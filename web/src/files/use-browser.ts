@@ -12,15 +12,23 @@ export function useFileBrowser(deviceId: string, workspaceId: string, active: bo
   const pagesRef = useRef(pages);
   pagesRef.current = pages;
   const requests = useRef(new Map<string, AbortController>());
+  const queued = useRef(new Set<string>());
+  const enabled = useRef(active);
+  enabled.current = active;
   const load = useCallback(
-    async (path: string, more = false) => {
+    async (path: string, more = false, background = false): Promise<FileListing | undefined> => {
+      if (!enabled.current) return;
+      if (background && requests.current.has(path)) {
+        queued.current.add(path);
+        return;
+      }
       requests.current.get(path)?.abort();
       const controller = new AbortController();
       requests.current.set(path, controller);
       const previous = pagesRef.current[path]?.listing;
       setPages((old) => ({ ...old, [path]: { ...old[path], busy: true, error: undefined } }));
       try {
-        const result = await rpc<FileListing>(
+        let result = await rpc<FileListing>(
           deviceId,
           "files.list",
           {
@@ -31,13 +39,31 @@ export function useFileBrowser(deviceId: string, workspaceId: string, active: bo
           controller.signal,
         );
         if (controller.signal.aborted) return;
+        const refreshed = [...result.entries.items];
+        while (
+          !more &&
+          refreshed.length < (previous?.entries.items.length ?? 0) &&
+          result.entries.nextCursor
+        ) {
+          result = await rpc<FileListing>(
+            deviceId,
+            "files.list",
+            {
+              workspaceId,
+              path,
+              cursor: result.entries.nextCursor,
+            },
+            controller.signal,
+          );
+          if (controller.signal.aborted) return;
+          refreshed.push(...result.entries.items);
+        }
         const items =
-          more && previous
-            ? [...previous.entries.items, ...result.entries.items]
-            : result.entries.items;
+          more && previous ? [...previous.entries.items, ...result.entries.items] : refreshed;
         items.sort(compareEntries);
         const listing = { ...result, entries: { ...result.entries, items } };
-        setPages((old) => ({ ...old, [path]: { listing, busy: false } }));
+        pagesRef.current = { ...pagesRef.current, [path]: { listing, busy: false } };
+        setPages(pagesRef.current);
         return listing;
       } catch (error) {
         if (!controller.signal.aborted) {
@@ -47,21 +73,26 @@ export function useFileBrowser(deviceId: string, workspaceId: string, active: bo
           }));
         }
       } finally {
-        if (requests.current.get(path) === controller) requests.current.delete(path);
+        if (requests.current.get(path) === controller) {
+          requests.current.delete(path);
+          if (queued.current.delete(path) && enabled.current && !document.hidden)
+            void load(path, false, true);
+        }
       }
     },
     [deviceId, workspaceId],
   );
   useEffect(() => {
-    const pending = requests.current;
+    enabled.current = active;
+    const pending = requests.current,
+      waiting = queued.current;
     return () => {
+      enabled.current = false;
       for (const request of pending.values()) request.abort();
       pending.clear();
+      waiting.clear();
     };
-  }, []);
-  useEffect(() => {
-    if (active) void load(".");
-  }, [active, load]);
+  }, [active]);
   function forget(path: string) {
     for (const [key, request] of requests.current)
       if (isWithin(key, path)) {

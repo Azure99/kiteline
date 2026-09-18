@@ -35,6 +35,7 @@ export class FileChannels {
     private config: AgentConfig,
     private identity: Identity,
     private otherChannels: () => number,
+    private changed: (workspaceId: string) => void = () => {},
   ) {}
   get count() {
     return this.cleaningCount + [...this.entries.values()].filter((item) => item.admitted).length;
@@ -121,6 +122,8 @@ export class FileChannels {
             } catch (error) {
               reply = errorReply(id, error);
             }
+            if (channel.write.value.published || channel.write.value.uncertain)
+              this.changed(channel.write.value.workspaceId);
             await send(JSON.stringify({ type: "result", reply }));
             this.finish(id, undefined, true);
           } else throw new AppError("invalid_argument", "无效文件控制帧");

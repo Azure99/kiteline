@@ -30,6 +30,7 @@ import { FileOperationDialog, type FileAction } from "./operation-dialog";
 import { ImagePreview } from "./image-preview";
 import { downloadFile, type FileTarget } from "./content";
 import { FileSearch } from "./search-view";
+import { useWorkspaceRefresh } from "../lib/use-workspace-refresh";
 
 export function Files({
   device,
@@ -68,6 +69,10 @@ export function Files({
       item.workspaceId === workspace.id &&
       (queryDraft ? item.id === queryDraft : item.path === queryFile),
   );
+  useWorkspaceRefresh(device.id, workspace.id, visible && enabled, "files", async (signal) => {
+    await refresh(signal, true);
+    if (draft && !signal.aborted) await store.observe(draft, signal);
+  });
   useEffect(() => {
     if (!visible || !queryFile || !enabled || isImage) return;
     const target = { deviceId: device.id, workspaceId: workspace.id, path: queryFile };
@@ -173,8 +178,11 @@ export function Files({
   function download(path: string) {
     downloadFile({ deviceId: device.id, workspaceId: workspace.id, path });
   }
-  function refresh() {
-    for (const path of mobile ? [folder] : expanded) void load(path);
+  async function refresh(signal?: AbortSignal, background = false) {
+    for (const path of new Set(mobile ? [folder] : [folder, ...expanded])) {
+      if (signal?.aborted) return;
+      await load(path, false, background);
+    }
   }
   function movePaths(moves: { from: string; to: string }[]) {
     if (!moves.length) return;
@@ -328,7 +336,7 @@ export function Files({
               <ListChecks />
               {selecting ? "结束选择" : "选择文件"}
             </MenuItem>
-            <MenuItem disabled={!enabled} onClick={refresh}>
+            <MenuItem disabled={!enabled} onClick={() => void refresh()}>
               <RefreshCw />
               刷新
             </MenuItem>

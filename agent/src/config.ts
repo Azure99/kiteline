@@ -25,6 +25,7 @@ export const defaultAgentLimits = {
   terminalSessionsPerDevice: 32,
   terminalStallTimeout: 10_000,
   channelsPerDevice: 128,
+  watchDirectories: 8192,
 };
 export interface Identity {
   deviceId: string;

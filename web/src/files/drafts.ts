@@ -26,9 +26,11 @@ export interface Draft extends FileTarget {
   location?: { line: number; range?: [number, number] };
   busy?: "loading" | "saving" | "checking";
   error?: unknown;
+  observationError?: unknown;
   notice?: string;
   unknownSave?: { target: FileTarget; raw: string; text: string };
   missing?: boolean;
+  diskChanged?: boolean;
   request?: AbortController;
   diskActivity: number;
   readChannel?: string;
@@ -158,7 +160,9 @@ export class DraftStore {
     draft.unknownSave = undefined;
     draft.missing = false;
     draft.error = undefined;
+    draft.observationError = undefined;
     draft.notice = undefined;
+    draft.diskChanged = false;
     draft.scrollTop = draft.scrollLeft = 0;
     this.changed();
   }
@@ -228,6 +232,8 @@ export class DraftStore {
       draft.revision = saved.revision;
       draft.unknownSave = undefined;
       draft.missing = false;
+      draft.diskChanged = false;
+      draft.observationError = undefined;
       draft.notice = duplicate ? "目标还有一份打开的草稿，两份内容均已保留" : undefined;
       return true;
     } catch (error) {
@@ -291,6 +297,36 @@ export class DraftStore {
       if (this.has(draft)) this.changed();
     }
   }
+  async observe(draft: Draft, signal: AbortSignal) {
+    if (draft.busy || !draft.state || !this.has(draft)) return;
+    const activity = draft.diskActivity,
+      path = draft.path;
+    try {
+      const disk = await readText({ ...draft }, signal);
+      if (
+        signal.aborted ||
+        !this.has(draft) ||
+        draft.diskActivity !== activity ||
+        draft.path !== path
+      )
+        return;
+      draft.diskChanged = disk.meta.revision !== draft.revision;
+      draft.observationError = undefined;
+      draft.missing = false;
+      this.changed();
+    } catch (error) {
+      if (
+        signal.aborted ||
+        !this.has(draft) ||
+        draft.diskActivity !== activity ||
+        draft.path !== path
+      )
+        return;
+      draft.observationError = error;
+      if (error instanceof ApiError && error.code === "not_found") draft.missing = true;
+      this.changed();
+    }
+  }
   async rename(deviceId: string, workspaceId: string, from: string, to: string) {
     const moved = this.items.filter(
       (item) =>
@@ -338,6 +374,7 @@ export class DraftStore {
     } else this.close(draft);
   }
   private markMissing(draft: Draft, notice: string) {
+    draft.diskActivity++;
     draft.request?.abort();
     draft.request = undefined;
     draft.busy = undefined;
@@ -416,5 +453,6 @@ export function showDraft(draft: Draft, replace = false) {
   navigate(`${workspacePath(draft.deviceId, draft.workspaceId, "files")}?${query}`, replace);
 }
 export function draftError(draft: Draft) {
-  return draft.error ? errorMessage(draft.error) : undefined;
+  const error = draft.error ?? draft.observationError;
+  return error ? errorMessage(error) : undefined;
 }

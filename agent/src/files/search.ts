@@ -5,7 +5,8 @@ import { pipeline } from "node:stream/promises";
 import { parserStream } from "stream-json";
 import type { Token } from "stream-json/parser.js";
 import { AppError, limits, type SearchMatch, type SearchResult } from "@kiteline/shared/protocol";
-import { BytePrefix, SearchJson } from "./search-json.js";
+import { SearchJson } from "./search-json.js";
+import { BytePrefix } from "../buffers.js";
 
 export async function searchFiles(
   root: string,

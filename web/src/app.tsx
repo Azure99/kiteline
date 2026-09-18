@@ -32,10 +32,12 @@ import { DirectoryDialog } from "./devices/directory-dialog";
 import { DeviceActionDialog, type DeviceAction } from "./devices/device-actions";
 
 import { DeviceNavigation } from "./devices/device-navigation";
-import { DeviceList, DeviceDetail, statusNames } from "./devices/device-views";
+import { DeviceList, DeviceDetail } from "./devices/device-views";
 import { WorkspaceTerminal } from "./terminal/sessions";
 import type { TerminalLayout } from "./terminal/groups";
 import { Files } from "./files/files";
+import { GitTool } from "./git/git";
+import { WatchStatus } from "./components/watch-status";
 import { DraftStore, isDirty } from "./files/drafts";
 import { DraftView } from "./files/draft-view";
 import { OpenFiles } from "./files/open-files";
@@ -384,6 +386,7 @@ export function App() {
                       </button>
                     ))}
                   </div>
+                  <WatchStatus deviceId={device.id} workspaceId={workspace.id} />
                   <WorkspaceTerminal
                     key={`${device.id}:${workspace.id}`}
                     device={device}
@@ -412,17 +415,12 @@ export function App() {
                         setActiveUpload(id);
                       }}
                     />
-                    <div
-                      className={
-                        route.tool === "git"
-                          ? "flex min-h-0 flex-1 items-center justify-center text-muted-foreground"
-                          : "hidden"
-                      }
-                    >
-                      <span>
-                        {device.status === "online" ? "暂无打开内容" : statusNames[device.status]}
-                      </span>
-                    </div>
+                    <GitTool
+                      device={device}
+                      workspace={workspace}
+                      visible={route.tool === "git"}
+                      store={drafts}
+                    />
                   </WorkspaceTerminal>
                 </>
               )

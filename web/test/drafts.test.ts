@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Device } from "@kiteline/shared/protocol";
-import { DraftStore, isDirty } from "../src/files/drafts";
+import { DraftStore, draftError, isDirty } from "../src/files/drafts";
 import { ApiError } from "../src/lib/api";
 import type { DiskText, FileTarget } from "../src/files/content";
 
@@ -174,4 +174,37 @@ test("missing checks cannot override later same-path saves or another open draft
     expect(savedDraft.missing).toBe(false);
     expect(isDirty(savedDraft)).toBe(false);
   }
+});
+test("background observations preserve edits, recover missing status and cannot undo a later deletion", async () => {
+  const { store, draft } = await opened();
+  store.update(draft, draft.state!.update({ changes: { from: 4, insert: " edited" } }).state);
+  const state = draft.state;
+  const signal = new AbortController().signal;
+  transport.read.mockResolvedValueOnce(disk("external", "external"));
+  await store.observe(draft, signal);
+  expect(draft.state).toBe(state);
+  expect(draft.revision).toBe("a-base");
+  expect(draft.diskChanged).toBe(true);
+  transport.read.mockRejectedValueOnce(new ApiError("not_found", "missing"));
+  await store.observe(draft, signal);
+  expect(draft.missing).toBe(true);
+  expect(draftError(draft)).toBe("missing");
+  transport.read.mockResolvedValueOnce(disk("base", "a-base"));
+  await store.observe(draft, signal);
+  expect(draft.missing).toBe(false);
+  expect(draftError(draft)).toBeUndefined();
+  expect(draft.state).toBe(state);
+  let finish!: (value: DiskText) => void;
+  transport.read.mockImplementationOnce(
+    () =>
+      new Promise<DiskText>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const observing = store.observe(draft, signal);
+  store.deleted("device", "workspace", "a.txt");
+  finish(disk("base", "a-base"));
+  await observing;
+  expect(draft.missing).toBe(true);
+  expect(draft.state).toBe(state);
 });

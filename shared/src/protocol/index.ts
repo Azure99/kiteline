@@ -18,6 +18,12 @@ export const limits = {
   searchPathBytes: 4096,
   searchRanges: 128,
   searchErrorBytes: 4096,
+  discoveryDirectories: 10_000,
+  discoverySlice: 2000,
+  diffRenderLines: 2000,
+  diffRawBytes: 32 * 1024,
+  watchDebounce: 300,
+  visibleRefreshInterval: 15_000,
   heartbeatInterval: 20_000,
   heartbeatTimeout: 60_000,
   tcpKeepAliveDelayMs: 20_000,
@@ -131,6 +137,99 @@ export interface SearchResult {
 export interface PathError {
   path: string;
   error: KitelineError;
+}
+export interface Repo {
+  id: string;
+  path: string;
+  rootPath: string;
+  gitDir: string;
+  commonDir: string;
+  linked: boolean;
+  available: boolean;
+}
+export interface RepoDiscovery {
+  repos: Repo[];
+  complete: boolean;
+  scanCursor?: string;
+  issues: PathError[];
+}
+export interface HeadIdentity {
+  symbolicRef: string | null;
+  oid: string | null;
+}
+export type GitType = "file" | "symlink" | "gitlink" | "absent" | "directory" | "other";
+export interface GitEntry {
+  path: string;
+  oldPath?: string;
+  types: {
+    head?: GitType;
+    index?: GitType;
+    worktree: GitType;
+    base?: GitType;
+    ours?: GitType;
+    theirs?: GitType;
+  };
+  indexStatus: string;
+  worktreeStatus: string;
+  conflict: boolean;
+  submodule?: { commitChanged: boolean; trackedDirty: boolean; untrackedDirty: boolean };
+}
+export interface GitStatus {
+  head: HeadIdentity;
+  branch?: string;
+  upstream?: string;
+  ahead?: number;
+  behind?: number;
+  entries: GitEntry[];
+  offset: number;
+  nextOffset?: number;
+  totalCount: number;
+  listToken: string;
+  stagedCount: number;
+  hasConflicts: boolean;
+  indexToken?: string;
+  truncated: boolean;
+}
+export interface DiffSummary {
+  path: string;
+  oldPath?: string;
+  status: string;
+  binary: boolean;
+  oldMode?: string;
+  newMode?: string;
+}
+export interface GitDiff {
+  patch: string;
+  summary: DiffSummary;
+  truncated: boolean;
+}
+export interface Commit {
+  oid: string;
+  parents: string[];
+  author: string;
+  time: string;
+  subject: string;
+}
+export interface GitHistory {
+  commits: Commit[];
+  anchorOid?: string;
+  nextOffset?: number;
+}
+export interface CommitFile {
+  path: string;
+  oldPath?: string;
+  status: string;
+  binary: boolean;
+}
+export interface CommitFiles {
+  files: Page<CommitFile>;
+  parentOid?: string;
+}
+export interface Branch {
+  name: string;
+  oid: string;
+  current: boolean;
+  worktreePath?: string;
 }
 export interface FileItemResult {
   path: string;

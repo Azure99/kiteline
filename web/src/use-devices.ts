@@ -44,6 +44,7 @@ export function useDevices(
           setConnected(true);
           setError("");
           socket?.send(JSON.stringify({ type: "watch.set", targets: targets.current }));
+          window.dispatchEvent(new Event("kiteline:connected"));
         };
         socket.onmessage = (event) => {
           const message = JSON.parse(String(event.data)) as { type: string; devices?: Device[] };

@@ -23,10 +23,20 @@ import { FileChannels } from "./files/channels.js";
 import { BinaryFiles } from "./files/binary.js";
 import { searchFiles } from "./files/search.js";
 import { FileOperations } from "./files/operations.js";
+import { CursorBudget } from "./cursor-budget.js";
+import { Repositories } from "./git/repos.js";
+import { status } from "./git/status.js";
+import { workingDiff } from "./git/diff.js";
+import { branches, commitDiff, GitHistoryReads, history } from "./git/history.js";
+import { WorkspaceWatches } from "./watches.js";
 
 export class Agent {
   readonly metadata: MetadataStore;
-  readonly directories = new Directories();
+  readonly cursorBudget = new CursorBudget();
+  readonly directories = new Directories(this.cursorBudget);
+  readonly repos: Repositories;
+  readonly gitHistory = new GitHistoryReads(this.cursorBudget);
+  readonly watches: WorkspaceWatches;
   readonly sessions: Sessions;
   readonly files: Files;
   readonly textFiles: TextFiles;
@@ -47,6 +57,12 @@ export class Agent {
     readonly identity: Identity,
   ) {
     this.metadata = new MetadataStore(config);
+    this.watches = new WorkspaceWatches(config.limits.watchDirectories, (event) =>
+      this.send(event),
+    );
+    this.repos = new Repositories(this.metadata, this.cursorBudget);
+    this.repos.onObserved = (workspaceId, repo) => this.watches.repo(workspaceId, repo);
+    this.repos.onComplete = (workspaceId, ids) => this.watches.reposComplete(workspaceId, ids);
     this.files = new Files(this.metadata, this.directories);
     this.metadata.onChange = (snapshot) => this.send({ type: "metadata.snapshot", snapshot });
     this.sessions = new Sessions(config, this.metadata);
@@ -64,6 +80,7 @@ export class Agent {
       config,
       identity,
       () => this.channels.count,
+      (workspaceId) => this.watches.changed(workspaceId, true),
     );
     this.sessions.onChanged = (workspaceId) => this.send({ type: "sessions.changed", workspaceId });
     this.local = new LocalServer(config, (method, params, signal) => {
@@ -190,6 +207,9 @@ export class Agent {
             this.metadata.workspace(string(id));
             this.watched.add(string(id));
           }
+          void this.repos.retain(this.watched);
+          this.gitHistory.retain(this.watched);
+          this.watches.set([...this.watched].map((id) => this.metadata.workspace(id)));
         }
       } catch (error) {
         console.error(asError(error).message);
@@ -202,6 +222,9 @@ export class Agent {
       for (const controller of this.requests.values())
         controller.abort(new AppError("cancelled", "控制连接中断"));
       this.watched.clear();
+      void this.watches.close();
+      void this.repos.close();
+      this.gitHistory.close();
       this.channels.close();
       void this.fileChannels.close();
       void this.directories.close();
@@ -220,7 +243,15 @@ export class Agent {
     signal: AbortSignal,
     progress?: (value: FileProgress) => void,
   ): Promise<unknown> {
-    const operation = this.perform(method, params, signal, progress);
+    const operation = this.perform(method, params, signal, progress).finally(() => {
+      if (
+        ["files.create", "files.rename", "files.copy", "files.move", "files.delete"].includes(
+          method,
+        ) &&
+        typeof params.workspaceId === "string"
+      )
+        this.watches.changed(params.workspaceId, true);
+    });
     this.tasks.add(operation);
     void operation.finally(() => this.tasks.delete(operation)).catch(() => {});
     return operation;
@@ -234,6 +265,62 @@ export class Agent {
     if (this.stopped) throw new AppError("cancelled", "agent 正在停止");
     signal.throwIfAborted();
     switch (method) {
+      case "repos.discover":
+        return this.repos.discover(
+          string(params.workspaceId),
+          params.scanCursor === undefined ? undefined : string(params.scanCursor),
+          signal,
+        );
+      case "git.status":
+        return status(
+          await this.repos.resolve(string(params.workspaceId), string(params.repoId), signal),
+          params.offset === undefined
+            ? 0
+            : integer(params.offset, "offset", 0, Number.MAX_SAFE_INTEGER),
+          params.expectedListToken === undefined ? undefined : string(params.expectedListToken),
+          signal,
+        );
+      case "git.diff": {
+        const repo = await this.repos.resolve(
+          string(params.workspaceId),
+          string(params.repoId),
+          signal,
+        );
+        if (params.side === "commit")
+          return commitDiff(
+            repo,
+            string(params.commitOid),
+            params.parentOid === undefined ? undefined : string(params.parentOid),
+            string(params.path),
+            signal,
+          );
+        if (params.side !== "worktree" && params.side !== "staged")
+          throw new AppError("invalid_argument", "无效 diff 区域");
+        return workingDiff(repo, string(params.path), params.side, signal);
+      }
+      case "git.history":
+        return history(
+          await this.repos.resolve(string(params.workspaceId), string(params.repoId), signal),
+          params.anchorOid === undefined ? undefined : string(params.anchorOid),
+          params.offset === undefined
+            ? 0
+            : integer(params.offset, "offset", 0, Number.MAX_SAFE_INTEGER),
+          signal,
+        );
+      case "git.commitFiles":
+        return this.gitHistory.files(
+          string(params.workspaceId),
+          await this.repos.resolve(string(params.workspaceId), string(params.repoId), signal),
+          string(params.commitOid),
+          params.parentOid === undefined ? undefined : string(params.parentOid),
+          params.cursor === undefined ? undefined : string(params.cursor),
+          signal,
+        );
+      case "git.branches":
+        return branches(
+          await this.repos.resolve(string(params.workspaceId), string(params.repoId), signal),
+          signal,
+        );
       case "files.search": {
         if (
           (params.mode !== "name" && params.mode !== "content") ||
@@ -258,13 +345,16 @@ export class Agent {
           signal,
           progress,
         );
-      case "files.list":
-        return this.files.list(
+      case "files.list": {
+        const result = await this.files.list(
           string(params.workspaceId),
           string(params.path),
           params.cursor === undefined ? undefined : string(params.cursor),
           signal,
         );
+        this.watches.listed(string(params.workspaceId), result.resolvedPath);
+        return result;
+      }
       case "files.inspect":
         return this.files.inspect(
           string(params.workspaceId),
@@ -391,6 +481,9 @@ export class Agent {
     await this.local.close();
     await Promise.allSettled([...this.tasks]);
     await this.directories.close();
+    await this.repos.close();
+    await this.watches.close();
+    this.gitHistory.close();
     await this.sessions.close();
   }
 }

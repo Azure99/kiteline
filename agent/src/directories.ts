@@ -5,6 +5,7 @@ import { basename, dirname, isAbsolute, join } from "node:path";
 import { AppError, limits, type DirectoryListing, type Entry } from "@kiteline/shared/protocol";
 import { publish } from "./mutations.js";
 import { readEntry, sameObject } from "./files/paths.js";
+import { CursorBudget } from "./cursor-budget.js";
 
 interface Cursor {
   path: string;
@@ -14,15 +15,17 @@ interface Cursor {
   timer: NodeJS.Timeout;
   busy: boolean;
   info: BigIntStats;
+  release: () => void;
 }
 export class Directories {
   private cursors = new Map<string, Cursor>();
-  private opening = 0;
+  constructor(private budget = new CursorBudget()) {}
   private async closeCursor(id: string) {
     const cursor = this.cursors.get(id);
     if (!cursor) return;
     clearTimeout(cursor.timer);
     this.cursors.delete(id);
+    cursor.release();
     await cursor.directory.close().catch(() => {});
   }
   async list(
@@ -50,9 +53,7 @@ export class Directories {
       throw new AppError("conflict", "目录列表已变化或过期，请刷新");
     }
     if (!cursor) {
-      if (this.cursors.size + this.opening >= limits.cursorsPerDevice)
-        throw new AppError("busy", "目录列表过多，请关闭旧列表后重试");
-      this.opening++;
+      const release = this.budget.reserve();
       // Node 24 supports raw names here; its current typings omit this encoding.
       try {
         const directory = await opendir(path, { encoding: "buffer" as BufferEncoding });
@@ -67,13 +68,15 @@ export class Directories {
           carry: null,
           busy: false,
           info,
+          release,
           timer: setTimeout(() => {
             void this.closeCursor(id);
           }, limits.cursorLifetime),
         };
         this.cursors.set(id, cursor);
-      } finally {
-        this.opening--;
+      } catch (error) {
+        release();
+        throw error;
       }
     }
     if (cursor.busy) throw new AppError("busy", "该目录页正在读取");

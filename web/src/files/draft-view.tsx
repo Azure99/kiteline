@@ -134,6 +134,7 @@ export function DraftView({
       {(unavailable ||
         store.overLimit(draft) ||
         draft.notice ||
+        draft.diskChanged ||
         draftError(draft) ||
         draft.format.mixedLineEndings) && (
         <div className="shrink-0 space-y-1 border-b border-border px-3 py-2 text-xs">
@@ -145,6 +146,7 @@ export function DraftView({
             </p>
           )}
           {draft.notice && <p role="status">{draft.notice}</p>}
+          {draft.diskChanged && <p role="status">磁盘内容已变化</p>}
           {draftError(draft) && (
             <p role="alert" className="break-words text-destructive">
               {draftError(draft)}
