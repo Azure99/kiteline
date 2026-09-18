@@ -1,6 +1,7 @@
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { deviceServiceLink } from "../lib/device-service";
 import {
   integer,
   limits,
@@ -159,8 +160,18 @@ export class TerminalDisplay {
         );
         const styles = getComputedStyle(document.documentElement);
         const openLink = (_event: MouseEvent, uri: string) => {
-          if (/^https?:\/\//i.test(uri)) window.open(uri, "_blank", "noopener,noreferrer");
+          if (/^https?:\/\//i.test(uri))
+            window.open(
+              deviceServiceLink(uri, this.deviceId)?.url ?? uri,
+              "_blank",
+              "noopener,noreferrer",
+            );
         };
+        const hoverLink = (_event: MouseEvent, uri: string) => {
+          const target = deviceServiceLink(uri, this.deviceId);
+          this.element.title = target ? `访问设备端口 · ${this.deviceId}:${target.port}` : uri;
+        };
+        const leaveLink = () => this.element.removeAttribute("title");
         const terminal = new Terminal({
           ...terminalOptions(integer(frame.historyLines, "historyLines", 0, 50000)),
           cols: integer(frame.cols, "cols", 1, 10000),
@@ -179,12 +190,12 @@ export class TerminalDisplay {
             cursor: "#a8c4ef",
             selectionBackground: "#52719588",
           },
-          linkHandler: { activate: openLink },
+          linkHandler: { activate: openLink, hover: hoverLink, leave: leaveLink },
         });
         this.terminal = terminal;
         terminal.unicode.activeVersion = "6";
         terminal.loadAddon(this.fitAddon);
-        terminal.loadAddon(new WebLinksAddon(openLink));
+        terminal.loadAddon(new WebLinksAddon(openLink, { hover: hoverLink, leave: leaveLink }));
         const scroll = retainScrollUpHistory(terminal);
         const source = forwardUserInput(terminal, (text) => {
           if (text.length === 1 && text.charCodeAt(0) <= 127 && this.interaction?.control()) {

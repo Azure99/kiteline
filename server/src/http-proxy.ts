@@ -1,0 +1,296 @@
+import {
+  Agent,
+  request as httpRequest,
+  ServerResponse,
+  STATUS_CODES,
+  type ClientRequest,
+  type IncomingMessage,
+  type OutgoingHttpHeaders,
+} from "node:http";
+import type { Duplex } from "node:stream";
+import { AppError, asError, integer } from "@kiteline/shared/protocol";
+import type { ServerConfig } from "./config.js";
+import type { Store, Login } from "./store.js";
+import type { Connections } from "./connections.js";
+import type { Channels } from "./channels.js";
+import { cookie, origin } from "./http.js";
+import { requestHeaders, responseHeaders } from "./proxy-headers.js";
+
+interface Target {
+  deviceId: string;
+  port: number;
+  prefix: string;
+  path: string;
+  strip: boolean;
+  redirect?: string;
+}
+export const isProxyPath = (path: string) => /^\/(?:proxy|absproxy)(?:[/?]|$)/.test(path);
+export function proxyTarget(raw: string): Target {
+  const match = /^(\/(proxy|absproxy)\/([^/?]+)\/(\d{1,5}))((?:[/?].*)?)$/.exec(raw);
+  if (!match) throw new AppError("invalid_argument", "无效设备端口路径");
+  const [, prefix, kind, encodedDevice, port, suffix = ""] = match;
+  let deviceId: string;
+  try {
+    deviceId = decodeURIComponent(encodedDevice!);
+  } catch {
+    throw new AppError("invalid_argument", "无效设备 ID");
+  }
+  const targetPort = integer(Number(port), "port", 1, 65535);
+  return {
+    deviceId,
+    port: targetPort,
+    prefix: prefix!,
+    path: kind === "proxy" ? suffix : raw,
+    strip: kind === "proxy",
+    ...(!suffix.startsWith("/") ? { redirect: `${prefix}/${suffix}` } : {}),
+  };
+}
+function navigation(request: IncomingMessage) {
+  return (
+    request.method === "GET" &&
+    (request.headers["sec-fetch-mode"] === "navigate" ||
+      request.headers["sec-fetch-dest"] === "document")
+  );
+}
+function escape(text: string) {
+  return text.replace(
+    /[&<>"']/g,
+    (value) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[value]!,
+  );
+}
+function rawHead(status: number, message: string, headers: OutgoingHttpHeaders) {
+  const lines = [`HTTP/1.1 ${status} ${message}`];
+  for (const [key, value] of Object.entries(headers))
+    if (value !== undefined)
+      for (const item of Array.isArray(value) ? value : [value]) lines.push(`${key}: ${item}`);
+  return lines.join("\r\n") + "\r\n\r\n";
+}
+function write(stream: Duplex, bytes: string | Buffer) {
+  return new Promise<void>((resolve, reject) =>
+    stream.write(bytes, (error) => (error ? reject(error) : resolve())),
+  );
+}
+function failure(
+  request: IncomingMessage,
+  destination: ServerResponse | Duplex,
+  error: unknown,
+  target?: Target,
+) {
+  if (destination.destroyed) return;
+  if (destination instanceof ServerResponse && destination.headersSent)
+    return destination.destroy();
+  const detail = asError(error);
+  const statuses: Record<string, number> = {
+    unauthenticated: 401,
+    forbidden: 403,
+    not_found: 404,
+    unsupported: 405,
+    invalid_argument: 400,
+    offline: 503,
+    busy: 429,
+    timeout: 504,
+  };
+  const status = statuses[detail.code] ?? 502;
+  if (status === 401 && navigation(request) && destination instanceof ServerResponse) {
+    destination
+      .writeHead(302, {
+        location: `/login?returnTo=${encodeURIComponent(request.url ?? "/")}`,
+        "cache-control": "no-store",
+        connection: "close",
+      })
+      .end();
+    return;
+  }
+  const title = target ? `设备端口 ${target.port}` : "设备 HTTP 访问";
+  const message = detail.message + (status === 502 ? "；请核对端口、监听地址和容器网络。" : "");
+  const html = navigation(request);
+  const content = html
+    ? `<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${escape(title)}</title>
+<style>
+body{font:15px/1.6 system-ui,sans-serif;color:#263247;margin:48px auto;padding:0 24px;max-width:640px;overflow-wrap:anywhere}
+h1{font-size:22px}
+a,button{display:inline-flex;align-items:center;min-height:44px;padding:0 12px;border:0;background:transparent;color:#4269ad;font:inherit;cursor:pointer}
+</style>
+<h1>${escape(title)}</h1>
+<p>${escape(target?.deviceId ?? "")}</p>
+<p>${escape(message)}</p>
+<a href="/devices${target ? `/${encodeURIComponent(target.deviceId)}` : ""}">返回设备</a>
+<button type="button" onclick="location.reload()">重新打开</button>
+</html>`
+    : message + "\n";
+  const headers = {
+    "content-type": html ? "text/html; charset=utf-8" : "text/plain; charset=utf-8",
+    "content-length": Buffer.byteLength(content),
+    "cache-control": "no-store",
+    connection: "close",
+  };
+  if (destination instanceof ServerResponse) destination.writeHead(status, headers).end(content);
+  else destination.end(rawHead(status, STATUS_CODES[status]!, headers) + content);
+}
+
+export class HttpProxy {
+  constructor(
+    private config: ServerConfig,
+    private store: Store,
+    private connections: Connections,
+    private channels: Channels,
+  ) {}
+  async handle(request: IncomingMessage, destination: ServerResponse | Duplex, head?: Buffer) {
+    let target: Target | undefined;
+    try {
+      if (request.method === "CONNECT") throw new AppError("unsupported", "不支持 CONNECT");
+      target = proxyTarget(request.url ?? "");
+      const login = this.store.session(cookie(request));
+      if (!login) throw new AppError("unauthenticated", "请登录");
+      if (head !== undefined || !["GET", "HEAD"].includes(request.method ?? "GET"))
+        origin(request, this.config.publicUrl);
+      const device = this.connections.devices().find((value) => value.id === target!.deviceId);
+      if (!device || device.status === "revoked")
+        throw new AppError("not_found", "设备不存在或已撤销");
+      if (target.redirect) {
+        if (destination instanceof ServerResponse)
+          destination.writeHead(308, { location: target.redirect }).end();
+        else
+          destination.end(
+            rawHead(308, "Permanent Redirect", {
+              location: target.redirect,
+              "content-length": 0,
+              connection: "close",
+            }),
+          );
+        return;
+      }
+      if (head !== undefined && request.headers.upgrade?.toLowerCase() !== "websocket")
+        throw new AppError("unsupported", "只支持 WebSocket 升级");
+      await this.forward(request, destination, target, login, head);
+    } catch (error) {
+      failure(request, destination, error, target);
+    }
+  }
+  private async forward(
+    request: IncomingMessage,
+    destination: ServerResponse | Duplex,
+    target: Target,
+    login: Login,
+    head?: Buffer,
+  ) {
+    const response = destination instanceof ServerResponse ? destination : undefined;
+    const browser = destination instanceof ServerResponse ? undefined : destination;
+    let upstream: ClientRequest | undefined = undefined;
+    let incoming: IncomingMessage | undefined;
+    let peer: Duplex | undefined;
+    let finished = false,
+      upgraded = false,
+      sentHead = false;
+    let channelId: string | undefined = undefined;
+    const agent = new Agent({ keepAlive: false });
+    const finish = (error?: unknown) => {
+      if (finished) return;
+      finished = true;
+      request.unpipe();
+      upstream?.destroy();
+      peer?.destroy();
+      agent.destroy();
+      if (channelId) {
+        if (error) this.channels.cancel(channelId, error);
+        else this.channels.finishHttp(channelId);
+      }
+    };
+    const fail = (error: unknown) => {
+      if (finished || (!upgraded && incoming?.complete && (response?.headersSent || sentHead)))
+        return;
+      if (sentHead && !response) destination.destroy();
+      else failure(request, destination, error, target);
+      finish(error);
+    };
+    destination.on("error", fail);
+    destination.on("close", () => {
+      if (response?.writableFinished) finish();
+      else finish(new AppError("cancelled", "访问已关闭"));
+    });
+    destination.on("finish", () => finish());
+    request.on("aborted", () => fail(new AppError("cancelled", "请求已取消")));
+    request.on("error", fail);
+    const pending = this.channels.createHttp(target.deviceId, login, target.port, fail);
+    channelId = pending.id;
+    let tunnel: Duplex;
+    try {
+      tunnel = await pending.ready;
+    } catch (error) {
+      fail(error);
+      return;
+    }
+    if (finished) return tunnel.destroy();
+    agent.createConnection = () => tunnel;
+    upstream = httpRequest({
+      agent,
+      hostname: "localhost",
+      port: target.port,
+      method: request.method,
+      path: target.path,
+      headers: requestHeaders(request.headers, this.config.publicUrl, head !== undefined),
+    });
+    upstream.on("error", fail);
+    upstream.on("response", (result) => {
+      try {
+        if (result.statusCode! < 100) throw new AppError("io_error", "本地服务返回无效 HTTP 状态");
+        incoming = result;
+        result.on("error", fail);
+        result.on("close", () => {
+          if (!result.complete) fail(new AppError("io_error", "本地响应未完整结束"));
+        });
+        const headers = responseHeaders(result.headers, target.prefix, target.strip);
+        if (response) {
+          if (!request.complete) headers.connection = "close";
+          response.writeHead(result.statusCode!, result.statusMessage, headers);
+          response.flushHeaders();
+          result.pipe(response);
+        } else {
+          headers.connection = "close";
+          sentHead = true;
+          void write(browser!, rawHead(result.statusCode!, result.statusMessage ?? "", headers))
+            .then(() => result.pipe(destination))
+            .catch(fail);
+        }
+      } catch (error) {
+        fail(error);
+      }
+    });
+    upstream.on("upgrade", (result, socket, upstreamHead) => {
+      if (response || result.headers.upgrade?.toLowerCase() !== "websocket") {
+        socket.destroy();
+        return fail(new AppError("io_error", "无效上游升级响应"));
+      }
+      peer = socket;
+      socket.pause();
+      browser!.pause();
+      socket.on("error", fail);
+      socket.on("close", () => finish());
+      upgraded = true;
+      sentHead = true;
+      void (async () => {
+        await write(
+          browser!,
+          rawHead(
+            101,
+            result.statusMessage ?? "Switching Protocols",
+            responseHeaders(result.headers, target.prefix, target.strip, true),
+          ),
+        );
+        if (upstreamHead.length) await write(browser!, upstreamHead);
+        if (head!.length) await write(socket, head!);
+        if (finished) return;
+        browser!.pipe(socket).pipe(browser!);
+      })().catch(fail);
+    });
+    if (head !== undefined) upstream.end();
+    else {
+      upstream.flushHeaders();
+      request.pipe(upstream);
+    }
+  }
+}

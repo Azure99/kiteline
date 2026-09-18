@@ -8,10 +8,12 @@ import { Store, password } from "./store.js";
 import { AttemptLimiter, body, cookie, failure, json, origin } from "./http.js";
 import { bearer, Connections } from "./connections.js";
 import { Channels } from "./channels.js";
+import { HttpProxy, isProxyPath } from "./http-proxy.js";
 
 export function createKitelineServer(config: ServerConfig, store: Store) {
   const connections = new Connections(store);
   const channels = new Channels(connections, config);
+  const proxy = new HttpProxy(config, store, connections, channels);
   const limiter = new AttemptLimiter();
   function login(request: IncomingMessage) {
     const session = store.session(cookie(request));
@@ -27,6 +29,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
     json(response, 200, { expiresAt: session.expiresAt });
   }
   async function route(request: IncomingMessage, response: ServerResponse) {
+    if (isProxyPath(request.url ?? "")) return proxy.handle(request, response);
     const url = new URL(request.url ?? "/", config.publicUrl);
     const path = url.pathname;
     const method = request.method ?? "GET";
@@ -188,9 +191,15 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
   });
   server.requestTimeout = 0;
   const sockets = new WebSocketServer({ noServer: true, maxPayload: limits.controlMessageBytes });
+  const httpSockets = new WebSocketServer({ noServer: true, maxPayload: limits.dataChunkBytes });
+  server.on("connect", (request, socket, head) => void proxy.handle(request, socket, head));
   server.on("upgrade", (request, socket, head) => {
     request.socket.setKeepAlive(true, limits.tcpKeepAliveDelayMs);
     try {
+      if (isProxyPath(request.url ?? "")) {
+        void proxy.handle(request, socket, head);
+        return;
+      }
       const url = new URL(request.url ?? "/", config.publicUrl);
       const agentChannel = /^\/api\/agent\/channels\/([^/]+)$/.exec(url.pathname);
       const browserChannel = /^\/api\/channels\/([^/]+)\/terminal$/.exec(url.pathname);
@@ -198,8 +207,14 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
         const device = store.authenticateAgent(bearer(request));
         if (!device) throw new AppError("unauthenticated", "设备凭据无效");
         const id = decodeURIComponent(agentChannel[1]!);
-        channels.checkAgent(id, device.id, string(url.searchParams.get("connectionId")));
-        sockets.handleUpgrade(request, socket, head, (ws) => channels.acceptAgent(id, ws));
+        const kind = channels.checkAgent(
+          id,
+          device.id,
+          string(url.searchParams.get("connectionId")),
+        );
+        (kind === "http.proxy" ? httpSockets : sockets).handleUpgrade(request, socket, head, (ws) =>
+          channels.acceptAgent(id, ws),
+        );
       } else if (browserChannel) {
         origin(request, config.publicUrl);
         const session = login(request);
@@ -237,6 +252,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       channels.close();
       connections.close();
       sockets.close();
+      httpSockets.close();
       await new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),
       );

@@ -231,7 +231,7 @@ export function TerminalView({
       )}
       <div className="relative flex min-h-0 flex-1">
         <div ref={element} className="terminal-canvas min-h-0 min-w-0 flex-1" />
-        {terminal && <TouchControls terminal={terminal} onError={setNotice} />}
+        {terminal && <TouchControls terminal={terminal} deviceId={deviceId} onError={setNotice} />}
         {reading && (
           <div className="absolute bottom-3 right-4 rounded bg-[#39414c] shadow">
             <IconButton label="回到底部" onClick={() => display.current?.scrollToBottom()}>

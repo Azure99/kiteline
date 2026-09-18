@@ -10,6 +10,7 @@ import {
   Terminal,
   X,
   Upload,
+  Globe,
 } from "lucide-react";
 import type { KitelineError, Device } from "@kiteline/shared/protocol";
 import { Auth, type Session } from "./auth";
@@ -43,6 +44,8 @@ import { DraftStore, isDirty } from "./files/drafts";
 import { DraftView } from "./files/draft-view";
 import { OpenFiles } from "./files/open-files";
 import { UploadDialog } from "./files/upload-dialog";
+import { returnToService } from "./lib/login-return";
+import { PortDialog } from "./devices/port-dialog";
 
 export function App() {
   const terminalLayouts = useRef(new Map<string, TerminalLayout>());
@@ -58,6 +61,8 @@ export function App() {
   const [picker, setPicker] = useState(false);
   const [directoryDevice, setDirectoryDevice] = useState<Device>();
   const [action, setAction] = useState<DeviceAction>();
+  const [portDevice, setPortDevice] = useState<string>();
+  useEffect(() => setPortDevice(undefined), [route.deviceId]);
   const [uploads, setUploads] = useState<
     {
       id: string;
@@ -144,6 +149,7 @@ export function App() {
     setAuthError("");
     try {
       setSession(await api<Session>("/api/session"));
+      returnToService();
     } catch (error) {
       if (error instanceof ApiError && error.code === "unauthenticated") {
         try {
@@ -166,6 +172,7 @@ export function App() {
       setPicker(false);
       setDirectoryDevice(undefined);
       setAction(undefined);
+      setPortDevice(undefined);
       setUploads([]);
       setActiveUpload(undefined);
     };
@@ -224,6 +231,7 @@ export function App() {
         onLogin={(value) => {
           setSession(value);
           setInitialized(true);
+          returnToService();
         }}
       />
     );
@@ -284,6 +292,11 @@ export function App() {
             aria-label={connected ? "已连接" : "连接中断"}
           />
           <OpenFiles store={drafts} />
+          {device && device.status !== "revoked" && (
+            <IconButton label="访问端口" onClick={() => setPortDevice(device.id)}>
+              <Globe />
+            </IconButton>
+          )}
           {!!uploads.length && (
             <Menu>
               <MenuTrigger
@@ -435,11 +448,15 @@ export function App() {
                 onNavigate={choose}
                 onAdd={setDirectoryDevice}
                 onAction={setAction}
+                onPort={() => setPortDevice(device.id)}
               />
             )}
           </main>
         </div>
       </div>
+      {device && portDevice === device.id && device.status !== "revoked" && (
+        <PortDialog key={device.id} device={device} onClose={() => setPortDevice(undefined)} />
+      )}
       <Dialog open={binding} onOpenChange={setBinding}>
         {binding && (
           <BindingDialog

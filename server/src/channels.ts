@@ -11,7 +11,9 @@ import {
   type ChannelReady,
 } from "@kiteline/shared/protocol";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { Duplex } from "node:stream";
 import { heartbeat, sendFrame } from "@kiteline/shared/ws";
+import { httpStream } from "@kiteline/shared/http-stream";
 import type { ServerConfig } from "./config.js";
 import type { Login } from "./store.js";
 import { send, type AgentConnection, type Connections } from "./connections.js";
@@ -23,15 +25,16 @@ interface Channel {
   connection: AgentConnection;
   timer: NodeJS.Timeout;
   expiresAt: string;
-  kind: "terminal.attach" | "file.read" | "file.write";
+  kind: "terminal.attach" | "file.read" | "file.write" | "http.proxy";
   params: Record<string, unknown>;
   agent?: WebSocket;
   browser?: WebSocket;
   meta?: TerminalMeta | FileMeta;
   file?: FileTransfer;
+  http?: { stream?: Duplex; failed: (error: unknown) => void };
   download?: { request: IncomingMessage; response: ServerResponse };
   terminalFinished?: boolean;
-  resolve: (value: ChannelReady) => void;
+  resolve: () => void;
   reject: (error: unknown) => void;
 }
 export class Channels {
@@ -86,6 +89,36 @@ export class Channels {
           throw new AppError("invalid_argument", "需要明确创建或保存");
       }
     }
+    const pending = this.reserve(deviceId, login, kind, params);
+    if (download) {
+      pending.item.download = download;
+      download.response.on("close", () => {
+        if (!download.response.writableFinished)
+          this.cancel(pending.id, new AppError("cancelled", "下载已取消"));
+      });
+    }
+    return {
+      id: pending.id,
+      ready: pending.ready.then(
+        (): ChannelReady => ({
+          channelId: pending.id,
+          expiresAt: pending.item.expiresAt,
+          meta: pending.item.meta!,
+        }),
+      ),
+    };
+  }
+  createHttp(deviceId: string, login: Login, port: number, failed: (error: unknown) => void) {
+    const pending = this.reserve(deviceId, login, "http.proxy", { port }, { failed });
+    return { id: pending.id, ready: pending.ready.then(() => pending.item.http!.stream!) };
+  }
+  private reserve(
+    deviceId: string,
+    login: Login,
+    kind: Channel["kind"],
+    params: Record<string, unknown>,
+    http?: Channel["http"],
+  ) {
     const id = randomUUID();
     const connection = this.connections.agents.get(deviceId);
     const unavailable = (error: AppError): never => {
@@ -99,12 +132,13 @@ export class Channels {
     )
       return unavailable(new AppError("busy", "设备通道已满"));
     const expiresAt = new Date(Date.now() + this.config.limits.channelPairTimeout).toISOString();
-    const ready = new Promise<ChannelReady>((resolve, reject) => {
+    let item: Channel;
+    const ready = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(
         () => this.cancel(id, new AppError("timeout", "通道配对超时")),
         this.config.limits.channelPairTimeout,
       );
-      this.entries.set(id, {
+      item = {
         id,
         connection,
         loginId: login.id,
@@ -114,14 +148,9 @@ export class Channels {
         timer,
         resolve,
         reject,
-      });
-      if (download) {
-        this.entries.get(id)!.download = download;
-        download.response.on("close", () => {
-          if (!download.response.writableFinished)
-            this.cancel(id, new AppError("cancelled", "下载已取消"));
-        });
-      }
+        http,
+      };
+      this.entries.set(id, item);
     });
     send(connection.socket, {
       type: "channel.open",
@@ -130,7 +159,7 @@ export class Channels {
       kind,
       params,
     });
-    return { id, ready };
+    return { id, ready, item: item! };
   }
   checkAgent(id: string, deviceId: string, connectionId: string) {
     const item = this.entries.get(id);
@@ -142,13 +171,14 @@ export class Channels {
       this.connections.agents.get(deviceId) !== item.connection
     )
       throw new AppError("forbidden", "数据通道已失效");
+    return item.kind;
   }
   acceptAgent(id: string, socket: WebSocket) {
     const item = this.entries.get(id)!;
     item.agent = socket;
     if (item.kind === "terminal.attach") heartbeat(socket);
-    else socket.on("error", () => this.cancel(id, new AppError("offline", "文件数据连接失败")));
-    socket.on("message", (raw, binary) => {
+    else socket.on("error", () => this.cancel(id, new AppError("offline", "数据连接失败")));
+    const receive = (raw: Buffer, binary: boolean) => {
       try {
         if (this.entries.get(id) !== item) return;
         if (item.file) return;
@@ -165,6 +195,15 @@ export class Channels {
         if (message.type === "error")
           throw new AppError(string(message.code), string(message.message), message.details);
         if (message.type !== "ready") throw new AppError("invalid_argument", "需要通道 ready");
+        if (item.http) {
+          record(message.meta);
+          clearTimeout(item.timer);
+          socket.off("message", receive);
+          item.http.stream = httpStream(socket, (error) => this.cancel(id, error));
+          socket.send(JSON.stringify({ type: "start" }));
+          item.resolve();
+          return;
+        }
         item.meta = record(message.meta) as unknown as TerminalMeta | FileMeta;
         if (item.kind !== "terminal.attach") {
           const meta = item.meta as FileMeta;
@@ -186,12 +225,14 @@ export class Channels {
             () => this.cancel(id, new AppError("timeout", "等待浏览器配对超时")),
             this.config.limits.channelPairTimeout,
           );
-        item.resolve({ channelId: id, expiresAt: item.expiresAt, meta: item.meta });
+        item.resolve();
       } catch (error) {
         this.cancel(id, error);
       }
-    });
+    };
+    socket.on("message", receive);
     socket.on("close", () => {
+      if (item.http?.stream) return;
       if (item.file) {
         void item.file.sourceClosed().then(() => {
           if (this.entries.get(id) === item && !item.file!.sourceComplete)
@@ -215,7 +256,7 @@ export class Channels {
     const item = this.entries.get(id);
     if (!item || item.loginId !== loginId) throw new AppError("not_found", "文件通道不存在");
     if (
-      item.kind === "terminal.attach" ||
+      (item.kind !== "file.read" && item.kind !== "file.write") ||
       item.file ||
       !item.meta ||
       item.agent?.readyState !== WebSocket.OPEN
@@ -247,6 +288,12 @@ export class Channels {
     item.agent?.resume();
     item.agent?.close(1000);
   }
+  finishHttp(id: string) {
+    const item = this.entries.get(id);
+    if (!item?.http) return;
+    this.release(id);
+    item.http.stream?.destroy();
+  }
   acceptBrowser(id: string, socket: WebSocket) {
     const item = this.entries.get(id)!;
     item.browser = socket;
@@ -273,6 +320,8 @@ export class Channels {
     this.entries.delete(id);
     clearTimeout(item.timer);
     item.reject(error);
+    item.http?.failed(error);
+    item.http?.stream?.destroy();
     if (item.kind === "file.read")
       this.notifyFileFailure(id, item.loginId, item.connection.id, item.params, error);
     item.file?.stop(error);

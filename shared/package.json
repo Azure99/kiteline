@@ -9,6 +9,7 @@
     "./stdio": "./dist/protocol/stdio.js",
     "./ws": "./dist/protocol/ws.js",
     "./file-stream": "./dist/protocol/file-stream.js",
+    "./http-stream": "./dist/protocol/http-stream.js",
     "./text": "./dist/protocol/text.js",
     "./terminal": "./dist/terminal/index.js",
     "./terminal/node": "./dist/terminal/native.js"

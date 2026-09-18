@@ -9,6 +9,7 @@ import {
   Server,
   Settings,
   Trash2,
+  Globe,
 } from "lucide-react";
 import type { Device, Session } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
@@ -19,6 +20,7 @@ import { useEffect, useState } from "react";
 import { Dialog } from "../components/ui/dialog";
 import { TerminalSettings } from "../terminal/settings";
 import { rpc, errorMessage } from "../lib/api";
+import { IconButton } from "../components/icon-button";
 
 export const statusNames = { online: "在线", offline: "离线", revoked: "已撤销" };
 
@@ -75,11 +77,13 @@ export function DeviceDetail({
   onNavigate,
   onAdd,
   onAction,
+  onPort,
 }: {
   device: Device;
   onNavigate: (path: string) => void;
   onAdd: (device: Device) => void;
   onAction: (action: DeviceAction) => void;
+  onPort: () => void;
 }) {
   const [settings, setSettings] = useState(false);
   const [counts, setCounts] = useState<Record<string, number>>({});
@@ -121,6 +125,11 @@ export function DeviceDetail({
       <div className="mb-2 flex items-center gap-3">
         <Server size={23} className="text-muted-foreground" />
         <h1 className="min-w-0 flex-1 break-all text-lg font-semibold">{device.name}</h1>
+        {device.status !== "revoked" && (
+          <IconButton label="访问此设备端口" onClick={onPort}>
+            <Globe />
+          </IconButton>
+        )}
         <Menu>
           <MenuTrigger render={<Button variant="ghost" size="icon" aria-label="设备操作" />}>
             <MoreHorizontal />

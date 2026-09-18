@@ -1,0 +1,126 @@
+import { connect, type Socket } from "node:net";
+import type { Duplex } from "node:stream";
+import { WebSocket } from "ws";
+import { AppError, asError, integer, limits, record } from "@kiteline/shared/protocol";
+import { httpStream } from "@kiteline/shared/http-stream";
+import type { AgentConfig, Identity } from "../config.js";
+
+interface Channel {
+  socket: WebSocket;
+  timer: NodeJS.Timeout;
+  local?: Socket;
+  stream?: Duplex;
+  admitted: boolean;
+  ready: boolean;
+}
+
+export class HttpChannels {
+  private entries = new Map<string, Channel>();
+  constructor(
+    private config: AgentConfig,
+    private identity: Identity,
+    private otherChannels: () => number,
+  ) {}
+  get count() {
+    return [...this.entries.values()].filter((item) => item.admitted).length;
+  }
+  open(id: string, connectionId: string, _kind: string, params: Record<string, unknown>) {
+    const admitted = this.count + this.otherChannels() < this.config.limits.channelsPerDevice;
+    const url = new URL(`/api/agent/channels/${encodeURIComponent(id)}`, this.identity.server);
+    url.protocol = "wss:";
+    url.searchParams.set("connectionId", connectionId);
+    const socket = new WebSocket(url, {
+      headers: { authorization: `Bearer ${this.identity.deviceToken}` },
+      maxPayload: limits.dataChunkBytes,
+      handshakeTimeout: this.config.limits.channelPairTimeout,
+      finishRequest(request) {
+        request.setSocketKeepAlive(true, limits.tcpKeepAliveDelayMs);
+        request.end();
+      },
+    });
+    const item: Channel = {
+      socket,
+      admitted,
+      ready: false,
+      timer: setTimeout(
+        () => this.fail(id, new AppError("timeout", "本地服务连接超时")),
+        this.config.limits.channelPairTimeout,
+      ),
+    };
+    this.entries.set(id, item);
+    const start = (raw: Buffer, binary: boolean) => {
+      try {
+        if (binary || !item.ready || record(JSON.parse(raw.toString())).type !== "start")
+          throw new AppError("invalid_argument", "HTTP 通道尚未就绪");
+        socket.off("message", start);
+        clearTimeout(item.timer);
+        item.stream = httpStream(socket, (error) => this.fail(id, error));
+        item.local!.pipe(item.stream).pipe(item.local!);
+      } catch (error) {
+        this.fail(id, error);
+      }
+    };
+    socket.on("message", start);
+    socket.on("error", (error) => this.fail(id, error));
+    socket.on("close", () => this.cancel(id));
+    socket.on("open", () => {
+      if (this.entries.get(id) !== item) return socket.terminate();
+      try {
+        if (!admitted) throw new AppError("busy", "设备通道已满");
+        const port = integer(params.port, "port", 1, 65535);
+        const dial = (host: string) => {
+          const local = connect({ host, port });
+          item.local = local;
+          let connected = false;
+          local.once("connect", () => {
+            connected = true;
+            if (this.entries.get(id) !== item) return local.destroy();
+            local.setKeepAlive(true, limits.tcpKeepAliveDelayMs);
+            item.ready = true;
+            item.timer.refresh();
+            socket.send(JSON.stringify({ type: "ready", meta: {} }));
+          });
+          local.on("error", (error) => {
+            if (this.entries.get(id) !== item) return;
+            if (!connected && host === "127.0.0.1") dial("::1");
+            else this.fail(id, error);
+          });
+          local.on("close", () => {
+            if (this.entries.get(id) === item && connected && !item.stream)
+              this.fail(id, new AppError("io_error", "本地服务在请求前关闭连接"));
+          });
+        };
+        dial("127.0.0.1");
+      } catch (error) {
+        this.fail(id, error);
+      }
+    });
+  }
+  private fail(id: string, error: unknown) {
+    const item = this.entries.get(id);
+    if (!item) return;
+    if (!item.stream && item.socket.readyState === WebSocket.OPEN) {
+      const detail = asError(error);
+      item.socket.send(
+        JSON.stringify({ type: "error", code: detail.code, message: detail.message }),
+      );
+      this.dispose(id, false);
+      item.socket.close(1000);
+    } else this.cancel(id);
+  }
+  private dispose(id: string, terminate: boolean) {
+    const item = this.entries.get(id);
+    if (!item) return;
+    this.entries.delete(id);
+    clearTimeout(item.timer);
+    item.local?.destroy();
+    item.stream?.destroy();
+    if (terminate) item.socket.terminate();
+  }
+  cancel(id: string) {
+    this.dispose(id, true);
+  }
+  close() {
+    for (const id of this.entries.keys()) this.cancel(id);
+  }
+}

@@ -34,6 +34,8 @@ import { changeIndex, discard, discardScope, gitPaths, reviewDiscard } from "./g
 import { changeBranch, commit, createBranch } from "./git/refs.js";
 import { expectedHead, remotes, syncRemote } from "./git/remotes.js";
 import { finishOperation } from "./git/operation.js";
+import { HttpChannels } from "./http/channels.js";
+import { listeningPorts } from "./http/ports.js";
 
 const gitWriteMethods = new Set([
   "git.stage",
@@ -65,6 +67,7 @@ export class Agent {
   private readonly local: LocalServer;
   private readonly channels: TerminalChannels;
   private readonly fileChannels: FileChannels;
+  private readonly httpChannels: HttpChannels;
   readonly requests = new Map<string, AbortController>();
   readonly watched = new Set<string>();
   private readonly tasks = new Set<Promise<unknown>>();
@@ -94,15 +97,20 @@ export class Agent {
       this.sessions,
       config,
       identity,
-      () => this.fileChannels.count,
+      () => this.fileChannels.count + this.httpChannels.count,
     );
     this.fileChannels = new FileChannels(
       this.textFiles,
       new BinaryFiles(config, this.metadata, this.textFiles.temporary),
       config,
       identity,
-      () => this.channels.count,
+      () => this.channels.count + this.httpChannels.count,
       (workspaceId) => this.watches.changed(workspaceId, true),
+    );
+    this.httpChannels = new HttpChannels(
+      config,
+      identity,
+      () => this.channels.count + this.fileChannels.count,
     );
     this.sessions.onChanged = (workspaceId) => this.send({ type: "sessions.changed", workspaceId });
     this.local = new LocalServer(config, (method, params, signal) => {
@@ -165,7 +173,12 @@ export class Agent {
         } else if (message.type === "channel.open") {
           if (message.connectionId !== this.connectionId)
             throw new AppError("conflict", "旧控制连接");
-          const channels = message.kind === "terminal.attach" ? this.channels : this.fileChannels;
+          const channels =
+            message.kind === "terminal.attach"
+              ? this.channels
+              : message.kind === "http.proxy"
+                ? this.httpChannels
+                : this.fileChannels;
           channels.open(
             string(message.channelId),
             string(message.connectionId),
@@ -175,6 +188,7 @@ export class Agent {
         } else if (message.type === "channel.cancel") {
           this.channels.cancel(string(message.channelId));
           this.fileChannels.cancel(string(message.channelId));
+          this.httpChannels.cancel(string(message.channelId));
         } else if (message.type === "rpc.request") {
           const id = string(message.id, "request id", 128);
           if (this.requests.has(id)) throw new AppError("conflict", "Duplicate request");
@@ -251,6 +265,7 @@ export class Agent {
       this.gitHistory.close();
       this.channels.close();
       void this.fileChannels.close();
+      this.httpChannels.close();
       void this.directories.close();
       if (this.stopped) return;
       if (code === 4001 || code === 4003) {
@@ -290,6 +305,8 @@ export class Agent {
     if (this.stopped) throw new AppError("cancelled", "agent 正在停止");
     signal.throwIfAborted();
     switch (method) {
+      case "ports.list":
+        return listeningPorts(signal);
       case "git.remotes":
         return remotes(
           await this.repos.resolve(string(params.workspaceId), string(params.repoId), signal),
@@ -622,6 +639,7 @@ export class Agent {
     this.socket?.terminate();
     this.channels.close();
     await this.fileChannels.close();
+    this.httpChannels.close();
     for (const controller of this.requests.values())
       controller.abort(new AppError("cancelled", "agent 正在停止"));
     await this.local.close();

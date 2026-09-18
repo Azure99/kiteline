@@ -51,6 +51,7 @@ export async function rpc<T>(
     signal,
     ![
       "directories.list",
+      "ports.list",
       "sessions.list",
       "files.list",
       "files.inspect",

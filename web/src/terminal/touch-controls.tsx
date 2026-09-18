@@ -1,20 +1,25 @@
 import { useEffect, useRef, useState } from "react";
-import { Copy, X } from "lucide-react";
+import { Copy, X, ExternalLink } from "lucide-react";
 import type { Terminal } from "@xterm/xterm";
 import { TouchSelection, type SelectionHandles } from "./touch-selection";
 import { IconButton } from "../components/icon-button";
 import { errorMessage } from "../lib/api";
+import { deviceServiceLink } from "../lib/device-service";
 
 export function TouchControls({
   terminal,
+  deviceId,
   onError,
 }: {
   terminal: Terminal;
+  deviceId: string;
   onError: (message: string) => void;
 }) {
   const [handles, setHandles] = useState<SelectionHandles>();
   const selection = useRef<TouchSelection>(undefined);
   const layer = useRef<HTMLDivElement>(null);
+  const service = handles ? deviceServiceLink(terminal.getSelection(), deviceId) : undefined;
+  const halfWidth = service ? 68 : 50;
   useEffect(() => {
     const current = new TouchSelection(terminal, setHandles);
     selection.current = current;
@@ -67,7 +72,10 @@ export function TouchControls({
           })}
           <div
             className="terminal-selection-menu pointer-events-auto flex rounded border border-border bg-background text-foreground shadow-md"
-            style={{ left: handles.menu.x, top: handles.menu.y }}
+            style={{
+              left: Math.max(halfWidth, Math.min(window.innerWidth - halfWidth, handles.menu.x)),
+              top: handles.menu.y,
+            }}
             onPointerDown={(event) => event.preventDefault()}
           >
             <IconButton
@@ -83,6 +91,14 @@ export function TouchControls({
             <IconButton label="取消选择" onClick={() => selection.current?.cancel()}>
               <X />
             </IconButton>
+            {service && (
+              <IconButton
+                label={`访问设备端口 · ${deviceId}:${service.port}`}
+                onClick={() => window.open(service.url, "_blank", "noopener,noreferrer")}
+              >
+                <ExternalLink />
+              </IconButton>
+            )}
           </div>
         </>
       )}

@@ -32,6 +32,12 @@ pnpm agent run
 
 正式公网部署使用真实 HTTPS 证书。密码恢复需先停止 server，再以相同 `KITELINE_DATA_DIR` 运行 `pnpm server reset-password`，完成后重新启动。原生组件及构建身份位于 `dist/native/`；临时编译目录和包缓存使用 `/var/tmp`。
 
+## 访问设备上的开发服务
+
+设备页或顶部地球图标可输入端口，打开时读取一次监听端口建议。终端中的 `http://localhost:端口/` 链接可直接打开；手机选中完整链接后也有访问动作。服务需监听 agent 所在环境的 loopback 或 wildcard 地址。
+
+默认入口剥离代理前缀。Vite 项目使用“保留路径”，将项目 `base` 设置为复制地址中的 `/absproxy/<deviceId>/<port>/`，`server.allowedHosts` 加入工作台实际域名；默认 HMR 沿此地址使用 WSS。根相对 API、应用登录回调等仍需项目自身配置。
+
 ## 检查
 
 ```sh

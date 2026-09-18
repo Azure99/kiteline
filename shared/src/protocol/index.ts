@@ -205,6 +205,10 @@ export interface GitRemotes {
   defaultPushRemote?: string;
   pushTargetDescription: string;
 }
+export interface ListeningPorts {
+  ports: number[];
+  truncated: boolean;
+}
 export interface DiffSummary {
   path: string;
   oldPath?: string;
