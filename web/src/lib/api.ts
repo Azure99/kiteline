@@ -61,6 +61,8 @@ export async function rpc<T>(
       "git.history",
       "git.commitFiles",
       "git.branches",
+      "git.review",
+      "git.remotes",
     ].includes(method),
   );
   if (reply.outcome !== "succeeded")

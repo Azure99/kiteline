@@ -48,6 +48,7 @@ export function Files({
   const route = useRoute();
   const mobile = useMobile();
   const folder = route.query.get("folder") ?? ".";
+  const reveal = route.query.get("reveal");
   const [expanded, setExpanded] = useState(new Set(["."]));
   const [selected, setSelected] = useState(new Set<string>());
   const [selecting, setSelecting] = useState(false);
@@ -100,6 +101,9 @@ export function Files({
   useEffect(() => {
     if (visible && enabled && folder !== ".") void load(folder);
   }, [visible, enabled, folder, load]);
+  useEffect(() => {
+    if (visible && reveal) setListOpen(true);
+  }, [visible, reveal]);
   useEffect(() => {
     const written = (event: Event) => {
       const target = (event as CustomEvent<{ deviceId: string; workspaceId: string; path: string }>)
@@ -391,9 +395,9 @@ export function Files({
             aria-label="文件列表"
           >
             <FileExplorer
-              path={mobile ? folder : "."}
+              path={mobile || reveal ? folder : "."}
               {...{ pages, expanded, selected, mobile, selecting }}
-              currentFile={queryFile ?? undefined}
+              currentFile={queryFile ?? reveal ?? undefined}
               disabled={!enabled}
               onFolder={enter}
               onOpen={open}

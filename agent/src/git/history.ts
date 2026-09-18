@@ -16,7 +16,7 @@ import { boundedDiff, numstatReader, selectedPatch, rawReader, type RawChange } 
 import { commandLine, git, NulRecords, utf8 } from "./process.js";
 import { diffOptions, headIdentity } from "./status.js";
 
-async function commitOid(repo: Repo, oid: string, signal: AbortSignal) {
+export async function commitOid(repo: Repo, oid: string, signal: AbortSignal) {
   if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(oid))
     throw new AppError("invalid_argument", "需要完整提交 OID");
   const actual = commandLine(

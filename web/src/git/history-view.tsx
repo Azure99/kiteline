@@ -6,6 +6,7 @@ import {
   ChevronRight,
   GitCommitHorizontal,
   RefreshCw,
+  GitBranch,
 } from "lucide-react";
 import type { Commit, CommitFiles, GitHistory } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
@@ -21,6 +22,7 @@ interface Props {
   repoId: string;
   active: boolean;
   onFile: (path: string) => void;
+  onBranch?: (oid: string) => void;
 }
 export function HistoryView(props: Props) {
   const { deviceId, workspaceId, repoId, active } = props;
@@ -164,6 +166,7 @@ function CommitView({
   active,
   onBack,
   onFile,
+  onBranch,
 }: Props & { commit: Commit; onBack: () => void }) {
   const [parent, setParent] = useState(commit.parents[0]);
   const [value, setValue] = useState<CommitFiles>();
@@ -229,6 +232,15 @@ function CommitView({
         <span className="font-mono text-[11px] text-muted-foreground">
           {commit.oid.slice(0, 8)}
         </span>
+        {onBranch && (
+          <IconButton
+            label="从此提交创建分支"
+            disabled={!active}
+            onClick={() => onBranch(commit.oid)}
+          >
+            <GitBranch />
+          </IconButton>
+        )}
       </div>
       {commit.parents.length > 1 && (
         <div className="shrink-0 border-b border-border px-3">

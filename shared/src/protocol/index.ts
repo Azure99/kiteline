@@ -188,7 +188,22 @@ export interface GitStatus {
   stagedCount: number;
   hasConflicts: boolean;
   indexToken?: string;
+  operation?: GitOperation;
   truncated: boolean;
+}
+export interface GitOperation {
+  kind: "merge" | "rebase" | "am" | "cherry-pick" | "revert" | "unknown";
+  token?: string;
+  canContinue: boolean;
+  canAbort: boolean;
+  reason?: string;
+}
+export interface GitRemotes {
+  remotes: { name: string; fetchUrls: string[]; pushUrls: string[] }[];
+  upstream?: string;
+  defaultFetchRemote?: string;
+  defaultPushRemote?: string;
+  pushTargetDescription: string;
 }
 export interface DiffSummary {
   path: string;
@@ -202,6 +217,12 @@ export interface GitDiff {
   patch: string;
   summary: DiffSummary;
   truncated: boolean;
+}
+export type DiscardScope = "worktree" | "all";
+export interface GitReview {
+  paths: string[];
+  summary: { path: string; action: "restore" | "delete" }[];
+  reviewToken: string;
 }
 export interface Commit {
   oid: string;

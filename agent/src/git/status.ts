@@ -11,6 +11,7 @@ import {
   type Repo,
 } from "@kiteline/shared/protocol";
 import { commandLine, git, gitHash, NulRecords, utf8 } from "./process.js";
+import { readOperation } from "./operation.js";
 
 export const diffOptions = [
   "--no-color",
@@ -251,6 +252,7 @@ export async function status(
     stagedCount,
     hasConflicts,
     indexToken: hasConflicts ? undefined : before.token,
+    operation: await readOperation(repo, before.head, hasConflicts, signal),
     truncated: nextOffset !== undefined,
   };
   while (Buffer.byteLength(JSON.stringify(result)) > limits.resultBytes && entries.length) {

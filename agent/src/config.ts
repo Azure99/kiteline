@@ -18,6 +18,7 @@ export const defaultAgentLimits = {
   transfersPerDevice: 4,
   fileOperationTimeout: 30 * 60_000,
   searchTimeout: 10_000,
+  gitWriteTimeout: 10 * 60_000,
   channelIdleTimeout: 120_000,
   rpcTimeout: 30_000,
   channelPairTimeout: 30_000,

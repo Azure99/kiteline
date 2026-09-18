@@ -84,9 +84,12 @@ export class Repositories {
     return repo;
   }
   async resolve(workspaceId: string, id: string, signal: AbortSignal) {
-    const root = this.metadata.workspace(workspaceId).path;
     const old = this.known.get(id);
     if (!old) throw new AppError("not_found", "仓库未发现或已过期，请刷新仓库");
+    return this.verify(workspaceId, old, signal);
+  }
+  async verify(workspaceId: string, old: Repo, signal: AbortSignal) {
+    const root = this.metadata.workspace(workspaceId).path;
     let current: Repo;
     try {
       current = await this.inspect(old.rootPath, root, signal);
@@ -94,7 +97,7 @@ export class Repositories {
       signal.throwIfAborted();
       throw new AppError("not_found", `仓库不可用：${asError(error).message}`);
     }
-    if (current.id !== id) throw new AppError("conflict", "仓库身份已变化，请重新选择");
+    if (current.id !== old.id) throw new AppError("conflict", "仓库身份已变化，请重新选择");
     if (!current.available) throw new AppError("unsupported", "裸仓库不支持工作树操作");
     this.remember(workspaceId, current);
     return current;

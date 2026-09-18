@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { isUtf8 } from "node:buffer";
 import { createHash } from "node:crypto";
-import { AppError, limits } from "@kiteline/shared/protocol";
+import { AppError, asError, OperationError, limits } from "@kiteline/shared/protocol";
 import { BytePrefix } from "../buffers.js";
 
 interface Options {
@@ -11,6 +11,7 @@ interface Options {
   truncate?: boolean;
   allowedCodes?: number[];
   env?: NodeJS.ProcessEnv;
+  write?: boolean;
 }
 export async function git(
   root: string,
@@ -21,7 +22,12 @@ export async function git(
   signal.throwIfAborted();
   const child = spawn(
     "git",
-    ["--no-pager", "--literal-pathspecs", "--no-optional-locks", "-c", "color.ui=false", ...args],
+    [
+      "--no-pager",
+      "--literal-pathspecs",
+      ...(options.write ? [] : ["--no-optional-locks", "-c", "color.ui=false"]),
+      ...args,
+    ],
     {
       cwd: root,
       detached: true,
@@ -33,6 +39,8 @@ export async function git(
   const stderr = new BytePrefix(32 * 1024);
   let error: unknown;
   let clipped = false;
+  let killTimer: NodeJS.Timeout | undefined;
+  let terminated: Promise<void> | undefined;
   const stop = () => {
     if (child.pid) {
       try {
@@ -40,6 +48,16 @@ export async function git(
       } catch {
         // The process group may already have exited.
       }
+      terminated ??= new Promise<void>((resolve) => {
+        killTimer = setTimeout(() => {
+          try {
+            process.kill(-child.pid!, "SIGKILL");
+          } catch {
+            /* Already exited. */
+          }
+          resolve();
+        }, 1000);
+      });
     }
   };
   const abort = () => stop();
@@ -61,8 +79,10 @@ export async function git(
         stdout.append(chunk);
         if (stdout.truncated) {
           clipped = true;
-          if (!options.truncate) error = new AppError("limit_exceeded", "Git 输出超过容量");
-          stop();
+          if (!options.write) {
+            if (!options.truncate) error = new AppError("limit_exceeded", "Git 输出超过容量");
+            stop();
+          }
         }
       }
     } catch (reason) {
@@ -74,6 +94,40 @@ export async function git(
   child.stdin.end(options.input);
   const code = await new Promise<number | null>((resolve) => child.once("close", resolve));
   signal.removeEventListener("abort", abort);
+  if (terminated && child.pid) {
+    let groupAlive = false;
+    try {
+      process.kill(-child.pid, 0);
+      groupAlive = true;
+    } catch {
+      /* No remaining group. */
+    }
+    if (groupAlive) await terminated;
+  }
+  clearTimeout(killTimer);
+  const result = {
+    stdout: stdout.text(),
+    stderr: stderr.text(),
+    truncated: clipped || stderr.truncated,
+    exitCode: code,
+  };
+  if (
+    options.write &&
+    (signal.aborted || error || !(options.allowedCodes ?? [0]).includes(code ?? -1))
+  ) {
+    const reason = asError(
+      signal.aborted
+        ? signal.reason
+        : (error ?? new AppError("io_error", stderr.text().trim() || "Git 命令失败")),
+    );
+    throw new OperationError(
+      reason.code,
+      reason.message,
+      child.pid ? "unknown" : "failed",
+      result,
+      reason.details,
+    );
+  }
   signal.throwIfAborted();
   if (error) throw error;
   if (!clipped && !(options.allowedCodes ?? [0]).includes(code ?? -1))

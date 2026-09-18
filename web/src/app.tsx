@@ -37,6 +37,7 @@ import { WorkspaceTerminal } from "./terminal/sessions";
 import type { TerminalLayout } from "./terminal/groups";
 import { Files } from "./files/files";
 import { GitTool } from "./git/git";
+import { GitActions } from "./git/actions";
 import { WatchStatus } from "./components/watch-status";
 import { DraftStore, isDirty } from "./files/drafts";
 import { DraftView } from "./files/draft-view";
@@ -46,6 +47,7 @@ import { UploadDialog } from "./files/upload-dialog";
 export function App() {
   const terminalLayouts = useRef(new Map<string, TerminalLayout>());
   const [drafts] = useState(() => new DraftStore());
+  const [gitActions] = useState(() => new GitActions());
   const route = useRoute();
   const [session, setSession] = useState<Session>();
   const [initialized, setInitialized] = useState(true);
@@ -176,6 +178,7 @@ export function App() {
       await post("/api/logout");
       terminalLayouts.current.clear();
       drafts.clear();
+      gitActions.clear();
       setUploads([]);
       setActiveUpload(undefined);
       setSession(undefined);
@@ -420,6 +423,7 @@ export function App() {
                       workspace={workspace}
                       visible={route.tool === "git"}
                       store={drafts}
+                      actions={gitActions}
                     />
                   </WorkspaceTerminal>
                 </>

@@ -29,6 +29,26 @@ import { status } from "./git/status.js";
 import { workingDiff } from "./git/diff.js";
 import { branches, commitDiff, GitHistoryReads, history } from "./git/history.js";
 import { WorkspaceWatches } from "./watches.js";
+import { GitWriteQueue } from "./git/queue.js";
+import { changeIndex, discard, discardScope, gitPaths, reviewDiscard } from "./git/paths.js";
+import { changeBranch, commit, createBranch } from "./git/refs.js";
+import { expectedHead, remotes, syncRemote } from "./git/remotes.js";
+import { finishOperation } from "./git/operation.js";
+
+const gitWriteMethods = new Set([
+  "git.stage",
+  "git.unstage",
+  "git.discard",
+  "git.commit",
+  "git.branch.create",
+  "git.branch.switch",
+  "git.branch.delete",
+  "git.fetch",
+  "git.pull",
+  "git.push",
+  "git.continue",
+  "git.abort",
+]);
 
 export class Agent {
   readonly metadata: MetadataStore;
@@ -37,6 +57,7 @@ export class Agent {
   readonly repos: Repositories;
   readonly gitHistory = new GitHistoryReads(this.cursorBudget);
   readonly watches: WorkspaceWatches;
+  readonly gitWrites: GitWriteQueue;
   readonly sessions: Sessions;
   readonly files: Files;
   readonly textFiles: TextFiles;
@@ -61,6 +82,7 @@ export class Agent {
       this.send(event),
     );
     this.repos = new Repositories(this.metadata, this.cursorBudget);
+    this.gitWrites = new GitWriteQueue(this.repos);
     this.repos.onObserved = (workspaceId, repo) => this.watches.repo(workspaceId, repo);
     this.repos.onComplete = (workspaceId, ids) => this.watches.reposComplete(workspaceId, ids);
     this.files = new Files(this.metadata, this.directories);
@@ -166,7 +188,9 @@ export class Agent {
               ? this.config.limits.fileOperationTimeout
               : method === "files.search"
                 ? this.config.limits.searchTimeout
-                : this.config.limits.rpcTimeout,
+                : gitWriteMethods.has(method)
+                  ? this.config.limits.gitWriteTimeout
+                  : this.config.limits.rpcTimeout,
           );
           void this.dispatch(method, params, controller.signal, (progress) => {
             if (this.socket === socket) this.send({ type: "request.progress", id, ...progress });
@@ -245,9 +269,10 @@ export class Agent {
   ): Promise<unknown> {
     const operation = this.perform(method, params, signal, progress).finally(() => {
       if (
-        ["files.create", "files.rename", "files.copy", "files.move", "files.delete"].includes(
+        (["files.create", "files.rename", "files.copy", "files.move", "files.delete"].includes(
           method,
-        ) &&
+        ) ||
+          gitWriteMethods.has(method)) &&
         typeof params.workspaceId === "string"
       )
         this.watches.changed(params.workspaceId, true);
@@ -265,6 +290,127 @@ export class Agent {
     if (this.stopped) throw new AppError("cancelled", "agent 正在停止");
     signal.throwIfAborted();
     switch (method) {
+      case "git.remotes":
+        return remotes(
+          await this.repos.resolve(string(params.workspaceId), string(params.repoId), signal),
+          signal,
+        );
+      case "git.fetch":
+      case "git.pull":
+      case "git.push":
+        return this.gitWrites.run(
+          string(params.workspaceId),
+          string(params.repoId),
+          signal,
+          (repo) =>
+            syncRemote(
+              repo,
+              method.slice(4) as "fetch" | "pull" | "push",
+              {
+                remote: params.remote === undefined ? undefined : string(params.remote),
+                expectedHead:
+                  method === "git.fetch" ? undefined : expectedHead(params.expectedHead),
+              },
+              signal,
+            ),
+          progress,
+        );
+      case "git.continue":
+      case "git.abort": {
+        const expected = record(params.expectedOperation);
+        return this.gitWrites.run(
+          string(params.workspaceId),
+          string(params.repoId),
+          signal,
+          (repo) =>
+            finishOperation(
+              repo,
+              string(expected.kind),
+              string(expected.token),
+              method === "git.continue" ? "continue" : "abort",
+              signal,
+            ),
+          progress,
+        );
+      }
+      case "git.commit":
+        return this.gitWrites.run(
+          string(params.workspaceId),
+          string(params.repoId),
+          signal,
+          (repo) =>
+            commit(
+              repo,
+              string(params.message, "message", limits.controlMessageBytes),
+              string(params.indexToken),
+              signal,
+            ),
+          progress,
+        );
+      case "git.branch.create":
+        if (typeof params.switch !== "boolean")
+          throw new AppError("invalid_argument", "请选择是否切换分支");
+        return this.gitWrites.run(
+          string(params.workspaceId),
+          string(params.repoId),
+          signal,
+          (repo) =>
+            createBranch(
+              repo,
+              string(params.name),
+              params.startOid === undefined ? undefined : string(params.startOid),
+              params.switch === true,
+              signal,
+            ),
+          progress,
+        );
+      case "git.branch.switch":
+      case "git.branch.delete":
+        return this.gitWrites.run(
+          string(params.workspaceId),
+          string(params.repoId),
+          signal,
+          (repo) =>
+            changeBranch(
+              repo,
+              string(params.name),
+              string(params.refOid),
+              method === "git.branch.switch" ? "switch" : "delete",
+              signal,
+            ),
+          progress,
+        );
+      case "git.stage":
+      case "git.unstage":
+      case "git.discard":
+        return this.gitWrites.run(
+          string(params.workspaceId),
+          string(params.repoId),
+          signal,
+          (repo) =>
+            method === "git.discard"
+              ? discard(
+                  repo,
+                  gitPaths(params.paths),
+                  discardScope(params.scope),
+                  string(params.reviewToken),
+                  signal,
+                )
+              : changeIndex(
+                  repo,
+                  gitPaths(params.paths),
+                  method === "git.stage" ? "stage" : "unstage",
+                  signal,
+                ),
+          progress,
+        );
+      case "git.review":
+        return reviewDiscard(
+          await this.repos.resolve(string(params.workspaceId), string(params.repoId), signal),
+          gitPaths(params.paths),
+          discardScope(params.scope),
+          signal,
+        );
       case "repos.discover":
         return this.repos.discover(
           string(params.workspaceId),

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ChevronDown,
   ChevronLeft,
@@ -6,8 +6,18 @@ import {
   FolderGit2,
   GitBranch,
   RefreshCw,
+  Plus,
+  Minus,
+  Undo2,
 } from "lucide-react";
-import type { Device, GitEntry, Repo, RepoDiscovery, Workspace } from "@kiteline/shared/protocol";
+import type {
+  Device,
+  DiscardScope,
+  GitEntry,
+  Repo,
+  RepoDiscovery,
+  Workspace,
+} from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
 import { Button } from "../components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
@@ -21,17 +31,34 @@ import { HistoryView } from "./history-view";
 import { BranchesView } from "./branches-view";
 import { ApiError } from "../lib/api";
 import { useWorkspaceRefresh } from "../lib/use-workspace-refresh";
+import { navigate, workspacePath } from "../lib/navigation";
+import { parentPath } from "../files/use-browser";
+import { type GitActions, useGitActivity } from "./actions";
+import {
+  confirmDiskVersion,
+  DiscardDialog,
+  discardable,
+  GitFeedback,
+  RowActions,
+  stageable,
+} from "./change-actions";
+import { CommitBox } from "./commit-box";
+import { BranchDialog } from "./branch-dialog";
+import { RemoteActions } from "./remote-actions";
+import { OperationBar } from "./operation-bar";
 
 export function GitTool({
   device,
   workspace,
   visible,
   store,
+  actions,
 }: {
   device: Device;
   workspace: Workspace;
   visible: boolean;
   store: DraftStore;
+  actions: GitActions;
 }) {
   const [repos, setRepos] = useState<Repo[]>([]);
   const [repoId, setRepoId] = useState<string>();
@@ -121,42 +148,48 @@ export function GitTool({
       }),
     );
   }
+  function locateFile(path: string) {
+    if (!repo) return;
+    const full = repo.path === "." ? path : `${repo.path}/${path}`;
+    navigate(
+      workspacePath(device.id, workspace.id, "files") +
+        "?" +
+        new URLSearchParams({ folder: parentPath(full), reveal: full }),
+    );
+  }
+  const picker = (
+    <Menu>
+      <MenuTrigger render={<Button variant="ghost" className="min-w-0 max-w-[55%] shrink" />}>
+        <FolderGit2 />
+        <span className="min-w-0 truncate">
+          {repo?.path === "." ? workspace.name : (repo?.path ?? "仓库")}
+        </span>
+        <ChevronDown />
+      </MenuTrigger>
+      <MenuContent>
+        {repos.map((item) => (
+          <MenuItem key={item.id} onClick={() => setRepoId(item.id)}>
+            <span className="min-w-0 break-all">
+              {item.path === "." ? workspace.name : item.path}
+              {item.linked ? " · worktree" : ""}
+              {!item.available ? " · 裸仓库" : ""}
+            </span>
+          </MenuItem>
+        ))}
+        <MenuItem disabled={!enabled || busy} onClick={() => void discover()}>
+          <RefreshCw />
+          重新发现仓库
+        </MenuItem>
+      </MenuContent>
+    </Menu>
+  );
   return (
     <div className={visible ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
-      <div className="flex min-h-11 shrink-0 items-center gap-2 border-b border-border px-3">
-        <Menu>
-          <MenuTrigger render={<Button variant="ghost" className="min-w-0 max-w-full shrink" />}>
-            <FolderGit2 />
-            <span className="min-w-0 truncate">
-              {repo?.path === "." ? workspace.name : (repo?.path ?? "仓库")}
-            </span>
-            <ChevronDown />
-          </MenuTrigger>
-          <MenuContent>
-            {repos.map((item) => (
-              <MenuItem key={item.id} onClick={() => setRepoId(item.id)}>
-                <span className="min-w-0 break-all">
-                  {item.path === "." ? workspace.name : item.path}
-                  {item.linked ? " · worktree" : ""}
-                  {!item.available ? " · 裸仓库" : ""}
-                </span>
-              </MenuItem>
-            ))}
-            <MenuItem disabled={!enabled || busy} onClick={() => void discover()}>
-              <RefreshCw />
-              重新发现仓库
-            </MenuItem>
-          </MenuContent>
-        </Menu>
-        <span className="flex-1" />
-        <IconButton
-          label="刷新仓库发现"
-          disabled={!enabled || busy}
-          onClick={() => void discover()}
-        >
-          <RefreshCw />
-        </IconButton>
-      </div>
+      {!repo?.available && (
+        <div className="flex min-h-11 shrink-0 items-center gap-2 border-b border-border px-3">
+          {picker}
+        </div>
+      )}
       {!enabled && (
         <p role="status" className="border-b border-border px-4 py-2 text-xs">
           设备{device.status === "revoked" ? "已撤销" : "离线"}
@@ -183,8 +216,9 @@ export function GitTool({
       {repo?.available ? (
         <Changes
           key={repo.id}
-          {...{ device, workspace, repo, visible, enabled }}
+          {...{ device, workspace, repo, visible, enabled, actions, store, picker }}
           onFile={openFile}
+          onLocate={locateFile}
         />
       ) : (
         <div className="flex flex-1 items-center justify-center p-4 text-sm text-muted-foreground">
@@ -202,6 +236,10 @@ function Changes({
   visible,
   enabled,
   onFile,
+  onLocate,
+  actions,
+  store,
+  picker,
 }: {
   device: Device;
   workspace: Workspace;
@@ -209,12 +247,34 @@ function Changes({
   visible: boolean;
   enabled: boolean;
   onFile: (path: string) => void;
+  onLocate: (path: string) => void;
+  actions: GitActions;
+  store: DraftStore;
+  picker: ReactNode;
 }) {
   const mobile = useMobile();
   const state = useGitStatus(device.id, workspace.id, repo.id, visible && enabled);
   const [target, setTarget] = useState<DiffTarget>();
   const [view, setView] = useState<"changes" | "history" | "branches">("changes");
   const { value, selected, setSelected } = state;
+  const actionTarget = { deviceId: device.id, workspaceId: workspace.id, repoId: repo.id };
+  const activity = useGitActivity(actions, actionTarget);
+  const [discarding, setDiscarding] = useState<{ paths: string[]; scope: DiscardScope }>();
+  const [branchStart, setBranchStart] = useState<string>();
+  const disabled = !enabled || !!activity.request;
+  const { load } = state;
+  useEffect(() => {
+    if (visible && enabled && activity.revision) void load();
+  }, [activity.revision, visible, enabled, load]);
+  function indexAction(paths: string[], kind: "stage" | "unstage") {
+    if (kind === "stage" && !confirmDiskVersion(store, actionTarget, repo.path, paths)) return;
+    void actions.run(
+      actionTarget,
+      `git.${kind}`,
+      { paths: [...new Set(paths)] },
+      kind === "stage" ? "暂存" : "取消暂存",
+    );
+  }
   const select = (entry: GitEntry, side: ChangeSide) => {
     const item = selectionOf(entry, side);
     setSelected((old) =>
@@ -225,7 +285,8 @@ function Changes({
   };
   return (
     <>
-      <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border px-3">
+      <div className="flex min-h-11 shrink-0 items-center gap-2 border-b border-border px-3">
+        {picker}
         <button
           className="flex min-h-10 min-w-0 flex-1 items-center gap-2 text-xs max-[959px]:min-h-11"
           title={value?.head.oid ?? undefined}
@@ -239,13 +300,12 @@ function Changes({
         </button>
         {!!value?.ahead && <span className="text-xs">↑{value.ahead}</span>}
         {!!value?.behind && <span className="text-xs">↓{value.behind}</span>}
-        <IconButton
-          label="刷新 Git 状态"
-          disabled={!enabled || state.busy}
-          onClick={() => void state.load()}
-        >
-          <RefreshCw />
-        </IconButton>
+        <RemoteActions
+          target={actionTarget}
+          actions={actions}
+          active={visible && enabled}
+          head={value?.head}
+        />
       </div>
       <div
         role="tablist"
@@ -272,7 +332,16 @@ function Changes({
             )}
           </button>
         ))}
-        {state.busy && <span className="ml-auto text-muted-foreground">正在读取</span>}
+        <span className="ml-auto hidden text-muted-foreground min-[960px]:block">
+          {state.busy ? "正在读取" : ""}
+        </span>
+        <IconButton
+          label="刷新 Git 状态"
+          disabled={!enabled || state.busy}
+          onClick={() => void state.load()}
+        >
+          <RefreshCw />
+        </IconButton>
       </div>
       {(state.error || state.notice) && (
         <p
@@ -282,6 +351,21 @@ function Changes({
           {state.error || state.notice}
         </p>
       )}
+      <GitFeedback
+        actions={actions}
+        target={actionTarget}
+        onLocate={onLocate}
+        onTerminal={() => navigate(workspacePath(device.id, workspace.id))}
+      />
+      {value?.operation && (
+        <OperationBar
+          operation={value.operation}
+          target={actionTarget}
+          actions={actions}
+          disabled={!enabled}
+          onTerminal={() => navigate(workspacePath(device.id, workspace.id))}
+        />
+      )}
       {view === "history" && (
         <HistoryView
           deviceId={device.id}
@@ -289,6 +373,9 @@ function Changes({
           repoId={repo.id}
           active={visible && enabled}
           onFile={onFile}
+          onBranch={(oid) => {
+            if (!disabled) setBranchStart(oid);
+          }}
         />
       )}
       {view === "branches" && (
@@ -297,6 +384,8 @@ function Changes({
           workspaceId={workspace.id}
           repoId={repo.id}
           active={visible && enabled}
+          actions={actions}
+          headOid={value?.head.oid}
         />
       )}
       <div className={view === "changes" ? "flex min-h-0 flex-1" : "hidden"}>
@@ -314,13 +403,57 @@ function Changes({
                 ] as const
               ).map(([side, label]) => {
                 const entries = value?.entries.filter((entry) => inSide(entry, side)) ?? [];
+                const chosen = entries.filter((entry) =>
+                  selected.some((item) => item.path === entry.path && item.side === side),
+                );
                 if (side === "conflict" && !entries.length) return null;
                 return (
                   <div key={side}>
                     <div className="flex items-center gap-2 bg-muted/65 px-3 py-2 text-xs">
                       <ChevronDown size={13} />
                       {label}
-                      <span className="ml-auto">{entries.length}</span>
+                      <span className="ml-auto">
+                        {side === "staged" ? (value?.stagedCount ?? 0) : entries.length}
+                      </span>
+                      {!!chosen.length && (
+                        <>
+                          <IconButton
+                            label={side === "staged" ? "取消暂存所选文件" : "暂存所选文件"}
+                            disabled={
+                              disabled ||
+                              (side !== "staged" && chosen.some((entry) => !stageable(entry)))
+                            }
+                            onClick={() =>
+                              indexAction(
+                                chosen.flatMap((entry) =>
+                                  side === "staged" && entry.oldPath
+                                    ? [entry.path, entry.oldPath]
+                                    : [entry.path],
+                                ),
+                                side === "staged" ? "unstage" : "stage",
+                              )
+                            }
+                          >
+                            {side === "staged" ? <Minus /> : <Plus />}
+                          </IconButton>
+                          <IconButton
+                            label={
+                              side !== "worktree"
+                                ? "丢弃所选文件全部更改"
+                                : "丢弃所选文件未暂存更改"
+                            }
+                            disabled={disabled || chosen.some((entry) => !discardable(entry))}
+                            onClick={() =>
+                              setDiscarding({
+                                paths: chosen.map((entry) => entry.path),
+                                scope: side !== "worktree" ? "all" : "worktree",
+                              })
+                            }
+                          >
+                            <Undo2 />
+                          </IconButton>
+                        </>
+                      )}
                     </div>
                     {entries.map((entry) => (
                       <div
@@ -345,11 +478,13 @@ function Changes({
                         <button
                           title={entry.path}
                           onClick={() =>
-                            setTarget({
-                              path: entry.path,
-                              oldPath: entry.oldPath,
-                              side: side === "staged" ? "staged" : "worktree",
-                            })
+                            side === "conflict"
+                              ? onFile(entry.path)
+                              : setTarget({
+                                  path: entry.path,
+                                  oldPath: entry.oldPath,
+                                  side: side === "staged" ? "staged" : "worktree",
+                                })
                           }
                           className="min-h-11 min-w-0 flex-1 py-2 text-left text-xs"
                         >
@@ -370,6 +505,14 @@ function Changes({
                             </span>
                           )}
                         </button>
+                        <RowActions
+                          entry={entry}
+                          side={side}
+                          disabled={disabled}
+                          onIndex={indexAction}
+                          onDiscard={(paths, scope) => setDiscarding({ paths, scope })}
+                          onFile={() => onFile(entry.path)}
+                        />
                       </div>
                     ))}
                     {!entries.length && (
@@ -401,6 +544,13 @@ function Changes({
                 <ChevronRight />
               </IconButton>
             </div>
+            <CommitBox
+              target={actionTarget}
+              actions={actions}
+              status={value}
+              disabled={disabled}
+              mobile={mobile}
+            />
           </aside>
         )}
         {target ? (
@@ -421,6 +571,23 @@ function Changes({
           )
         )}
       </div>
+      {discarding && (
+        <DiscardDialog
+          target={actionTarget}
+          {...discarding}
+          actions={actions}
+          onLocate={onLocate}
+          onClose={() => setDiscarding(undefined)}
+        />
+      )}
+      {branchStart && (
+        <BranchDialog
+          target={actionTarget}
+          actions={actions}
+          startOid={branchStart}
+          onClose={() => setBranchStart(undefined)}
+        />
+      )}
     </>
   );
 }
