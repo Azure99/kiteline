@@ -1,0 +1,14 @@
+packages:
+  - server
+  - agent
+  - terminal-recorder
+  - web
+  - shared
+
+minimumReleaseAgeExclude:
+  - lucide-react@1.47.0
+
+onlyBuiltDependencies:
+  - esbuild
+
+storeDir: /var/tmp/kiteline-pnpm-store

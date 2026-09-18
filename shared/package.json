@@ -1,0 +1,17 @@
+{
+  "name": "@kiteline/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./protocol": "./dist/protocol/index.js",
+    "./ipc": "./dist/protocol/ipc.js",
+    "./stdio": "./dist/protocol/stdio.js",
+    "./ws": "./dist/protocol/ws.js",
+    "./terminal": "./dist/terminal/index.js",
+    "./terminal/node": "./dist/terminal/native.js"
+  },
+  "dependencies": {
+    "ws": "8.18.3"
+  }
+}

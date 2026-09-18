@@ -1,0 +1,372 @@
+import { randomUUID } from "node:crypto";
+import { access, mkdir, rm } from "node:fs/promises";
+import { constants } from "node:fs";
+import { dirname, join } from "node:path";
+import {
+  AppError,
+  OperationError,
+  limits,
+  terminalProfile,
+  type Session,
+} from "@kiteline/shared/protocol";
+import type { RecorderMessage, TerminalIdentity } from "@kiteline/shared/ipc";
+import { tmux } from "@kiteline/shared/terminal/node";
+import type { AgentConfig } from "../config.js";
+import type { MetadataStore } from "../metadata.js";
+import { Recorder } from "./recorder.js";
+
+interface Managed {
+  session: Session;
+  identity: Partial<TerminalIdentity> & Pick<TerminalIdentity, "socket" | "tmuxSession">;
+  creation?: Promise<Session>;
+  creationMayArrive?: boolean;
+  cleanup?: Promise<void>;
+  recovery?: Promise<void>;
+  ending?: boolean;
+}
+function waitFor<T>(operation: Promise<T>, signal: AbortSignal) {
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    signal.addEventListener("abort", abort, { once: true });
+    operation.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
+}
+
+export class Sessions {
+  readonly recorder: Recorder;
+  private records = new Map<string, Managed>();
+  private jobs = new Set<Promise<unknown>>();
+  private closing = false;
+  private checking = false;
+  private lifeTimer: NodeJS.Timeout;
+  onChanged?: (workspaceId: string) => void;
+  onFrame?: (message: RecorderMessage) => void;
+  constructor(
+    private config: AgentConfig,
+    private metadata: MetadataStore,
+  ) {
+    this.recorder = new Recorder(config.limits);
+    this.recorder.onMessage = (message) => this.message(message);
+    this.recorder.onExit = (reason) => {
+      for (const item of this.records.values()) {
+        item.creationMayArrive = false;
+        this.unavailable(item, reason);
+        this.onFrame?.({
+          type: "fault",
+          sessionId: item.session.id,
+          error: { code: "recording_unavailable", message: reason },
+        });
+      }
+    };
+    this.lifeTimer = setInterval(() => {
+      void this.track(this.checkUnavailable()).catch(console.error);
+    }, 2000);
+    this.lifeTimer.unref();
+  }
+  list(workspaceId?: string) {
+    return {
+      sessions: [...this.records.values()]
+        .map((item) => item.session)
+        .filter((session) => !workspaceId || session.workspaceId === workspaceId),
+    };
+  }
+  get(id: string, workspaceId?: string) {
+    const item = this.records.get(id);
+    if (!item || (workspaceId && item.session.workspaceId !== workspaceId))
+      throw new AppError("not_found", "终端会话不存在");
+    return item;
+  }
+  private track<T>(promise: Promise<T>) {
+    this.jobs.add(promise);
+    void promise.finally(() => this.jobs.delete(promise)).catch(() => {});
+    return promise;
+  }
+  async create(
+    workspaceId: string,
+    name: string | undefined,
+    shortcutId: string | undefined,
+    signal: AbortSignal,
+  ) {
+    if (this.closing) throw new AppError("cancelled", "agent 正在停止");
+    await access(this.config.shell, constants.X_OK);
+    const id = randomUUID();
+    const socket = join(this.config.runDir, id, "tmux.sock");
+    if (Buffer.byteLength(socket) > 103)
+      throw new AppError(
+        "invalid_argument",
+        "运行目录路径过长，请使用较短的 KITELINE_AGENT_RUN_DIR",
+      );
+    const { item, workspace, shortcut } = await this.metadata.withCurrent((metadata) => {
+      signal.throwIfAborted();
+      if (this.closing) throw new AppError("cancelled", "agent 正在停止");
+      if (this.records.size >= this.config.limits.terminalSessionsPerDevice)
+        throw new AppError("busy", "设备终端会话已满");
+      const workspace = this.metadata.workspace(workspaceId);
+      const shortcut = shortcutId
+        ? metadata.shortcuts.find((item) => item.id === shortcutId)
+        : undefined;
+      if (shortcutId && !shortcut) throw new AppError("not_found", "快捷方式不存在");
+      const item: Managed = {
+        session: {
+          id,
+          workspaceId,
+          name: name ?? shortcut?.name ?? "Shell",
+          createdAt: new Date().toISOString(),
+          historyLines: metadata.settings.historyLines,
+          state: "starting",
+          terminalProfile,
+          webStatus: "unavailable",
+          historyGap: false,
+        },
+        identity: { socket, tmuxSession: "kiteline" },
+      };
+      // Reserve before creation, in the same boundary as workspace removal.
+      this.records.set(id, item);
+      return { item, workspace, shortcut };
+    });
+    this.onChanged?.(workspaceId);
+    const operation = this.track(
+      (async () => {
+        try {
+          await mkdir(dirname(socket), { recursive: true, mode: 0o700 });
+          item.creationMayArrive = true;
+          const identity = await this.recorder.request<TerminalIdentity>({
+            type: "create",
+            sessionId: id,
+            socket,
+            tmuxSession: "kiteline",
+            workspacePath: workspace.path,
+            shell: this.config.shell,
+            command: shortcut?.command,
+            cols: limits.terminalInitialCols,
+            rows: limits.terminalInitialRows,
+            historyLines: item.session.historyLines,
+          });
+          item.creationMayArrive = false;
+          if (!this.records.has(id) || item.cleanup)
+            throw new OperationError("io_error", "终端已结束", "unknown", { sessionId: id });
+          item.identity = identity;
+          item.session.state = "running";
+          item.session.webStatus = "available";
+          this.onChanged?.(workspaceId);
+          return { ...item.session };
+        } catch (error) {
+          if (!(error instanceof OperationError)) item.creationMayArrive = false;
+          if (!this.records.has(id))
+            throw new OperationError("io_error", "终端已创建后结束，请查看会话列表", "unknown", {
+              sessionId: id,
+            });
+          const state = await this.inspect(item).catch(() => undefined);
+          if (state?.alive) {
+            item.session.state = "running";
+            this.unavailable(item, error instanceof Error ? error.message : String(error));
+            return { ...item.session };
+          }
+          if (state && !state.alive && !item.creationMayArrive) {
+            await this.remove(item);
+            throw error;
+          }
+          throw new OperationError("io_error", "未能确认终端创建结果，请查询会话列表", "unknown", {
+            sessionId: id,
+          });
+        }
+      })(),
+    );
+    item.creation = operation;
+    void operation
+      .finally(() => {
+        item.creation = undefined;
+      })
+      .catch(() => {});
+    try {
+      return await waitFor(operation, signal);
+    } catch (error) {
+      if (signal.aborted)
+        throw new OperationError("cancelled", "终端创建确认已中断", "unknown", { sessionId: id });
+      throw error;
+    }
+  }
+  rename(workspaceId: string, id: string, name: string) {
+    const item = this.get(id, workspaceId);
+    item.session.name = name;
+    this.onChanged?.(workspaceId);
+    return item.session;
+  }
+  async end(workspaceId: string | undefined, id: string) {
+    const item = this.get(id, workspaceId);
+    item.ending = true;
+    try {
+      await item.creation?.catch(() => {});
+      await item.recovery;
+      if (this.recorder.available) {
+        try {
+          await this.recorder.request({ type: "end", sessionId: id });
+        } catch (error) {
+          if (!(error instanceof AppError) || error.code !== "recording_unavailable") throw error;
+        }
+      }
+      await this.remove(item);
+      return { ended: true };
+    } finally {
+      item.ending = false;
+    }
+  }
+  recover(workspaceId: string, id: string) {
+    const item = this.get(id, workspaceId);
+    if (this.closing || item.ending) throw new AppError("cancelled", "终端正在结束");
+    if (item.creation || item.session.state !== "running")
+      throw new AppError("busy", "终端仍在创建");
+    if (item.session.webStatus === "available" || item.recovery) return { ...item.session };
+    item.session.webStatus = "recovering";
+    delete item.session.webReason;
+    this.onChanged?.(workspaceId);
+    item.recovery = this.track(
+      (async () => {
+        try {
+          const state = await this.inspect(item);
+          if (!state.alive) {
+            await this.remove(item);
+            return;
+          }
+          await this.recorder.request({
+            type: "recover",
+            sessionId: id,
+            ...(item.identity as TerminalIdentity),
+            cols: state.cols!,
+            rows: state.rows!,
+            historyLines: item.session.historyLines,
+          });
+          if (this.records.get(id) === item && !item.cleanup && !item.ending) {
+            item.session.webStatus = "available";
+            delete item.session.webReason;
+            this.onChanged?.(workspaceId);
+          }
+        } catch (error) {
+          if (this.records.get(id) === item && !item.cleanup)
+            this.unavailable(item, error instanceof Error ? error.message : String(error));
+        } finally {
+          item.recovery = undefined;
+        }
+      })(),
+    );
+    return { ...item.session };
+  }
+  async redraw(workspaceId: string, id: string) {
+    const item = this.get(id, workspaceId);
+    if (item.session.webStatus !== "available" || item.ending)
+      throw new AppError("recording_unavailable", "请先恢复终端记录");
+    await this.recorder.request({ type: "redraw", sessionId: id });
+    return { ...item.session };
+  }
+  private unavailable(item: Managed, reason: string) {
+    item.session.webStatus = "unavailable";
+    item.session.historyGap = true;
+    item.session.webReason = reason;
+    this.onChanged?.(item.session.workspaceId);
+  }
+  private message(message: RecorderMessage) {
+    if (message.type === "fault") {
+      const item = this.records.get(message.sessionId);
+      if (item) this.unavailable(item, message.error.message);
+    } else if (message.type === "ended") {
+      const item = this.records.get(message.sessionId);
+      if (item) void this.track(this.remove(item)).catch((error: unknown) => console.error(error));
+    }
+    this.onFrame?.(message);
+  }
+  private async inspect(item: Managed) {
+    try {
+      const output = await tmux(
+        item.identity.socket,
+        [
+          "list-panes",
+          "-a",
+          "-F",
+          "#{pane_id} #{window_id} #{pane_dead} #{pane_dead_status}|#{pane_width} #{pane_height}",
+        ],
+        undefined,
+        AbortSignal.timeout(this.config.limits.rpcTimeout),
+      );
+      const result = /^(%\d+) (@\d+) ([01]) (\d*)\|(\d+) (\d+)\s*$/.exec(output);
+      if (!result) throw new Error("无法确认受管终端身份");
+      item.creationMayArrive = false;
+      item.identity.paneId = result[1];
+      item.identity.windowId = result[2];
+      return {
+        alive: result[3] === "0",
+        exitCode: result[4] ? Number(result[4]) : null,
+        cols: Number(result[5]),
+        rows: Number(result[6]),
+      };
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        /no server running|No such file or directory|Connection refused/.test(error.message)
+      )
+        return { alive: false, exitCode: null, cols: undefined, rows: undefined };
+      throw error;
+    }
+  }
+  private async checkUnavailable() {
+    if (this.closing || this.checking) return;
+    this.checking = true;
+    try {
+      for (const item of this.records.values()) {
+        if (
+          item.session.webStatus !== "unavailable" ||
+          item.creation ||
+          item.cleanup ||
+          item.recovery ||
+          item.ending
+        )
+          continue;
+        const state = await this.inspect(item).catch(() => undefined);
+        if (state?.alive && item.session.state === "starting") {
+          item.session.state = "running";
+          this.onChanged?.(item.session.workspaceId);
+        } else if (state && !state.alive && !item.creationMayArrive) await this.remove(item);
+      }
+    } finally {
+      this.checking = false;
+    }
+  }
+  private remove(item: Managed): Promise<void> {
+    if (item.cleanup) return item.cleanup;
+    if (this.records.get(item.session.id) !== item) return Promise.resolve();
+    item.cleanup = (async () => {
+      try {
+        await tmux(
+          item.identity.socket,
+          ["kill-server"],
+          undefined,
+          AbortSignal.timeout(this.config.limits.rpcTimeout),
+        );
+      } catch (error) {
+        if ((await this.inspect(item)).alive) throw error;
+      }
+      this.records.delete(item.session.id);
+      this.onChanged?.(item.session.workspaceId);
+      await rm(dirname(item.identity.socket), { recursive: true, force: true });
+    })().finally(() => {
+      item.cleanup = undefined;
+    });
+    return item.cleanup;
+  }
+  async close() {
+    this.closing = true;
+    clearInterval(this.lifeTimer);
+    await Promise.allSettled([...this.jobs]);
+    await this.recorder.close();
+    const results = await Promise.allSettled(
+      [...this.records.values()].map((item) => this.remove(item)),
+    );
+    const errors = results
+      .filter((result) => result.status === "rejected")
+      .map((result) => result.reason as unknown);
+    if (errors.length) throw new AggregateError(errors, "部分终端未能结束");
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "@kiteline/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@kiteline/shared": "workspace:*",
+    "bcryptjs": "3.0.3",
+    "proper-lockfile": "4.1.2",
+    "ws": "8.18.3"
+  }
+}

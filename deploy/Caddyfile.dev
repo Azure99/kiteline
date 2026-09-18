@@ -1,0 +1,16 @@
+{
+	admin off
+	auto_https disable_redirects
+}
+
+https://localhost:8443 {
+	tls internal
+	@server path /api/* /healthz /proxy/* /absproxy/*
+	reverse_proxy @server 127.0.0.1:8080 {
+		flush_interval 100ms
+		transport http {
+			keepalive off
+		}
+	}
+	reverse_proxy 127.0.0.1:5173
+}

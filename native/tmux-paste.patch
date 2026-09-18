@@ -1,0 +1,20 @@
+--- a/cmd-paste-buffer.c
++++ b/cmd-paste-buffer.c
+@@ -83,7 +83,7 @@
+ 		}
+ 		seplen = strlen(sepstr);
+ 
+-		if (bracket && (wp->screen->mode & MODE_BRACKETPASTE))
++		if (bracket && (wp->base.mode & MODE_BRACKETPASTE))
+ 			bufferevent_write(wp->event, "\033[200~", 6);
+ 
+ 		bufdata = paste_buffer_data(pb, &bufsize);
+@@ -102,7 +102,7 @@
+ 		if (bufdata != bufend)
+ 			bufferevent_write(wp->event, bufdata, bufend - bufdata);
+ 
+-		if (bracket && (wp->screen->mode & MODE_BRACKETPASTE))
++		if (bracket && (wp->base.mode & MODE_BRACKETPASTE))
+ 			bufferevent_write(wp->event, "\033[201~", 6);
+ 	}
+ 
