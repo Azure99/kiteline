@@ -9,6 +9,7 @@ import {
   record,
   string,
   type Reply,
+  type FileProgress,
 } from "@kiteline/shared/protocol";
 import type { AgentConfig, Identity } from "./config.js";
 import { MetadataStore } from "./metadata.js";
@@ -16,13 +17,23 @@ import { Directories } from "./directories.js";
 import { Sessions } from "./terminals/sessions.js";
 import { LocalServer } from "./local.js";
 import { TerminalChannels } from "./terminals/channels.js";
+import { Files } from "./files/index.js";
+import { TextFiles } from "./files/text.js";
+import { FileChannels } from "./files/channels.js";
+import { BinaryFiles } from "./files/binary.js";
+import { searchFiles } from "./files/search.js";
+import { FileOperations } from "./files/operations.js";
 
 export class Agent {
   readonly metadata: MetadataStore;
   readonly directories = new Directories();
   readonly sessions: Sessions;
+  readonly files: Files;
+  readonly textFiles: TextFiles;
+  readonly fileOperations: FileOperations;
   private readonly local: LocalServer;
   private readonly channels: TerminalChannels;
+  private readonly fileChannels: FileChannels;
   readonly requests = new Map<string, AbortController>();
   readonly watched = new Set<string>();
   private readonly tasks = new Set<Promise<unknown>>();
@@ -36,9 +47,24 @@ export class Agent {
     readonly identity: Identity,
   ) {
     this.metadata = new MetadataStore(config);
+    this.files = new Files(this.metadata, this.directories);
     this.metadata.onChange = (snapshot) => this.send({ type: "metadata.snapshot", snapshot });
     this.sessions = new Sessions(config, this.metadata);
-    this.channels = new TerminalChannels(this.sessions, config, identity);
+    this.textFiles = new TextFiles(config, this.metadata);
+    this.fileOperations = new FileOperations(this.metadata, this.textFiles.temporary);
+    this.channels = new TerminalChannels(
+      this.sessions,
+      config,
+      identity,
+      () => this.fileChannels.count,
+    );
+    this.fileChannels = new FileChannels(
+      this.textFiles,
+      new BinaryFiles(config, this.metadata, this.textFiles.temporary),
+      config,
+      identity,
+      () => this.channels.count,
+    );
     this.sessions.onChanged = (workspaceId) => this.send({ type: "sessions.changed", workspaceId });
     this.local = new LocalServer(config, (method, params, signal) => {
       if (method === "workspaces.list")
@@ -55,6 +81,7 @@ export class Agent {
   }
   async start() {
     await this.metadata.load();
+    await this.textFiles.temporary.cleanStartup();
     await this.local.start();
     this.connect();
   }
@@ -99,15 +126,17 @@ export class Agent {
         } else if (message.type === "channel.open") {
           if (message.connectionId !== this.connectionId)
             throw new AppError("conflict", "旧控制连接");
-          this.channels.open(
+          const channels = message.kind === "terminal.attach" ? this.channels : this.fileChannels;
+          channels.open(
             string(message.channelId),
             string(message.connectionId),
             string(message.kind),
             record(message.params),
           );
-        } else if (message.type === "channel.cancel")
+        } else if (message.type === "channel.cancel") {
           this.channels.cancel(string(message.channelId));
-        else if (message.type === "rpc.request") {
+          this.fileChannels.cancel(string(message.channelId));
+        } else if (message.type === "rpc.request") {
           const id = string(message.id, "request id", 128);
           if (this.requests.has(id)) throw new AppError("conflict", "Duplicate request");
           const controller = new AbortController();
@@ -116,9 +145,15 @@ export class Agent {
           this.requests.set(id, controller);
           const timeout = setTimeout(
             () => controller.abort(new AppError("timeout", "操作超时")),
-            this.config.limits.rpcTimeout,
+            ["files.copy", "files.move", "files.delete"].includes(method)
+              ? this.config.limits.fileOperationTimeout
+              : method === "files.search"
+                ? this.config.limits.searchTimeout
+                : this.config.limits.rpcTimeout,
           );
-          void this.dispatch(method, params, controller.signal)
+          void this.dispatch(method, params, controller.signal, (progress) => {
+            if (this.socket === socket) this.send({ type: "request.progress", id, ...progress });
+          })
             .then(
               (result) => ({ id, outcome: "succeeded", result }) as Reply,
               (error: unknown) => errorReply(id, error),
@@ -168,6 +203,7 @@ export class Agent {
         controller.abort(new AppError("cancelled", "控制连接中断"));
       this.watched.clear();
       this.channels.close();
+      void this.fileChannels.close();
       void this.directories.close();
       if (this.stopped) return;
       if (code === 4001 || code === 4003) {
@@ -178,8 +214,13 @@ export class Agent {
       this.delay = Math.min(30_000, this.delay * 2);
     });
   }
-  dispatch(method: string, params: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
-    const operation = this.perform(method, params, signal);
+  dispatch(
+    method: string,
+    params: Record<string, unknown>,
+    signal: AbortSignal,
+    progress?: (value: FileProgress) => void,
+  ): Promise<unknown> {
+    const operation = this.perform(method, params, signal, progress);
     this.tasks.add(operation);
     void operation.finally(() => this.tasks.delete(operation)).catch(() => {});
     return operation;
@@ -188,10 +229,63 @@ export class Agent {
     method: string,
     params: Record<string, unknown>,
     signal: AbortSignal,
+    progress?: (value: FileProgress) => void,
   ): Promise<unknown> {
     if (this.stopped) throw new AppError("cancelled", "agent 正在停止");
     signal.throwIfAborted();
     switch (method) {
+      case "files.search": {
+        if (
+          (params.mode !== "name" && params.mode !== "content") ||
+          typeof params.includeIgnored !== "boolean"
+        )
+          throw new AppError("invalid_argument", "无效搜索参数");
+        return searchFiles(
+          this.metadata.workspace(string(params.workspaceId)).path,
+          params.mode,
+          string(params.query, "query"),
+          params.includeIgnored,
+          signal,
+        );
+      }
+      case "files.copy":
+      case "files.move":
+      case "files.delete":
+        return this.fileOperations.run(
+          method.slice(6) as "copy" | "move" | "delete",
+          string(params.workspaceId),
+          method === "files.delete" ? params.paths : params.items,
+          signal,
+          progress,
+        );
+      case "files.list":
+        return this.files.list(
+          string(params.workspaceId),
+          string(params.path),
+          params.cursor === undefined ? undefined : string(params.cursor),
+          signal,
+        );
+      case "files.inspect":
+        return this.files.inspect(
+          string(params.workspaceId),
+          string(params.path),
+          params.suggestCopyName === true,
+          signal,
+        );
+      case "files.create":
+        return this.files.create(
+          string(params.workspaceId),
+          string(params.path),
+          string(params.kind),
+          signal,
+        );
+      case "files.rename":
+        return this.files.rename(
+          string(params.workspaceId),
+          string(params.path),
+          string(params.newName),
+          signal,
+        );
       case "directories.list":
         return this.directories.list(
           string(params.absolutePath),
@@ -291,6 +385,7 @@ export class Agent {
     clearTimeout(this.reconnect);
     this.socket?.terminate();
     this.channels.close();
+    await this.fileChannels.close();
     for (const controller of this.requests.values())
       controller.abort(new AppError("cancelled", "agent 正在停止"));
     await this.local.close();

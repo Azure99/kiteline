@@ -12,6 +12,13 @@ export interface AgentConfig {
 }
 export const defaultAgentLimits = {
   editorBytes: 2 * 1024 * 1024,
+  transferBytes: 1024 * 1024 * 1024,
+  imageBytes: 20 * 1024 * 1024,
+  imagePixels: 20_000_000,
+  transfersPerDevice: 4,
+  fileOperationTimeout: 30 * 60_000,
+  searchTimeout: 10_000,
+  channelIdleTimeout: 120_000,
   rpcTimeout: 30_000,
   channelPairTimeout: 30_000,
   terminalInputBytes: 256 * 1024,

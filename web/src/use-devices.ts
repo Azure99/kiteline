@@ -3,7 +3,12 @@ import type { Device } from "@kiteline/shared/protocol";
 import { api, errorMessage } from "./lib/api";
 import type { Session } from "./auth";
 
-export function useDevices(active: boolean, deviceId?: string, workspaceId?: string) {
+export function useDevices(
+  active: boolean,
+  deviceId?: string,
+  workspaceId?: string,
+  onSession?: (session: Session) => void,
+) {
   const [devices, setDevices] = useState<Device[]>([]);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState("");
@@ -26,8 +31,9 @@ export function useDevices(active: boolean, deviceId?: string, workspaceId?: str
     let socket: WebSocket | undefined;
     async function connect() {
       try {
-        await api<Session>("/api/session");
+        const session = await api<Session>("/api/session");
         if (stopped) return;
+        onSession?.(session);
         await refresh();
         if (stopped) return;
         const url = new URL("/api/events", location.origin);
@@ -64,6 +70,6 @@ export function useDevices(active: boolean, deviceId?: string, workspaceId?: str
       socketRef.current = null;
       setConnected(false);
     };
-  }, [active, refresh]);
+  }, [active, refresh, onSession]);
   return { devices, connected, error, refresh };
 }

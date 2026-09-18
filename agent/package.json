@@ -5,7 +5,9 @@
   "type": "module",
   "dependencies": {
     "@kiteline/shared": "workspace:*",
+    "image-size": "2.0.4",
     "proper-lockfile": "4.1.2",
+    "stream-json": "3.6.0",
     "ws": "8.18.3"
   }
 }

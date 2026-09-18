@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   ChevronRight,
   Folder,
@@ -9,8 +9,9 @@ import {
   Server,
   Terminal,
   X,
+  Upload,
 } from "lucide-react";
-import type { Device } from "@kiteline/shared/protocol";
+import type { KitelineError, Device } from "@kiteline/shared/protocol";
 import { Auth, type Session } from "./auth";
 import { ApiError, api, errorMessage, post } from "./lib/api";
 import { devicePath, navigate, useRoute, workspacePath } from "./lib/navigation";
@@ -34,9 +35,15 @@ import { DeviceNavigation } from "./devices/device-navigation";
 import { DeviceList, DeviceDetail, statusNames } from "./devices/device-views";
 import { WorkspaceTerminal } from "./terminal/sessions";
 import type { TerminalLayout } from "./terminal/groups";
+import { Files } from "./files/files";
+import { DraftStore, isDirty } from "./files/drafts";
+import { DraftView } from "./files/draft-view";
+import { OpenFiles } from "./files/open-files";
+import { UploadDialog } from "./files/upload-dialog";
 
 export function App() {
   const terminalLayouts = useRef(new Map<string, TerminalLayout>());
+  const [drafts] = useState(() => new DraftStore());
   const route = useRoute();
   const [session, setSession] = useState<Session>();
   const [initialized, setInitialized] = useState(true);
@@ -47,14 +54,72 @@ export function App() {
   const [picker, setPicker] = useState(false);
   const [directoryDevice, setDirectoryDevice] = useState<Device>();
   const [action, setAction] = useState<DeviceAction>();
+  const [uploads, setUploads] = useState<
+    {
+      id: string;
+      deviceId: string;
+      workspaceId: string;
+      folder: string;
+      files: File[];
+      label: string;
+    }[]
+  >([]);
+  const [activeUpload, setActiveUpload] = useState<string>();
   const {
     devices,
     connected,
     error: connectionError,
     refresh,
-  } = useDevices(!!session, route.deviceId, route.workspaceId);
+  } = useDevices(!!session, route.deviceId, route.workspaceId, setSession);
   const device = devices.find((d) => d.id === route.deviceId);
   const workspace = device?.snapshot?.workspaces.find((w) => w.id === route.workspaceId);
+  const orphan =
+    route.tool === "files" &&
+    route.deviceId &&
+    route.workspaceId &&
+    (!device || !workspace || device.status === "revoked")
+      ? drafts.find(
+          {
+            deviceId: route.deviceId,
+            workspaceId: route.workspaceId,
+            path: route.query.get("file") ?? "",
+          },
+          route.query.get("draft") ?? undefined,
+        )
+      : undefined;
+  useLayoutEffect(() => {
+    if (session) drafts.limits(devices, session.draftTotalBytes);
+  }, [drafts, devices, session]);
+  useEffect(() => {
+    const unload = (event: BeforeUnloadEvent) => {
+      if (drafts.snapshot().some(isDirty)) {
+        event.preventDefault();
+        event.returnValue = "";
+      }
+    };
+    const failed = (event: Event) => {
+      const message = (
+        event as CustomEvent<{
+          type: string;
+          channelId: string;
+          error: KitelineError;
+          purpose?: string;
+          path?: string;
+        }>
+      ).detail;
+      if (message.type === "channel.failed") {
+        drafts.fileFailed(message.channelId, message.error);
+        if (message.purpose === "download" && message.error.code !== "cancelled")
+          setError(`下载 ${message.path}：${message.error.message}`);
+      }
+    };
+    window.addEventListener("beforeunload", unload);
+    window.addEventListener("kiteline:event", failed);
+    return () => {
+      window.removeEventListener("beforeunload", unload);
+      window.removeEventListener("kiteline:event", failed);
+    };
+  }, [drafts]);
   useEffect(() => {
     const viewport = window.visualViewport;
     const resize = () =>
@@ -97,14 +162,20 @@ export function App() {
       setPicker(false);
       setDirectoryDevice(undefined);
       setAction(undefined);
+      setUploads([]);
+      setActiveUpload(undefined);
     };
     window.addEventListener("kiteline:unauthenticated", expire);
     return () => window.removeEventListener("kiteline:unauthenticated", expire);
   }, []);
   async function logout() {
+    if (drafts.snapshot().some(isDirty) && !window.confirm("放弃未保存修改并退出登录？")) return;
     try {
       await post("/api/logout");
       terminalLayouts.current.clear();
+      drafts.clear();
+      setUploads([]);
+      setActiveUpload(undefined);
       setSession(undefined);
     } catch (error) {
       setError(errorMessage(error));
@@ -207,6 +278,27 @@ export function App() {
             title={connected ? "已连接" : "连接中断"}
             aria-label={connected ? "已连接" : "连接中断"}
           />
+          <OpenFiles store={drafts} />
+          {!!uploads.length && (
+            <Menu>
+              <MenuTrigger
+                render={
+                  <Button variant="ghost" size="icon" aria-label={`上传状态 ${uploads.length}`} />
+                }
+              >
+                <Upload />
+              </MenuTrigger>
+              <MenuContent>
+                {uploads.map((item) => (
+                  <MenuItem key={item.id} onClick={() => setActiveUpload(item.id)}>
+                    <span className="min-w-0 break-all" title={item.label}>
+                      {item.label} · {item.files.length}
+                    </span>
+                  </MenuItem>
+                ))}
+              </MenuContent>
+            </Menu>
+          )}
           <Menu>
             <MenuTrigger render={<Button variant="ghost" size="icon" aria-label="拥有者菜单" />}>
               <MoreHorizontal />
@@ -246,6 +338,17 @@ export function App() {
               </div>
             ) : !route.deviceId ? (
               <DeviceList devices={devices} onNavigate={choose} onBind={() => setBinding(true)} />
+            ) : orphan ? (
+              <DraftView
+                key={orphan.id}
+                store={drafts}
+                draft={orphan}
+                unavailable={
+                  device?.status === "revoked"
+                    ? "设备已撤销；内容仅保留在当前页面"
+                    : "原 workspace 不可用；内容仅保留在当前页面"
+                }
+              />
             ) : !device ? (
               <p className="p-6 text-muted-foreground">
                 {connected ? "设备不存在" : "正在连接设备"}
@@ -288,7 +391,34 @@ export function App() {
                     visible={route.tool === "terminal"}
                     layouts={terminalLayouts.current}
                   >
-                    <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
+                    <Files
+                      device={device}
+                      workspace={workspace}
+                      visible={route.tool === "files"}
+                      store={drafts}
+                      onUpload={(files, folder) => {
+                        const id = crypto.randomUUID();
+                        setUploads((old) => [
+                          ...old,
+                          {
+                            id,
+                            deviceId: device.id,
+                            workspaceId: workspace.id,
+                            folder,
+                            files,
+                            label: `${device.name} / ${workspace.name} / ${folder}`,
+                          },
+                        ]);
+                        setActiveUpload(id);
+                      }}
+                    />
+                    <div
+                      className={
+                        route.tool === "git"
+                          ? "flex min-h-0 flex-1 items-center justify-center text-muted-foreground"
+                          : "hidden"
+                      }
+                    >
                       <span>
                         {device.status === "online" ? "暂无打开内容" : statusNames[device.status]}
                       </span>
@@ -318,6 +448,25 @@ export function App() {
           />
         )}
       </Dialog>
+      {uploads.map((item) => (
+        <UploadDialog
+          key={item.id}
+          {...item}
+          open={activeUpload === item.id}
+          onHide={() => setActiveUpload(undefined)}
+          onClose={() => {
+            setUploads((old) => old.filter((upload) => upload !== item));
+            setActiveUpload(undefined);
+          }}
+          onWritten={(path) =>
+            window.dispatchEvent(
+              new CustomEvent("kiteline:file-written", {
+                detail: { deviceId: item.deviceId, workspaceId: item.workspaceId, path },
+              }),
+            )
+          }
+        />
+      ))}
       <Dialog
         open={!!directoryDevice}
         onOpenChange={(open) => {

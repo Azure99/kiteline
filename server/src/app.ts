@@ -80,6 +80,9 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
         return json(response, 200, { devices: connections.devices() });
       const device = /^\/api\/devices\/([^/]+)(.*)$/.exec(path);
       const channel = /^\/api\/channels\/([^/]+)$/.exec(path);
+      const content = /^\/api\/channels\/([^/]+)\/content$/.exec(path);
+      if (content && (method === "GET" || method === "PUT"))
+        return channels.content(decodeURIComponent(content[1]!), session.id, request, response);
       if (channel && method === "DELETE")
         return json(response, 200, {
           found: channels.cancel(
@@ -91,6 +94,21 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       if (device) {
         const id = decodeURIComponent(device[1]!);
         const suffix = device[2];
+        if (suffix === "/download" && method === "GET") {
+          const pending = channels.create(
+            id,
+            session,
+            "file.read",
+            {
+              workspaceId: string(url.searchParams.get("workspaceId")),
+              path: string(url.searchParams.get("path")),
+              purpose: "download",
+            },
+            { request, response },
+          );
+          await pending.ready;
+          return;
+        }
         if (suffix === "/channels" && method === "POST") {
           const input = record(await body(request));
           login(request);

@@ -1,0 +1,187 @@
+import { afterEach, expect, test } from "vitest";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import {
+  mkdtemp,
+  mkdir,
+  writeFile,
+  readFile,
+  readlink,
+  lstat,
+  rm,
+  symlink,
+  chmod,
+  stat,
+  link,
+} from "node:fs/promises";
+import { join } from "node:path";
+import { OperationError } from "@kiteline/shared/protocol";
+import { FileOperations } from "../src/files/operations.js";
+import { TemporaryFiles } from "../src/files/temporary.js";
+import { Files } from "../src/files/index.js";
+import { MetadataStore } from "../src/metadata.js";
+import { Directories } from "../src/directories.js";
+import { defaultAgentLimits } from "../src/config.js";
+
+const exec = promisify(execFile);
+const cleanups: (() => Promise<unknown>)[] = [];
+afterEach(async () => {
+  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+});
+async function setup() {
+  const data = await mkdtemp("/var/tmp/kiteline-file-operations-");
+  cleanups.push(() => rm(data, { recursive: true, force: true }));
+  const root = join(data, "workspace");
+  await mkdir(root);
+  const metadata = new MetadataStore({
+    dataDir: data,
+    runDir: join(data, "run"),
+    shell: "/bin/sh",
+    limits: { ...defaultAgentLimits },
+  });
+  const workspace = await metadata.add(root);
+  const temporary = new TemporaryFiles(data);
+  const directories = new Directories();
+  cleanups.push(() => directories.close());
+  const operations = new FileOperations(metadata, temporary);
+  return {
+    root,
+    data,
+    temporary,
+    files: new Files(metadata, directories),
+    operations,
+    id: workspace.id,
+    run: (
+      kind: "copy" | "move" | "delete",
+      inputs: unknown,
+      signal = new AbortController().signal,
+    ) => operations.run(kind, workspace.id, inputs, signal),
+  };
+}
+const copy = (path: string, targetPath: string) => [{ path, targetPath, collision: "error" }];
+
+test("copy preserves regular permissions and links; explicit replacement changes the link entry only", async () => {
+  const { root, files, id, run } = await setup();
+  await mkdir(join(root, "source"));
+  await writeFile(join(root, "source/a"), Buffer.from([0, 1, 255, 10]));
+  await chmod(join(root, "source/a"), 0o640);
+  await symlink("a", join(root, "source/link"));
+  await symlink(Buffer.from([255]), join(root, "source/raw-link"));
+  await run("copy", copy("source", "target"));
+  expect(await readFile(join(root, "target/a"))).toEqual(Buffer.from([0, 1, 255, 10]));
+  expect((await stat(join(root, "target/a"))).mode & 0o777).toBe(0o640);
+  expect(await readlink(join(root, "target/link"))).toBe("a");
+  expect(await readlink(join(root, "target/raw-link"), { encoding: "buffer" })).toEqual(
+    Buffer.from([255]),
+  );
+  await writeFile(join(root, "shared"), "keep");
+  await symlink("shared", join(root, "config"));
+  const inspection = await files.inspect(id, "config");
+  await run("copy", [
+    {
+      path: "source/a",
+      targetPath: "config",
+      collision: "replace",
+      expectedTargetVersion: inspection.targetVersion,
+    },
+  ]);
+  expect((await lstat(join(root, "config"))).isFile()).toBe(true);
+  expect(await readFile(join(root, "shared"), "utf8")).toBe("keep");
+  await expect(run("copy", copy("source", "target"))).rejects.toMatchObject({
+    outcome: "failed",
+    code: "conflict",
+  });
+  await expect(run("copy", copy("source", "source/nested"))).rejects.toMatchObject({
+    outcome: "failed",
+    code: "invalid_argument",
+  });
+  await link(join(root, "shared"), join(root, "hard-link"));
+  await expect(
+    run("move", [
+      {
+        path: "shared",
+        targetPath: "hard-link",
+        collision: "replace",
+        expectedTargetVersion: (await files.inspect(id, "hard-link")).targetVersion,
+      },
+    ]),
+  ).rejects.toMatchObject({ outcome: "failed", code: "invalid_argument" });
+  expect(await readFile(join(root, "shared"), "utf8")).toBe("keep");
+});
+
+test("recursive failures retain successful siblings and deletion never follows a final symlink", async () => {
+  const { root, data, run } = await setup();
+  await mkdir(join(root, "source"));
+  await writeFile(join(root, "source/a"), "A");
+  await exec("mkfifo", [join(root, "source/pipe")]);
+  await expect(run("copy", copy("source", "target"))).rejects.toMatchObject({
+    outcome: "partial",
+    result: { items: [{ outcome: "partial" }] },
+  });
+  expect(await readFile(join(root, "target/a"), "utf8")).toBe("A");
+  await writeFile(join(data, "outside"), "keep");
+  await symlink(join(data, "outside"), join(root, "source/link"));
+  await expect(run("delete", ["source"])).rejects.toMatchObject({ outcome: "partial" });
+  expect(await readFile(join(data, "outside"), "utf8")).toBe("keep");
+  await expect(lstat(join(root, "source/a"))).rejects.toMatchObject({ code: "ENOENT" });
+  expect((await lstat(join(root, "source/pipe"))).isFIFO()).toBe(true);
+  await expect(run("delete", ["."])).rejects.toMatchObject({
+    outcome: "failed",
+    code: "invalid_argument",
+  });
+});
+
+test("cancellation preserves published directory and stops scheduling its children", async () => {
+  const { root, operations, id } = await setup();
+  await mkdir(join(root, "source"));
+  await writeFile(join(root, "source/a"), "A");
+  const controller = new AbortController();
+  await expect(
+    operations.run("copy", id, copy("source", "target"), controller.signal, (progress) => {
+      if (progress.completedItems) controller.abort(new Error("cancel"));
+    }),
+  ).rejects.toMatchObject({ outcome: "partial" });
+  expect((await lstat(join(root, "target"))).isDirectory()).toBe(true);
+  await expect(lstat(join(root, "target/a"))).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test("cross-filesystem move publishes before deleting only its copied source; bind deletion enters visible data", async (context) => {
+  const { root, data, run } = await setup();
+  const disk = join(root, "disk");
+  await mkdir(disk);
+  try {
+    await exec("mount", ["-t", "tmpfs", "-o", "size=1m", "tmpfs", disk]);
+  } catch (error) {
+    if (/permission denied|Operation not permitted/.test(String(error))) context.skip();
+    throw error;
+  }
+  cleanups.push(() => exec("umount", [disk]));
+  await writeFile(join(disk, "source"), "cross-device");
+  await run("move", copy("disk/source", "moved"));
+  expect(await readFile(join(root, "moved"), "utf8")).toBe("cross-device");
+  await expect(lstat(join(disk, "source"))).rejects.toMatchObject({ code: "ENOENT" });
+  await symlink(Buffer.from([255]), join(disk, "link"));
+  await run("move", copy("disk/link", "moved-link"));
+  expect(await readlink(join(root, "moved-link"), { encoding: "buffer" })).toEqual(
+    Buffer.from([255]),
+  );
+  const outside = join(data, "outside");
+  await mkdir(outside);
+  await writeFile(join(outside, "shared"), "delete");
+  const project = join(root, "project");
+  await mkdir(project);
+  const mounted = join(project, "data");
+  await mkdir(mounted);
+  await exec("mount", ["--bind", outside, mounted]);
+  cleanups.push(() => exec("umount", [mounted]));
+  let result: unknown;
+  try {
+    await run("delete", ["project"]);
+  } catch (error) {
+    result = error;
+  }
+  expect(result).toBeInstanceOf(OperationError);
+  expect(result).toMatchObject({ outcome: "partial" });
+  await expect(lstat(join(outside, "shared"))).rejects.toMatchObject({ code: "ENOENT" });
+  expect((await stat(mounted)).isDirectory()).toBe(true);
+});

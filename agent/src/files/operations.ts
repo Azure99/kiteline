@@ -1,0 +1,429 @@
+import { isUtf8 } from "node:buffer";
+import { constants, type BigIntStats } from "node:fs";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  open,
+  opendir,
+  readlink,
+  rename,
+  rmdir,
+  stat,
+  unlink,
+} from "node:fs/promises";
+import { dirname, join } from "node:path";
+import {
+  AppError,
+  OperationError,
+  asError,
+  limits,
+  record,
+  type CopyItem,
+  type KitelineError,
+  type FileItemResult,
+  type FileProgress,
+  type PathError,
+} from "@kiteline/shared/protocol";
+import type { MetadataStore } from "../metadata.js";
+import { publish } from "../mutations.js";
+import { locate, protectRoot, relativePath, sameObject } from "./paths.js";
+import { checkTarget, targetAgain } from "./destination.js";
+import { renameNoReplace } from "./rename.js";
+import { TemporaryFiles, type TrackedTemporary } from "./temporary.js";
+
+interface ObjectRef {
+  path: string;
+  location: Awaited<ReturnType<typeof locate>>;
+  info: BigIntStats;
+}
+interface ResultState {
+  completed: number;
+  failed: number;
+  failures: PathError[];
+  detailBytes: number;
+  budget: number;
+  truncated: boolean;
+  unknown: boolean;
+  error?: KitelineError;
+}
+
+export class FileOperations {
+  constructor(
+    private metadata: MetadataStore,
+    private temporary: TemporaryFiles,
+  ) {}
+
+  async run(
+    kind: "copy" | "move" | "delete",
+    workspaceId: string,
+    inputs: unknown,
+    signal: AbortSignal,
+    progress?: (value: FileProgress) => void,
+  ) {
+    if (!Array.isArray(inputs) || !inputs.length || inputs.length > limits.listPageEntries)
+      throw new AppError("invalid_argument", "请选择有限数量的文件");
+    const items: CopyItem[] = inputs.map((input: unknown) => {
+      if (kind === "delete")
+        return { path: relativePath(input), targetPath: "", collision: "error" };
+      const item = record(input);
+      if (item.collision !== "error" && item.collision !== "replace")
+        throw new AppError("invalid_argument", "无效同名处理方式");
+      if (
+        item.collision === "replace"
+          ? typeof item.expectedTargetVersion !== "string"
+          : item.expectedTargetVersion !== undefined
+      )
+        throw new AppError("invalid_argument", "替换需要确认的目标版本");
+      return {
+        path: relativePath(item.path),
+        targetPath: relativePath(item.targetPath),
+        collision: item.collision,
+        expectedTargetVersion: item.expectedTargetVersion as string | undefined,
+      };
+    });
+    if (Buffer.byteLength(JSON.stringify(items)) > limits.resultBytes / 2)
+      throw new AppError("limit_exceeded", "所选路径超过操作容量，请分批处理");
+    const root = this.metadata.workspace(workspaceId).path;
+    const results: FileItemResult[] = [];
+    let totalCompleted = 0,
+      bytes = 0,
+      lastProgress = 0;
+    const report = (path: string, count = 0, written = 0, force = false) => {
+      totalCompleted += count;
+      bytes += written;
+      if (force || Date.now() - lastProgress >= 200) {
+        lastProgress = Date.now();
+        progress?.({ phase: "running", currentPath: path, completedItems: totalCompleted, bytes });
+      }
+    };
+    progress?.({ phase: "queued", completedItems: 0, bytes: 0 });
+    for (const item of items) {
+      const state: ResultState = {
+        completed: 0,
+        failed: 0,
+        failures: [],
+        detailBytes: 0,
+        budget: Math.floor(limits.resultBytes / (items.length * 4)),
+        truncated: false,
+        unknown: false,
+      };
+      const done = (path: string) => {
+        state.completed++;
+        report(path, 1);
+      };
+      try {
+        signal.throwIfAborted();
+        const source = await publish(async () => {
+          const source = await capture(root, item.path);
+          if (kind !== "copy") await protectRoot(root, source.path, source.info);
+          return source;
+        }, signal);
+        if (kind === "delete") await this.remove(root, source, signal, state, done);
+        else
+          await this.copyMove(root, source, item, kind === "move", signal, state, done, (count) =>
+            report(source.path, 0, count),
+          );
+      } catch (error) {
+        fail(state, item.path, error);
+      }
+      const error = state.error;
+      results.push({
+        path: item.path,
+        ...(kind !== "delete" ? { targetPath: item.targetPath } : {}),
+        outcome: state.unknown
+          ? "unknown"
+          : state.failed
+            ? state.completed
+              ? "partial"
+              : "failed"
+            : "succeeded",
+        completedItems: state.completed,
+        ...(error ? { error } : {}),
+        ...(state.failed ? { failures: state.failures, truncated: state.truncated } : {}),
+      });
+      report(item.path, 0, 0, true);
+    }
+    const result = { items: results };
+    if (results.some((item) => item.outcome !== "succeeded")) {
+      const outcome = results.some((item) => item.outcome === "unknown")
+        ? "unknown"
+        : totalCompleted
+          ? "partial"
+          : "failed";
+      const error = results.find((item) => item.error)?.error;
+      throw new OperationError(
+        error?.code ?? "io_error",
+        error?.message ?? "部分项目未完成",
+        outcome,
+        result,
+      );
+    }
+    return result;
+  }
+
+  private async remove(
+    root: string,
+    source: ObjectRef,
+    signal: AbortSignal,
+    result: ResultState,
+    done: (path: string) => void,
+  ) {
+    signal.throwIfAborted();
+    if (source.info.isDirectory()) {
+      await this.children(root, source, signal, result, async (child) =>
+        this.remove(root, child, signal, result, done),
+      );
+    } else if (!source.info.isFile() && !source.info.isSymbolicLink()) {
+      throw new AppError("unsupported", "不删除设备节点、socket 或 FIFO");
+    }
+    await publish(async () => {
+      const current = await verify(root, source);
+      signal.throwIfAborted();
+      if (current.info.isDirectory()) await rmdir(current.location.absolute);
+      else await unlink(current.location.absolute);
+      done(source.path);
+    }, signal);
+  }
+
+  private async copyMove(
+    root: string,
+    source: ObjectRef,
+    item: CopyItem,
+    move: boolean,
+    signal: AbortSignal,
+    result: ResultState,
+    done: (path: string) => void,
+    bytes: (count: number) => void,
+    expectedParent?: ObjectRef,
+  ) {
+    if (!source.info.isDirectory() && !source.info.isFile() && !source.info.isSymbolicLink())
+      throw new AppError("unsupported", "不复制设备节点、socket 或 FIFO");
+    const target = await publish(async () => {
+      await verify(root, source);
+      const target = await locate(root, item.targetPath);
+      if (expectedParent && !sameObject(target.parentInfo, expectedParent.info))
+        throw new AppError("conflict", "目标目录已变化");
+      if (source.location.absolute === target.absolute)
+        throw new AppError("invalid_argument", "源与目标相同");
+      if (source.info.isDirectory()) await outsideDirectory(source, target.parent);
+      await checkTarget(target, item, source.info.isDirectory());
+      return target;
+    }, signal);
+    if (move) {
+      try {
+        await publish(async () => {
+          await verify(root, source);
+          const current = await targetAgain(root, item.targetPath, target);
+          const destination = await checkTarget(current, item, source.info.isDirectory());
+          if (destination && sameObject(source.info, destination))
+            throw new AppError("invalid_argument", "源与目标指向同一目录项对象");
+          signal.throwIfAborted();
+          if (item.collision === "replace")
+            await rename(source.location.absolute, current.absolute);
+          else await renameNoReplace(source.location.absolute, current.absolute);
+          done(source.path);
+        }, signal);
+        return;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EXDEV") throw error;
+      }
+    }
+    if (source.info.isDirectory()) {
+      const created = await publish(async () => {
+        const current = await targetAgain(root, item.targetPath, target);
+        signal.throwIfAborted();
+        await mkdir(current.absolute, { mode: Number(source.info.mode & 0o777n) | 0o700 });
+        done(item.targetPath);
+        return capture(root, item.targetPath);
+      }, signal);
+      await this.children(root, source, signal, result, async (child) => {
+        const childTarget = join(item.targetPath, child.location.name);
+        await this.copyMove(
+          root,
+          child,
+          { path: child.path, targetPath: childTarget, collision: "error" },
+          move,
+          signal,
+          result,
+          done,
+          bytes,
+          created,
+        );
+      });
+      await publish(async () => {
+        await verify(root, created);
+        signal.throwIfAborted();
+        await chmod(created.location.absolute, Number(source.info.mode & 0o777n));
+      }, signal);
+      if (move)
+        await publish(async () => {
+          await verify(root, source);
+          signal.throwIfAborted();
+          await rmdir(source.location.absolute);
+        }, signal);
+      return;
+    }
+
+    let temporary: TrackedTemporary | undefined;
+    let published = false,
+      uncertain = false;
+    let copied = source;
+    try {
+      if (source.info.isSymbolicLink()) {
+        const text = await readlink(source.location.absolute, { encoding: "buffer" });
+        temporary = await this.temporary.createLink(target.parent, target.parentInfo, text, signal);
+      } else {
+        const file = await open(
+          source.location.absolute,
+          constants.O_RDONLY | constants.O_NONBLOCK,
+        );
+        try {
+          const info = await file.stat({ bigint: true });
+          if (!info.isFile() || !sameObject(info, source.info))
+            throw new AppError("conflict", "源文件已变化");
+          copied = { ...source, info };
+          const output = await this.temporary.create(target.parent, target.parentInfo, signal);
+          temporary = output;
+          const block = Buffer.alloc(limits.dataChunkBytes);
+          let position = 0;
+          while (position < Number(info.size)) {
+            signal.throwIfAborted();
+            const { bytesRead } = await file.read(
+              block,
+              0,
+              Math.min(block.length, Number(info.size) - position),
+              position,
+            );
+            if (!bytesRead) throw new AppError("conflict", "复制期间源文件缩短");
+            let written = 0;
+            while (written < bytesRead) {
+              signal.throwIfAborted();
+              const next = await output.handle.write(
+                block,
+                written,
+                bytesRead - written,
+                position + written,
+              );
+              if (!next.bytesWritten) throw new AppError("io_error", "复制未能继续");
+              written += next.bytesWritten;
+            }
+            position += bytesRead;
+            bytes(bytesRead);
+          }
+          const after = await file.stat({ bigint: true });
+          if (!sameContentStat(info, after)) throw new AppError("conflict", "复制期间源文件已变化");
+          await output.handle.chmod(Number(info.mode & 0o777n));
+          await this.temporary.closeFile(output);
+        } finally {
+          await file.close();
+        }
+      }
+      await publish(async () => {
+        await this.temporary.checkLocked(temporary!);
+        const current = await targetAgain(root, item.targetPath, target);
+        await checkTarget(current, item, false);
+        signal.throwIfAborted();
+        if (item.collision === "replace") await rename(temporary!.path, current.absolute);
+        else await renameNoReplace(temporary!.path, current.absolute);
+        published = true;
+        done(item.targetPath);
+        await this.temporary.forgetLocked(temporary!);
+      }, signal);
+      if (move)
+        await publish(async () => {
+          await verify(root, copied, true);
+          signal.throwIfAborted();
+          await unlink(copied.location.absolute);
+        }, signal);
+    } catch (error) {
+      if (error instanceof OperationError && error.outcome === "unknown") uncertain = true;
+      throw error;
+    } finally {
+      if (temporary) {
+        if ("handle" in temporary)
+          await this.temporary.closeFile(temporary as import("./temporary.js").Temporary);
+        if (!published && !uncertain) await this.temporary.discard(temporary);
+      }
+    }
+  }
+
+  private async children(
+    root: string,
+    source: ObjectRef,
+    signal: AbortSignal,
+    result: ResultState,
+    visit: (child: ObjectRef) => Promise<void>,
+  ) {
+    await publish(() => verify(root, source), signal);
+    const directory = await opendir(source.location.absolute, {
+      encoding: "buffer" as BufferEncoding,
+    });
+    try {
+      for (;;) {
+        signal.throwIfAborted();
+        await publish(() => verify(root, source), signal);
+        const entry = await directory.read();
+        if (!entry) break;
+        const raw = Buffer.isBuffer(entry.name) ? entry.name : Buffer.from(entry.name);
+        const path = join(source.path, raw.toString("utf8"));
+        try {
+          if (!isUtf8(raw)) throw new AppError("unsupported", "名称不是有效 UTF-8，保留该项");
+          const child = await publish(async () => {
+            await verify(root, source);
+            return capture(root, path);
+          }, signal);
+          await visit(child);
+        } catch (error) {
+          fail(result, path, error);
+        }
+      }
+    } finally {
+      await directory.close();
+    }
+  }
+}
+
+async function capture(root: string, path: string): Promise<ObjectRef> {
+  const location = await locate(root, path);
+  return { path, location, info: await lstat(location.absolute, { bigint: true }) };
+}
+async function verify(root: string, original: ObjectRef, content = false) {
+  const current = await capture(root, original.path);
+  if (
+    current.location.parent !== original.location.parent ||
+    !sameObject(current.location.parentInfo, original.location.parentInfo) ||
+    !sameObject(current.info, original.info) ||
+    (content && !sameContentStat(current.info, original.info))
+  )
+    throw new AppError("conflict", "源路径或文件已变化，保留当前对象");
+  return current;
+}
+function sameContentStat(a: BigIntStats, b: BigIntStats) {
+  return a.size === b.size && a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs;
+}
+async function outsideDirectory(source: ObjectRef, parent: string) {
+  for (;;) {
+    if (sameObject(source.info, await stat(parent, { bigint: true })))
+      throw new AppError("invalid_argument", "不能复制或移动到自身或子目录");
+    const next = dirname(parent);
+    if (next === parent) return;
+    parent = next;
+  }
+}
+function fail(state: ResultState, path: string, error: unknown) {
+  state.failed++;
+  if (error instanceof OperationError && error.outcome === "unknown") state.unknown = true;
+  const failure = { path, error: asError(error) };
+  if (!state.error) {
+    const length = Math.max(16, Math.floor((state.budget - 100) / 3));
+    state.error = { code: failure.error.code, message: failure.error.message.slice(0, length) };
+    state.detailBytes += Buffer.byteLength(JSON.stringify(state.error));
+    if (state.error.message.length !== failure.error.message.length) state.truncated = true;
+  }
+  const size = Buffer.byteLength(JSON.stringify(failure));
+  if (state.detailBytes + size <= state.budget && state.failures.length < limits.listPageEntries) {
+    state.failures.push(failure);
+    state.detailBytes += size;
+  } else state.truncated = true;
+}

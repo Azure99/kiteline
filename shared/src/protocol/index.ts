@@ -6,10 +6,18 @@ export const limits = {
   controlMessageBytes: 1024 * 1024,
   resultBytes: 512 * 1024,
   dataChunkBytes: 64 * 1024,
+  filePendingFrames: 256,
+  filePendingBytes: 2 * 1024 * 1024,
   pendingRequestsPerDevice: 32,
   listPageEntries: 500,
   cursorLifetime: 60_000,
   cursorsPerDevice: 16,
+  copyNameAttempts: 1000,
+  searchMatches: 1000,
+  searchLineBytes: 2048,
+  searchPathBytes: 4096,
+  searchRanges: 128,
+  searchErrorBytes: 4096,
   heartbeatInterval: 20_000,
   heartbeatTimeout: 60_000,
   tcpKeepAliveDelayMs: 20_000,
@@ -99,6 +107,84 @@ export interface DirectoryListing {
   parentPath?: string;
   entries: Page<Entry>;
 }
+export interface FileListing {
+  path: string;
+  resolvedPath: string;
+  entries: Page<Entry>;
+}
+export interface FileInspection {
+  entry: Entry;
+  targetVersion: string;
+  suggestedName?: string;
+}
+export interface SearchMatch {
+  path: string;
+  line?: number;
+  text?: string;
+  ranges?: [number, number][];
+  truncated?: boolean;
+}
+export interface SearchResult {
+  matches: SearchMatch[];
+  truncated: boolean;
+}
+export interface PathError {
+  path: string;
+  error: KitelineError;
+}
+export interface FileItemResult {
+  path: string;
+  targetPath?: string;
+  outcome: Outcome;
+  error?: KitelineError;
+  completedItems?: number;
+  failures?: PathError[];
+  truncated?: boolean;
+}
+export interface CopyItem {
+  path: string;
+  targetPath: string;
+  collision: "error" | "replace";
+  expectedTargetVersion?: string;
+}
+export interface FileProgress {
+  phase: "queued" | "running";
+  currentPath?: string;
+  completedItems?: number;
+  bytes?: number;
+}
+export interface TextFormat {
+  bom: boolean;
+  lineEnding: "lf" | "crlf";
+  mixedLineEndings?: boolean;
+}
+export interface FileMeta {
+  size: number;
+  contentType: string;
+  filename: string;
+  targetPath?: string;
+  revision?: string;
+  resolvedPath?: string;
+  mode?: number;
+  bom?: boolean;
+  lineEnding?: TextFormat["lineEnding"];
+  mixedLineEndings?: boolean;
+  width?: number;
+  height?: number;
+}
+export interface UploadedFile {
+  path: string;
+  size: number;
+  targetVersion: string;
+}
+export interface SavedFile extends UploadedFile {
+  revision: string;
+}
+export interface ChannelReady<T = TerminalMeta | FileMeta> {
+  channelId: string;
+  expiresAt: string;
+  meta: T;
+}
 
 export class AppError extends Error {
   constructor(
@@ -113,7 +199,7 @@ export class OperationError extends AppError {
   constructor(
     code: string,
     message: string,
-    public outcome: "partial" | "unknown",
+    public outcome: "failed" | "partial" | "unknown",
     public result?: unknown,
     details?: unknown,
   ) {

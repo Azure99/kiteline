@@ -28,14 +28,16 @@ export class TerminalChannels {
     private sessions: Sessions,
     private config: AgentConfig,
     private identity: Identity,
+    private otherChannels: () => number = () => 0,
   ) {
     sessions.onFrame = (message) => this.frame(message);
   }
+  get count() {
+    return [...this.entries.values()].filter((item) => item.admitted).length;
+  }
   open(id: string, connectionId: string, kind: string, params: Record<string, unknown>) {
     if (this.entries.has(id)) throw new AppError("conflict", "通道已存在");
-    const admitted =
-      [...this.entries.values()].filter((item) => item.admitted).length <
-      this.config.limits.channelsPerDevice;
+    const admitted = this.count + this.otherChannels() < this.config.limits.channelsPerDevice;
     const url = new URL(`/api/agent/channels/${encodeURIComponent(id)}`, this.identity.server);
     url.protocol = "wss:";
     url.searchParams.set("connectionId", connectionId);

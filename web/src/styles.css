@@ -24,6 +24,7 @@
   --destructive: #bb3a43;
   --terminal: #20242b;
   --terminal-foreground: #d6dce5;
+  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-family:
     Inter,
     -apple-system,

@@ -1,17 +1,19 @@
-import { isUtf8 } from "node:buffer";
 import { randomUUID } from "node:crypto";
-import { opendir, lstat, readlink, realpath, mkdir } from "node:fs/promises";
-import type { Dir, Dirent } from "node:fs";
+import { opendir, realpath, mkdir, stat } from "node:fs/promises";
+import type { BigIntStats, Dir, Dirent } from "node:fs";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { AppError, limits, type DirectoryListing, type Entry } from "@kiteline/shared/protocol";
 import { publish } from "./mutations.js";
+import { readEntry, sameObject } from "./files/paths.js";
 
 interface Cursor {
   path: string;
+  entryParent: string;
   directory: Dir;
   carry: Dirent | null;
   timer: NodeJS.Timeout;
   busy: boolean;
+  info: BigIntStats;
 }
 export class Directories {
   private cursors = new Map<string, Cursor>();
@@ -23,14 +25,30 @@ export class Directories {
     this.cursors.delete(id);
     await cursor.directory.close().catch(() => {});
   }
-  async list(path: string, token?: string, signal?: AbortSignal): Promise<DirectoryListing> {
+  async list(
+    path: string,
+    token?: string,
+    signal?: AbortSignal,
+    entryParent?: string,
+  ): Promise<DirectoryListing> {
     if (!isAbsolute(path)) throw new AppError("invalid_argument", "需要绝对目录路径");
     path = await realpath(path);
+    entryParent ??= path;
     signal?.throwIfAborted();
     const id = token ?? randomUUID();
     let cursor = this.cursors.get(id);
-    if (token && (!cursor || cursor.path !== path))
-      throw new AppError("conflict", "目录列表已过期，请刷新");
+    const info = await stat(path, { bigint: true });
+    if (
+      token &&
+      (!cursor ||
+        cursor.path !== path ||
+        cursor.entryParent !== entryParent ||
+        !sameObject(cursor.info, info) ||
+        cursor.info.mtimeNs !== info.mtimeNs)
+    ) {
+      if (cursor) await this.closeCursor(id);
+      throw new AppError("conflict", "目录列表已变化或过期，请刷新");
+    }
     if (!cursor) {
       if (this.cursors.size + this.opening >= limits.cursorsPerDevice)
         throw new AppError("busy", "目录列表过多，请关闭旧列表后重试");
@@ -44,9 +62,11 @@ export class Directories {
         }
         cursor = {
           path,
+          entryParent,
           directory,
           carry: null,
           busy: false,
+          info,
           timer: setTimeout(() => {
             void this.closeCursor(id);
           }, limits.cursorLifetime),
@@ -60,7 +80,10 @@ export class Directories {
     cursor.busy = true;
     cursor.timer.refresh();
     const items: Entry[] = [];
-    let bytes = 512;
+    let bytes =
+      512 +
+      Buffer.byteLength(JSON.stringify(path)) * 2 +
+      Buffer.byteLength(JSON.stringify(entryParent));
     try {
       while (items.length < limits.listPageEntries) {
         signal?.throwIfAborted();
@@ -71,31 +94,9 @@ export class Directories {
           break;
         }
         const rawName: Buffer = Buffer.isBuffer(item.name) ? item.name : Buffer.from(item.name);
-        const name = rawName.toString("utf8");
-        const actual = Buffer.concat([
-          Buffer.from(path.endsWith("/") ? path : path + "/"),
-          rawName,
-        ]);
-        const valid = isUtf8(rawName);
         let entry: Entry;
         try {
-          const info = await lstat(actual);
-          entry = {
-            name,
-            ...(valid
-              ? { path: join(path, name) }
-              : { path: null, unavailableReason: "invalid_utf8" as const }),
-            kind: info.isDirectory()
-              ? "directory"
-              : info.isFile()
-                ? "file"
-                : info.isSymbolicLink()
-                  ? "symlink"
-                  : "other",
-            size: info.size,
-            mtime: info.mtime.toISOString(),
-            ...(info.isSymbolicLink() ? { linkTarget: await readlink(actual) } : {}),
-          };
+          entry = await readEntry(path, rawName, join(entryParent, rawName.toString("utf8")));
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
           throw error;
@@ -134,8 +135,9 @@ export class Directories {
   async mkdir(path: string, signal?: AbortSignal) {
     if (!isAbsolute(path) || !basename(path))
       throw new AppError("invalid_argument", "需要绝对目录路径");
-    const target = join(await realpath(dirname(path)), basename(path));
     return publish(async () => {
+      const target = join(await realpath(dirname(path)), basename(path));
+      signal?.throwIfAborted();
       await mkdir(target);
       return { path: target };
     }, signal);

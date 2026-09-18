@@ -49,7 +49,9 @@ export async function rpc<T>(
     `/api/devices/${encodeURIComponent(deviceId)}/rpc`,
     { id: crypto.randomUUID(), method, params },
     signal,
-    !["directories.list", "sessions.list"].includes(method),
+    !["directories.list", "sessions.list", "files.list", "files.inspect", "files.search"].includes(
+      method,
+    ),
   );
   if (reply.outcome !== "succeeded")
     throw new ApiError(
