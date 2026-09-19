@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Entry, FileListing } from "@kiteline/shared/protocol";
-import { errorMessage, rpc } from "../lib/api";
+import { rpc } from "../lib/api";
+import { i18n } from "../i18n";
 
 export interface DirectoryPage {
   listing?: FileListing;
   busy: boolean;
-  error?: string;
+  error?: unknown;
 }
 export function useFileBrowser(deviceId: string, workspaceId: string, active: boolean) {
   const [pages, setPages] = useState<Record<string, DirectoryPage>>({});
@@ -69,7 +70,7 @@ export function useFileBrowser(deviceId: string, workspaceId: string, active: bo
         if (!controller.signal.aborted) {
           setPages((old) => ({
             ...old,
-            [path]: { ...old[path], busy: false, error: errorMessage(error) },
+            [path]: { ...old[path], busy: false, error },
           }));
         }
       } finally {
@@ -124,7 +125,8 @@ export function childPath(parent: string, name: string) {
   return parent === "." ? name : `${parent}/${name}`;
 }
 export function formatBytes(bytes = 0) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
+  if (bytes < 1024) return `${bytes.toLocaleString(i18n.resolvedLanguage)} B`;
+  if (bytes < 1024 * 1024)
+    return `${(bytes / 1024).toLocaleString(i18n.resolvedLanguage, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} KiB`;
+  return `${(bytes / 1024 / 1024).toLocaleString(i18n.resolvedLanguage, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} MiB`;
 }

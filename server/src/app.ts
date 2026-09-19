@@ -18,7 +18,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
   const limiter = new AttemptLimiter();
   function login(request: IncomingMessage) {
     const session = store.session(cookie(request));
-    if (!session) throw new AppError("unauthenticated", "请登录");
+    if (!session) throw new AppError("unauthenticated", "Please sign in");
     return session;
   }
   function newSession(response: ServerResponse) {
@@ -58,7 +58,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
         if (path === "/api/setup")
           await store.setup(string(input.setupToken, "setup token", 256), value);
         else if (!(await store.verifyPassword(value)))
-          throw new AppError("unauthenticated", "密码错误");
+          throw new AppError("unauthenticated", "Incorrect password");
         return newSession(response);
       }
       const session = login(request);
@@ -97,7 +97,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
         return json(response, 200, {
           found: channels.cancel(
             decodeURIComponent(channel[1]!),
-            new AppError("cancelled", "通道已取消"),
+            new AppError("cancelled", "Channel cancelled"),
             session.id,
           ),
         });
@@ -125,7 +125,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
           const pending = channels.create(id, session, string(input.kind), record(input.params));
           response.on("close", () => {
             if (!response.writableFinished)
-              channels.cancel(pending.id, new AppError("cancelled", "请求已关闭"));
+              channels.cancel(pending.id, new AppError("cancelled", "Request closed"));
           });
           return json(response, 200, await pending.ready);
         }
@@ -162,7 +162,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
             found: connections.cancel(id, decodeURIComponent(cancel[1]!), session.id),
           });
       }
-      throw new AppError("not_found", "接口不存在");
+      throw new AppError("not_found", "API endpoint not found");
     }
     if (method !== "GET" && method !== "HEAD") {
       response.writeHead(405).end();
@@ -172,11 +172,11 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
     try {
       decodedPath = decodeURIComponent(path);
     } catch {
-      throw new AppError("invalid_argument", "无效 URL 路径");
+      throw new AppError("invalid_argument", "Invalid URL path");
     }
     const file = resolve(config.webDir, "." + decodedPath);
     if (file !== config.webDir && !file.startsWith(config.webDir + sep))
-      throw new AppError("not_found", "文件不存在");
+      throw new AppError("not_found", "File not found");
     const extensions: Record<string, string> = {
       ".js": "text/javascript",
       ".css": "text/css",
@@ -192,7 +192,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       type = extensions[extname(file)] ?? "text/html; charset=utf-8";
     } catch (error) {
       if (!["ENOENT", "EISDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
-      if (path.startsWith("/assets/")) throw new AppError("not_found", "资源不存在");
+      if (path.startsWith("/assets/")) throw new AppError("not_found", "Resource not found");
       content = await readFile(resolve(config.webDir, "index.html"));
       type = "text/html; charset=utf-8";
     }
@@ -218,7 +218,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       const browserChannel = /^\/api\/channels\/([^/]+)\/terminal$/.exec(url.pathname);
       if (agentChannel) {
         const device = store.authenticateAgent(bearer(request));
-        if (!device) throw new AppError("unauthenticated", "设备凭据无效");
+        if (!device) throw new AppError("unauthenticated", "Invalid device credentials");
         const id = decodeURIComponent(agentChannel[1]!);
         const kind = channels.checkAgent(
           id,
@@ -236,9 +236,9 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
         sockets.handleUpgrade(request, socket, head, (ws) => channels.acceptBrowser(id, ws));
       } else if (url.pathname === "/api/agent/control") {
         if (url.searchParams.get("protocolVersion") !== "1")
-          throw new AppError("unsupported", "协议版本不匹配");
+          throw new AppError("unsupported", "Protocol version mismatch");
         const device = store.authenticateAgent(bearer(request));
-        if (!device) throw new AppError("unauthenticated", "设备凭据无效");
+        if (!device) throw new AppError("unauthenticated", "Invalid device credentials");
         sockets.handleUpgrade(request, socket, head, (ws) =>
           connections.acceptAgent(device.id, ws),
         );

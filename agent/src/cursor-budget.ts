@@ -4,7 +4,7 @@ export class CursorBudget {
   private count = 0;
   reserve() {
     if (this.count >= limits.cursorsPerDevice)
-      throw new AppError("busy", "列表读取过多，请稍后重试");
+      throw new AppError("busy", "Too many active list reads; try again later");
     this.count++;
     let released = false;
     return () => {

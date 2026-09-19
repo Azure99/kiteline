@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useState } from "react";
 import type { FileInspection } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
@@ -24,6 +25,8 @@ export function FileConflictDialog({
   onClose: () => void;
   onChoose: (path: string, version?: string) => void;
 }) {
+  const { t } = useTranslation();
+
   const suggested = inspection.suggestedName
     ? childPath(parentPath(target), inspection.suggestedName)
     : target;
@@ -37,20 +40,22 @@ export function FileConflictDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>目标已存在</DialogTitle>
+          <DialogTitle>{t(($) => $.files.targetExists)}</DialogTitle>
         </DialogHeader>
         <div className="space-y-3 overflow-auto p-4">
           <p className="break-all text-sm">{target}</p>
           {inspection.entry.kind === "symlink" && (
             <div className="space-y-1 text-sm">
-              <p className="break-all">链接目标：{inspection.entry.linkTarget}</p>
-              <p>替换将移除符号链接，原目标文件不变。</p>
+              <p className="break-all">
+                {t(($) => $.files.linkTarget, { path: inspection.entry.linkTarget ?? "" })}
+              </p>
+              <p>{t(($) => $.files.replaceLink)}</p>
             </div>
           )}
           <label className="block space-y-1 text-sm">
-            <span>保留两份的路径</span>
+            <span>{t(($) => $.files.keepBothPath)}</span>
             <Textarea
-              aria-label="保留两份的路径"
+              aria-label={t(($) => $.files.keepBothPath)}
               rows={2}
               value={path}
               onChange={(event) => setPath(event.target.value)}
@@ -58,23 +63,23 @@ export function FileConflictDialog({
           </label>
           {inspection.suggestedName && (
             <Button variant="ghost" onClick={() => setPath(suggested)}>
-              使用建议名称
+              {t(($) => $.files.suggestName)}
             </Button>
           )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
-            取消
+            {t(($) => $.common.cancel)}
           </Button>
           <Button
             variant="outline"
             disabled={directory || inspection.entry.kind === "directory"}
             onClick={() => onChoose(target, inspection.targetVersion)}
           >
-            替换
+            {t(($) => $.files.replace)}
           </Button>
           <Button disabled={!path || path === target} onClick={() => onChoose(path)}>
-            保留两份
+            {t(($) => $.files.keepBoth)}
           </Button>
         </DialogFooter>
       </DialogContent>

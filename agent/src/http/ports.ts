@@ -5,10 +5,10 @@ import { AppError, limits, type ListeningPorts } from "@kiteline/shared/protocol
 export function listeningPort(line: string, ipv6: boolean): number | undefined {
   const fields = line.trim().split(/\s+/);
   if (!/^\d+:$/.test(fields[0] ?? "") || fields.length < 4)
-    throw new AppError("io_error", "无法解析设备监听端口");
+    throw new AppError("io_error", "Cannot parse the device listening port");
   const local = /^([0-9A-F]+):([0-9A-F]{4})$/i.exec(fields[1]!);
   if (!local || local[1]!.length !== (ipv6 ? 32 : 8) || !/^[0-9A-F]{2}$/i.test(fields[3]!))
-    throw new AppError("io_error", "无法解析设备监听地址");
+    throw new AppError("io_error", "Cannot parse the device listening address");
   if (fields[3]!.toUpperCase() !== "0A") return;
   const addresses = ipv6
     ? ["00000000000000000000000000000000", "00000000000000000000000001000000"]

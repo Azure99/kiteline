@@ -1,7 +1,8 @@
+import { ErrorNotice } from "../components/error-notice";
+import { useTranslation } from "react-i18next";
 import { useState } from "react";
 import { Copy } from "lucide-react";
 import type { Session } from "@kiteline/shared/protocol";
-import { errorMessage } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
@@ -21,16 +22,18 @@ export function SessionDialog({
   onClose(): void;
   onChange(kind: "rename" | "end", id: string, name: string): Promise<boolean>;
 }) {
+  const { t } = useTranslation();
+
   const [name, setName] = useState(action.session.name);
   const [copied, setCopied] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<unknown>();
   async function copy() {
     try {
       await navigator.clipboard.writeText(`kiteline-agent terminal attach ${action.session.id}`);
       setCopied(true);
-      setError("");
+      setError(undefined);
     } catch (error) {
-      setError(errorMessage(error));
+      setError(error);
     }
   }
   return (
@@ -44,15 +47,15 @@ export function SessionDialog({
         <DialogHeader>
           <DialogTitle>
             {action.kind === "rename"
-              ? "重命名终端"
+              ? t(($) => $.terminal.rename)
               : action.kind === "copy"
-                ? "本机接续"
-                : "结束会话"}
+                ? t(($) => $.terminal.localAttach)
+                : t(($) => $.terminal.endSession)}
           </DialogTitle>
         </DialogHeader>
         {action.kind === "rename" ? (
           <Input
-            aria-label="终端名称"
+            aria-label={t(($) => $.terminal.name)}
             value={name}
             maxLength={256}
             onChange={(event) => setName(event.target.value)}
@@ -61,30 +64,30 @@ export function SessionDialog({
         ) : action.kind === "copy" ? (
           <>
             <Input
-              aria-label="本机接续命令"
+              aria-label={t(($) => $.terminal.localCommand)}
               readOnly
               value={`kiteline-agent terminal attach ${action.session.id}`}
             />
-            <p className="text-sm text-muted-foreground">
-              Ctrl-b d 断开；Ctrl-b Ctrl-b 发送 Ctrl-b。
-            </p>
+            <p className="text-sm text-muted-foreground">{t(($) => $.terminal.detachHint)}</p>
           </>
         ) : (
-          <p className="break-words">结束 {action.session.name} 及其中的任务？</p>
-        )}
-        {error && (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
+          <p className="break-words">
+            {t(($) => $.terminal.endConfirm, { name: action.session.name })}
           </p>
+        )}
+        {!!error && (
+          <div role="alert" className="text-sm text-destructive">
+            <ErrorNotice error={error} />
+          </div>
         )}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" disabled={busy} onClick={onClose}>
-            {action.kind === "copy" ? "关闭" : "取消"}
+            {action.kind === "copy" ? t(($) => $.common.close) : t(($) => $.common.cancel)}
           </Button>
           {action.kind === "copy" ? (
             <Button onClick={() => void copy()}>
               <Copy />
-              {copied ? "已复制" : "复制"}
+              {copied ? t(($) => $.common.copied) : t(($) => $.common.copy)}
             </Button>
           ) : (
             <Button
@@ -97,7 +100,7 @@ export function SessionDialog({
                   });
               }}
             >
-              {action.kind === "rename" ? "保存" : "结束"}
+              {action.kind === "rename" ? t(($) => $.common.save) : t(($) => $.terminal.end)}
             </Button>
           )}
         </div>

@@ -36,7 +36,7 @@ export class TerminalChannels {
     return [...this.entries.values()].filter((item) => item.admitted).length;
   }
   open(id: string, connectionId: string, kind: string, params: Record<string, unknown>) {
-    if (this.entries.has(id)) throw new AppError("conflict", "通道已存在");
+    if (this.entries.has(id)) throw new AppError("conflict", "Channel already exists");
     const admitted = this.count + this.otherChannels() < this.config.limits.channelsPerDevice;
     const url = new URL(`/api/agent/channels/${encodeURIComponent(id)}`, this.identity.server);
     url.protocol = "wss:";
@@ -54,7 +54,7 @@ export class TerminalChannels {
       started: false,
       admitted,
       timer: setTimeout(
-        () => this.fail(id, new AppError("timeout", "等待通道配对超时")),
+        () => this.fail(id, new AppError("timeout", "Timed out waiting for channel pairing")),
         this.config.limits.channelPairTimeout,
       ),
     };
@@ -65,20 +65,25 @@ export class TerminalChannels {
     socket.on("open", () => {
       heartbeat(socket);
       try {
-        if (!admitted) throw new AppError("busy", "设备通道已满");
-        if (kind !== "terminal.attach") throw new AppError("unsupported", "不支持的数据通道");
+        if (!admitted) throw new AppError("busy", "Device channel limit reached");
+        if (kind !== "terminal.attach")
+          throw new AppError("unsupported", "Unsupported data channel");
         const item = this.sessions.get(string(params.sessionId), string(params.workspaceId));
         if (params.terminalProfile !== terminalProfile)
-          throw new AppError("unsupported", "终端组件版本不同，请统一升级");
+          throw new AppError(
+            "unsupported",
+            "Terminal component versions differ; upgrade them together",
+          );
         if (
           params.history !== undefined &&
           params.history !== "retained" &&
           params.history !== "screen"
         )
-          throw new AppError("invalid_argument", "无效历史范围");
-        if (item.session.state !== "running") throw new AppError("busy", "终端仍在创建");
+          throw new AppError("invalid_argument", "Invalid history range");
+        if (item.session.state !== "running")
+          throw new AppError("busy", "Terminal is still being created");
         if (item.session.webStatus !== "available")
-          throw new AppError("recording_unavailable", "终端记录不可用");
+          throw new AppError("recording_unavailable", "Terminal recording is unavailable");
         sendFrame(
           socket,
           JSON.stringify({
@@ -94,7 +99,7 @@ export class TerminalChannels {
         );
         clearTimeout(channel.timer);
         channel.timer = setTimeout(
-          () => this.fail(id, new AppError("timeout", "等待通道 start 超时")),
+          () => this.fail(id, new AppError("timeout", "Timed out waiting for channel start")),
           this.config.limits.channelPairTimeout,
         );
       } catch (error) {
@@ -106,10 +111,11 @@ export class TerminalChannels {
         if (this.entries.get(id) !== channel) return;
         const message = binary ? undefined : record(JSON.parse(raw.toString()));
         if (!channel.started) {
-          if (message?.type !== "start") throw new AppError("invalid_argument", "通道尚未开始");
+          if (message?.type !== "start")
+            throw new AppError("invalid_argument", "Channel has not started");
           const item = this.sessions.get(channel.sessionId);
           if (item.session.webStatus !== "available")
-            throw new AppError("recording_unavailable", "终端记录不可用");
+            throw new AppError("recording_unavailable", "Terminal recording is unavailable");
           channel.started = true;
           clearTimeout(channel.timer);
           void this.sessions.recorder
@@ -128,7 +134,7 @@ export class TerminalChannels {
         const target = { sessionId: channel.sessionId, attachmentId: id };
         if (binary) {
           if ((raw as Buffer).length > limits.dataChunkBytes)
-            throw new AppError("limit_exceeded", "输入帧过大");
+            throw new AppError("limit_exceeded", "Input frame is too large");
           command = {
             type: "input",
             ...target,
@@ -136,7 +142,7 @@ export class TerminalChannels {
           };
         } else if (message?.type === "paste") {
           if (typeof message.text !== "string")
-            throw new AppError("invalid_argument", "粘贴内容无效");
+            throw new AppError("invalid_argument", "Invalid paste content");
           command = { type: "paste", ...target, text: message.text };
         } else if (message?.type === "resize")
           command = {
@@ -151,7 +157,7 @@ export class TerminalChannels {
             ...target,
             bytes: integer(message.bytes, "bytes", 0, Number.MAX_SAFE_INTEGER),
           };
-        else throw new AppError("invalid_argument", "无效终端输入");
+        else throw new AppError("invalid_argument", "Invalid terminal input");
         this.sessions.recorder.send(command);
       } catch (error) {
         if (!channel.started) {

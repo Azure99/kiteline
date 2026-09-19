@@ -10,7 +10,7 @@ export async function targetAgain(
 ) {
   const current = await locate(root, path);
   if (current.parent !== expected.parent || !sameObject(current.parentInfo, expected.parentInfo))
-    throw new AppError("conflict", "目标父目录已变化");
+    throw new AppError("conflict", "Target parent directory has changed");
   return current;
 }
 
@@ -25,7 +25,9 @@ export async function checkTarget(
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     if (item.collision === "replace")
-      throw new AppError("conflict", "确认的目标已消失", { path: item.targetPath });
+      throw new AppError("conflict", "The confirmed target no longer exists", {
+        path: item.targetPath,
+      });
     return;
   }
   const targetVersion = versionOf(target.parent, target.name, info);
@@ -37,7 +39,9 @@ export async function checkTarget(
   )
     throw new AppError(
       "conflict",
-      info.isDirectory() || directory ? "目录不替换或合并" : "目标已存在或已变化",
+      info.isDirectory() || directory
+        ? "Directories cannot be replaced or merged"
+        : "Target already exists or has changed",
       {
         path: item.targetPath,
         current: {

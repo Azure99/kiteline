@@ -139,5 +139,5 @@ export type GitWriteMethod =
   | "git.abort";
 type GitParams<M extends GitWriteMethod> = Omit<RpcParams<M>, keyof RepoParams>;
 export type GitWriteArguments = {
-  [M in GitWriteMethod]: [method: M, params: GitParams<M>, label: string];
+  [M in GitWriteMethod]: [method: M, params: GitParams<M>];
 }[GitWriteMethod];

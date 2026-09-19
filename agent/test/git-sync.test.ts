@@ -148,7 +148,7 @@ test("oversized rebase metadata is reported without enabling an unverified opera
     kind: "unknown",
     canContinue: false,
     canAbort: false,
-    reason: expect.stringContaining("单行超过"),
+    reason: expect.stringContaining("contains a line exceeding"),
   });
 });
 test("remote metadata follows native URL expansion and avoids claiming complex push targets", async () => {
@@ -160,13 +160,16 @@ test("remote metadata follows native URL expansion and avoids claiming complex p
   expect(await remotes(repo, signal())).toMatchObject({
     defaultFetchRemote: "backup",
     defaultPushRemote: "backup",
-    pushTargetDescription: "backup/main",
+    pushTarget: "backup/main",
     remotes: [
       { fetchUrls: ["https://example.test/repo.git"], pushUrls: ["ssh://example.test/repo.git"] },
     ],
   });
   await cli("config", "remote.backup.mirror", "true");
-  expect((await remotes(repo, signal())).pushTargetDescription).toBe("按设备 Git 配置 · backup");
+  expect(await remotes(repo, signal())).toMatchObject({
+    defaultPushRemote: "backup",
+    pushTarget: undefined,
+  });
 });
 test("sequencer-only cherry-pick remains actionable after a manual conflict commit", async () => {
   const { repo, cli, write, first, second } = await divergent();
@@ -221,7 +224,7 @@ test("fetch pull push reuse local remotes and pull strategy; queued HEAD identit
     upstream: "origin/main",
     defaultFetchRemote: "origin",
     defaultPushRemote: "origin",
-    pushTargetDescription: "origin/main",
+    pushTarget: "origin/main",
   });
   await writeFile(join(other, "remote-only"), "remote\n");
   await remote("add", ".");

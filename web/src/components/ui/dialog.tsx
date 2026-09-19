@@ -2,6 +2,7 @@ import { Dialog as Primitive } from "@base-ui/react/dialog";
 import { X } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { Button } from "./button";
+import { useTranslation } from "react-i18next";
 
 export const Dialog = Primitive.Root;
 export const DialogTrigger = Primitive.Trigger;
@@ -10,6 +11,7 @@ export const DialogTitle = Primitive.Title;
 export const DialogDescription = Primitive.Description;
 
 export function DialogContent({ className, children, ...props }: Primitive.Popup.Props) {
+  const { t } = useTranslation();
   return (
     <Primitive.Portal>
       <Primitive.Backdrop className="fixed inset-0 z-40 bg-black/25" />
@@ -21,7 +23,9 @@ export function DialogContent({ className, children, ...props }: Primitive.Popup
         {...props}
       >
         <div className="absolute right-2 top-2">
-          <Primitive.Close render={<Button variant="ghost" size="icon" aria-label="关闭" />}>
+          <Primitive.Close
+            render={<Button variant="ghost" size="icon" aria-label={t(($) => $.common.close)} />}
+          >
             <X />
           </Primitive.Close>
         </div>

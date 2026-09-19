@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
@@ -45,6 +46,8 @@ export function Files({
   store: DraftStore;
   onUpload: (files: File[], folder: string) => void;
 }) {
+  const { t, i18n } = useTranslation();
+
   const route = useRoute();
   const mobile = useMobile();
   const folder = route.query.get("folder") ?? ".";
@@ -55,7 +58,9 @@ export function Files({
   const [listOpen, setListOpen] = useState(true);
   const [action, setAction] = useState<NameAction>();
   const [operation, setOperation] = useState<FileAction>();
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState<
+    { kind: "downloadStarted"; path: string } | { kind: "renamed" | "created" }
+  >();
   const fileInput = useRef<HTMLInputElement>(null);
   const enabled = device.status === "online";
   const { pages, load, forget } = useFileBrowser(device.id, workspace.id, visible && enabled);
@@ -115,7 +120,7 @@ export function Files({
     const downloaded = (event: Event) => {
       const target = (event as CustomEvent<FileTarget>).detail;
       if (target.deviceId === device.id && target.workspaceId === workspace.id)
-        setNotice(`已交给浏览器下载：${target.path}`);
+        setNotice({ kind: "downloadStarted", path: target.path });
     };
     window.addEventListener("kiteline:download", downloaded);
     return () => {
@@ -155,7 +160,7 @@ export function Files({
     if (folder === path || path === ".") void load(path);
   }
   function open(entry: Entry) {
-    setNotice("");
+    setNotice(undefined);
     if (/\.(png|jpe?g|webp|gif)$/i.test(entry.name)) {
       preview(entry);
       return;
@@ -171,7 +176,7 @@ export function Files({
     );
   }
   function preview(entry: Pick<Entry, "path">) {
-    setNotice("");
+    setNotice(undefined);
     const query = new URLSearchParams({
       file: entry.path!,
       folder: parentPath(entry.path!),
@@ -259,12 +264,12 @@ export function Files({
         }
       >
         {mobile && queryFile ? (
-          <IconButton label="返回目录" onClick={() => setFilePath()}>
+          <IconButton label={t(($) => $.files.backDirectory)} onClick={() => setFilePath()}>
             <ArrowLeft />
           </IconButton>
         ) : (
           <IconButton
-            label="上级目录"
+            label={t(($) => $.files.parentDirectory)}
             disabled={folder === "."}
             onClick={() => enter(parentPath(folder))}
           >
@@ -272,7 +277,10 @@ export function Files({
           </IconButton>
         )}
         {!mobile && (
-          <IconButton label="显示或隐藏文件列表" onClick={() => setListOpen((open) => !open)}>
+          <IconButton
+            label={t(($) => $.files.toggleList)}
+            onClick={() => setListOpen((open) => !open)}
+          >
             <PanelLeft />
           </IconButton>
         )}
@@ -283,7 +291,7 @@ export function Files({
           {folder === "." ? workspace.name : folder}
         </span>
         <IconButton
-          label="搜索文件或内容"
+          label={t(($) => $.files.searchFiles)}
           disabled={!enabled}
           onClick={() => {
             const query = new URLSearchParams(location.search);
@@ -294,7 +302,7 @@ export function Files({
           <Search />
         </IconButton>
         <IconButton
-          label="新建文件"
+          label={t(($) => $.files.newFile)}
           disabled={!enabled}
           onClick={() => setAction({ kind: "file", parent: folder })}
         >
@@ -305,7 +313,7 @@ export function Files({
           type="file"
           multiple
           className="hidden"
-          aria-label="上传文件选择"
+          aria-label={t(($) => $.files.uploadPicker)}
           onChange={(event) => {
             const files = Array.from(event.target.files ?? []);
             if (files.length) onUpload(files, folder);
@@ -313,20 +321,24 @@ export function Files({
           }}
         />
         <Menu>
-          <MenuTrigger render={<Button variant="ghost" size="icon" aria-label="更多文件操作" />}>
+          <MenuTrigger
+            render={
+              <Button variant="ghost" size="icon" aria-label={t(($) => $.files.moreActions)} />
+            }
+          >
             <MoreHorizontal />
           </MenuTrigger>
           <MenuContent>
             <MenuItem disabled={!enabled} onClick={() => fileInput.current?.click()}>
               <Upload />
-              上传文件
+              {t(($) => $.files.uploadFiles)}
             </MenuItem>
             <MenuItem
               disabled={!enabled}
               onClick={() => setAction({ kind: "directory", parent: folder })}
             >
               <FolderPlus />
-              新建目录
+              {t(($) => $.files.newDirectory)}
             </MenuItem>
             <MenuItem
               onClick={() => {
@@ -335,20 +347,22 @@ export function Files({
               }}
             >
               <ListChecks />
-              {selecting ? "结束选择" : "选择文件"}
+              {selecting ? t(($) => $.files.finishSelection) : t(($) => $.files.selectFiles)}
             </MenuItem>
             <MenuItem disabled={!enabled} onClick={() => void refresh()}>
               <RefreshCw />
-              刷新
+              {t(($) => $.common.refresh)}
             </MenuItem>
           </MenuContent>
         </Menu>
       </div>
       {!searching && !!selected.size && (
         <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border px-3">
-          <span className="mr-auto text-xs">{selected.size}</span>
+          <span className="mr-auto text-xs">
+            {selected.size.toLocaleString(i18n.resolvedLanguage)}
+          </span>
           <IconButton
-            label="下载所选文件"
+            label={t(($) => $.files.downloadSelected)}
             disabled={!enabled}
             onClick={() => {
               const entries = new Map(
@@ -364,32 +378,48 @@ export function Files({
           >
             <Download />
           </IconButton>
-          <IconButton label="复制所选" disabled={!enabled} onClick={() => selectedAction("copy")}>
+          <IconButton
+            label={t(($) => $.files.copySelected)}
+            disabled={!enabled}
+            onClick={() => selectedAction("copy")}
+          >
             <Copy />
           </IconButton>
-          <IconButton label="移动所选" disabled={!enabled} onClick={() => selectedAction("move")}>
+          <IconButton
+            label={t(($) => $.files.moveSelected)}
+            disabled={!enabled}
+            onClick={() => selectedAction("move")}
+          >
             <FolderInput />
           </IconButton>
-          <IconButton label="删除所选" disabled={!enabled} onClick={() => selectedAction("delete")}>
+          <IconButton
+            label={t(($) => $.files.deleteSelected)}
+            disabled={!enabled}
+            onClick={() => selectedAction("delete")}
+          >
             <Trash2 />
           </IconButton>
         </div>
       )}
       {!searching && notice && (
         <p role="status" className="border-b border-border px-3 py-1 text-xs text-muted-foreground">
-          {notice}
+          {notice.kind === "downloadStarted"
+            ? t(($) => $.files.downloadStarted, { path: notice.path })
+            : t(($) => $.files[notice.kind])}
         </p>
       )}
       {!enabled && (
         <p className="border-b border-border px-3 py-2 text-sm text-muted-foreground">
-          {device.status === "revoked" ? "设备已撤销" : "设备离线"}
+          {device.status === "revoked"
+            ? t(($) => $.common.deviceRevoked)
+            : t(($) => $.common.deviceOffline)}
         </p>
       )}
       <div className={searching ? "hidden" : "flex min-h-0 flex-1"}>
         {(mobile ? !queryFile : listOpen) && (
           <aside
             className="scroll-area w-full overflow-auto border-border bg-muted/25 min-[960px]:w-72 min-[960px]:shrink-0 min-[960px]:border-r"
-            aria-label="文件列表"
+            aria-label={t(($) => $.files.list)}
           >
             <FileExplorer
               path={mobile || reveal ? folder : "."}
@@ -415,7 +445,10 @@ export function Files({
           </aside>
         )}
         {(!mobile || queryFile) && (
-          <section className="flex min-w-0 flex-1 flex-col" aria-label="文件内容">
+          <section
+            className="flex min-w-0 flex-1 flex-col"
+            aria-label={t(($) => $.files.fileContent)}
+          >
             {isImage && queryFile ? (
               <ImagePreview
                 key={queryFile}
@@ -428,12 +461,16 @@ export function Files({
                 store={store}
                 draft={draft}
                 unavailable={
-                  !enabled ? (device.status === "revoked" ? "设备已撤销" : "设备离线") : undefined
+                  !enabled
+                    ? device.status === "revoked"
+                      ? t(($) => $.common.deviceRevoked)
+                      : t(($) => $.common.deviceOffline)
+                    : undefined
                 }
               />
             ) : (
               <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-                选择文件
+                {t(($) => $.files.selectFiles)}
               </div>
             )}
           </section>
@@ -450,7 +487,7 @@ export function Files({
           onClose={() => setAction(undefined)}
           onDone={(result) => {
             setAction(undefined);
-            setNotice(result.from ? "已重命名" : "已创建");
+            setNotice({ kind: result.from ? "renamed" : "created" });
             if (result.from) {
               moveViewPaths([{ from: result.from, to: result.to }]);
             }

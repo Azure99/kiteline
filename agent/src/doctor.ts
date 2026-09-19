@@ -57,17 +57,19 @@ export async function diagnose(
     return result.stdout.trim();
   };
   add(
-    "配置",
+    "Configuration",
     `data=${config.dataDir}; run=${config.runDir}; metadata=${join(config.dataDir, "agent.json")}`,
   );
   await check("Node", async () => {
     const info = JSON.parse(await readFile(join(packageDirectory, "release.json"), "utf8"));
     if (`v${info.node}` !== process.version || info.architecture !== process.arch)
-      throw new Error(`安装清单与当前运行时不符: ${process.version} ${process.arch}`);
+      throw new Error(
+        `Installation manifest does not match the current runtime: ${process.version} ${process.arch}`,
+      );
     return `${process.execPath}; ${process.version} ${process.arch}; release=${info.version}`;
   });
   const native = join(packageDirectory, "dist/native");
-  await check("终端构建身份", async () => {
+  await check("Terminal build identity", async () => {
     const identity = JSON.parse(await readFile(join(native, "identity.json"), "utf8"));
     const release = JSON.parse(await readFile(join(packageDirectory, "release.json"), "utf8"));
     const recorderRequire = createRequire(join(packageDirectory, "terminal-recorder/package.json"));
@@ -76,7 +78,9 @@ export async function diagnose(
       recorderRequire("@xterm/headless/package.json").version !== identity.headless ||
       recorderRequire("@xterm/addon-serialize/package.json").version !== identity.serialize
     )
-      throw new Error("recorder 依赖或发布清单与终端构建身份不匹配");
+      throw new Error(
+        "Recorder dependencies or release manifest do not match the terminal build identity",
+      );
     const hash = async (file: string) =>
       createHash("sha256")
         .update(await readFile(file))
@@ -87,49 +91,55 @@ export async function diagnose(
       (await hash(tmuxBinary)) !== identity.tmuxBinary ||
       (await hash(join(native, "bin/rename-noreplace"))) !== identity.helperBinary
     )
-      throw new Error("原生组件、架构或 terminalProfile 与构建身份不匹配");
+      throw new Error(
+        "Native components, architecture, or terminalProfile do not match the build identity",
+      );
     await access(join(packageDirectory, "terminal-recorder/dist/main.js"), constants.R_OK);
     return `tmux=${identity.tmux}; profile=${identity.profile}; patch=${identity.patch}; headless=${identity.headless}; xterm=${identity.xterm}`;
   });
   for (const name of ["tmux", "rename-noreplace"]) {
-    await check(`${name} 动态库`, async () => {
+    await check(`${name} shared libraries`, async () => {
       const result = await command("ldd", [join(native, "bin", name)]);
       if (result.includes("not found")) throw new Error(result);
       return result;
     });
   }
-  await check("tmux 执行", () => command(tmuxBinary, ["-V"]));
-  await check("helper 执行", async () => {
+  await check("tmux execution", () => command(tmuxBinary, ["-V"]));
+  await check("Helper execution", async () => {
     try {
       await command(join(native, "bin/rename-noreplace"), []);
     } catch (error) {
-      if ((error as { code?: number }).code === 2) return "可装载，usage 退出码 2";
+      if ((error as { code?: number }).code === 2) return "Loadable; usage exit code 2";
       throw error;
     }
-    throw new Error("helper 未返回预期 usage 状态");
+    throw new Error("Helper did not return the expected usage status");
   });
   if (!runtime) {
-    add("运行环境", "尚未检查运行环境；仅检查当前安装和配置", "warn");
+    add(
+      "Runtime environment",
+      "Runtime environment has not been checked; only the current installation and configuration were checked",
+      "warn",
+    );
     return { runtime: false, items };
   }
   add(
     "Agent",
     `pid=${process.pid}; uid=${process.getuid?.()}; cwd=${process.cwd()}; metadata revision=${runtime.revision}`,
   );
-  add("环境", `HOME=${process.env.HOME ?? ""}\nPATH=${process.env.PATH ?? ""}`);
+  add("Environment", `HOME=${process.env.HOME ?? ""}\nPATH=${process.env.PATH ?? ""}`);
   add(
     "server",
-    runtime.server + (runtime.connected ? " 已连接" : " 未连接"),
+    runtime.server + (runtime.connected ? " connected" : " disconnected"),
     runtime.connected ? "ok" : "warn",
   );
   add(
-    "记录器",
-    runtime.recorderPid ? `pid=${runtime.recorderPid}` : "未运行",
+    "Recorder",
+    runtime.recorderPid ? `pid=${runtime.recorderPid}` : "Not running",
     runtime.sessions.length && !runtime.recorderPid ? "warn" : "ok",
   );
   for (const session of runtime.sessions)
     add(
-      `终端 ${session.id}`,
+      `Terminal ${session.id}`,
       `${session.state}; recording=${session.webStatus}${session.webReason ? `; ${session.webReason}` : ""}`,
       session.webStatus === "unavailable" ? "warn" : "ok",
     );
@@ -137,7 +147,9 @@ export async function diagnose(
     const encoding = await command("locale", ["charmap"]);
     const values = `LANG=${process.env.LANG ?? ""}; LC_ALL=${process.env.LC_ALL ?? ""}; LC_CTYPE=${process.env.LC_CTYPE ?? ""}`;
     if (!/^UTF-?8$/i.test(encoding))
-      throw new Error(`${encoding}; ${values}; 请修正 ${environmentFile} 或容器环境`);
+      throw new Error(
+        `${encoding}; ${values}; correct ${environmentFile} or the container environment`,
+      );
     return `${encoding}; ${values}`;
   });
   await check("terminfo", async () => {
@@ -161,11 +173,11 @@ export async function diagnose(
         Number(found[1]) < required[0]! ||
         (Number(found[1]) === required[0] && Number(found[2]) < required[1]!)
       )
-        throw new Error(`${version}; 需要 >= ${minimum}`);
+        throw new Error(`${version}; requires >= ${minimum}`);
       return version;
     });
   }
-  await check("Git 配置来源", async () => {
+  await check("Git configuration sources", async () => {
     try {
       const value = await command("git", [
         "config",
@@ -174,9 +186,11 @@ export async function diagnose(
         "--get-regexp",
         "^(user\\.|credential\\.|core\\.sshcommand|gpg\\.|commit\\.gpgsign)",
       ]);
-      return `cwd=${process.cwd()}\n${value}\n仓库专属 includeIf/配置及实际认证另由同步结果确认`;
+      return `cwd=${process.cwd()}\n${value}
+Repository-specific includeIf/configuration and actual authentication are verified separately by synchronization results`;
     } catch (error) {
-      if ((error as { code?: number }).code === 1) return `cwd=${process.cwd()}; 未配置匹配项`;
+      if ((error as { code?: number }).code === 1)
+        return `cwd=${process.cwd()}; no matching configuration entries`;
       throw error;
     }
   });
@@ -200,7 +214,11 @@ export async function diagnose(
     for (const value of configured.slice(configured.lastIndexOf("") + 1)) {
       const first = /^([A-Za-z0-9_./+-]+)(?:\s|$)/.exec(value)?.[1];
       if (!first) {
-        add(key, "已配置复杂命令，程序依赖尚未核验", "warn");
+        add(
+          key,
+          "A complex command is configured; executable dependencies have not been verified",
+          "warn",
+        );
         continue;
       }
       await check(key, async () => {
@@ -210,23 +228,23 @@ export async function diagnose(
           const bundled = join(await command("git", ["--exec-path"]), program);
           try {
             await access(bundled, constants.X_OK);
-            return `${bundled}; 入口可执行`;
+            return `${bundled}; entry point is executable`;
           } catch (error) {
             if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
           }
         }
         const path = await command("sh", ["-c", 'command -v "$1"', "sh", program]);
         await access(path, constants.X_OK);
-        return `${path}; 入口可执行`;
+        return `${path}; entry point is executable`;
       });
     }
   }
   if (process.env.SSH_AUTH_SOCK)
     await check("SSH_AUTH_SOCK", async () => {
       const path = process.env.SSH_AUTH_SOCK!;
-      if (!(await stat(path)).isSocket()) throw new Error(`${path} 不是 socket`);
+      if (!(await stat(path)).isSocket()) throw new Error(`${path} is not a socket`);
       await access(path, constants.R_OK | constants.W_OK);
-      return `${path}; 可访问，认证结果需实际同步验证`;
+      return `${path}; accessible; authentication must be verified by an actual synchronization`;
     });
   return { runtime: true, items };
 }
@@ -241,13 +259,13 @@ export async function doctorCli() {
       await agentConfig();
     } catch (error) {
       report.items.push({
-        name: "磁盘配置",
+        name: "Configuration on disk",
         status: "error",
         detail: error instanceof Error ? error.message : String(error),
       });
     }
     report.items.unshift({
-      name: "本机连接",
+      name: "Local connection",
       status: "warn",
       detail: error instanceof Error ? error.message : String(error),
     });

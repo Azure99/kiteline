@@ -29,8 +29,8 @@ async function main() {
       else if (command === "reset-password") {
         const reader = createInterface({ input: process.stdin, output: process.stdout });
         try {
-          await store.resetPassword(await reader.question("新密码: "));
-          console.log("密码已更新，全部网页登录已失效。");
+          await store.resetPassword(await reader.question("New password: "));
+          console.log("Password updated. All web login sessions have been invalidated.");
         } finally {
           reader.close();
         }

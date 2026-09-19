@@ -77,7 +77,7 @@ export class Sessions {
   get(id: string, workspaceId?: string) {
     const item = this.records.get(id);
     if (!item || (workspaceId && item.session.workspaceId !== workspaceId))
-      throw new AppError("not_found", "终端会话不存在");
+      throw new AppError("not_found", "Terminal session does not exist");
     return item;
   }
   private track<T>(promise: Promise<T>) {
@@ -91,25 +91,25 @@ export class Sessions {
     shortcutId: string | undefined,
     signal: AbortSignal,
   ) {
-    if (this.closing) throw new AppError("cancelled", "agent 正在停止");
+    if (this.closing) throw new AppError("cancelled", "Agent is stopping");
     await access(this.config.shell, constants.X_OK);
     const id = randomUUID();
     const socket = join(this.config.runDir, id, "tmux.sock");
     if (Buffer.byteLength(socket) > 103)
       throw new AppError(
         "invalid_argument",
-        "运行目录路径过长，请使用较短的 KITELINE_AGENT_RUN_DIR",
+        "Runtime directory path is too long; use a shorter KITELINE_AGENT_RUN_DIR",
       );
     const { item, workspace, shortcut } = await this.metadata.withCurrent((metadata) => {
       signal.throwIfAborted();
-      if (this.closing) throw new AppError("cancelled", "agent 正在停止");
+      if (this.closing) throw new AppError("cancelled", "Agent is stopping");
       if (this.records.size >= this.config.limits.terminalSessionsPerDevice)
-        throw new AppError("busy", "设备终端会话已满");
+        throw new AppError("busy", "Device terminal session limit reached");
       const workspace = this.metadata.workspace(workspaceId);
       const shortcut = shortcutId
         ? metadata.shortcuts.find((item) => item.id === shortcutId)
         : undefined;
-      if (shortcutId && !shortcut) throw new AppError("not_found", "快捷方式不存在");
+      if (shortcutId && !shortcut) throw new AppError("not_found", "Shortcut does not exist");
       const item: Managed = {
         session: {
           id,
@@ -148,7 +148,9 @@ export class Sessions {
           });
           item.creationMayArrive = false;
           if (!this.records.has(id) || item.cleanup)
-            throw new OperationError("io_error", "终端已结束", "unknown", { sessionId: id });
+            throw new OperationError("io_error", "Terminal has ended", "unknown", {
+              sessionId: id,
+            });
           item.identity = identity;
           item.session.state = "running";
           item.session.webStatus = "available";
@@ -157,9 +159,14 @@ export class Sessions {
         } catch (error) {
           if (!(error instanceof OperationError)) item.creationMayArrive = false;
           if (!this.records.has(id))
-            throw new OperationError("io_error", "终端已创建后结束，请查看会话列表", "unknown", {
-              sessionId: id,
-            });
+            throw new OperationError(
+              "io_error",
+              "Terminal was created and then ended; check the session list",
+              "unknown",
+              {
+                sessionId: id,
+              },
+            );
           const state = await this.inspect(item).catch(() => undefined);
           if (state?.alive) {
             item.session.state = "running";
@@ -170,9 +177,14 @@ export class Sessions {
             await this.remove(item);
             throw error;
           }
-          throw new OperationError("io_error", "未能确认终端创建结果，请查询会话列表", "unknown", {
-            sessionId: id,
-          });
+          throw new OperationError(
+            "io_error",
+            "Could not confirm terminal creation; check the session list",
+            "unknown",
+            {
+              sessionId: id,
+            },
+          );
         }
       })(),
     );
@@ -186,7 +198,12 @@ export class Sessions {
       return await waitFor(operation, signal);
     } catch (error) {
       if (signal.aborted)
-        throw new OperationError("cancelled", "终端创建确认已中断", "unknown", { sessionId: id });
+        throw new OperationError(
+          "cancelled",
+          "Terminal creation confirmation was interrupted",
+          "unknown",
+          { sessionId: id },
+        );
       throw error;
     }
   }
@@ -217,9 +234,9 @@ export class Sessions {
   }
   recover(workspaceId: string, id: string) {
     const item = this.get(id, workspaceId);
-    if (this.closing || item.ending) throw new AppError("cancelled", "终端正在结束");
+    if (this.closing || item.ending) throw new AppError("cancelled", "Terminal is ending");
     if (item.creation || item.session.state !== "running")
-      throw new AppError("busy", "终端仍在创建");
+      throw new AppError("busy", "Terminal is still being created");
     if (item.session.webStatus === "available" || item.recovery) return { ...item.session };
     item.session.webStatus = "recovering";
     delete item.session.webReason;
@@ -258,7 +275,7 @@ export class Sessions {
   async redraw(workspaceId: string, id: string) {
     const item = this.get(id, workspaceId);
     if (item.session.webStatus !== "available" || item.ending)
-      throw new AppError("recording_unavailable", "请先恢复终端记录");
+      throw new AppError("recording_unavailable", "Recover terminal recording first");
     await this.recorder.request({ type: "redraw", sessionId: id });
     return { ...item.session };
   }
@@ -292,7 +309,7 @@ export class Sessions {
         AbortSignal.timeout(this.config.limits.rpcTimeout),
       );
       const result = /^(%\d+) (@\d+) ([01]) (\d*)\|(\d+) (\d+)\s*$/.exec(output);
-      if (!result) throw new Error("无法确认受管终端身份");
+      if (!result) throw new Error("Cannot verify the managed terminal identity");
       item.creationMayArrive = false;
       item.identity.paneId = result[1];
       item.identity.windowId = result[2];
@@ -367,6 +384,6 @@ export class Sessions {
     const errors = results
       .filter((result) => result.status === "rejected")
       .map((result) => result.reason as unknown);
-    if (errors.length) throw new AggregateError(errors, "部分终端未能结束");
+    if (errors.length) throw new AggregateError(errors, "Some terminals could not be ended");
   }
 }

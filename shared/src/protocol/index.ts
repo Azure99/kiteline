@@ -214,7 +214,7 @@ export interface GitRemotes {
   upstream?: string;
   defaultFetchRemote?: string;
   defaultPushRemote?: string;
-  pushTargetDescription: string;
+  pushTarget?: string;
 }
 export interface ListeningPorts {
   ports: number[];

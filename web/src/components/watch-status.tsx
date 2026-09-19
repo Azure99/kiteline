@@ -1,14 +1,16 @@
 import { useWatchStatus } from "../lib/use-workspace-refresh";
+import { useTranslation } from "react-i18next";
 
 export function WatchStatus({ deviceId, workspaceId }: { deviceId: string; workspaceId: string }) {
+  const { t } = useTranslation();
   const reason = useWatchStatus(deviceId, workspaceId);
-  return reason ? (
+  return reason !== undefined ? (
     <p
       role="status"
-      className="shrink-0 border-b border-border px-3 py-1 text-xs text-muted-foreground"
+      className="workbench-notice shrink-0 border-b border-border px-3 py-1 text-xs text-muted-foreground"
       title={reason}
     >
-      自动监听受限，定时刷新仍可用：{reason}
+      {t(($) => $.common.watchLimited, { reason: reason || t(($) => $.common.watchUnavailable) })}
     </p>
   ) : null;
 }

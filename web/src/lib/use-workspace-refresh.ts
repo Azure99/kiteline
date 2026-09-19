@@ -85,7 +85,7 @@ export function useWatchStatus(deviceId: string, workspaceId: string) {
         value.deviceId === deviceId &&
         value.workspaceId === workspaceId
       )
-        setReason(value.status === "degraded" ? (value.reason ?? "目录监听不可用") : undefined);
+        setReason(value.status === "degraded" ? (value.reason ?? "") : undefined);
     };
     window.addEventListener("kiteline:event", event);
     return () => window.removeEventListener("kiteline:event", event);

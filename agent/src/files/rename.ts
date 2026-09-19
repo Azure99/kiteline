@@ -21,7 +21,13 @@ export function renameNoReplace(source: string, target: string): Promise<void> {
         const code = getSystemErrorName(errno);
         return reject(Object.assign(new Error(`${code}: ${source} -> ${target}`), { code }));
       }
-      reject(new OperationError("io_error", "文件发布结果未确认，请刷新核对", "unknown"));
+      reject(
+        new OperationError(
+          "io_error",
+          "File publication result is unconfirmed; refresh to verify",
+          "unknown",
+        ),
+      );
     });
   });
 }

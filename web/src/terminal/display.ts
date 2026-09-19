@@ -16,12 +16,15 @@ import {
   retainScrollUpHistory,
   terminalOptions,
 } from "@kiteline/shared/terminal";
-import { ApiError, api, errorMessage, post } from "../lib/api";
+import { ApiError, api, post } from "../lib/api";
+import { i18n } from "../i18n";
 import { retainReadonlyViewport } from "./readonly-viewport";
 
 export interface DisplayState {
   status: "connecting" | "ready" | "ended" | "error";
-  message?: string;
+  error?: unknown;
+  notice?: "connectionLost" | "inputLimit" | "pasteLimit";
+  exitCode?: number | null;
   code?: string;
   historyLimited?: boolean;
   historyGap?: boolean;
@@ -90,7 +93,7 @@ export class TerminalDisplay {
       }
       this.meta = channel.meta;
       if (channel.meta.terminalProfile !== terminalProfile)
-        throw new Error("终端组件版本不同，请统一升级");
+        throw new Error("Terminal component versions differ; upgrade them together");
       const url = new URL(
         `/api/channels/${encodeURIComponent(channel.channelId)}/terminal`,
         location.href,
@@ -103,7 +106,8 @@ export class TerminalDisplay {
         if (this.disposed || this.finalFrame) return;
         try {
           if (event.data instanceof ArrayBuffer) {
-            if (event.data.byteLength > limits.dataChunkBytes) throw new Error("终端数据帧过大");
+            if (event.data.byteLength > limits.dataChunkBytes)
+              throw new Error("Terminal data frame exceeds its limit");
             const data = new Uint8Array(event.data);
             this.queue = this.queue
               .then(() => this.output(data))
@@ -113,7 +117,7 @@ export class TerminalDisplay {
               typeof event.data !== "string" ||
               new TextEncoder().encode(event.data).length > limits.controlMessageBytes
             )
-              throw new Error("无效终端控制帧");
+              throw new Error("Invalid terminal control frame");
             const frame = record(JSON.parse(event.data));
             if (frame.type === "ended" || frame.type === "error") {
               this.finalFrame = true;
@@ -130,7 +134,7 @@ export class TerminalDisplay {
         }
       };
       socket.onerror = () => {
-        if (!this.finalFrame) this.fail(new Error("终端连接失败"));
+        if (!this.finalFrame) this.fail(new Error("Terminal connection failed"));
       };
       socket.onclose = () => {
         if (!this.finalFrame && !this.disposed) {
@@ -138,7 +142,12 @@ export class TerminalDisplay {
           this.ready = false;
           if (this.terminal) this.terminal.options.disableStdin = true;
           this.queue = this.queue.then(() =>
-            this.change({ ...this.state, status: "error", message: "连接已断开" }),
+            this.change({
+              ...this.state,
+              status: "error",
+              notice: "connectionLost",
+              error: undefined,
+            }),
           );
         }
       };
@@ -151,7 +160,7 @@ export class TerminalDisplay {
     switch (frame.type) {
       case "restore.begin": {
         if (this.terminal || frame.terminalProfile !== terminalProfile)
-          throw new Error("无效终端恢复边界");
+          throw new Error("Invalid terminal restoration boundary");
         this.snapshotRemaining = integer(
           frame.snapshotBytes,
           "snapshotBytes",
@@ -169,7 +178,9 @@ export class TerminalDisplay {
         };
         const hoverLink = (_event: MouseEvent, uri: string) => {
           const target = deviceServiceLink(uri, this.deviceId);
-          this.element.title = target ? `访问设备端口 · ${this.deviceId}:${target.port}` : uri;
+          this.element.title = target
+            ? i18n.t(($) => $.devices.openService, { device: this.deviceId, port: target.port })
+            : uri;
         };
         const leaveLink = () => this.element.removeAttribute("title");
         const terminal = new Terminal({
@@ -242,7 +253,8 @@ export class TerminalDisplay {
         break;
       case "ready":
         if (this.connectionLost || this.receivedEnd) return;
-        if (!this.terminal || this.snapshotRemaining) throw new Error("终端恢复内容不完整");
+        if (!this.terminal || this.snapshotRemaining)
+          throw new Error("Terminal restoration is incomplete");
         this.ready = true;
         this.change({ ...this.state, status: "ready" });
         this.resize();
@@ -257,28 +269,37 @@ export class TerminalDisplay {
         this.change({
           ...this.state,
           status: "ended",
-          message: frame.exitCode === null ? "已结束" : `已结束 (${String(frame.exitCode)})`,
+          exitCode: frame.exitCode === null ? null : Number(frame.exitCode),
+          notice: undefined,
+          error: undefined,
         });
         break;
       case "error":
-        this.fail(new ApiError(String(frame.code), String(frame.message)));
+        this.fail(new ApiError(String(frame.code), String(frame.message), "failed", frame.details));
         break;
       case "input.error":
         this.change({
           ...this.state,
-          message: `${String(frame.message)}${frame.outcome === "unknown" ? "；输入结果未知" : ""}`,
+          error: new ApiError(
+            String(frame.code),
+            String(frame.message),
+            frame.outcome === "unknown" ? "unknown" : "failed",
+            frame.details,
+          ),
+          notice: undefined,
         });
         break;
       default:
-        throw new Error("无效终端消息");
+        throw new Error("Invalid terminal message");
     }
   }
   private async output(bytes: Uint8Array) {
     const terminal = this.terminal;
     if (this.disposed) return;
-    if (!terminal) throw new Error("缺少终端恢复边界");
+    if (!terminal) throw new Error("Missing terminal restoration boundary");
     if (this.snapshotRemaining) {
-      if (bytes.length > this.snapshotRemaining) throw new Error("终端快照长度不符");
+      if (bytes.length > this.snapshotRemaining)
+        throw new Error("Terminal snapshot length mismatch");
       this.snapshotRemaining -= bytes.length;
     }
     await new Promise<void>((resolve) => terminal.write(bytes, resolve));
@@ -292,7 +313,7 @@ export class TerminalDisplay {
       this.socket.bufferedAmount + new TextEncoder().encode(text).length >
       limits.terminalPendingBytes
     )
-      throw new Error("终端发送积压");
+      throw new Error("Terminal send queue exceeds its limit");
     this.socket.send(text);
   }
   private bytes(data: Uint8Array) {
@@ -308,7 +329,7 @@ export class TerminalDisplay {
       data.length > limits.dataChunkBytes ||
       this.socket.bufferedAmount + data.length > limits.terminalPendingBytes
     ) {
-      this.change({ ...this.state, message: "终端输入过大或发送积压" });
+      this.change({ ...this.state, notice: "inputLimit", error: undefined });
       return;
     }
     this.socket.send(data);
@@ -331,7 +352,7 @@ export class TerminalDisplay {
       encoder.encode(normalizePaste(text)).length > this.meta.terminalInputBytes ||
       encoder.encode(JSON.stringify({ type: "paste", text })).length > this.meta.controlMessageBytes
     ) {
-      this.change({ ...this.state, message: "粘贴内容超过容量" });
+      this.change({ ...this.state, notice: "pasteLimit", error: undefined });
       return;
     }
     try {
@@ -339,7 +360,7 @@ export class TerminalDisplay {
       this.send({ type: "paste", text });
       this.terminal?.scrollToBottom();
     } catch (error) {
-      this.change({ ...this.state, message: errorMessage(error) });
+      this.change({ ...this.state, error, notice: undefined });
     }
   }
   private onPaste = (event: ClipboardEvent) => {
@@ -405,7 +426,8 @@ export class TerminalDisplay {
       ...this.state,
       status: "error",
       code: error instanceof ApiError ? error.code : undefined,
-      message: errorMessage(error),
+      error,
+      notice: undefined,
     });
   }
   private cancelChannel() {

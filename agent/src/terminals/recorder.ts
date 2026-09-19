@@ -83,7 +83,7 @@ export class Recorder {
       if (this.child !== child) return;
       this.child = undefined;
       this.writer = undefined;
-      const reason = stderr.trim() || "终端记录器已退出";
+      const reason = stderr.trim() || "Terminal recorder exited";
       for (const pending of this.pending.values()) {
         clearTimeout(pending.timer);
         pending.reject(new OperationError("recording_unavailable", reason, "unknown"));
@@ -98,7 +98,9 @@ export class Recorder {
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new OperationError("timeout", "记录器未确认操作", "unknown"));
+        reject(
+          new OperationError("timeout", "Recorder did not acknowledge the operation", "unknown"),
+        );
       }, this.config.channelPairTimeout);
       this.pending.set(id, { resolve: (value) => resolve(value as T), reject, timer });
       try {
@@ -112,10 +114,10 @@ export class Recorder {
   }
   send(message: RecorderRequest) {
     if (!this.available || !this.writer)
-      throw new AppError("recording_unavailable", "终端记录器不可用");
+      throw new AppError("recording_unavailable", "Terminal recorder is unavailable");
     const owner = "attachmentId" in message ? message.attachmentId : undefined;
     if (!this.writer.send(message, owner))
-      throw new AppError("limit_exceeded", "终端 IPC 发送积压");
+      throw new AppError("limit_exceeded", "Terminal IPC send backlog limit reached");
   }
   detach(sessionId: string, attachmentId: string) {
     this.writer?.discard(attachmentId);

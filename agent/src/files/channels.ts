@@ -61,7 +61,7 @@ export class FileChannels {
       ready: false,
       started: false,
       timer: setTimeout(
-        () => this.fail(id, new AppError("timeout", "文件准备超时")),
+        () => this.fail(id, new AppError("timeout", "File preparation timed out")),
         this.config.limits.channelPairTimeout,
       ),
       prepare: Promise.resolve(),
@@ -79,11 +79,11 @@ export class FileChannels {
         const frame = binary ? undefined : record(JSON.parse(data.toString()));
         if (!channel.started) {
           if (!channel.ready || frame?.type !== "start")
-            throw new AppError("invalid_argument", "文件通道尚未就绪");
+            throw new AppError("invalid_argument", "File channel is not ready");
           channel.started = true;
           clearTimeout(channel.timer);
           channel.timer = setTimeout(
-            () => this.fail(id, new AppError("timeout", "文件传输长时间未推进")),
+            () => this.fail(id, new AppError("timeout", "File transfer stalled for too long")),
             this.config.limits.channelIdleTimeout,
           );
           if (channel.read) {
@@ -126,15 +126,15 @@ export class FileChannels {
               this.changed(channel.write.value.workspaceId);
             await send(JSON.stringify({ type: "result", reply }));
             this.finish(id, undefined, true);
-          } else throw new AppError("invalid_argument", "无效文件控制帧");
-        } else throw new AppError("invalid_argument", "文件读取不接受正文");
+          } else throw new AppError("invalid_argument", "Invalid file control frame");
+        } else throw new AppError("invalid_argument", "File reads do not accept a body");
       },
       (error) => this.fail(id, error),
       signal,
     ).close;
     socket.on("open", () => {
       channel.prepare = (async () => {
-        if (!admitted) throw new AppError("busy", "设备文件传输名额已满");
+        if (!admitted) throw new AppError("busy", "Device file transfer limit reached");
         const workspaceId = string(params.workspaceId);
         const path = string(params.path);
         let meta;
@@ -152,7 +152,7 @@ export class FileChannels {
           (params.purpose === "save" || params.purpose === "upload")
         ) {
           if (typeof params.createOnly !== "boolean")
-            throw new AppError("invalid_argument", "无效保存参数");
+            throw new AppError("invalid_argument", "Invalid save parameters");
           const size = integer(
             params.size,
             "size",
@@ -163,7 +163,10 @@ export class FileChannels {
           );
           if (params.purpose === "save") {
             if (params.expectedTargetVersion !== undefined)
-              throw new AppError("invalid_argument", "保存不使用目录项版本");
+              throw new AppError(
+                "invalid_argument",
+                "Saving does not use a directory entry version",
+              );
             channel.write = {
               purpose: "save",
               value: await this.files.prepare(
@@ -177,7 +180,7 @@ export class FileChannels {
             };
           } else {
             if (params.expectedRevision !== undefined)
-              throw new AppError("invalid_argument", "上传不使用文本版本");
+              throw new AppError("invalid_argument", "Uploading does not use a text revision");
             channel.write = {
               purpose: "upload",
               value: await this.binaryFiles.prepare(
@@ -199,11 +202,11 @@ export class FileChannels {
               params.purpose === "save" ? "text/plain; charset=utf-8" : "application/octet-stream",
             filename: path.split("/").at(-1)!,
           };
-        } else throw new AppError("unsupported", "不支持的文件通道用途");
+        } else throw new AppError("unsupported", "Unsupported file channel purpose");
         signal.throwIfAborted();
         clearTimeout(channel.timer);
         channel.timer = setTimeout(
-          () => this.fail(id, new AppError("timeout", "等待文件请求超时")),
+          () => this.fail(id, new AppError("timeout", "Timed out waiting for a file request")),
           this.config.limits.channelPairTimeout,
         );
         channel.ready = true;
@@ -223,7 +226,7 @@ export class FileChannels {
     this.finish(id, error, true);
   }
   cancel(id: string) {
-    this.finish(id, new AppError("cancelled", "文件请求已取消"), false);
+    this.finish(id, new AppError("cancelled", "File request cancelled"), false);
   }
   private finish(id: string, error: unknown, graceful: boolean) {
     const channel = this.entries.get(id);
@@ -231,7 +234,7 @@ export class FileChannels {
     this.entries.delete(id);
     if (channel.admitted) this.cleaningCount++;
     clearTimeout(channel.timer);
-    channel.controller.abort(error ?? new AppError("cancelled", "文件请求已完成"));
+    channel.controller.abort(error ?? new AppError("cancelled", "File request completed"));
     if (graceful && channel.socket.readyState === WebSocket.OPEN) {
       channel.socket.resume();
       channel.socket.close(1000);

@@ -24,9 +24,9 @@ export async function checkRpcContracts(deviceId: string, target: GitTarget, met
   // @ts-expect-error commit-side diff requires a commit identity
   await rpc(deviceId, "git.diff", { workspaceId: "w", repoId: "r", path: "a", side: "commit" });
   const actions = new GitActions();
-  await actions.run(target, "git.pull", { expectedHead: { symbolicRef: null, oid: null } }, "Pull");
+  await actions.run(target, "git.pull", { expectedHead: { symbolicRef: null, oid: null } });
   // @ts-expect-error the independent Git write entry point also requires HEAD
-  await actions.run(target, "git.pull", {}, "Pull");
+  await actions.run(target, "git.pull", {});
   // @ts-expect-error result cannot be chosen independently of a method
   const wrong: RpcResult<"files.rename"> = result;
   void wrong;

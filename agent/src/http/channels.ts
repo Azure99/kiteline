@@ -43,7 +43,7 @@ export class HttpChannels {
       admitted,
       ready: false,
       timer: setTimeout(
-        () => this.fail(id, new AppError("timeout", "本地服务连接超时")),
+        () => this.fail(id, new AppError("timeout", "Local service connection timed out")),
         this.config.limits.channelPairTimeout,
       ),
     };
@@ -51,7 +51,7 @@ export class HttpChannels {
     const start = (raw: Buffer, binary: boolean) => {
       try {
         if (binary || !item.ready || record(JSON.parse(raw.toString())).type !== "start")
-          throw new AppError("invalid_argument", "HTTP 通道尚未就绪");
+          throw new AppError("invalid_argument", "HTTP channel is not ready");
         socket.off("message", start);
         clearTimeout(item.timer);
         item.stream = httpStream(socket, (error) => this.fail(id, error));
@@ -66,7 +66,7 @@ export class HttpChannels {
     socket.on("open", () => {
       if (this.entries.get(id) !== item) return socket.terminate();
       try {
-        if (!admitted) throw new AppError("busy", "设备通道已满");
+        if (!admitted) throw new AppError("busy", "Device channel limit reached");
         const port = integer(params.port, "port", 1, 65535);
         const dial = (host: string) => {
           const local = connect({ host, port });
@@ -87,7 +87,10 @@ export class HttpChannels {
           });
           local.on("close", () => {
             if (this.entries.get(id) === item && connected && !item.stream)
-              this.fail(id, new AppError("io_error", "本地服务在请求前关闭连接"));
+              this.fail(
+                id,
+                new AppError("io_error", "Local service closed the connection before the request"),
+              );
           });
         };
         dial("127.0.0.1");

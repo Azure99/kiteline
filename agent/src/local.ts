@@ -26,16 +26,17 @@ export class LocalServer {
   }
   async start() {
     if (Buffer.byteLength(this.socketPath) > 103)
-      throw new AppError("invalid_argument", "KITELINE_AGENT_RUN_DIR 路径过长");
+      throw new AppError("invalid_argument", "KITELINE_AGENT_RUN_DIR path is too long");
     await rm(this.socketPath, { force: true });
     const server = createServer(async (request, response) => {
       const controller = new AbortController();
       const timeout = setTimeout(
-        () => controller.abort(new AppError("timeout", "本机操作超时")),
+        () => controller.abort(new AppError("timeout", "Local operation timed out")),
         this.config.limits.rpcTimeout,
       );
       response.on("close", () => {
-        if (!response.writableEnded) controller.abort(new AppError("cancelled", "本机请求已断开"));
+        if (!response.writableEnded)
+          controller.abort(new AppError("cancelled", "Local request disconnected"));
       });
       try {
         if (request.method !== "POST" || request.url !== "/rpc")
@@ -46,7 +47,7 @@ export class LocalServer {
           const chunk = Buffer.from(part as Uint8Array);
           bytes += chunk.length;
           if (bytes > limits.controlMessageBytes)
-            throw new AppError("limit_exceeded", "本机请求过大");
+            throw new AppError("limit_exceeded", "Local request is too large");
           chunks.push(chunk);
         }
         const body = record(JSON.parse(Buffer.concat(chunks).toString()));
@@ -99,7 +100,8 @@ export function localRequest<T>(
         let bytes = 0;
         response.on("data", (chunk: Buffer) => {
           bytes += chunk.length;
-          if (bytes > limits.controlMessageBytes) response.destroy(new Error("本机结果过大"));
+          if (bytes > limits.controlMessageBytes)
+            response.destroy(new Error("Local result is too large"));
           else chunks.push(chunk);
         });
         response.on("error", reject);

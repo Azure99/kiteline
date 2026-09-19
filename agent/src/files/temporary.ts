@@ -49,7 +49,8 @@ export class TemporaryFiles {
   create(parent: string, expected: BigIntStats, signal: AbortSignal): Promise<Temporary> {
     return publish(async () => {
       const info = await stat(parent, { bigint: true });
-      if (!sameObject(info, expected)) throw new AppError("conflict", "目标父目录已变化");
+      if (!sameObject(info, expected))
+        throw new AppError("conflict", "Target parent directory has changed");
       const name = `.kiteline-${randomUUID()}.tmp`;
       const path = join(parent, name);
       const handle = await open(path, "wx+", 0o600);
@@ -83,7 +84,8 @@ export class TemporaryFiles {
   ): Promise<TrackedTemporary> {
     return publish(async () => {
       const info = await stat(parent, { bigint: true });
-      if (!sameObject(info, expected)) throw new AppError("conflict", "目标父目录已变化");
+      if (!sameObject(info, expected))
+        throw new AppError("conflict", "Target parent directory has changed");
       const name = `.kiteline-${randomUUID()}.tmp`;
       const path = join(parent, name);
       await symlink(target, path);
@@ -128,7 +130,7 @@ export class TemporaryFiles {
       String(file.dev) !== temporary.dev ||
       String(file.ino) !== temporary.ino
     )
-      throw new AppError("conflict", "临时文件或目标父目录已变化");
+      throw new AppError("conflict", "Temporary file or target parent directory has changed");
   }
 
   async forgetLocked(record: TemporaryRecord) {
@@ -149,7 +151,10 @@ export class TemporaryFiles {
         // A missing file only resolves the record if its original parent remains reachable.
         const parent = await stat(record.parent, { bigint: true });
         if (String(parent.dev) !== record.parentDev || String(parent.ino) !== record.parentIno)
-          throw new AppError("conflict", "临时文件父目录已变化，保留定位记录");
+          throw new AppError(
+            "conflict",
+            "Temporary file parent directory has changed; the location record is retained",
+          );
         await this.forgetLocked(record);
         return;
       }
@@ -162,7 +167,10 @@ export class TemporaryFiles {
       String(info.dev) !== record.dev ||
       String(info.ino) !== record.ino
     )
-      throw new AppError("conflict", "临时项身份已变化，保留定位记录");
+      throw new AppError(
+        "conflict",
+        "Temporary item identity has changed; the location record is retained",
+      );
     await unlink(path);
     await this.forgetLocked(record);
   }

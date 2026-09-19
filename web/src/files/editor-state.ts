@@ -9,6 +9,7 @@ import {
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { bracketMatching, defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { searchKeymap } from "@codemirror/search";
+import { editorPhrases } from "./editor-locale";
 
 const theme = EditorView.theme({
   "&": { height: "100%", fontSize: "13px", background: "var(--background)" },
@@ -26,7 +27,7 @@ const theme = EditorView.theme({
   "@media (max-width: 959px)": { "&": { fontSize: "16px" } },
 });
 
-export function textState(text: string, language: Compartment) {
+export function textState(text: string, language: Compartment, phrases = new Compartment()) {
   return EditorState.create({
     doc: text,
     extensions: [
@@ -39,6 +40,7 @@ export function textState(text: string, language: Compartment) {
       syntaxHighlighting(defaultHighlightStyle),
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
       language.of([]),
+      phrases.of(EditorState.phrases.of(editorPhrases())),
     ],
   });
 }

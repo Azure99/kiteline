@@ -12,7 +12,7 @@ test("only loopback and wildcard TCP LISTEN addresses become suggestions", () =>
   expect(listeningPort(row("0200007F"), false)).toBeUndefined();
   expect(listeningPort(row("0100007F", "01"), false)).toBeUndefined();
   expect(listeningPort(row("00000000000000000000000001000000"), true)).toBe(5299);
-  expect(() => listeningPort("unexpected data", false)).toThrow("无法解析");
+  expect(() => listeningPort("unexpected data", false)).toThrow("Cannot parse");
 });
 test("real proc snapshots deduplicate IPv4/IPv6 listeners and respect cancellation", async () => {
   const v4 = createServer(),

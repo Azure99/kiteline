@@ -1,3 +1,6 @@
+import { ErrorNotice } from "../components/error-notice";
+import { i18n } from "../i18n";
+import { useTranslation } from "react-i18next";
 import { useEffect, useState } from "react";
 import { FolderOpen, Minus, MoreHorizontal, Plus, Undo2 } from "lucide-react";
 import type { DiscardScope, GitEntry, GitReview } from "@kiteline/shared/protocol";
@@ -11,7 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../components/ui/dialog";
-import { ApiError, errorMessage, rpc } from "../lib/api";
+import { ApiError, rpc } from "../lib/api";
 import { type DraftStore, isDirty } from "../files/drafts";
 import type { ChangeSide } from "./selection";
 import { type GitActions, type GitTarget, useGitActivity } from "./actions";
@@ -39,11 +42,21 @@ export function RowActions({
   onDiscard: (paths: string[], scope: DiscardScope) => void;
   onFile: () => void;
 }) {
+  const { t } = useTranslation();
+
   const staged = side === "staged";
   return (
     <div className="flex shrink-0 items-center">
       <IconButton
-        label={`${staged ? "取消暂存" : side === "conflict" ? "标记解决" : "暂存"} ${entry.path}`}
+        label={t(
+          ($) =>
+            staged
+              ? $.git.unstageNamed
+              : side === "conflict"
+                ? $.git.resolveNamed
+                : $.git.stageNamed,
+          { path: entry.path },
+        )}
         disabled={disabled || (!staged && !stageable(entry))}
         onClick={() =>
           onIndex(
@@ -56,7 +69,7 @@ export function RowActions({
       </IconButton>
       {side === "worktree" && (
         <IconButton
-          label={`丢弃未暂存更改 ${entry.path}`}
+          label={t(($) => $.git.discardNamed, { path: entry.path })}
           disabled={disabled || !discardable(entry)}
           onClick={() => onDiscard([entry.path], "worktree")}
         >
@@ -65,18 +78,25 @@ export function RowActions({
       )}
       <Menu>
         <MenuTrigger
-          render={<Button variant="ghost" size="icon" aria-label={`${entry.path} Git 操作`} />}
+          render={
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={t(($) => $.git.actionsNamed, { path: entry.path })}
+            />
+          }
         >
           <MoreHorizontal />
         </MenuTrigger>
         <MenuContent>
           <MenuItem onClick={onFile}>
-            <FolderOpen />在 Files 打开
+            <FolderOpen />
+            {t(($) => $.git.openFiles)}
           </MenuItem>
           {staged && entry.oldPath && (
             <MenuItem disabled={disabled} onClick={() => onIndex([entry.path], "unstage")}>
               <Minus />
-              只取消暂存新路径
+              {t(($) => $.git.unstageNewPath)}
             </MenuItem>
           )}
           <MenuItem
@@ -84,7 +104,7 @@ export function RowActions({
             onClick={() => onDiscard([entry.path], "all")}
           >
             <Undo2 />
-            丢弃全部更改
+            {t(($) => $.git.discardAll)}
           </MenuItem>
         </MenuContent>
       </Menu>
@@ -106,7 +126,7 @@ export function confirmDiskVersion(
         isDirty(draft) &&
         paths.some((path) => draft.path === (repoPath === "." ? path : `${repoPath}/${path}`)),
     );
-  return !dirty || window.confirm("所选文件有未保存修改。暂存设备上的磁盘版本？");
+  return !dirty || window.confirm(i18n.t(($) => $.git.stageDiskConfirm));
 }
 export function GitFeedback({
   actions,
@@ -119,6 +139,8 @@ export function GitFeedback({
   onLocate: (path: string) => void;
   onTerminal: () => void;
 }) {
+  const { t } = useTranslation();
+
   const value = useGitActivity(actions, target);
   const details =
     value.error instanceof ApiError
@@ -127,38 +149,60 @@ export function GitFeedback({
   const result = (value.error instanceof ApiError ? value.error.result : value.result) as
     | { changedPaths?: string[]; stdout?: string; stderr?: string; truncated?: boolean }
     | undefined;
-  if (!value.request && !value.error && !value.notice) return null;
+  const actionNames = {
+    "git.stage": t(($) => $.git.stage),
+    "git.unstage": t(($) => $.git.unstage),
+    "git.commit": t(($) => $.git.commit),
+    "git.discard": t(($) => $.git.discard),
+    "git.branch.create": t(($) => $.git.createBranch),
+    "git.branch.switch": t(($) => $.git.switchBranch),
+    "git.branch.delete": t(($) => $.git.deleteBranch),
+    "git.continue": t(($) => $.git.continue),
+    "git.abort": t(($) => $.git.abort),
+    "git.fetch": "Fetch",
+    "git.pull": "Pull",
+    "git.push": "Push",
+  };
+  if (!value.request && !value.error && !value.completed) return null;
   return (
     <div className="max-h-40 shrink-0 overflow-auto border-b border-border px-3 py-2 text-xs">
       <div className="flex flex-wrap items-center gap-2">
-        <p
+        <div
           role={value.error ? "alert" : "status"}
           className={`min-w-0 flex-1 break-words ${value.error ? "text-destructive" : "text-muted-foreground"}`}
         >
-          {value.error
-            ? `${value.error instanceof ApiError && value.error.outcome === "partial" ? "部分完成；" : ""}${errorMessage(value.error)}`
-            : value.request
-              ? `${value.request.label} · ${value.request.phase === "queued" ? "等待执行" : "正在执行"}`
-              : value.notice}
-        </p>
+          {value.error ? (
+            <ErrorNotice error={value.error} />
+          ) : value.request ? (
+            t(
+              ($) => (value.request!.phase === "queued" ? $.git.actionQueued : $.git.actionRunning),
+              { action: actionNames[value.request.method] },
+            )
+          ) : (
+            value.completed &&
+            t(($) => $.git.actionCompleted, { action: actionNames[value.completed] })
+          )}
+        </div>
         {value.request && (
           <Button
             variant="ghost"
             disabled={value.request.cancelling}
             onClick={() => void actions.cancel(target)}
           >
-            {value.request.cancelling ? "正在取消" : "取消操作"}
+            {value.request.cancelling
+              ? t(($) => $.common.cancelling)
+              : t(($) => $.common.cancelOperation)}
           </Button>
         )}
-        {value.error && (
+        {!!value.error && (
           <Button variant="ghost" onClick={onTerminal}>
-            终端
+            {t(($) => $.common.terminal)}
           </Button>
         )}
       </div>
       {!!result?.changedPaths?.length && (
         <div className="mt-1">
-          <p>已变更路径</p>
+          <p>{t(($) => $.git.changedPaths)}</p>
           {result.changedPaths.map((path) => (
             <button
               key={path}
@@ -179,15 +223,15 @@ export function GitFeedback({
           {path}
         </button>
       ))}
-      {details?.truncated && <p>更多阻挡项未显示</p>}
+      {details?.truncated && <p>{t(($) => $.git.moreBlockedPaths)}</p>}
       {(result?.stdout || result?.stderr) && (
         <details className="mt-1">
-          <summary className="cursor-pointer py-1">Git 输出</summary>
+          <summary className="cursor-pointer py-1">{t(($) => $.git.output)}</summary>
           <pre className="break-words whitespace-pre-wrap">
             {result.stdout}
             {result.stderr}
           </pre>
-          {result.truncated && <p>输出仅保留前段</p>}
+          {result.truncated && <p>{t(($) => $.git.outputTruncated)}</p>}
         </details>
       )}
     </div>
@@ -208,6 +252,8 @@ export function DiscardDialog({
   onClose: () => void;
   onLocate: (path: string) => void;
 }) {
+  const { t } = useTranslation();
+
   const [review, setReview] = useState<GitReview>();
   const [error, setError] = useState<unknown>();
   useEffect(() => {
@@ -237,20 +283,25 @@ export function DiscardDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{scope === "all" ? "丢弃暂存与未暂存更改" : "丢弃未暂存更改"}</DialogTitle>
+          <DialogTitle>
+            {scope === "all"
+              ? t(($) => $.git.discardStagedWorktree)
+              : t(($) => $.git.discardWorktree)}
+          </DialogTitle>
         </DialogHeader>
         <div className="scroll-area min-h-0 space-y-2 overflow-auto p-4 text-sm">
           {review
             ? review.summary.map((entry) => (
                 <p key={entry.path} className="break-all whitespace-pre-wrap">
-                  {entry.action === "delete" ? "删除" : "恢复"} · {entry.path}
+                  {entry.action === "delete" ? t(($) => $.common.delete) : t(($) => $.git.restore)}{" "}
+                  · {entry.path}
                 </p>
               ))
-            : !error && <p role="status">正在审查</p>}
+            : !error && <p role="status">{t(($) => $.git.reviewing)}</p>}
           {!!error && (
-            <p role="alert" className="text-destructive">
-              {errorMessage(error)}
-            </p>
+            <div role="alert" className="text-destructive">
+              <ErrorNotice error={error} />
+            </div>
           )}
           {details?.blockedPaths?.map((path) => (
             <Button
@@ -266,29 +317,28 @@ export function DiscardDialog({
               {path}
             </Button>
           ))}
-          {details?.truncated && <p>更多阻挡项未显示</p>}
+          {details?.truncated && <p>{t(($) => $.git.moreBlockedPaths)}</p>}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
-            取消
+            {t(($) => $.common.cancel)}
           </Button>
           <Button
             variant="destructive"
             disabled={!review}
             onClick={() => {
               if (review) {
-                void actions.run(
-                  target,
-                  "git.discard",
-                  { paths: review.paths, scope, reviewToken: review.reviewToken },
-                  "丢弃",
-                );
+                void actions.run(target, "git.discard", {
+                  paths: review.paths,
+                  scope,
+                  reviewToken: review.reviewToken,
+                });
                 onClose();
               }
             }}
           >
             <Undo2 />
-            丢弃
+            {t(($) => $.git.discard)}
           </Button>
         </DialogFooter>
       </DialogContent>

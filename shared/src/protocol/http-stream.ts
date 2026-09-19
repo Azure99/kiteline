@@ -9,11 +9,11 @@ export function httpStream(socket: WebSocket, failed: (error: Error) => void): D
   }
   // Classify frames and EOF before ws can expose them to the HTTP parser.
   socket.prependListener("message", (_data, binary) => {
-    if (!binary) fail(new AppError("io_error", "HTTP 数据通道收到文本帧"));
+    if (!binary) fail(new AppError("io_error", "HTTP data channel received a text frame"));
   });
   socket.prependListener("close", (code: number) => {
     if (code !== 1000 && code !== 1005)
-      fail(new AppError("io_error", `HTTP 数据连接异常关闭 (${code})`));
+      fail(new AppError("io_error", `HTTP data connection closed abnormally (${code})`));
   });
   const source = createWebSocketStream(socket, { highWaterMark: limits.dataChunkBytes });
   source.on("error", failed);

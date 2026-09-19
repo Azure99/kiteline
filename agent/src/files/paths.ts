@@ -8,14 +8,14 @@ import { AppError, string, type Entry } from "@kiteline/shared/protocol";
 export function relativePath(value: unknown): string {
   const path = string(value, "path");
   if (isAbsolute(path) || path.split("/").includes(".."))
-    throw new AppError("invalid_argument", "需要 workspace 内的相对路径");
+    throw new AppError("invalid_argument", "A relative path within the workspace is required");
   return normalize(path).replace(/\/$/, "") || ".";
 }
 
 export function entryName(value: unknown): string {
   const name = string(value, "name");
   if (name.includes("/") || name === "." || name === "..")
-    throw new AppError("invalid_argument", "请输入单个文件或目录名称");
+    throw new AppError("invalid_argument", "Enter a single file or directory name");
   return name;
 }
 
@@ -47,7 +47,10 @@ export async function locate(root: string, path: string) {
 
 export async function protectRoot(root: string, path: string, info: BigIntStats) {
   if (path === "." || (info.isDirectory() && sameObject(info, await stat(root, { bigint: true }))))
-    throw new AppError("invalid_argument", "不能重命名、移动或删除 workspace 根目录");
+    throw new AppError(
+      "invalid_argument",
+      "Cannot rename, move, or delete the workspace root directory",
+    );
 }
 
 export async function readEntry(parent: string, rawName: Buffer, path?: string): Promise<Entry> {

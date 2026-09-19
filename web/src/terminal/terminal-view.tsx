@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import {
   ArrowDown,
@@ -12,8 +13,9 @@ import {
 import { TerminalDisplay, type DisplayState } from "./display";
 import { IconButton } from "../components/icon-button";
 import { Button } from "../components/ui/button";
-import { rpc, errorMessage } from "../lib/api";
-import type { Terminal } from "@xterm/xterm";
+import { rpc } from "../lib/api";
+import { Terminal } from "@xterm/xterm";
+import { ErrorNotice } from "../components/error-notice";
 import { TouchControls } from "./touch-controls";
 import { useMobile } from "../lib/use-mobile";
 import {
@@ -44,13 +46,15 @@ export function TerminalView({
   ref?: Ref<TerminalActions>;
   onStatus?: (status: DisplayState["status"]) => void;
 }) {
+  const { t } = useTranslation();
+
   const element = useRef<HTMLDivElement>(null);
   const display = useRef<TerminalDisplay>(undefined);
   const [terminal, setTerminal] = useState<Terminal>();
   const [reading, setReading] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [state, setState] = useState<DisplayState>({ status: "connecting" });
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState<unknown>();
   const [ctrl, setCtrl] = useState(false);
   const mobile = useMobile();
   const control = useRef(false);
@@ -94,14 +98,15 @@ export function TerminalView({
         await new Promise((resolve) => setTimeout(resolve, 500));
         const result = await rpc(deviceId, "sessions.list", { workspaceId }, signal);
         const current = result.sessions.find((value) => value.id === sessionId);
-        if (!current) throw new Error("原任务已结束");
+        if (!current) throw new Error("The original task has ended");
         session = current;
       }
       if (signal.aborted) return;
-      if (session.webStatus !== "available") throw new Error(session.webReason ?? "终端恢复失败");
+      if (session.webStatus !== "available")
+        throw new Error(session.webReason ?? "Terminal recovery failed");
       redisplay();
     } catch (error) {
-      if (!signal.aborted) setNotice(errorMessage(error));
+      if (!signal.aborted) setNotice(error);
     } finally {
       if (!signal.aborted) setRecovering(false);
     }
@@ -114,7 +119,7 @@ export function TerminalView({
       await rpc(deviceId, "sessions.redraw", { workspaceId, sessionId }, signal);
       if (!signal.aborted) setRedrawDialog(false);
     } catch (error) {
-      if (!signal.aborted) setNotice(errorMessage(error));
+      if (!signal.aborted) setNotice(error);
     } finally {
       if (!signal.aborted) setRedrawing(false);
     }
@@ -145,6 +150,12 @@ export function TerminalView({
       setReading(false);
     };
   }, [deviceId, workspaceId, sessionId, attempt, history]);
+  useEffect(() => {
+    Terminal.strings.promptLabel = t(($) => $.terminal.inputLabel);
+    Terminal.strings.tooMuchOutput = t(($) => $.terminal.tooMuchOutput);
+    terminal?.textarea?.setAttribute("aria-label", Terminal.strings.promptLabel);
+    element.current?.removeAttribute("title");
+  }, [terminal, t]);
   async function clipboard(copy: boolean) {
     try {
       if (copy) {
@@ -156,7 +167,7 @@ export function TerminalView({
         display.current?.focus();
       }
     } catch (error) {
-      setNotice(errorMessage(error));
+      setNotice(error);
     }
   }
   const auxiliary = (value: string) => {
@@ -165,26 +176,44 @@ export function TerminalView({
     setControl(false);
   };
   return (
-    <section className="terminal-surface flex min-h-0 flex-1 flex-col" aria-label="终端显示">
-      {(state.status !== "ready" ||
-        state.message ||
+    <section
+      className="terminal-surface flex min-h-0 flex-1 flex-col"
+      aria-label={t(($) => $.terminal.display)}
+    >
+      {!!(
+        state.status !== "ready" ||
+        state.error ||
+        state.notice ||
         state.historyGap ||
         state.historyLimited ||
-        notice) && (
+        notice
+      ) && (
         <div
-          className="terminal-notice flex flex-wrap items-center gap-2 px-3 py-1 text-xs"
+          className="terminal-notice flex flex-wrap items-start gap-2 px-3 py-1 text-xs"
           role="status"
         >
-          <span className="min-w-0 flex-1 break-words">
-            {notice ||
-              state.message ||
-              (state.status === "connecting"
-                ? "正在连接"
-                : [state.historyGap && "历史存在缺口", state.historyLimited && "已减少较早历史"]
-                    .filter(Boolean)
-                    .join("；"))}
-          </span>
-          {state.status === "error" && (
+          <div className="min-w-0 flex-1 break-words">
+            {notice || state.error ? (
+              <ErrorNotice error={notice || state.error} />
+            ) : state.notice ? (
+              t(($) => $.terminal[state.notice!])
+            ) : state.status === "ended" ? (
+              state.exitCode == null ? (
+                t(($) => $.terminal.ended)
+              ) : (
+                t(($) => $.terminal.endedCode, { code: state.exitCode })
+              )
+            ) : state.status === "connecting" ? (
+              t(($) => $.common.connecting)
+            ) : state.historyGap && state.historyLimited ? (
+              t(($) => $.terminal.historyGapLimited)
+            ) : state.historyGap ? (
+              t(($) => $.terminal.historyGap)
+            ) : state.historyLimited ? (
+              t(($) => $.terminal.historyLimited)
+            ) : null}
+          </div>
+          {!!(state.status === "error") && (
             <>
               <Button
                 variant="ghost"
@@ -195,24 +224,24 @@ export function TerminalView({
               >
                 <RefreshCw />
                 {recovering
-                  ? "正在恢复"
+                  ? t(($) => $.terminal.recovering)
                   : state.code === "recording_unavailable"
-                    ? "恢复终端"
-                    : "重新连接"}
+                    ? t(($) => $.terminal.recover)
+                    : t(($) => $.terminal.reconnect)}
               </Button>
               {["limit_exceeded", "timeout", "busy"].includes(state.code ?? "") && (
                 <Button
                   variant="ghost"
                   onClick={() => redisplay("screen")}
-                  title="仅本次显示省略较早滚屏"
+                  title={t(($) => $.terminal.screenOnlyHint)}
                 >
-                  减少历史后重试
+                  {t(($) => $.terminal.screenOnly)}
                 </Button>
               )}
             </>
           )}
-          {notice && (
-            <IconButton label="关闭提示" onClick={() => setNotice("")}>
+          {!!notice && (
+            <IconButton label={t(($) => $.common.dismiss)} onClick={() => setNotice("")}>
               <X />
             </IconButton>
           )}
@@ -223,7 +252,10 @@ export function TerminalView({
         {terminal && <TouchControls terminal={terminal} deviceId={deviceId} onError={setNotice} />}
         {reading && (
           <div className="absolute bottom-3 right-4 rounded bg-[#39414c] shadow">
-            <IconButton label="回到底部" onClick={() => display.current?.scrollToBottom()}>
+            <IconButton
+              label={t(($) => $.terminal.bottom)}
+              onClick={() => display.current?.scrollToBottom()}
+            >
               <ArrowDown />
             </IconButton>
           </div>
@@ -264,14 +296,14 @@ export function TerminalView({
             </>
           )}
           {[
-            { icon: ArrowLeft, value: "D", label: "左" },
-            { icon: ArrowDown, value: "B", label: "下" },
-            { icon: ArrowUp, value: "A", label: "上" },
-            { icon: ArrowRight, value: "C", label: "右" },
+            { icon: ArrowLeft, value: "D", label: t(($) => $.terminal.left) },
+            { icon: ArrowDown, value: "B", label: t(($) => $.terminal.down) },
+            { icon: ArrowUp, value: "A", label: t(($) => $.terminal.up) },
+            { icon: ArrowRight, value: "C", label: t(($) => $.terminal.right) },
           ].map(({ icon: Glyph, value, label }) => {
             return (
               <IconButton
-                key={label}
+                key={value}
                 label={label}
                 onClick={() =>
                   auxiliary(
@@ -286,11 +318,11 @@ export function TerminalView({
             );
           })}
         </div>
-        <IconButton label="复制选区" onClick={() => void clipboard(true)}>
+        <IconButton label={t(($) => $.terminal.copySelection)} onClick={() => void clipboard(true)}>
           <Copy />
         </IconButton>
         <IconButton
-          label="粘贴"
+          label={t(($) => $.terminal.paste)}
           disabled={state.status !== "ready"}
           onClick={() => void clipboard(false)}
         >
@@ -306,23 +338,23 @@ export function TerminalView({
         {redrawDialog && (
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>重绘程序</DialogTitle>
+              <DialogTitle>{t(($) => $.terminal.redrawProgram)}</DialogTitle>
             </DialogHeader>
             <p className="px-5 py-4 text-sm text-muted-foreground">
-              这会暂时调整任务尺寸，可能改变其他入口的画面和选区。
+              {t(($) => $.terminal.redrawHint)}
             </p>
-            {notice && (
-              <p role="alert" className="px-5 pb-4 text-sm text-destructive">
-                {notice}
-              </p>
+            {!!notice && (
+              <div role="alert" className="px-5 pb-4 text-sm text-destructive">
+                <ErrorNotice error={notice} />
+              </div>
             )}
             <DialogFooter>
               <Button variant="ghost" disabled={redrawing} onClick={() => setRedrawDialog(false)}>
-                取消
+                {t(($) => $.common.cancel)}
               </Button>
               <Button disabled={redrawing} onClick={() => void redraw()}>
                 <RefreshCw />
-                重绘
+                {t(($) => $.terminal.redraw)}
               </Button>
             </DialogFooter>
           </DialogContent>

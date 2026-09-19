@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useState } from "react";
 import { Check } from "lucide-react";
 import type { GitStatus } from "@kiteline/shared/protocol";
@@ -25,24 +26,24 @@ export function CommitBox({
   disabled: boolean;
   mobile: boolean;
 }) {
+  const { t } = useTranslation();
+
   const value = useGitActivity(actions, target);
   const [open, setOpen] = useState(false);
   const available =
     !disabled && !!status?.stagedCount && !status.hasConflicts && !!status.indexToken;
   const submit = () => {
     if (!available || !value.message.trim() || !status?.indexToken) return;
-    void actions.run(
-      target,
-      "git.commit",
-      { message: value.message, indexToken: status.indexToken },
-      "提交",
-    );
+    void actions.run(target, "git.commit", {
+      message: value.message,
+      indexToken: status.indexToken,
+    });
     setOpen(false);
   };
   const input = (
     <Textarea
-      aria-label="提交消息"
-      placeholder="提交消息"
+      aria-label={t(($) => $.git.commitMessage)}
+      placeholder={t(($) => $.git.commitMessage)}
       rows={3}
       value={value.message}
       onChange={(event) => actions.message(target, event.target.value)}
@@ -51,7 +52,7 @@ export function CommitBox({
   const button = (
     <Button disabled={!available || !value.message.trim()} onClick={submit}>
       <Check />
-      提交
+      {t(($) => $.git.commit)}
     </Button>
   );
   if (!mobile)
@@ -66,18 +67,18 @@ export function CommitBox({
       <div className="shrink-0 border-t border-border p-2">
         <Button className="w-full" disabled={!available} onClick={() => setOpen(true)}>
           <Check />
-          提交
+          {t(($) => $.git.commit)}
         </Button>
       </div>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>提交</DialogTitle>
+            <DialogTitle>{t(($) => $.git.commit)}</DialogTitle>
           </DialogHeader>
           <div className="p-4">{input}</div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>
-              取消
+              {t(($) => $.common.cancel)}
             </Button>
             {button}
           </DialogFooter>

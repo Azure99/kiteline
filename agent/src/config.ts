@@ -73,7 +73,7 @@ export async function agentConfig(): Promise<AgentConfig> {
       defaults[key] = integer(settings[key], key, 1, Number.MAX_SAFE_INTEGER);
   const shell =
     input.shell === undefined ? userInfo().shell || "/bin/sh" : string(input.shell, "shell");
-  if (!isAbsolute(shell)) throw new AppError("invalid_argument", "Shell 必须是绝对路径");
+  if (!isAbsolute(shell)) throw new AppError("invalid_argument", "Shell must be an absolute path");
   return { dataDir, runDir, shell, limits: defaults };
 }
 export async function readIdentity(config: AgentConfig): Promise<Identity> {
@@ -82,11 +82,11 @@ export async function readIdentity(config: AgentConfig): Promise<Identity> {
     value = record(await readJson(resolve(config.dataDir, "connection.json")));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT")
-      throw new AppError("not_found", "设备尚未绑定，请运行 kiteline-agent bind");
+      throw new AppError("not_found", "Device is not bound; run kiteline-agent bind");
     throw error;
   }
   const server = new URL(string(value.server, "server"));
-  if (server.protocol !== "https:") throw new AppError("invalid_argument", "server 必须使用 HTTPS");
+  if (server.protocol !== "https:") throw new AppError("invalid_argument", "server must use HTTPS");
   return {
     server: server.origin,
     deviceId: string(value.deviceId),

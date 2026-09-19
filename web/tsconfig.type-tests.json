@@ -1,4 +1,4 @@
 {
   "extends": "./tsconfig.json",
-  "include": ["test/rpc.typecheck.ts"]
+  "include": ["test/*.typecheck.ts", "src/i18n"]
 }

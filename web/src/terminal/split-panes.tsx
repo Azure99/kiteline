@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useEffect, useLayoutEffect, useRef, type DragEvent, type ReactNode } from "react";
 import { Group, Panel, Separator, type GroupImperativeHandle } from "react-resizable-panels";
 import { Maximize2, Minimize2, SquareTerminal, X } from "lucide-react";
@@ -38,6 +39,8 @@ export function SplitPanes({
   events: PaneEvents;
   onSizes(sizes: Record<string, number>): void;
 }) {
+  const { t } = useTranslation();
+
   const panels = useRef<GroupImperativeHandle>(null);
   const single = mobile || group.maximized;
   const layout = Object.fromEntries(
@@ -76,7 +79,7 @@ export function SplitPanes({
               key={`divider:${id}`}
               disabled={single}
               className={single ? "hidden" : "split-divider"}
-              aria-label="调整终端大小"
+              aria-label={t(($) => $.terminal.resize)}
             />
           ),
           <Panel
@@ -132,7 +135,9 @@ function TerminalPane({
   hidden: boolean;
   events: PaneEvents;
 }) {
-  const name = useRef(session?.name ?? "终端");
+  const { t } = useTranslation();
+
+  const name = useRef(session?.name);
   if (session) name.current = session.name;
   const actions = useRef<TerminalActions>(null);
   const register = events.actions;
@@ -158,18 +163,26 @@ function TerminalPane({
             actions.current?.focus();
           }}
           className="flex min-w-0 flex-1 items-center gap-2 text-left text-xs"
-          title={name.current}
+          title={name.current ?? t(($) => $.common.terminal)}
         >
           <SquareTerminal size={13} className="shrink-0" />
-          <span className="truncate">{name.current}</span>
+          <span className="truncate">{name.current ?? t(($) => $.common.terminal)}</span>
         </button>
         {multiple && (
-          <IconButton label={maximized ? "还原分屏" : "放大当前屏"} onClick={events.maximize}>
+          <IconButton
+            label={maximized ? t(($) => $.terminal.restoreSplit) : t(($) => $.terminal.maximize)}
+            onClick={events.maximize}
+          >
             {maximized ? <Minimize2 /> : <Maximize2 />}
           </IconButton>
         )}
         {events.menu(id)}
-        <IconButton label={`关闭 ${name.current} 显示`} onClick={() => events.close(id)}>
+        <IconButton
+          label={t(($) => $.terminal.closeNamed, {
+            name: name.current ?? t(($) => $.common.terminal),
+          })}
+          onClick={() => events.close(id)}
+        >
           <X />
         </IconButton>
       </header>

@@ -64,18 +64,22 @@ export class TextFiles {
     try {
       signal.throwIfAborted();
       const info = await handle.stat({ bigint: true });
-      if (!info.isFile()) throw new AppError("unsupported", "只支持编辑普通文本文件");
+      if (!info.isFile())
+        throw new AppError("unsupported", "Only regular text files can be edited");
       const size = Number(info.size);
       if (size > this.config.limits.editorBytes)
-        throw new AppError("limit_exceeded", "文件超过文本编辑容量");
+        throw new AppError("limit_exceeded", "File exceeds the text editing size limit");
       const bytes = await readExact(handle, size, signal);
       const { text, format } = decodeText(bytes);
       if (encodeText(text, format).length > this.config.limits.editorBytes)
-        throw new AppError("limit_exceeded", "按保存换行格式编码后超过编辑容量");
+        throw new AppError(
+          "limit_exceeded",
+          "Content encoded with the saved line ending format exceeds the editing size limit",
+        );
       const check = async () => {
         const after = await handle.stat({ bigint: true });
         if (after.size !== info.size || after.mtimeNs !== info.mtimeNs)
-          throw new AppError("conflict", "读取期间文件已变化，请重试");
+          throw new AppError("conflict", "File changed while being read; try again");
       };
       await check();
       const finish = async () => {
@@ -118,9 +122,9 @@ export class TextFiles {
     signal: AbortSignal,
   ): Promise<TextWrite> {
     if (size > this.config.limits.editorBytes)
-      throw new AppError("limit_exceeded", "保存内容超过编辑容量");
+      throw new AppError("limit_exceeded", "Content to save exceeds the editing size limit");
     if (createOnly ? expectedRevision !== undefined : !expectedRevision)
-      throw new AppError("invalid_argument", "保存需要对应的文件版本");
+      throw new AppError("invalid_argument", "Saving requires the corresponding file revision");
     path = relativePath(path);
     const absolute = this.absolute(workspaceId, path);
     let target: string;
@@ -129,7 +133,7 @@ export class TextFiles {
       target = location.absolute;
       try {
         await lstat(target);
-        throw new AppError("conflict", "目标已经存在");
+        throw new AppError("conflict", "Target already exists");
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
@@ -138,7 +142,7 @@ export class TextFiles {
         target = await realpath(absolute);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT")
-          throw new AppError("conflict", "原文件已不存在，请另存");
+          throw new AppError("conflict", "Original file no longer exists; save as a new file");
         throw error;
       }
     }
@@ -169,7 +173,7 @@ export class TextFiles {
   ) {
     signal.throwIfAborted();
     if (item.received + bytes.length > item.size)
-      throw new AppError("invalid_argument", "收到的正文超过声明长度");
+      throw new AppError("invalid_argument", "Received body exceeds the declared length");
     let offset = 0;
     while (offset < bytes.length) {
       signal.throwIfAborted();
@@ -179,14 +183,15 @@ export class TextFiles {
         bytes.length - offset,
         item.received + offset,
       );
-      if (!result.bytesWritten) throw new AppError("io_error", "文件写入未能继续");
+      if (!result.bytesWritten) throw new AppError("io_error", "File writing could not continue");
       offset += result.bytesWritten;
     }
     item.received += bytes.length;
   }
 
   async save(item: TextWrite, signal: AbortSignal): Promise<SavedFile> {
-    if (item.received !== item.size) throw new AppError("invalid_argument", "收到的正文长度不完整");
+    if (item.received !== item.size)
+      throw new AppError("invalid_argument", "Received body length is incomplete");
     const content = await readExact(item.temporary.handle, item.size, signal);
     decodeText(content);
     await this.temporary.closeFile(item.temporary);
@@ -207,14 +212,14 @@ export class TextFiles {
             (error as NodeJS.ErrnoException).code === "ENOENT" ||
             (error instanceof AppError && error.code === "not_found")
           )
-            throw new AppError("conflict", "原文件已不存在，请另存");
+            throw new AppError("conflict", "Original file no longer exists; save as a new file");
           throw error;
         }
         target = current.resolvedPath;
         if (current.revision !== item.expectedRevision) {
           const location = await locate(this.metadata.workspace(item.workspaceId).path, item.path);
           const info = await lstat(location.absolute, { bigint: true });
-          throw new AppError("conflict", "磁盘内容或链接目标已变化", {
+          throw new AppError("conflict", "Disk content or link target has changed", {
             path: item.path,
             current: {
               entry: await readEntry(location.parent, Buffer.from(location.name), item.path),
@@ -225,7 +230,7 @@ export class TextFiles {
         }
         mode = current.mode;
       }
-      if (target !== item.target) throw new AppError("conflict", "保存目标路径已变化");
+      if (target !== item.target) throw new AppError("conflict", "Save target path has changed");
       const prepared = await open(item.temporary.path, "r+");
       try {
         await prepared.chmod(mode);
@@ -254,10 +259,15 @@ export class TextFiles {
         await this.temporary.forgetLocked(item.temporary);
         return result;
       } catch (error) {
-        throw new OperationError("io_error", `已发布，结果未确认：${String(error)}`, "unknown", {
-          path: item.path,
-          size: item.size,
-        });
+        throw new OperationError(
+          "io_error",
+          `Published, but the result is unconfirmed: ${String(error)}`,
+          "unknown",
+          {
+            path: item.path,
+            size: item.size,
+          },
+        );
       }
     }, signal);
   }
@@ -271,7 +281,7 @@ export class TextFiles {
     const file = await open(resolvedPath, constants.O_RDONLY | constants.O_NONBLOCK);
     try {
       const info = await file.stat({ bigint: true });
-      if (!info.isFile()) throw new AppError("conflict", "原文件类型已变化");
+      if (!info.isFile()) throw new AppError("conflict", "Original file type has changed");
       const hash = createHash("sha256");
       const block = Buffer.alloc(limits.dataChunkBytes);
       const size = Number(info.size);
@@ -284,13 +294,13 @@ export class TextFiles {
           Math.min(block.length, size - offset),
           offset,
         );
-        if (!bytesRead) throw new AppError("conflict", "校验期间文件已变化");
+        if (!bytesRead) throw new AppError("conflict", "File changed during verification");
         hash.update(block.subarray(0, bytesRead));
         offset += bytesRead;
       }
       const after = await file.stat({ bigint: true });
       if (after.size !== info.size || after.mtimeNs !== info.mtimeNs)
-        throw new AppError("conflict", "校验期间文件已变化");
+        throw new AppError("conflict", "File changed during verification");
       return {
         resolvedPath,
         mode: Number(info.mode & 0o777n),
@@ -318,7 +328,7 @@ export async function readExact(
       Math.min(size - offset, limits.dataChunkBytes),
       position + offset,
     );
-    if (!bytesRead) throw new AppError("io_error", "文件读取不完整");
+    if (!bytesRead) throw new AppError("io_error", "File read is incomplete");
     offset += bytesRead;
   }
   return result;

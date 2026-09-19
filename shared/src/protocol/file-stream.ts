@@ -9,12 +9,12 @@ export interface FileFrame {
 export function sendFileFrame(socket: WebSocket, data: Buffer | string, signal: AbortSignal) {
   signal.throwIfAborted();
   if (socket.readyState !== WebSocket.OPEN)
-    return Promise.reject(new AppError("offline", "文件通道已关闭"));
+    return Promise.reject(new AppError("offline", "File channel closed"));
   if (
     Buffer.byteLength(data) >
     (typeof data === "string" ? limits.controlMessageBytes : limits.dataChunkBytes)
   )
-    return Promise.reject(new AppError("limit_exceeded", "文件数据帧超过容量"));
+    return Promise.reject(new AppError("limit_exceeded", "File data frame exceeds the size limit"));
   return new Promise<void>((resolve, reject) => {
     const abort = () => {
       reject(signal.reason);
@@ -51,7 +51,7 @@ export function consumeFileFrames(
       bytes + data.length > limits.filePendingBytes ||
       count >= limits.filePendingFrames
     ) {
-      fail(new AppError("limit_exceeded", "文件接收队列超过容量"));
+      fail(new AppError("limit_exceeded", "File receive queue exceeds its capacity"));
       return;
     }
     socket.pause();

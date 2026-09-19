@@ -1,18 +1,22 @@
+import { useTranslation } from "react-i18next";
+import { ErrorNotice } from "../components/error-notice";
 import { useEffect, useRef, useState } from "react";
 import { Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import type { Device, RpcParams } from "@kiteline/shared/protocol";
-import { rpc, errorMessage } from "../lib/api";
+import { rpc } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { IconButton } from "../components/icon-button";
 
 export function TerminalSettings({ device }: { device: Device }) {
+  const { t } = useTranslation();
+
   const [history, setHistory] = useState(String(device.snapshot?.settings.historyLines ?? 10000));
   const [shortcuts, setShortcuts] = useState(device.snapshot?.shortcuts ?? []);
   const [editing, setEditing] = useState<RpcParams<"shortcuts.put">>();
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<unknown>();
   const [saved, setSaved] = useState(false);
   const mounted = useRef(true);
   useEffect(() => {
@@ -23,13 +27,13 @@ export function TerminalSettings({ device }: { device: Device }) {
   }, []);
   async function operation(action: () => Promise<void>) {
     setBusy(true);
-    setError("");
+    setError(undefined);
     setSaved(false);
     try {
       await action();
       if (mounted.current) setSaved(true);
     } catch (error) {
-      if (mounted.current) setError(errorMessage(error));
+      if (mounted.current) setError(error);
     } finally {
       if (mounted.current) setBusy(false);
     }
@@ -42,7 +46,7 @@ export function TerminalSettings({ device }: { device: Device }) {
   return (
     <DialogContent>
       <DialogHeader>
-        <DialogTitle>终端设置 · {device.name}</DialogTitle>
+        <DialogTitle>{t(($) => $.terminal.settingsNamed, { name: device.name })}</DialogTitle>
       </DialogHeader>
       <div className="scroll-area min-h-0 space-y-5 overflow-auto p-5">
         <form
@@ -55,7 +59,7 @@ export function TerminalSettings({ device }: { device: Device }) {
           }}
         >
           <label className="min-w-0 flex-1 space-y-2 text-sm">
-            <span>新会话滚屏行数</span>
+            <span>{t(($) => $.terminal.historyLines)}</span>
             <Input
               type="number"
               min={0}
@@ -72,14 +76,14 @@ export function TerminalSettings({ device }: { device: Device }) {
           </label>
           <Button type="submit" disabled={disabled || history === ""}>
             <Save />
-            保存
+            {t(($) => $.common.save)}
           </Button>
         </form>
         <section>
           <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-sm font-semibold">快捷方式</h2>
+            <h2 className="text-sm font-semibold">{t(($) => $.terminal.shortcuts)}</h2>
             <IconButton
-              label="新增快捷方式"
+              label={t(($) => $.terminal.newShortcut)}
               disabled={disabled}
               onClick={() => editShortcut({ name: "", command: "" })}
             >
@@ -99,14 +103,14 @@ export function TerminalSettings({ device }: { device: Device }) {
                   </p>
                 </div>
                 <IconButton
-                  label={`编辑 ${shortcut.name}`}
+                  label={t(($) => $.common.editNamed, { name: shortcut.name })}
                   disabled={disabled}
                   onClick={() => editShortcut(shortcut)}
                 >
                   <Pencil />
                 </IconButton>
                 <IconButton
-                  label={`删除 ${shortcut.name}`}
+                  label={t(($) => $.common.deleteNamed, { name: shortcut.name })}
                   disabled={disabled}
                   onClick={() =>
                     void operation(async () => {
@@ -141,7 +145,7 @@ export function TerminalSettings({ device }: { device: Device }) {
               }}
             >
               <label className="block space-y-1 text-sm">
-                <span>名称</span>
+                <span>{t(($) => $.common.name)}</span>
                 <Input
                   value={editing.name ?? ""}
                   maxLength={256}
@@ -152,7 +156,7 @@ export function TerminalSettings({ device }: { device: Device }) {
                 />
               </label>
               <label className="block space-y-1 text-sm">
-                <span>Shell 命令</span>
+                <span>{t(($) => $.terminal.command)}</span>
                 <textarea
                   className="min-h-24 w-full rounded border border-border bg-background px-3 py-2 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring max-[959px]:text-base"
                   value={editing.command ?? ""}
@@ -170,20 +174,20 @@ export function TerminalSettings({ device }: { device: Device }) {
                   onClick={() => setEditing(undefined)}
                 >
                   <X />
-                  取消
+                  {t(($) => $.common.cancel)}
                 </Button>
                 <Button type="submit" disabled={disabled}>
                   <Save />
-                  保存快捷方式
+                  {t(($) => $.terminal.saveShortcut)}
                 </Button>
               </div>
             </form>
           )}
         </section>
       </div>
-      {(error || saved) && (
+      {!!(error || saved) && (
         <DialogFooter>
-          <p
+          <div
             role={error ? "alert" : "status"}
             className={
               error
@@ -191,8 +195,8 @@ export function TerminalSettings({ device }: { device: Device }) {
                 : "w-full text-sm text-muted-foreground"
             }
           >
-            {error || "已保存"}
-          </p>
+            {error ? <ErrorNotice error={error} /> : t(($) => $.common.saved)}
+          </div>
         </DialogFooter>
       )}
     </DialogContent>

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { SquareTerminal } from "lucide-react";
 import type { Session } from "@kiteline/shared/protocol";
@@ -60,6 +61,8 @@ export function GroupTabs({
   drag: ReturnType<typeof useTerminalDrag>;
   onSelect(id: string): void;
 }) {
+  const { t } = useTranslation();
+
   if (!layout.groups.length) return null;
   return (
     <div className="terminal-groups scroll-area flex shrink-0 items-center gap-2 overflow-x-auto border-b border-border px-2 py-1.5">
@@ -71,14 +74,14 @@ export function GroupTabs({
             className="terminal-group flex shrink-0 items-center rounded border"
             data-current={group.id === layout.current}
             data-drop={drag.target?.key === group.id}
-            aria-label={`第 ${index + 1} 组`}
+            aria-label={t(($) => $.terminal.group, { number: index + 1 })}
             onDragOver={(event) => drag.over(event, target)}
             onDrop={(event) => drag.drop(event, target)}
           >
             {group.members.map((id, memberIndex) => {
               const name =
                 sessions.find((session) => session.id === id)?.name ??
-                (ended.has(id) ? "已结束" : "终端");
+                (ended.has(id) ? t(($) => $.terminal.ended) : t(($) => $.common.terminal));
               function position(event: DragEvent) {
                 const bounds = event.currentTarget.getBoundingClientRect();
                 const after = event.clientX > bounds.left + bounds.width / 2;
@@ -125,7 +128,7 @@ export function GroupTabs({
           onDragOver={(event) => drag.over(event, { key: "new" })}
           onDrop={(event) => drag.drop(event, { key: "new" })}
         >
-          独立成组
+          {t(($) => $.terminal.newGroup)}
         </div>
       )}
     </div>

@@ -86,7 +86,7 @@ export class RecordedSession {
       await this.model.checkpointNow();
     }
     if (this.failed || this.ended)
-      throw new AppError("recording_unavailable", "终端已结束或记录中断");
+      throw new AppError("recording_unavailable", "Terminal ended or recording interrupted");
     return identity;
   }
   private async redrawTask() {
@@ -115,9 +115,13 @@ export class RecordedSession {
   }
   async attach(id: string, profile: string, history: "retained" | "screen", historyGap: boolean) {
     if (profile !== terminalProfile)
-      throw new AppError("unsupported", "终端组件版本不同，请统一升级");
-    if (this.ended || this.failed) throw new AppError("recording_unavailable", "终端记录不可用");
-    if (this.displays.has(id)) throw new AppError("conflict", "显示已附着");
+      throw new AppError(
+        "unsupported",
+        "Terminal component versions differ; upgrade all components together",
+      );
+    if (this.ended || this.failed)
+      throw new AppError("recording_unavailable", "Terminal recording is unavailable");
+    if (this.displays.has(id)) throw new AppError("conflict", "Display is already attached");
     const abort = new AbortController();
     const attachment = new Attachment(
       id,
@@ -138,7 +142,7 @@ export class RecordedSession {
         const display = this.displays.get(id);
         this.displays.delete(id);
         display?.unsubscribe?.();
-        abort.abort(new AppError("cancelled", "显示已关闭"));
+        abort.abort(new AppError("cancelled", "Display closed"));
         this.input.detach(id);
         this.maybeRelease();
       },

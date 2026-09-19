@@ -12,7 +12,7 @@ export async function terminalCli(config: AgentConfig, args: string[]) {
   }
   async function attach(id: string) {
     if (!process.stdin.isTTY || !process.stdout.isTTY)
-      throw new Error("附着需要本机终端；仅创建请使用 --no-attach");
+      throw new Error("Attaching requires a local terminal; use --no-attach to create only");
     const identity = await localRequest<TerminalIdentity>(config, "terminal.attach", {
       sessionId: id,
     });
@@ -47,7 +47,7 @@ export async function terminalCli(config: AgentConfig, args: string[]) {
     }
     case "new": {
       if (!args.includes("--no-attach") && (!process.stdin.isTTY || !process.stdout.isTTY))
-        throw new Error("附着需要本机终端；仅创建请使用 --no-attach");
+        throw new Error("Attaching requires a local terminal; use --no-attach to create only");
       const session = await localRequest<Session>(config, "sessions.create", {
         workspaceId: string(option("--workspace"), "workspace"),
         shortcutId: option("--shortcut"),

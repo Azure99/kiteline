@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+import { ErrorNotice } from "../components/error-notice";
 import {
   ChevronDown,
   ChevronRight,
@@ -55,6 +57,8 @@ export function FileExplorer({
   onImage: (entry: Entry) => void;
   onMore: (path: string) => void;
 }) {
+  const { t, i18n } = useTranslation();
+
   const page = pages[path];
   return (
     <div aria-busy={page?.busy}>
@@ -72,7 +76,7 @@ export function FileExplorer({
                 <label className="flex min-h-11 w-9 shrink-0 cursor-pointer items-center justify-center">
                   <input
                     type="checkbox"
-                    aria-label={`选择 ${entry.name}`}
+                    aria-label={t(($) => $.files.selectNamed, { name: entry.name })}
                     checked={!!entry.path && selected.has(entry.path)}
                     disabled={!entry.path || disabled}
                     onChange={() => onSelect(entry.path!)}
@@ -101,15 +105,16 @@ export function FileExplorer({
                   <span className="block truncate whitespace-pre text-sm">{entry.name}</span>
                   <span className="block truncate text-[11px] text-muted-foreground">
                     {entry.unavailableReason
-                      ? "名称编码不支持"
+                      ? t(($) => $.files.nameEncoding)
                       : folder
-                        ? "目录"
+                        ? t(($) => $.common.directory)
                         : entry.kind === "symlink"
-                          ? `链接 → ${entry.linkTarget}`
+                          ? t(($) => $.files.linkPath, { path: entry.linkTarget ?? "" })
                           : entry.kind === "other"
-                            ? "特殊文件"
+                            ? t(($) => $.files.specialFile)
                             : formatBytes(entry.size)}
-                    {entry.mtime && ` · ${new Date(entry.mtime).toLocaleString()}`}
+                    {entry.mtime &&
+                      ` · ${new Date(entry.mtime).toLocaleString(i18n.resolvedLanguage)}`}
                   </span>
                 </span>
                 {mobile && folder && (
@@ -123,7 +128,7 @@ export function FileExplorer({
                       <Button
                         variant="ghost"
                         size="icon"
-                        aria-label={`${entry.name} 文件操作`}
+                        aria-label={t(($) => $.files.actionsNamed, { name: entry.name })}
                         disabled={disabled}
                       />
                     }
@@ -135,34 +140,34 @@ export function FileExplorer({
                       <>
                         <MenuItem onClick={() => onDownload(entry)}>
                           <Download />
-                          下载
+                          {t(($) => $.common.download)}
                         </MenuItem>
                         <MenuItem onClick={() => onImage(entry)}>
                           <Image />
-                          图片预览
+                          {t(($) => $.files.previewImage)}
                         </MenuItem>
                       </>
                     )}
                     <MenuItem onClick={() => onRename(entry)}>
                       <Pencil />
-                      重命名
+                      {t(($) => $.common.rename)}
                     </MenuItem>
                     <MenuItem onClick={() => onAction("copy", entry)}>
                       <Copy />
-                      复制
+                      {t(($) => $.common.copy)}
                     </MenuItem>
                     <MenuItem onClick={() => onAction("move", entry)}>
                       <FolderInput />
-                      移动
+                      {t(($) => $.common.move)}
                     </MenuItem>
                     <MenuItem onClick={() => onAction("delete", entry)}>
                       <Trash2 />
-                      删除
+                      {t(($) => $.common.delete)}
                     </MenuItem>
                     {entry.kind === "symlink" && (
                       <MenuItem onClick={() => onFolder(entry.path!)}>
                         <Folder />
-                        进入链接目录
+                        {t(($) => $.files.openLinkDirectory)}
                       </MenuItem>
                     )}
                   </MenuContent>
@@ -195,18 +200,20 @@ export function FileExplorer({
           </div>
         );
       })}
-      {page?.error && (
-        <p role="alert" className="break-words px-3 py-2 text-xs text-destructive">
-          {page.error}
-        </p>
+      {!!page?.error && (
+        <div role="alert" className="break-words px-3 py-2 text-xs text-destructive">
+          <ErrorNotice error={page.error} />
+        </div>
       )}
       {page?.busy && (
         <p role="status" className="px-3 py-2 text-xs text-muted-foreground">
-          正在读取
+          {t(($) => $.common.reading)}
         </p>
       )}
       {!page?.busy && page?.listing?.entries.items.length === 0 && (
-        <p className="px-3 py-3 text-xs text-muted-foreground">空目录</p>
+        <p className="px-3 py-3 text-xs text-muted-foreground">
+          {t(($) => $.files.emptyDirectory)}
+        </p>
       )}
       {page?.listing?.entries.nextCursor && (
         <Button
@@ -215,7 +222,7 @@ export function FileExplorer({
           disabled={page.busy || disabled}
           onClick={() => onMore(path)}
         >
-          加载更多
+          {t(($) => $.common.more)}
         </Button>
       )}
     </div>

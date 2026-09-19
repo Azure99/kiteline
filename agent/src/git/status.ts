@@ -76,7 +76,7 @@ function fields(record: Buffer, count: number) {
   let start = 0;
   for (let i = 0; i < count; i++) {
     const end = record.indexOf(32, start);
-    if (end < 0) throw new AppError("io_error", "Git status 记录不完整");
+    if (end < 0) throw new AppError("io_error", "Git status record is incomplete");
     parts.push(record.subarray(start, end).toString("ascii"));
     start = end + 1;
   }
@@ -112,7 +112,8 @@ export async function readStatus(
       return;
     }
     const type = String.fromCharCode(record[0] ?? 0);
-    if (!["1", "2", "u"].includes(type)) throw new AppError("io_error", "不支持的 Git status 记录");
+    if (!["1", "2", "u"].includes(type))
+      throw new AppError("io_error", "Unsupported Git status record");
     const { parts, path } = fields(record, type === "1" ? 8 : type === "2" ? 9 : 10);
     const xy = parts[1]!,
       sub = parts[2]!;
@@ -166,7 +167,7 @@ export async function readStatus(
     },
   );
   reader.end();
-  if (rename) throw new AppError("io_error", "Git rename 记录不完整");
+  if (rename) throw new AppError("io_error", "Git rename record is incomplete");
 }
 export async function status(
   repo: Repo,
@@ -194,7 +195,7 @@ export async function status(
       if (entry.indexStatus !== "." && entry.indexStatus !== "?" && !entry.conflict) stagedCount++;
       const size = Buffer.byteLength(JSON.stringify(entry)) + 1;
       if (size + 2048 > limits.resultBytes)
-        throw new AppError("limit_exceeded", "Git 单个变化超过容量");
+        throw new AppError("limit_exceeded", "A Git change exceeds the size limit");
       if (totalCount++ < offset || full) return;
       if (entries.length >= limits.listPageEntries || bytes + size > limits.resultBytes) {
         full = true;
@@ -231,12 +232,12 @@ export async function status(
     }
   const after = await observeIndex(repo, signal);
   if (before.token !== after.token)
-    throw new AppError("conflict", "Git HEAD/index 在读取期间变化，请刷新");
+    throw new AppError("conflict", "Git HEAD/index changed while being read; refresh");
   const listToken = createHash("sha256")
     .update(JSON.stringify([repo.id, before.token, hash.digest("hex")]))
     .digest("hex");
   if (expectedListToken !== undefined && expectedListToken !== listToken)
-    throw new AppError("conflict", "Git 列表已变化，请刷新当前页");
+    throw new AppError("conflict", "Git list has changed; refresh the current page");
   const nextOffset = offset + entries.length < totalCount ? offset + entries.length : undefined;
   const result: GitStatus = {
     head: before.head,
@@ -261,6 +262,9 @@ export async function status(
     result.truncated = true;
   }
   if (!entries.length && offset < totalCount)
-    throw new AppError("limit_exceeded", "Git 单个变化及仓库信息超过容量");
+    throw new AppError(
+      "limit_exceeded",
+      "A Git change and repository information exceed the size limit",
+    );
   return result;
 }

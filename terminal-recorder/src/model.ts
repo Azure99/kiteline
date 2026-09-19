@@ -57,7 +57,9 @@ export class Model {
     const bytes = Buffer.byteLength(data);
     this.pendingBytes += bytes;
     if (this.pendingBytes > limits.terminalModelPendingBytes) {
-      this.fault(new AppError("limit_exceeded", "终端记录解析积压超过容量"));
+      this.fault(
+        new AppError("limit_exceeded", "Terminal recording parser backlog exceeds the limit"),
+      );
       return;
     }
     void this.ordered(async () => {
@@ -91,7 +93,12 @@ export class Model {
       };
       const timer = setTimeout(() => {
         cleanup();
-        reject(new AppError("timeout", "未收到终端实际尺寸，请重新显示后重试"));
+        reject(
+          new AppError(
+            "timeout",
+            "Actual terminal dimensions were not received; reopen the display and try again",
+          ),
+        );
       }, timeout);
       this.listeners.add(check);
       void this.ordered(check);
@@ -99,7 +106,7 @@ export class Model {
   }
   async checkpointNow() {
     await this.ordered(() => {
-      if (this.stopped) throw new AppError("recording_unavailable", "记录已中断");
+      if (this.stopped) throw new AppError("recording_unavailable", "Recording interrupted");
       if (atGround(this.terminal)) this.rotate();
     });
   }
@@ -117,7 +124,11 @@ export class Model {
           rows: this.terminal.rows,
           historyLimited: scrollback < original,
         };
-      if (scrollback === 0) throw new AppError("limit_exceeded", "当前终端画面超过恢复容量");
+      if (scrollback === 0)
+        throw new AppError(
+          "limit_exceeded",
+          "Current terminal screen exceeds the recovery size limit",
+        );
       scrollback = Math.floor(scrollback / 2);
     }
   }
@@ -158,7 +169,7 @@ export class Model {
     while (true) {
       signal.throwIfAborted();
       const attached = await this.ordered(() => {
-        if (this.stopped) throw new AppError("recording_unavailable", "记录已中断");
+        if (this.stopped) throw new AppError("recording_unavailable", "Recording interrupted");
         let snapshot: Snapshot | undefined;
         if (history === "screen") {
           if (atGround(this.terminal)) snapshot = { ...this.serialize(true), tail: [] };
@@ -174,7 +185,8 @@ export class Model {
         return true;
       });
       if (attached) return () => this.listeners.delete(live);
-      if (Date.now() >= deadline) throw new AppError("busy", "暂未取得完整恢复边界，请重试");
+      if (Date.now() >= deadline)
+        throw new AppError("busy", "A complete recovery boundary is not yet available; try again");
       await new Promise<void>((resolve, reject) => {
         const cleanup = () => {
           clearTimeout(timer);

@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+import { ErrorNotice } from "../components/error-notice";
 import { Files, Circle, X } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { IconButton } from "../components/icon-button";
@@ -12,6 +14,8 @@ import {
 import { draftError, isDirty, showDraft, useDrafts, type DraftStore } from "./drafts";
 
 export function OpenFiles({ store }: { store: DraftStore }) {
+  const { t } = useTranslation();
+
   const drafts = useDrafts(store);
   const closing = drafts.find((item) => item.id === store.closing);
   return (
@@ -22,7 +26,7 @@ export function OpenFiles({ store }: { store: DraftStore }) {
             <Button
               variant="ghost"
               size="icon"
-              aria-label={`打开的文件 ${drafts.length}`}
+              aria-label={t(($) => $.files.openCount, { count: drafts.length })}
               disabled={!drafts.length}
             />
           }
@@ -38,7 +42,10 @@ export function OpenFiles({ store }: { store: DraftStore }) {
                 </span>
                 {isDirty(draft) && <Circle size={7} fill="currentColor" />}
               </MenuItem>
-              <IconButton label={`关闭 ${draft.path}`} onClick={() => store.requestClose(draft)}>
+              <IconButton
+                label={t(($) => $.common.closeNamed, { name: draft.path })}
+                onClick={() => store.requestClose(draft)}
+              >
                 <X />
               </IconButton>
             </div>
@@ -57,14 +64,14 @@ export function OpenFiles({ store }: { store: DraftStore }) {
         {closing && (
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>保存修改？</DialogTitle>
+              <DialogTitle>{t(($) => $.files.saveChanges)}</DialogTitle>
             </DialogHeader>
             <div className="space-y-3 overflow-auto p-4 text-sm">
               <p className="break-all">{closing.path}</p>
               {draftError(closing) && (
-                <p role="alert" className="text-destructive">
-                  {draftError(closing)}
-                </p>
+                <div role="alert" className="text-destructive">
+                  <ErrorNotice error={closing.error ?? closing.observationError} />
+                </div>
               )}
             </div>
             <DialogFooter>
@@ -75,10 +82,10 @@ export function OpenFiles({ store }: { store: DraftStore }) {
                   store.changed();
                 }}
               >
-                取消
+                {t(($) => $.common.cancel)}
               </Button>
               <Button variant="outline" onClick={() => store.close(closing)}>
-                放弃修改
+                {t(($) => $.files.discardChanges)}
               </Button>
               <Button
                 disabled={!store.canSave(closing)}
@@ -89,7 +96,7 @@ export function OpenFiles({ store }: { store: DraftStore }) {
                   });
                 }}
               >
-                保存并关闭
+                {t(($) => $.files.saveClose)}
               </Button>
             </DialogFooter>
           </DialogContent>

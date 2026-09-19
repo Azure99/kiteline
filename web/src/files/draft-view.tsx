@@ -1,3 +1,5 @@
+import { ErrorNotice } from "../components/error-notice";
+import { useTranslation } from "react-i18next";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Circle, Copy, Download, FileOutput, RefreshCw, Save, X } from "lucide-react";
 import { Button } from "../components/ui/button";
@@ -10,7 +12,7 @@ import {
   DialogTitle,
 } from "../components/ui/dialog";
 import { IconButton } from "../components/icon-button";
-import { ApiError, errorMessage } from "../lib/api";
+import { ApiError } from "../lib/api";
 import { draftError, isDirty, showDraft, useDrafts, type Draft, type DraftStore } from "./drafts";
 import { TextEditor } from "./text-editor";
 import { formatBytes } from "./use-browser";
@@ -25,11 +27,14 @@ export function DraftView({
   draft: Draft;
   unavailable?: string;
 }) {
+  const { t } = useTranslation();
+
   const all = useDrafts(store);
   const [disk, setDisk] = useState<DiskText>();
   const [saveAs, setSaveAs] = useState(false);
   const [path, setPath] = useState(draft.path);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<unknown>();
+  const [invalid, setInvalid] = useState(false);
   const generation = useRef(0);
   const tabStrip = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -69,13 +74,14 @@ export function DraftView({
     if (current && (draft.unknownSave !== undefined || current.meta.revision !== draft.revision))
       setDisk(current);
   }
-  if (!store.has(draft)) return <div className="p-4 text-sm text-muted-foreground">文件已关闭</div>;
+  if (!store.has(draft))
+    return <div className="p-4 text-sm text-muted-foreground">{t(($) => $.files.closed)}</div>;
   return (
     <>
       <div
         ref={tabStrip}
         role="tablist"
-        aria-label="打开的文件"
+        aria-label={t(($) => $.files.openFiles)}
         className="flex min-h-9 shrink-0 overflow-x-auto border-b border-border bg-muted/40"
       >
         {tabs.map((item) => (
@@ -91,9 +97,14 @@ export function DraftView({
               className="flex min-h-9 min-w-0 items-center gap-2 px-3 text-xs"
             >
               <span className="truncate">{item.path.split("/").at(-1)}</span>
-              {isDirty(item) && <Circle size={7} fill="currentColor" aria-label="未保存" />}
+              {isDirty(item) && (
+                <Circle size={7} fill="currentColor" aria-label={t(($) => $.files.unsaved)} />
+              )}
             </button>
-            <IconButton label={`关闭 ${item.path}`} onClick={() => store.requestClose(item)}>
+            <IconButton
+              label={t(($) => $.common.closeNamed, { name: item.path })}
+              onClick={() => store.requestClose(item)}
+            >
               <X size={13} />
             </IconButton>
           </div>
@@ -106,11 +117,15 @@ export function DraftView({
         >
           {draft.path}
         </span>
-        <IconButton label="下载文件" disabled={!!unavailable} onClick={() => downloadFile(draft)}>
+        <IconButton
+          label={t(($) => $.files.downloadFile)}
+          disabled={!!unavailable}
+          onClick={() => downloadFile(draft)}
+        >
           <Download />
         </IconButton>
         <IconButton
-          label="复制文本"
+          label={t(($) => $.files.copyText)}
           disabled={!draft.state}
           onClick={() => {
             void navigator.clipboard
@@ -124,25 +139,26 @@ export function DraftView({
           <Copy />
         </IconButton>
         <IconButton
-          label="核对磁盘内容"
+          label={t(($) => $.files.checkDisk)}
           disabled={!!draft.busy || !!unavailable}
           onClick={() => void check()}
         >
           <RefreshCw />
         </IconButton>
         <IconButton
-          label="另存为"
+          label={t(($) => $.files.saveAs)}
           disabled={!draft.state || !!draft.busy || !!unavailable}
           onClick={() => {
             setPath(draft.path);
-            setError("");
+            setError(undefined);
+            setInvalid(false);
             setSaveAs(true);
           }}
         >
           <FileOutput />
         </IconButton>
         <IconButton
-          label="保存文件"
+          label={t(($) => $.files.saveFile)}
           disabled={!store.canSave(draft) || !!unavailable}
           onClick={() => void save()}
         >
@@ -157,29 +173,31 @@ export function DraftView({
         draft.format.mixedLineEndings) && (
         <div className="shrink-0 space-y-1 border-b border-border px-3 py-2 text-xs">
           {unavailable && <p role="status">{unavailable}</p>}
-          {store.overLimit(draft) && <p role="status">内容超过当前编辑容量，请缩小后保存</p>}
+          {store.overLimit(draft) && <p role="status">{t(($) => $.files.shrinkToSave)}</p>}
           {draft.format.mixedLineEndings && (
             <p className="text-muted-foreground">
-              混合换行；保存采用 {draft.format.lineEnding.toUpperCase()}
+              {t(($) => $.files.mixedEol, { format: draft.format.lineEnding.toUpperCase() })}
             </p>
           )}
-          {draft.notice && <p role="status">{draft.notice}</p>}
-          {draft.diskChanged && <p role="status">磁盘内容已变化</p>}
+          {draft.notice && <p role="status">{t(($) => $.files[draft.notice!])}</p>}
+          {draft.diskChanged && <p role="status">{t(($) => $.files.diskChanged)}</p>}
           {draftError(draft) && (
-            <p role="alert" className="break-words text-destructive">
-              {draftError(draft)}
-            </p>
+            <div role="alert" className="break-words text-destructive">
+              <ErrorNotice error={draft.error ?? draft.observationError} />
+            </div>
           )}
-          {draft.error instanceof ApiError &&
-            (draft.error.code === "conflict" || draft.error.outcome === "unknown") && (
-              <Button
-                variant="outline"
-                disabled={!!draft.busy || !!unavailable}
-                onClick={() => void check()}
-              >
-                核对磁盘内容
-              </Button>
-            )}
+          {!!(
+            draft.error instanceof ApiError &&
+            (draft.error.code === "conflict" || draft.error.outcome === "unknown")
+          ) && (
+            <Button
+              variant="outline"
+              disabled={!!draft.busy || !!unavailable}
+              onClick={() => void check()}
+            >
+              {t(($) => $.files.checkDisk)}
+            </Button>
+          )}
         </div>
       )}
       {draft.state ? (
@@ -192,7 +210,7 @@ export function DraftView({
         />
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-4 text-sm text-muted-foreground">
-          {draft.busy ? "正在读取" : "未打开文本"}
+          {draft.busy ? t(($) => $.common.reading) : t(($) => $.files.noText)}
           {!draft.busy && (
             <Button
               variant="outline"
@@ -200,7 +218,7 @@ export function DraftView({
               onClick={() => void store.load(draft)}
             >
               <RefreshCw />
-              重试
+              {t(($) => $.common.retry)}
             </Button>
           )}
         </div>
@@ -208,13 +226,13 @@ export function DraftView({
       <div className="flex min-h-6 shrink-0 flex-wrap items-center justify-between gap-x-3 border-t border-border px-3 text-[11px] text-muted-foreground">
         <span>
           {draft.busy === "saving"
-            ? "正在保存"
+            ? t(($) => $.files.saving)
             : draft.busy === "checking"
-              ? "正在核对"
+              ? t(($) => $.files.checking)
               : isDirty(draft)
-                ? "未保存"
+                ? t(($) => $.files.unsaved)
                 : draft.state
-                  ? "已保存"
+                  ? t(($) => $.common.saved)
                   : ""}
         </span>
         {draft.state && (
@@ -233,48 +251,48 @@ export function DraftView({
         {disk && (
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>磁盘内容已变化</DialogTitle>
+              <DialogTitle>{t(($) => $.files.diskChanged)}</DialogTitle>
             </DialogHeader>
             <div className="min-h-0 space-y-3 overflow-auto p-4">
               <p className="break-all text-xs">{disk.target.path}</p>
               <Textarea
-                aria-label="当前磁盘文本"
+                aria-label={t(($) => $.files.diskText)}
                 value={disk.text}
                 readOnly
                 rows={12}
                 className="font-mono text-xs"
               />
-              {error && (
-                <p role="alert" className="text-sm text-destructive">
-                  {error}
-                </p>
+              {!!error && (
+                <div role="alert" className="text-sm text-destructive">
+                  <ErrorNotice error={error} />
+                </div>
               )}
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setDisk(undefined)}>
-                取消
+                {t(($) => $.common.cancel)}
               </Button>
               <Button
                 variant="outline"
                 disabled={!!draft.busy}
                 onClick={() => {
-                  if (isDirty(draft) && !window.confirm("放弃未保存修改，加载磁盘版本？")) return;
+                  if (isDirty(draft) && !window.confirm(t(($) => $.files.discardLoad))) return;
                   try {
                     store.adopt(draft, disk);
                     setDisk(undefined);
                     showDraft(draft, true);
                   } catch (reason) {
-                    setError(errorMessage(reason));
+                    setError(reason);
                   }
                 }}
               >
-                加载磁盘版
+                {t(($) => $.files.loadDisk)}
               </Button>
               <Button
                 disabled={!store.canSave(draft) || !!unavailable}
                 onClick={() => void save(disk.meta.revision, disk.target.path)}
               >
-                覆盖此版本
+                {t(($) => $.files.overwriteVersion)}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -288,7 +306,7 @@ export function DraftView({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>另存为</DialogTitle>
+            <DialogTitle>{t(($) => $.files.saveAs)}</DialogTitle>
           </DialogHeader>
           <form
             onSubmit={(event) => {
@@ -298,39 +316,52 @@ export function DraftView({
                 path.startsWith("/") ||
                 path.split("/").some((part) => !part || part === "." || part === "..")
               ) {
-                setError("请输入 workspace 内的文件路径");
+                setError(undefined);
+                setInvalid(true);
                 return;
               }
+              setInvalid(false);
+              setError(undefined);
               const submitted = ++generation.current;
               void store.save(draft, path, null).then((saved) => {
                 if (submitted !== generation.current || !store.has(draft)) return;
                 if (saved) {
                   closeSaveAs();
                   showDraft(draft, true);
-                } else setError(draftError(draft) ?? "未能保存");
+                } else
+                  setError(
+                    draft.error ??
+                      draft.observationError ??
+                      new Error("The file could not be saved"),
+                  );
               });
             }}
             className="flex min-h-0 flex-col"
           >
             <div className="space-y-3 overflow-auto p-4">
               <Textarea
-                aria-label="另存路径"
+                aria-label={t(($) => $.files.savePath)}
                 rows={2}
                 value={path}
                 onChange={(event) => setPath(event.target.value)}
               />
-              {error && (
+              {invalid && (
                 <p role="alert" className="text-sm text-destructive">
-                  {error}
+                  {t(($) => $.files.savePathRequired)}
                 </p>
+              )}
+              {!!error && (
+                <div role="alert" className="text-sm text-destructive">
+                  <ErrorNotice error={error} />
+                </div>
               )}
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={closeSaveAs}>
-                取消
+                {t(($) => $.common.cancel)}
               </Button>
               <Button type="submit" disabled={!store.canSave(draft)}>
-                另存
+                {t(($) => $.files.saveCopy)}
               </Button>
             </DialogFooter>
           </form>

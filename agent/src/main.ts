@@ -16,7 +16,7 @@ async function input(prompt: string) {
     let result = "";
     for await (const part of process.stdin) {
       result += part.toString();
-      if (result.length > 4096) throw new Error("输入过长");
+      if (result.length > 4096) throw new Error("Input is too long");
     }
     return result.trim();
   }
@@ -68,7 +68,7 @@ async function main() {
       const index = process.argv.indexOf("--server");
       const server = new URL(string(index < 0 ? undefined : process.argv[index + 1], "server"));
       if (server.protocol !== "https:")
-        throw new AppError("invalid_argument", "server 必须使用 HTTPS");
+        throw new AppError("invalid_argument", "server must use HTTPS");
       if (process.argv.includes("--if-unbound")) {
         const exists = await lstat(resolve(config.dataDir, "connection.json")).then(
           () => true,
@@ -79,10 +79,10 @@ async function main() {
         );
         if (exists)
           throw new Error(
-            "此安装已绑定，保留原设备身份。请使用 kiteline-agent run 或 sudo kiteline-agent service start；重新绑定须先停止原实例，再明确执行 kiteline-agent bind。",
+            "This installation is already bound; the existing device identity is retained. Use kiteline-agent run or sudo kiteline-agent service start. To bind again, stop the existing instance first, then explicitly run kiteline-agent bind.",
           );
       }
-      const code = await input("绑定码: ");
+      const code = await input("Binding code: ");
       let value: Record<string, unknown>;
       try {
         const response = await fetch(new URL("/api/agent/bind", server), {
@@ -97,7 +97,7 @@ async function main() {
       } catch (error) {
         if (error instanceof AppError) throw error;
         throw new Error(
-          "绑定结果未知。请在网页登录后查询本次绑定；已消费但无本地凭据时撤销该设备，再用新码绑定。",
+          "Binding result is unknown. Sign in to the web app and check this binding. If the code was consumed but no credentials were saved locally, revoke the device and bind again with a new code.",
           { cause: error },
         );
       }
@@ -109,11 +109,14 @@ async function main() {
       try {
         await atomicJson(resolve(config.dataDir, "connection.json"), identity);
       } catch (error) {
-        throw new Error(`设备 ${identity.deviceId} 已登记但凭据未保存，请在网页撤销后重新绑定。`, {
-          cause: error,
-        });
+        throw new Error(
+          `Device ${identity.deviceId} was registered but its credentials were not saved; revoke it in the web app and bind again.`,
+          {
+            cause: error,
+          },
+        );
       }
-      console.log(`设备已绑定: ${identity.deviceId}`);
+      console.log(`Device bound: ${identity.deviceId}`);
       await release();
       return;
     }

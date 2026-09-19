@@ -1,3 +1,6 @@
+import { useTranslation } from "react-i18next";
+import { ApiError } from "../lib/api";
+import { ErrorNotice } from "../components/error-notice";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { Maximize2, PanelBottom, Plus, RefreshCw, X } from "lucide-react";
@@ -39,6 +42,8 @@ export function WorkspaceTerminal({
   layouts: Map<string, TerminalLayout>;
   children: ReactNode;
 }) {
+  const { t } = useTranslation();
+
   const key = `${device.id}:${workspace.id}`;
   const [layout, setLayout] = useState(() => layouts.get(key) ?? emptyLayout());
   const remote = useSessions(device, workspace.id);
@@ -91,7 +96,7 @@ export function WorkspaceTerminal({
         displays.current.has(routeSession)
       )
         setLayout((old) => selectSession(old, routeSession));
-      else setError("终端不存在或已结束");
+      else setError(new ApiError("not_found", "The terminal does not exist or has ended"));
     } else if (route.tool === "terminal" && previous !== undefined)
       setLayout((old) => ({ ...old, current: undefined }));
   }, [routeSession, route.tool, selected, remote.loaded, sessions, setError]);
@@ -213,13 +218,15 @@ export function WorkspaceTerminal({
   }
   return (
     <>
-      {remote.error && (
+      {!!remote.error && (
         <div
           role="alert"
-          className="flex shrink-0 items-center gap-2 bg-red-50 px-3 py-2 text-sm text-destructive"
+          className="workbench-notice flex shrink-0 items-start gap-2 bg-red-50 px-3 py-2 text-sm text-destructive"
         >
-          <span className="min-w-0 flex-1 break-words">{remote.error}</span>
-          <IconButton label="关闭提示" onClick={remote.clearError}>
+          <div className="min-w-0 flex-1 break-words">
+            <ErrorNotice error={remote.error} />
+          </div>
+          <IconButton label={t(($) => $.common.dismiss)} onClick={remote.clearError}>
             <X />
           </IconButton>
         </div>
@@ -230,14 +237,14 @@ export function WorkspaceTerminal({
           <span className="flex-1" />
           {newButtons()}
           <IconButton
-            label="刷新会话"
+            label={t(($) => $.terminal.refreshSessions)}
             disabled={device.status !== "online"}
             onClick={() => void remote.refresh()}
           >
             <RefreshCw />
           </IconButton>
           {selected && (
-            <IconButton label="关闭显示" onClick={() => close(selected)}>
+            <IconButton label={t(($) => $.terminal.closeDisplay)} onClick={() => close(selected)}>
               <X />
             </IconButton>
           )}
@@ -267,7 +274,14 @@ export function WorkspaceTerminal({
               focus,
               close,
               maximize: () => patchGroup({ maximized: !group.maximized }),
-              menu: (id) => menu(id, false, `${find(id)?.name ?? "终端"} 操作`),
+              menu: (id) =>
+                menu(
+                  id,
+                  false,
+                  t(($) => $.common.actionsNamed, {
+                    name: find(id)?.name ?? t(($) => $.common.terminal),
+                  }),
+                ),
               dragStart: drag.start,
               dragEnd: drag.end,
             }}
@@ -276,7 +290,7 @@ export function WorkspaceTerminal({
           <div className="flex min-h-0 flex-1 items-center justify-center">
             <Button variant="outline" disabled={!enabled} onClick={() => void create()}>
               <Plus />
-              新建终端
+              {t(($) => $.terminal.new)}
             </Button>
           </div>
         )}
@@ -284,7 +298,9 @@ export function WorkspaceTerminal({
       <div className={visible ? "hidden" : "flex min-h-0 flex-1 flex-col"}>
         <div className="flex min-h-9 shrink-0 items-center justify-end border-b border-border px-2 max-[959px]:hidden">
           <IconButton
-            label={layout.dockOpen ? "收起配套终端" : "展开配套终端"}
+            label={
+              layout.dockOpen ? t(($) => $.terminal.collapseDock) : t(($) => $.terminal.expandDock)
+            }
             onClick={() =>
               setLayout((old) => ({ ...old, dockOpen: !old.dockOpen, dock: old.dock ?? selected }))
             }
@@ -309,7 +325,7 @@ export function WorkspaceTerminal({
           </Panel>
           {layout.dockOpen && !mobile && (
             <>
-              <Separator className="split-divider" aria-label="调整配套终端高度" />
+              <Separator className="split-divider" aria-label={t(($) => $.terminal.resizeDock)} />
               <Panel
                 id="dock"
                 minSize={170}
@@ -323,13 +339,16 @@ export function WorkspaceTerminal({
                   {dockId && (
                     <>
                       <IconButton
-                        label="在 Terminal 展开"
+                        label={t(($) => $.terminal.expandTerminal)}
                         disabled={!find(dockId) && !displays.current.has(dockId)}
                         onClick={() => applyMain(selectSession(layout, dockId), "terminal")}
                       >
                         <Maximize2 />
                       </IconButton>
-                      <IconButton label="关闭配套显示" onClick={() => close(dockId, true)}>
+                      <IconButton
+                        label={t(($) => $.terminal.closeDock)}
+                        onClick={() => close(dockId, true)}
+                      >
                         <X />
                       </IconButton>
                     </>
@@ -346,7 +365,7 @@ export function WorkspaceTerminal({
                   />
                 ) : (
                   <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-                    选择终端会话
+                    {t(($) => $.terminal.selectSession)}
                   </div>
                 )}
               </Panel>

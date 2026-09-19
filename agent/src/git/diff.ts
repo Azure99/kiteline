@@ -45,7 +45,7 @@ export function rawReader(each: (change: RawChange) => void) {
     data: reader.data,
     end() {
       reader.end();
-      if (header) throw new AppError("io_error", "Git raw diff 不完整");
+      if (header) throw new AppError("io_error", "Git raw diff is incomplete");
     },
   };
 }
@@ -60,7 +60,7 @@ export function numstatReader(each: (path: string, binary: boolean) => void) {
     }
     const first = record.indexOf(9),
       second = record.indexOf(9, first + 1);
-    if (first < 0 || second < 0) throw new AppError("io_error", "Git numstat 不完整");
+    if (first < 0 || second < 0) throw new AppError("io_error", "Git numstat is incomplete");
     binary = record[0] === 45;
     if (second === record.length - 1) renamed = 2;
     else each(utf8(record.subarray(second + 1)), binary);
@@ -69,7 +69,7 @@ export function numstatReader(each: (path: string, binary: boolean) => void) {
     data: reader.data,
     end() {
       reader.end();
-      if (renamed) throw new AppError("io_error", "Git numstat rename 不完整");
+      if (renamed) throw new AppError("io_error", "Git numstat rename record is incomplete");
     },
   };
 }
@@ -144,11 +144,14 @@ export async function workingDiff(
     (side === "staged" && [".", "?"].includes(selected.indexStatus)) ||
     (side === "worktree" && selected.worktreeStatus === ".")
   )
-    throw new AppError("conflict", "所选变化已不适用，请刷新");
+    throw new AppError("conflict", "Selected change no longer applies; refresh");
   if (selected.indexStatus === "?") {
     const info = await lstat(join(repo.rootPath, path));
     if (!info.isFile() && !info.isSymbolicLink())
-      throw new AppError("unsupported", "此项需进入目录或终端查看");
+      throw new AppError(
+        "unsupported",
+        "Open the directory or use the terminal to inspect this item",
+      );
     const args = ["diff", "--no-index", ...diffOptions];
     const nums = await git(
       repo.rootPath,
@@ -185,7 +188,7 @@ export async function workingDiff(
     onData: raw.data,
   });
   raw.end();
-  if (!change) throw new AppError("conflict", "所选变化已不适用，请刷新");
+  if (!change) throw new AppError("conflict", "Selected change no longer applies; refresh");
   let binary = false;
   const nums = numstatReader((itemPath, isBinary) => {
     if (itemPath === path) binary = isBinary;

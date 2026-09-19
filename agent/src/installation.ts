@@ -36,7 +36,7 @@ export async function installationPaths(installation: Installation) {
         !isAbsolute(environment[key]!)
       )
         throw new Error(
-          `${environmentFile}: ${key} 必须为单行双引号绝对路径，例如 ${key}="/var/lib/kiteline"，不使用转义或尾部注释`,
+          `${environmentFile}: ${key} must be a single-line absolute path in double quotes, for example ${key}="/var/lib/kiteline", without escapes or trailing comments`,
         );
     }
   } catch (error) {
@@ -53,6 +53,6 @@ export async function installedPaths() {
   const installation = await readInstallation();
   if (!installation) return;
   if (process.getuid?.() !== installation.uid)
-    throw new Error(`请以项目用户 ${installation.user} 执行此命令`);
+    throw new Error(`Use project user ${installation.user} to run this command`);
   return installationPaths(installation);
 }

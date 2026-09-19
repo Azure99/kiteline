@@ -1,8 +1,10 @@
+import { ErrorNotice } from "../components/error-notice";
+import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GitBranch, RefreshCw, Plus, Trash2, ArrowRightLeft } from "lucide-react";
 import type { Branch } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
-import { errorMessage, rpc } from "../lib/api";
+import { rpc } from "../lib/api";
 import { useWorkspaceRefresh } from "../lib/use-workspace-refresh";
 import { type GitActions, useGitActivity } from "./actions";
 import { BranchDialog } from "./branch-dialog";
@@ -22,9 +24,11 @@ export function BranchesView({
   actions: GitActions;
   headOid?: string | null;
 }) {
+  const { t } = useTranslation();
+
   const [items, setItems] = useState<Branch[]>([]);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<unknown>();
   const request = useRef<AbortController>(undefined);
   const target = { deviceId, workspaceId, repoId };
   const activity = useGitActivity(actions, target);
@@ -35,7 +39,7 @@ export function BranchesView({
     const controller = new AbortController();
     request.current = controller;
     setBusy(true);
-    setError("");
+    setError(undefined);
     try {
       const result = await rpc(
         deviceId,
@@ -45,7 +49,7 @@ export function BranchesView({
       );
       if (!controller.signal.aborted) setItems(result.branches);
     } catch (error) {
-      if (!controller.signal.aborted) setError(errorMessage(error));
+      if (!controller.signal.aborted) setError(error);
     } finally {
       if (request.current === controller) {
         request.current = undefined;
@@ -64,20 +68,24 @@ export function BranchesView({
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-10 shrink-0 items-center justify-end border-b border-border px-3">
         <IconButton
-          label="创建分支"
+          label={t(($) => $.git.createBranch)}
           disabled={disabled || !headOid}
           onClick={() => setCreating(true)}
         >
           <Plus />
         </IconButton>
-        <IconButton label="刷新分支" disabled={!active || busy} onClick={() => void load()}>
+        <IconButton
+          label={t(($) => $.git.refreshBranches)}
+          disabled={!active || busy}
+          onClick={() => void load()}
+        >
           <RefreshCw />
         </IconButton>
       </div>
-      {error && (
-        <p role="alert" className="px-4 py-2 text-xs text-destructive">
-          {error}
-        </p>
+      {!!error && (
+        <div role="alert" className="px-4 py-2 text-xs text-destructive">
+          <ErrorNotice error={error} />
+        </div>
       )}
       <div className="scroll-area min-h-0 flex-1 overflow-auto">
         {items.map((branch) => (
@@ -93,34 +101,32 @@ export function BranchesView({
                 {branch.worktreePath && !branch.current ? ` · ${branch.worktreePath}` : ""}
               </p>
             </div>
-            {branch.current && <span className="text-xs text-primary">当前</span>}
+            {branch.current && (
+              <span className="text-xs text-primary">{t(($) => $.git.current)}</span>
+            )}
             {!branch.current && (
               <div className="flex shrink-0">
                 <IconButton
-                  label={`切换到 ${branch.name}`}
+                  label={t(($) => $.git.switchNamed, { name: branch.name })}
                   disabled={disabled || !!branch.worktreePath}
                   onClick={() =>
-                    void actions.run(
-                      target,
-                      "git.branch.switch",
-                      { name: branch.name, refOid: branch.oid },
-                      "切换分支",
-                    )
+                    void actions.run(target, "git.branch.switch", {
+                      name: branch.name,
+                      refOid: branch.oid,
+                    })
                   }
                 >
                   <ArrowRightLeft />
                 </IconButton>
                 <IconButton
-                  label={`删除分支 ${branch.name}`}
+                  label={t(($) => $.git.deleteBranchNamed, { name: branch.name })}
                   disabled={disabled || !!branch.worktreePath}
                   onClick={() => {
-                    if (window.confirm(`删除分支 ${branch.name}？`))
-                      void actions.run(
-                        target,
-                        "git.branch.delete",
-                        { name: branch.name, refOid: branch.oid },
-                        "删除分支",
-                      );
+                    if (window.confirm(t(($) => $.git.deleteBranchConfirm, { name: branch.name })))
+                      void actions.run(target, "git.branch.delete", {
+                        name: branch.name,
+                        refOid: branch.oid,
+                      });
                   }}
                 >
                   <Trash2 />
@@ -131,7 +137,7 @@ export function BranchesView({
         ))}
         {!items.length && (
           <p role="status" className="p-4 text-sm text-muted-foreground">
-            {busy ? "正在读取" : error ? "" : "暂无分支"}
+            {busy ? t(($) => $.common.reading) : error ? "" : t(($) => $.git.noBranches)}
           </p>
         )}
       </div>

@@ -1,7 +1,24 @@
 import { Menu as Primitive } from "@base-ui/react/menu";
+import { Check } from "lucide-react";
 
 export const Menu = Primitive.Root;
 export const MenuTrigger = Primitive.Trigger;
+export const MenuRadioGroup = Primitive.RadioGroup;
+export function MenuRadioItem({ children, ...props }: Primitive.RadioItem.Props) {
+  return (
+    <Primitive.RadioItem
+      className="flex min-h-8 cursor-default items-center gap-2 rounded px-2 py-1.5 text-sm outline-none data-highlighted:bg-muted max-[959px]:min-h-11"
+      {...props}
+    >
+      <span className="size-4 shrink-0">
+        <Primitive.RadioItemIndicator>
+          <Check size={16} />
+        </Primitive.RadioItemIndicator>
+      </span>
+      {children}
+    </Primitive.RadioItem>
+  );
+}
 export function MenuContent({ children }: { children: React.ReactNode }) {
   return (
     <Primitive.Portal>

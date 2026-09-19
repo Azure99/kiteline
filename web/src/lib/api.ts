@@ -1,4 +1,6 @@
 import type { KitelineError, RpcArguments, RpcReply, RpcResult } from "@kiteline/shared/protocol";
+import { i18n } from "../i18n";
+import { en } from "../i18n/en";
 
 export class ApiError extends Error {
   constructor(
@@ -33,7 +35,7 @@ export async function api<T>(
     return data as T;
   } catch (error) {
     if (!mutation || error instanceof ApiError) throw error;
-    throw new ApiError("io_error", "未收到操作结果", "unknown");
+    throw new ApiError("io_error", "No operation result was received", "unknown");
   }
 }
 export function post<T>(path: string, value: unknown = {}, signal?: AbortSignal, mutation = true) {
@@ -81,9 +83,18 @@ export async function rpc<A extends RpcArguments>(
     );
   return reply.result;
 }
-export function errorMessage(error: unknown) {
+export function errorMessage(error: unknown, context?: "login") {
   const message = error instanceof Error ? error.message : String(error);
-  return error instanceof ApiError && error.outcome === "unknown"
-    ? `${message}；请刷新确认，勿重复执行。`
-    : message;
+  const code = error instanceof ApiError ? error.code : undefined;
+  const summary =
+    context === "login" && code === "unauthenticated"
+      ? i18n.t(($) => $.auth.invalidCredentials)
+      : code && Object.hasOwn(en.errors, code)
+        ? i18n.t(($) => $.errors[code as keyof typeof en.errors])
+        : i18n.t(($) => $.errors.requestFailed);
+  const outcome =
+    error instanceof ApiError && (error.outcome === "unknown" || error.outcome === "partial")
+      ? i18n.t(($) => $.errors[error.outcome as "unknown" | "partial"])
+      : "";
+  return [summary, code ? `[${code}] ${message}` : message, outcome].filter(Boolean).join(" ");
 }

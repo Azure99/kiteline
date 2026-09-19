@@ -27,13 +27,13 @@ interface Target {
 export const isProxyPath = (path: string) => /^\/(?:proxy|absproxy)(?:[/?]|$)/.test(path);
 export function proxyTarget(raw: string): Target {
   const match = /^(\/(proxy|absproxy)\/([^/?]+)\/(\d{1,5}))((?:[/?].*)?)$/.exec(raw);
-  if (!match) throw new AppError("invalid_argument", "无效设备端口路径");
+  if (!match) throw new AppError("invalid_argument", "Invalid device port path");
   const [, prefix, kind, encodedDevice, port, suffix = ""] = match;
   let deviceId: string;
   try {
     deviceId = decodeURIComponent(encodedDevice!);
   } catch {
-    throw new AppError("invalid_argument", "无效设备 ID");
+    throw new AppError("invalid_argument", "Invalid device ID");
   }
   const targetPort = integer(Number(port), "port", 1, 65535);
   return {
@@ -101,12 +101,14 @@ function failure(
       .end();
     return;
   }
-  const title = target ? `设备端口 ${target.port}` : "设备 HTTP 访问";
-  const message = detail.message + (status === 502 ? "；请核对端口、监听地址和容器网络。" : "");
+  const title = target ? `Device port ${target.port}` : "Device HTTP access";
+  const message =
+    detail.message +
+    (status === 502 ? "; check the port, listening address, and container network." : "");
   const html = navigation(request);
   const content = html
     ? `<!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escape(title)}</title>
@@ -118,8 +120,8 @@ a,button{display:inline-flex;align-items:center;min-height:44px;padding:0 12px;b
 <h1>${escape(title)}</h1>
 <p>${escape(target?.deviceId ?? "")}</p>
 <p>${escape(message)}</p>
-<a href="/devices${target ? `/${encodeURIComponent(target.deviceId)}` : ""}">返回设备</a>
-<button type="button" onclick="location.reload()">重新打开</button>
+<a href="/devices${target ? `/${encodeURIComponent(target.deviceId)}` : ""}">Back to device</a>
+<button type="button" onclick="location.reload()">Reopen</button>
 </html>`
     : message + "\n";
   const headers = {
@@ -142,15 +144,16 @@ export class HttpProxy {
   async handle(request: IncomingMessage, destination: ServerResponse | Duplex, head?: Buffer) {
     let target: Target | undefined;
     try {
-      if (request.method === "CONNECT") throw new AppError("unsupported", "不支持 CONNECT");
+      if (request.method === "CONNECT")
+        throw new AppError("unsupported", "CONNECT is not supported");
       target = proxyTarget(request.url ?? "");
       const login = this.store.session(cookie(request));
-      if (!login) throw new AppError("unauthenticated", "请登录");
+      if (!login) throw new AppError("unauthenticated", "Please sign in");
       if (head !== undefined || !["GET", "HEAD"].includes(request.method ?? "GET"))
         origin(request, this.config.publicUrl);
       const device = this.connections.devices().find((value) => value.id === target!.deviceId);
       if (!device || device.status === "revoked")
-        throw new AppError("not_found", "设备不存在或已撤销");
+        throw new AppError("not_found", "Device not found or revoked");
       if (target.redirect) {
         if (destination instanceof ServerResponse)
           destination.writeHead(308, { location: target.redirect }).end();
@@ -165,7 +168,7 @@ export class HttpProxy {
         return;
       }
       if (head !== undefined && request.headers.upgrade?.toLowerCase() !== "websocket")
-        throw new AppError("unsupported", "只支持 WebSocket 升级");
+        throw new AppError("unsupported", "Only WebSocket upgrades are supported");
       await this.forward(request, destination, target, login, head);
     } catch (error) {
       failure(request, destination, error, target);
@@ -210,10 +213,10 @@ export class HttpProxy {
     destination.on("error", fail);
     destination.on("close", () => {
       if (response?.writableFinished) finish();
-      else finish(new AppError("cancelled", "访问已关闭"));
+      else finish(new AppError("cancelled", "HTTP connection closed"));
     });
     destination.on("finish", () => finish());
-    request.on("aborted", () => fail(new AppError("cancelled", "请求已取消")));
+    request.on("aborted", () => fail(new AppError("cancelled", "Request cancelled")));
     request.on("error", fail);
     const pending = this.channels.createHttp(target.deviceId, login, target.port, fail);
     channelId = pending.id;
@@ -237,11 +240,13 @@ export class HttpProxy {
     upstream.on("error", fail);
     upstream.on("response", (result) => {
       try {
-        if (result.statusCode! < 100) throw new AppError("io_error", "本地服务返回无效 HTTP 状态");
+        if (result.statusCode! < 100)
+          throw new AppError("io_error", "Local service returned an invalid HTTP status");
         incoming = result;
         result.on("error", fail);
         result.on("close", () => {
-          if (!result.complete) fail(new AppError("io_error", "本地响应未完整结束"));
+          if (!result.complete)
+            fail(new AppError("io_error", "Local response ended before completion"));
         });
         const headers = responseHeaders(result.headers, target.prefix, target.strip);
         if (response) {
@@ -263,7 +268,7 @@ export class HttpProxy {
     upstream.on("upgrade", (result, socket, upstreamHead) => {
       if (response || result.headers.upgrade?.toLowerCase() !== "websocket") {
         socket.destroy();
-        return fail(new AppError("io_error", "无效上游升级响应"));
+        return fail(new AppError("io_error", "Invalid upstream upgrade response"));
       }
       peer = socket;
       socket.pause();

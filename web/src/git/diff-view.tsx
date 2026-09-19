@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { Decoration, Diff, Hunk, parseDiff, type FileData, type HunkTokens } from "react-diff-view";
 import "react-diff-view/style/index.css";
@@ -5,6 +6,7 @@ import { ArrowLeft, FilePenLine, RefreshCw } from "lucide-react";
 import { limits, type GitDiff } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
 import { errorMessage, rpc } from "../lib/api";
+import { ErrorNotice, ErrorDetails } from "../components/error-notice";
 
 export type DiffTarget = {
   path: string;
@@ -27,14 +29,16 @@ export function DiffView({
   onBack: () => void;
   onFile: () => void;
 }) {
+  const { t } = useTranslation();
+
   const [value, setValue] = useState<GitDiff>();
-  const [error, setError] = useState("");
+  const [error, setError] = useState<unknown>();
   const [busy, setBusy] = useState(false);
   const [retry, setRetry] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
     setBusy(true);
-    setError("");
+    setError(undefined);
     void rpc(deviceId, "git.diff", { workspaceId, repoId, ...target }, controller.signal)
       .then(
         (result) => {
@@ -48,7 +52,7 @@ export function DiffView({
             );
         },
         (error) => {
-          if (!controller.signal.aborted) setError(errorMessage(error));
+          if (!controller.signal.aborted) setError(error);
         },
       )
       .finally(() => {
@@ -63,31 +67,46 @@ export function DiffView({
       aria-busy={busy}
     >
       <div className="flex min-h-10 shrink-0 items-center gap-1 border-b border-border px-2">
-        <IconButton label="返回变化" onClick={onBack}>
+        <IconButton label={t(($) => $.git.backChanges)} onClick={onBack}>
           <ArrowLeft />
         </IconButton>
         <span className="min-w-0 flex-1 truncate text-xs" title={target.path}>
           {target.path}
         </span>
         <span className="text-[11px] text-muted-foreground">
-          {target.side === "staged" ? "暂存区" : target.side === "commit" ? "提交" : "工作树"}
+          {target.side === "staged"
+            ? t(($) => $.git.index)
+            : target.side === "commit"
+              ? t(($) => $.git.commit)
+              : t(($) => $.git.worktree)}
         </span>
-        <IconButton label="在 Files 打开" onClick={onFile}>
+        <IconButton label={t(($) => $.git.openFiles)} onClick={onFile}>
           <FilePenLine />
         </IconButton>
-        <IconButton label="刷新 diff" disabled={busy} onClick={() => setRetry((n) => n + 1)}>
+        <IconButton
+          label={t(($) => $.git.refreshDiff)}
+          disabled={busy}
+          onClick={() => setRetry((n) => n + 1)}
+        >
           <RefreshCw />
         </IconButton>
       </div>
       <div className="scroll-area min-h-0 min-w-0 flex-1 overflow-auto">
-        {error && (
-          <p role="alert" className="break-words p-4 text-sm text-destructive">
-            {value ? `刷新失败，显示上次结果：${error}` : error}
-          </p>
+        {!!error && (
+          <div role="alert" className="break-words p-4 text-sm text-destructive">
+            {value ? (
+              <>
+                {t(($) => $.git.staleDiff, { error: errorMessage(error) })}
+                <ErrorDetails error={error} />
+              </>
+            ) : (
+              <ErrorNotice error={error} />
+            )}
+          </div>
         )}
         {busy && !value && (
           <p role="status" className="p-4 text-sm text-muted-foreground">
-            正在读取
+            {t(($) => $.common.reading)}
           </p>
         )}
         {value && <Patch value={value} />}
@@ -96,13 +115,15 @@ export function DiffView({
   );
 }
 export function Patch({ value }: { value: GitDiff }) {
+  const { t } = useTranslation();
+
   const parsed = useMemo(() => {
-    if (value.truncated) return { reason: "Diff 读取已截断" };
+    if (value.truncated) return { reason: "diffTruncated" as const };
     if (value.patch.split("\n").length > limits.diffRenderLines)
-      return { reason: "Diff 超过显示行数" };
+      return { reason: "diffLineLimit" as const };
     try {
       const files = parseDiff(value.patch);
-      if (!files.length && value.patch.trim()) return { reason: "Diff 无法结构化显示" };
+      if (!files.length && value.patch.trim()) return { reason: "diffUnstructured" as const };
       if (
         !files.some((file) => file.hunks.length) &&
         value.patch
@@ -115,10 +136,10 @@ export function Patch({ value }: { value: GitDiff }) {
               ),
           )
       )
-        return { reason: "Diff 含未解析内容" };
+        return { reason: "diffUnparsed" as const };
       return { files };
     } catch {
-      return { reason: "Diff 解析失败" };
+      return { reason: "diffParseFailed" as const };
     }
   }, [value]);
   const bytes = new TextEncoder().encode(value.patch);
@@ -136,10 +157,11 @@ export function Patch({ value }: { value: GitDiff }) {
             </p>
           )}
           <p>
-            {summary.status}
-            {summary.binary ? " · 二进制" : ""}
+            {summary.binary
+              ? t(($) => $.git.binaryNamed, { path: summary.status })
+              : summary.status}
             {summary.oldMode !== summary.newMode
-              ? ` · ${summary.oldMode ?? "无"} → ${summary.newMode ?? "无"}`
+              ? ` · ${summary.oldMode ?? t(($) => $.git.none)} → ${summary.newMode ?? t(($) => $.git.none)}`
               : ""}
           </p>
         </div>
@@ -147,9 +169,11 @@ export function Patch({ value }: { value: GitDiff }) {
       {parsed.reason ? (
         <>
           <p role="status" className="px-4 py-2 text-xs">
-            {parsed.reason}
-            {bytes.length > limits.diffRawBytes ? "；仅显示部分原始 patch" : ""}
+            {t(($) => $.git[parsed.reason!])}
           </p>
+          {bytes.length > limits.diffRawBytes && (
+            <p className="px-4 py-2 text-xs">{t(($) => $.git.rawPatchLimited)}</p>
+          )}
           <pre className="w-max min-w-full px-4 py-3 font-mono text-xs">{raw}</pre>
         </>
       ) : (
@@ -159,6 +183,8 @@ export function Patch({ value }: { value: GitDiff }) {
   );
 }
 function DiffBlock({ file }: { file: FileData }) {
+  const { t } = useTranslation();
+
   const tokens: HunkTokens = { old: [], new: [] };
   for (const hunk of file.hunks)
     for (const change of hunk.changes)
@@ -206,9 +232,13 @@ function DiffBlock({ file }: { file: FileData }) {
       </Diff>
       {(file.oldEndingNewLine === false || file.newEndingNewLine === false) && (
         <p className="border-t border-border px-4 py-2 text-xs text-muted-foreground">
-          {file.oldEndingNewLine === false ? "旧版" : ""}
-          {file.oldEndingNewLine === false && file.newEndingNewLine === false ? "、" : ""}
-          {file.newEndingNewLine === false ? "新版" : ""}末尾无换行
+          {t(($) =>
+            file.oldEndingNewLine === false && file.newEndingNewLine === false
+              ? $.git.noNewlineBoth
+              : file.oldEndingNewLine === false
+                ? $.git.noNewlineOld
+                : $.git.noNewlineNew,
+          )}
         </p>
       )}
     </>

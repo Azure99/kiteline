@@ -30,7 +30,11 @@ export class InputQueue {
   input(attachmentId: string, data: Buffer, paste = false) {
     if (this.closed || !data.length) return;
     if (this.bytes + data.length > this.config.terminalInputBytes) {
-      this.reject(attachmentId, new AppError("limit_exceeded", "终端输入超过容量"), "failed");
+      this.reject(
+        attachmentId,
+        new AppError("limit_exceeded", "Terminal input exceeds the capacity limit"),
+        "failed",
+      );
       return;
     }
     const last = this.queue.at(-1);
@@ -53,7 +57,11 @@ export class InputQueue {
       cols > limits.terminalMaxCols ||
       rows > limits.terminalMaxRows
     ) {
-      this.reject(attachmentId, new AppError("invalid_argument", "终端尺寸无效"), "failed");
+      this.reject(
+        attachmentId,
+        new AppError("invalid_argument", "Invalid terminal dimensions"),
+        "failed",
+      );
       return;
     }
     const last = this.queue.at(-1);
@@ -62,7 +70,7 @@ export class InputQueue {
       last.rows = rows;
     } else {
       if (this.bytes + 32 > this.config.terminalInputBytes) {
-        this.reject(attachmentId, new AppError("busy", "终端输入队列已满"), "failed");
+        this.reject(attachmentId, new AppError("busy", "Terminal input queue is full"), "failed");
         return;
       }
       this.queue.push({ type: "resize", attachmentId, cols, rows });
@@ -78,9 +86,10 @@ export class InputQueue {
     });
   }
   redraw() {
-    if (this.closed) return Promise.reject(new AppError("recording_unavailable", "记录已中断"));
+    if (this.closed)
+      return Promise.reject(new AppError("recording_unavailable", "Recording interrupted"));
     if (this.bytes + 32 > this.config.terminalInputBytes)
-      return Promise.reject(new AppError("busy", "终端输入队列已满"));
+      return Promise.reject(new AppError("busy", "Terminal input queue is full"));
     return new Promise<void>((resolve, reject) => {
       this.queue.push({ type: "redraw", attachmentId: undefined, resolve, reject });
       this.bytes += 32;
@@ -105,7 +114,7 @@ export class InputQueue {
             await this.model.waitForSize(item.cols, item.rows, this.config.channelPairTimeout);
           } else {
             const identity = this.control.identity;
-            if (!identity) throw new AppError("busy", "终端尚未创建完成");
+            if (!identity) throw new AppError("busy", "Terminal creation is not complete");
             await tmux(
               identity.socket,
               [
@@ -150,7 +159,7 @@ export class InputQueue {
     this.closed = true;
     for (const item of this.queue.splice(0)) {
       this.bytes -= cost(item);
-      if (item.type === "redraw") item.reject(new AppError("cancelled", "终端已关闭"));
+      if (item.type === "redraw") item.reject(new AppError("cancelled", "Terminal closed"));
     }
   }
 }

@@ -53,7 +53,9 @@ test("Files preserves UTF-8 paths and browses accessible links outside its works
   expect(external.entries.items[0]?.path).toBe("link/visible");
   await files.rename(id, "link/visible", "moved");
   expect(await readFile(join(data, "external/moved"), "utf8")).toBe("outside");
-  expect(() => files.create(id, "../escape", "file")).toThrow("需要 workspace 内的相对路径");
+  expect(() => files.create(id, "../escape", "file")).toThrow(
+    "A relative path within the workspace is required",
+  );
 });
 
 test("concurrent exclusive publications never replace an existing name or dangling link", async () => {

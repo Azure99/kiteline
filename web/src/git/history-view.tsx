@@ -1,3 +1,5 @@
+import { ErrorNotice } from "../components/error-notice";
+import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
@@ -12,7 +14,7 @@ import type { Commit, CommitFiles, GitHistory } from "@kiteline/shared/protocol"
 import { Button } from "../components/ui/button";
 import { IconButton } from "../components/icon-button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
-import { errorMessage, rpc } from "../lib/api";
+import { rpc } from "../lib/api";
 import { useMobile } from "../lib/use-mobile";
 import { DiffView, type DiffTarget } from "./diff-view";
 
@@ -25,12 +27,14 @@ interface Props {
   onBranch?: (oid: string) => void;
 }
 export function HistoryView(props: Props) {
+  const { t, i18n } = useTranslation();
+
   const { deviceId, workspaceId, repoId, active } = props;
   const [value, setValue] = useState<GitHistory>();
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<Commit>();
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<unknown>();
   const request = useRef<AbortController>(undefined);
   const pages = useRef<number[]>([]);
   const position = useRef<{ anchor?: string; offset: number }>({ offset: 0 });
@@ -41,7 +45,7 @@ export function HistoryView(props: Props) {
       const controller = new AbortController();
       request.current = controller;
       setBusy(true);
-      setError("");
+      setError(undefined);
       try {
         const result = await rpc(
           deviceId,
@@ -55,7 +59,7 @@ export function HistoryView(props: Props) {
         setValue(result);
         setOffset(offset);
       } catch (error) {
-        if (!controller.signal.aborted) setError(errorMessage(error));
+        if (!controller.signal.aborted) setError(error);
       } finally {
         if (request.current === controller) {
           request.current = undefined;
@@ -75,7 +79,7 @@ export function HistoryView(props: Props) {
         <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border px-3 text-xs text-muted-foreground">
           <span className="mr-auto">{value?.anchorOid?.slice(0, 8)}</span>
           <IconButton
-            label="刷新提交历史"
+            label={t(($) => $.git.refreshHistory)}
             disabled={busy || !active}
             onClick={() => {
               void load({ offset: 0 }, []);
@@ -84,10 +88,10 @@ export function HistoryView(props: Props) {
             <RefreshCw />
           </IconButton>
         </div>
-        {error && (
-          <p role="alert" className="px-4 py-2 text-xs text-destructive">
-            {error}
-          </p>
+        {!!error && (
+          <div role="alert" className="px-4 py-2 text-xs text-destructive">
+            <ErrorNotice error={error} />
+          </div>
         )}
         <div className="scroll-area min-h-0 flex-1 overflow-auto">
           {value?.commits.map((commit) => (
@@ -102,7 +106,7 @@ export function HistoryView(props: Props) {
                   {commit.subject || commit.oid.slice(0, 8)}
                 </span>
                 <span className="mt-1 block break-words text-xs text-muted-foreground">
-                  {commit.author} · {new Date(commit.time).toLocaleString()}
+                  {commit.author} · {new Date(commit.time).toLocaleString(i18n.resolvedLanguage)}
                 </span>
               </span>
               <span className="hidden font-mono text-xs text-muted-foreground min-[960px]:block">
@@ -112,16 +116,18 @@ export function HistoryView(props: Props) {
           ))}
           {!value?.commits.length && (
             <p role="status" className="p-4 text-sm text-muted-foreground">
-              {busy ? "正在读取" : error ? "" : "暂无提交"}
+              {busy ? t(($) => $.common.reading) : error ? "" : t(($) => $.git.noCommits)}
             </p>
           )}
         </div>
         <div className="flex min-h-10 shrink-0 items-center gap-1 border-t border-border px-3 text-xs text-muted-foreground">
           <span className="mr-auto">
-            {value?.commits.length ? `${offset + 1}–${offset + value.commits.length}` : "0"}
+            {value?.commits.length
+              ? `${(offset + 1).toLocaleString(i18n.resolvedLanguage)}–${(offset + value.commits.length).toLocaleString(i18n.resolvedLanguage)}`
+              : "0"}
           </span>
           <IconButton
-            label="历史上一页"
+            label={t(($) => $.git.previousHistory)}
             disabled={busy || offset === 0}
             onClick={() =>
               void load(
@@ -133,7 +139,7 @@ export function HistoryView(props: Props) {
             <ChevronLeft />
           </IconButton>
           <IconButton
-            label="历史下一页"
+            label={t(($) => $.git.nextHistory)}
             disabled={busy || value?.nextOffset === undefined}
             onClick={() => {
               if (value?.nextOffset !== undefined)
@@ -168,11 +174,13 @@ function CommitView({
   onFile,
   onBranch,
 }: Props & { commit: Commit; onBack: () => void }) {
+  const { t } = useTranslation();
+
   const [parent, setParent] = useState(commit.parents[0]);
   const [value, setValue] = useState<CommitFiles>();
   const [target, setTarget] = useState<DiffTarget>();
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<unknown>();
   const request = useRef<AbortController>(undefined);
   const loaded = useRef(false);
   const mobile = useMobile();
@@ -182,7 +190,7 @@ function CommitView({
       const controller = new AbortController();
       request.current = controller;
       setBusy(true);
-      setError("");
+      setError(undefined);
       try {
         const next = await rpc(
           deviceId,
@@ -201,7 +209,7 @@ function CommitView({
             : next,
         );
       } catch (error) {
-        if (!controller.signal.aborted) setError(errorMessage(error));
+        if (!controller.signal.aborted) setError(error);
       } finally {
         if (request.current === controller) {
           request.current = undefined;
@@ -223,7 +231,7 @@ function CommitView({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-2 border-b border-border p-2">
-        <IconButton label="返回提交历史" onClick={onBack}>
+        <IconButton label={t(($) => $.git.backHistory)} onClick={onBack}>
           <ArrowLeft />
         </IconButton>
         <span className="min-w-0 flex-1 truncate text-xs" title={commit.subject}>
@@ -234,7 +242,7 @@ function CommitView({
         </span>
         {onBranch && (
           <IconButton
-            label="从此提交创建分支"
+            label={t(($) => $.git.branchFromCommit)}
             disabled={!active}
             onClick={() => onBranch(commit.oid)}
           >
@@ -247,29 +255,30 @@ function CommitView({
           <Menu>
             <MenuTrigger render={<Button variant="ghost" />}>
               <span className="text-xs">
-                父项 {commit.parents.indexOf(parent!) + 1} · {parent?.slice(0, 8)}
+                {t(($) => $.git.parentNumber, { number: commit.parents.indexOf(parent!) + 1 })} ·{" "}
+                {parent?.slice(0, 8)}
               </span>
               <ChevronDown />
             </MenuTrigger>
             <MenuContent>
               {commit.parents.map((oid, index) => (
                 <MenuItem key={oid} onClick={() => setParent(oid)}>
-                  父项 {index + 1} · {oid.slice(0, 8)}
+                  {t(($) => $.git.parentNumber, { number: index + 1 })} · {oid.slice(0, 8)}
                 </MenuItem>
               ))}
             </MenuContent>
           </Menu>
         </div>
       )}
-      {error && (
-        <p role="alert" className="px-4 py-2 text-xs text-destructive">
-          {error}
-        </p>
+      {!!error && (
+        <div role="alert" className="px-4 py-2 text-xs text-destructive">
+          <ErrorNotice error={error} />
+        </div>
       )}
       <div className="flex min-h-0 flex-1">
         <aside
           className={`${mobile && target ? "hidden" : ""} scroll-area w-full overflow-auto border-border min-[960px]:w-72 min-[960px]:shrink-0 min-[960px]:border-r`}
-          aria-label="提交文件"
+          aria-label={t(($) => $.git.commitFiles)}
         >
           {value?.files.items.map((file) => (
             <button
@@ -287,12 +296,16 @@ function CommitView({
             >
               <span className="font-mono text-muted-foreground">{file.status}</span>
               <span className="min-w-0 flex-1 break-all">{file.path}</span>
-              {file.binary && <span className="text-muted-foreground">二进制</span>}
+              {file.binary && (
+                <span className="text-muted-foreground">{t(($) => $.git.binary)}</span>
+              )}
             </button>
           ))}
-          {busy && <p className="p-4 text-xs text-muted-foreground">正在读取</p>}
-          {!busy && !error && !value?.files.items.length && (
-            <p className="p-4 text-xs text-muted-foreground">没有文件变化</p>
+          {busy && (
+            <p className="p-4 text-xs text-muted-foreground">{t(($) => $.common.reading)}</p>
+          )}
+          {!!(!busy && !error && !value?.files.items.length) && (
+            <p className="p-4 text-xs text-muted-foreground">{t(($) => $.git.noFileChanges)}</p>
           )}
           {value?.files.nextCursor && (
             <Button
@@ -301,13 +314,13 @@ function CommitView({
               disabled={busy || !active}
               onClick={() => void load(value.files.nextCursor)}
             >
-              继续加载
+              {t(($) => $.git.loadMore)}
             </Button>
           )}
-          {!busy && error && (
+          {!!(!busy && error) && (
             <Button variant="ghost" disabled={!active} onClick={() => void load()}>
               <RefreshCw />
-              重试
+              {t(($) => $.common.retry)}
             </Button>
           )}
         </aside>

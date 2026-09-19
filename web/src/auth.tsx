@@ -1,6 +1,9 @@
+import { ErrorNotice } from "./components/error-notice";
 import { useState, type FormEvent } from "react";
 import { ArrowRight, Terminal } from "lucide-react";
-import { api, errorMessage, post } from "./lib/api";
+import { useTranslation } from "react-i18next";
+import { LanguageMenu } from "./components/language-menu";
+import { api, post } from "./lib/api";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import {
@@ -23,13 +26,14 @@ export function Auth({
   initialized: boolean;
   onLogin: (session: Session) => void;
 }) {
+  const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<unknown>();
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const input = new FormData(event.currentTarget);
     setBusy(true);
-    setError("");
+    setError(undefined);
     try {
       await post(initialized ? "/api/login" : "/api/setup", {
         password: input.get("password"),
@@ -37,7 +41,7 @@ export function Auth({
       });
       onLogin(await api<Session>("/api/session"));
     } catch (error) {
-      setError(errorMessage(error));
+      setError(error);
     } finally {
       setBusy(false);
     }
@@ -50,17 +54,22 @@ export function Auth({
             <Terminal size={22} />
           </span>
           <h1 className="text-xl font-semibold">Kiteline</h1>
+          <div className="ml-auto">
+            <LanguageMenu />
+          </div>
         </div>
-        <h2 className="mb-6 text-lg font-medium">{initialized ? "登录" : "设置拥有者"}</h2>
+        <h2 className="mb-6 text-lg font-medium">
+          {initialized ? t(($) => $.auth.login) : t(($) => $.auth.ownerSetup)}
+        </h2>
         <form onSubmit={(event) => void submit(event)} className="space-y-4">
           {!initialized && (
             <label className="block space-y-2">
-              <span>初始化凭据</span>
+              <span>{t(($) => $.auth.setupToken)}</span>
               <Input name="setupToken" required autoComplete="off" autoFocus />
             </label>
           )}
           <label className="block space-y-2">
-            <span>密码</span>
+            <span>{t(($) => $.auth.password)}</span>
             <Input
               name="password"
               type="password"
@@ -69,13 +78,17 @@ export function Auth({
               autoFocus={initialized}
             />
           </label>
-          {error && (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
+          {!!error && (
+            <div role="alert" className="text-sm text-destructive">
+              <ErrorNotice error={error} context="login" />
+            </div>
           )}
           <Button type="submit" disabled={busy} className="w-full">
-            {busy ? "正在处理" : initialized ? "登录" : "初始化"}
+            {busy
+              ? t(($) => $.auth.processing)
+              : initialized
+                ? t(($) => $.auth.login)
+                : t(($) => $.auth.initialize)}
             <ArrowRight />
           </Button>
         </form>
@@ -83,18 +96,18 @@ export function Auth({
           <DialogTrigger
             render={<Button variant="ghost" className="mt-3 w-full text-muted-foreground" />}
           >
-            登录恢复
+            {t(($) => $.auth.recovery)}
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>登录恢复</DialogTitle>
+              <DialogTitle>{t(($) => $.auth.recovery)}</DialogTitle>
             </DialogHeader>
             <div className="space-y-3 overflow-auto p-5 text-sm">
-              <p>先停止统一服务，在相同数据目录执行：</p>
+              <p>{t(($) => $.auth.recoveryCommand)}</p>
               <pre className="overflow-auto rounded bg-muted p-3">
                 {initialized ? "kiteline-server reset-password" : "kiteline-server setup-token"}
               </pre>
-              <p>完成后重新启动服务。</p>
+              <p>{t(($) => $.auth.restart)}</p>
             </div>
           </DialogContent>
         </Dialog>

@@ -2,10 +2,11 @@ import { useSyncExternalStore } from "react";
 import type {
   FileProgress,
   GitWriteArguments,
+  GitWriteMethod,
   RpcReply,
   RpcResult,
 } from "@kiteline/shared/protocol";
-import { api, ApiError, errorMessage, post } from "../lib/api";
+import { api, ApiError, post } from "../lib/api";
 
 export interface GitTarget {
   deviceId: string;
@@ -15,9 +16,14 @@ export interface GitTarget {
 export interface GitActivity {
   message: string;
   messageVersion: number;
-  request?: { id: string; label: string; phase: FileProgress["phase"]; cancelling: boolean };
+  request?: {
+    id: string;
+    method: GitWriteMethod;
+    phase: FileProgress["phase"];
+    cancelling: boolean;
+  };
   error?: ApiError | Error;
-  notice?: string;
+  completed?: GitWriteMethod;
   result?: unknown;
   revision: number;
 }
@@ -56,20 +62,20 @@ export class GitActions {
   }
   async run<A extends GitWriteArguments>(
     target: GitTarget,
-    ...[method, params, label]: A
+    ...[method, params]: A
   ): Promise<RpcResult<A[0]> | undefined> {
     const value = this.get(target);
     if (value.request) return;
     const request = {
       id: crypto.randomUUID(),
-      label,
+      method,
       phase: "queued" as FileProgress["phase"],
       cancelling: false,
     };
     const messageVersion = value.messageVersion;
     value.request = request;
     value.error = undefined;
-    value.notice = undefined;
+    value.completed = undefined;
     value.result = undefined;
     this.notify();
     const progress = (event: Event) => {
@@ -103,7 +109,7 @@ export class GitActions {
       value.error = undefined;
       value.result = reply.result;
       if (method === "git.commit" && messageVersion === value.messageVersion) value.message = "";
-      value.notice = `${label}完成`;
+      value.completed = method;
       return reply.result;
     } catch (error) {
       value.error = error instanceof Error ? error : new Error(String(error));
@@ -124,7 +130,7 @@ export class GitActions {
       await api(`/api/devices/${target.deviceId}/requests/${request.id}`, { method: "DELETE" });
     } catch (error) {
       if (value.request !== request) return;
-      value.error = new Error(errorMessage(error));
+      value.error = error instanceof Error ? error : new Error(String(error));
       request.cancelling = false;
       this.notify();
     }

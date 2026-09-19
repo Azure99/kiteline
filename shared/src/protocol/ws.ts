@@ -19,11 +19,15 @@ export function sendFrame(
   data: string | Buffer,
   binary = Buffer.isBuffer(data),
 ) {
-  if (socket.readyState !== WebSocket.OPEN) throw new AppError("cancelled", "数据连接已关闭");
+  if (socket.readyState !== WebSocket.OPEN)
+    throw new AppError("cancelled", "Data connection closed");
   const bytes = Buffer.byteLength(data);
   if (bytes > (binary ? limits.dataChunkBytes : limits.controlMessageBytes))
-    throw new AppError("limit_exceeded", "数据帧超过容量");
+    throw new AppError("limit_exceeded", "Data frame exceeds the size limit");
   if (socket.bufferedAmount + bytes > limits.terminalPendingBytes)
-    throw new AppError("limit_exceeded", "当前显示传输积压，请重新连接");
+    throw new AppError(
+      "limit_exceeded",
+      "Display transmission backlog exceeds the limit; reconnect",
+    );
   socket.send(data, { binary });
 }

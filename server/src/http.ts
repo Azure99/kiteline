@@ -13,13 +13,14 @@ export async function body(request: IncomingMessage): Promise<unknown> {
   const parts: Buffer[] = [];
   for await (const part of request) {
     size += part.length;
-    if (size > limits.controlMessageBytes) throw new AppError("limit_exceeded", "请求过大");
+    if (size > limits.controlMessageBytes)
+      throw new AppError("limit_exceeded", "Request exceeds the size limit");
     parts.push(part);
   }
   try {
     return JSON.parse(Buffer.concat(parts).toString("utf8"));
   } catch {
-    throw new AppError("invalid_argument", "无效 JSON");
+    throw new AppError("invalid_argument", "Invalid JSON");
   }
 }
 export function cookie(request: IncomingMessage) {
@@ -30,7 +31,7 @@ export function cookie(request: IncomingMessage) {
     ?.slice("kiteline_session=".length);
 }
 export function origin(request: IncomingMessage, expected: string) {
-  if (request.headers.origin !== expected) throw new AppError("forbidden", "Origin 不匹配");
+  if (request.headers.origin !== expected) throw new AppError("forbidden", "Origin mismatch");
 }
 export function failure(response: ServerResponse, error: unknown) {
   const detail = asError(error);
@@ -60,7 +61,7 @@ export class AttemptLimiter {
     const previous = this.sources.get(source);
     const current = previous && previous.until > now ? previous : { count: 0, until: now + 60_000 };
     if (this.count >= 30 || current.count >= 10)
-      throw new AppError("busy", "尝试次数过多，请稍后重试");
+      throw new AppError("busy", "Too many attempts; try again later");
     if (this.sources.size >= 1024 && !this.sources.has(source))
       this.sources.delete(this.sources.keys().next().value!);
     this.count++;

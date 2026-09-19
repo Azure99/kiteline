@@ -62,19 +62,19 @@ export class FileOperations {
     progress?: (value: FileProgress) => void,
   ) {
     if (!Array.isArray(inputs) || !inputs.length || inputs.length > limits.listPageEntries)
-      throw new AppError("invalid_argument", "请选择有限数量的文件");
+      throw new AppError("invalid_argument", "Select a limited number of files");
     const items: CopyItem[] = inputs.map((input: unknown) => {
       if (kind === "delete")
         return { path: relativePath(input), targetPath: "", collision: "error" };
       const item = record(input);
       if (item.collision !== "error" && item.collision !== "replace")
-        throw new AppError("invalid_argument", "无效同名处理方式");
+        throw new AppError("invalid_argument", "Invalid name conflict action");
       if (
         item.collision === "replace"
           ? typeof item.expectedTargetVersion !== "string"
           : item.expectedTargetVersion !== undefined
       )
-        throw new AppError("invalid_argument", "替换需要确认的目标版本");
+        throw new AppError("invalid_argument", "Replacement requires the confirmed target version");
       return {
         path: relativePath(item.path),
         targetPath: relativePath(item.targetPath),
@@ -83,7 +83,10 @@ export class FileOperations {
       };
     });
     if (Buffer.byteLength(JSON.stringify(items)) > limits.resultBytes / 2)
-      throw new AppError("limit_exceeded", "所选路径超过操作容量，请分批处理");
+      throw new AppError(
+        "limit_exceeded",
+        "Selected paths exceed the operation limit; process them in batches",
+      );
     const root = this.metadata.workspace(workspaceId).path;
     const results: FileItemResult[] = [];
     let totalCompleted = 0,
@@ -154,7 +157,7 @@ export class FileOperations {
       const error = results.find((item) => item.error)?.error;
       throw new OperationError(
         error?.code ?? "io_error",
-        error?.message ?? "部分项目未完成",
+        error?.message ?? "Some items were not completed",
         outcome,
         result,
       );
@@ -175,7 +178,7 @@ export class FileOperations {
         this.remove(root, child, signal, result, done),
       );
     } else if (!source.info.isFile() && !source.info.isSymbolicLink()) {
-      throw new AppError("unsupported", "不删除设备节点、socket 或 FIFO");
+      throw new AppError("unsupported", "Device nodes, sockets, and FIFOs cannot be deleted");
     }
     await publish(async () => {
       const current = await verify(root, source);
@@ -198,14 +201,14 @@ export class FileOperations {
     expectedParent?: ObjectRef,
   ) {
     if (!source.info.isDirectory() && !source.info.isFile() && !source.info.isSymbolicLink())
-      throw new AppError("unsupported", "不复制设备节点、socket 或 FIFO");
+      throw new AppError("unsupported", "Device nodes, sockets, and FIFOs cannot be copied");
     const target = await publish(async () => {
       await verify(root, source);
       const target = await locate(root, item.targetPath);
       if (expectedParent && !sameObject(target.parentInfo, expectedParent.info))
-        throw new AppError("conflict", "目标目录已变化");
+        throw new AppError("conflict", "Target directory has changed");
       if (source.location.absolute === target.absolute)
-        throw new AppError("invalid_argument", "源与目标相同");
+        throw new AppError("invalid_argument", "Source and target are the same");
       if (source.info.isDirectory()) await outsideDirectory(source, target.parent);
       await checkTarget(target, item, source.info.isDirectory());
       return target;
@@ -217,7 +220,10 @@ export class FileOperations {
           const current = await targetAgain(root, item.targetPath, target);
           const destination = await checkTarget(current, item, source.info.isDirectory());
           if (destination && sameObject(source.info, destination))
-            throw new AppError("invalid_argument", "源与目标指向同一目录项对象");
+            throw new AppError(
+              "invalid_argument",
+              "Source and target refer to the same directory entry object",
+            );
           signal.throwIfAborted();
           if (item.collision === "replace")
             await rename(source.location.absolute, current.absolute);
@@ -281,7 +287,7 @@ export class FileOperations {
         try {
           const info = await file.stat({ bigint: true });
           if (!info.isFile() || !sameObject(info, source.info))
-            throw new AppError("conflict", "源文件已变化");
+            throw new AppError("conflict", "Source file has changed");
           copied = { ...source, info };
           const output = await this.temporary.create(target.parent, target.parentInfo, signal);
           temporary = output;
@@ -295,7 +301,7 @@ export class FileOperations {
               Math.min(block.length, Number(info.size) - position),
               position,
             );
-            if (!bytesRead) throw new AppError("conflict", "复制期间源文件缩短");
+            if (!bytesRead) throw new AppError("conflict", "Source file shrank during copying");
             let written = 0;
             while (written < bytesRead) {
               signal.throwIfAborted();
@@ -305,14 +311,15 @@ export class FileOperations {
                 bytesRead - written,
                 position + written,
               );
-              if (!next.bytesWritten) throw new AppError("io_error", "复制未能继续");
+              if (!next.bytesWritten) throw new AppError("io_error", "Copying could not continue");
               written += next.bytesWritten;
             }
             position += bytesRead;
             bytes(bytesRead);
           }
           const after = await file.stat({ bigint: true });
-          if (!sameContentStat(info, after)) throw new AppError("conflict", "复制期间源文件已变化");
+          if (!sameContentStat(info, after))
+            throw new AppError("conflict", "Source file changed during copying");
           await output.handle.chmod(Number(info.mode & 0o777n));
           await this.temporary.closeFile(output);
         } finally {
@@ -368,7 +375,8 @@ export class FileOperations {
         const raw = Buffer.isBuffer(entry.name) ? entry.name : Buffer.from(entry.name);
         const path = join(source.path, raw.toString("utf8"));
         try {
-          if (!isUtf8(raw)) throw new AppError("unsupported", "名称不是有效 UTF-8，保留该项");
+          if (!isUtf8(raw))
+            throw new AppError("unsupported", "Name is not valid UTF-8; the item is retained");
           const child = await publish(async () => {
             await verify(root, source);
             return capture(root, path);
@@ -396,7 +404,10 @@ async function verify(root: string, original: ObjectRef, content = false) {
     !sameObject(current.info, original.info) ||
     (content && !sameContentStat(current.info, original.info))
   )
-    throw new AppError("conflict", "源路径或文件已变化，保留当前对象");
+    throw new AppError(
+      "conflict",
+      "Source path or file has changed; the current object is retained",
+    );
   return current;
 }
 function sameContentStat(a: BigIntStats, b: BigIntStats) {
@@ -405,7 +416,10 @@ function sameContentStat(a: BigIntStats, b: BigIntStats) {
 async function outsideDirectory(source: ObjectRef, parent: string) {
   for (;;) {
     if (sameObject(source.info, await stat(parent, { bigint: true })))
-      throw new AppError("invalid_argument", "不能复制或移动到自身或子目录");
+      throw new AppError(
+        "invalid_argument",
+        "Cannot copy or move an item into itself or a subdirectory",
+      );
     const next = dirname(parent);
     if (next === parent) return;
     parent = next;

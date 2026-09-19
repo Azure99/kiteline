@@ -53,7 +53,7 @@ export async function readText(
     const response = await fetch(`/api/channels/${ready.channelId}/content`, { signal });
     await check(response);
     const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.length !== ready.meta.size) throw new Error("文件接收不完整");
+    if (bytes.length !== ready.meta.size) throw new Error("File transfer is incomplete");
     return {
       target,
       meta: ready.meta,
@@ -90,11 +90,17 @@ export async function writeText(
     await check(response);
     const reply = (await response.json()) as Reply<SavedFile>;
     if (reply.outcome !== "succeeded")
-      throw new ApiError(reply.error.code, reply.error.message, reply.outcome, reply.error.details);
+      throw new ApiError(
+        reply.error.code,
+        reply.error.message,
+        reply.outcome,
+        reply.error.details,
+        reply.result,
+      );
     return reply.result;
   } catch (error) {
     if (error instanceof ApiError) throw error;
-    throw new ApiError("io_error", "保存结果未确认", "unknown");
+    throw new ApiError("io_error", "The save result is unconfirmed", "unknown");
   } finally {
     void release(ready.channelId);
   }
@@ -121,7 +127,7 @@ export async function readImage(
     const response = await fetch(`/api/channels/${ready.channelId}/content`, { signal });
     await check(response);
     const blob = await response.blob();
-    if (blob.size !== ready.meta.size) throw new Error("图片接收不完整");
+    if (blob.size !== ready.meta.size) throw new Error("Image transfer is incomplete");
     return { blob, meta: ready.meta };
   } finally {
     void release(ready.channelId);
@@ -169,13 +175,14 @@ export async function uploadFile(
               reply.error.message,
               "outcome" in reply ? reply.outcome : undefined,
               reply.error.details,
+              "result" in reply ? reply.result : undefined,
             ),
           );
-        else reject(new ApiError("io_error", "上传结果未确认", "unknown"));
+        else reject(new ApiError("io_error", "The upload result is unconfirmed", "unknown"));
       };
       request.onerror = () => {
         cleanup();
-        reject(new ApiError("io_error", "上传结果未确认", "unknown"));
+        reject(new ApiError("io_error", "The upload result is unconfirmed", "unknown"));
       };
       request.send(file);
       if (signal.aborted) cancel();

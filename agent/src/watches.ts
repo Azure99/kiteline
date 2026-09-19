@@ -126,7 +126,7 @@ export class WorkspaceWatches {
           return path;
         }
         if (desired.size >= this.capacity) {
-          degraded(id, "监听目录已达上限");
+          degraded(id, "Watched directory limit reached");
           return;
         }
         desired.set(path, { owners: new Set([id]), identity: `${info.dev}:${info.ino}` });

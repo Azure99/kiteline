@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Check, CircleX, Terminal } from "lucide-react";
 import type { GitOperation } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
@@ -17,6 +18,8 @@ export function OperationBar({
   disabled: boolean;
   onTerminal: () => void;
 }) {
+  const { t } = useTranslation();
+
   const activity = useGitActivity(actions, target);
   const busy = disabled || !!activity.request;
   const expectedOperation = operation.token
@@ -25,7 +28,7 @@ export function OperationBar({
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-amber-50 px-3 py-2 text-xs">
       <div className="min-w-0 flex-1 basis-32">
-        <p>{operation.kind === "unknown" ? "Git 操作待处理" : operation.kind}</p>
+        <p>{operation.kind === "unknown" ? t(($) => $.git.pendingOperation) : operation.kind}</p>
         {operation.reason && (
           <p className="mt-1 break-words text-muted-foreground">{operation.reason}</p>
         )}
@@ -34,30 +37,25 @@ export function OperationBar({
         variant="outline"
         disabled={busy || !operation.token || !operation.canContinue}
         onClick={() => {
-          if (expectedOperation)
-            void actions.run(target, "git.continue", { expectedOperation }, "继续");
+          if (expectedOperation) void actions.run(target, "git.continue", { expectedOperation });
         }}
       >
         <Check />
-        继续
+        {t(($) => $.git.continue)}
       </Button>
       <Button
         variant="ghost"
         disabled={busy || !operation.token || !operation.canAbort}
         onClick={() => {
           if (!expectedOperation) return;
-          if (
-            window.confirm(
-              `中止当前 ${operation.kind}？Git 将尝试恢复操作前状态，未提交内容可能受影响。`,
-            )
-          )
-            void actions.run(target, "git.abort", { expectedOperation }, "中止");
+          if (window.confirm(t(($) => $.git.abortConfirm, { kind: operation.kind })))
+            void actions.run(target, "git.abort", { expectedOperation });
         }}
       >
         <CircleX />
-        中止
+        {t(($) => $.git.abort)}
       </Button>
-      <IconButton label="在终端处理" onClick={onTerminal}>
+      <IconButton label={t(($) => $.git.useTerminal)} onClick={onTerminal}>
         <Terminal />
       </IconButton>
     </div>

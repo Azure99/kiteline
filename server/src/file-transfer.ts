@@ -38,7 +38,7 @@ export class FileTransfer {
     private purpose = "text",
   ) {
     this.timer = setTimeout(
-      () => fail(new AppError("timeout", "文件传输长时间未推进")),
+      () => fail(new AppError("timeout", "File transfer timed out with no progress")),
       idleTimeout,
     );
     this.frames = consumeFileFrames(
@@ -51,7 +51,7 @@ export class FileTransfer {
     response.once("finish", release);
     response.once("close", () => {
       if (response.writableFinished) release();
-      else fail(new AppError("cancelled", "文件请求已关闭"));
+      else fail(new AppError("cancelled", "File request closed"));
     });
   }
   async start() {
@@ -70,7 +70,7 @@ export class FileTransfer {
       for await (const chunk of this.request) {
         const bytes = chunk as Buffer;
         if (this.received + bytes.length > this.meta.size)
-          throw new AppError("invalid_argument", "正文超过声明长度");
+          throw new AppError("invalid_argument", "Body exceeds the declared length");
         for (let offset = 0; offset < bytes.length; offset += limits.dataChunkBytes) {
           await sendFileFrame(
             this.socket,
@@ -82,7 +82,7 @@ export class FileTransfer {
         this.received += bytes.length;
       }
       if (this.received !== this.meta.size)
-        throw new AppError("invalid_argument", "正文长度不完整");
+        throw new AppError("invalid_argument", "Body is shorter than the declared length");
       this.ended = true;
       await sendFileFrame(this.socket, JSON.stringify({ type: "end" }), signal);
     } catch (error) {
@@ -113,16 +113,16 @@ export class FileTransfer {
       if (message.type === "error")
         throw new AppError(string(message.code), string(message.message), message.details);
       if (this.kind !== "file.write" || !this.ended || message.type !== "result")
-        throw new AppError("invalid_argument", "无效文件结果帧");
+        throw new AppError("invalid_argument", "Invalid file result frame");
       const reply = record(message.reply) as unknown as Reply;
       if (!["succeeded", "failed", "partial", "unknown"].includes(reply.outcome))
-        throw new AppError("invalid_argument", "无效文件结果");
+        throw new AppError("invalid_argument", "Invalid file result");
       this.resultReceived = true;
       json(this.response, 200, reply);
       return;
     }
     if (this.kind !== "file.read" || this.readComplete)
-      throw new AppError("invalid_argument", "无效文件正文帧");
+      throw new AppError("invalid_argument", "Invalid file body frame");
     const total = this.received + data.length;
     integer(total, "file bytes", 0, this.meta.size);
     if (!this.response.headersSent) this.headers();
@@ -134,7 +134,7 @@ export class FileTransfer {
     if (this.readComplete) this.response.end();
   }
   stop(error?: unknown) {
-    this.controller.abort(error ?? new AppError("cancelled", "文件请求已完成"));
+    this.controller.abort(error ?? new AppError("cancelled", "File request completed"));
     clearTimeout(this.timer);
     void this.frames.close();
     if (error && !this.response.writableFinished && !this.response.destroyed) {

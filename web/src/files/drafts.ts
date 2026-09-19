@@ -8,12 +8,25 @@ import { readText, writeText, type DiskText, type FileTarget } from "./content";
 import { textState } from "./editor-state";
 import { isWithin, movedPath, parentPath } from "./use-browser";
 
+export type DraftNotice =
+  | "loadingCapacity"
+  | "fileCapacity"
+  | "pageCapacity"
+  | "savedOldPath"
+  | "duplicateDraft"
+  | "diskMatches"
+  | "checkingMoved"
+  | "diskChangedKept"
+  | "deletedDraft"
+  | "missingDraft";
+
 export interface Draft extends FileTarget {
   id: string;
   deviceName: string;
   workspaceName: string;
   state?: EditorState;
   language: Compartment;
+  phrases: Compartment;
   format: TextFormat;
   bytes: number;
   baseText: string;
@@ -27,7 +40,7 @@ export interface Draft extends FileTarget {
   busy?: "loading" | "saving" | "checking";
   error?: unknown;
   observationError?: unknown;
-  notice?: string;
+  notice?: DraftNotice;
   unknownSave?: { target: FileTarget; raw: string; text: string };
   missing?: boolean;
   diskChanged?: boolean;
@@ -93,13 +106,12 @@ export class DraftStore {
       if (device.editorBytes !== undefined) this.editorLimits.set(device.id, device.editorBytes);
     this.changed();
   }
-  limitError(draft: Draft, size: number, previous = draft.bytes) {
+  limitError(draft: Draft, size: number, previous = draft.bytes): DraftNotice | undefined {
     const limit = this.editorLimits.get(draft.deviceId);
-    if (limit === undefined || this.totalLimit === undefined) return "正在获取编辑容量";
-    if (size > limit && size > previous) return "内容超过单文件编辑容量";
+    if (limit === undefined || this.totalLimit === undefined) return "loadingCapacity";
+    if (size > limit && size > previous) return "fileCapacity";
     const total = this.items.reduce((sum, item) => sum + item.bytes, 0) - draft.bytes + size;
-    if (total > this.totalLimit && size > previous)
-      return "已打开文本超过页面容量，请先关闭其他文件";
+    if (total > this.totalLimit && size > previous) return "pageCapacity";
   }
   canSave(draft: Draft) {
     const limit = this.editorLimits.get(draft.deviceId);
@@ -124,6 +136,7 @@ export class DraftStore {
       ...target,
       id: crypto.randomUUID(),
       language: new Compartment(),
+      phrases: new Compartment(),
       format: { bom: false, lineEnding: "lf" },
       bytes: 0,
       baseText: "",
@@ -147,10 +160,13 @@ export class DraftStore {
   adopt(draft: Draft, disk: DiskText) {
     const size = encodeText(disk.text, disk.meta as TextFormat).length;
     const error = this.limitError(draft, size);
-    if (error) throw new Error(error);
+    if (error) {
+      draft.notice = error;
+      throw new ApiError("limit_exceeded", "The text exceeds the available editor capacity");
+    }
     draft.path = disk.target.path;
     draft.format = disk.meta as TextFormat;
-    draft.state = textState(disk.text, draft.language);
+    draft.state = textState(disk.text, draft.language, draft.phrases);
     draft.bytes = size;
     draft.baseText = disk.text;
     draft.baseRaw = disk.raw;
@@ -216,7 +232,7 @@ export class DraftStore {
       );
       if (!this.has(draft) || draft.request !== request) return false;
       if (draft.path !== originalPath) {
-        draft.notice = "原路径保存已完成，请核对移动后的文件";
+        draft.notice = "savedOldPath";
         return false;
       }
       const duplicate = this.items.some(
@@ -234,7 +250,7 @@ export class DraftStore {
       draft.missing = false;
       draft.diskChanged = false;
       draft.observationError = undefined;
-      draft.notice = duplicate ? "目标还有一份打开的草稿，两份内容均已保留" : undefined;
+      draft.notice = duplicate ? "duplicateDraft" : undefined;
       return true;
     } catch (error) {
       if (this.has(draft) && draft.request === request && draft.path === originalPath) {
@@ -276,7 +292,7 @@ export class DraftStore {
         draft.unknownSave = undefined;
         draft.missing = false;
         draft.error = undefined;
-        draft.notice = "磁盘内容与上次发送内容一致";
+        draft.notice = "diskMatches";
         window.dispatchEvent(new CustomEvent("kiteline:file-written", { detail: unknown.target }));
         const query = new URLSearchParams(location.search);
         if (query.get("draft") === draft.id) {
@@ -366,7 +382,7 @@ export class DraftStore {
       draft.path = movedPath(draft.path, from, to);
       if (draft.unknownSave)
         draft.unknownSave.target.path = movedPath(draft.unknownSave.target.path, from, to);
-      draft.notice = "路径已更新，正在核对磁盘版本";
+      draft.notice = "checkingMoved";
     }
     this.changed();
     for (const draft of moved) {
@@ -376,7 +392,7 @@ export class DraftStore {
         draft.revision = disk.meta.revision;
         draft.resolvedPath = disk.meta.resolvedPath;
         draft.notice = undefined;
-      } else draft.notice = "磁盘内容已变化，草稿已保留";
+      } else draft.notice = "diskChangedKept";
       if (
         this.items.some(
           (item) =>
@@ -386,7 +402,7 @@ export class DraftStore {
             item.path === draft.path,
         )
       )
-        draft.notice = "目标还有一份打开的草稿，两份内容均已保留";
+        draft.notice = "duplicateDraft";
       this.changed();
     }
   }
@@ -396,7 +412,7 @@ export class DraftStore {
       this.changed();
     } else this.close(draft);
   }
-  private markMissing(draft: Draft, notice: string) {
+  private markMissing(draft: Draft, notice: DraftNotice) {
     draft.diskActivity++;
     draft.request?.abort();
     draft.request = undefined;
@@ -408,7 +424,7 @@ export class DraftStore {
     deviceId: string,
     workspaceId: string,
     path: string,
-    notice = "磁盘文件已删除，当前内容可另存",
+    notice: DraftNotice = "deletedDraft",
   ) {
     for (const draft of this.items)
       if (
@@ -439,7 +455,7 @@ export class DraftStore {
           error instanceof ApiError &&
           error.code === "not_found"
         ) {
-          this.markMissing(draft, "原路径已不存在，当前内容可另存");
+          this.markMissing(draft, "missingDraft");
           this.changed();
         }
       }

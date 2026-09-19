@@ -26,17 +26,20 @@ const nul = (paths: string[]) => Buffer.from(paths.join("\0") + "\0");
 
 export function gitPaths(value: unknown) {
   if (!Array.isArray(value) || !value.length || value.length > limits.listPageEntries * 2)
-    throw new AppError("invalid_argument", "请选择当前页的文件");
+    throw new AppError("invalid_argument", "Select files from the current page");
   const paths = [...new Set(value.map(relativePath))];
   if (Buffer.byteLength(JSON.stringify({ changedPaths: paths })) > limits.resultBytes)
-    throw new AppError("limit_exceeded", "所选路径超过容量，请减少本次选择");
+    throw new AppError(
+      "limit_exceeded",
+      "Selected paths exceed the size limit; select fewer items",
+    );
   if (paths.some((path) => path === "." || path.split("/").includes(".git")))
-    throw new AppError("invalid_argument", "不能操作仓库根或 Git 元数据");
+    throw new AppError("invalid_argument", "Cannot operate on the repository root or Git metadata");
   return paths.sort();
 }
 export function discardScope(value: unknown): DiscardScope {
   if (value !== "worktree" && value !== "all")
-    throw new AppError("invalid_argument", "无效丢弃区域");
+    throw new AppError("invalid_argument", "Invalid discard scope");
   return value;
 }
 class Blockers {
@@ -126,7 +129,9 @@ async function checkIndex(repo: Repo, add: string[], remove: string[], signal: A
     )
       blocked.add(path);
   });
-  blocked.check("请先暂存关联旧项的删除，或取消暂存关联新增项，再操作当前文件");
+  blocked.check(
+    "Stage the deletion of the related old item or unstage the related new item before operating on this file",
+  );
 }
 async function diskTarget(repo: Repo, path: string, blocked?: Blockers) {
   const parts = path.split("/");
@@ -212,21 +217,31 @@ export async function changeIndex(
       !entry ||
       (kind === "stage" ? entry.worktreeStatus === "." : [".", "?"].includes(entry.indexStatus))
     )
-      throw new AppError("conflict", `${path} 的状态已变化，请刷新`);
+      throw new AppError("conflict", `${path} has changed state; refresh`);
     if (kind === "unstage") {
       (leaf(head!.get(path)) ? add : remove).push(path);
       continue;
     }
     if (entry.conflict && Object.values(entry.types).includes("gitlink"))
-      throw new AppError("unsupported", "子模块冲突请在子仓库或终端处理");
+      throw new AppError(
+        "unsupported",
+        "Resolve submodule conflicts in the submodule repository or terminal",
+      );
     const info = await diskTarget(repo, path);
     if (!info || (info.isDirectory() && entry.worktreeStatus === "D")) remove.push(path);
     else if (entry.submodule) {
       if (!entry.submodule.commitChanged || !info.isDirectory())
-        throw new AppError("unsupported", "仅子模块内部变化，请进入子仓库处理");
+        throw new AppError(
+          "unsupported",
+          "Only submodule contents have changed; handle them in the submodule repository",
+        );
       add.push(path);
     } else if (info.isFile() || info.isSymbolicLink()) add.push(path);
-    else throw new AppError("conflict", `${path} 是目录或特殊项，不能递归暂存`);
+    else
+      throw new AppError(
+        "conflict",
+        `${path} is a directory or special item and cannot be staged recursively`,
+      );
   }
   await checkIndex(repo, add, remove, signal);
   return steps(async (done) => {
@@ -276,14 +291,14 @@ async function discardPlan(
   for (const path of requested) {
     const entry = selected.get(path);
     if (!entry || (scope === "worktree" && entry.worktreeStatus === "."))
-      throw new AppError("conflict", `${path} 的状态已变化，请刷新`);
+      throw new AppError("conflict", `${path} has changed state; refresh`);
     if (scope === "all" && entry.oldPath) {
       paths.add(entry.oldPath);
       renamedOrigins.add(entry.oldPath);
     }
   }
   if (paths.size > limits.listPageEntries * 2)
-    throw new AppError("limit_exceeded", "关联路径过多，请减少本次选择");
+    throw new AppError("limit_exceeded", "Too many related paths; select fewer items");
   const ordered = [...paths].sort();
   const index = await leaves(repo, ordered, "index", signal);
   const source = scope === "all" ? await leaves(repo, ordered, "HEAD", signal) : index;
@@ -305,9 +320,15 @@ async function discardPlan(
       index.get(path)?.mode === "160000" ||
       Object.values(entry?.types ?? {}).includes("gitlink")
     )
-      throw new AppError("unsupported", "父仓库不丢弃子模块内容，请进入子仓库处理");
+      throw new AppError(
+        "unsupported",
+        "The parent repository cannot discard submodule contents; handle them in the submodule repository",
+      );
     if (scope === "worktree" && entry?.conflict)
-      throw new AppError("unsupported", "冲突项没有唯一 index 内容，请编辑文件或明确丢弃全部更改");
+      throw new AppError(
+        "unsupported",
+        "Conflicting item has no single index content; edit the file or explicitly discard all changes",
+      );
     const info = await diskTarget(repo, path, blocked);
     hash.update(JSON.stringify([path, from ?? null, info ? String(info.mode) : null]));
     if (info?.isFile()) {
@@ -338,13 +359,13 @@ async function discardPlan(
     }
     summary.push({ path, action: leaf(from) ? "restore" : "delete" });
   }
-  blocked.check("请先在 Files 移走或删除阻挡项，再重新审查丢弃");
+  blocked.check("Move or delete blocking items in Files first, then review the discard again");
   if (scope === "all") await checkIndex(repo, restore, remove, signal);
   if ((await observeIndex(repo, signal)).token !== observation.token)
-    throw new AppError("conflict", "HEAD/index 在审查期间变化，请重试");
+    throw new AppError("conflict", "HEAD/index changed during review; try again");
   const review = { paths: ordered, summary, reviewToken: hash.digest("hex") };
   if (Buffer.byteLength(JSON.stringify(review)) > limits.resultBytes)
-    throw new AppError("limit_exceeded", "确认路径过多，请减少本次选择");
+    throw new AppError("limit_exceeded", "Too many paths to confirm; select fewer items");
   return { review, restore, remove, unlink: deleted };
 }
 export async function reviewDiscard(
@@ -367,7 +388,7 @@ export async function discard(
     plan.review.reviewToken !== reviewToken ||
     JSON.stringify(plan.review.paths) !== JSON.stringify(paths)
   )
-    throw new AppError("conflict", "丢弃范围或内容已变化，请重新审查");
+    throw new AppError("conflict", "Discard scope or content has changed; review again");
   return steps(async (done) => {
     await forceRemove(repo, plan.remove, signal);
     done(plan.remove);

@@ -51,7 +51,10 @@ export async function remotes(repo: Repo, signal: AbortSignal): Promise<GitRemot
       const text = commandLine(urls.bytes);
       const values = count === 1 ? [text] : text.split("\n");
       if (values.length !== count)
-        throw new AppError("unsupported", "含换行的多个远端 URL 请在终端查看");
+        throw new AppError(
+          "unsupported",
+          "View multiple remote URLs containing line breaks in the terminal",
+        );
       entry[push ? "pushUrls" : "fetchUrls"] = values;
     }
   }
@@ -79,26 +82,29 @@ export async function remotes(repo: Repo, signal: AbortSignal): Promise<GitRemot
   );
   const upstream = upstreamResult.code === 0 ? commandLine(upstreamResult.bytes) : undefined;
   const pushMode = (await config(repo, "push.default", signal)).at(-1) ?? "simple";
-  let description = `按设备 Git 配置${defaultPushRemote ? ` · ${defaultPushRemote}` : ""}`;
+  let pushTarget: string | undefined;
   if (branch && defaultPushRemote && !explicitPush.has(defaultPushRemote)) {
-    if (pushMode === "current") description = `${defaultPushRemote}/${branch}`;
+    if (pushMode === "current") pushTarget = `${defaultPushRemote}/${branch}`;
     else if (
       upstream &&
       defaultPushRemote === remote &&
       (pushMode === "upstream" ||
         (pushMode === "simple" && upstream === (remote === "." ? branch : `${remote}/${branch}`)))
     )
-      description = upstream;
+      pushTarget = upstream;
   }
   const metadata: GitRemotes = {
     remotes: [...entries.values()],
     upstream,
     defaultFetchRemote,
     defaultPushRemote,
-    pushTargetDescription: description,
+    pushTarget,
   };
   if (Buffer.byteLength(JSON.stringify(metadata)) > limits.resultBytes)
-    throw new AppError("limit_exceeded", "远端配置超过读取容量，请在终端查看");
+    throw new AppError(
+      "limit_exceeded",
+      "Remote configuration exceeds the read size limit; view it in the terminal",
+    );
   return metadata;
 }
 export function expectedHead(value: unknown): HeadIdentity {
@@ -110,7 +116,7 @@ export function expectedHead(value: unknown): HeadIdentity {
     (value.symbolicRef !== null && typeof value.symbolicRef !== "string") ||
     (value.oid !== null && typeof value.oid !== "string")
   )
-    throw new AppError("invalid_argument", "需要完整 HEAD 身份");
+    throw new AppError("invalid_argument", "A complete HEAD identity is required");
   return { symbolicRef: value.symbolicRef, oid: value.oid };
 }
 export async function syncRemote(
@@ -126,13 +132,16 @@ export async function syncRemote(
       current.symbolicRef !== params.expectedHead.symbolicRef ||
       current.oid !== params.expectedHead.oid
     )
-      throw new AppError("conflict", "当前分支或 HEAD 已变化，请刷新后同步");
+      throw new AppError(
+        "conflict",
+        "Current branch or HEAD has changed; refresh before synchronizing",
+      );
   }
   if (
     params.remote &&
     !(await remotes(repo, signal)).remotes.some((entry) => entry.name === params.remote)
   )
-    throw new AppError("conflict", "远端已变化，请刷新");
+    throw new AppError("conflict", "Remote has changed; refresh");
   const result = await git(
     repo.rootPath,
     [

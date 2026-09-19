@@ -1,13 +1,13 @@
 import { AppError, type TextFormat } from "./index.js";
 
 export function decodeText(bytes: Uint8Array): { text: string; format: TextFormat } {
-  if (bytes.includes(0)) throw new AppError("unsupported", "二进制文件不能作为文本编辑");
+  if (bytes.includes(0)) throw new AppError("unsupported", "Binary files cannot be edited as text");
   const bom = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf;
   let text: string;
   try {
     text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
   } catch {
-    throw new AppError("unsupported", "文件不是有效的 UTF-8 文本");
+    throw new AppError("unsupported", "File is not valid UTF-8 text");
   }
   if (bom) text = text.slice(1);
   let crlf = 0,

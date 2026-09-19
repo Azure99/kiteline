@@ -14,13 +14,13 @@ export function readLines(
       let end: number;
       while ((end = buffer.indexOf(10, offset)) !== -1) {
         if (end - offset > limits.controlMessageBytes)
-          throw new AppError("limit_exceeded", "控制行超过容量");
+          throw new AppError("limit_exceeded", "Control line exceeds the size limit");
         onLine(buffer.subarray(offset, end));
         offset = end + 1;
       }
       partial = Buffer.from(buffer.subarray(offset));
       if (partial.length > limits.controlMessageBytes)
-        throw new AppError("limit_exceeded", "控制行超过容量");
+        throw new AppError("limit_exceeded", "Control line exceeds the size limit");
     } catch (error) {
       stream.off("data", data);
       onError(error instanceof Error ? error : new Error(String(error)));
@@ -47,7 +47,7 @@ export class JsonWriter {
     const data = JSON.stringify(message) + "\n";
     const bytes = Buffer.byteLength(data);
     if (bytes > limits.controlMessageBytes)
-      throw new AppError("limit_exceeded", "IPC 消息超过容量");
+      throw new AppError("limit_exceeded", "IPC message exceeds the size limit");
     if (this.closed || this.stream.destroyed) return false;
     const pending = this.bytes.get(owner) ?? 0;
     if (pending + bytes > limits.terminalPendingBytes) return false;

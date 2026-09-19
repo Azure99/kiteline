@@ -20,7 +20,7 @@ export interface Login {
 
 export function password(value: unknown): string {
   if (typeof value !== "string" || Buffer.byteLength(value) < 8 || Buffer.byteLength(value) > 72)
-    throw new AppError("invalid_argument", "密码长度应为 8 至 72 个 UTF-8 字节");
+    throw new AppError("invalid_argument", "Password must be 8 to 72 UTF-8 bytes");
   return value;
 }
 export class Store {
@@ -38,7 +38,7 @@ export class Store {
     return !!this.db.prepare("SELECT id FROM owner WHERE id=1").get();
   }
   newSetupToken() {
-    if (this.initialized()) throw new AppError("conflict", "已经初始化");
+    if (this.initialized()) throw new AppError("conflict", "Already initialized");
     const token = secret();
     this.db
       .prepare("INSERT OR REPLACE INTO setup VALUES(1,?,?)")
@@ -57,9 +57,9 @@ export class Store {
       const setup = this.db.prepare("SELECT hash,expiresAt FROM setup WHERE id=1").get() as
         | { hash: string; expiresAt: string }
         | undefined;
-      if (this.initialized()) throw new AppError("conflict", "已经初始化");
+      if (this.initialized()) throw new AppError("conflict", "Already initialized");
       if (!setup || setup.hash !== digest(token) || setup.expiresAt <= new Date().toISOString())
-        throw new AppError("forbidden", "初始化凭据无效或已过期");
+        throw new AppError("forbidden", "Setup credentials are invalid or expired");
       this.db.prepare("INSERT INTO owner VALUES(1,?)").run(hash);
       this.db.exec("DELETE FROM setup; COMMIT");
     } catch (error) {
@@ -94,7 +94,7 @@ export class Store {
       .all(new Date().toISOString()) as { id: string }[];
   }
   async resetPassword(value: string) {
-    if (!this.initialized()) throw new AppError("conflict", "尚未初始化");
+    if (!this.initialized()) throw new AppError("conflict", "Not initialized");
     const hash = await bcrypt.hash(password(value), 12);
     this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -121,7 +121,7 @@ export class Store {
     const row = this.db
       .prepare("SELECT expiresAt,consumedDeviceId FROM bindings WHERE id=?")
       .get(id) as { expiresAt: string; consumedDeviceId: string | null } | undefined;
-    if (!row) throw new AppError("not_found", "绑定记录不存在");
+    if (!row) throw new AppError("not_found", "Binding record not found");
     return {
       bindingId: id,
       expiresAt: row.expiresAt,
@@ -141,7 +141,8 @@ export class Store {
           "SELECT id FROM bindings WHERE hash=? AND consumedDeviceId IS NULL AND expiresAt>?",
         )
         .get(digest(code), new Date().toISOString()) as { id: string } | undefined;
-      if (!row) throw new AppError("forbidden", "绑定码无效、已过期或已使用");
+      if (!row)
+        throw new AppError("forbidden", "Binding code is invalid, expired, or already used");
       const deviceId = randomUUID();
       const deviceToken = secret();
       this.db
@@ -175,11 +176,11 @@ export class Store {
   }
   renameDevice(id: string, name: string) {
     if (!this.db.prepare("UPDATE devices SET name=? WHERE id=?").run(name, id).changes)
-      throw new AppError("not_found", "设备不存在");
+      throw new AppError("not_found", "Device not found");
   }
   revokeDevice(id: string) {
     if (!this.db.prepare("UPDATE devices SET revoked=1 WHERE id=?").run(id).changes)
-      throw new AppError("not_found", "设备不存在");
+      throw new AppError("not_found", "Device not found");
   }
   snapshot(id: string, snapshot: Metadata) {
     this.db

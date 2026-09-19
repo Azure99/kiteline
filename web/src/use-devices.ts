@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Device } from "@kiteline/shared/protocol";
-import { api, errorMessage } from "./lib/api";
+import { api } from "./lib/api";
 import type { Session } from "./auth";
 
 export function useDevices(
@@ -11,13 +11,13 @@ export function useDevices(
 ) {
   const [devices, setDevices] = useState<Device[]>([]);
   const [connected, setConnected] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<unknown>();
   const socketRef = useRef<WebSocket | null>(null);
   const targets = useRef<{ deviceId: string; workspaceId: string }[]>([]);
   const refresh = useCallback(async () => {
     const result = await api<{ devices: Device[] }>("/api/devices");
     setDevices(result.devices);
-    setError("");
+    setError(undefined);
   }, []);
   useEffect(() => {
     targets.current = deviceId && workspaceId ? [{ deviceId, workspaceId }] : [];
@@ -42,7 +42,7 @@ export function useDevices(
         socketRef.current = socket;
         socket.onopen = () => {
           setConnected(true);
-          setError("");
+          setError(undefined);
           socket?.send(JSON.stringify({ type: "watch.set", targets: targets.current }));
           window.dispatchEvent(new Event("kiteline:connected"));
         };
@@ -58,7 +58,7 @@ export function useDevices(
       } catch (error) {
         if (!stopped) {
           setConnected(false);
-          setError(errorMessage(error));
+          setError(error);
           retry = setTimeout(() => void connect(), 3000);
         }
       }

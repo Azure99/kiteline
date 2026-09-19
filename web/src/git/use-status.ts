@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { GitStatus } from "@kiteline/shared/protocol";
-import { ApiError, errorMessage, rpc } from "../lib/api";
+import { ApiError, rpc } from "../lib/api";
 import { reconcileSelection, type ChangeSelection } from "./selection";
 import { useWorkspaceRefresh } from "../lib/use-workspace-refresh";
 
@@ -12,8 +12,8 @@ export function useGitStatus(
 ) {
   const [value, setValue] = useState<GitStatus>();
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [error, setError] = useState<unknown>();
+  const [notice, setNotice] = useState(0);
   const [selected, setSelected] = useState<ChangeSelection[]>([]);
   const current = useRef<GitStatus>(undefined);
   const selection = useRef(selected);
@@ -39,8 +39,8 @@ export function useGitStatus(
       const controller = new AbortController();
       request.current = controller;
       setBusy(true);
-      setError("");
-      if (!background) setNotice("");
+      setError(undefined);
+      if (!background) setNotice(0);
       if (paging) {
         selection.current = [];
         setSelected([]);
@@ -78,14 +78,14 @@ export function useGitStatus(
         if (controller.signal.aborted) return;
         const retained = reconcileSelection(selection.current, current.current, next);
         if (selection.current.length > retained.length)
-          setNotice(`${selection.current.length - retained.length} 项选择已失效`);
+          setNotice(selection.current.length - retained.length);
         selection.current = retained;
         setSelected(retained);
         history.current = visited.filter((item) => item < next.offset);
         current.current = next;
         setValue(next);
       } catch (error) {
-        if (!controller.signal.aborted) setError(errorMessage(error));
+        if (!controller.signal.aborted) setError(error);
       } finally {
         if (request.current === controller) {
           request.current = undefined;

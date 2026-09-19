@@ -1,9 +1,9 @@
+import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
 import { Copy, X, ExternalLink } from "lucide-react";
 import type { Terminal } from "@xterm/xterm";
 import { TouchSelection, type SelectionHandles } from "./touch-selection";
 import { IconButton } from "../components/icon-button";
-import { errorMessage } from "../lib/api";
 import { deviceServiceLink } from "../lib/device-service";
 
 export function TouchControls({
@@ -13,8 +13,10 @@ export function TouchControls({
 }: {
   terminal: Terminal;
   deviceId: string;
-  onError: (message: string) => void;
+  onError: (error: unknown) => void;
 }) {
+  const { t } = useTranslation();
+
   const [handles, setHandles] = useState<SelectionHandles>();
   const selection = useRef<TouchSelection>(undefined);
   const layer = useRef<HTMLDivElement>(null);
@@ -53,7 +55,11 @@ export function TouchControls({
               point && (
                 <button
                   key={side}
-                  aria-label={side === "start" ? "选区起点" : "选区终点"}
+                  aria-label={
+                    side === "start"
+                      ? t(($) => $.terminal.selectionStart)
+                      : t(($) => $.terminal.selectionEnd)
+                  }
                   className="terminal-selection-handle pointer-events-auto"
                   style={{
                     left: Math.max(0, Math.min(window.innerWidth - 44, point.x - 22)),
@@ -79,21 +85,24 @@ export function TouchControls({
             onPointerDown={(event) => event.preventDefault()}
           >
             <IconButton
-              label="复制所选文本"
+              label={t(($) => $.terminal.copySelected)}
               onClick={() =>
                 void navigator.clipboard
                   .writeText(terminal.getSelection())
-                  .catch((error: unknown) => onError(errorMessage(error)))
+                  .catch((error: unknown) => onError(error))
               }
             >
               <Copy />
             </IconButton>
-            <IconButton label="取消选择" onClick={() => selection.current?.cancel()}>
+            <IconButton
+              label={t(($) => $.terminal.cancelSelection)}
+              onClick={() => selection.current?.cancel()}
+            >
               <X />
             </IconButton>
             {service && (
               <IconButton
-                label={`访问设备端口 · ${deviceId}:${service.port}`}
+                label={t(($) => $.devices.openService, { device: deviceId, port: service.port })}
                 onClick={() => window.open(service.url, "_blank", "noopener,noreferrer")}
               >
                 <ExternalLink />

@@ -1,3 +1,5 @@
+import { ErrorNotice } from "../components/error-notice";
+import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
 import { Copy, FolderInput, Trash2 } from "lucide-react";
 import type {
@@ -8,7 +10,7 @@ import type {
   FileProgress,
   RpcArguments,
 } from "@kiteline/shared/protocol";
-import { api, ApiError, errorMessage, rpc, rpcReply } from "../lib/api";
+import { api, ApiError, rpc, rpcReply } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
 import {
@@ -33,14 +35,6 @@ interface Row {
   result?: FileItemResult;
   skipped?: boolean;
 }
-const names = { copy: "复制", move: "移动", delete: "删除" };
-const outcomes = {
-  succeeded: "已完成",
-  failed: "未完成",
-  partial: "部分完成",
-  unknown: "结果未确认",
-};
-
 export function FileOperationDialog({
   deviceId,
   workspaceId,
@@ -56,6 +50,8 @@ export function FileOperationDialog({
   onClose: () => void;
   onResult: (items: FileItemResult[]) => void;
 }) {
+  const { t } = useTranslation();
+
   const [rows, setRows] = useState<Row[]>(() =>
     action.entries.map((entry) => ({
       entry,
@@ -67,7 +63,8 @@ export function FileOperationDialog({
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [progress, setProgress] = useState<FileProgress>();
-  const [error, setError] = useState("");
+  const [error, setError] = useState<unknown>();
+  const [invalid, setInvalid] = useState(false);
   const [conflict, setConflict] = useState<{
     row: Row;
     inspection: FileInspection;
@@ -143,7 +140,8 @@ export function FileOperationDialog({
           row.targetPath.split("/").some((part) => part === ".."),
       )
     ) {
-      setError("请输入 workspace 内的目标路径");
+      setError(undefined);
+      setInvalid(true);
       return;
     }
     const submitted = pending.map((row) => ({ ...row }));
@@ -151,7 +149,8 @@ export function FileOperationDialog({
     current.current = request;
     setBusy(true);
     setCancelling(false);
-    setError("");
+    setError(undefined);
+    setInvalid(false);
     setProgress({ phase: "queued" });
     try {
       const params = {
@@ -190,11 +189,19 @@ export function FileOperationDialog({
         }),
       );
       onResult(result);
-      if (reply.outcome !== "succeeded" && !reply.result?.items.length)
-        setError(reply.error.message);
+      if (reply.outcome !== "succeeded")
+        setError(
+          new ApiError(
+            reply.error.code,
+            reply.error.message,
+            reply.outcome,
+            reply.error.details,
+            reply.result,
+          ),
+        );
     } catch (reason) {
       if (!alive.current) return;
-      setError(errorMessage(reason));
+      setError(reason);
       const result: FileItemResult[] = submitted.map((row) => ({
         path: row.entry.path!,
         targetPath: row.targetPath,
@@ -218,7 +225,8 @@ export function FileOperationDialog({
   async function inspect(row: Row) {
     edited.current = true;
     setConflictBusy(true);
-    setError("");
+    setError(undefined);
+    setInvalid(false);
     try {
       const inspection = await rpc(deviceId, "files.inspect", {
         workspaceId,
@@ -231,7 +239,7 @@ export function FileOperationDialog({
           inspection,
         });
     } catch (reason) {
-      if (alive.current) setError(errorMessage(reason));
+      if (alive.current) setError(reason);
     } finally {
       if (alive.current) setConflictBusy(false);
     }
@@ -248,23 +256,31 @@ export function FileOperationDialog({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {names[action.kind]} · {rows.length}
+              {t(
+                ($) =>
+                  action.kind === "copy"
+                    ? $.files.copyCount
+                    : action.kind === "move"
+                      ? $.files.moveCount
+                      : $.files.deleteCount,
+                { count: rows.length },
+              )}
             </DialogTitle>
           </DialogHeader>
           <div className="scroll-area min-h-0 space-y-3 overflow-auto p-4">
             {action.kind === "delete" ? (
               <p className="text-sm">
-                永久删除
-                {rows.some((row) => row.entry.kind === "directory")
-                  ? "，包含目录内挂载的共用数据；挂载点可能保留"
-                  : ""}
-                ，不提供恢复。
+                {t(($) =>
+                  rows.some((row) => row.entry.kind === "directory")
+                    ? $.files.deleteSelectedMounted
+                    : $.files.deleteSelected,
+                )}
               </p>
             ) : (
               <label className="block space-y-1 text-sm">
-                <span>目标目录</span>
+                <span>{t(($) => $.files.targetDirectory)}</span>
                 <Textarea
-                  aria-label="目标目录"
+                  aria-label={t(($) => $.files.targetDirectory)}
                   rows={1}
                   value={directory}
                   disabled={busy || conflictBusy}
@@ -296,7 +312,9 @@ export function FileOperationDialog({
                 <p className="break-all whitespace-pre-wrap text-sm">{row.entry.path}</p>
                 {action.kind !== "delete" && (
                   <Textarea
-                    aria-label={`目标 ${row.entry.path}`}
+                    aria-label={t(($) => $.files.targetNamed, {
+                      path: row.entry.path ?? row.entry.name,
+                    })}
                     rows={1}
                     value={row.targetPath}
                     disabled={busy || conflictBusy || !editable(row)}
@@ -318,21 +336,46 @@ export function FileOperationDialog({
                           : "text-destructive"
                       }
                     >
-                      {outcomes[row.result.outcome]}
-                      {row.result.completedItems ? ` · ${row.result.completedItems} 项` : ""}
-                      {row.result.error && !row.result.failures?.length
-                        ? ` · ${row.result.error.message}`
-                        : ""}
+                      {t(($) => $.files[row.result!.outcome])}
                     </p>
-                    {row.result.failures?.map((failure, index) => (
-                      <p key={index} className="break-all text-muted-foreground">
-                        {failure.path}: {failure.error.message}
+                    {!!row.result.completedItems && (
+                      <p>
+                        {t(($) => $.files.completedItems, { count: row.result.completedItems })}
                       </p>
+                    )}
+                    {row.result.error && !row.result.failures?.length && (
+                      <ErrorNotice
+                        error={
+                          new ApiError(
+                            row.result.error.code,
+                            row.result.error.message,
+                            row.result.outcome,
+                            row.result.error.details,
+                          )
+                        }
+                      />
+                    )}
+                    {row.result.failures?.map((failure, index) => (
+                      <div key={index} className="break-all text-muted-foreground">
+                        {failure.path}:{" "}
+                        <ErrorNotice
+                          error={
+                            new ApiError(
+                              failure.error.code,
+                              failure.error.message,
+                              "failed",
+                              failure.error.details,
+                            )
+                          }
+                        />
+                      </div>
                     ))}
-                    {row.result.truncated && <p>更多失败详情已省略</p>}
+                    {row.result.truncated && <p>{t(($) => $.files.errorsOmitted)}</p>}
                   </div>
                 )}
-                {row.skipped && <p className="text-xs text-muted-foreground">已跳过</p>}
+                {row.skipped && (
+                  <p className="text-xs text-muted-foreground">{t(($) => $.common.skipped)}</p>
+                )}
                 {!busy && editable(row) && action.kind !== "delete" && (
                   <div className="flex gap-2">
                     <Button
@@ -340,19 +383,19 @@ export function FileOperationDialog({
                       disabled={conflictBusy}
                       onClick={() => void inspect(row)}
                     >
-                      同名处理
+                      {t(($) => $.files.resolveConflict)}
                     </Button>
                     <Button
                       variant="ghost"
                       disabled={conflictBusy}
                       onClick={() => updateRow(row, { skipped: true })}
                     >
-                      跳过
+                      {t(($) => $.common.skip)}
                     </Button>
                   </div>
                 )}
                 {row.collision === "replace" && editable(row) && (
-                  <p className="text-xs text-destructive">已确认替换目标目录项</p>
+                  <p className="text-xs text-destructive">{t(($) => $.files.replaceConfirmed)}</p>
                 )}
               </div>
             ))}
@@ -360,16 +403,22 @@ export function FileOperationDialog({
               <div role="status" className="space-y-1 text-xs text-muted-foreground">
                 <p>
                   {progress.phase === "queued"
-                    ? "等待执行"
-                    : `已处理 ${progress.completedItems ?? 0} 项${progress.bytes ? ` · ${formatBytes(progress.bytes)}` : ""}`}
+                    ? t(($) => $.common.queued)
+                    : t(($) => $.files.completedItems, { count: progress.completedItems ?? 0 })}
+                  {!!progress.bytes && ` · ${formatBytes(progress.bytes)}`}
                 </p>
                 <p className="truncate">{progress.currentPath}</p>
               </div>
             )}
-            {error && (
-              <p role="alert" className="break-words text-sm text-destructive">
-                {error}
+            {invalid && (
+              <p role="alert" className="text-sm text-destructive">
+                {t(($) => $.files.targetPathRequired)}
               </p>
+            )}
+            {!!error && (
+              <div role="alert" className="break-words text-sm text-destructive">
+                <ErrorNotice error={error} />
+              </div>
             )}
           </div>
           <DialogFooter>
@@ -385,17 +434,17 @@ export function FileOperationDialog({
                     method: "DELETE",
                   }).catch((reason: unknown) => {
                     if (alive.current) {
-                      setError(errorMessage(reason));
+                      setError(reason);
                       setCancelling(false);
                     }
                   });
                 }}
               >
-                {cancelling ? "正在取消" : "取消操作"}
+                {cancelling ? t(($) => $.common.cancelling) : t(($) => $.common.cancelOperation)}
               </Button>
             ) : (
               <Button variant="outline" onClick={onClose}>
-                关闭
+                {t(($) => $.common.close)}
               </Button>
             )}
             {!busy && !!pending.length && (
@@ -405,7 +454,9 @@ export function FileOperationDialog({
                 onClick={() => void run()}
               >
                 <Icon />
-                {rows.some((row) => row.result) ? "重试未完成项" : names[action.kind]}
+                {rows.some((row) => row.result)
+                  ? t(($) => $.files.retryIncomplete)
+                  : t(($) => $.common[action.kind])}
               </Button>
             )}
           </DialogFooter>

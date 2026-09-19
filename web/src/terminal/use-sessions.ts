@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Device, Session } from "@kiteline/shared/protocol";
-import { ApiError, rpc, errorMessage } from "../lib/api";
+import { ApiError, rpc } from "../lib/api";
 
 export function useSessions(device: Device, workspaceId: string) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState("");
-  const [listError, setListError] = useState("");
+  const [error, setError] = useState<unknown>();
+  const [listError, setListError] = useState<unknown>();
   const [uncertainCreate, setUncertainCreate] = useState(false);
   const [busy, setBusy] = useState(false);
   const alive = useRef(true);
@@ -21,11 +21,11 @@ export function useSessions(device: Device, workspaceId: string) {
       if (alive.current && read === revision.current) {
         setSessions(result.sessions);
         setLoaded(true);
-        setListError("");
+        setListError(undefined);
       }
       return result.sessions;
     } catch (error) {
-      if (alive.current && read === revision.current) setListError(errorMessage(error));
+      if (alive.current && read === revision.current) setListError(error);
     }
   }, [device.id, device.status, workspaceId]);
   useEffect(() => {
@@ -55,7 +55,7 @@ export function useSessions(device: Device, workspaceId: string) {
   }, [refresh, device.id, workspaceId]);
   async function create(shortcutId?: string) {
     setBusy(true);
-    setError("");
+    setError(undefined);
     setUncertainCreate(false);
     try {
       const session = await rpc(device.id, "sessions.create", { workspaceId, shortcutId });
@@ -66,7 +66,7 @@ export function useSessions(device: Device, workspaceId: string) {
       }
     } catch (error) {
       if (alive.current) {
-        setError(errorMessage(error));
+        setError(error);
         setUncertainCreate(error instanceof ApiError && error.outcome === "unknown");
         const knownId =
           error instanceof ApiError &&
@@ -84,7 +84,7 @@ export function useSessions(device: Device, workspaceId: string) {
   }
   async function change(kind: "rename" | "end", sessionId: string, name: string) {
     setBusy(true);
-    setError("");
+    setError(undefined);
     try {
       if (kind === "rename")
         await rpc(device.id, "sessions.rename", { workspaceId, sessionId, name });
@@ -94,7 +94,7 @@ export function useSessions(device: Device, workspaceId: string) {
         return true;
       }
     } catch (error) {
-      if (alive.current) setError(errorMessage(error));
+      if (alive.current) setError(error);
     } finally {
       if (alive.current) setBusy(false);
     }
@@ -111,8 +111,8 @@ export function useSessions(device: Device, workspaceId: string) {
     create,
     change,
     clearError: () => {
-      setError("");
-      setListError("");
+      setError(undefined);
+      setListError(undefined);
     },
   };
 }

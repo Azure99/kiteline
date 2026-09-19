@@ -68,10 +68,10 @@ export class Files {
 
   create(workspaceId: string, input: string, kind: string, signal?: AbortSignal) {
     if (kind !== "file" && kind !== "directory")
-      throw new AppError("invalid_argument", "无效文件类型");
+      throw new AppError("invalid_argument", "Invalid file type");
     const root = this.metadata.workspace(workspaceId).path;
     const path = relativePath(input);
-    if (path === ".") throw new AppError("conflict", "workspace 根目录已经存在");
+    if (path === ".") throw new AppError("conflict", "Workspace root directory already exists");
     return publish(async () => {
       const target = await locate(root, path);
       signal?.throwIfAborted();
@@ -87,9 +87,14 @@ export class Files {
       try {
         return await readEntry(target.parent, Buffer.from(target.name), path);
       } catch (error) {
-        throw new OperationError("io_error", `已创建，读取结果失败：${String(error)}`, "partial", {
-          path,
-        });
+        throw new OperationError(
+          "io_error",
+          `Created, but reading the result failed: ${String(error)}`,
+          "partial",
+          {
+            path,
+          },
+        );
       }
     }, signal);
   }
@@ -103,7 +108,8 @@ export class Files {
       const info = await lstat(source.absolute, { bigint: true });
       await protectRoot(root, path, info);
       const to = join(dirname(path), name);
-      if (path === to) throw new AppError("invalid_argument", "新名称与原名称相同");
+      if (path === to)
+        throw new AppError("invalid_argument", "New name is the same as the original name");
       signal?.throwIfAborted();
       await renameNoReplace(source.absolute, join(source.parent, name));
       return { from: path, to };

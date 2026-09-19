@@ -162,7 +162,10 @@ export class Connections {
         pending.resolve({
           id,
           outcome: "unknown",
-          error: { code: "offline", message: "设备连接已中断，执行结果未知" },
+          error: {
+            code: "offline",
+            message: "Device connection lost; operation outcome is unknown",
+          },
         });
       }
     this.onAgentClosed?.(connection);
@@ -220,16 +223,16 @@ export class Connections {
     params: Record<string, unknown>,
   ) {
     const connection = this.agents.get(deviceId);
-    if (!connection?.snapshot) throw new AppError("offline", "设备离线");
-    if (this.pending.has(requestId)) throw new AppError("conflict", "请求 ID 已存在");
+    if (!connection?.snapshot) throw new AppError("offline", "Device offline");
+    if (this.pending.has(requestId)) throw new AppError("conflict", "Request ID already exists");
     if (
       [...this.pending.values()].filter((p) => p.connection === connection).length >=
       limits.pendingRequestsPerDevice
     )
-      throw new AppError("busy", "设备请求过多");
+      throw new AppError("busy", "Too many pending requests for this device");
     const message = { type: "rpc.request", id: requestId, method, params };
     if (Buffer.byteLength(JSON.stringify(message)) > limits.controlMessageBytes)
-      throw new AppError("limit_exceeded", "请求过大");
+      throw new AppError("limit_exceeded", "Request exceeds the size limit");
     return new Promise<Reply>((resolve) => {
       this.pending.set(requestId, { loginId: login.id, connection, resolve });
       send(connection.socket, message);
@@ -268,6 +271,7 @@ export class Connections {
 }
 export function bearer(request: IncomingMessage) {
   const value = request.headers.authorization;
-  if (!value?.startsWith("Bearer ")) throw new AppError("unauthenticated", "缺少设备凭据");
+  if (!value?.startsWith("Bearer "))
+    throw new AppError("unauthenticated", "Missing device credentials");
   return value.slice(7);
 }

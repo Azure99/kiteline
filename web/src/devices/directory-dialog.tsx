@@ -1,7 +1,9 @@
+import { ErrorNotice } from "../components/error-notice";
+import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
 import { ArrowUp, Folder, FolderPlus, RefreshCw } from "lucide-react";
 import type { DirectoryListing, Workspace } from "@kiteline/shared/protocol";
-import { errorMessage, rpc } from "../lib/api";
+import { rpc } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import {
@@ -20,10 +22,13 @@ export function DirectoryDialog({
   deviceId: string;
   onAdded: (workspace: Workspace) => void;
 }) {
+  const { t } = useTranslation();
+
   const [path, setPath] = useState("/");
   const [input, setInput] = useState("/");
   const [listing, setListing] = useState<DirectoryListing>();
-  const [error, setError] = useState("");
+  const [error, setError] = useState<unknown>();
+  const [invalid, setInvalid] = useState(false);
   const [busy, setBusy] = useState(true);
   const [revision, setRevision] = useState(0);
   const [newName, setNewName] = useState<string>();
@@ -38,7 +43,8 @@ export function DirectoryDialog({
   useEffect(() => {
     const controller = new AbortController();
     setBusy(true);
-    setError("");
+    setError(undefined);
+    setInvalid(false);
     void rpc(deviceId, "directories.list", { absolutePath: path, cursor }, controller.signal)
       .then(
         (result) => {
@@ -46,7 +52,7 @@ export function DirectoryDialog({
           setInput(result.path);
         },
         (error: unknown) => {
-          if (!controller.signal.aborted) setError(errorMessage(error));
+          if (!controller.signal.aborted) setError(error);
         },
       )
       .finally(() => {
@@ -63,25 +69,28 @@ export function DirectoryDialog({
   async function add() {
     if (!listing) return;
     setBusy(true);
-    setError("");
+    setError(undefined);
+    setInvalid(false);
     try {
       const workspace = await rpc(deviceId, "workspaces.add", {
         absolutePath: listing.path,
       });
       if (mounted.current) onAdded(workspace);
     } catch (error) {
-      setError(errorMessage(error));
+      setError(error);
     } finally {
       setBusy(false);
     }
   }
   async function mkdir() {
     if (!listing || !newName || newName.includes("/") || newName === "." || newName === "..") {
-      setError("请输入单个目录名称");
+      setError(undefined);
+      setInvalid(true);
       return;
     }
     setBusy(true);
-    setError("");
+    setError(undefined);
+    setInvalid(false);
     try {
       const result = await rpc(deviceId, "directories.mkdir", {
         absolutePath: `${listing.path.replace(/\/$/, "")}/${newName}`,
@@ -89,7 +98,7 @@ export function DirectoryDialog({
       setNewName(undefined);
       go(result.path);
     } catch (error) {
-      setError(errorMessage(error));
+      setError(error);
     } finally {
       setBusy(false);
     }
@@ -97,7 +106,7 @@ export function DirectoryDialog({
   return (
     <DialogContent>
       <DialogHeader>
-        <DialogTitle>添加 workspace</DialogTitle>
+        <DialogTitle>{t(($) => $.devices.addWorkspace)}</DialogTitle>
       </DialogHeader>
       <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
         <form
@@ -108,23 +117,27 @@ export function DirectoryDialog({
           }}
         >
           <IconButton
-            label="上级目录"
+            label={t(($) => $.files.parentDirectory)}
             disabled={busy || !listing?.parentPath}
             onClick={() => go(listing!.parentPath!)}
           >
             <ArrowUp />
           </IconButton>
           <Input
-            aria-label="绝对目录路径"
+            aria-label={t(($) => $.devices.absolutePath)}
             disabled={busy}
             value={input}
             onChange={(event) => setInput(event.target.value)}
             autoComplete="off"
           />
-          <IconButton label="转到目录" disabled={busy} type="submit">
+          <IconButton label={t(($) => $.devices.goDirectory)} disabled={busy} type="submit">
             <RefreshCw />
           </IconButton>
-          <IconButton label="新建目录" disabled={busy || !listing} onClick={() => setNewName("")}>
+          <IconButton
+            label={t(($) => $.files.newDirectory)}
+            disabled={busy || !listing}
+            onClick={() => setNewName("")}
+          >
             <FolderPlus />
           </IconButton>
         </form>
@@ -137,23 +150,28 @@ export function DirectoryDialog({
             }}
           >
             <Input
-              aria-label="新目录名称"
+              aria-label={t(($) => $.devices.newDirectoryName)}
               value={newName}
               onChange={(event) => setNewName(event.target.value)}
               autoFocus
             />
             <Button type="submit" disabled={busy}>
-              新建
+              {t(($) => $.devices.new)}
             </Button>
             <Button variant="ghost" onClick={() => setNewName(undefined)}>
-              取消
+              {t(($) => $.common.cancel)}
             </Button>
           </form>
         )}
-        {error && (
+        {invalid && (
           <p role="alert" className="text-sm text-destructive">
-            {error}
+            {t(($) => $.devices.directoryNameRequired)}
           </p>
+        )}
+        {!!error && (
+          <div role="alert" className="text-sm text-destructive">
+            <ErrorNotice error={error} />
+          </div>
         )}
         <div className="scroll-area min-h-40 flex-1 overflow-auto" aria-busy={busy}>
           {listing?.entries.items.map((entry, index) => (
@@ -166,20 +184,24 @@ export function DirectoryDialog({
               <Folder size={17} className="shrink-0 text-primary" />
               <span className="min-w-0 break-all">{entry.name}</span>
               {entry.unavailableReason && (
-                <span className="ml-auto text-xs text-destructive">名称编码不支持</span>
+                <span className="ml-auto text-xs text-destructive">
+                  {t(($) => $.files.nameEncoding)}
+                </span>
               )}
               {entry.kind === "symlink" && (
-                <span className="ml-auto text-xs text-muted-foreground">链接</span>
+                <span className="ml-auto text-xs text-muted-foreground">
+                  {t(($) => $.devices.link)}
+                </span>
               )}
             </button>
           ))}
           {busy && (
             <p role="status" className="p-3 text-sm text-muted-foreground">
-              正在读取
+              {t(($) => $.common.reading)}
             </p>
           )}
           {listing?.entries.items.length === 0 && !busy && (
-            <p className="p-3 text-sm text-muted-foreground">空目录</p>
+            <p className="p-3 text-sm text-muted-foreground">{t(($) => $.files.emptyDirectory)}</p>
           )}
         </div>
         {listing?.entries.nextCursor && (
@@ -191,14 +213,14 @@ export function DirectoryDialog({
               setRevision((r) => r + 1);
             }}
           >
-            下一页
+            {t(($) => $.common.nextPage)}
           </Button>
         )}
       </div>
       <DialogFooter>
-        <DialogClose render={<Button variant="outline" />}>取消</DialogClose>
+        <DialogClose render={<Button variant="outline" />}>{t(($) => $.common.cancel)}</DialogClose>
         <Button disabled={busy || !listing || !!error} onClick={() => void add()}>
-          选择此目录
+          {t(($) => $.devices.selectDirectory)}
         </Button>
       </DialogFooter>
     </DialogContent>

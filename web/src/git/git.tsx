@@ -1,3 +1,5 @@
+import { ErrorNotice } from "../components/error-notice";
+import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ChevronDown,
@@ -21,7 +23,7 @@ import type {
 import { IconButton } from "../components/icon-button";
 import { Button } from "../components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
-import { errorMessage, rpc } from "../lib/api";
+import { ApiError, rpc } from "../lib/api";
 import { useMobile } from "../lib/use-mobile";
 import { showDraft, type DraftStore } from "../files/drafts";
 import { DiffView, type DiffTarget } from "./diff-view";
@@ -29,7 +31,6 @@ import { inSide, selectionOf, type ChangeSide } from "./selection";
 import { useGitStatus } from "./use-status";
 import { HistoryView } from "./history-view";
 import { BranchesView } from "./branches-view";
-import { ApiError } from "../lib/api";
 import { useWorkspaceRefresh } from "../lib/use-workspace-refresh";
 import { navigate, useRoute, workspacePath } from "../lib/navigation";
 import { parentPath } from "../files/use-browser";
@@ -60,6 +61,8 @@ export function GitTool({
   store: DraftStore;
   actions: GitActions;
 }) {
+  const { t } = useTranslation();
+
   const route = useRoute();
   const requestedRepo = route.tool === "git" ? route.query.get("repo") : null;
   const [repos, setRepos] = useState<Repo[]>([]);
@@ -69,7 +72,7 @@ export function GitTool({
   }, [requestedRepo]);
   const [scan, setScan] = useState<RepoDiscovery>();
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<unknown>();
   const request = useRef<AbortController>(undefined);
   const scanCursor = useRef<string>(undefined);
   const scanned = useRef(new Map<string, Repo>());
@@ -81,7 +84,7 @@ export function GitTool({
     const controller = new AbortController();
     request.current = controller;
     setBusy(true);
-    setError("");
+    setError(undefined);
     try {
       const read = (scanCursor?: string) =>
         rpc(
@@ -119,7 +122,7 @@ export function GitTool({
     } catch (error) {
       if (!controller.signal.aborted) {
         if (error instanceof ApiError && error.code === "conflict") scanCursor.current = undefined;
-        setError(errorMessage(error));
+        setError(error);
       }
     } finally {
       if (request.current === controller) {
@@ -177,7 +180,7 @@ export function GitTool({
       <MenuTrigger render={<Button variant="ghost" className="min-w-0 max-w-[55%] shrink" />}>
         <FolderGit2 />
         <span className="min-w-0 truncate">
-          {repo?.path === "." ? workspace.name : (repo?.path ?? "仓库")}
+          {repo?.path === "." ? workspace.name : (repo?.path ?? t(($) => $.git.repository))}
         </span>
         <ChevronDown />
       </MenuTrigger>
@@ -185,15 +188,20 @@ export function GitTool({
         {repos.map((item) => (
           <MenuItem key={item.id} onClick={() => chooseRepo(item.id)}>
             <span className="min-w-0 break-all">
-              {item.path === "." ? workspace.name : item.path}
+              {item.available
+                ? item.path === "."
+                  ? workspace.name
+                  : item.path
+                : t(($) => $.git.bareRepository, {
+                    path: item.path === "." ? workspace.name : item.path,
+                  })}
               {item.linked ? " · worktree" : ""}
-              {!item.available ? " · 裸仓库" : ""}
             </span>
           </MenuItem>
         ))}
         <MenuItem disabled={!enabled || busy} onClick={() => void discover()}>
           <RefreshCw />
-          重新发现仓库
+          {t(($) => $.git.discover)}
         </MenuItem>
       </MenuContent>
     </Menu>
@@ -207,24 +215,35 @@ export function GitTool({
       )}
       {!enabled && (
         <p role="status" className="border-b border-border px-4 py-2 text-xs">
-          设备{device.status === "revoked" ? "已撤销" : "离线"}
+          {device.status === "revoked"
+            ? t(($) => $.common.deviceRevoked)
+            : t(($) => $.common.deviceOffline)}
         </p>
       )}
-      {(!!error || !!scan?.issues.length) && (
+      {!!(!!error || !!scan?.issues.length) && (
         <div className="max-h-36 shrink-0 overflow-auto border-b border-border px-4 py-2 text-xs text-destructive">
-          {error && <p role="alert">{error}</p>}
+          {!!error && (
+            <div role="alert">
+              <ErrorNotice error={error} />
+            </div>
+          )}
           {scan?.issues.map((item, i) => (
-            <p key={i} className="break-all">
-              {item.path}：{item.error.message}
-            </p>
+            <div key={i} className="break-all">
+              {item.path}:{" "}
+              <ErrorNotice
+                error={
+                  new ApiError(item.error.code, item.error.message, "failed", item.error.details)
+                }
+              />
+            </div>
           ))}
         </div>
       )}
       {scan && !scan.complete && (
         <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-1 text-xs">
-          <span>仓库扫描未完成</span>
+          <span>{t(($) => $.git.scanIncomplete)}</span>
           <Button variant="ghost" disabled={!enabled || busy} onClick={() => void discover()}>
-            继续扫描
+            {t(($) => $.git.continueScan)}
           </Button>
         </div>
       )}
@@ -238,14 +257,14 @@ export function GitTool({
       ) : (
         <div className="flex flex-1 items-center justify-center p-4 text-sm text-muted-foreground">
           {busy
-            ? "正在发现仓库"
+            ? t(($) => $.git.discovering)
             : repo
-              ? "裸仓库不支持工作树操作"
+              ? t(($) => $.git.bareUnsupported)
               : selectedRepoId
                 ? scan?.complete
-                  ? "所选仓库不存在或已不可用"
-                  : "尚未发现所选仓库"
-                : "没有发现 Git 仓库"}
+                  ? t(($) => $.git.repoMissing)
+                  : t(($) => $.git.repoNotFoundYet)
+                : t(($) => $.git.noRepositories)}
         </div>
       )}
     </div>
@@ -275,6 +294,8 @@ function Changes({
   store: DraftStore;
   picker: ReactNode;
 }) {
+  const { t, i18n } = useTranslation();
+
   const mobile = useMobile();
   const state = useGitStatus(device.id, workspace.id, repo.id, visible && enabled);
   const [target, setTarget] = useState<DiffTarget>();
@@ -292,8 +313,8 @@ function Changes({
   function indexAction(paths: string[], kind: "stage" | "unstage") {
     if (kind === "stage" && !confirmDiskVersion(store, actionTarget, repo.path, paths)) return;
     const params = { paths: [...new Set(paths)] };
-    if (kind === "stage") void actions.run(actionTarget, "git.stage", params, "暂存");
-    else void actions.run(actionTarget, "git.unstage", params, "取消暂存");
+    if (kind === "stage") void actions.run(actionTarget, "git.stage", params);
+    else void actions.run(actionTarget, "git.unstage", params);
   }
   const select = (entry: GitEntry, side: ChangeSide) => {
     const item = selectionOf(entry, side);
@@ -314,12 +335,17 @@ function Changes({
         >
           <GitBranch size={15} className="shrink-0" />
           <span className="truncate">
-            {value?.branch ?? (value?.head.oid ? value.head.oid.slice(0, 8) : "Git")}
+            {value?.branch ??
+              (value?.head.oid ? value.head.oid.slice(0, 8) : t(($) => $.common.git))}
             {value?.upstream ? ` · ${value.upstream}` : ""}
           </span>
         </button>
-        {!!value?.ahead && <span className="text-xs">↑{value.ahead}</span>}
-        {!!value?.behind && <span className="text-xs">↓{value.behind}</span>}
+        {!!value?.ahead && (
+          <span className="text-xs">↑{value.ahead.toLocaleString(i18n.resolvedLanguage)}</span>
+        )}
+        {!!value?.behind && (
+          <span className="text-xs">↓{value.behind.toLocaleString(i18n.resolvedLanguage)}</span>
+        )}
         <RemoteActions
           target={actionTarget}
           actions={actions}
@@ -329,14 +355,14 @@ function Changes({
       </div>
       <div
         role="tablist"
-        aria-label="Git 视图"
+        aria-label={t(($) => $.git.views)}
         className="flex min-h-9 shrink-0 items-center gap-4 border-b border-border px-4 text-xs"
       >
         {(
           [
-            ["changes", "变化"],
-            ["history", "历史"],
-            ["branches", "分支"],
+            ["changes", t(($) => $.git.changes)],
+            ["history", t(($) => $.git.history)],
+            ["branches", t(($) => $.git.branches)],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -348,28 +374,34 @@ function Changes({
           >
             {label}
             {id === "changes" && (
-              <span className="rounded bg-muted px-1.5">{value?.totalCount ?? 0}</span>
+              <span className="rounded bg-muted px-1.5">
+                {(value?.totalCount ?? 0).toLocaleString(i18n.resolvedLanguage)}
+              </span>
             )}
           </button>
         ))}
         <span className="ml-auto hidden text-muted-foreground min-[960px]:block">
-          {state.busy ? "正在读取" : ""}
+          {state.busy ? t(($) => $.common.reading) : ""}
         </span>
         <IconButton
-          label="刷新 Git 状态"
+          label={t(($) => $.git.refreshStatus)}
           disabled={!enabled || state.busy}
           onClick={() => void state.load()}
         >
           <RefreshCw />
         </IconButton>
       </div>
-      {(state.error || state.notice) && (
-        <p
+      {!!(state.error || state.notice) && (
+        <div
           role={state.error ? "alert" : "status"}
           className="border-b border-border px-4 py-2 text-xs text-destructive"
         >
-          {state.error || state.notice}
-        </p>
+          {state.error ? (
+            <ErrorNotice error={state.error} />
+          ) : (
+            t(($) => $.git.selectionExpired, { count: state.notice })
+          )}
+        </div>
       )}
       <GitFeedback
         actions={actions}
@@ -412,14 +444,14 @@ function Changes({
         {(!mobile || !target) && (
           <aside
             className="flex min-h-0 w-full flex-col border-border min-[960px]:w-80 min-[960px]:shrink-0 min-[960px]:border-r"
-            aria-label="Git 变化列表"
+            aria-label={t(($) => $.git.changeList)}
           >
             <div className="scroll-area min-h-0 flex-1 overflow-auto">
               {(
                 [
-                  ["conflict", "冲突"],
-                  ["staged", "暂存的更改"],
-                  ["worktree", "更改"],
+                  ["conflict", t(($) => $.git.conflicts)],
+                  ["staged", t(($) => $.git.stagedChanges)],
+                  ["worktree", t(($) => $.git.worktreeChanges)],
                 ] as const
               ).map(([side, label]) => {
                 const entries = value?.entries.filter((entry) => inSide(entry, side)) ?? [];
@@ -433,12 +465,19 @@ function Changes({
                       <ChevronDown size={13} />
                       {label}
                       <span className="ml-auto">
-                        {side === "staged" ? (value?.stagedCount ?? 0) : entries.length}
+                        {(side === "staged"
+                          ? (value?.stagedCount ?? 0)
+                          : entries.length
+                        ).toLocaleString(i18n.resolvedLanguage)}
                       </span>
                       {!!chosen.length && (
                         <>
                           <IconButton
-                            label={side === "staged" ? "取消暂存所选文件" : "暂存所选文件"}
+                            label={
+                              side === "staged"
+                                ? t(($) => $.git.unstageSelected)
+                                : t(($) => $.git.stageSelected)
+                            }
                             disabled={
                               disabled ||
                               (side !== "staged" && chosen.some((entry) => !stageable(entry)))
@@ -459,8 +498,8 @@ function Changes({
                           <IconButton
                             label={
                               side !== "worktree"
-                                ? "丢弃所选文件全部更改"
-                                : "丢弃所选文件未暂存更改"
+                                ? t(($) => $.git.discardSelectedAll)
+                                : t(($) => $.git.discardSelectedWorktree)
                             }
                             disabled={disabled || chosen.some((entry) => !discardable(entry))}
                             onClick={() =>
@@ -483,7 +522,10 @@ function Changes({
                         <label className="flex min-h-11 items-center justify-center max-[959px]:min-w-11">
                           <input
                             type="checkbox"
-                            aria-label={`选择${label} ${entry.path}`}
+                            aria-label={t(($) => $.git.selectNamed, {
+                              area: label,
+                              path: entry.path,
+                            })}
                             checked={selected.some(
                               (item) => item.side === side && item.path === entry.path,
                             )}
@@ -518,10 +560,15 @@ function Changes({
                           )}
                           {entry.submodule && (
                             <span className="block text-[10px] text-muted-foreground">
-                              子模块{entry.submodule.commitChanged ? " · 指针变化" : ""}
-                              {entry.submodule.trackedDirty || entry.submodule.untrackedDirty
-                                ? " · 内部修改"
-                                : ""}
+                              {t(($) =>
+                                entry.submodule!.commitChanged
+                                  ? entry.submodule!.trackedDirty || entry.submodule!.untrackedDirty
+                                    ? $.git.submodulePointerDirty
+                                    : $.git.submodulePointer
+                                  : entry.submodule!.trackedDirty || entry.submodule!.untrackedDirty
+                                    ? $.git.submoduleDirty
+                                    : $.git.submodule,
+                              )}
                             </span>
                           )}
                         </button>
@@ -536,7 +583,9 @@ function Changes({
                       </div>
                     ))}
                     {!entries.length && (
-                      <p className="px-8 py-3 text-xs text-muted-foreground">暂无更改</p>
+                      <p className="px-8 py-3 text-xs text-muted-foreground">
+                        {t(($) => $.git.noChanges)}
+                      </p>
                     )}
                   </div>
                 );
@@ -545,19 +594,19 @@ function Changes({
             <div className="flex min-h-10 shrink-0 items-center gap-1 border-t border-border px-3 text-xs text-muted-foreground">
               <span className="mr-auto">
                 {value?.entries.length
-                  ? `${value.offset + 1}–${value.offset + value.entries.length}`
+                  ? `${(value.offset + 1).toLocaleString(i18n.resolvedLanguage)}–${(value.offset + value.entries.length).toLocaleString(i18n.resolvedLanguage)}`
                   : "0"}{" "}
-                / {value?.totalCount ?? 0}
+                / {(value?.totalCount ?? 0).toLocaleString(i18n.resolvedLanguage)}
               </span>
               <IconButton
-                label="Git 上一页"
+                label={t(($) => $.git.previousPage)}
                 disabled={!value?.offset || state.busy}
                 onClick={state.previous}
               >
                 <ChevronLeft />
               </IconButton>
               <IconButton
-                label="Git 下一页"
+                label={t(($) => $.git.nextPage)}
                 disabled={value?.nextOffset === undefined || state.busy}
                 onClick={state.next}
               >
@@ -587,7 +636,7 @@ function Changes({
         ) : (
           !mobile && (
             <div className="flex min-w-0 flex-1 items-center justify-center text-sm text-muted-foreground">
-              选择变化
+              {t(($) => $.git.selectChange)}
             </div>
           )
         )}

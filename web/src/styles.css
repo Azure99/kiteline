@@ -147,6 +147,13 @@ select {
   min-width: 100%;
   height: auto;
 }
+.terminal-notice,
+.workbench-notice {
+  /* Language changes must not resize xterm and clear its selection. */
+  height: 4rem;
+  flex-shrink: 0;
+  overflow: auto;
+}
 .terminal-notice {
   background: #313944;
   color: #e2e8f0;

@@ -1,6 +1,8 @@
+import { ErrorNotice } from "../components/error-notice";
+import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
 import type { Entry } from "@kiteline/shared/protocol";
-import { rpc, errorMessage } from "../lib/api";
+import { rpc } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
 import {
@@ -30,9 +32,12 @@ export function FileNameDialog({
   onClose: () => void;
   onDone: (result: { from?: string; to: string; entry?: Entry }) => void;
 }) {
+  const { t } = useTranslation();
+
   const [name, setName] = useState(action.kind === "rename" ? action.entry.name : "");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<unknown>();
+  const [invalid, setInvalid] = useState(false);
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -41,15 +46,21 @@ export function FileNameDialog({
     };
   }, []);
   const title =
-    action.kind === "rename" ? "重命名" : action.kind === "file" ? "新建文件" : "新建目录";
+    action.kind === "rename"
+      ? t(($) => $.common.rename)
+      : action.kind === "file"
+        ? t(($) => $.files.newFile)
+        : t(($) => $.files.newDirectory);
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (!name || name.includes("/") || name === "." || name === "..") {
-      setError("请输入单个文件或目录名称");
+      setError(undefined);
+      setInvalid(true);
       return;
     }
     setBusy(true);
-    setError("");
+    setError(undefined);
+    setInvalid(false);
     try {
       const result =
         action.kind === "rename"
@@ -61,7 +72,7 @@ export function FileNameDialog({
             }).then((entry) => ({ to: entry.path!, entry }));
       if (alive.current) onDone(result);
     } catch (error) {
-      if (alive.current) setError(errorMessage(error));
+      if (alive.current) setError(error);
     } finally {
       if (alive.current) setBusy(false);
     }
@@ -86,25 +97,30 @@ export function FileNameDialog({
               {action.kind === "rename" ? action.entry.path : action.parent}
             </p>
             <Textarea
-              aria-label="名称"
+              aria-label={t(($) => $.common.name)}
               rows={2}
               value={name}
               onChange={(event) => setName(event.target.value)}
               autoFocus
               disabled={busy}
             />
-            {error && (
-              <p role="alert" className="break-words text-sm text-destructive">
-                {error}
+            {invalid && (
+              <p role="alert" className="text-sm text-destructive">
+                {t(($) => $.files.nameRequired)}
               </p>
+            )}
+            {!!error && (
+              <div role="alert" className="break-words text-sm text-destructive">
+                <ErrorNotice error={error} />
+              </div>
             )}
           </div>
           <DialogFooter>
             <Button variant="outline" disabled={busy} onClick={onClose}>
-              取消
+              {t(($) => $.common.cancel)}
             </Button>
             <Button type="submit" disabled={busy}>
-              {busy ? "处理中" : title}
+              {busy ? t(($) => $.common.processing) : title}
             </Button>
           </DialogFooter>
         </form>

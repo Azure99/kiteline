@@ -12,7 +12,7 @@ export function installationCommands(publicUrl: string, code: string) {
   const command = (service: boolean) => `(
 set -e
 for kiteline_tool in curl mktemp; do
-  command -v "$kiteline_tool" >/dev/null || { echo "缺少 $kiteline_tool；Ubuntu 24.04: sudo apt-get update && sudo apt-get install -y curl ca-certificates coreutils" >&2; exit 1; }
+  command -v "$kiteline_tool" >/dev/null || { echo "Missing $kiteline_tool; Ubuntu 24.04: sudo apt-get update && sudo apt-get install -y curl ca-certificates coreutils" >&2; exit 1; }
 done
 kiteline_install=$(mktemp /var/tmp/kiteline-install.XXXXXX)
 trap 'rm -f "$kiteline_install"' EXIT
@@ -39,11 +39,14 @@ export async function serveAgentInstallation(
       const name = `kiteline-agent-${appVersion}-linux-${arch}${suffix}`;
       if (path === `/downloads/agent/${appVersion}/${name}`) filename = name;
     }
-  if (!filename) throw new AppError("not_found", "安装资源不存在");
+  if (!filename) throw new AppError("not_found", "Installation resource not found");
   const file = await open(resolve(directory, filename), "r").catch(
     (error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT")
-        throw new AppError("not_found", "此 server 未包含配套安装资源，请检查发布包");
+        throw new AppError(
+          "not_found",
+          "This server does not include the matching installation resources; check the release package",
+        );
       throw error;
     },
   );

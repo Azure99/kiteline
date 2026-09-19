@@ -72,7 +72,7 @@ export class Control {
     const creating = "shell" in o;
     const config = join(dirname(this.options.socket), "tmux.conf");
     if (creating) await writeFile(config, preset(o), { mode: 0o600 });
-    if (this.disposed) throw new AppError("cancelled", "终端创建已中断");
+    if (this.disposed) throw new AppError("cancelled", "Terminal creation interrupted");
     const started = this.expect();
     const command = creating
       ? [
@@ -101,7 +101,9 @@ export class Control {
       if (this.stderr.length < 8192) this.stderr += data.toString();
     });
     this.child.on("error", (error) => this.fail(error));
-    this.child.on("close", () => this.fail(new Error(this.stderr.trim() || "tmux control 已断开")));
+    this.child.on("close", () =>
+      this.fail(new Error(this.stderr.trim() || "tmux control connection closed")),
+    );
     readLines(
       this.child.stdout,
       (line) => this.line(line),
@@ -114,7 +116,7 @@ export class Control {
           `display-message -p -t ${o.tmuxSession} '#{pane_id} #{window_id} #{pane_width} #{pane_height}'`,
         );
     const match = /^(%\d+) (@\d+) (\d+) (\d+)$/.exec(identity[0] ?? "");
-    if (!match) throw new Error("tmux 未返回终端身份");
+    if (!match) throw new Error("tmux did not return the terminal identity");
     this.identity = {
       socket: o.socket,
       tmuxSession: o.tmuxSession,
@@ -137,7 +139,7 @@ export class Control {
     );
     const fields = format[0]?.split(" ").map(Number);
     if (!fields || fields.length !== 7 || fields.some((value) => !Number.isSafeInteger(value)))
-      throw new AppError("io_error", "无法读取原任务画面");
+      throw new AppError("io_error", "Could not read the existing terminal screen");
     const [cols, rows, alternate, x, y, cursor, applicationCursor] = fields as [
       number,
       number,
@@ -162,20 +164,21 @@ export class Control {
   private expect() {
     return new Promise<string[]>((resolve, reject) => {
       const timer = setTimeout(
-        () => this.fail(new AppError("timeout", "tmux 控制命令超时")),
+        () => this.fail(new AppError("timeout", "tmux control command timed out")),
         this.timeout,
       );
       this.pending.push({ resolve, reject, timer });
     });
   }
   command(value: string) {
-    if (this.disposed) return Promise.reject(new AppError("recording_unavailable", "记录已中断"));
+    if (this.disposed)
+      return Promise.reject(new AppError("recording_unavailable", "Recording interrupted"));
     const result = this.expect();
     this.child.stdin.write(value + "\n");
     return result;
   }
   async resize(cols: number, rows: number) {
-    if (!this.identity) throw new AppError("busy", "终端仍在创建");
+    if (!this.identity) throw new AppError("busy", "Terminal is still being created");
     await this.command(`select-window -t ${this.identity.windowId}`);
     await this.command(`refresh-client -C ${cols}x${rows}`);
   }
@@ -201,7 +204,7 @@ export class Control {
       } else {
         block.bytes += line.length;
         if (block.bytes > limits.controlMessageBytes)
-          throw new AppError("limit_exceeded", "tmux 命令结果超过容量");
+          throw new AppError("limit_exceeded", "tmux command result exceeds the size limit");
         block.lines.push(text);
       }
       return;
@@ -215,7 +218,7 @@ export class Control {
     const output = /^%output (%\d+) /.exec(text);
     if (output) {
       if (this.identity && output[1] !== this.identity.paneId)
-        throw new Error("受管终端出现了其他 pane");
+        throw new Error("An unexpected pane appeared in the managed terminal");
       this.events.output(decodeOutput(line.subarray(output[0].length)));
       return;
     }
@@ -226,7 +229,7 @@ export class Control {
         (this.identity &&
           (layout[1] !== this.identity.windowId || `%${layout[4]}` !== this.identity.paneId))
       )
-        throw new Error("受管终端布局已改变");
+        throw new Error("Managed terminal layout changed");
       this.events.resize(Number(layout[2]), Number(layout[3]));
       return;
     }
@@ -238,7 +241,7 @@ export class Control {
       )
         this.life(life[3]!);
     } else if (/^%(?:pause|continue|extended-output|exit)(?: |$)/.test(text))
-      throw new Error(`终端记录中断: ${text}`);
+      throw new Error(`Terminal recording interrupted: ${text}`);
   }
   private fail(error: Error) {
     if (this.disposed) return;

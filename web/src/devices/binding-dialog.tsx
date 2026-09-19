@@ -1,7 +1,9 @@
+import { ErrorNotice } from "../components/error-notice";
+import { useTranslation } from "react-i18next";
 import { useEffect, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import type { Device } from "@kiteline/shared/protocol";
-import { api, errorMessage, post } from "../lib/api";
+import { api, post } from "../lib/api";
 import {
   DialogContent,
   DialogFooter,
@@ -32,23 +34,25 @@ export function BindingDialog({
   connected: boolean;
   onDevice: (id: string) => void;
 }) {
+  const { t, i18n } = useTranslation();
+
   const [binding, setBinding] = useState<Binding>();
   const [result, setResult] = useState<Result>();
-  const [error, setError] = useState("");
-  const [copyError, setCopyError] = useState("");
+  const [error, setError] = useState<unknown>();
+  const [copyError, setCopyError] = useState<unknown>();
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<"foreground" | "service">("foreground");
   const [copied, setCopied] = useState("");
   async function create() {
-    setError("");
-    setCopyError("");
+    setError(undefined);
+    setCopyError(undefined);
     setBusy(true);
     try {
       setBinding(await post<Binding>("/api/bindings"));
       setResult({ status: "pending" });
       setCopied("");
     } catch (error) {
-      setError(errorMessage(error));
+      setError(error);
     } finally {
       setBusy(false);
     }
@@ -64,11 +68,11 @@ export function BindingDialog({
         });
         if (controller.signal.aborted) return;
         setResult(status);
-        setError("");
+        setError(undefined);
         if (status.status === "pending") timer = setTimeout(() => void poll(), 2000);
       } catch (error) {
         if (!controller.signal.aborted) {
-          setError(errorMessage(error));
+          setError(error);
           timer = setTimeout(() => void poll(), 3000);
         }
       }
@@ -83,22 +87,22 @@ export function BindingDialog({
   const device = devices.find((entry) => entry.id === result?.deviceId);
   const online = connected && device?.status === "online";
   const copy = (text: string) => {
-    setCopyError("");
+    setCopyError(undefined);
     setCopied("");
     void navigator.clipboard
       .writeText(text)
       .then(() => setCopied(text))
-      .catch((error: unknown) => setCopyError(errorMessage(error)));
+      .catch((error: unknown) => setCopyError(error));
   };
   return (
     <DialogContent>
       <DialogHeader>
-        <DialogTitle>绑定设备</DialogTitle>
+        <DialogTitle>{t(($) => $.devices.bind)}</DialogTitle>
       </DialogHeader>
       <div className="space-y-4 overflow-auto p-5">
         {!binding ? (
           <Button disabled={busy} onClick={() => void create()}>
-            {busy ? "正在生成" : "生成接入命令"}
+            {busy ? t(($) => $.devices.generating) : t(($) => $.devices.generateCommand)}
           </Button>
         ) : (
           <>
@@ -106,26 +110,32 @@ export function BindingDialog({
               <span role="status" className="text-sm">
                 {result?.status === "consumed"
                   ? online
-                    ? "设备已在线"
+                    ? t(($) => $.devices.deviceOnline)
                     : !connected
-                      ? "已登记，连接状态待确认"
+                      ? t(($) => $.devices.registeredUnknown)
                       : device?.status === "revoked"
-                        ? "设备已撤销"
-                        : "已登记，尚未连接"
+                        ? t(($) => $.common.deviceRevoked)
+                        : t(($) => $.devices.registeredOffline)
                   : result?.status === "expired"
-                    ? "绑定码已过期"
-                    : "等待设备"}
+                    ? t(($) => $.devices.bindingExpired)
+                    : t(($) => $.devices.waitingDevice)}
               </span>
               <span className="text-xs">
-                {new Date(binding.expiresAt).toLocaleTimeString()} 到期
+                {t(($) => $.devices.expiresAt, {
+                  time: new Date(binding.expiresAt).toLocaleTimeString(i18n.resolvedLanguage),
+                })}
               </span>
             </div>
             <fieldset className="space-y-2 text-sm">
-              <legend className="sr-only">运行方式</legend>
+              <legend className="sr-only">{t(($) => $.devices.runMode)}</legend>
               {(
                 [
-                  ["foreground", "前台运行", "Ctrl-C 停止"],
-                  ["service", "后台常驻", "systemd · 开机启动"],
+                  [
+                    "foreground",
+                    t(($) => $.devices.foreground),
+                    t(($) => $.devices.foregroundHint),
+                  ],
+                  ["service", t(($) => $.devices.service), t(($) => $.devices.serviceHint)],
                 ] as const
               ).map(([value, label, hint]) => (
                 <label key={value} className="flex flex-wrap items-center gap-2">
@@ -137,7 +147,7 @@ export function BindingDialog({
                     onChange={() => {
                       setMode(value);
                       setCopied("");
-                      setCopyError("");
+                      setCopyError(undefined);
                     }}
                   />
                   <span>{label}</span>
@@ -147,9 +157,15 @@ export function BindingDialog({
             </fieldset>
             <div className="rounded border border-border">
               <div className="flex items-center justify-between border-b border-border px-3 py-1">
-                <span className="text-xs text-muted-foreground">Linux · 当前项目用户</span>
+                <span className="text-xs text-muted-foreground">
+                  {t(($) => $.devices.projectUser)}
+                </span>
                 <IconButton
-                  label={copied === command ? "已复制接入命令" : "复制接入命令"}
+                  label={
+                    copied === command
+                      ? t(($) => $.devices.copiedInstall)
+                      : t(($) => $.devices.copyInstall)
+                  }
                   disabled={result?.status !== "pending"}
                   onClick={() => copy(command!)}
                 >
@@ -161,13 +177,19 @@ export function BindingDialog({
               </pre>
             </div>
             <details className="text-sm">
-              <summary className="cursor-pointer text-muted-foreground">已安装，仅绑定</summary>
+              <summary className="cursor-pointer text-muted-foreground">
+                {t(($) => $.devices.bindOnly)}
+              </summary>
               <div className="mt-2 flex items-start gap-2">
                 <code className="min-w-0 flex-1 whitespace-pre-wrap break-all text-xs">
                   {binding.commands.bind}
                 </code>
                 <IconButton
-                  label={copied === binding.commands.bind ? "已复制绑定命令" : "复制绑定命令"}
+                  label={
+                    copied === binding.commands.bind
+                      ? t(($) => $.devices.copiedBind)
+                      : t(($) => $.devices.copyBind)
+                  }
                   disabled={result?.status !== "pending"}
                   onClick={() => copy(binding.commands.bind)}
                 >
@@ -176,24 +198,26 @@ export function BindingDialog({
               </div>
             </details>
             {result?.status === "consumed" && !online && (
-              <p className="text-sm text-muted-foreground">
-                若设备未能保存凭据，请撤销该设备后重新绑定。
-              </p>
+              <p className="text-sm text-muted-foreground">{t(($) => $.devices.lostCredentials)}</p>
             )}
           </>
         )}
-        {(copyError || error) && (
-          <p role="alert" className="text-sm text-destructive">
-            {copyError || error}
-          </p>
+        {!!(copyError || error) && (
+          <div role="alert" className="text-sm text-destructive">
+            <ErrorNotice error={copyError || error} />
+          </div>
         )}
       </div>
       <DialogFooter>
-        <DialogClose render={<Button variant="outline" />}>关闭</DialogClose>
-        {result?.deviceId && <Button onClick={() => onDevice(result.deviceId!)}>查看设备</Button>}
+        <DialogClose render={<Button variant="outline" />}>{t(($) => $.common.close)}</DialogClose>
+        {result?.deviceId && (
+          <Button onClick={() => onDevice(result.deviceId!)}>
+            {t(($) => $.devices.viewDevice)}
+          </Button>
+        )}
         {result?.status === "expired" && (
           <Button onClick={() => void create()} disabled={busy}>
-            重新生成
+            {t(($) => $.devices.regenerate)}
           </Button>
         )}
       </DialogFooter>

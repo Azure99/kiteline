@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useState } from "react";
 import { GitBranch } from "lucide-react";
 import { Button } from "../components/ui/button";
@@ -22,6 +23,8 @@ export function BranchDialog({
   startOid?: string;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
+
   const [name, setName] = useState("");
   const [switchTo, setSwitchTo] = useState(true);
   return (
@@ -33,24 +36,23 @@ export function BranchDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>创建分支</DialogTitle>
+          <DialogTitle>{t(($) => $.git.createBranch)}</DialogTitle>
         </DialogHeader>
         <form
           onSubmit={(event) => {
             event.preventDefault();
             if (!name.trim() || actions.get(target).request) return;
-            void actions.run(
-              target,
-              "git.branch.create",
-              { name: name.trim(), startOid, switch: switchTo },
-              "创建分支",
-            );
+            void actions.run(target, "git.branch.create", {
+              name: name.trim(),
+              startOid,
+              switch: switchTo,
+            });
             onClose();
           }}
         >
           <div className="space-y-3 p-4">
             <label className="block space-y-1 text-sm">
-              <span>分支名称</span>
+              <span>{t(($) => $.git.branchName)}</span>
               <Input autoFocus value={name} onChange={(event) => setName(event.target.value)} />
             </label>
             {startOid && (
@@ -62,16 +64,16 @@ export function BranchDialog({
                 checked={switchTo}
                 onChange={(event) => setSwitchTo(event.target.checked)}
               />
-              创建后切换
+              {t(($) => $.git.switchAfterCreate)}
             </label>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>
-              取消
+              {t(($) => $.common.cancel)}
             </Button>
             <Button type="submit" disabled={!name.trim() || !!actions.get(target).request}>
               <GitBranch />
-              创建
+              {t(($) => $.common.create)}
             </Button>
           </DialogFooter>
         </form>

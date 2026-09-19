@@ -24,28 +24,28 @@ while [ "$#" -gt 0 ]; do
     *) fail "Unknown option: $1" ;;
     esac
 done
-case "$server" in https://*) ;; *) fail "需要 HTTPS server 地址" ;; esac
-case "$version" in '' | *[!0-9A-Za-z.+-]*) fail "无效发布版本" ;; esac
-[ -n "$code" ] || fail "缺少绑定码，请在网页重新生成接入命令"
-[ "$(uname -s)" = Linux ] || fail "仅支持 Linux"
+case "$server" in https://*) ;; *) fail "An HTTPS server URL is required" ;; esac
+case "$version" in '' | *[!0-9A-Za-z.+-]*) fail "Invalid release version" ;; esac
+[ -n "$code" ] || fail "Missing binding code; generate a new connection command in the web app"
+[ "$(uname -s)" = Linux ] || fail "Only Linux is supported"
 case "$(uname -m)" in
 x86_64) arch=amd64 ;;
 aarch64 | arm64) arch=arm64 ;;
-*) fail "仅支持 Linux amd64/arm64" ;;
+*) fail "Only Linux amd64/arm64 is supported" ;;
 esac
 
 for tool in curl tar gzip sha256sum mktemp id getent readlink; do
-    command -v "$tool" >/dev/null 2>&1 || fail "缺少 $tool。Ubuntu 24.04: apt-get update && apt-get install -y curl ca-certificates tar gzip coreutils libc-bin（普通用户加 sudo）"
+    command -v "$tool" >/dev/null 2>&1 || fail "Missing $tool. Ubuntu 24.04: apt-get update && apt-get install -y curl ca-certificates tar gzip coreutils libc-bin (add sudo when running as a non-root user)"
 done
-[ -z "${KITELINE_AGENT_HOME+x}${KITELINE_AGENT_RUN_DIR+x}" ] || fail "接入命令使用安装配置。请取消 KITELINE_AGENT_HOME/KITELINE_AGENT_RUN_DIR 环境覆盖；已有自定义目录通过 /etc/kiteline-agent.env 配置。"
+[ -z "${KITELINE_AGENT_HOME+x}${KITELINE_AGENT_RUN_DIR+x}" ] || fail "The connection command uses the installation configuration. Unset KITELINE_AGENT_HOME/KITELINE_AGENT_RUN_DIR environment overrides; configure existing custom directories in /etc/kiteline-agent.env."
 user=$(id -un)
 if [ "$(id -u)" -ne 0 ]; then
-    command -v sudo >/dev/null 2>&1 || fail "安装程序需要 sudo。请由管理员安装 sudo 或手工安装完整 agent 包。"
+    command -v sudo >/dev/null 2>&1 || fail "The installer requires sudo. Ask an administrator to install sudo, or manually install the complete agent package."
 fi
 if "$service"; then
-    [ "$(id -u)" -ne 0 ] || fail "后台服务请以已有的非 root 项目用户执行此命令，不要 sudo 整条接入命令。"
+    [ "$(id -u)" -ne 0 ] || fail "For a background service, run this command as an existing non-root project user. Do not run the entire connection command with sudo."
     if [ ! -d /run/systemd/system ] || ! command -v systemctl >/dev/null 2>&1; then
-        fail "后台服务需要运行中的 systemd；此环境可使用前台方式。"
+        fail "A background service requires a running systemd instance; use foreground mode in this environment."
     fi
 fi
 as_root() {
@@ -63,21 +63,21 @@ if [ ! -e /etc/kiteline-agent.json ]; then
     tar -xzf "$temporary/$name.tar.gz" -C "$temporary" --no-same-owner
     package="$temporary/$name"
     (cd "$package" && sha256sum --status --check SHA256SUMS)
-    [ "$("$package/bin/kiteline-agent" --version)" = "$version" ] || fail "安装包版本不匹配"
+    [ "$("$package/bin/kiteline-agent" --version)" = "$version" ] || fail "Package version mismatch"
     if "$service"; then "$package/bin/kiteline-agent" check --service; else "$package/bin/kiteline-agent" check; fi
     as_root "$package/bin/kiteline-agent" install --user "$user"
     rm -rf "$temporary"
     trap - EXIT
 fi
-[ -x "$agent" ] || fail "安装记录存在，但缺少 $agent；请修复原安装。"
-[ "$("$agent" --version)" = "$version" ] || fail "已安装其他版本；原安装未改动。请先明确执行 kiteline-agent service upgrade，再接入。"
+[ -x "$agent" ] || fail "An installation record exists, but $agent is missing; repair the existing installation."
+[ "$("$agent" --version)" = "$version" ] || fail "A different version is installed; the existing installation was not changed. Run kiteline-agent service upgrade explicitly before connecting."
 if "$service"; then as_root "$agent" service check; else "$agent" check; fi
 printf '%s\n' "$code" | "$agent" bind --server "$server" --if-unbound
 if "$service"; then
     as_root "$agent" service install --user "$user"
     as_root "$agent" service start
-    printf '%s\n' 'Agent 系统服务已启动，实际在线状态请查看网页设备列表。'
+    printf '%s\n' 'The agent system service has started. Check the device list in the web app for its online status.'
 else
-    printf '%s\n' 'Agent 在此前台运行；Ctrl-C 停止并结束受管终端任务。再次运行：kiteline-agent run'
+    printf '%s\n' 'The agent is running in the foreground here; Ctrl-C stops it and ends managed terminal tasks. To run it again: kiteline-agent run'
     exec "$agent" run
 fi

@@ -57,14 +57,16 @@ export class BinaryFiles {
     try {
       signal.throwIfAborted();
       const info = await file.stat({ bigint: true });
-      if (!info.isFile()) throw new AppError("unsupported", "只支持读取普通文件");
+      if (!info.isFile()) throw new AppError("unsupported", "Only regular files can be read");
       const size = Number(info.size);
       const limit =
         purpose === "image" ? this.config.limits.imageBytes : this.config.limits.transferBytes;
       if (!Number.isSafeInteger(size) || size > limit)
         throw new AppError(
           "limit_exceeded",
-          purpose === "image" ? "图片超过预览容量" : "文件超过传输容量",
+          purpose === "image"
+            ? "Image exceeds the preview size limit"
+            : "File exceeds the transfer size limit",
         );
       const meta: FileMeta = {
         size,
@@ -75,7 +77,7 @@ export class BinaryFiles {
         if (purpose === "download") return;
         const after = await file.stat({ bigint: true });
         if (after.size !== info.size || after.mtimeNs !== info.mtimeNs)
-          throw new AppError("conflict", "读取期间图片已变化，请重试");
+          throw new AppError("conflict", "Image changed while being read; try again");
       };
       let bytes: Buffer | undefined;
       if (purpose === "image") {
@@ -84,16 +86,16 @@ export class BinaryFiles {
         try {
           dimensions = imageSize(bytes);
         } catch {
-          throw new AppError("unsupported", "图片格式损坏或不支持");
+          throw new AppError("unsupported", "Image format is corrupt or unsupported");
         }
         const { type, width, height } = dimensions;
         const mime = { png: "image/png", jpg: "image/jpeg", webp: "image/webp", gif: "image/gif" }[
           type ?? ""
         ];
         if (!mime || !width || !height)
-          throw new AppError("unsupported", "只支持 PNG、JPEG、WebP、GIF 图片");
+          throw new AppError("unsupported", "Only PNG, JPEG, WebP, and GIF images are supported");
         if (width * height > this.config.limits.imagePixels)
-          throw new AppError("limit_exceeded", "图片尺寸超过预览容量");
+          throw new AppError("limit_exceeded", "Image dimensions exceed the preview limit");
         Object.assign(meta, { contentType: mime, width, height });
         await check();
       }
@@ -130,9 +132,9 @@ export class BinaryFiles {
     signal: AbortSignal,
   ): Promise<UploadWrite> {
     if (size > this.config.limits.transferBytes)
-      throw new AppError("limit_exceeded", "文件超过传输容量");
+      throw new AppError("limit_exceeded", "File exceeds the transfer size limit");
     if (createOnly ? expectedTargetVersion !== undefined : !expectedTargetVersion)
-      throw new AppError("invalid_argument", "替换需要确认的目标版本");
+      throw new AppError("invalid_argument", "Replacement requires the confirmed target version");
     path = relativePath(path);
     const root = this.metadata.workspace(workspaceId).path;
     const collision = createOnly ? "error" : "replace";
@@ -158,7 +160,8 @@ export class BinaryFiles {
   }
 
   async save(item: UploadWrite, signal: AbortSignal): Promise<UploadedFile> {
-    if (item.received !== item.size) throw new AppError("invalid_argument", "收到的正文长度不完整");
+    if (item.received !== item.size)
+      throw new AppError("invalid_argument", "Received body length is incomplete");
     await item.temporary.handle.chmod(0o666 & ~process.umask());
     await this.temporary.closeFile(item.temporary);
     return publish(async () => {
@@ -188,10 +191,15 @@ export class BinaryFiles {
         await this.temporary.forgetLocked(item.temporary);
         return result;
       } catch (error) {
-        throw new OperationError("io_error", `已发布，结果未确认：${String(error)}`, "unknown", {
-          path: item.path,
-          size: item.size,
-        });
+        throw new OperationError(
+          "io_error",
+          `Published, but the result is unconfirmed: ${String(error)}`,
+          "unknown",
+          {
+            path: item.path,
+            size: item.size,
+          },
+        );
       }
     }, signal);
   }

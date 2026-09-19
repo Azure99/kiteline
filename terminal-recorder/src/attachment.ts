@@ -52,7 +52,9 @@ export class Attachment {
     if (this.closed) return;
     const bytes = event.type === "output" ? Buffer.byteLength(event.data) : 32;
     if (this.pendingBytes + bytes > limits.terminalPendingBytes) {
-      this.fail(new AppError("limit_exceeded", "当前显示接收过慢，请重新连接"));
+      this.fail(
+        new AppError("limit_exceeded", "Display is receiving output too slowly; reconnect"),
+      );
       return;
     }
     this.pending.push(event);
@@ -67,7 +69,9 @@ export class Attachment {
   }
   acknowledge(bytes: number) {
     if (!Number.isSafeInteger(bytes) || bytes < this.consumed || bytes > this.sent) {
-      this.fail(new AppError("invalid_argument", "无效终端消费确认"));
+      this.fail(
+        new AppError("invalid_argument", "Invalid terminal output consumption acknowledgement"),
+      );
       return;
     }
     if (bytes === this.consumed) return;
@@ -110,7 +114,12 @@ export class Attachment {
       }
       this.held = undefined;
       if (!this.send(piece)) {
-        this.fail(new AppError("limit_exceeded", "当前显示传输积压，请重新连接"));
+        this.fail(
+          new AppError(
+            "limit_exceeded",
+            "Display transmission backlog exceeds the limit; reconnect",
+          ),
+        );
         return;
       }
       if (Buffer.isBuffer(piece)) this.sent += piece.length;
@@ -124,7 +133,7 @@ export class Attachment {
   private checkStall() {
     if (!this.closed && this.sent > this.consumed && !this.timer)
       this.timer = setTimeout(
-        () => this.fail(new AppError("timeout", "当前显示已停止消费输出")),
+        () => this.fail(new AppError("timeout", "Display has stopped consuming output")),
         this.stallTimeout,
       );
   }

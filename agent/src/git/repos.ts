@@ -70,7 +70,7 @@ export class Repositories {
     const rootPath = bare ? root : await readPath("--show-toplevel");
     const within = relative(workspaceRoot, rootPath);
     if (within === ".." || within.startsWith("../") || isAbsolute(within))
-      throw new AppError("unsupported", "仓库根位于 workspace 之外");
+      throw new AppError("unsupported", "Repository root is outside the workspace");
     const gitDir = await readPath("--git-dir");
     const commonDir = await readPath("--git-common-dir");
     const entry = { rootPath, gitDir, commonDir, available: !bare };
@@ -85,7 +85,11 @@ export class Repositories {
   }
   async resolve(workspaceId: string, id: string, signal: AbortSignal) {
     const old = this.known.get(id);
-    if (!old) throw new AppError("not_found", "仓库未发现或已过期，请刷新仓库");
+    if (!old)
+      throw new AppError(
+        "not_found",
+        "Repository was not found or has expired; refresh repositories",
+      );
     return this.verify(workspaceId, old, signal);
   }
   async verify(workspaceId: string, old: Repo, signal: AbortSignal) {
@@ -95,10 +99,12 @@ export class Repositories {
       current = await this.inspect(old.rootPath, root, signal);
     } catch (error) {
       signal.throwIfAborted();
-      throw new AppError("not_found", `仓库不可用：${asError(error).message}`);
+      throw new AppError("not_found", `Repository is unavailable: ${asError(error).message}`);
     }
-    if (current.id !== old.id) throw new AppError("conflict", "仓库身份已变化，请重新选择");
-    if (!current.available) throw new AppError("unsupported", "裸仓库不支持工作树操作");
+    if (current.id !== old.id)
+      throw new AppError("conflict", "Repository identity has changed; select it again");
+    if (!current.available)
+      throw new AppError("unsupported", "Bare repositories do not support worktree operations");
     this.remember(workspaceId, current);
     return current;
   }
@@ -111,7 +117,7 @@ export class Repositories {
     const id = token ?? randomUUID();
     let scan = this.scans.get(id);
     if (token && (!scan || scan.workspaceId !== workspaceId || scan.root !== root))
-      throw new AppError("conflict", "仓库扫描已过期，请重新扫描");
+      throw new AppError("conflict", "Repository scan has expired; scan again");
     if (!scan) {
       const release = this.budget.reserve();
       scan = {
@@ -128,7 +134,7 @@ export class Repositories {
       };
       this.scans.set(id, scan);
     }
-    if (scan.busy) throw new AppError("busy", "仓库扫描正在运行");
+    if (scan.busy) throw new AppError("busy", "Repository scan is running");
     scan.busy = true;
     signal = AbortSignal.any([signal, scan.controller.signal]);
     const result: RepoDiscovery = { repos: [], issues: [], complete: false };
@@ -137,7 +143,8 @@ export class Repositories {
     const started = Date.now();
     const add = (item: Repo | PathError) => {
       const size = Buffer.byteLength(JSON.stringify(item)) + 1;
-      if (size + 256 > limits.resultBytes) throw new AppError("limit_exceeded", "仓库条目超过容量");
+      if (size + 256 > limits.resultBytes)
+        throw new AppError("limit_exceeded", "Repository entry exceeds the size limit");
       if (bytes + size > limits.resultBytes) {
         scan!.pending = item;
         return false;
@@ -202,7 +209,10 @@ export class Repositories {
             if (
               !add({
                 path: relative(root, frame.path) || ".",
-                error: { code: "unsupported", message: "目录包含非 UTF-8 名称，无法扫描该项" },
+                error: {
+                  code: "unsupported",
+                  message: "Directory contains a non-UTF-8 name; this item cannot be scanned",
+                },
               })
             )
               break;
@@ -236,7 +246,7 @@ export class Repositories {
     const scan = this.scans.get(id);
     if (!scan) return;
     this.scans.delete(id);
-    scan.controller.abort(new AppError("cancelled", "仓库扫描已结束"));
+    scan.controller.abort(new AppError("cancelled", "Repository scan has ended"));
     clearTimeout(scan.timer);
     scan.release();
     await Promise.all(scan.stack.map((frame) => frame.directory?.close().catch(() => {})));

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { ChevronDown, Plus, SquareTerminal } from "lucide-react";
 import type { Session, Shortcut } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
@@ -17,6 +18,8 @@ export function SessionPicker({
   dock: boolean;
   onSelect(id: string): void;
 }) {
+  const { t, i18n } = useTranslation();
+
   return (
     <Menu>
       <MenuTrigger
@@ -24,14 +27,14 @@ export function SessionPicker({
           <Button
             variant="ghost"
             className="min-w-0 max-w-64 shrink"
-            aria-label={dock ? "选择配套会话" : "选择终端会话"}
+            aria-label={dock ? t(($) => $.terminal.selectDock) : t(($) => $.terminal.selectSession)}
           />
         }
       >
         <SquareTerminal />
         <span className="truncate">
           {sessions.find((session) => session.id === selected)?.name ??
-            (selected ? "已结束" : "终端")}
+            (selected ? t(($) => $.terminal.ended) : t(($) => $.common.terminal))}
         </span>
         <ChevronDown />
       </MenuTrigger>
@@ -43,14 +46,16 @@ export function SessionPicker({
               <span className="max-w-60 truncate">{session.name}</span>
               {uncertain && (
                 <span className="text-xs text-muted-foreground">
-                  {new Date(session.createdAt).toLocaleString()}
+                  {new Date(session.createdAt).toLocaleString(i18n.resolvedLanguage)}
                 </span>
               )}
             </span>
-            {session.state === "starting" && <span className="text-muted-foreground">创建中</span>}
+            {session.state === "starting" && (
+              <span className="text-muted-foreground">{t(($) => $.terminal.starting)}</span>
+            )}
           </MenuItem>
         ))}
-        {!sessions.length && <MenuItem disabled>无运行会话</MenuItem>}
+        {!sessions.length && <MenuItem disabled>{t(($) => $.terminal.noSessions)}</MenuItem>}
       </MenuContent>
     </Menu>
   );
@@ -66,10 +71,12 @@ export function NewSessionButtons({
   disabled: boolean;
   onCreate(shortcutId?: string): void;
 }) {
+  const { t } = useTranslation();
+
   return (
     <>
       <IconButton
-        label={dock ? "新建配套终端" : "新建终端"}
+        label={dock ? t(($) => $.terminal.newDock) : t(($) => $.terminal.new)}
         disabled={disabled}
         onClick={() => onCreate()}
       >
@@ -79,7 +86,12 @@ export function NewSessionButtons({
         <Menu>
           <MenuTrigger
             render={
-              <Button variant="ghost" size="icon" aria-label="终端快捷方式" disabled={disabled} />
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={t(($) => $.terminal.shortcutMenu)}
+                disabled={disabled}
+              />
             }
           >
             <ChevronDown />

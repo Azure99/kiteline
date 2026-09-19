@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import {
   ArrowDown,
   ArrowUp,
@@ -55,6 +56,8 @@ export function SessionMenu({
   onDirection(direction: "horizontal" | "vertical"): void;
   onSettings(): void;
 }) {
+  const { t } = useTranslation();
+
   const group = id ? groupFor(layout, id) : undefined;
   const index = group && id ? group.members.indexOf(id) : -1;
   return (
@@ -64,7 +67,9 @@ export function SessionMenu({
           <Button
             variant="ghost"
             size="icon"
-            aria-label={label ?? (dock ? "配套终端操作" : "终端操作")}
+            aria-label={
+              label ?? (dock ? t(($) => $.terminal.dockActions) : t(($) => $.terminal.actions))
+            }
           />
         }
       >
@@ -73,7 +78,7 @@ export function SessionMenu({
       <MenuContent>
         <MenuItem onClick={onSettings}>
           <Settings />
-          终端设置
+          {t(($) => $.terminal.settings)}
         </MenuItem>
         {id && (
           <>
@@ -81,18 +86,20 @@ export function SessionMenu({
               <>
                 <MenuItem disabled={disabled} onClick={onSplit}>
                   <Plus />
-                  新建并分屏
+                  {t(($) => $.terminal.createSplit)}
                 </MenuItem>
                 <MenuItem disabled={!group || group.members.length < 2} onClick={() => onMove(id)}>
                   <Split />
-                  拆为独立组
+                  {t(($) => $.terminal.separateGroup)}
                 </MenuItem>
                 {layout.groups
                   .filter((item) => item !== group)
                   .map((item) => (
                     <MenuItem key={item.id} onClick={() => onMove(id, item.id)}>
                       <Maximize2 />
-                      移入第 {layout.groups.indexOf(item) + 1} 组
+                      {t(($) => $.terminal.moveToGroup, {
+                        number: layout.groups.indexOf(item) + 1,
+                      })}
                     </MenuItem>
                   ))}
                 <MenuItem
@@ -100,28 +107,28 @@ export function SessionMenu({
                   onClick={() => onMove(id, group!.id, group!.members[index - 1])}
                 >
                   <ArrowUp />
-                  向前移动
+                  {t(($) => $.terminal.moveEarlier)}
                 </MenuItem>
                 <MenuItem
                   disabled={!group || index === group.members.length - 1}
                   onClick={() => onMove(id, group!.id, group!.members[index + 2])}
                 >
                   <ArrowDown />
-                  向后移动
+                  {t(($) => $.terminal.moveLater)}
                 </MenuItem>
                 <MenuItem
                   disabled={!group || group.members.length < 2}
                   onClick={() => onDirection("horizontal")}
                 >
                   <Columns2 />
-                  横向分屏
+                  {t(($) => $.terminal.horizontal)}
                 </MenuItem>
                 <MenuItem
                   disabled={!group || group.members.length < 2}
                   onClick={() => onDirection("vertical")}
                 >
                   <Rows2 />
-                  纵向分屏
+                  {t(($) => $.terminal.vertical)}
                 </MenuItem>
                 <div className="my-1 border-t border-border" />
               </>
@@ -130,42 +137,42 @@ export function SessionMenu({
               <>
                 <MenuItem onClick={() => onCommand("redisplay", id)}>
                   <RefreshCw />
-                  重新显示
+                  {t(($) => $.terminal.redisplay)}
                 </MenuItem>
                 <MenuItem onClick={() => onCommand("redraw", id)}>
                   <RefreshCw />
-                  重绘程序
+                  {t(($) => $.terminal.redrawProgram)}
                 </MenuItem>
               </>
             )}
             <MenuItem onClick={() => onCommand("larger", id)}>
               <ZoomIn />
-              增大字号
+              {t(($) => $.terminal.fontLarger)}
             </MenuItem>
             <MenuItem onClick={() => onCommand("smaller", id)}>
               <ZoomOut />
-              减小字号
+              {t(($) => $.terminal.fontSmaller)}
             </MenuItem>
             {session && (
               <>
                 <MenuItem onClick={() => onCommand("rename", id)}>
                   <Pencil />
-                  重命名
+                  {t(($) => $.common.rename)}
                 </MenuItem>
                 <MenuItem onClick={() => onCommand("copy", id)}>
                   <Copy />
-                  本机接续命令
+                  {t(($) => $.terminal.localCommand)}
                 </MenuItem>
               </>
             )}
             <MenuItem onClick={() => onCommand("close", id)}>
               <X />
-              关闭显示
+              {t(($) => $.terminal.closeDisplay)}
             </MenuItem>
             {session && (
               <MenuItem onClick={() => onCommand("end", id)}>
                 <Trash2 />
-                结束会话
+                {t(($) => $.terminal.endSession)}
               </MenuItem>
             )}
           </>

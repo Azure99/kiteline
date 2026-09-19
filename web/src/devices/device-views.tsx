@@ -1,3 +1,5 @@
+import { ErrorNotice } from "../components/error-notice";
+import { useTranslation } from "react-i18next";
 import {
   ChevronRight,
   Folder,
@@ -19,10 +21,8 @@ import type { DeviceAction } from "./device-actions";
 import { useEffect, useState } from "react";
 import { Dialog } from "../components/ui/dialog";
 import { TerminalSettings } from "../terminal/settings";
-import { rpc, errorMessage } from "../lib/api";
+import { rpc } from "../lib/api";
 import { IconButton } from "../components/icon-button";
-
-export const statusNames = { online: "在线", offline: "离线", revoked: "已撤销" };
 
 export function DeviceList({
   devices,
@@ -33,19 +33,21 @@ export function DeviceList({
   onNavigate: (path: string) => void;
   onBind: () => void;
 }) {
+  const { t } = useTranslation();
+
   return (
     <section className="scroll-area overflow-auto p-5">
       <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-base font-semibold">设备</h1>
+        <h1 className="text-base font-semibold">{t(($) => $.common.devices)}</h1>
         <Button onClick={() => onBind()}>
           <Plus />
-          绑定设备
+          {t(($) => $.devices.bind)}
         </Button>
       </div>
       {devices.length === 0 ? (
         <div className="py-16 text-center text-muted-foreground">
           <Monitor size={30} className="mx-auto mb-3" />
-          <p>尚未绑定设备</p>
+          <p>{t(($) => $.devices.noDevices)}</p>
         </div>
       ) : (
         <div className="divide-y divide-border border-y border-border">
@@ -59,10 +61,10 @@ export function DeviceList({
               <span className="min-w-0 flex-1 basis-32 truncate font-medium">{d.name}</span>
               <span className="flex items-center gap-2 text-xs text-muted-foreground">
                 <span className="status-dot" data-status={d.status} />
-                {statusNames[d.status]}
+                {t(($) => $.common[d.status])}
               </span>
               <span className="text-xs text-muted-foreground">
-                {d.snapshot?.workspaces.length ?? 0} workspace
+                {t(($) => $.devices.workspaces, { count: d.snapshot?.workspaces.length ?? 0 })}
               </span>
               <ChevronRight size={15} />
             </button>
@@ -85,9 +87,11 @@ export function DeviceDetail({
   onAction: (action: DeviceAction) => void;
   onPort: () => void;
 }) {
+  const { t, i18n } = useTranslation();
+
   const [settings, setSettings] = useState(false);
   const [counts, setCounts] = useState<Record<string, number>>({});
-  const [countError, setCountError] = useState("");
+  const [countError, setCountError] = useState<unknown>();
   useEffect(() => {
     if (device.status !== "online") return;
     let stopped = false;
@@ -104,7 +108,7 @@ export function DeviceDetail({
         setCounts(next);
         setCountError("");
       } catch (error) {
-        if (!stopped && current === revision) setCountError(errorMessage(error));
+        if (!stopped && current === revision) setCountError(error);
       }
     }
     void refresh();
@@ -121,29 +125,33 @@ export function DeviceDetail({
         <Server size={23} className="text-muted-foreground" />
         <h1 className="min-w-0 flex-1 break-all text-lg font-semibold">{device.name}</h1>
         {device.status !== "revoked" && (
-          <IconButton label="访问此设备端口" onClick={onPort}>
+          <IconButton label={t(($) => $.devices.devicePort)} onClick={onPort}>
             <Globe />
           </IconButton>
         )}
         <Menu>
-          <MenuTrigger render={<Button variant="ghost" size="icon" aria-label="设备操作" />}>
+          <MenuTrigger
+            render={
+              <Button variant="ghost" size="icon" aria-label={t(($) => $.devices.deviceActions)} />
+            }
+          >
             <MoreHorizontal />
           </MenuTrigger>
           <MenuContent>
             <MenuItem onClick={() => setSettings(true)}>
               <Settings />
-              终端设置
+              {t(($) => $.terminal.settings)}
             </MenuItem>
             <MenuItem onClick={() => onAction({ type: "rename", device })}>
               <Pencil />
-              重命名
+              {t(($) => $.common.rename)}
             </MenuItem>
             <MenuItem
               disabled={device.status === "revoked"}
               onClick={() => onAction({ type: "revoke", device })}
             >
               <Trash2 />
-              撤销设备
+              {t(($) => $.devices.revokeDevice)}
             </MenuItem>
           </MenuContent>
         </Menu>
@@ -151,15 +159,21 @@ export function DeviceDetail({
       <div className="mb-7 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
         <span className="flex items-center gap-2">
           <span className="status-dot" data-status={device.status} />
-          {statusNames[device.status]}
+          {t(($) => $.common[device.status])}
         </span>
-        {device.lastSeenAt && <span>最近连接 {new Date(device.lastSeenAt).toLocaleString()}</span>}
+        {device.lastSeenAt && (
+          <span>
+            {t(($) => $.devices.lastSeen, {
+              time: new Date(device.lastSeenAt).toLocaleString(i18n.resolvedLanguage),
+            })}
+          </span>
+        )}
       </div>
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-semibold">
           Workspaces{" "}
           <span className="ml-1 text-muted-foreground">
-            {device.snapshot?.workspaces.length ?? 0}
+            {(device.snapshot?.workspaces.length ?? 0).toLocaleString(i18n.resolvedLanguage)}
           </span>
         </h2>
         <Button
@@ -168,7 +182,7 @@ export function DeviceDetail({
           onClick={() => onAdd(device)}
         >
           <FolderPlus />
-          添加
+          {t(($) => $.common.add)}
         </Button>
       </div>
       <div className="divide-y divide-border border-y border-border">
@@ -188,15 +202,21 @@ export function DeviceDetail({
               {device.status === "online" && !!counts[w.id] && (
                 <span
                   className="ml-auto shrink-0 text-xs text-muted-foreground"
-                  title="运行或创建中的终端"
+                  title={t(($) => $.devices.runningTerminals)}
                 >
-                  {counts[w.id]} 终端
+                  {t(($) => $.devices.terminals, { count: counts[w.id]! })}
                 </span>
               )}
             </button>
             <Menu>
               <MenuTrigger
-                render={<Button variant="ghost" size="icon" aria-label={`${w.name} 操作`} />}
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={t(($) => $.common.actionsNamed, { name: w.name })}
+                  />
+                }
               >
                 <MoreHorizontal />
               </MenuTrigger>
@@ -206,24 +226,24 @@ export function DeviceDetail({
                   onClick={() => onAction({ type: "workspace-rename", device, workspace: w })}
                 >
                   <Pencil />
-                  重命名
+                  {t(($) => $.common.rename)}
                 </MenuItem>
                 <MenuItem
                   disabled={device.status !== "online"}
                   onClick={() => onAction({ type: "workspace-remove", device, workspace: w })}
                 >
                   <Trash2 />
-                  移除
+                  {t(($) => $.devices.remove)}
                 </MenuItem>
               </MenuContent>
             </Menu>
           </div>
         ))}
       </div>
-      {countError && (
-        <p role="alert" className="mt-2 text-sm text-destructive">
-          {countError}
-        </p>
+      {!!countError && (
+        <div role="alert" className="mt-2 text-sm text-destructive">
+          <ErrorNotice error={countError} />
+        </div>
       )}
       <Dialog open={settings} onOpenChange={setSettings}>
         {settings && <TerminalSettings device={device} />}

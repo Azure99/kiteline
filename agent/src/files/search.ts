@@ -122,10 +122,12 @@ export async function searchFiles(
   if (spawnError)
     throw new AppError(
       spawnError.code === "ENOENT" ? "unsupported" : "io_error",
-      spawnError.code === "ENOENT" ? "设备未安装 ripgrep (rg)" : spawnError.message,
+      spawnError.code === "ENOENT"
+        ? "ripgrep (rg) is not installed on the device"
+        : spawnError.message,
     );
   if (!limited && (failure || (code !== 0 && code !== 1)))
-    throw new AppError("io_error", stderr.text().trim() || "搜索未能完成", {
+    throw new AppError("io_error", stderr.text().trim() || "Search could not be completed", {
       truncated: stderr.truncated,
     });
   return result;

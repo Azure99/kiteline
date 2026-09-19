@@ -1,3 +1,5 @@
+import { ErrorNotice } from "../components/error-notice";
+import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
 import { Upload } from "lucide-react";
 import type { FileInspection } from "@kiteline/shared/protocol";
@@ -10,7 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../components/ui/dialog";
-import { ApiError, errorMessage, rpc } from "../lib/api";
+import { ApiError, rpc } from "../lib/api";
 import { FileConflictDialog } from "./conflict-dialog";
 import { uploadFile } from "./content";
 import { childPath, formatBytes } from "./use-browser";
@@ -22,7 +24,7 @@ interface UploadRow {
   version?: string;
   sent: number;
   status: "pending" | "sending" | "succeeded" | "failed" | "unknown" | "skipped";
-  error?: string;
+  error?: unknown;
   collision?: boolean;
 }
 
@@ -45,6 +47,8 @@ export function UploadDialog({
   onClose: () => void;
   onWritten: (path: string) => void;
 }) {
+  const { t } = useTranslation();
+
   const [rows, setRows] = useState<UploadRow[]>(() =>
     files.map((file, id) => ({
       id,
@@ -57,7 +61,8 @@ export function UploadDialog({
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
   const [cancelled, setCancelled] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<unknown>();
+  const [invalid, setInvalid] = useState(false);
   const [conflict, setConflict] = useState<{ row: UploadRow; inspection: FileInspection }>();
   const active = useRef<AbortController>(undefined);
   const stop = useRef(false);
@@ -82,11 +87,13 @@ export function UploadDialog({
         (row) => !row.path || row.path.startsWith("/") || row.path.split("/").includes(".."),
       )
     ) {
-      setError("请输入 workspace 内的目标路径");
+      setError(undefined);
+      setInvalid(true);
       return;
     }
     setBusy(true);
-    setError("");
+    setError(undefined);
+    setInvalid(false);
     setCancelled(false);
     stop.current = false;
     for (const row of selected) {
@@ -109,8 +116,8 @@ export function UploadDialog({
           status: reason instanceof ApiError && reason.outcome === "unknown" ? "unknown" : "failed",
           error:
             controller.signal.aborted && !(reason instanceof ApiError)
-              ? "已取消"
-              : errorMessage(reason),
+              ? new ApiError("cancelled", "Upload cancelled", "failed")
+              : reason,
           collision: reason instanceof ApiError && reason.code === "conflict",
         });
       } finally {
@@ -121,7 +128,8 @@ export function UploadDialog({
   }
   async function inspect(row: UploadRow) {
     setChecking(true);
-    setError("");
+    setError(undefined);
+    setInvalid(false);
     try {
       const inspection = await rpc(deviceId, "files.inspect", {
         workspaceId,
@@ -130,7 +138,7 @@ export function UploadDialog({
       });
       if (alive.current) setConflict({ row, inspection });
     } catch (reason) {
-      if (alive.current) setError(errorMessage(reason));
+      if (alive.current) setError(reason);
     } finally {
       if (alive.current) setChecking(false);
     }
@@ -145,7 +153,7 @@ export function UploadDialog({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>上传 · {rows.length}</DialogTitle>
+            <DialogTitle>{t(($) => $.files.uploadCount, { count: rows.length })}</DialogTitle>
           </DialogHeader>
           <div className="scroll-area min-h-0 space-y-3 overflow-auto p-4">
             {rows.map((row) => (
@@ -157,7 +165,7 @@ export function UploadDialog({
                   </span>
                 </p>
                 <Textarea
-                  aria-label={`上传目标 ${row.file.name}`}
+                  aria-label={t(($) => $.files.uploadTarget, { name: row.file.name })}
                   rows={1}
                   value={row.path}
                   disabled={busy || checking || !editable(row)}
@@ -180,54 +188,59 @@ export function UploadDialog({
                     <p>
                       {row.sent < row.file.size
                         ? `${formatBytes(row.sent)} / ${formatBytes(row.file.size)}`
-                        : "等待设备完成"}
+                        : t(($) => $.files.awaitingUpload)}
                     </p>
                   </div>
                 )}
                 {row.status === "succeeded" && (
-                  <p className="text-xs text-muted-foreground">已上传</p>
+                  <p className="text-xs text-muted-foreground">{t(($) => $.files.uploaded)}</p>
                 )}
                 {row.status === "skipped" && (
-                  <p className="text-xs text-muted-foreground">已跳过</p>
+                  <p className="text-xs text-muted-foreground">{t(($) => $.common.skipped)}</p>
                 )}
                 {row.version && editable(row) && (
-                  <p className="text-xs text-destructive">已确认替换目标目录项</p>
+                  <p className="text-xs text-destructive">{t(($) => $.files.replaceConfirmed)}</p>
                 )}
-                {row.error && (
-                  <p role="alert" className="break-words text-xs text-destructive">
-                    {row.error}
-                  </p>
+                {!!row.error && (
+                  <div role="alert" className="break-words text-xs text-destructive">
+                    <ErrorNotice error={row.error} />
+                  </div>
                 )}
                 {row.status === "unknown" && (
-                  <p className="text-xs text-muted-foreground">先核对目标文件，再决定后续操作。</p>
+                  <p className="text-xs text-muted-foreground">{t(($) => $.files.checkTarget)}</p>
                 )}
                 {!busy && editable(row) && (
                   <div className="flex gap-2">
                     <Button variant="outline" disabled={checking} onClick={() => void inspect(row)}>
-                      同名处理
+                      {t(($) => $.files.resolveConflict)}
                     </Button>
                     <Button
                       variant="ghost"
                       disabled={checking}
                       onClick={() => update(row.id, { status: "skipped" })}
                     >
-                      跳过
+                      {t(($) => $.common.skip)}
                     </Button>
                   </div>
                 )}
               </div>
             ))}
-            {error && (
-              <p role="alert" className="break-words text-sm text-destructive">
-                {error}
+            {invalid && (
+              <p role="alert" className="text-sm text-destructive">
+                {t(($) => $.files.targetPathRequired)}
               </p>
+            )}
+            {!!error && (
+              <div role="alert" className="break-words text-sm text-destructive">
+                <ErrorNotice error={error} />
+              </div>
             )}
           </div>
           <DialogFooter>
             {busy ? (
               <>
                 <Button variant="outline" onClick={onHide}>
-                  收起
+                  {t(($) => $.common.collapse)}
                 </Button>
                 <Button
                   variant="outline"
@@ -238,18 +251,18 @@ export function UploadDialog({
                     active.current?.abort();
                   }}
                 >
-                  {cancelled ? "正在取消" : "取消上传"}
+                  {cancelled ? t(($) => $.common.cancelling) : t(($) => $.files.cancelUpload)}
                 </Button>
               </>
             ) : (
               <Button variant="outline" onClick={onClose}>
-                关闭
+                {t(($) => $.common.close)}
               </Button>
             )}
             {!busy && rows.some(editable) && (
               <Button disabled={checking} onClick={() => void run()}>
                 <Upload />
-                上传
+                {t(($) => $.common.upload)}
               </Button>
             )}
           </DialogFooter>

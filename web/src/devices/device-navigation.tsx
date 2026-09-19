@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronRight, Folder, Plus, Server } from "lucide-react";
 import { useState } from "react";
 import type { Device } from "@kiteline/shared/protocol";
@@ -19,18 +20,20 @@ export function DeviceNavigation({
   onNavigate: (path: string) => void;
   onBind: () => void;
 }) {
+  const { t } = useTranslation();
+
   const [collapsed, setCollapsed] = useState<string[]>([]);
   return (
-    <nav aria-label="设备与 workspace" className="space-y-1 p-2">
+    <nav aria-label={t(($) => $.shell.deviceWorkspaces)} className="space-y-1 p-2">
       <div className="flex items-center justify-between px-2 py-2">
         <button
           className="text-xs font-medium text-muted-foreground"
           onClick={() => onNavigate("/devices")}
         >
-          设备
+          {t(($) => $.common.devices)}
         </button>
         <IconButton
-          label="绑定设备"
+          label={t(($) => $.devices.bind)}
           onClick={() => {
             onBind();
           }}
@@ -52,7 +55,10 @@ export function DeviceNavigation({
               </span>
             </button>
             <IconButton
-              label={`${collapsed.includes(d.id) ? "展开" : "收起"} ${d.name}`}
+              label={t(
+                ($) => (collapsed.includes(d.id) ? $.common.expandNamed : $.common.collapseNamed),
+                { name: d.name },
+              )}
               aria-expanded={!collapsed.includes(d.id)}
               onClick={() =>
                 setCollapsed((previous) =>

@@ -43,7 +43,7 @@ async function main() {
         const session = sessions.get(message.sessionId);
         if (!session) {
           if (message.type === "detach" || message.type === "consumed") return;
-          throw new AppError("recording_unavailable", "终端记录不可用");
+          throw new AppError("recording_unavailable", "Terminal recording is unavailable");
         }
         switch (message.type) {
           case "attach":

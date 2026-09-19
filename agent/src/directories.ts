@@ -34,7 +34,8 @@ export class Directories {
     signal?: AbortSignal,
     entryParent?: string,
   ): Promise<DirectoryListing> {
-    if (!isAbsolute(path)) throw new AppError("invalid_argument", "需要绝对目录路径");
+    if (!isAbsolute(path))
+      throw new AppError("invalid_argument", "An absolute directory path is required");
     path = await realpath(path);
     entryParent ??= path;
     signal?.throwIfAborted();
@@ -50,7 +51,7 @@ export class Directories {
         cursor.info.mtimeNs !== info.mtimeNs)
     ) {
       if (cursor) await this.closeCursor(id);
-      throw new AppError("conflict", "目录列表已变化或过期，请刷新");
+      throw new AppError("conflict", "Directory listing has changed or expired; refresh");
     }
     if (!cursor) {
       const release = this.budget.reserve();
@@ -79,7 +80,7 @@ export class Directories {
         throw error;
       }
     }
-    if (cursor.busy) throw new AppError("busy", "该目录页正在读取");
+    if (cursor.busy) throw new AppError("busy", "This directory page is being read");
     cursor.busy = true;
     cursor.timer.refresh();
     const items: Entry[] = [];
@@ -106,7 +107,8 @@ export class Directories {
         }
         const size = Buffer.byteLength(JSON.stringify(entry));
         if (bytes + size > limits.resultBytes) {
-          if (!items.length) throw new AppError("limit_exceeded", "单个目录项超过容量");
+          if (!items.length)
+            throw new AppError("limit_exceeded", "A directory entry exceeds the size limit");
           cursor.carry = item;
           break;
         }
@@ -137,7 +139,7 @@ export class Directories {
   }
   async mkdir(path: string, signal?: AbortSignal) {
     if (!isAbsolute(path) || !basename(path))
-      throw new AppError("invalid_argument", "需要绝对目录路径");
+      throw new AppError("invalid_argument", "An absolute directory path is required");
     return publish(async () => {
       const target = join(await realpath(dirname(path)), basename(path));
       signal?.throwIfAborted();

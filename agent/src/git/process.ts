@@ -80,7 +80,8 @@ export async function git(
         if (stdout.truncated) {
           clipped = true;
           if (!options.write) {
-            if (!options.truncate) error = new AppError("limit_exceeded", "Git 输出超过容量");
+            if (!options.truncate)
+              error = new AppError("limit_exceeded", "Git output exceeds the size limit");
             stop();
           }
         }
@@ -118,7 +119,7 @@ export async function git(
     const reason = asError(
       signal.aborted
         ? signal.reason
-        : (error ?? new AppError("io_error", stderr.text().trim() || "Git 命令失败")),
+        : (error ?? new AppError("io_error", stderr.text().trim() || "Git command failed")),
     );
     throw new OperationError(
       reason.code,
@@ -131,7 +132,9 @@ export async function git(
   signal.throwIfAborted();
   if (error) throw error;
   if (!clipped && !(options.allowedCodes ?? [0]).includes(code ?? -1))
-    throw new AppError("io_error", stderr.text().trim() || "Git 命令失败", { exitCode: code });
+    throw new AppError("io_error", stderr.text().trim() || "Git command failed", {
+      exitCode: code,
+    });
   return {
     bytes: stdout.bytes,
     text: stdout.text(),
@@ -150,7 +153,8 @@ export async function gitHash(root: string, args: string[], signal: AbortSignal)
   return hash.digest("hex");
 }
 export function utf8(bytes: Buffer) {
-  if (!isUtf8(bytes)) throw new AppError("unsupported", "Git 路径不是有效 UTF-8，需在终端处理");
+  if (!isUtf8(bytes))
+    throw new AppError("unsupported", "Git path is not valid UTF-8; handle it in the terminal");
   return bytes.toString();
 }
 export function commandLine(bytes: Buffer) {
@@ -165,15 +169,15 @@ export class NulRecords {
       end: number;
     while ((end = bytes.indexOf(0, start)) !== -1) {
       if (end - start > limits.resultBytes)
-        throw new AppError("limit_exceeded", "Git 单条记录超过容量");
+        throw new AppError("limit_exceeded", "A Git record exceeds the size limit");
       this.each(bytes.subarray(start, end));
       start = end + 1;
     }
     this.partial = Buffer.from(bytes.subarray(start));
     if (this.partial.length > limits.resultBytes)
-      throw new AppError("limit_exceeded", "Git 单条记录超过容量");
+      throw new AppError("limit_exceeded", "A Git record exceeds the size limit");
   };
   end() {
-    if (this.partial.length) throw new AppError("io_error", "Git 记录不完整");
+    if (this.partial.length) throw new AppError("io_error", "Git record is incomplete");
   }
 }

@@ -1,10 +1,12 @@
+import { useTranslation } from "react-i18next";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { ArrowLeft, File, Search, X } from "lucide-react";
 import type { SearchMatch, SearchResult } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
-import { errorMessage, rpc } from "../lib/api";
+import { rpc } from "../lib/api";
+import { ErrorNotice } from "../components/error-notice";
 
 export function FileSearch({
   deviceId,
@@ -23,11 +25,13 @@ export function FileSearch({
   onBack: () => void;
   onOpen: (match: SearchMatch) => void;
 }) {
+  const { t } = useTranslation();
+
   const [mode, setMode] = useState<"name" | "content">("content");
   const [query, setQuery] = useState("");
   const [includeIgnored, setIncludeIgnored] = useState(false);
   const [result, setResult] = useState<SearchResult>();
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState<{ kind: "cancelled" } | { kind: "error"; error: unknown }>();
   const [busy, setBusy] = useState(false);
   const request = useRef<AbortController>(undefined);
   useEffect(() => () => request.current?.abort(), []);
@@ -35,7 +39,7 @@ export function FileSearch({
     request.current?.abort();
     request.current = undefined;
     setBusy(false);
-    setStatus("已取消");
+    setStatus({ kind: "cancelled" });
   }
   async function search() {
     request.current?.abort();
@@ -43,7 +47,7 @@ export function FileSearch({
     request.current = current;
     setBusy(true);
     setResult(undefined);
-    setStatus("");
+    setStatus(undefined);
     try {
       const next = await rpc(
         deviceId,
@@ -53,7 +57,7 @@ export function FileSearch({
       );
       if (request.current === current) setResult(next);
     } catch (error) {
-      if (request.current === current) setStatus(errorMessage(error));
+      if (request.current === current) setStatus({ kind: "error", error });
     } finally {
       if (request.current === current) {
         request.current = undefined;
@@ -62,12 +66,17 @@ export function FileSearch({
     }
   }
   return (
-    <section className={visible ? "flex min-h-0 flex-1 flex-col" : "hidden"} aria-label="文件搜索">
+    <section
+      className={visible ? "flex min-h-0 flex-1 flex-col" : "hidden"}
+      aria-label={t(($) => $.files.searchTitle)}
+    >
       <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border px-2">
-        <IconButton label="返回文件" onClick={onBack}>
+        <IconButton label={t(($) => $.files.backFiles)} onClick={onBack}>
           <ArrowLeft />
         </IconButton>
-        <span className="min-w-0 truncate text-xs">搜索 · {workspaceName}</span>
+        <span className="min-w-0 truncate text-xs">
+          {t(($) => $.files.searchWorkspace, { name: workspaceName })}
+        </span>
       </div>
       <form
         className="shrink-0 space-y-3 border-b border-border p-3"
@@ -77,11 +86,15 @@ export function FileSearch({
         }}
       >
         <div className="flex flex-wrap items-center gap-3">
-          <div role="group" aria-label="搜索类型" className="inline-flex rounded-md bg-muted p-0.5">
+          <div
+            role="group"
+            aria-label={t(($) => $.files.searchType)}
+            className="inline-flex rounded-md bg-muted p-0.5"
+          >
             {(
               [
-                ["content", "正文"],
-                ["name", "文件名"],
+                ["content", t(($) => $.files.content)],
+                ["name", t(($) => $.common.fileName)],
               ] as const
             ).map(([value, label]) => (
               <button
@@ -101,22 +114,22 @@ export function FileSearch({
               checked={includeIgnored}
               onChange={(event) => setIncludeIgnored(event.target.checked)}
             />
-            包含已忽略项
+            {t(($) => $.files.includeIgnored)}
           </label>
         </div>
         <div className="flex gap-2">
           <Input
-            aria-label="搜索内容"
+            aria-label={t(($) => $.files.searchQuery)}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             className="min-w-0 flex-1"
           />
           <Button type="submit" disabled={disabled || !query}>
             <Search />
-            搜索
+            {t(($) => $.common.search)}
           </Button>
           {busy && (
-            <IconButton label="取消搜索" onClick={cancel}>
+            <IconButton label={t(($) => $.files.cancelSearch)} onClick={cancel}>
               <X />
             </IconButton>
           )}
@@ -124,19 +137,24 @@ export function FileSearch({
       </form>
       <div className="scroll-area min-h-0 flex-1 overflow-auto">
         {(busy || status || result) && (
-          <p
+          <div
             role="status"
             className="border-b border-border px-4 py-2 text-xs text-muted-foreground"
           >
-            {busy
-              ? "正在搜索"
-              : status ||
-                (result?.truncated
-                  ? `${result.matches.length} 项 · 结果不完整`
-                  : result?.matches.length
-                    ? `${result.matches.length} 项`
-                    : "没有匹配")}
-          </p>
+            {busy ? (
+              t(($) => $.files.searching)
+            ) : status?.kind === "error" ? (
+              <ErrorNotice error={status.error} />
+            ) : status?.kind === "cancelled" ? (
+              t(($) => $.common.cancelled)
+            ) : result?.truncated ? (
+              t(($) => $.files.partialMatches, { count: result.matches.length })
+            ) : result?.matches.length ? (
+              t(($) => $.files.matches, { count: result.matches.length })
+            ) : (
+              t(($) => $.files.noMatches)
+            )}
+          </div>
         )}
         {result?.matches.map((match, index) => (
           <button
@@ -154,7 +172,9 @@ export function FileSearch({
             {match.text !== undefined && (
               <span className="mt-2 block overflow-x-auto whitespace-pre font-mono text-xs text-muted-foreground">
                 <MatchText match={match} />
-                {match.truncated && <span className="ml-2 font-sans">片段已截断</span>}
+                {match.truncated && (
+                  <span className="ml-2 font-sans">{t(($) => $.files.snippetTruncated)}</span>
+                )}
               </span>
             )}
           </button>

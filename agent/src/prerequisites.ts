@@ -36,29 +36,33 @@ export async function checkPrerequisites(service = false) {
         Number(version[1]) < major ||
         (Number(version[1]) === major && Number(version[2]) < minor)
       )
-        throw new Error(`需要 >= ${major}.${minor}，当前 ${line}`);
+        throw new Error(`Requires >= ${major}.${minor}; current: ${line}`);
     });
   }
   await check("SSH", () => command("ssh", ["-V"]));
   await check("Shell", () => access(config.shell, constants.X_OK));
   await check("UTF-8 locale", async () => {
     if (!/^UTF-?8$/i.test(await command("locale", ["charmap"])))
-      throw new Error("请设置已安装的 UTF-8 locale，例如 LANG=C.UTF-8，并检查 LC_ALL/LC_CTYPE");
+      throw new Error(
+        "Set an installed UTF-8 locale, such as LANG=C.UTF-8, and check LC_ALL/LC_CTYPE",
+      );
   });
   await check("terminfo", () => command("infocmp", ["-x", "tmux-256color"], tmuxEnvironment()));
-  await check("随包 tmux", () => command(tmuxBinary, ["-V"]));
-  await check("随包文件 helper", async () => {
+  await check("Bundled tmux", () => command(tmuxBinary, ["-V"]));
+  await check("Bundled file helper", async () => {
     try {
       await command(join(packageDirectory, "dist/native/bin/rename-noreplace"), []);
     } catch (error) {
       if ((error as { code?: number }).code === 2) return;
       throw error;
     }
-    throw new Error("helper 未返回预期 usage 状态");
+    throw new Error("Helper did not return the expected usage status");
   });
-  await check("运行目录", async () => {
+  await check("Runtime directory", async () => {
     if (Buffer.byteLength(join(config.runDir, "0".repeat(36), "tmux.sock")) > 103)
-      throw new Error("KITELINE_AGENT_RUN_DIR 过长，请配置较短的用户可写目录");
+      throw new Error(
+        "KITELINE_AGENT_RUN_DIR is too long; configure a shorter user-writable directory",
+      );
     const paths =
       service && config.runDir === "/run/kiteline-agent"
         ? [config.dataDir]
@@ -70,7 +74,11 @@ export async function checkPrerequisites(service = false) {
   });
   if (failures.length)
     throw new Error(
-      `接入检查未通过：\n${failures.join("\n")}\nUbuntu 24.04 基础依赖：\n${process.getuid?.() === 0 ? "" : "sudo "}apt-get update && ${process.getuid?.() === 0 ? "" : "sudo "}apt-get install -y git ripgrep openssh-client ncurses-bin locales\n安装依赖或修正以上配置后，重新执行接入命令。`,
+      `Setup checks failed:
+${failures.join("\n")}
+Ubuntu 24.04 base dependencies:
+${process.getuid?.() === 0 ? "" : "sudo "}apt-get update && ${process.getuid?.() === 0 ? "" : "sudo "}apt-get install -y git ripgrep openssh-client ncurses-bin locales
+After installing the dependencies or correcting the configuration above, run the setup command again.`,
     );
-  console.log("接入检查通过。");
+  console.log("Setup checks passed.");
 }

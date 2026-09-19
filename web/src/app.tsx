@@ -1,4 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { LanguageMenu } from "./components/language-menu";
 import {
   ChevronRight,
   Folder,
@@ -15,6 +17,7 @@ import {
 import type { KitelineError, Device } from "@kiteline/shared/protocol";
 import { Auth, type Session } from "./auth";
 import { ApiError, api, errorMessage, post } from "./lib/api";
+import { ErrorDetails, ErrorNotice } from "./components/error-notice";
 import { devicePath, navigate, useRoute, workspacePath } from "./lib/navigation";
 import { useDevices } from "./use-devices";
 import { Button } from "./components/ui/button";
@@ -26,7 +29,6 @@ import {
   DialogTrigger,
 } from "./components/ui/dialog";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "./components/ui/menu";
-import { TooltipProvider } from "./components/ui/tooltip";
 import { IconButton } from "./components/icon-button";
 import { BindingDialog } from "./devices/binding-dialog";
 import { DirectoryDialog } from "./devices/directory-dialog";
@@ -48,6 +50,7 @@ import { returnToService } from "./lib/login-return";
 import { PortDialog } from "./devices/port-dialog";
 
 export function App() {
+  const { t, i18n } = useTranslation();
   const terminalLayouts = useRef(new Map<string, TerminalLayout>());
   const [drafts] = useState(() => new DraftStore());
   const [gitActions] = useState(() => new GitActions());
@@ -55,8 +58,8 @@ export function App() {
   const [session, setSession] = useState<Session>();
   const [initialized, setInitialized] = useState(true);
   const [loading, setLoading] = useState(true);
-  const [authError, setAuthError] = useState("");
-  const [error, setError] = useState("");
+  const [authError, setAuthError] = useState<unknown>();
+  const [error, setError] = useState<{ cause: unknown; downloadPath?: string }>();
   const [binding, setBinding] = useState(false);
   const [picker, setPicker] = useState(false);
   const [directoryDevice, setDirectoryDevice] = useState<Device>();
@@ -119,7 +122,15 @@ export function App() {
       if (message.type === "channel.failed") {
         drafts.fileFailed(message.channelId, message.error);
         if (message.purpose === "download" && message.error.code !== "cancelled")
-          setError(`下载 ${message.path}：${message.error.message}`);
+          setError({
+            cause: new ApiError(
+              message.error.code,
+              message.error.message,
+              undefined,
+              message.error.details,
+            ),
+            downloadPath: message.path,
+          });
       }
     };
     window.addEventListener("beforeunload", unload);
@@ -155,9 +166,9 @@ export function App() {
         try {
           setInitialized((await api<{ initialized: boolean }>("/api/bootstrap")).initialized);
         } catch (error) {
-          setAuthError(errorMessage(error));
+          setAuthError(error);
         }
-      } else setAuthError(errorMessage(error));
+      } else setAuthError(error);
     } finally {
       setLoading(false);
     }
@@ -180,7 +191,7 @@ export function App() {
     return () => window.removeEventListener("kiteline:unauthenticated", expire);
   }, []);
   async function logout() {
-    if (drafts.snapshot().some(isDirty) && !window.confirm("放弃未保存修改并退出登录？")) return;
+    if (drafts.snapshot().some(isDirty) && !window.confirm(t(($) => $.shell.discardLogout))) return;
     try {
       await post("/api/logout");
       terminalLayouts.current.clear();
@@ -190,13 +201,13 @@ export function App() {
       setActiveUpload(undefined);
       setSession(undefined);
     } catch (error) {
-      setError(errorMessage(error));
+      setError({ cause: error });
     }
   }
   function choose(path: string) {
     navigate(path);
     setPicker(false);
-    setError("");
+    setError(undefined);
   }
   const navigation = (
     <DeviceNavigation
@@ -215,11 +226,13 @@ export function App() {
     return (
       <div className="flex h-dvh flex-col items-center justify-center gap-4 bg-muted p-5">
         <Terminal className="text-primary" />
-        <p role={authError ? "alert" : "status"}>{authError || "正在连接"}</p>
-        {authError && (
+        <div role={authError ? "alert" : "status"}>
+          {authError ? <ErrorNotice error={authError} /> : t(($) => $.common.connecting)}
+        </div>
+        {!!authError && (
           <Button onClick={() => void loadSession()}>
             <RefreshCw />
-            重试
+            {t(($) => $.common.retry)}
           </Button>
         )}
       </div>
@@ -236,7 +249,7 @@ export function App() {
       />
     );
   return (
-    <TooltipProvider delay={400}>
+    <>
       <div className="flex h-[var(--app-height,100dvh)] min-h-0 flex-col overflow-hidden">
         <header className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3 max-[959px]:flex-wrap max-[959px]:gap-y-0">
           <button
@@ -255,7 +268,7 @@ export function App() {
                   variant="ghost"
                   size="icon"
                   className="min-[960px]:hidden"
-                  aria-label="切换设备和 workspace"
+                  aria-label={t(($) => $.shell.switchWorkspace)}
                 />
               }
             >
@@ -263,7 +276,7 @@ export function App() {
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>设备与 workspace</DialogTitle>
+                <DialogTitle>{t(($) => $.shell.deviceWorkspaces)}</DialogTitle>
               </DialogHeader>
               <div className="scroll-area overflow-auto">{navigation}</div>
             </DialogContent>
@@ -274,7 +287,7 @@ export function App() {
               className="max-w-full truncate"
               title={device?.name}
             >
-              {device?.name ?? "设备"}
+              {device?.name ?? t(($) => $.common.devices)}
             </button>
             {workspace && (
               <>
@@ -288,12 +301,12 @@ export function App() {
           <span
             className="status-dot max-[959px]:ml-auto"
             data-status={connected ? "online" : "offline"}
-            title={connected ? "已连接" : "连接中断"}
-            aria-label={connected ? "已连接" : "连接中断"}
+            title={connected ? t(($) => $.common.connected) : t(($) => $.common.disconnected)}
+            aria-label={connected ? t(($) => $.common.connected) : t(($) => $.common.disconnected)}
           />
           <OpenFiles store={drafts} />
           {device && device.status !== "revoked" && (
-            <IconButton label="访问端口" onClick={() => setPortDevice(device.id)}>
+            <IconButton label={t(($) => $.shell.openPort)} onClick={() => setPortDevice(device.id)}>
               <Globe />
             </IconButton>
           )}
@@ -301,7 +314,11 @@ export function App() {
             <Menu>
               <MenuTrigger
                 render={
-                  <Button variant="ghost" size="icon" aria-label={`上传状态 ${uploads.length}`} />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={t(($) => $.shell.uploadStatus, { count: uploads.length })}
+                  />
                 }
               >
                 <Upload />
@@ -310,21 +327,26 @@ export function App() {
                 {uploads.map((item) => (
                   <MenuItem key={item.id} onClick={() => setActiveUpload(item.id)}>
                     <span className="min-w-0 break-all" title={item.label}>
-                      {item.label} · {item.files.length}
+                      {item.label} · {item.files.length.toLocaleString(i18n.resolvedLanguage)}
                     </span>
                   </MenuItem>
                 ))}
               </MenuContent>
             </Menu>
           )}
+          <LanguageMenu />
           <Menu>
-            <MenuTrigger render={<Button variant="ghost" size="icon" aria-label="拥有者菜单" />}>
+            <MenuTrigger
+              render={
+                <Button variant="ghost" size="icon" aria-label={t(($) => $.shell.ownerMenu)} />
+              }
+            >
               <MoreHorizontal />
             </MenuTrigger>
             <MenuContent>
               <MenuItem onClick={() => void logout()}>
                 <LogOut />
-                退出登录
+                {t(($) => $.shell.logout)}
               </MenuItem>
             </MenuContent>
           </Menu>
@@ -334,14 +356,25 @@ export function App() {
             {navigation}
           </aside>
           <main className="flex min-w-0 flex-1 flex-col">
-            {(error || connectionError) && (
+            {!!(error || connectionError) && (
               <div
                 role="alert"
-                className="flex shrink-0 items-center gap-2 border-b border-border bg-red-50 px-4 py-2 text-sm text-destructive"
+                className="workbench-notice flex shrink-0 items-start gap-2 border-b border-border bg-red-50 px-4 py-2 text-sm text-destructive"
               >
-                <span className="min-w-0 flex-1 break-words">{error || connectionError}</span>
-                {error && (
-                  <IconButton label="关闭提示" onClick={() => setError("")}>
+                <div className="min-w-0 flex-1 break-words">
+                  {error?.downloadPath
+                    ? t(($) => $.shell.downloadFailed, {
+                        path: error.downloadPath,
+                        error: errorMessage(error.cause),
+                      })
+                    : errorMessage(error ? error.cause : connectionError)}
+                  <ErrorDetails error={error ? error.cause : connectionError} />
+                </div>
+                {!!error && (
+                  <IconButton
+                    label={t(($) => $.common.dismiss)}
+                    onClick={() => setError(undefined)}
+                  >
                     <X />
                   </IconButton>
                 )}
@@ -349,9 +382,9 @@ export function App() {
             )}
             {!route.valid ? (
               <div className="p-6">
-                页面不存在
+                {t(($) => $.shell.pageMissing)}
                 <Button variant="ghost" onClick={() => choose("/devices")}>
-                  返回设备
+                  {t(($) => $.shell.backDevices)}
                 </Button>
               </div>
             ) : !route.deviceId ? (
@@ -363,28 +396,28 @@ export function App() {
                 draft={orphan}
                 unavailable={
                   device?.status === "revoked"
-                    ? "设备已撤销；内容仅保留在当前页面"
-                    : "原 workspace 不可用；内容仅保留在当前页面"
+                    ? t(($) => $.shell.revokedDraft)
+                    : t(($) => $.shell.missingWorkspaceDraft)
                 }
               />
             ) : !device ? (
               <p className="p-6 text-muted-foreground">
-                {connected ? "设备不存在" : "正在连接设备"}
+                {connected ? t(($) => $.shell.deviceMissing) : t(($) => $.shell.connectingDevice)}
               </p>
             ) : route.workspaceId ? (
               !workspace ? (
-                <p className="p-6 text-muted-foreground">workspace 已移除</p>
+                <p className="p-6 text-muted-foreground">{t(($) => $.shell.workspaceRemoved)}</p>
               ) : (
                 <>
                   <div
                     role="tablist"
-                    aria-label="工作工具"
+                    aria-label={t(($) => $.shell.tools)}
                     className="flex shrink-0 gap-5 border-b border-border bg-muted/60 px-4 max-[959px]:gap-0 max-[959px]:px-0"
                   >
                     {[
-                      { id: "terminal", name: "Terminal", icon: Terminal },
-                      { id: "files", name: "Files", icon: Folder },
-                      { id: "git", name: "Git", icon: GitBranch },
+                      { id: "terminal", name: t(($) => $.common.terminal), icon: Terminal },
+                      { id: "files", name: t(($) => $.common.files), icon: Folder },
+                      { id: "git", name: t(($) => $.common.git), icon: GitBranch },
                     ].map((tool) => (
                       <button
                         key={tool.id}
@@ -516,11 +549,11 @@ export function App() {
             action={action}
             onDone={() => {
               setAction(undefined);
-              void refresh().catch((error: unknown) => setError(errorMessage(error)));
+              void refresh().catch((error: unknown) => setError({ cause: error }));
             }}
           />
         )}
       </Dialog>
-    </TooltipProvider>
+    </>
   );
 }

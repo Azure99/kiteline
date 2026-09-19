@@ -18,11 +18,11 @@ import { diffOptions, headIdentity } from "./status.js";
 
 export async function commitOid(repo: Repo, oid: string, signal: AbortSignal) {
   if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(oid))
-    throw new AppError("invalid_argument", "需要完整提交 OID");
+    throw new AppError("invalid_argument", "A full commit OID is required");
   const actual = commandLine(
     (await git(repo.rootPath, ["rev-parse", "--verify", `${oid}^{commit}`], signal)).bytes,
   );
-  if (actual !== oid) throw new AppError("invalid_argument", "OID 不是提交对象");
+  if (actual !== oid) throw new AppError("invalid_argument", "OID is not a commit object");
   return actual;
 }
 export async function history(
@@ -53,7 +53,7 @@ export async function history(
     const commit = { oid, parents: parents ? parents.split(" ") : [], author, time, subject };
     const size = Buffer.byteLength(JSON.stringify(commit)) + 1;
     if (size + 256 > limits.resultBytes)
-      throw new AppError("limit_exceeded", "单条提交信息超过容量");
+      throw new AppError("limit_exceeded", "A commit message exceeds the size limit");
     count++;
     if (full || commits.length >= limits.listPageEntries || bytes + size > limits.resultBytes) {
       full = true;
@@ -80,7 +80,7 @@ export async function history(
     { onData: reader.data },
   );
   reader.end();
-  if (fields.length) throw new AppError("io_error", "Git 提交记录不完整");
+  if (fields.length) throw new AppError("io_error", "Git commit record is incomplete");
   return {
     commits,
     anchorOid,
@@ -105,9 +105,9 @@ async function comparison(
   );
   const parents = value ? value.split(" ") : [];
   if (selectedParent !== undefined && !parents.includes(selectedParent))
-    throw new AppError("invalid_argument", "所选 OID 不是该提交的父项");
+    throw new AppError("invalid_argument", "Selected OID is not a parent of this commit");
   if (parents.length > 1 && !selectedParent)
-    throw new AppError("invalid_argument", "请选择合并提交的父项");
+    throw new AppError("invalid_argument", "Select a parent of the merge commit");
   const parentOid = selectedParent ?? parents[0];
   const base =
     parentOid ??
@@ -186,7 +186,7 @@ export class GitHistoryReads {
         cursor.repoId !== repo.id ||
         cursor.commit !== oid)
     )
-      throw new AppError("conflict", "提交文件列表已过期，请刷新");
+      throw new AppError("conflict", "Commit file list has expired; refresh");
     if (!cursor) {
       cursor = {
         workspaceId,
@@ -201,7 +201,7 @@ export class GitHistoryReads {
       };
       this.cursors.set(id, cursor);
     }
-    if (cursor.busy) throw new AppError("busy", "提交文件列表正在读取");
+    if (cursor.busy) throw new AppError("busy", "Commit file list is being read");
     cursor.busy = true;
     signal = AbortSignal.any([signal, cursor.controller.signal]);
     const items: CommitFile[] = [];
@@ -211,7 +211,7 @@ export class GitHistoryReads {
     try {
       const { commit, base, parentOid } = await comparison(repo, oid, parent, signal);
       if (cursor.prepared && cursor.parentOid !== parentOid)
-        throw new AppError("conflict", "提交文件列表的父项已变化，请刷新");
+        throw new AppError("conflict", "Parent of the commit file list has changed; refresh");
       cursor.parentOid = parentOid;
       cursor.prepared = true;
       await changes(repo, base, commit, signal, (change) => {
@@ -223,7 +223,7 @@ export class GitHistoryReads {
         };
         const size = Buffer.byteLength(JSON.stringify(item)) + 1;
         if (size + 512 > limits.resultBytes)
-          throw new AppError("limit_exceeded", "单个提交文件超过容量");
+          throw new AppError("limit_exceeded", "A commit file entry exceeds the size limit");
         if (count++ < cursor!.offset || full) return;
         if (items.length >= limits.listPageEntries || bytes + size > limits.resultBytes) {
           full = true;
@@ -259,7 +259,7 @@ export class GitHistoryReads {
     this.cursors.delete(id);
     clearTimeout(cursor.timer);
     cursor.release();
-    cursor.controller.abort(new AppError("cancelled", "提交文件读取已结束"));
+    cursor.controller.abort(new AppError("cancelled", "Commit file reading has ended"));
   }
   retain(workspaceIds: Set<string>) {
     for (const [id, cursor] of this.cursors)
@@ -282,7 +282,8 @@ export async function commitDiff(
   await changes(repo, base, commit, signal, (item) => {
     if (item.path === path) change = item;
   });
-  if (!change) throw new AppError("not_found", "该提交中没有所选文件变化");
+  if (!change)
+    throw new AppError("not_found", "Selected file change is not present in this commit");
   const binaries = await binary(repo, base, commit, [path], signal);
   const summary: DiffSummary = {
     path,
@@ -330,6 +331,6 @@ export async function branches(repo: Repo, signal: AbortSignal) {
     });
   }
   if (Buffer.byteLength(JSON.stringify({ branches: result })) > limits.resultBytes)
-    throw new AppError("limit_exceeded", "分支列表超过容量");
+    throw new AppError("limit_exceeded", "Branch list exceeds the size limit");
   return { branches: result };
 }

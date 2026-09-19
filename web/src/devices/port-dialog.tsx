@@ -1,3 +1,5 @@
+import { ErrorNotice } from "../components/error-notice";
+import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Copy, ExternalLink, RefreshCw } from "lucide-react";
 import type { Device, ListeningPorts } from "@kiteline/shared/protocol";
@@ -11,28 +13,30 @@ import {
   DialogFooter,
 } from "../components/ui/dialog";
 import { IconButton } from "../components/icon-button";
-import { errorMessage, rpc } from "../lib/api";
+import { rpc } from "../lib/api";
 import { serviceURL } from "../lib/device-service";
 
 export function PortDialog({ device, onClose }: { device: Device; onClose: () => void }) {
+  const { t } = useTranslation();
+
   const [port, setPort] = useState("");
   const [retain, setRetain] = useState(false);
   const [ports, setPorts] = useState<ListeningPorts>();
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [error, setError] = useState<unknown>();
+  const [notice, setNotice] = useState<{ kind: "copied" } | { kind: "error"; error: unknown }>();
   const request = useRef<AbortController>(undefined);
   const load = useCallback(async () => {
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
     setLoading(true);
-    setError("");
+    setError(undefined);
     try {
       const next = await rpc(device.id, "ports.list", {}, controller.signal);
       if (!controller.signal.aborted) setPorts(next);
     } catch (error) {
-      if (!controller.signal.aborted) setError(errorMessage(error));
+      if (!controller.signal.aborted) setError(error);
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
@@ -50,9 +54,9 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
     if (!url) return;
     try {
       await navigator.clipboard.writeText(url);
-      setNotice("链接已复制");
+      setNotice({ kind: "copied" });
     } catch (error) {
-      setNotice(errorMessage(error));
+      setNotice({ kind: "error", error });
     }
   }
   return (
@@ -64,7 +68,7 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>访问端口</DialogTitle>
+          <DialogTitle>{t(($) => $.shell.openPort)}</DialogTitle>
         </DialogHeader>
         <form
           className="flex min-h-0 flex-col"
@@ -76,22 +80,22 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
           <div className="space-y-4 overflow-auto p-5">
             <p className="break-all text-sm font-medium">{device.name}</p>
             <label className="block space-y-2 text-sm">
-              <span>端口</span>
+              <span>{t(($) => $.devices.port)}</span>
               <Input
-                aria-label="端口"
+                aria-label={t(($) => $.devices.port)}
                 inputMode="numeric"
                 pattern="[0-9]*"
                 maxLength={5}
                 value={port}
                 onChange={(event) => {
                   setPort(event.target.value);
-                  setNotice("");
+                  setNotice(undefined);
                 }}
                 autoFocus
               />
             </label>
             <fieldset className="flex flex-wrap gap-x-5 gap-y-2 text-sm">
-              <legend className="sr-only">代理路径</legend>
+              <legend className="sr-only">{t(($) => $.devices.proxyPath)}</legend>
               <label className="flex min-h-8 items-center gap-2 max-[959px]:min-h-11">
                 <input
                   type="radio"
@@ -99,7 +103,7 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
                   checked={!retain}
                   onChange={() => setRetain(false)}
                 />
-                普通路径
+                {t(($) => $.devices.stripPrefix)}
               </label>
               <label className="flex min-h-8 items-center gap-2 max-[959px]:min-h-11">
                 <input
@@ -108,24 +112,28 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
                   checked={retain}
                   onChange={() => setRetain(true)}
                 />
-                保留路径
+                {t(($) => $.devices.keepPrefix)}
               </label>
             </fieldset>
             <div>
               <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
-                <span>监听端口</span>
-                <IconButton label="刷新监听端口" onClick={() => void load()} disabled={loading}>
+                <span>{t(($) => $.devices.listeningPorts)}</span>
+                <IconButton
+                  label={t(($) => $.devices.refreshPorts)}
+                  onClick={() => void load()}
+                  disabled={loading}
+                >
                   <RefreshCw />
                 </IconButton>
               </div>
               {loading ? (
                 <p role="status" className="text-sm text-muted-foreground">
-                  正在读取
+                  {t(($) => $.common.reading)}
                 </p>
               ) : error ? (
-                <p role="alert" className="break-words text-sm text-destructive">
-                  {error}
-                </p>
+                <div role="alert" className="break-words text-sm text-destructive">
+                  <ErrorNotice error={error} />
+                </div>
               ) : (
                 <div className="flex flex-wrap gap-2">
                   {ports?.ports.map((entry) => (
@@ -134,40 +142,46 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
                       variant="outline"
                       onClick={() => {
                         setPort(String(entry));
-                        setNotice("");
+                        setNotice(undefined);
                       }}
                     >
                       {entry}
                     </Button>
                   ))}
                   {ports?.ports.length === 0 && (
-                    <p className="text-sm text-muted-foreground">未发现监听端口</p>
+                    <p className="text-sm text-muted-foreground">{t(($) => $.devices.noPorts)}</p>
                   )}
                 </div>
               )}
               {ports?.truncated && (
-                <p className="mt-2 text-xs text-muted-foreground">仅显示部分端口</p>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {t(($) => $.devices.partialPorts)}
+                </p>
               )}
             </div>
             {port && !url && (
               <p role="alert" className="text-sm text-destructive">
-                端口需在 1 至 65535 之间
+                {t(($) => $.devices.portRange)}
               </p>
             )}
             {notice && (
-              <p role="status" className="text-sm text-muted-foreground">
-                {notice}
-              </p>
+              <div role="status" className="text-sm text-muted-foreground">
+                {notice.kind === "copied" ? (
+                  t(($) => $.common.copied)
+                ) : (
+                  <ErrorNotice error={notice.error} />
+                )}
+              </div>
             )}
           </div>
           <DialogFooter>
             <Button variant="outline" disabled={!url} onClick={() => void copy()}>
               <Copy />
-              复制链接
+              {t(($) => $.devices.copyLink)}
             </Button>
             <Button type="submit" disabled={!url}>
               <ExternalLink />
-              打开
+              {t(($) => $.common.open)}
             </Button>
           </DialogFooter>
         </form>

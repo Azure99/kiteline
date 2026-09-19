@@ -42,7 +42,7 @@ export function tmux(
     child.stdin.on("error", () => {});
     child.on("error", reject);
     child.on("close", (code) => {
-      if (overflow) reject(new AppError("limit_exceeded", "tmux 输出超过容量"));
+      if (overflow) reject(new AppError("limit_exceeded", "tmux output exceeds the size limit"));
       else if (code !== 0)
         reject(
           new AppError(

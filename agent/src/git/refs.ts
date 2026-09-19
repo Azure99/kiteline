@@ -16,38 +16,44 @@ async function headAfter(repo: Repo, signal: AbortSignal, known: object) {
     const reason = asError(error);
     throw new OperationError(
       reason.code,
-      `写入已完成，但无法读取结果：${reason.message}`,
+      `Write completed, but the result could not be read: ${reason.message}`,
       "unknown",
       known,
     );
   }
 }
 export async function commit(repo: Repo, message: string, indexToken: string, signal: AbortSignal) {
-  if (!message.trim()) throw new AppError("invalid_argument", "请输入提交消息");
+  if (!message.trim()) throw new AppError("invalid_argument", "Enter a commit message");
   if ((await observeIndex(repo, signal)).token !== indexToken)
-    throw new AppError("conflict", "HEAD/index 已变化，请刷新后提交");
+    throw new AppError("conflict", "HEAD/index has changed; refresh before committing");
   let staged = false,
     conflicted = false;
   await readStatus(repo, signal, (entry) => {
     conflicted ||= entry.conflict;
     staged ||= ![".", "?"].includes(entry.indexStatus);
   });
-  if (conflicted) throw new AppError("conflict", "仓库仍有未解决冲突");
-  if (!staged) throw new AppError("conflict", "没有暂存的更改");
+  if (conflicted) throw new AppError("conflict", "Repository still has unresolved conflicts");
+  if (!staged) throw new AppError("conflict", "No staged changes");
   await git(repo.rootPath, ["commit", "-F", "-"], signal, { input: message, write: true });
   const head = await headAfter(repo, signal, { committed: true });
   if (!head.oid)
-    throw new OperationError("io_error", "提交已完成，HEAD 不可读，请刷新确认", "unknown", {
-      committed: true,
-    });
+    throw new OperationError(
+      "io_error",
+      "Commit completed, but HEAD is unreadable; refresh to verify",
+      "unknown",
+      {
+        committed: true,
+      },
+    );
   return { commitOid: head.oid };
 }
 async function branchName(repo: Repo, name: string, signal: AbortSignal) {
-  if (name.startsWith("-")) throw new AppError("invalid_argument", "分支名称不能以 - 开头");
+  if (name.startsWith("-"))
+    throw new AppError("invalid_argument", "Branch name cannot start with -");
   const result = await git(repo.rootPath, ["check-ref-format", `refs/heads/${name}`], signal, {
     allowedCodes: [0, 1],
   });
-  if (result.code !== 0) throw new AppError("invalid_argument", "分支名称无效");
+  if (result.code !== 0) throw new AppError("invalid_argument", "Invalid branch name");
 }
 export async function createBranch(
   repo: Repo,
@@ -60,7 +66,7 @@ export async function createBranch(
   const start = startOid
     ? await commitOid(repo, startOid, signal)
     : (await headIdentity(repo.rootPath, signal)).oid;
-  if (!start) throw new AppError("conflict", "当前仓库尚无提交");
+  if (!start) throw new AppError("conflict", "Current repository has no commits yet");
   await git(repo.rootPath, ["branch", "--no-recurse-submodules", "--", name, start], signal, {
     write: true,
   });
@@ -75,7 +81,7 @@ export async function createBranch(
       const switched = head?.symbolicRef === `refs/heads/${name}`;
       throw new OperationError(
         reason.code,
-        `分支已创建${switched ? "并已切换，但 Git 报错" : "；切换命令未正常完成"}：${reason.message}`,
+        `Branch created${switched ? " and switched to, but Git reported an error" : "; the switch command did not complete normally"}: ${reason.message}`,
         "partial",
         { created: true, ...(head ? { switched, head } : {}) },
         reason.details,
@@ -117,7 +123,7 @@ export async function changeBranch(
     { allowedCodes: [0, 1] },
   );
   if (actual.code !== 0 || commandLine(actual.bytes) !== refOid)
-    throw new AppError("conflict", "目标分支已变化，请刷新");
+    throw new AppError("conflict", "Target branch has changed; refresh");
   await git(
     repo.rootPath,
     kind === "switch"

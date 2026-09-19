@@ -46,12 +46,12 @@ export class Channels {
     connections.onLoginClosed = (loginId) => {
       for (const item of this.entries.values())
         if (item.loginId === loginId)
-          this.cancel(item.id, new AppError("unauthenticated", "登录已结束"));
+          this.cancel(item.id, new AppError("unauthenticated", "Login session ended"));
     };
     connections.onAgentClosed = (connection) => {
       for (const item of this.entries.values())
         if (item.connection === connection)
-          this.cancel(item.id, new AppError("offline", "设备连接已中断"));
+          this.cancel(item.id, new AppError("offline", "Device connection lost"));
     };
   }
   create(
@@ -62,7 +62,7 @@ export class Channels {
     download?: { request: IncomingMessage; response: ServerResponse },
   ) {
     if (kind !== "terminal.attach" && kind !== "file.read" && kind !== "file.write")
-      throw new AppError("unsupported", "不支持的数据通道");
+      throw new AppError("unsupported", "Unsupported data channel");
     string(params.workspaceId);
     if (kind === "terminal.attach") {
       string(params.sessionId);
@@ -72,7 +72,7 @@ export class Channels {
         params.history !== "retained" &&
         params.history !== "screen"
       )
-        throw new AppError("invalid_argument", "无效历史范围");
+        throw new AppError("invalid_argument", "Invalid history range");
     } else {
       string(params.path);
       if (
@@ -82,11 +82,11 @@ export class Channels {
             : ["save", "upload"]
         ).includes(String(params.purpose))
       )
-        throw new AppError("unsupported", "不支持的文件用途");
+        throw new AppError("unsupported", "Unsupported file purpose");
       if (kind === "file.write") {
         integer(params.size, "size", 0, Number.MAX_SAFE_INTEGER);
         if (typeof params.createOnly !== "boolean")
-          throw new AppError("invalid_argument", "需要明确创建或保存");
+          throw new AppError("invalid_argument", "Specify whether to create or save the file");
       }
     }
     const pending = this.reserve(deviceId, login, kind, params);
@@ -94,7 +94,7 @@ export class Channels {
       pending.item.download = download;
       download.response.on("close", () => {
         if (!download.response.writableFinished)
-          this.cancel(pending.id, new AppError("cancelled", "下载已取消"));
+          this.cancel(pending.id, new AppError("cancelled", "Download cancelled"));
       });
     }
     return {
@@ -125,17 +125,17 @@ export class Channels {
       if (kind === "file.read") this.notifyFileFailure(id, login.id, deviceId, params, error);
       throw error;
     };
-    if (!connection?.snapshot) return unavailable(new AppError("offline", "设备离线"));
+    if (!connection?.snapshot) return unavailable(new AppError("offline", "Device offline"));
     if (
       [...this.entries.values()].filter((item) => item.connection === connection).length >=
       this.config.limits.channelsPerDevice
     )
-      return unavailable(new AppError("busy", "设备通道已满"));
+      return unavailable(new AppError("busy", "Device channel limit reached"));
     const expiresAt = new Date(Date.now() + this.config.limits.channelPairTimeout).toISOString();
     let item: Channel;
     const ready = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(
-        () => this.cancel(id, new AppError("timeout", "通道配对超时")),
+        () => this.cancel(id, new AppError("timeout", "Channel pairing timed out")),
         this.config.limits.channelPairTimeout,
       );
       item = {
@@ -170,14 +170,15 @@ export class Channels {
       item.connection.connectionId !== connectionId ||
       this.connections.agents.get(deviceId) !== item.connection
     )
-      throw new AppError("forbidden", "数据通道已失效");
+      throw new AppError("forbidden", "Data channel is no longer valid");
     return item.kind;
   }
   acceptAgent(id: string, socket: WebSocket) {
     const item = this.entries.get(id)!;
     item.agent = socket;
     if (item.kind === "terminal.attach") heartbeat(socket);
-    else socket.on("error", () => this.cancel(id, new AppError("offline", "数据连接失败")));
+    else
+      socket.on("error", () => this.cancel(id, new AppError("offline", "Data connection failed")));
     const receive = (raw: Buffer, binary: boolean) => {
       try {
         if (this.entries.get(id) !== item) return;
@@ -190,11 +191,13 @@ export class Channels {
           sendFrame(item.browser, binary ? Buffer.from(raw as Buffer) : raw.toString(), binary);
           return;
         }
-        if (binary || item.meta) throw new AppError("invalid_argument", "通道尚未配对");
+        if (binary || item.meta)
+          throw new AppError("invalid_argument", "Channel has not been paired");
         const message = record(JSON.parse(raw.toString()));
         if (message.type === "error")
           throw new AppError(string(message.code), string(message.message), message.details);
-        if (message.type !== "ready") throw new AppError("invalid_argument", "需要通道 ready");
+        if (message.type !== "ready")
+          throw new AppError("invalid_argument", "Expected a channel ready message");
         if (item.http) {
           record(message.meta);
           clearTimeout(item.timer);
@@ -209,12 +212,12 @@ export class Channels {
           const meta = item.meta as FileMeta;
           integer(meta.size, "size", 0, Number.MAX_SAFE_INTEGER);
           if (item.kind === "file.write" && meta.size !== item.params.size)
-            throw new AppError("invalid_argument", "文件声明长度不一致");
+            throw new AppError("invalid_argument", "Declared file lengths do not match");
           if (
             item.params.purpose === "image" &&
             !["image/png", "image/jpeg", "image/webp", "image/gif"].includes(meta.contentType)
           )
-            throw new AppError("unsupported", "不支持的图片类型");
+            throw new AppError("unsupported", "Unsupported image type");
         }
         clearTimeout(item.timer);
         item.expiresAt = new Date(Date.now() + this.config.limits.channelPairTimeout).toISOString();
@@ -222,7 +225,7 @@ export class Channels {
           this.content(id, item.loginId, item.download.request, item.download.response);
         else
           item.timer = setTimeout(
-            () => this.cancel(id, new AppError("timeout", "等待浏览器配对超时")),
+            () => this.cancel(id, new AppError("timeout", "Timed out waiting for browser pairing")),
             this.config.limits.channelPairTimeout,
           );
         item.resolve();
@@ -236,34 +239,36 @@ export class Channels {
       if (item.file) {
         void item.file.sourceClosed().then(() => {
           if (this.entries.get(id) === item && !item.file!.sourceComplete)
-            this.cancel(id, new AppError("offline", "设备数据连接已关闭"));
+            this.cancel(id, new AppError("offline", "Device data connection closed"));
         });
-      } else this.cancel(id, new AppError("offline", "设备数据连接已关闭"));
+      } else this.cancel(id, new AppError("offline", "Device data connection closed"));
     });
   }
   checkBrowser(id: string, loginId: string) {
     const item = this.entries.get(id);
-    if (!item || item.loginId !== loginId) throw new AppError("not_found", "数据通道不存在");
+    if (!item || item.loginId !== loginId)
+      throw new AppError("not_found", "Data channel not found");
     if (
       item.kind !== "terminal.attach" ||
       item.browser ||
       !item.meta ||
       item.agent?.readyState !== WebSocket.OPEN
     )
-      throw new AppError("conflict", "数据通道不可加入");
+      throw new AppError("conflict", "Data channel cannot be joined");
   }
   content(id: string, loginId: string, request: IncomingMessage, response: ServerResponse) {
     const item = this.entries.get(id);
-    if (!item || item.loginId !== loginId) throw new AppError("not_found", "文件通道不存在");
+    if (!item || item.loginId !== loginId)
+      throw new AppError("not_found", "File channel not found");
     if (
       (item.kind !== "file.read" && item.kind !== "file.write") ||
       item.file ||
       !item.meta ||
       item.agent?.readyState !== WebSocket.OPEN
     )
-      throw new AppError("conflict", "文件通道不可加入");
+      throw new AppError("conflict", "File channel cannot be joined");
     if (request.method !== (item.kind === "file.read" ? "GET" : "PUT"))
-      throw new AppError("invalid_argument", "文件请求方法不匹配");
+      throw new AppError("invalid_argument", "File request method mismatch");
     clearTimeout(item.timer);
     item.file = new FileTransfer(
       item.kind,
@@ -307,7 +312,7 @@ export class Channels {
         this.cancel(id, error);
       }
     });
-    socket.on("close", () => this.cancel(id, new AppError("cancelled", "显示已关闭")));
+    socket.on("close", () => this.cancel(id, new AppError("cancelled", "Display closed")));
     try {
       sendFrame(item.agent!, JSON.stringify({ type: "start" }));
     } catch (error) {
@@ -336,7 +341,8 @@ export class Channels {
     return true;
   }
   close() {
-    for (const id of this.entries.keys()) this.cancel(id, new AppError("offline", "服务正在停止"));
+    for (const id of this.entries.keys())
+      this.cancel(id, new AppError("offline", "Server is shutting down"));
   }
   private notifyFileFailure(
     id: string,

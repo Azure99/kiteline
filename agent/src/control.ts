@@ -130,11 +130,12 @@ export class Agent {
         return Promise.resolve({ workspaces: this.metadata.value.workspaces });
       if (method === "terminal.attach") {
         const item = this.sessions.get(string(params.sessionId));
-        if (item.session.state !== "running") throw new AppError("busy", "终端仍在创建");
+        if (item.session.state !== "running")
+          throw new AppError("busy", "Terminal is still being created");
         return Promise.resolve(item.identity);
       }
       if (!["sessions.list", "sessions.create", "sessions.end"].includes(method))
-        throw new AppError("unsupported", "不支持的本机操作");
+        throw new AppError("unsupported", "Unsupported local operation");
       return this.dispatch(method, params, signal);
     });
   }
@@ -149,7 +150,7 @@ export class Agent {
   send(message: unknown) {
     const text = JSON.stringify(message);
     if (Buffer.byteLength(text) > limits.controlMessageBytes)
-      throw new AppError("limit_exceeded", "控制消息超限");
+      throw new AppError("limit_exceeded", "Control message exceeds the size limit");
     if (this.socket?.readyState !== WebSocket.OPEN) return;
     if (this.socket.bufferedAmount > limits.controlMessageBytes * 2) {
       this.socket.close(1013, "control_backpressure");
@@ -186,7 +187,7 @@ export class Agent {
           this.send(this.metadata.hello());
         } else if (message.type === "channel.open") {
           if (message.connectionId !== this.connectionId)
-            throw new AppError("conflict", "旧控制连接");
+            throw new AppError("conflict", "Stale control connection");
           const channels =
             message.kind === "terminal.attach"
               ? this.channels
@@ -211,7 +212,7 @@ export class Agent {
           const params = record(message.params);
           this.requests.set(id, controller);
           const timeout = setTimeout(
-            () => controller.abort(new AppError("timeout", "操作超时")),
+            () => controller.abort(new AppError("timeout", "Operation timed out")),
             ["files.copy", "files.move", "files.delete"].includes(method)
               ? this.config.limits.fileOperationTimeout
               : method === "files.search"
@@ -238,7 +239,10 @@ export class Agent {
                     reply: {
                       id,
                       outcome: reply.outcome === "succeeded" ? "unknown" : "failed",
-                      error: { code: "limit_exceeded", message: "操作结果超过容量，请刷新确认" },
+                      error: {
+                        code: "limit_exceeded",
+                        message: "Operation result exceeds the size limit; refresh to verify",
+                      },
                     },
                   });
                 else this.send({ type: "rpc.result", reply });
@@ -250,7 +254,9 @@ export class Agent {
               if (this.requests.get(id) === controller) this.requests.delete(id);
             });
         } else if (message.type === "rpc.cancel")
-          this.requests.get(string(message.id))?.abort(new AppError("cancelled", "操作已取消"));
+          this.requests
+            .get(string(message.id))
+            ?.abort(new AppError("cancelled", "Operation cancelled"));
         else if (message.type === "watch.set") {
           if (!Array.isArray(message.workspaceIds))
             throw new AppError("invalid_argument", "Invalid watches");
@@ -271,7 +277,7 @@ export class Agent {
       clearInterval(ping);
       this.connectionId = undefined;
       for (const controller of this.requests.values())
-        controller.abort(new AppError("cancelled", "控制连接中断"));
+        controller.abort(new AppError("cancelled", "Control connection interrupted"));
       this.watched.clear();
       void this.watches.close();
       void this.repos.close();
@@ -315,7 +321,7 @@ export class Agent {
     signal: AbortSignal,
     progress?: (value: FileProgress) => void,
   ): Promise<unknown> {
-    if (this.stopped) throw new AppError("cancelled", "agent 正在停止");
+    if (this.stopped) throw new AppError("cancelled", "Agent is stopping");
     signal.throwIfAborted();
     switch (method) {
       case "ports.list":
@@ -379,7 +385,7 @@ export class Agent {
         ) satisfies Promise<RpcResult<typeof method>>;
       case "git.branch.create":
         if (typeof params.switch !== "boolean")
-          throw new AppError("invalid_argument", "请选择是否切换分支");
+          throw new AppError("invalid_argument", "Choose whether to switch branches");
         return this.gitWrites.run(
           string(params.workspaceId),
           string(params.repoId),
@@ -473,7 +479,7 @@ export class Agent {
             signal,
           ) satisfies Promise<RpcResult<typeof method>>;
         if (params.side !== "worktree" && params.side !== "staged")
-          throw new AppError("invalid_argument", "无效 diff 区域");
+          throw new AppError("invalid_argument", "Invalid diff side");
         return workingDiff(repo, string(params.path), params.side, signal) satisfies Promise<
           RpcResult<typeof method>
         >;
@@ -506,7 +512,7 @@ export class Agent {
           (params.mode !== "name" && params.mode !== "content") ||
           typeof params.includeIgnored !== "boolean"
         )
-          throw new AppError("invalid_argument", "无效搜索参数");
+          throw new AppError("invalid_argument", "Invalid search parameters");
         return searchFiles(
           this.metadata.workspace(string(params.workspaceId)).path,
           params.mode,
@@ -577,7 +583,7 @@ export class Agent {
         const name = string(params.name, "name", 256);
         return this.metadata.update((metadata) => {
           const workspace = metadata.workspaces.find((w) => w.id === id);
-          if (!workspace) throw new AppError("not_found", "workspace 不存在");
+          if (!workspace) throw new AppError("not_found", "Workspace does not exist");
           workspace.name = name;
           return workspace;
         }, signal) satisfies Promise<RpcResult<typeof method>>;
@@ -587,7 +593,7 @@ export class Agent {
         this.metadata.workspace(id);
         return this.metadata.update((metadata) => {
           if (this.sessions.list(id).sessions.length)
-            throw new AppError("busy", "请先结束 workspace 中的终端会话");
+            throw new AppError("busy", "End the terminal sessions in the workspace first");
           metadata.workspaces = metadata.workspaces.filter((w) => w.id !== id);
           return { removed: true };
         }, signal) satisfies Promise<RpcResult<typeof method>>;
@@ -640,7 +646,7 @@ export class Agent {
         return this.metadata.update((metadata) => {
           const previous = metadata.shortcuts.find((item) => item.id === id);
           if (params.id !== undefined && !previous)
-            throw new AppError("not_found", "快捷方式不存在");
+            throw new AppError("not_found", "Shortcut does not exist");
           const shortcut = { id, name, command };
           if (previous) Object.assign(previous, shortcut);
           else metadata.shortcuts.push(shortcut);
@@ -655,7 +661,7 @@ export class Agent {
         }, signal) satisfies Promise<RpcResult<typeof method>>;
       }
       default:
-        throw new AppError("unsupported", `不支持的操作: ${method}`);
+        throw new AppError("unsupported", `Unsupported operation: ${method}`);
     }
   }
   async close() {
@@ -666,7 +672,7 @@ export class Agent {
     await this.fileChannels.close();
     this.httpChannels.close();
     for (const controller of this.requests.values())
-      controller.abort(new AppError("cancelled", "agent 正在停止"));
+      controller.abort(new AppError("cancelled", "Agent is stopping"));
     await this.local.close();
     await Promise.allSettled([...this.tasks]);
     await this.directories.close();

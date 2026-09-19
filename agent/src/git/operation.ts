@@ -36,13 +36,13 @@ export async function readOperation(
     async function scalar(name: string) {
       const metadata = await info(name);
       if (!metadata) return;
-      if (!metadata.isFile()) throw new AppError("io_error", `${name} 不是普通状态文件`);
+      if (!metadata.isFile()) throw new AppError("io_error", `${name} is not a regular state file`);
       const file = await open(join(repo.gitDir, name), "r");
       try {
         const bytes = Buffer.alloc(16 * 1024 + 1);
         const result = await file.read(bytes);
         if (result.bytesRead > 16 * 1024)
-          throw new AppError("limit_exceeded", `${name} 超过状态读取容量`);
+          throw new AppError("limit_exceeded", `${name} exceeds the state read size limit`);
         const content = bytes.subarray(0, result.bytesRead);
         hash.update(JSON.stringify([name, content.toString("base64")]));
         return content.toString();
@@ -54,7 +54,7 @@ export async function readOperation(
       const metadata = await info(name);
       const commands = new Set<string>();
       if (!metadata) return commands;
-      if (!metadata.isFile()) throw new AppError("io_error", `${name} 不是普通步骤文件`);
+      if (!metadata.isFile()) throw new AppError("io_error", `${name} is not a regular step file`);
       const file = await open(join(repo.gitDir, name), "r");
       const stream = file.createReadStream({ signal });
       const digest = createHash("sha256");
@@ -78,7 +78,10 @@ export async function readOperation(
             const end = bytes.indexOf(10, start);
             const part = bytes.subarray(start, end < 0 ? bytes.length : end);
             if (pending.length + part.length > 64 * 1024)
-              throw new AppError("limit_exceeded", `${name} 单行超过状态读取容量`);
+              throw new AppError(
+                "limit_exceeded",
+                `${name} contains a line exceeding the state read size limit`,
+              );
             pending = pending.length ? Buffer.concat([pending, part]) : part;
             if (end < 0) break;
             line(pending);
@@ -111,9 +114,10 @@ export async function readOperation(
       return;
     let kind: GitOperation["kind"], reason: string | undefined;
     let canContinue = !hasConflicts;
-    if (hasConflicts) reason = "请先解决并暂存冲突文件";
+    if (hasConflicts) reason = "Resolve and stage conflicting files first";
     if (mergeRebase) {
-      if (!mergeRebase.isDirectory()) throw new AppError("io_error", "rebase-merge 状态不可读");
+      if (!mergeRebase.isDirectory())
+        throw new AppError("io_error", "rebase-merge state is unreadable");
       kind = "rebase";
       for (const name of ["head-name", "orig-head", "onto", "stopped-sha", "msgnum"])
         await scalar(`rebase-merge/${name}`);
@@ -138,11 +142,12 @@ export async function readOperation(
       if (!comment || [...commands].some((word) => word !== "pick" && word !== "p")) {
         canContinue = false;
         reason = comment
-          ? "本轮 rebase 含特殊步骤，请在终端继续"
-          : "无法确定 Git 注释前缀，请在终端继续";
+          ? "This rebase contains special steps; continue in the terminal"
+          : "Cannot determine the Git comment prefix; continue in the terminal";
       }
     } else if (applyRebase) {
-      if (!applyRebase.isDirectory()) throw new AppError("io_error", "rebase-apply 状态不可读");
+      if (!applyRebase.isDirectory())
+        throw new AppError("io_error", "rebase-apply state is unreadable");
       const applying = await scalar("rebase-apply/applying"),
         rebasing = await scalar("rebase-apply/rebasing");
       kind = applying !== undefined ? "am" : rebasing !== undefined ? "rebase" : "unknown";
@@ -158,7 +163,7 @@ export async function readOperation(
         await scalar(`rebase-apply/${name}`);
     } else if (cherry !== undefined || revert !== undefined || sequence) {
       if (sequence && !sequence.isDirectory())
-        throw new AppError("io_error", "sequencer 状态不可读");
+        throw new AppError("io_error", "sequencer state is unreadable");
       await scalar("sequencer/head");
       await scalar("sequencer/abort-safety");
       const commands = await steps("sequencer/todo", "#");
@@ -182,7 +187,7 @@ export async function readOperation(
         kind,
         canContinue: false,
         canAbort: false,
-        reason: "无法识别当前 Git 操作，请在终端处理",
+        reason: "Cannot identify the current Git operation; handle it in the terminal",
       };
     hash.update(JSON.stringify(kind));
     return {
@@ -198,7 +203,7 @@ export async function readOperation(
       kind: "unknown",
       canContinue: false,
       canAbort: false,
-      reason: `无法读取 Git 操作：${asError(error).message}`,
+      reason: `Cannot read the Git operation: ${asError(error).message}`,
     };
   }
 }
@@ -220,9 +225,9 @@ export async function finishOperation(
   const current = await currentOperation(repo, signal);
   const operation = current.operation;
   if (!operation?.token || operation.kind !== kind || operation.token !== token)
-    throw new AppError("conflict", "Git 操作已变化，请刷新后重新确认");
+    throw new AppError("conflict", "Git operation has changed; refresh and confirm again");
   if (!(action === "continue" ? operation.canContinue : operation.canAbort))
-    throw new AppError("conflict", operation.reason ?? "当前操作不适用");
+    throw new AppError("conflict", operation.reason ?? "Current operation does not apply");
   let result;
   try {
     result = await git(repo.rootPath, [kind, `--${action}`], signal, {
@@ -261,7 +266,7 @@ export async function finishOperation(
     };
   } catch (error) {
     const reason = asError(error);
-    throw new OperationError(reason.code, `Git 命令已完成；${reason.message}`, "unknown", {
+    throw new OperationError(reason.code, `Git command completed; ${reason.message}`, "unknown", {
       stdout: result.text,
       stderr: result.stderr,
       truncated: result.truncated,

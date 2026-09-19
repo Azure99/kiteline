@@ -281,7 +281,7 @@ test("background observations preserve edits, recover missing status and cannot 
   transport.read.mockRejectedValueOnce(new ApiError("not_found", "missing"));
   await store.observe(draft, signal);
   expect(draft.missing).toBe(true);
-  expect(draftError(draft)).toBe("missing");
+  expect(draftError(draft)).toContain("missing");
   transport.read.mockResolvedValueOnce(disk("base", "a-base"));
   await store.observe(draft, signal);
   expect(draft.missing).toBe(false);

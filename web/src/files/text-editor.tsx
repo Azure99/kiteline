@@ -1,9 +1,11 @@
+import { useTranslation } from "react-i18next";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { EditorView } from "@codemirror/view";
 import { LanguageDescription } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { encodeText } from "@kiteline/shared/text";
 import type { Draft, DraftStore } from "./drafts";
+import { updateEditorLocale } from "./editor-locale";
 
 export function TextEditor({
   draft,
@@ -14,6 +16,8 @@ export function TextEditor({
   store: DraftStore;
   onSave: () => void;
 }) {
+  const { t, i18n } = useTranslation();
+
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView>(undefined);
   const save = useRef(onSave);
@@ -58,6 +62,13 @@ export function TextEditor({
   useLayoutEffect(() => {
     const editor = view.current;
     if (editor && draft.state && editor.state !== draft.state) editor.setState(draft.state);
+  });
+  useLayoutEffect(() => {
+    const editor = view.current;
+    if (editor) updateEditorLocale(editor, draft.phrases);
+  }, [draft, i18n.resolvedLanguage]);
+  useLayoutEffect(() => {
+    const editor = view.current;
     if (editor && draft.location) {
       const { line: number, range } = draft.location;
       draft.location = undefined;
@@ -87,6 +98,10 @@ export function TextEditor({
     };
   }, [draft, draft.path, draft.language]);
   return (
-    <div ref={host} className="min-h-0 min-w-0 flex-1 overflow-hidden" aria-label="文本编辑器" />
+    <div
+      ref={host}
+      className="min-h-0 min-w-0 flex-1 overflow-hidden"
+      aria-label={t(($) => $.files.editor)}
+    />
   );
 }
