@@ -1,0 +1,5 @@
+Types: deb
+URIs: https://snapshot.ubuntu.com/ubuntu/20260918T000000Z
+Suites: noble noble-updates noble-security
+Components: main universe
+Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg

@@ -31,7 +31,7 @@ import { HistoryView } from "./history-view";
 import { BranchesView } from "./branches-view";
 import { ApiError } from "../lib/api";
 import { useWorkspaceRefresh } from "../lib/use-workspace-refresh";
-import { navigate, workspacePath } from "../lib/navigation";
+import { navigate, useRoute, workspacePath } from "../lib/navigation";
 import { parentPath } from "../files/use-browser";
 import { type GitActions, useGitActivity } from "./actions";
 import {
@@ -60,8 +60,13 @@ export function GitTool({
   store: DraftStore;
   actions: GitActions;
 }) {
+  const route = useRoute();
+  const requestedRepo = route.tool === "git" ? route.query.get("repo") : null;
   const [repos, setRepos] = useState<Repo[]>([]);
-  const [repoId, setRepoId] = useState<string>();
+  const [repoId, setRepoId] = useState<string | undefined>(requestedRepo ?? undefined);
+  useEffect(() => {
+    if (requestedRepo) setRepoId(requestedRepo);
+  }, [requestedRepo]);
   const [scan, setScan] = useState<RepoDiscovery>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -79,7 +84,7 @@ export function GitTool({
     setError("");
     try {
       const read = (scanCursor?: string) =>
-        rpc<RepoDiscovery>(
+        rpc(
           device.id,
           "repos.discover",
           { workspaceId: workspace.id, scanCursor },
@@ -107,11 +112,7 @@ export function GitTool({
         const entries = new Map((found.complete ? [] : old).map((item) => [item.id, item]));
         for (const repo of scanned.current.values()) entries.set(repo.id, repo);
         const next = [...entries.values()].sort((a, b) => a.path.localeCompare(b.path));
-        setRepoId((selected) =>
-          next.some((item) => item.id === selected)
-            ? selected
-            : (next.find((item) => item.available)?.id ?? next[0]?.id),
-        );
+        setRepoId((selected) => selected ?? next.find((item) => item.available)?.id ?? next[0]?.id);
         return next;
       });
       setScan(found);
@@ -135,7 +136,21 @@ export function GitTool({
     };
   }, [enabled, discover]);
   useWorkspaceRefresh(device.id, workspace.id, enabled, "repos", discover);
-  const repo = repos.find((item) => item.id === repoId);
+  const selectedRepoId = requestedRepo ?? repoId;
+  const repo = repos.find((item) => item.id === selectedRepoId);
+  const activeRepoId = repo?.id;
+  useEffect(() => {
+    if (route.tool !== "git" || requestedRepo || !activeRepoId) return;
+    const query = new URLSearchParams(location.search);
+    query.set("repo", activeRepoId);
+    navigate(location.pathname + `?${query}`, true);
+  }, [route.tool, requestedRepo, activeRepoId]);
+  function chooseRepo(id: string) {
+    setRepoId(id);
+    const query = new URLSearchParams(location.search);
+    query.set("repo", id);
+    navigate(location.pathname + `?${query}`);
+  }
   function openFile(path: string) {
     if (!repo) return;
     showDraft(
@@ -168,7 +183,7 @@ export function GitTool({
       </MenuTrigger>
       <MenuContent>
         {repos.map((item) => (
-          <MenuItem key={item.id} onClick={() => setRepoId(item.id)}>
+          <MenuItem key={item.id} onClick={() => chooseRepo(item.id)}>
             <span className="min-w-0 break-all">
               {item.path === "." ? workspace.name : item.path}
               {item.linked ? " · worktree" : ""}
@@ -222,7 +237,15 @@ export function GitTool({
         />
       ) : (
         <div className="flex flex-1 items-center justify-center p-4 text-sm text-muted-foreground">
-          {busy ? "正在发现仓库" : repo ? "裸仓库不支持工作树操作" : "没有发现 Git 仓库"}
+          {busy
+            ? "正在发现仓库"
+            : repo
+              ? "裸仓库不支持工作树操作"
+              : selectedRepoId
+                ? scan?.complete
+                  ? "所选仓库不存在或已不可用"
+                  : "尚未发现所选仓库"
+                : "没有发现 Git 仓库"}
         </div>
       )}
     </div>
@@ -268,12 +291,9 @@ function Changes({
   }, [activity.revision, visible, enabled, load]);
   function indexAction(paths: string[], kind: "stage" | "unstage") {
     if (kind === "stage" && !confirmDiskVersion(store, actionTarget, repo.path, paths)) return;
-    void actions.run(
-      actionTarget,
-      `git.${kind}`,
-      { paths: [...new Set(paths)] },
-      kind === "stage" ? "暂存" : "取消暂存",
-    );
+    const params = { paths: [...new Set(paths)] };
+    if (kind === "stage") void actions.run(actionTarget, "git.stage", params, "暂存");
+    else void actions.run(actionTarget, "git.unstage", params, "取消暂存");
   }
   const select = (entry: GitEntry, side: ChangeSide) => {
     const item = selectionOf(entry, side);
@@ -555,6 +575,7 @@ function Changes({
         )}
         {target ? (
           <DiffView
+            key={JSON.stringify(target)}
             deviceId={device.id}
             workspaceId={workspace.id}
             repoId={repo.id}

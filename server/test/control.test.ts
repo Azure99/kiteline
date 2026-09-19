@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { once } from "node:events";
 import { request } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
@@ -8,6 +9,7 @@ import { WebSocket } from "ws";
 import { createKitelineServer } from "../src/app.js";
 import { Store } from "../src/store.js";
 import type { ServerConfig } from "../src/config.js";
+import { appVersion } from "@kiteline/shared/protocol";
 
 const cleanups: (() => Promise<unknown> | void)[] = [];
 afterEach(async () => {
@@ -22,6 +24,7 @@ async function fixture() {
     hostname: "127.0.0.1",
     port: 0,
     webDir: dataDir,
+    downloadsDir: dataDir,
     limits: {
       sessionLifetime: 60_000,
       draftTotalBytes: 1000,
@@ -33,11 +36,14 @@ async function fixture() {
   const app = createKitelineServer(config, store);
   await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
-  cleanups.push(async () => {
-    await app.close();
-    store.close();
-    await rm(dataDir, { recursive: true, force: true });
-  });
+  let closing: Promise<void> | undefined;
+  const close = () =>
+    (closing ??= (async () => {
+      await app.close();
+      store.close();
+      await rm(dataDir, { recursive: true, force: true });
+    })());
+  cleanups.push(close);
   function call(
     path: string,
     method = "GET",
@@ -87,8 +93,78 @@ async function fixture() {
       .toBe("online");
     return { ...identity, socket, messages, binding };
   }
-  return { app, store, config, call, device, origin };
+  return { app, store, config, call, device, origin, close };
 }
+
+test("malformed static URL encoding returns a client error", async () => {
+  const f = await fixture();
+  const response = await f.call("/devices/%");
+  expect(response.status).toBe(400);
+  expect(await response.json()).toMatchObject({ error: { code: "invalid_argument" } });
+});
+
+test("paired installer resources stream without login and never fall back to the SPA", async () => {
+  const f = await fixture();
+  const name = `kiteline-agent-${appVersion}-linux-arm64.tar.gz`;
+  const path = `/downloads/agent/${appVersion}/${name}`;
+  const bytes = Buffer.alloc(512 * 1024, 93);
+  await writeFile(join(f.config.downloadsDir, name), bytes);
+  const response = await f.call(path);
+  expect(response.status).toBe(200);
+  expect(response.headers.get("content-length")).toBe(String(bytes.length));
+  expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes);
+  const head = await f.call(path, "HEAD");
+  expect(head.status).toBe(200);
+  expect(head.headers.get("content-length")).toBe(String(bytes.length));
+  expect(await head.text()).toBe("");
+  const interrupted = await f.call(path);
+  await interrupted.body!.cancel();
+  expect((await f.call("/healthz")).status).toBe(200);
+  expect((await f.call("/downloads/agent/unknown/missing")).status).toBe(404);
+  expect((await f.call("/install.sh")).status).toBe(404);
+  expect((await f.call(path, "POST")).status).toBe(405);
+  await writeFile(join(f.config.downloadsDir, "install.sh"), "#!/bin/sh\nexit 0\n");
+  expect(await (await f.call("/install.sh")).text()).toBe("#!/bin/sh\nexit 0\n");
+});
+
+test("binding returns versioned installation commands from the configured public origin", async () => {
+  const f = await fixture();
+  const session = f.store.createSession(60_000);
+  const response = await f.call("/api/bindings", "POST", {}, `kiteline_session=${session.token}`);
+  expect(response.status).toBe(200);
+  const value = await response.json();
+  expect(value.commands.foreground).toContain(`${f.config.publicUrl}/install.sh`);
+  expect(value.commands.foreground).toContain(`--version '${appVersion}' --code '${value.code}'`);
+  expect(value.commands.foreground).not.toContain("--service");
+  expect(value.commands.service).toContain("--service");
+  expect(value.commands.bind).toContain("--if-unbound");
+  expect(f.store.binding(value.bindingId).status).toBe("pending");
+});
+
+test("server stop closes a request whose JSON body has not finished", async () => {
+  const f = await fixture();
+  const login = f.store.createSession(60_000);
+  const received = once(f.app.server, "request");
+  const client = request(`${f.origin}/api/devices/test/rpc`, {
+    method: "POST",
+    headers: {
+      origin: f.config.publicUrl,
+      cookie: `kiteline_session=${login.token}`,
+      "content-type": "application/json",
+      "content-length": 1024,
+    },
+  });
+  client.on("error", () => {});
+  client.write("{");
+  await received;
+  const stopping = f.close();
+  try {
+    expect(await Promise.race([stopping.then(() => true), delay(1000, false)])).toBe(true);
+  } finally {
+    client.destroy();
+    await stopping;
+  }
+});
 
 test("owner setup, cookie, binding consumption, revocation and password recovery", async () => {
   const f = await fixture();

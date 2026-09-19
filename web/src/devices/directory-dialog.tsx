@@ -39,12 +39,7 @@ export function DirectoryDialog({
     const controller = new AbortController();
     setBusy(true);
     setError("");
-    void rpc<DirectoryListing>(
-      deviceId,
-      "directories.list",
-      { absolutePath: path, cursor },
-      controller.signal,
-    )
+    void rpc(deviceId, "directories.list", { absolutePath: path, cursor }, controller.signal)
       .then(
         (result) => {
           setListing(result);
@@ -70,7 +65,7 @@ export function DirectoryDialog({
     setBusy(true);
     setError("");
     try {
-      const workspace = await rpc<Workspace>(deviceId, "workspaces.add", {
+      const workspace = await rpc(deviceId, "workspaces.add", {
         absolutePath: listing.path,
       });
       if (mounted.current) onAdded(workspace);
@@ -88,7 +83,7 @@ export function DirectoryDialog({
     setBusy(true);
     setError("");
     try {
-      const result = await rpc<{ path: string }>(deviceId, "directories.mkdir", {
+      const result = await rpc(deviceId, "directories.mkdir", {
         absolutePath: `${listing.path.replace(/\/$/, "")}/${newName}`,
       });
       setNewName(undefined);

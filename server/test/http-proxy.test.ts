@@ -64,6 +64,7 @@ async function fixture(handler: RequestListener, channels = 128) {
     hostname: "127.0.0.1",
     port: 0,
     webDir: root,
+    downloadsDir: root,
     limits: {
       sessionLifetime: 60_000,
       draftTotalBytes: 1000,

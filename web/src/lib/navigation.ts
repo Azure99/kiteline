@@ -15,13 +15,23 @@ export function useRoute() {
     () => window.location.pathname + window.location.search,
   );
   const url = new URL(location, window.location.origin);
+  return parseRoute(url);
+}
+export function parseRoute(url: URL) {
   const match = /^\/devices(?:\/([^/]+)(?:\/workspaces\/([^/]+)\/(terminal|files|git))?)?\/?$/.exec(
     url.pathname,
   );
+  let deviceId: string | undefined, workspaceId: string | undefined;
+  try {
+    deviceId = match?.[1] && decodeURIComponent(match[1]);
+    workspaceId = match?.[2] && decodeURIComponent(match[2]);
+  } catch {
+    return { valid: false, query: url.searchParams };
+  }
   return {
     valid: !!match || url.pathname === "/",
-    deviceId: match?.[1] && decodeURIComponent(match[1]),
-    workspaceId: match?.[2] && decodeURIComponent(match[2]),
+    deviceId,
+    workspaceId,
     tool: match?.[3] as "terminal" | "files" | "git" | undefined,
     query: url.searchParams,
   };

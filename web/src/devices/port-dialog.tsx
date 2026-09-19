@@ -29,7 +29,7 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
     setLoading(true);
     setError("");
     try {
-      const next = await rpc<ListeningPorts>(device.id, "ports.list", {}, controller.signal);
+      const next = await rpc(device.id, "ports.list", {}, controller.signal);
       if (!controller.signal.aborted) setPorts(next);
     } catch (error) {
       if (!controller.signal.aborted) setError(errorMessage(error));

@@ -1,0 +1,7 @@
+**
+!deploy/
+!deploy/**
+!dist/
+!dist/releases/
+!dist/releases/*.tar.gz
+!dist/releases/*.sha256

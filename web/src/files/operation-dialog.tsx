@@ -6,9 +6,9 @@ import type {
   FileInspection,
   FileItemResult,
   FileProgress,
-  Reply,
+  RpcArguments,
 } from "@kiteline/shared/protocol";
-import { api, ApiError, errorMessage, post, rpc } from "../lib/api";
+import { api, ApiError, errorMessage, rpc, rpcReply } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
 import {
@@ -104,7 +104,7 @@ export function FileOperationDialog({
         const initial = childPath(folder, entry.name);
         if (initial !== entry.path || stopped || edited.current) continue;
         try {
-          const inspected = await rpc<FileInspection>(deviceId, "files.inspect", {
+          const inspected = await rpc(deviceId, "files.inspect", {
             workspaceId,
             path: initial,
             suggestCopyName: true,
@@ -154,27 +154,26 @@ export function FileOperationDialog({
     setError("");
     setProgress({ phase: "queued" });
     try {
-      const reply = await post<Reply<{ items: FileItemResult[] }>>(
-        `/api/devices/${deviceId}/rpc`,
-        {
-          id: request.id,
-          method: `files.${action.kind}`,
-          params: {
-            workspaceId,
-            ...(action.kind === "delete"
-              ? { paths: submitted.map((row) => row.entry.path) }
-              : {
-                  items: submitted.map((row) => ({
-                    path: row.entry.path,
-                    targetPath: row.targetPath,
-                    collision: row.collision,
-                    expectedTargetVersion: row.version,
-                  })),
-                }),
-          },
-        },
-        request.controller.signal,
-      );
+      const params = {
+        workspaceId,
+        items: submitted.map((row) => ({
+          path: row.entry.path!,
+          targetPath: row.targetPath,
+          collision: row.collision,
+          expectedTargetVersion: row.version,
+        })),
+      };
+      const operation: RpcArguments<"files.copy" | "files.move" | "files.delete"> =
+        action.kind === "delete"
+          ? [
+              "files.delete",
+              { workspaceId, paths: submitted.map((row) => row.entry.path!) },
+              request.controller.signal,
+            ]
+          : action.kind === "copy"
+            ? ["files.copy", params, request.controller.signal]
+            : ["files.move", params, request.controller.signal];
+      const reply = await rpcReply(deviceId, request.id, operation);
       if (!alive.current) return;
       const result =
         reply.result?.items ??
@@ -221,7 +220,7 @@ export function FileOperationDialog({
     setConflictBusy(true);
     setError("");
     try {
-      const inspection = await rpc<FileInspection>(deviceId, "files.inspect", {
+      const inspection = await rpc(deviceId, "files.inspect", {
         workspaceId,
         path: row.targetPath,
         suggestCopyName: true,

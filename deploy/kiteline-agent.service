@@ -1,0 +1,23 @@
+[Unit]
+Description=Kiteline device agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@HOME@
+Environment=@HOME_ENV@
+Environment=@PATH_ENV@
+Environment=LANG=C.UTF-8
+EnvironmentFile=-/etc/kiteline-agent.env
+RuntimeDirectory=kiteline-agent
+RuntimeDirectoryMode=0700
+ExecStart=/opt/kiteline-agent/bin/kiteline-agent run
+Restart=on-failure
+RestartSec=3
+KillMode=control-group
+TimeoutStopSec=45
+
+[Install]
+WantedBy=multi-user.target

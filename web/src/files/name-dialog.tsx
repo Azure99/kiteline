@@ -19,12 +19,14 @@ export function FileNameDialog({
   deviceId,
   workspaceId,
   action,
+  rename,
   onClose,
   onDone,
 }: {
   deviceId: string;
   workspaceId: string;
   action: NameAction;
+  rename: (path: string, name: string) => Promise<{ from: string; to: string }>;
   onClose: () => void;
   onDone: (result: { from?: string; to: string; entry?: Entry }) => void;
 }) {
@@ -51,12 +53,8 @@ export function FileNameDialog({
     try {
       const result =
         action.kind === "rename"
-          ? await rpc<{ from: string; to: string }>(deviceId, "files.rename", {
-              workspaceId,
-              path: action.entry.path,
-              newName: name,
-            })
-          : await rpc<Entry>(deviceId, "files.create", {
+          ? await rename(action.entry.path!, name)
+          : await rpc(deviceId, "files.create", {
               workspaceId,
               path: childPath(action.parent, name),
               kind: action.kind,

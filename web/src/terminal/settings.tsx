@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Pencil, Plus, Save, Trash2, X } from "lucide-react";
-import type { Device, Shortcut } from "@kiteline/shared/protocol";
+import type { Device, RpcParams } from "@kiteline/shared/protocol";
 import { rpc, errorMessage } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -10,7 +10,7 @@ import { IconButton } from "../components/icon-button";
 export function TerminalSettings({ device }: { device: Device }) {
   const [history, setHistory] = useState(String(device.snapshot?.settings.historyLines ?? 10000));
   const [shortcuts, setShortcuts] = useState(device.snapshot?.shortcuts ?? []);
-  const [editing, setEditing] = useState<Partial<Shortcut>>();
+  const [editing, setEditing] = useState<RpcParams<"shortcuts.put">>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
@@ -35,7 +35,7 @@ export function TerminalSettings({ device }: { device: Device }) {
     }
   }
   const disabled = busy || device.status !== "online";
-  function editShortcut(value: Partial<Shortcut>) {
+  function editShortcut(value: RpcParams<"shortcuts.put">) {
     setEditing(value);
     setSaved(false);
   }
@@ -129,7 +129,7 @@ export function TerminalSettings({ device }: { device: Device }) {
               onSubmit={(event) => {
                 event.preventDefault();
                 void operation(async () => {
-                  const result = await rpc<Shortcut>(device.id, "shortcuts.put", editing);
+                  const result = await rpc(device.id, "shortcuts.put", editing);
                   if (mounted.current) {
                     setShortcuts((items) => [
                       ...items.filter((item) => item.id !== result.id),

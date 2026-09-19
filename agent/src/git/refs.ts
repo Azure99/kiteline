@@ -1,4 +1,10 @@
-import { AppError, asError, OperationError, type Repo } from "@kiteline/shared/protocol";
+import {
+  AppError,
+  asError,
+  OperationError,
+  type Repo,
+  type RpcResult,
+} from "@kiteline/shared/protocol";
 import { commandLine, git } from "./process.js";
 import { commitOid } from "./history.js";
 import { headIdentity, observeIndex, readStatus } from "./status.js";
@@ -82,13 +88,27 @@ export async function createBranch(
     head: await headAfter(repo, signal, { created: true, switched: switchTo }),
   };
 }
+export function changeBranch(
+  repo: Repo,
+  name: string,
+  refOid: string,
+  kind: "switch",
+  signal: AbortSignal,
+): Promise<RpcResult<"git.branch.switch">>;
+export function changeBranch(
+  repo: Repo,
+  name: string,
+  refOid: string,
+  kind: "delete",
+  signal: AbortSignal,
+): Promise<RpcResult<"git.branch.delete">>;
 export async function changeBranch(
   repo: Repo,
   name: string,
   refOid: string,
   kind: "switch" | "delete",
   signal: AbortSignal,
-) {
+): Promise<RpcResult<"git.branch.switch" | "git.branch.delete">> {
   await branchName(repo, name, signal);
   const actual = await git(
     repo.rootPath,
@@ -107,6 +127,8 @@ export async function changeBranch(
     { write: true },
   );
   return kind === "delete"
-    ? { deleted: true }
-    : { head: await headAfter(repo, signal, { switched: true }) };
+    ? ({ deleted: true } satisfies RpcResult<"git.branch.delete">)
+    : ({
+        head: await headAfter(repo, signal, { switched: true }),
+      } satisfies RpcResult<"git.branch.switch">);
 }

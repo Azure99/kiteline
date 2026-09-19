@@ -1,0 +1,20 @@
+[Unit]
+Description=Kiteline server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kiteline
+WorkingDirectory=/var/lib/kiteline
+Environment=KITELINE_DATA_DIR=/var/lib/kiteline
+Environment=KITELINE_LISTEN_ADDR=127.0.0.1:8080
+EnvironmentFile=/etc/kiteline-server.env
+ExecStart=/opt/kiteline-server/bin/kiteline-server serve
+Restart=on-failure
+RestartSec=3
+KillMode=control-group
+TimeoutStopSec=45
+
+[Install]
+WantedBy=multi-user.target

@@ -212,7 +212,7 @@ export function DiscardDialog({
   const [error, setError] = useState<unknown>();
   useEffect(() => {
     const controller = new AbortController();
-    void rpc<GitReview>(
+    void rpc(
       target.deviceId,
       "git.review",
       { workspaceId: target.workspaceId, repoId: target.repoId, paths, scope },

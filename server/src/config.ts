@@ -8,6 +8,7 @@ export interface ServerConfig {
   hostname: string;
   port: number;
   webDir: string;
+  downloadsDir: string;
   limits: {
     sessionLifetime: number;
     draftTotalBytes: number;
@@ -47,6 +48,7 @@ export function serverConfig(): ServerConfig {
     hostname: address.hostname.replace(/^\[|\]$/g, ""),
     port: Number(address.port || 80),
     webDir: resolve(import.meta.dirname, "../../web/dist"),
+    downloadsDir: resolve(import.meta.dirname, "../../downloads"),
     limits: defaults,
   };
 }

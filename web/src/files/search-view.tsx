@@ -45,7 +45,7 @@ export function FileSearch({
     setResult(undefined);
     setStatus("");
     try {
-      const next = await rpc<SearchResult>(
+      const next = await rpc(
         deviceId,
         "files.search",
         { workspaceId, mode, query, includeIgnored },

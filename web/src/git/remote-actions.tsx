@@ -29,12 +29,7 @@ export function RemoteActions({
     const controller = new AbortController();
     request.current = controller;
     try {
-      const next = await rpc<GitRemotes>(
-        deviceId,
-        "git.remotes",
-        { workspaceId, repoId },
-        controller.signal,
-      );
+      const next = await rpc(deviceId, "git.remotes", { workspaceId, repoId }, controller.signal);
       if (!controller.signal.aborted) {
         setValue(next);
         setError("");
@@ -89,14 +84,18 @@ export function RemoteActions({
       <IconButton
         label={`Pull${value?.upstream ? ` · ${value.upstream}` : " · 按设备 Git 配置"}`}
         disabled={disabled || !head}
-        onClick={() => void actions.run(target, "git.pull", { expectedHead: head }, "Pull")}
+        onClick={() => {
+          if (head) void actions.run(target, "git.pull", { expectedHead: head }, "Pull");
+        }}
       >
         <ArrowDown />
       </IconButton>
       <IconButton
         label={`Push · ${value?.pushTargetDescription ?? "按设备 Git 配置"}`}
         disabled={disabled || !head}
-        onClick={() => void actions.run(target, "git.push", { expectedHead: head }, "Push")}
+        onClick={() => {
+          if (head) void actions.run(target, "git.push", { expectedHead: head }, "Push");
+        }}
       >
         <ArrowUp />
       </IconButton>

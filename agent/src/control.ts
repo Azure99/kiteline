@@ -1,5 +1,6 @@
 import { WebSocket } from "ws";
 import { randomUUID } from "node:crypto";
+import { mkdir } from "node:fs/promises";
 import {
   AppError,
   asError,
@@ -10,6 +11,7 @@ import {
   string,
   type Reply,
   type FileProgress,
+  type RpcResult,
 } from "@kiteline/shared/protocol";
 import type { AgentConfig, Identity } from "./config.js";
 import { MetadataStore } from "./metadata.js";
@@ -36,6 +38,7 @@ import { expectedHead, remotes, syncRemote } from "./git/remotes.js";
 import { finishOperation } from "./git/operation.js";
 import { HttpChannels } from "./http/channels.js";
 import { listeningPorts } from "./http/ports.js";
+import { diagnose } from "./doctor.js";
 
 const gitWriteMethods = new Set([
   "git.stage",
@@ -114,6 +117,15 @@ export class Agent {
     );
     this.sessions.onChanged = (workspaceId) => this.send({ type: "sessions.changed", workspaceId });
     this.local = new LocalServer(config, (method, params, signal) => {
+      if (method === "doctor")
+        return diagnose(this.config, signal, {
+          server: this.identity.server,
+          connected: this.socket?.readyState === WebSocket.OPEN && !!this.connectionId,
+          revision: this.metadata.value.revision,
+          shell: this.config.shell,
+          recorderPid: this.sessions.recorder.pid,
+          sessions: this.sessions.list().sessions,
+        });
       if (method === "workspaces.list")
         return Promise.resolve({ workspaces: this.metadata.value.workspaces });
       if (method === "terminal.attach") {
@@ -127,6 +139,8 @@ export class Agent {
     });
   }
   async start() {
+    await mkdir(this.config.dataDir, { recursive: true, mode: 0o700 });
+    await mkdir(this.config.runDir, { recursive: true, mode: 0o700 });
     await this.metadata.load();
     await this.textFiles.temporary.cleanStartup();
     await this.local.start();
@@ -240,14 +254,13 @@ export class Agent {
         else if (message.type === "watch.set") {
           if (!Array.isArray(message.workspaceIds))
             throw new AppError("invalid_argument", "Invalid watches");
+          const ids = new Set(message.workspaceIds.map((id) => string(id)));
+          const workspaces = this.metadata.value.workspaces.filter((item) => ids.has(item.id));
           this.watched.clear();
-          for (const id of message.workspaceIds) {
-            this.metadata.workspace(string(id));
-            this.watched.add(string(id));
-          }
+          for (const workspace of workspaces) this.watched.add(workspace.id);
           void this.repos.retain(this.watched);
           this.gitHistory.retain(this.watched);
-          this.watches.set([...this.watched].map((id) => this.metadata.workspace(id)));
+          this.watches.set(workspaces);
         }
       } catch (error) {
         console.error(asError(error).message);
@@ -306,12 +319,12 @@ export class Agent {
     signal.throwIfAborted();
     switch (method) {
       case "ports.list":
-        return listeningPorts(signal);
+        return listeningPorts(signal) satisfies Promise<RpcResult<typeof method>>;
       case "git.remotes":
         return remotes(
           await this.repos.resolve(string(params.workspaceId), string(params.repoId), signal),
           signal,
-        );
+        ) satisfies Promise<RpcResult<typeof method>>;
       case "git.fetch":
       case "git.pull":
       case "git.push":
@@ -331,7 +344,7 @@ export class Agent {
               signal,
             ),
           progress,
-        );
+        ) satisfies Promise<RpcResult<typeof method>>;
       case "git.continue":
       case "git.abort": {
         const expected = record(params.expectedOperation);
@@ -348,7 +361,7 @@ export class Agent {
               signal,
             ),
           progress,
-        );
+        ) satisfies Promise<RpcResult<typeof method>>;
       }
       case "git.commit":
         return this.gitWrites.run(
@@ -363,7 +376,7 @@ export class Agent {
               signal,
             ),
           progress,
-        );
+        ) satisfies Promise<RpcResult<typeof method>>;
       case "git.branch.create":
         if (typeof params.switch !== "boolean")
           throw new AppError("invalid_argument", "请选择是否切换分支");
@@ -380,23 +393,25 @@ export class Agent {
               signal,
             ),
           progress,
-        );
+        ) satisfies Promise<RpcResult<typeof method>>;
       case "git.branch.switch":
+        return this.gitWrites.run(
+          string(params.workspaceId),
+          string(params.repoId),
+          signal,
+          (repo) =>
+            changeBranch(repo, string(params.name), string(params.refOid), "switch", signal),
+          progress,
+        ) satisfies Promise<RpcResult<typeof method>>;
       case "git.branch.delete":
         return this.gitWrites.run(
           string(params.workspaceId),
           string(params.repoId),
           signal,
           (repo) =>
-            changeBranch(
-              repo,
-              string(params.name),
-              string(params.refOid),
-              method === "git.branch.switch" ? "switch" : "delete",
-              signal,
-            ),
+            changeBranch(repo, string(params.name), string(params.refOid), "delete", signal),
           progress,
-        );
+        ) satisfies Promise<RpcResult<typeof method>>;
       case "git.stage":
       case "git.unstage":
       case "git.discard":
@@ -420,20 +435,20 @@ export class Agent {
                   signal,
                 ),
           progress,
-        );
+        ) satisfies Promise<RpcResult<typeof method>>;
       case "git.review":
         return reviewDiscard(
           await this.repos.resolve(string(params.workspaceId), string(params.repoId), signal),
           gitPaths(params.paths),
           discardScope(params.scope),
           signal,
-        );
+        ) satisfies Promise<RpcResult<typeof method>>;
       case "repos.discover":
         return this.repos.discover(
           string(params.workspaceId),
           params.scanCursor === undefined ? undefined : string(params.scanCursor),
           signal,
-        );
+        ) satisfies Promise<RpcResult<typeof method>>;
       case "git.status":
         return status(
           await this.repos.resolve(string(params.workspaceId), string(params.repoId), signal),
@@ -442,7 +457,7 @@ export class Agent {
             : integer(params.offset, "offset", 0, Number.MAX_SAFE_INTEGER),
           params.expectedListToken === undefined ? undefined : string(params.expectedListToken),
           signal,
-        );
+        ) satisfies Promise<RpcResult<typeof method>>;
       case "git.diff": {
         const repo = await this.repos.resolve(
           string(params.workspaceId),
@@ -456,10 +471,12 @@ export class Agent {
             params.parentOid === undefined ? undefined : string(params.parentOid),
             string(params.path),
             signal,
-          );
+          ) satisfies Promise<RpcResult<typeof method>>;
         if (params.side !== "worktree" && params.side !== "staged")
           throw new AppError("invalid_argument", "无效 diff 区域");
-        return workingDiff(repo, string(params.path), params.side, signal);
+        return workingDiff(repo, string(params.path), params.side, signal) satisfies Promise<
+          RpcResult<typeof method>
+        >;
       }
       case "git.history":
         return history(
@@ -469,7 +486,7 @@ export class Agent {
             ? 0
             : integer(params.offset, "offset", 0, Number.MAX_SAFE_INTEGER),
           signal,
-        );
+        ) satisfies Promise<RpcResult<typeof method>>;
       case "git.commitFiles":
         return this.gitHistory.files(
           string(params.workspaceId),
@@ -478,12 +495,12 @@ export class Agent {
           params.parentOid === undefined ? undefined : string(params.parentOid),
           params.cursor === undefined ? undefined : string(params.cursor),
           signal,
-        );
+        ) satisfies Promise<RpcResult<typeof method>>;
       case "git.branches":
         return branches(
           await this.repos.resolve(string(params.workspaceId), string(params.repoId), signal),
           signal,
-        );
+        ) satisfies Promise<RpcResult<typeof method>>;
       case "files.search": {
         if (
           (params.mode !== "name" && params.mode !== "content") ||
@@ -496,7 +513,7 @@ export class Agent {
           string(params.query, "query"),
           params.includeIgnored,
           signal,
-        );
+        ) satisfies Promise<RpcResult<typeof method>>;
       }
       case "files.copy":
       case "files.move":
@@ -507,7 +524,7 @@ export class Agent {
           method === "files.delete" ? params.paths : params.items,
           signal,
           progress,
-        );
+        ) satisfies Promise<RpcResult<typeof method>>;
       case "files.list": {
         const result = await this.files.list(
           string(params.workspaceId),
@@ -516,7 +533,7 @@ export class Agent {
           signal,
         );
         this.watches.listed(string(params.workspaceId), result.resolvedPath);
-        return result;
+        return result satisfies RpcResult<typeof method>;
       }
       case "files.inspect":
         return this.files.inspect(
@@ -524,35 +541,37 @@ export class Agent {
           string(params.path),
           params.suggestCopyName === true,
           signal,
-        );
+        ) satisfies Promise<RpcResult<typeof method>>;
       case "files.create":
         return this.files.create(
           string(params.workspaceId),
           string(params.path),
           string(params.kind),
           signal,
-        );
+        ) satisfies Promise<RpcResult<typeof method>>;
       case "files.rename":
         return this.files.rename(
           string(params.workspaceId),
           string(params.path),
           string(params.newName),
           signal,
-        );
+        ) satisfies Promise<RpcResult<typeof method>>;
       case "directories.list":
         return this.directories.list(
           string(params.absolutePath),
           params.cursor === undefined ? undefined : string(params.cursor),
           signal,
-        );
+        ) satisfies Promise<RpcResult<typeof method>>;
       case "directories.mkdir":
-        return this.directories.mkdir(string(params.absolutePath), signal);
+        return this.directories.mkdir(string(params.absolutePath), signal) satisfies Promise<
+          RpcResult<typeof method>
+        >;
       case "workspaces.add":
         return this.metadata.add(
           string(params.absolutePath),
           params.name === undefined ? undefined : string(params.name, "name", 256),
           signal,
-        );
+        ) satisfies Promise<RpcResult<typeof method>>;
       case "workspaces.rename": {
         const id = string(params.workspaceId);
         const name = string(params.name, "name", 256);
@@ -561,7 +580,7 @@ export class Agent {
           if (!workspace) throw new AppError("not_found", "workspace 不存在");
           workspace.name = name;
           return workspace;
-        }, signal);
+        }, signal) satisfies Promise<RpcResult<typeof method>>;
       }
       case "workspaces.remove": {
         const id = string(params.workspaceId);
@@ -571,13 +590,13 @@ export class Agent {
             throw new AppError("busy", "请先结束 workspace 中的终端会话");
           metadata.workspaces = metadata.workspaces.filter((w) => w.id !== id);
           return { removed: true };
-        }, signal);
+        }, signal) satisfies Promise<RpcResult<typeof method>>;
       }
       case "sessions.list": {
         const workspaceId =
           params.workspaceId === undefined ? undefined : string(params.workspaceId);
         if (workspaceId) this.metadata.workspace(workspaceId);
-        return this.sessions.list(workspaceId);
+        return this.sessions.list(workspaceId) satisfies RpcResult<typeof method>;
       }
       case "sessions.create":
         return this.sessions.create(
@@ -585,28 +604,34 @@ export class Agent {
           params.name === undefined ? undefined : string(params.name, "name", 256),
           params.shortcutId === undefined ? undefined : string(params.shortcutId),
           signal,
-        );
+        ) satisfies Promise<RpcResult<typeof method>>;
       case "sessions.rename":
         return this.sessions.rename(
           string(params.workspaceId),
           string(params.sessionId),
           string(params.name, "name", 256),
-        );
+        ) satisfies RpcResult<typeof method>;
       case "sessions.end":
         return this.sessions.end(
           params.workspaceId === undefined ? undefined : string(params.workspaceId),
           string(params.sessionId),
-        );
+        ) satisfies Promise<RpcResult<typeof method>>;
       case "sessions.recover":
-        return this.sessions.recover(string(params.workspaceId), string(params.sessionId));
+        return this.sessions.recover(
+          string(params.workspaceId),
+          string(params.sessionId),
+        ) satisfies RpcResult<typeof method>;
       case "sessions.redraw":
-        return this.sessions.redraw(string(params.workspaceId), string(params.sessionId));
+        return this.sessions.redraw(
+          string(params.workspaceId),
+          string(params.sessionId),
+        ) satisfies Promise<RpcResult<typeof method>>;
       case "settings.update": {
         const historyLines = integer(params.historyLines, "historyLines", 0, 50_000);
         return this.metadata.update((metadata) => {
           metadata.settings.historyLines = historyLines;
           return metadata.settings;
-        }, signal);
+        }, signal) satisfies Promise<RpcResult<typeof method>>;
       }
       case "shortcuts.put": {
         const id = params.id === undefined ? randomUUID() : string(params.id);
@@ -620,14 +645,14 @@ export class Agent {
           if (previous) Object.assign(previous, shortcut);
           else metadata.shortcuts.push(shortcut);
           return shortcut;
-        }, signal);
+        }, signal) satisfies Promise<RpcResult<typeof method>>;
       }
       case "shortcuts.remove": {
         const id = string(params.id);
         return this.metadata.update((metadata) => {
           metadata.shortcuts = metadata.shortcuts.filter((item) => item.id !== id);
           return { removed: true };
-        }, signal);
+        }, signal) satisfies Promise<RpcResult<typeof method>>;
       }
       default:
         throw new AppError("unsupported", `不支持的操作: ${method}`);

@@ -1,0 +1,14 @@
+ARG UBUNTU
+FROM ${UBUNTU}
+ARG CA_CERTIFICATES_URL
+ARG CA_CERTIFICATES_SHA256
+ADD --checksum=sha256:${CA_CERTIFICATES_SHA256} ${CA_CERTIFICATES_URL} /var/tmp/ca-certificates.deb
+COPY ubuntu.sources /etc/apt/sources.list.d/ubuntu.sources
+RUN dpkg-deb --extract /var/tmp/ca-certificates.deb /var/tmp/ca-bootstrap \
+    && mkdir -p /etc/ssl/certs \
+    && cat /var/tmp/ca-bootstrap/usr/share/ca-certificates/mozilla/*.crt > /etc/ssl/certs/ca-certificates.crt \
+    && apt-get update --error-on=any && apt-get install -y --no-install-recommends \
+    build-essential pkg-config libevent-dev libncurses-dev ncurses-term \
+    bison curl ca-certificates patch patchelf \
+    && rm -rf /var/lib/apt/lists/* /var/tmp/ca-bootstrap /var/tmp/ca-certificates.deb
+ENV TMPDIR=/var/tmp

@@ -1,5 +1,10 @@
 import { useSyncExternalStore } from "react";
-import type { FileProgress, Reply } from "@kiteline/shared/protocol";
+import type {
+  FileProgress,
+  GitWriteArguments,
+  RpcReply,
+  RpcResult,
+} from "@kiteline/shared/protocol";
 import { api, ApiError, errorMessage, post } from "../lib/api";
 
 export interface GitTarget {
@@ -49,12 +54,10 @@ export class GitActions {
     value.messageVersion++;
     this.notify();
   }
-  async run<T>(
+  async run<A extends GitWriteArguments>(
     target: GitTarget,
-    method: string,
-    params: object,
-    label: string,
-  ): Promise<T | undefined> {
+    ...[method, params, label]: A
+  ): Promise<RpcResult<A[0]> | undefined> {
     const value = this.get(target);
     if (value.request) return;
     const request = {
@@ -84,7 +87,7 @@ export class GitActions {
     };
     window.addEventListener("kiteline:event", progress);
     try {
-      const reply = await post<Reply<T>>(`/api/devices/${target.deviceId}/rpc`, {
+      const reply = await post<RpcReply<A[0]>>(`/api/devices/${target.deviceId}/rpc`, {
         id: request.id,
         method,
         params: { ...params, workspaceId: target.workspaceId, repoId: target.repoId },

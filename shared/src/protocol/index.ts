@@ -1,6 +1,17 @@
 export const protocolVersion = 1;
 export const appVersion = "0.1.0";
 export const terminalProfile = "xterm-c1";
+export type {
+  RpcMethods,
+  RpcMethod,
+  RpcParams,
+  RpcResult,
+  RpcRequest,
+  RpcReply,
+  RpcArguments,
+  GitWriteMethod,
+  GitWriteArguments,
+} from "./rpc.js";
 
 export const limits = {
   controlMessageBytes: 1024 * 1024,
@@ -47,9 +58,9 @@ export interface KitelineError {
   message: string;
   details?: unknown;
 }
-export type Reply<T = unknown> =
+export type Reply<T = unknown, E = unknown> =
   | { id: string; outcome: "succeeded"; result: T }
-  | { id: string; outcome: "failed" | "partial" | "unknown"; error: KitelineError; result?: T };
+  | { id: string; outcome: "failed" | "partial" | "unknown"; error: KitelineError; result?: E };
 export interface Workspace {
   id: string;
   name: string;

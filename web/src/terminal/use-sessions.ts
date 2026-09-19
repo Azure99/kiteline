@@ -15,7 +15,7 @@ export function useSessions(device: Device, workspaceId: string) {
     const read = ++revision.current;
     if (device.status !== "online") return;
     try {
-      const result = await rpc<{ sessions: Session[] }>(device.id, "sessions.list", {
+      const result = await rpc(device.id, "sessions.list", {
         workspaceId,
       });
       if (alive.current && read === revision.current) {
@@ -46,6 +46,8 @@ export function useSessions(device: Device, workspaceId: string) {
     const timer = setInterval(() => void refresh(), 15000);
     return () => {
       alive.current = false;
+      // Invalidate the current request generation, not a captured resource.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
       revision.current++;
       clearInterval(timer);
       window.removeEventListener("kiteline:event", changed);
@@ -56,7 +58,7 @@ export function useSessions(device: Device, workspaceId: string) {
     setError("");
     setUncertainCreate(false);
     try {
-      const session = await rpc<Session>(device.id, "sessions.create", { workspaceId, shortcutId });
+      const session = await rpc(device.id, "sessions.create", { workspaceId, shortcutId });
       if (alive.current) {
         revision.current++;
         setSessions((old) => [...old.filter((item) => item.id !== session.id), session]);
@@ -80,11 +82,13 @@ export function useSessions(device: Device, workspaceId: string) {
       if (alive.current) setBusy(false);
     }
   }
-  async function change(kind: "rename" | "end", sessionId: string, name?: string) {
+  async function change(kind: "rename" | "end", sessionId: string, name: string) {
     setBusy(true);
     setError("");
     try {
-      await rpc(device.id, `sessions.${kind}`, { workspaceId, sessionId, name });
+      if (kind === "rename")
+        await rpc(device.id, "sessions.rename", { workspaceId, sessionId, name });
+      else await rpc(device.id, "sessions.end", { workspaceId, sessionId });
       if (alive.current) {
         void refresh();
         return true;

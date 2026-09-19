@@ -48,7 +48,7 @@ export function useGitStatus(
       try {
         let next: GitStatus;
         try {
-          next = await rpc<GitStatus>(
+          next = await rpc(
             deviceId,
             "git.status",
             { workspaceId, repoId, offset, expectedListToken },
@@ -57,7 +57,7 @@ export function useGitStatus(
         } catch (error) {
           if (expectedListToken && error instanceof ApiError && error.code === "conflict") {
             visited = history.current;
-            next = await rpc<GitStatus>(
+            next = await rpc(
               deviceId,
               "git.status",
               { workspaceId, repoId, offset: current.current?.offset ?? 0 },
@@ -68,7 +68,7 @@ export function useGitStatus(
         if (next.offset > 0 && next.offset >= next.totalCount) {
           offset = [...visited].reverse().find((item) => item < next.totalCount) ?? 0;
           visited = visited.filter((item) => item < offset);
-          next = await rpc<GitStatus>(
+          next = await rpc(
             deviceId,
             "git.status",
             { workspaceId, repoId, offset },

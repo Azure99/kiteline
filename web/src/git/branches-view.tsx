@@ -37,7 +37,7 @@ export function BranchesView({
     setBusy(true);
     setError("");
     try {
-      const result = await rpc<{ branches: Branch[] }>(
+      const result = await rpc(
         deviceId,
         "git.branches",
         { workspaceId, repoId },

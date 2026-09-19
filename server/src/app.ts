@@ -9,6 +9,7 @@ import { AttemptLimiter, body, cookie, failure, json, origin } from "./http.js";
 import { bearer, Connections } from "./connections.js";
 import { Channels } from "./channels.js";
 import { HttpProxy, isProxyPath } from "./http-proxy.js";
+import { installationCommands, serveAgentInstallation } from "./agent-installation.js";
 
 export function createKitelineServer(config: ServerConfig, store: Store) {
   const connections = new Connections(store);
@@ -33,6 +34,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
     const url = new URL(request.url ?? "/", config.publicUrl);
     const path = url.pathname;
     const method = request.method ?? "GET";
+    if (await serveAgentInstallation(path, config.downloadsDir, request, response)) return;
     if (path === "/healthz" && method === "GET")
       return json(response, 200, { status: "ok", version: appVersion });
     if (path === "/api/agent/bind" && method === "POST") {
@@ -74,8 +76,13 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
         );
         return json(response, 200, {});
       }
-      if (path === "/api/bindings" && method === "POST")
-        return json(response, 200, store.newBinding());
+      if (path === "/api/bindings" && method === "POST") {
+        const binding = store.newBinding();
+        return json(response, 200, {
+          ...binding,
+          commands: installationCommands(config.publicUrl, binding.code),
+        });
+      }
       const binding = /^\/api\/bindings\/([^/]+)$/.exec(path);
       if (binding && method === "GET")
         return json(response, 200, store.binding(decodeURIComponent(binding[1]!)));
@@ -161,7 +168,13 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       response.writeHead(405).end();
       return;
     }
-    const file = resolve(config.webDir, "." + decodeURIComponent(path));
+    let decodedPath: string;
+    try {
+      decodedPath = decodeURIComponent(path);
+    } catch {
+      throw new AppError("invalid_argument", "无效 URL 路径");
+    }
+    const file = resolve(config.webDir, "." + decodedPath);
     if (file !== config.webDir && !file.startsWith(config.webDir + sep))
       throw new AppError("not_found", "文件不存在");
     const extensions: Record<string, string> = {
@@ -253,9 +266,10 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       connections.close();
       sockets.close();
       httpSockets.close();
-      await new Promise<void>((resolve, reject) =>
-        server.close((error) => (error ? reject(error) : resolve())),
-      );
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+        server.closeAllConnections();
+      });
     },
   };
 }

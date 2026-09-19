@@ -1,0 +1,18 @@
+{
+  "ubuntu": "ubuntu:24.04@sha256:b3cc40b72b93588182b5410f723c7aaf142363311c2aa993d8a453ddcbb3ae15",
+  "caCertificates": {
+    "url": "https://snapshot.ubuntu.com/ubuntu/20260918T000000Z/pool/main/c/ca-certificates/ca-certificates_20260601~24.04.1_all.deb",
+    "sha256": "6bac2a01979e210d9eac1d4d56747ec709ea60654744d66705dc3c36e7629e50"
+  },
+  "node": "24.20.0",
+  "nodeArchives": {
+    "amd64": {
+      "architecture": "x64",
+      "sha256": "2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2"
+    },
+    "arm64": {
+      "architecture": "arm64",
+      "sha256": "5f4ddab610c1ab2016b3c227cebdbf6d9495161487e4739c7b90090595f465f7"
+    }
+  }
+}

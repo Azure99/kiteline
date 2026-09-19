@@ -50,12 +50,13 @@ export function DeviceActionDialog({
           body: JSON.stringify({ name }),
         });
       else if (action.type === "revoke") await post(`/api/devices/${action.device.id}/revoke`);
-      else if ("workspace" in action)
-        await rpc(
-          action.device.id,
-          action.type === "workspace-rename" ? "workspaces.rename" : "workspaces.remove",
-          { workspaceId: action.workspace.id, name },
-        );
+      else if (action.type === "workspace-rename")
+        await rpc(action.device.id, "workspaces.rename", {
+          workspaceId: action.workspace.id,
+          name,
+        });
+      else if (action.type === "workspace-remove")
+        await rpc(action.device.id, "workspaces.remove", { workspaceId: action.workspace.id });
       if (mounted.current) onDone();
     } catch (error) {
       setError(errorMessage(error));

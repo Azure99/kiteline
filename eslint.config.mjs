@@ -12,7 +12,7 @@ export default tseslint.config(
     rules: { "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }] },
   },
   {
-    files: ["web/**/*.tsx"],
+    files: ["web/**/*.{ts,tsx}"],
     plugins: { "react-hooks": hooks },
     rules: {
       "react-hooks/rules-of-hooks": "error",

@@ -6,13 +6,10 @@ import { limits, type GitDiff } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
 import { errorMessage, rpc } from "../lib/api";
 
-export interface DiffTarget {
+export type DiffTarget = {
   path: string;
   oldPath?: string;
-  side: "worktree" | "staged" | "commit";
-  commitOid?: string;
-  parentOid?: string;
-}
+} & ({ side: "worktree" | "staged" } | { side: "commit"; commitOid: string; parentOid?: string });
 export function DiffView({
   deviceId,
   workspaceId,
@@ -38,11 +35,17 @@ export function DiffView({
     const controller = new AbortController();
     setBusy(true);
     setError("");
-    setValue(undefined);
-    void rpc<GitDiff>(deviceId, "git.diff", { workspaceId, repoId, ...target }, controller.signal)
+    void rpc(deviceId, "git.diff", { workspaceId, repoId, ...target }, controller.signal)
       .then(
         (result) => {
-          if (!controller.signal.aborted) setValue(result);
+          if (!controller.signal.aborted)
+            setValue((old) =>
+              old?.patch === result.patch &&
+              old.truncated === result.truncated &&
+              JSON.stringify(old.summary) === JSON.stringify(result.summary)
+                ? old
+                : result,
+            );
         },
         (error) => {
           if (!controller.signal.aborted) setError(errorMessage(error));
@@ -54,7 +57,11 @@ export function DiffView({
     return () => controller.abort();
   }, [deviceId, workspaceId, repoId, target, refreshKey, retry]);
   return (
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col" aria-label="Git diff">
+    <section
+      className="flex min-h-0 min-w-0 flex-1 flex-col"
+      aria-label="Git diff"
+      aria-busy={busy}
+    >
       <div className="flex min-h-10 shrink-0 items-center gap-1 border-b border-border px-2">
         <IconButton label="返回变化" onClick={onBack}>
           <ArrowLeft />
@@ -75,10 +82,10 @@ export function DiffView({
       <div className="scroll-area min-h-0 min-w-0 flex-1 overflow-auto">
         {error && (
           <p role="alert" className="break-words p-4 text-sm text-destructive">
-            {error}
+            {value ? `刷新失败，显示上次结果：${error}` : error}
           </p>
         )}
-        {busy && (
+        {busy && !value && (
           <p role="status" className="p-4 text-sm text-muted-foreground">
             正在读取
           </p>

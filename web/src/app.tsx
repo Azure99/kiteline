@@ -238,7 +238,7 @@ export function App() {
   return (
     <TooltipProvider delay={400}>
       <div className="flex h-[var(--app-height,100dvh)] min-h-0 flex-col overflow-hidden">
-        <header className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3">
+        <header className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3 max-[959px]:flex-wrap max-[959px]:gap-y-0">
           <button
             className="hidden w-48 shrink-0 items-center gap-2 text-sm font-semibold min-[960px]:flex"
             onClick={() => choose("/devices")}
@@ -268,7 +268,7 @@ export function App() {
               <div className="scroll-area overflow-auto">{navigation}</div>
             </DialogContent>
           </Dialog>
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5 py-2 text-sm">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5 py-2 text-sm max-[959px]:order-last max-[959px]:basis-full max-[959px]:pt-0">
             <button
               onClick={() => choose(device ? devicePath(device.id) : "/devices")}
               className="max-w-full truncate"
@@ -286,7 +286,7 @@ export function App() {
             )}
           </div>
           <span
-            className="status-dot"
+            className="status-dot max-[959px]:ml-auto"
             data-status={connected ? "online" : "offline"}
             title={connected ? "已连接" : "连接中断"}
             aria-label={connected ? "已连接" : "连接中断"}
@@ -460,6 +460,8 @@ export function App() {
       <Dialog open={binding} onOpenChange={setBinding}>
         {binding && (
           <BindingDialog
+            devices={devices}
+            connected={connected}
             onDevice={(id) => {
               setBinding(false);
               choose(devicePath(id));

@@ -1,8 +1,9 @@
 import { homedir, userInfo } from "node:os";
 import { resolve, isAbsolute } from "node:path";
-import { readFile, mkdir, writeFile, rename, rm } from "node:fs/promises";
+import { readFile, writeFile, rename, rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { AppError, integer, record, string } from "@kiteline/shared/protocol";
+import { installedPaths } from "./installation.js";
 
 export interface AgentConfig {
   dataDir: string;
@@ -45,13 +46,20 @@ export async function atomicJson(path: string, value: unknown) {
     await rm(temporary, { force: true });
   }
 }
-export async function agentConfig(): Promise<AgentConfig> {
+export async function agentPaths() {
+  const installed = await installedPaths();
   const dataDir = resolve(
-    process.env.KITELINE_AGENT_HOME ?? resolve(homedir(), ".local/share/kiteline-agent"),
+    process.env.KITELINE_AGENT_HOME ??
+      installed?.dataDir ??
+      resolve(homedir(), ".local/share/kiteline-agent"),
   );
-  const runDir = resolve(process.env.KITELINE_AGENT_RUN_DIR ?? resolve(dataDir, "run"));
-  await mkdir(dataDir, { recursive: true, mode: 0o700 });
-  await mkdir(runDir, { recursive: true, mode: 0o700 });
+  const runDir = resolve(
+    process.env.KITELINE_AGENT_RUN_DIR ?? installed?.runDir ?? resolve(dataDir, "run"),
+  );
+  return { dataDir, runDir };
+}
+export async function agentConfig(): Promise<AgentConfig> {
+  const { dataDir, runDir } = await agentPaths();
   let input: Record<string, unknown> = {};
   try {
     input = record(await readJson(resolve(dataDir, "config.json")));

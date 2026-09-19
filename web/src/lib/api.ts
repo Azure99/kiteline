@@ -1,4 +1,4 @@
-import type { KitelineError, Reply } from "@kiteline/shared/protocol";
+import type { KitelineError, RpcArguments, RpcReply, RpcResult } from "@kiteline/shared/protocol";
 
 export class ApiError extends Error {
   constructor(
@@ -39,15 +39,14 @@ export async function api<T>(
 export function post<T>(path: string, value: unknown = {}, signal?: AbortSignal, mutation = true) {
   return api<T>(path, { method: "POST", body: JSON.stringify(value), signal }, mutation);
 }
-export async function rpc<T>(
+export function rpcReply<A extends RpcArguments>(
   deviceId: string,
-  method: string,
-  params: object,
-  signal?: AbortSignal,
-): Promise<T> {
-  const reply = await post<Reply<T>>(
+  id: string,
+  [method, params, signal]: A,
+): Promise<RpcReply<A[0]>> {
+  return post<RpcReply<A[0]>>(
     `/api/devices/${encodeURIComponent(deviceId)}/rpc`,
-    { id: crypto.randomUUID(), method, params },
+    { id, method, params },
     signal,
     ![
       "directories.list",
@@ -66,6 +65,12 @@ export async function rpc<T>(
       "git.remotes",
     ].includes(method),
   );
+}
+export async function rpc<A extends RpcArguments>(
+  deviceId: string,
+  ...args: A
+): Promise<RpcResult<A[0]>> {
+  const reply = await rpcReply(deviceId, crypto.randomUUID(), args);
   if (reply.outcome !== "succeeded")
     throw new ApiError(
       reply.error.code,

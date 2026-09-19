@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Circle, Copy, Download, FileOutput, RefreshCw, Save, X } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
@@ -31,6 +31,23 @@ export function DraftView({
   const [path, setPath] = useState(draft.path);
   const [error, setError] = useState("");
   const generation = useRef(0);
+  const tabStrip = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const strip = tabStrip.current;
+    if (!strip) return;
+    const reveal = () => {
+      const tab = strip.querySelector('[aria-selected="true"]')?.parentElement;
+      if (!tab || !strip.clientWidth) return;
+      const bounds = strip.getBoundingClientRect();
+      const current = tab.getBoundingClientRect();
+      if (current.left < bounds.left) strip.scrollLeft += current.left - bounds.left;
+      else if (current.right > bounds.right) strip.scrollLeft += current.right - bounds.right;
+    };
+    reveal();
+    const observer = new ResizeObserver(reveal);
+    observer.observe(strip);
+    return () => observer.disconnect();
+  }, [draft.id]);
   useEffect(
     () => () => {
       generation.current++;
@@ -56,6 +73,7 @@ export function DraftView({
   return (
     <>
       <div
+        ref={tabStrip}
         role="tablist"
         aria-label="打开的文件"
         className="flex min-h-9 shrink-0 overflow-x-auto border-b border-border bg-muted/40"

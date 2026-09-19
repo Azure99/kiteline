@@ -86,6 +86,99 @@ test("old save confirmation cannot replace a newer baseline after a rename round
   expect(draft.revision).toBe("second");
 });
 
+test("rename completion updates its original drafts without navigating a different view", async () => {
+  const { store, draft } = await opened();
+  store.update(draft, draft.state!.update({ changes: { from: 4, insert: " edited" } }).state);
+  let finish!: (response: Response) => void;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve;
+        }),
+    ),
+  );
+  const renaming = store.renameFile(target, "b.txt");
+  const otherView = { pathname: "/devices/other", search: "" };
+  vi.stubGlobal("location", otherView);
+  transport.read.mockResolvedValueOnce(disk("base", "b-base", "b.txt"));
+  finish(Response.json({ outcome: "succeeded", result: { from: "a.txt", to: "b.txt" } }));
+  await renaming;
+  await vi.waitFor(() => expect(draft.revision).toBe("b-base"));
+  expect(draft.path).toBe("b.txt");
+  expect(draft.state!.doc.toString()).toBe("base edited");
+  expect(draft.baseText).toBe("base");
+  expect(location).toBe(otherView);
+});
+
+test("late rename does not migrate a closed draft or a later instance at the same path", async () => {
+  const { store, draft } = await opened();
+  let finish!: (response: Response) => void;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve;
+        }),
+    ),
+  );
+  const renaming = store.renameFile(target, "b.txt");
+  store.close(draft);
+  transport.read.mockResolvedValueOnce(disk("replacement", "new"));
+  const replacement = store.open({ ...target, deviceName: "Device", workspaceName: "Workspace" });
+  await vi.waitFor(() => expect(replacement.state).toBeDefined());
+  finish(Response.json({ outcome: "succeeded", result: { from: "a.txt", to: "b.txt" } }));
+  await renaming;
+  expect(store.snapshot()).toEqual([replacement]);
+  expect(replacement.path).toBe("a.txt");
+  expect(replacement.state!.doc.toString()).toBe("replacement");
+});
+
+test("failed rename keeps the original draft path", async () => {
+  const { store, draft } = await opened();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      Response.json({ outcome: "failed", error: { code: "conflict", message: "Target exists" } }),
+    ),
+  );
+  await expect(store.renameFile(target, "b.txt")).rejects.toMatchObject({ code: "conflict" });
+  expect(draft.path).toBe("a.txt");
+});
+
+test("late rename does not capture another draft saved into the old source path", async () => {
+  const { store, draft } = await opened();
+  transport.read.mockResolvedValueOnce(disk("other", "c-base", "c.txt"));
+  const other = store.open({
+    ...target,
+    path: "c.txt",
+    deviceName: "Device",
+    workspaceName: "Workspace",
+  });
+  await vi.waitFor(() => expect(other.state).toBeDefined());
+  let finish!: (response: Response) => void;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve;
+        }),
+    ),
+  );
+  const renaming = store.renameFile(target, "b.txt");
+  transport.write.mockResolvedValueOnce({ path: "a.txt", revision: "new-a", size: 5 });
+  expect(await store.save(other, "a.txt", null)).toBe(true);
+  transport.read.mockResolvedValueOnce(disk("base", "b-base", "b.txt"));
+  finish(Response.json({ outcome: "succeeded", result: { from: "a.txt", to: "b.txt" } }));
+  await renaming;
+  expect(draft.path).toBe("b.txt");
+  expect(other.path).toBe("a.txt");
+  expect(other.state!.doc.toString()).toBe("other");
+});
+
 test("closed drafts stay closed after a late read; lower limits allow shrinking and compliant saves", async () => {
   const { store, draft } = await opened();
   store.limits([{ id: "device", editorBytes: 3 } as Device], 2);

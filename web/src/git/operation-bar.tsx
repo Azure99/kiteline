@@ -19,7 +19,9 @@ export function OperationBar({
 }) {
   const activity = useGitActivity(actions, target);
   const busy = disabled || !!activity.request;
-  const expectedOperation = { kind: operation.kind, token: operation.token };
+  const expectedOperation = operation.token
+    ? { kind: operation.kind, token: operation.token }
+    : undefined;
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-amber-50 px-3 py-2 text-xs">
       <div className="min-w-0 flex-1 basis-32">
@@ -31,7 +33,10 @@ export function OperationBar({
       <Button
         variant="outline"
         disabled={busy || !operation.token || !operation.canContinue}
-        onClick={() => void actions.run(target, "git.continue", { expectedOperation }, "继续")}
+        onClick={() => {
+          if (expectedOperation)
+            void actions.run(target, "git.continue", { expectedOperation }, "继续");
+        }}
       >
         <Check />
         继续
@@ -40,6 +45,7 @@ export function OperationBar({
         variant="ghost"
         disabled={busy || !operation.token || !operation.canAbort}
         onClick={() => {
+          if (!expectedOperation) return;
           if (
             window.confirm(
               `中止当前 ${operation.kind}？Git 将尝试恢复操作前状态，未提交内容可能受影响。`,

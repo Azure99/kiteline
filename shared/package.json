@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "files": [
+    "dist"
+  ],
   "exports": {
     "./protocol": "./dist/protocol/index.js",
     "./ipc": "./dist/protocol/ipc.js",

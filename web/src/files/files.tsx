@@ -188,14 +188,11 @@ export function Files({
       await load(path, false, background);
     }
   }
-  function movePaths(moves: { from: string; to: string }[]) {
+  function moveViewPaths(moves: { from: string; to: string }[]) {
     if (!moves.length) return;
     const nextPath = (path: string) =>
       moves.reduce((next, move) => movedPath(next, move.from, move.to), path);
-    for (const { from, to } of moves) {
-      void store.rename(device.id, workspace.id, from, to);
-      forget(from);
-    }
+    for (const { from } of moves) forget(from);
     const query = new URLSearchParams(location.search);
     const nextFolder = nextPath(query.get("folder") ?? ".");
     if (nextFolder === ".") query.delete("folder");
@@ -447,12 +444,15 @@ export function Files({
           deviceId={device.id}
           workspaceId={workspace.id}
           action={action}
+          rename={(path, name) =>
+            store.renameFile({ deviceId: device.id, workspaceId: workspace.id, path }, name)
+          }
           onClose={() => setAction(undefined)}
           onDone={(result) => {
             setAction(undefined);
             setNotice(result.from ? "已重命名" : "已创建");
             if (result.from) {
-              movePaths([{ from: result.from, to: result.to }]);
+              moveViewPaths([{ from: result.from, to: result.to }]);
             }
             if (result.entry?.kind === "file") open(result.entry);
             void load(parentPath(result.to));
@@ -473,8 +473,11 @@ export function Files({
               for (const item of items)
                 if (item.outcome === "partial" || item.outcome === "unknown")
                   void store.checkMissing(device.id, workspace.id, item.path);
-            if (operation.kind === "move")
-              movePaths(completed.map((item) => ({ from: item.path, to: item.targetPath! })));
+            if (operation.kind === "move") {
+              for (const item of completed)
+                void store.rename(device.id, workspace.id, item.path, item.targetPath!);
+              moveViewPaths(completed.map((item) => ({ from: item.path, to: item.targetPath! })));
+            }
             if (operation.kind === "delete") {
               const query = new URLSearchParams(location.search);
               for (const item of completed) {

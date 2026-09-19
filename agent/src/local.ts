@@ -81,7 +81,7 @@ export class LocalServer {
 }
 
 export function localRequest<T>(
-  config: AgentConfig,
+  config: Pick<AgentConfig, "runDir"> & { limits: Pick<AgentConfig["limits"], "rpcTimeout"> },
   method: string,
   params: Record<string, unknown> = {},
 ): Promise<T> {

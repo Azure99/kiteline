@@ -46,6 +46,7 @@ export function WorkspaceTerminal({
   const route = useRoute();
   const routeSession = route.query.get("session");
   const lastRouteSession = useRef<string | null | undefined>(undefined);
+  const lastTool = useRef<string | undefined>(undefined);
   const displays = useRef(new Map<string, TerminalActions>());
   const dockActions = useRef<TerminalActions>(null);
   const [statuses, setStatuses] = useState<Record<string, DisplayState["status"]>>({});
@@ -71,7 +72,17 @@ export function WorkspaceTerminal({
     setLayout((old) => retainSessions(old, kept, dockKept));
   }, [sessions, remote.loaded, layout, mobile, dockId]);
   useEffect(() => {
-    if (!remote.loaded || lastRouteSession.current === routeSession) return;
+    if (!remote.loaded) return;
+    const returning = route.tool === "terminal" && lastTool.current !== "terminal";
+    lastTool.current = route.tool;
+    if (returning && !routeSession && selected) {
+      const query = new URLSearchParams(location.search);
+      query.set("session", selected);
+      lastRouteSession.current = selected;
+      navigate(location.pathname + `?${query}`, true);
+      return;
+    }
+    if (lastRouteSession.current === routeSession) return;
     const previous = lastRouteSession.current;
     lastRouteSession.current = routeSession;
     if (routeSession) {
@@ -81,8 +92,9 @@ export function WorkspaceTerminal({
       )
         setLayout((old) => selectSession(old, routeSession));
       else setError("终端不存在或已结束");
-    } else if (previous !== undefined) setLayout((old) => ({ ...old, current: undefined }));
-  }, [routeSession, remote.loaded, sessions, setError]);
+    } else if (route.tool === "terminal" && previous !== undefined)
+      setLayout((old) => ({ ...old, current: undefined }));
+  }, [routeSession, route.tool, selected, remote.loaded, sessions, setError]);
   const register = useCallback((id: string, value: TerminalActions | null) => {
     if (value) displays.current.set(id, value);
     else {

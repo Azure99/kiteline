@@ -123,7 +123,7 @@ export function UploadDialog({
     setChecking(true);
     setError("");
     try {
-      const inspection = await rpc<FileInspection>(deviceId, "files.inspect", {
+      const inspection = await rpc(deviceId, "files.inspect", {
         workspaceId,
         path: row.path,
         suggestCopyName: true,

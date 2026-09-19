@@ -14,6 +14,8 @@
     "format:check": "prettier --check .",
     "test": "vitest run --maxWorkers=2",
     "native:build": "node scripts/build-native.mjs",
+    "package": "node scripts/package.mjs",
+    "images": "node scripts/images.mjs",
     "dev": "node scripts/dev.mjs",
     "server": "node server/dist/main.js",
     "agent": "node agent/dist/main.js"

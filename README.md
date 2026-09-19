@@ -2,6 +2,8 @@
 
 单人自托管的 Linux 远程工作台。
 
+正式包、原生服务和容器的运行方式见 [安装与运行](deploy/README.md)。
+
 ## 从源码开发
 
 开发环境使用 Node 24.20.0 和 pnpm 11.25.0。Ubuntu 原生组件构建需要 `build-essential pkg-config libevent-dev libncurses-dev ncurses-term bison curl patch`，运行设备工具还需要 Git 2.43+、ripgrep 14+ 和 Shell。
@@ -13,15 +15,15 @@ pnpm build
 KITELINE_DATA_DIR=/var/tmp/kiteline-dev/server KITELINE_PUBLIC_URL=https://localhost:8443 pnpm dev
 ```
 
-`dev` 编译并监听 TypeScript，启动 server 与 Vite，退出时关闭启动的进程。浏览器登录要求同源 HTTPS；在另一个终端启动开发代理：
+`dev` 编译并监听 TypeScript，启动 server 与 Vite，退出时关闭启动的进程。浏览器登录要求同源 HTTPS，可接已有反代；下面是可选的本地 Caddy 开发 fixture，不属于产品部署：
 
 ```sh
 docker run --rm --name kiteline-dev-caddy --network host \
-  -v "$PWD/deploy/Caddyfile.dev:/etc/caddy/Caddyfile:ro" \
+  -v "$PWD/scripts/dev/Caddyfile:/etc/caddy/Caddyfile:ro" \
   -v /var/tmp/kiteline-dev/caddy:/data caddy:2.10.2
 ```
 
-打开 https://localhost:8443，信任本地开发证书，使用 server 控制台的初始化凭据设置密码。设备列表可生成绑定码；设备端使用相同的测试根证书和独立状态目录：
+打开 https://localhost:8443，信任本地开发证书，使用 server 控制台的初始化凭据设置密码。源码 dev 不含发布下载资源；在网页生成接入命令，从“已安装，仅绑定”命令中取得绑定码，在下方 bind 提示时输入。设备端使用相同的测试根证书和独立状态目录：
 
 ```sh
 export NODE_EXTRA_CA_CERTS=/var/tmp/kiteline-dev/caddy/caddy/pki/authorities/local/root.crt
@@ -30,7 +32,7 @@ pnpm agent bind --server https://localhost:8443
 pnpm agent run
 ```
 
-正式公网部署使用真实 HTTPS 证书。密码恢复需先停止 server，再以相同 `KITELINE_DATA_DIR` 运行 `pnpm server reset-password`，完成后重新启动。原生组件及构建身份位于 `dist/native/`；临时编译目录和包缓存使用 `/var/tmp`。
+正式部署的 server 直接提供 HTTP，由用户反代提供最终 HTTPS，见[安装与运行](deploy/README.md#server-与已有-https-反代)。密码恢复需先停止 server，再以相同 `KITELINE_DATA_DIR` 运行 `pnpm server reset-password`，完成后重新启动。原生组件及构建身份位于 `dist/native/`；临时编译目录和包缓存使用 `/var/tmp`。
 
 ## 访问设备上的开发服务
 

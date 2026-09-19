@@ -1,11 +1,15 @@
 import { createInterface } from "node:readline/promises";
 import { hostname } from "node:os";
 import { resolve } from "node:path";
+import { lstat, mkdir } from "node:fs/promises";
 import lockfile from "proper-lockfile";
 import { AppError, appVersion, record, string } from "@kiteline/shared/protocol";
 import { agentConfig, atomicJson, readIdentity } from "./config.js";
 import { Agent } from "./control.js";
 import { terminalCli } from "./terminal-cli.js";
+import { doctorCli } from "./doctor.js";
+import { installCli, serviceCli } from "./service.js";
+import { checkPrerequisites } from "./prerequisites.js";
 
 async function input(prompt: string) {
   if (!process.stdin.isTTY) {
@@ -29,13 +33,32 @@ async function main() {
     return;
   }
   const command = process.argv[2];
+  if (command === "install") {
+    await installCli(process.argv.slice(3));
+    return;
+  }
+  if (command === "check") {
+    await checkPrerequisites(process.argv.includes("--service"));
+    return;
+  }
+  if (command === "service") {
+    await serviceCli(process.argv.slice(3));
+    return;
+  }
+  if (command === "doctor") {
+    await doctorCli();
+    return;
+  }
   if (command === "workspace" || command === "terminal") {
     await terminalCli(await agentConfig(), process.argv.slice(2));
     return;
   }
   if (command !== "run" && command !== "bind")
-    throw new Error("Usage: kiteline-agent bind --server HTTPS_ORIGIN | run");
+    throw new Error(
+      "Usage: kiteline-agent install --user USER | check | bind --server HTTPS_ORIGIN [--if-unbound] | run | doctor | service | terminal | workspace",
+    );
   const config = await agentConfig();
+  await mkdir(config.dataDir, { recursive: true, mode: 0o700 });
   const release = await lockfile.lock(config.dataDir, {
     lockfilePath: resolve(config.dataDir, "process.lock"),
     realpath: false,
@@ -46,6 +69,19 @@ async function main() {
       const server = new URL(string(index < 0 ? undefined : process.argv[index + 1], "server"));
       if (server.protocol !== "https:")
         throw new AppError("invalid_argument", "server 必须使用 HTTPS");
+      if (process.argv.includes("--if-unbound")) {
+        const exists = await lstat(resolve(config.dataDir, "connection.json")).then(
+          () => true,
+          (error: NodeJS.ErrnoException) => {
+            if (error.code === "ENOENT") return false;
+            throw error;
+          },
+        );
+        if (exists)
+          throw new Error(
+            "此安装已绑定，保留原设备身份。请使用 kiteline-agent run 或 sudo kiteline-agent service start；重新绑定须先停止原实例，再明确执行 kiteline-agent bind。",
+          );
+      }
       const code = await input("绑定码: ");
       let value: Record<string, unknown>;
       try {
@@ -85,7 +121,7 @@ async function main() {
     await agent.start();
     console.log(`Agent ${agent.identity.deviceId} connecting to ${agent.identity.server}`);
     let closing = false;
-    for (const signal of ["SIGINT", "SIGTERM"] as const)
+    for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const)
       process.on(signal, () => {
         if (closing) return;
         closing = true;

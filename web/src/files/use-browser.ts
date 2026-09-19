@@ -28,7 +28,7 @@ export function useFileBrowser(deviceId: string, workspaceId: string, active: bo
       const previous = pagesRef.current[path]?.listing;
       setPages((old) => ({ ...old, [path]: { ...old[path], busy: true, error: undefined } }));
       try {
-        let result = await rpc<FileListing>(
+        let result = await rpc(
           deviceId,
           "files.list",
           {
@@ -45,7 +45,7 @@ export function useFileBrowser(deviceId: string, workspaceId: string, active: bo
           refreshed.length < (previous?.entries.items.length ?? 0) &&
           result.entries.nextCursor
         ) {
-          result = await rpc<FileListing>(
+          result = await rpc(
             deviceId,
             "files.list",
             {

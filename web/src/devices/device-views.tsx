@@ -11,7 +11,7 @@ import {
   Trash2,
   Globe,
 } from "lucide-react";
-import type { Device, Session } from "@kiteline/shared/protocol";
+import type { Device } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
 import { devicePath, workspacePath } from "../lib/navigation";
@@ -96,12 +96,7 @@ export function DeviceDetail({
     async function refresh() {
       const current = ++revision;
       try {
-        const result = await rpc<{ sessions: Session[] }>(
-          device.id,
-          "sessions.list",
-          {},
-          abort.signal,
-        );
+        const result = await rpc(device.id, "sessions.list", {}, abort.signal);
         if (stopped || current !== revision) return;
         const next: Record<string, number> = {};
         for (const session of result.sessions)

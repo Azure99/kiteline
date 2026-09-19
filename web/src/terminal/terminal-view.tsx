@@ -13,7 +13,6 @@ import { TerminalDisplay, type DisplayState } from "./display";
 import { IconButton } from "../components/icon-button";
 import { Button } from "../components/ui/button";
 import { rpc, errorMessage } from "../lib/api";
-import type { Session } from "@kiteline/shared/protocol";
 import type { Terminal } from "@xterm/xterm";
 import { TouchControls } from "./touch-controls";
 import { useMobile } from "../lib/use-mobile";
@@ -90,20 +89,10 @@ export function TerminalView({
     const signal = operations.current.signal;
     setRecovering(true);
     try {
-      let session = await rpc<Session>(
-        deviceId,
-        "sessions.recover",
-        { workspaceId, sessionId },
-        signal,
-      );
+      let session = await rpc(deviceId, "sessions.recover", { workspaceId, sessionId }, signal);
       while (!signal.aborted && session.webStatus === "recovering") {
         await new Promise((resolve) => setTimeout(resolve, 500));
-        const result = await rpc<{ sessions: Session[] }>(
-          deviceId,
-          "sessions.list",
-          { workspaceId },
-          signal,
-        );
+        const result = await rpc(deviceId, "sessions.list", { workspaceId }, signal);
         const current = result.sessions.find((value) => value.id === sessionId);
         if (!current) throw new Error("原任务已结束");
         session = current;

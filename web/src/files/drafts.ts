@@ -6,7 +6,7 @@ import { ApiError, errorMessage, rpc } from "../lib/api";
 import { navigate, workspacePath } from "../lib/navigation";
 import { readText, writeText, type DiskText, type FileTarget } from "./content";
 import { textState } from "./editor-state";
-import { movedPath, parentPath } from "./use-browser";
+import { isWithin, movedPath, parentPath } from "./use-browser";
 
 export interface Draft extends FileTarget {
   id: string;
@@ -327,9 +327,32 @@ export class DraftStore {
       this.changed();
     }
   }
-  async rename(deviceId: string, workspaceId: string, from: string, to: string) {
-    const moved = this.items.filter(
+  async renameFile(target: FileTarget, newName: string) {
+    const drafts = this.items.filter(
+      (draft) =>
+        draft.deviceId === target.deviceId &&
+        draft.workspaceId === target.workspaceId &&
+        (isWithin(draft.path, target.path) ||
+          (draft.unknownSave && isWithin(draft.unknownSave.target.path, target.path))),
+    );
+    const result = await rpc(target.deviceId, "files.rename", {
+      workspaceId: target.workspaceId,
+      path: target.path,
+      newName,
+    });
+    void this.rename(target.deviceId, target.workspaceId, result.from, result.to, drafts);
+    return result;
+  }
+  async rename(
+    deviceId: string,
+    workspaceId: string,
+    from: string,
+    to: string,
+    candidates = this.items,
+  ) {
+    const moved = candidates.filter(
       (item) =>
+        this.has(item) &&
         item.deviceId === deviceId &&
         item.workspaceId === workspaceId &&
         (movedPath(item.path, from, to) !== item.path ||

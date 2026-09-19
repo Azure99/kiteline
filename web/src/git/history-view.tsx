@@ -43,7 +43,7 @@ export function HistoryView(props: Props) {
       setBusy(true);
       setError("");
       try {
-        const result = await rpc<GitHistory>(
+        const result = await rpc(
           deviceId,
           "git.history",
           { workspaceId, repoId, anchorOid: anchor, offset },
@@ -184,7 +184,7 @@ function CommitView({
       setBusy(true);
       setError("");
       try {
-        const next = await rpc<CommitFiles>(
+        const next = await rpc(
           deviceId,
           "git.commitFiles",
           { workspaceId, repoId, commitOid: commit.oid, parentOid: parent, cursor },
@@ -313,6 +313,7 @@ function CommitView({
         </aside>
         {target && (
           <DiffView
+            key={JSON.stringify(target)}
             {...{ deviceId, workspaceId, repoId, target }}
             onBack={() => setTarget(undefined)}
             onFile={() => onFile(target.path)}

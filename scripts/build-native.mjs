@@ -1,10 +1,24 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, cpSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+  cpSync,
+  copyFileSync,
+  rmSync,
+} from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
-const destination = resolve(root, "dist/native");
+const recorderDependencies = JSON.parse(
+  readFileSync(resolve(root, "terminal-recorder/package.json"), "utf8"),
+).dependencies;
+const webDependencies = JSON.parse(
+  readFileSync(resolve(root, "web/package.json"), "utf8"),
+).dependencies;
+const destination = resolve(process.env.KITELINE_NATIVE_OUTPUT ?? resolve(root, "dist/native"));
 const directory = mkdtempSync("/var/tmp/kiteline-native-");
 const tarball = resolve(directory, "tmux.tar.gz");
 const checksum = "551ab8dea0bf505c0ad6b7bb35ef567cdde0ccb84357df142c254f35a23e19aa";
@@ -32,6 +46,30 @@ try {
   run("make", ["-s", "-j2"], source);
   mkdirSync(resolve(destination, "bin"), { recursive: true });
   cpSync(resolve(source, "tmux"), resolve(destination, "bin/tmux"));
+  mkdirSync(resolve(destination, "licenses"), { recursive: true });
+  cpSync(resolve(source, "COPYING"), resolve(destination, "licenses/tmux.txt"));
+  const libraries = {};
+  if (process.env.KITELINE_BUNDLE_LIBS === "1") {
+    const linked = spawnSync("ldd", [resolve(destination, "bin/tmux")], { encoding: "utf8" });
+    if (linked.status !== 0 || linked.stdout.includes("not found"))
+      throw new Error("tmux dynamic dependencies are unavailable");
+    mkdirSync(resolve(destination, "lib"), { recursive: true });
+    for (const match of linked.stdout.matchAll(
+      /\s+(lib(?:event|tinfo|ncurses)[^\s]+) => (\/[^\s]+)/g,
+    )) {
+      copyFileSync(match[2], resolve(destination, "lib", match[1]));
+      libraries[match[1]] = digest(match[2]);
+    }
+    run("patchelf", ["--set-rpath", "$ORIGIN/../lib", resolve(destination, "bin/tmux")]);
+    for (const [name, file] of [
+      ["libevent", "/usr/share/doc/libevent-dev/copyright"],
+      ["ncurses", "/usr/share/doc/libncurses-dev/copyright"],
+    ])
+      cpSync(file, resolve(destination, "licenses", `${name}.txt`));
+    const packages = spawnSync("dpkg-query", ["-W"], { encoding: "utf8" });
+    if (packages.status !== 0) throw new Error("Cannot record native build packages");
+    writeFileSync(resolve(destination, "build-packages.txt"), packages.stdout);
+  }
   const terminfo = spawnSync("infocmp", ["-x", "tmux-256color"], { encoding: "utf8" });
   if (terminfo.status !== 0) throw new Error("Install ncurses-term for tmux-256color");
   const terminfoSource = resolve(directory, "tmux.terminfo");
@@ -53,6 +91,7 @@ try {
       {
         node: process.version,
         architecture: process.arch,
+        libraries,
         tmux: "3.4",
         tmuxSource: checksum,
         patch: digest(resolve(root, "native/tmux-paste.patch")),
@@ -62,9 +101,9 @@ try {
         helperBinary: digest(resolve(destination, "bin/rename-noreplace")),
         helperFlags: ["-Wall", "-Wextra", "-Werror", "-O2"],
         configure: ["--disable-sixel"],
-        headless: "6.1.0-beta.303",
-        xterm: "6.1.0-beta.304",
-        serialize: "0.15.0-beta.301",
+        headless: recorderDependencies["@xterm/headless"],
+        xterm: webDependencies["@xterm/xterm"],
+        serialize: recorderDependencies["@xterm/addon-serialize"],
         profile: "xterm-c1",
       },
       null,

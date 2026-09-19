@@ -30,7 +30,7 @@ export function CommitBox({
   const available =
     !disabled && !!status?.stagedCount && !status.hasConflicts && !!status.indexToken;
   const submit = () => {
-    if (!available || !value.message.trim()) return;
+    if (!available || !value.message.trim() || !status?.indexToken) return;
     void actions.run(
       target,
       "git.commit",
