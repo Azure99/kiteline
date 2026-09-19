@@ -1,4 +1,9 @@
 export const en = {
+  release: {
+    webMismatch:
+      "Web {{web}} / Server {{server}}: remote operations are paused. Copy any unsaved content before reloading.",
+    reload: "Reload page",
+  },
   common: {
     language: "Language",
     browserLanguage: "Use browser language",
@@ -98,6 +103,7 @@ export const en = {
     not_found: "The requested item is unavailable.",
     invalid_argument: "Check the supplied values.",
     offline: "The device is offline.",
+    version_mismatch: "The versions do not match. Use the server's matching release.",
     busy: "The resource is busy.",
     timeout: "The operation timed out.",
     conflict: "The current state has changed. Refresh and check before continuing.",
@@ -111,6 +117,11 @@ export const en = {
     partial: "The operation was only partially completed.",
   },
   devices: {
+    upgradeAgent: "Upgrade agent",
+    copyUpgrade: "Copy upgrade command",
+    upgradeTarget: "Matching release: {{version}}",
+    upgradeHint:
+      "Run on this device in a separate terminal or SSH session. Stop a foreground agent first. Confirming the upgrade ends its terminals and keeps the binding, configuration and workspaces.",
     bind: "Connect device",
     generating: "Generating",
     generateCommand: "Generate install command",
@@ -168,6 +179,12 @@ export const en = {
     linkCopied: "Link copied",
     expiresAt: "Expires at {{time}}",
     lastSeen: "Last connected {{time}}",
+    versionMismatch: "Version mismatch",
+    versionUnknown: "Unknown",
+    releaseVersions: "Agent {{agent}} · Server {{server}}",
+    versionObserved: "Last reported {{time}}",
+    matchingReleaseRequired:
+      "Install the server's matching agent release to reconnect. Version rejection does not stop local terminal tasks.",
     workspaces_one: "{{count, number}} workspace",
     workspaces_other: "{{count, number}} workspaces",
     openService: "Open device port · {{device}}:{{port}}",

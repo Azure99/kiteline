@@ -1,13 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { basename, isAbsolute, resolve } from "node:path";
 import { realpath, stat } from "node:fs/promises";
-import {
-  AppError,
-  appVersion,
-  checkMetadata,
-  limits,
-  type Metadata,
-} from "@kiteline/shared/protocol";
+import { AppError, checkMetadata, limits, type Metadata } from "@kiteline/shared/protocol";
 import { atomicJson, readJson, type AgentConfig } from "./config.js";
 
 export class MetadataStore {
@@ -32,8 +26,6 @@ export class MetadataStore {
   hello(snapshot = this.value) {
     return {
       type: "hello",
-      protocolVersion: 1,
-      agentVersion: appVersion,
       snapshot,
       editorBytes: this.config.limits.editorBytes,
     };

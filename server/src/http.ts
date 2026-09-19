@@ -1,5 +1,16 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { AppError, asError, limits } from "@kiteline/shared/protocol";
+import { AppError, appVersion, asError, limits } from "@kiteline/shared/protocol";
+
+export function requireVersion(clientVersion: string | null, component: "agent" | "web") {
+  if (clientVersion !== appVersion) throw versionMismatch(clientVersion, component);
+}
+export function versionMismatch(clientVersion: string | null, component: "agent" | "web") {
+  return new AppError(
+    "version_mismatch",
+    `${component} version ${clientVersion ?? "unknown"} does not match server ${appVersion}. Use the matching release.`,
+    { component, clientVersion, serverVersion: appVersion },
+  );
+}
 
 export function json(response: ServerResponse, status: number, value: unknown) {
   response.writeHead(status, {
@@ -43,6 +54,7 @@ export function errorStatus(error: unknown) {
     limit_exceeded: 413,
     invalid_argument: 400,
     offline: 503,
+    version_mismatch: 426,
   };
   return statuses[asError(error).code] ?? 500;
 }

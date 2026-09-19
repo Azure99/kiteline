@@ -3,10 +3,12 @@ import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import {
   AppError,
+  appVersion,
   asError,
   errorReply,
   integer,
   limits,
+  protocolVersion,
   record,
   string,
   type Reply,
@@ -78,6 +80,8 @@ export class Agent {
   private readonly tasks = new Set<Promise<unknown>>();
   socket?: WebSocket;
   connectionId?: string;
+  private serverVersion?: string;
+  private connectionError?: string;
   private reconnect?: NodeJS.Timeout;
   private stopped = false;
   private delay = 1000;
@@ -124,6 +128,8 @@ export class Agent {
         return diagnose(this.config, signal, {
           server: this.identity.server,
           connected: this.socket?.readyState === WebSocket.OPEN && !!this.connectionId,
+          serverVersion: this.serverVersion,
+          connectionError: this.connectionError,
           revision: this.metadata.value.revision,
           shell: this.config.shell,
           recorderPid: this.sessions.recorder.pid,
@@ -164,13 +170,16 @@ export class Agent {
   }
   private connect() {
     if (this.stopped) return;
-    const url = new URL("/api/agent/control?protocolVersion=1", this.identity.server);
+    const url = new URL("/api/agent/control", this.identity.server);
+    url.searchParams.set("protocolVersion", String(protocolVersion));
+    url.searchParams.set("appVersion", appVersion);
     url.protocol = "wss:";
     const socket = new WebSocket(url, {
       headers: { authorization: `Bearer ${this.identity.deviceToken}` },
       maxPayload: limits.controlMessageBytes,
       handshakeTimeout: this.config.limits.channelPairTimeout,
     });
+    let failure: string | undefined;
     this.socket = socket;
     let lastPong = Date.now();
     const ping = setInterval(() => {
@@ -180,7 +189,11 @@ export class Agent {
     socket.on("pong", () => {
       lastPong = Date.now();
     });
-    socket.on("error", (error) => console.error("Control connection:", error.message));
+    socket.on("open", () => this.send(this.metadata.hello()));
+    socket.on("error", (error) => {
+      this.connectionError = failure ??= error.message;
+      console.error("Control connection:", error.message);
+    });
     socket.on("unexpected-response", (_request, response) => {
       const hint =
         response.statusCode === 426
@@ -188,18 +201,40 @@ export class Agent {
           : response.statusCode === 401
             ? "Check the device binding and credentials."
             : "Check the server URL and reverse proxy.";
-      console.error(`Control connection: HTTP ${response.statusCode}. ${hint}`);
-      response.resume();
-      socket.terminate();
+      void (async () => {
+        let diagnostic = hint;
+        try {
+          const parts: Buffer[] = [];
+          let size = 0;
+          for await (const chunk of response) {
+            size += chunk.length;
+            if (size > limits.controlMessageBytes) break;
+            parts.push(Buffer.from(chunk));
+          }
+          const error = record(record(JSON.parse(Buffer.concat(parts).toString())).error);
+          diagnostic = string(error.message);
+          if (error.code === "version_mismatch")
+            this.serverVersion = string(record(error.details).serverVersion);
+        } catch {
+          // A reverse proxy may return an HTML error instead of the server diagnostic.
+        } finally {
+          this.connectionError = failure = `HTTP ${response.statusCode}. ${diagnostic}`;
+          console.error("Control connection:", this.connectionError);
+          socket.terminate();
+        }
+      })();
     });
     socket.on("message", (raw, binary) => {
       try {
         if (binary) throw new AppError("invalid_argument", "Expected JSON");
         const message = record(JSON.parse(raw.toString()));
         if (message.type === "welcome") {
+          this.serverVersion = string(message.serverVersion);
+          if (this.serverVersion !== appVersion)
+            throw new AppError("version_mismatch", "Server returned a different release version");
           this.connectionId = string(message.connectionId);
+          this.connectionError = undefined;
           this.delay = 1000;
-          this.send(this.metadata.hello());
         } else if (message.type === "channel.open") {
           if (message.connectionId !== this.connectionId)
             throw new AppError("conflict", "Stale control connection");
@@ -290,6 +325,9 @@ export class Agent {
     });
     socket.on("close", (code, reason) => {
       clearInterval(ping);
+      this.connectionError =
+        failure ??
+        `Control connection closed (${code}${reason.length ? ": " + reason.toString() : ""})`;
       this.connectionId = undefined;
       for (const controller of this.requests.values())
         controller.abort(new AppError("cancelled", "Control connection interrupted"));

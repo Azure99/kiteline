@@ -12,6 +12,7 @@ import {
   Settings,
   Trash2,
   Globe,
+  Download,
 } from "lucide-react";
 import type { Device } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
@@ -22,6 +23,7 @@ import { useEffect, useState } from "react";
 import { TerminalSettings } from "../terminal/settings";
 import { rpc } from "../lib/api";
 import { IconButton } from "../components/icon-button";
+import { UpgradeDialog } from "./upgrade-dialog";
 
 export function DeviceList({
   devices,
@@ -60,7 +62,11 @@ export function DeviceList({
               <span className="min-w-0 flex-1 basis-32 truncate font-medium">{d.name}</span>
               <span className="flex items-center gap-2 text-xs text-muted-foreground">
                 <span className="status-dot" data-status={d.status} />
-                {t(($) => $.common[d.status])}
+                {d.status === "offline" &&
+                d.release &&
+                d.release.agentVersion !== d.release.serverVersion
+                  ? t(($) => $.devices.versionMismatch)
+                  : t(($) => $.common[d.status])}
               </span>
               <span className="text-xs text-muted-foreground">
                 {t(($) => $.devices.workspaces, { count: d.snapshot?.workspaces.length ?? 0 })}
@@ -89,6 +95,7 @@ export function DeviceDetail({
   const { t, i18n } = useTranslation();
 
   const [settings, setSettings] = useState(false);
+  const [upgrade, setUpgrade] = useState(false);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [countError, setCountError] = useState<unknown>();
   useEffect(() => {
@@ -137,6 +144,10 @@ export function DeviceDetail({
             <MoreHorizontal />
           </MenuTrigger>
           <MenuContent>
+            <MenuItem disabled={device.status === "revoked"} onClick={() => setUpgrade(true)}>
+              <Download />
+              {t(($) => $.devices.upgradeAgent)}
+            </MenuItem>
             <MenuItem onClick={() => setSettings(true)}>
               <Settings />
               {t(($) => $.terminal.settings)}
@@ -158,7 +169,11 @@ export function DeviceDetail({
       <div className="mb-7 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
         <span className="flex items-center gap-2">
           <span className="status-dot" data-status={device.status} />
-          {t(($) => $.common[device.status])}
+          {device.status === "offline" &&
+          device.release &&
+          device.release.agentVersion !== device.release.serverVersion
+            ? t(($) => $.devices.versionMismatch)
+            : t(($) => $.common[device.status])}
         </span>
         {device.lastSeenAt && (
           <span>
@@ -168,6 +183,29 @@ export function DeviceDetail({
           </span>
         )}
       </div>
+      {device.release && (
+        <div className="mb-5 space-y-1 text-xs text-muted-foreground">
+          <p>
+            {t(($) => $.devices.releaseVersions, {
+              agent: device.release.agentVersion ?? t(($) => $.devices.versionUnknown),
+              server: device.release.serverVersion,
+            })}
+          </p>
+          {device.status !== "online" && (
+            <p>
+              {t(($) => $.devices.versionObserved, {
+                time: new Date(device.release.observedAt).toLocaleString(i18n.resolvedLanguage),
+              })}
+            </p>
+          )}
+          {device.status === "offline" &&
+            device.release.agentVersion !== device.release.serverVersion && (
+              <p role="status" className="text-destructive">
+                {t(($) => $.devices.matchingReleaseRequired)}
+              </p>
+            )}
+        </div>
+      )}
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-semibold">
           Workspaces{" "}
@@ -245,6 +283,7 @@ export function DeviceDetail({
         </div>
       )}
       {settings && <TerminalSettings device={device} onClose={() => setSettings(false)} />}
+      {upgrade && <UpgradeDialog onClose={() => setUpgrade(false)} />}
     </section>
   );
 }

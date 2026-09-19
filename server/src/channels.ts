@@ -123,7 +123,7 @@ export class Channels {
       if (kind === "file.read") this.notifyFileFailure(id, login.id, deviceId, params, error);
       throw error;
     };
-    if (!connection?.snapshot) return unavailable(new AppError("offline", "Device offline"));
+    if (!connection?.snapshot) return unavailable(this.connections.unavailableError(deviceId));
     if (
       [...this.entries.values()].filter((item) => item.connection === connection).length >=
       this.config.limits.channelsPerDevice

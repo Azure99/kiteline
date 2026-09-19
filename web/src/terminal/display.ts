@@ -19,6 +19,7 @@ import {
 import { ApiError, api, post } from "../lib/api";
 import { i18n } from "../i18n";
 import { retainReadonlyViewport } from "./readonly-viewport";
+import { versionedPath } from "../lib/release";
 
 export interface DisplayState {
   status: "connecting" | "ready" | "ended" | "error";
@@ -95,7 +96,7 @@ export class TerminalDisplay {
       if (channel.meta.terminalProfile !== terminalProfile)
         throw new Error("Terminal component versions differ; upgrade them together");
       const url = new URL(
-        `/api/channels/${encodeURIComponent(channel.channelId)}/terminal`,
+        versionedPath(`/api/channels/${encodeURIComponent(channel.channelId)}/terminal`),
         location.href,
       );
       url.protocol = "wss:";

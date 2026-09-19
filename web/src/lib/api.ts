@@ -7,6 +7,7 @@ import {
 } from "@kiteline/shared/protocol";
 import { i18n } from "../i18n";
 import { en } from "../i18n/en";
+import { observeServerVersion, versionedPath } from "./release";
 
 export class ApiError extends Error {
   constructor(
@@ -25,13 +26,14 @@ export async function api<T>(
   mutation = !!options.method && !["GET", "HEAD"].includes(options.method),
 ): Promise<T> {
   try {
-    const response = await fetch(path, {
+    const response = await fetch(versionedPath(path), {
       ...options,
       headers: {
         ...(options.body ? { "content-type": "application/json" } : {}),
         ...options.headers,
       },
     });
+    observeServerVersion(response.headers.get("x-kiteline-version"));
     const data: unknown = await response.json();
     if (!response.ok) {
       const error = (data as { error: KitelineError }).error;

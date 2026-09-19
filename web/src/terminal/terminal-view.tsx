@@ -13,7 +13,8 @@ import {
 import { TerminalDisplay, type DisplayState } from "./display";
 import { IconButton } from "../components/icon-button";
 import { Button } from "../components/ui/button";
-import { rpc } from "../lib/api";
+import { api, rpc } from "../lib/api";
+import { useServerVersion, webCompatible } from "../lib/release";
 import { Terminal } from "@xterm/xterm";
 import { ErrorNotice } from "../components/error-notice";
 import { TouchControls } from "./touch-controls";
@@ -47,6 +48,7 @@ export function TerminalView({
   onStatus?: (status: DisplayState["status"]) => void;
 }) {
   const { t } = useTranslation();
+  useServerVersion();
 
   const element = useRef<HTMLDivElement>(null);
   const display = useRef<TerminalDisplay>(undefined);
@@ -75,10 +77,19 @@ export function TerminalView({
     return () => operations.current.abort();
   }, []);
   function redisplay(scope: "retained" | "screen" = "retained") {
-    setNotice("");
-    setHistory(scope);
-    setState({ status: "connecting" });
-    setAttempt((value) => value + 1);
+    if (!webCompatible()) return;
+    const signal = operations.current.signal;
+    void api("/api/session", { signal })
+      .then(() => {
+        if (signal.aborted || !webCompatible()) return;
+        setNotice("");
+        setHistory(scope);
+        setState({ status: "connecting" });
+        setAttempt((value) => value + 1);
+      })
+      .catch((error: unknown) => {
+        if (!signal.aborted) setNotice(error);
+      });
   }
   useImperativeHandle(ref, () => ({
     redisplay,
@@ -217,7 +228,7 @@ export function TerminalView({
             <>
               <Button
                 variant="ghost"
-                disabled={recovering}
+                disabled={recovering || !webCompatible()}
                 onClick={() =>
                   state.code === "recording_unavailable" ? void recover() : redisplay()
                 }

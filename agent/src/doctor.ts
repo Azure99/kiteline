@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { isDeepStrictEqual, promisify } from "node:util";
 import { createRequire } from "node:module";
 import { join } from "node:path";
-import { terminalProfile, type Session } from "@kiteline/shared/protocol";
+import { appVersion, terminalProfile, type Session } from "@kiteline/shared/protocol";
 import { tmuxBinary, tmuxEnvironment } from "@kiteline/shared/terminal/node";
 import { agentConfig, agentPaths, defaultAgentLimits, type AgentConfig } from "./config.js";
 import { localRequest } from "./local.js";
@@ -25,6 +25,8 @@ export interface DoctorReport {
 interface Runtime {
   server: string;
   connected: boolean;
+  serverVersion?: string;
+  connectionError?: string;
   revision: number;
   shell: string;
   recorderPid?: number;
@@ -119,12 +121,15 @@ export async function diagnose(
   }
   add(
     "Agent",
-    `pid=${process.pid}; uid=${process.getuid?.()}; cwd=${process.cwd()}; metadata revision=${runtime.revision}`,
+    `version=${appVersion}; pid=${process.pid}; uid=${process.getuid?.()}; cwd=${process.cwd()}; metadata revision=${runtime.revision}`,
   );
   add("Environment", `HOME=${process.env.HOME ?? ""}\nPATH=${process.env.PATH ?? ""}`);
   add(
     "server",
-    runtime.server + (runtime.connected ? " connected" : " disconnected"),
+    runtime.server +
+      (runtime.connected ? " connected" : " disconnected") +
+      (runtime.serverVersion ? `; last server version=${runtime.serverVersion}` : "") +
+      (runtime.connectionError ? `; ${runtime.connectionError}` : ""),
     runtime.connected ? "ok" : "warn",
   );
   add(

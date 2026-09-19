@@ -10,6 +10,8 @@ import { WebSocket, WebSocketServer } from "ws";
 import { Agent } from "../src/control.js";
 import { defaultAgentLimits } from "../src/config.js";
 import { localRequest } from "../src/local.js";
+import { appVersion, type Session } from "@kiteline/shared/protocol";
+import type { DoctorReport } from "../src/doctor.js";
 
 test("control reconnects after handshake rejection, retains valid watches and scopes remote session end", async () => {
   const root = await mkdtemp("/var/tmp/kiteline-agent-control-");
@@ -46,7 +48,21 @@ test("control reconnects after handshake rejection, retains valid watches and sc
     server = createServer({ key: await readFile(key), cert: await readFile(cert) });
     sockets = new WebSocketServer({ noServer: true });
     const refusals = [401, 426];
+    let rejectVersion = false;
     server.on("upgrade", (request, socket, head) => {
+      if (rejectVersion) {
+        const body = JSON.stringify({
+          error: {
+            code: "version_mismatch",
+            message: "Install the matching release 0.3.0-test",
+            details: { serverVersion: "0.3.0-test" },
+          },
+        });
+        socket.end(
+          `HTTP/1.1 426 Rejected\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`,
+        );
+        return;
+      }
       const status = refusals.shift();
       if (status) socket.end(`HTTP/1.1 ${status} Rejected\r\nConnection: close\r\n\r\n`);
       else sockets!.handleUpgrade(request, socket, head, (ws) => sockets!.emit("connection", ws));
@@ -54,8 +70,14 @@ test("control reconnects after handshake rejection, retains valid watches and sc
     const messages: Record<string, unknown>[] = [];
     let peer: WebSocket | undefined;
     sockets.once("connection", (socket) => {
-      socket.on("message", (data) => messages.push(JSON.parse(data.toString())));
-      socket.send(JSON.stringify({ type: "welcome", connectionId: "test" }));
+      socket.on("message", (data) => {
+        const message = JSON.parse(data.toString());
+        messages.push(message);
+        if (message.type === "hello")
+          socket.send(
+            JSON.stringify({ type: "welcome", connectionId: "test", serverVersion: appVersion }),
+          );
+      });
       peer = socket;
     });
     server.listen(0, "127.0.0.1");
@@ -128,6 +150,26 @@ test("control reconnects after handshake rejection, retains valid watches and sc
       agent.dispatch("sessions.end", { workspaceId: active.id, sessionId: session.id }, signal),
     ).resolves.toEqual({ ended: true });
     const local = await agent.sessions.create(active.id, undefined, undefined, signal);
+    rejectVersion = true;
+    socket.close();
+    await expect
+      .poll(() => log.mock.calls.flat().join("\n"), { timeout: 5000 })
+      .toContain("Install the matching release 0.3.0-test");
+    const report = await localRequest<DoctorReport>(agent.config, "doctor");
+    expect(report.items.find((item) => item.name === "server")?.detail).toContain(
+      "last server version=0.3.0-test",
+    );
+    const retained = await localRequest<{ sessions: Session[] }>(agent.config, "sessions.list");
+    expect(retained.sessions).toMatchObject([{ id: local.id, state: "running" }]);
+    await new Promise<void>((resolve) => server!.close(() => resolve()));
+    server = undefined;
+    await expect
+      .poll(() => log.mock.calls.flat().join("\n"), { timeout: 8000 })
+      .toContain("ECONNREFUSED");
+    const disconnected = await localRequest<DoctorReport>(agent.config, "doctor");
+    expect(disconnected.items.find((item) => item.name === "server")?.detail).toContain(
+      "ECONNREFUSED",
+    );
     await expect(
       localRequest(agent.config, "sessions.end", { sessionId: local.id }),
     ).resolves.toEqual({ ended: true });
@@ -141,4 +183,4 @@ test("control reconnects after handshake rejection, retains valid watches and sc
     await rm(root, { recursive: true, force: true });
     log.mockRestore();
   }
-}, 15000);
+}, 20000);

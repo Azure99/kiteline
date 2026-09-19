@@ -86,6 +86,7 @@ function failure(
     unsupported: 405,
     invalid_argument: 400,
     offline: 503,
+    version_mismatch: 426,
     busy: 429,
     timeout: 504,
   };

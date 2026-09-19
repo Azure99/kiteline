@@ -6,6 +6,7 @@ import { LanguageMenu } from "./components/language-menu";
 import { api, post } from "./lib/api";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
+import { ReleaseNotice } from "./components/release-notice";
 import {
   Dialog,
   DialogContent,
@@ -49,6 +50,7 @@ export function Auth({
   return (
     <main className="flex min-h-dvh items-center justify-center bg-muted px-6 py-12">
       <div className="w-full max-w-80">
+        <ReleaseNotice />
         <div className="mb-9 flex items-center gap-3">
           <span className="flex size-9 items-center justify-center rounded bg-primary text-white">
             <Terminal size={22} />

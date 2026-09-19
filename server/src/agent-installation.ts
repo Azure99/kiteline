@@ -22,6 +22,39 @@ sh "$kiteline_install" --server ${origin} --version ${quote(appVersion)} --code 
   return { foreground: command(false), service: command(true), bind };
 }
 
+export function upgradeCommand(publicUrl: string) {
+  return {
+    version: appVersion,
+    command: `(
+set -e
+for kiteline_tool in curl mktemp uname id; do
+  command -v "$kiteline_tool" >/dev/null || { echo "Missing $kiteline_tool; Ubuntu 24.04: sudo apt-get update && sudo apt-get install -y curl ca-certificates coreutils" >&2; exit 1; }
+done
+[ "$(uname -s)" = Linux ] || { echo 'Only Linux is supported' >&2; exit 1; }
+case "$(uname -m)" in
+  x86_64) kiteline_arch=amd64 ;;
+  aarch64|arm64) kiteline_arch=arm64 ;;
+  *) echo 'Only Linux amd64/arm64 is supported' >&2; exit 1 ;;
+esac
+[ -x /usr/local/bin/kiteline-agent ] || { echo 'Install and bind the agent before upgrading' >&2; exit 1; }
+if [ "$(id -u)" -ne 0 ]; then
+  command -v sudo >/dev/null || { echo 'The upgrade requires sudo or root' >&2; exit 1; }
+fi
+kiteline_upgrade=$(mktemp -d /var/tmp/kiteline-agent-upgrade.XXXXXX)
+trap 'rm -rf "$kiteline_upgrade"' EXIT
+kiteline_name="kiteline-agent-${appVersion}-linux-$kiteline_arch.tar.gz"
+kiteline_base=${quote(publicUrl + "/downloads/agent/" + appVersion + "/")}"$kiteline_name"
+curl -fsSL --proto '=https' --proto-redir '=https' "$kiteline_base" -o "$kiteline_upgrade/$kiteline_name"
+curl -fsSL --proto '=https' --proto-redir '=https' "$kiteline_base.sha256" -o "$kiteline_upgrade/$kiteline_name.sha256"
+if [ "$(id -u)" -eq 0 ]; then
+  /usr/local/bin/kiteline-agent service upgrade --archive "$kiteline_upgrade/$kiteline_name"
+else
+  sudo -- /usr/local/bin/kiteline-agent service upgrade --archive "$kiteline_upgrade/$kiteline_name"
+fi
+)`,
+  };
+}
+
 export async function serveAgentInstallation(
   path: string,
   directory: string,

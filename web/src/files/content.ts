@@ -8,6 +8,7 @@ import type {
 } from "@kiteline/shared/protocol";
 import { decodeText } from "@kiteline/shared/text";
 import { ApiError, api, post } from "../lib/api";
+import { observeServerVersion, versionedPath, webCompatible } from "../lib/release";
 
 export interface FileTarget {
   deviceId: string;
@@ -37,6 +38,7 @@ async function release(id: string) {
   await api(`/api/channels/${id}`, { method: "DELETE" }).catch(() => {});
 }
 async function check(response: Response) {
+  observeServerVersion(response.headers.get("x-kiteline-version"));
   if (response.ok) return;
   if (response.status === 401) window.dispatchEvent(new Event("kiteline:unauthenticated"));
   const data = (await response.json()) as { error: KitelineError };
@@ -50,7 +52,9 @@ export async function readText(
   const ready = await channel(target, "file.read", { purpose: "text" }, signal);
   onChannel?.(ready.channelId);
   try {
-    const response = await fetch(`/api/channels/${ready.channelId}/content`, { signal });
+    const response = await fetch(versionedPath(`/api/channels/${ready.channelId}/content`), {
+      signal,
+    });
     await check(response);
     const bytes = new Uint8Array(await response.arrayBuffer());
     if (bytes.length !== ready.meta.size) throw new Error("File transfer is incomplete");
@@ -82,7 +86,7 @@ export async function writeText(
     signal,
   );
   try {
-    const response = await fetch(`/api/channels/${ready.channelId}/content`, {
+    const response = await fetch(versionedPath(`/api/channels/${ready.channelId}/content`), {
       method: "PUT",
       body: new Blob([bytes as Uint8Array<ArrayBuffer>]),
       signal,
@@ -107,8 +111,11 @@ export async function writeText(
 }
 
 export function downloadFile(target: FileTarget) {
+  if (!webCompatible()) return;
   const link = document.createElement("a");
-  link.href = `/api/devices/${encodeURIComponent(target.deviceId)}/download?${new URLSearchParams({ workspaceId: target.workspaceId, path: target.path })}`;
+  link.href = versionedPath(
+    `/api/devices/${encodeURIComponent(target.deviceId)}/download?${new URLSearchParams({ workspaceId: target.workspaceId, path: target.path })}`,
+  );
   link.download = target.path.split("/").at(-1)!;
   document.body.append(link);
   link.click();
@@ -124,7 +131,9 @@ export async function readImage(
   const ready = await channel(target, "file.read", { purpose: "image" }, signal);
   onChannel(ready.channelId);
   try {
-    const response = await fetch(`/api/channels/${ready.channelId}/content`, { signal });
+    const response = await fetch(versionedPath(`/api/channels/${ready.channelId}/content`), {
+      signal,
+    });
     await check(response);
     const blob = await response.blob();
     if (blob.size !== ready.meta.size) throw new Error("Image transfer is incomplete");
@@ -160,11 +169,12 @@ export async function uploadFile(
       };
       signal.addEventListener("abort", cancel, { once: true });
       const cleanup = () => signal.removeEventListener("abort", cancel);
-      request.open("PUT", `/api/channels/${ready.channelId}/content`);
+      request.open("PUT", versionedPath(`/api/channels/${ready.channelId}/content`));
       request.responseType = "json";
       request.upload.onprogress = (event) => onProgress(event.loaded);
       request.onload = () => {
         cleanup();
+        observeServerVersion(request.getResponseHeader("x-kiteline-version"));
         if (request.status === 401) window.dispatchEvent(new Event("kiteline:unauthenticated"));
         const reply = request.response as Reply<UploadedFile> | { error: KitelineError } | null;
         if (reply && "outcome" in reply && reply.outcome === "succeeded") resolve(reply.result);

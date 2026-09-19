@@ -1,5 +1,9 @@
 import type { TranslationResources } from "./en";
 export const zhCN = {
+  release: {
+    webMismatch: "Web {{web}} / Server {{server}}：远程操作已暂停。刷新前请复制未保存的内容。",
+    reload: "刷新页面",
+  },
   common: {
     language: "语言",
     browserLanguage: "跟随浏览器",
@@ -99,6 +103,7 @@ export const zhCN = {
     not_found: "所需项目不可用。",
     invalid_argument: "请检查输入内容。",
     offline: "设备已离线。",
+    version_mismatch: "版本不匹配，请使用与 server 配套的版本。",
     busy: "资源正忙。",
     timeout: "操作已超时。",
     conflict: "当前状态已变化，请刷新核对后继续。",
@@ -112,6 +117,11 @@ export const zhCN = {
     partial: "操作部分完成。",
   },
   devices: {
+    upgradeAgent: "升级 agent",
+    copyUpgrade: "复制升级命令",
+    upgradeTarget: "配套目标版本：{{version}}",
+    upgradeHint:
+      "在此设备的独立终端或 SSH 中执行。前台 agent 须先自行停止；确认升级会结束其终端，保留绑定、配置和 workspace。",
     bind: "绑定设备",
     generating: "正在生成",
     generateCommand: "生成接入命令",
@@ -166,6 +176,12 @@ export const zhCN = {
     linkCopied: "链接已复制",
     expiresAt: "{{time}} 到期",
     lastSeen: "最近连接 {{time}}",
+    versionMismatch: "版本不匹配",
+    versionUnknown: "未知",
+    releaseVersions: "Agent {{agent}} · Server {{server}}",
+    versionObserved: "最后报告 {{time}}",
+    matchingReleaseRequired:
+      "安装与 server 配套的 agent 后重新连接。版本拒绝不会结束本机终端任务。",
     workspaces_one: "{{count, number}} workspace",
     workspaces_other: "{{count, number}} workspace",
     openService: "访问设备端口 · {{device}}:{{port}}",

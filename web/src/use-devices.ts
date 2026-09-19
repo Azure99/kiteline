@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { BrowserEvent, Device } from "@kiteline/shared/protocol";
 import { api } from "./lib/api";
 import type { Session } from "./auth";
+import { useServerVersion, versionedPath, webCompatible } from "./lib/release";
 
 export function useDevices(
   active: boolean,
@@ -9,6 +10,7 @@ export function useDevices(
   workspaceId?: string,
   onSession?: (session: Session) => void,
 ) {
+  const serverVersion = useServerVersion();
   const [devices, setDevices] = useState<Device[]>([]);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<unknown>();
@@ -35,8 +37,8 @@ export function useDevices(
         if (stopped) return;
         onSession?.(session);
         await refresh();
-        if (stopped) return;
-        const url = new URL("/api/events", location.origin);
+        if (stopped || !webCompatible()) return;
+        const url = new URL(versionedPath("/api/events"), location.origin);
         url.protocol = "wss:";
         socket = new WebSocket(url);
         socketRef.current = socket;
@@ -71,6 +73,6 @@ export function useDevices(
       socketRef.current = null;
       setConnected(false);
     };
-  }, [active, refresh, onSession]);
+  }, [active, refresh, onSession, serverVersion]);
   return { devices, connected, error, refresh };
 }

@@ -89,11 +89,13 @@ sudo kiteline-agent service upgrade --archive "/path/to/kiteline-agent-${KITELIN
 sudo kiteline-agent service uninstall
 ```
 
-升级需要旁边的 `.sha256` 文件并明确确认，会结束当前终端，保留绑定、workspace 和配置；新服务未就绪时恢复旧安装并报告结果。前台方式须先停止，升级后仍保持停止；卸载默认保留状态与环境文件，`--purge-state` 只移除 agent 自己的状态 JSON，保留目录和项目文件。
+更新server后，刷新网页；设备版本不匹配时，在设备详情动作中选“升级agent”，复制命令到该设备的独立终端或SSH执行。命令下载当前server配套包和`.sha256`并调用上述upgrade，无需重新绑定。前台先自行停止，完成后再运行`kiteline-agent run`；systemd沿原方式重启。卸载默认保留状态与环境文件，`--purge-state`只移除agent自己的状态JSON，保留目录和项目文件。
 
 ### 运行与维护补充
 
 Linux 的 Unix socket 完整路径限 103 字节。显式使用 `/run` 等易失运行目录时，启动前及系统重启后需准备属于运行用户的可写目录。
+
+维护需明确确认，停止会结束终端任务，保留配置、绑定和 workspace。新服务未就绪时恢复旧安装并报告结果；前台升级后保持停止。
 
 ## 自行准备的容器
 

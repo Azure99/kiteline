@@ -2,14 +2,35 @@ import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse }
 import { readFile } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import { WebSocketServer } from "ws";
-import { AppError, appVersion, limits, record, string } from "@kiteline/shared/protocol";
+import {
+  AppError,
+  appVersion,
+  asError,
+  limits,
+  protocolVersion,
+  record,
+  string,
+} from "@kiteline/shared/protocol";
 import type { ServerConfig } from "./config.js";
 import { Store, password } from "./store.js";
-import { AttemptLimiter, body, cookie, errorStatus, failure, json, origin } from "./http.js";
+import {
+  AttemptLimiter,
+  body,
+  cookie,
+  errorStatus,
+  failure,
+  json,
+  origin,
+  requireVersion,
+} from "./http.js";
 import { bearer, Connections } from "./connections.js";
 import { Channels } from "./channels.js";
 import { HttpProxy, isProxyPath } from "./http-proxy.js";
-import { installationCommands, serveAgentInstallation } from "./agent-installation.js";
+import {
+  installationCommands,
+  serveAgentInstallation,
+  upgradeCommand,
+} from "./agent-installation.js";
 
 export function createKitelineServer(config: ServerConfig, store: Store) {
   const connections = new Connections(store);
@@ -34,6 +55,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
     const url = new URL(request.url ?? "/", config.publicUrl);
     const path = url.pathname;
     const method = request.method ?? "GET";
+    if (path.startsWith("/api/")) response.setHeader("x-kiteline-version", appVersion);
     if (await serveAgentInstallation(path, config.downloadsDir, request, response)) return;
     if (path === "/healthz" && method === "GET")
       return json(response, 200, { status: "ok", version: appVersion });
@@ -76,6 +98,11 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
         );
         return json(response, 200, {});
       }
+      if (path === "/api/devices" && method === "GET")
+        return json(response, 200, { devices: connections.devices() });
+      if (path === "/api/agent/upgrade-command" && method === "GET")
+        return json(response, 200, upgradeCommand(config.publicUrl));
+      requireVersion(url.searchParams.get("appVersion"), "web");
       if (path === "/api/bindings" && method === "POST") {
         const binding = store.newBinding();
         return json(response, 200, {
@@ -86,8 +113,6 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       const binding = /^\/api\/bindings\/([^/]+)$/.exec(path);
       if (binding && method === "GET")
         return json(response, 200, store.binding(decodeURIComponent(binding[1]!)));
-      if (path === "/api/devices" && method === "GET")
-        return json(response, 200, { devices: connections.devices() });
       const device = /^\/api\/devices\/([^/]+)(.*)$/.exec(path);
       const channel = /^\/api\/channels\/([^/]+)$/.exec(path);
       const content = /^\/api\/channels\/([^/]+)\/content$/.exec(path);
@@ -231,20 +256,23 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       } else if (browserChannel) {
         origin(request, config.publicUrl);
         const session = login(request);
+        requireVersion(url.searchParams.get("appVersion"), "web");
         const id = decodeURIComponent(browserChannel[1]!);
         channels.checkBrowser(id, session.id);
         sockets.handleUpgrade(request, socket, head, (ws) => channels.acceptBrowser(id, ws));
       } else if (url.pathname === "/api/agent/control") {
-        if (url.searchParams.get("protocolVersion") !== "1")
-          throw new AppError("unsupported", "Protocol version mismatch");
         const device = store.authenticateAgent(bearer(request));
         if (!device) throw new AppError("unauthenticated", "Invalid device credentials");
+        connections.checkAgentVersion(device.id, url.searchParams.get("appVersion"));
+        if (url.searchParams.get("protocolVersion") !== String(protocolVersion))
+          throw new AppError("unsupported", "Protocol version mismatch");
         sockets.handleUpgrade(request, socket, head, (ws) =>
           connections.acceptAgent(device.id, ws),
         );
       } else if (url.pathname === "/api/events") {
         origin(request, config.publicUrl);
         const session = login(request);
+        requireVersion(url.searchParams.get("appVersion"), "web");
         sockets.handleUpgrade(request, socket, head, (ws) =>
           connections.acceptBrowser(ws, session),
         );
@@ -252,7 +280,10 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
     } catch (error) {
       const status =
         error instanceof AppError && error.code === "unsupported" ? 426 : errorStatus(error);
-      socket.end(`HTTP/1.1 ${status} ${STATUS_CODES[status]}\r\nConnection: close\r\n\r\n`);
+      const payload = JSON.stringify({ error: asError(error) });
+      socket.end(
+        `HTTP/1.1 ${status} ${STATUS_CODES[status]}\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nContent-Length: ${Buffer.byteLength(payload)}\r\nConnection: close\r\n\r\n${payload}`,
+      );
     }
   });
   return {

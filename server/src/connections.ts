@@ -4,6 +4,7 @@ import { WebSocket } from "ws";
 import { heartbeat } from "@kiteline/shared/ws";
 import {
   AppError,
+  appVersion,
   checkMetadata,
   integer,
   limits,
@@ -13,9 +14,11 @@ import {
   type BrowserEvent,
   type WorkspaceEvent,
   type Metadata,
+  type Device,
   type Reply,
 } from "@kiteline/shared/protocol";
 import type { Login, Store } from "./store.js";
+import { requireVersion, versionMismatch } from "./http.js";
 
 export interface AgentConnection {
   id: string;
@@ -45,6 +48,8 @@ export function send(socket: WebSocket, value: unknown) {
 }
 export class Connections {
   readonly agents = new Map<string, AgentConnection>();
+  private readonly handshakes = new Set<AgentConnection>();
+  private readonly releases = new Map<string, NonNullable<Device["release"]>>();
   private readonly browsers = new Set<Browser>();
   private readonly pending = new Map<string, Pending>();
   private readonly expiry: NodeJS.Timeout;
@@ -63,15 +68,33 @@ export class Connections {
   devices() {
     return this.store.devices().map((device) => {
       const connection = this.agents.get(device.id);
+      const known = { ...device, release: this.releases.get(device.id) };
       return connection?.snapshot
         ? {
-            ...device,
+            ...known,
             status: "online" as const,
             snapshot: connection.snapshot,
             editorBytes: connection.editorBytes,
           }
-        : device;
+        : known;
     });
+  }
+  checkAgentVersion(id: string, version: string | null) {
+    if (!this.agents.has(id)) {
+      this.releases.set(id, {
+        agentVersion: version,
+        serverVersion: appVersion,
+        observedAt: new Date().toISOString(),
+      });
+      this.broadcastDevices();
+    }
+    requireVersion(version, "agent");
+  }
+  unavailableError(id: string) {
+    const release = this.releases.get(id);
+    if (release && release.agentVersion !== appVersion)
+      return versionMismatch(release.agentVersion, "agent");
+    return new AppError("offline", "Device offline");
   }
   broadcastDevices() {
     const event = { type: "devices.changed", devices: this.devices() } satisfies BrowserEvent;
@@ -82,24 +105,21 @@ export class Connections {
       if (browser.login.id === loginId) send(browser.socket, event);
   }
   acceptAgent(id: string, socket: WebSocket) {
-    const previous = this.agents.get(id);
-    if (previous) {
-      this.dropAgent(previous);
-      previous.socket.close(4001, "connection_replaced");
-    }
     const connection: AgentConnection = { id, connectionId: randomUUID(), socket };
-    this.agents.set(id, connection);
+    this.handshakes.add(connection);
     heartbeat(socket);
-    send(socket, { type: "welcome", connectionId: connection.connectionId });
-    const helloTimeout = setTimeout(() => socket.close(1008, "hello_timeout"), 30_000);
+    const helloTimeout = setTimeout(() => {
+      this.handshakes.delete(connection);
+      socket.close(1008, "hello_timeout");
+    }, 30_000);
     socket.on("message", (data, binary) => {
       try {
         if (binary) throw new AppError("invalid_argument", "Expected JSON control frame");
         const message = record(JSON.parse(data.toString()));
-        if (this.agents.get(id) !== connection) return;
+        if (socket.readyState !== WebSocket.OPEN) return;
+        if (!this.handshakes.has(connection) && this.agents.get(id) !== connection) return;
         if (message.type === "hello") {
-          if (message.protocolVersion !== 1 || connection.snapshot)
-            throw new AppError("unsupported", "Invalid hello");
+          if (connection.snapshot) throw new AppError("unsupported", "Invalid hello");
           connection.editorBytes = integer(
             message.editorBytes,
             "editorBytes",
@@ -108,8 +128,25 @@ export class Connections {
           );
           connection.snapshot = checkMetadata(message.snapshot);
           clearTimeout(helloTimeout);
+          this.handshakes.delete(connection);
+          const previous = this.agents.get(id);
+          if (previous) {
+            this.dropAgent(previous);
+            previous.socket.close(4001, "connection_replaced");
+          }
+          this.agents.set(id, connection);
+          this.releases.set(id, {
+            agentVersion: appVersion,
+            serverVersion: appVersion,
+            observedAt: new Date().toISOString(),
+          });
           this.store.snapshot(id, connection.snapshot);
           this.store.connected(id);
+          send(socket, {
+            type: "welcome",
+            connectionId: connection.connectionId,
+            serverVersion: appVersion,
+          });
           this.broadcastDevices();
           this.updateWatch(id);
         } else if (!connection.snapshot) throw new AppError("invalid_argument", "hello required");
@@ -157,6 +194,7 @@ export class Connections {
     });
     socket.on("close", () => {
       clearTimeout(helloTimeout);
+      this.handshakes.delete(connection);
       this.dropAgent(connection);
     });
   }
@@ -230,7 +268,7 @@ export class Connections {
     params: Record<string, unknown>,
   ) {
     const connection = this.agents.get(deviceId);
-    if (!connection?.snapshot) throw new AppError("offline", "Device offline");
+    if (!connection?.snapshot) throw this.unavailableError(deviceId);
     if (this.pending.has(requestId)) throw new AppError("conflict", "Request ID already exists");
     if (
       [...this.pending.values()].filter((p) => p.connection === connection).length >=
@@ -260,6 +298,11 @@ export class Connections {
   }
   revoke(deviceId: string) {
     this.store.revokeDevice(deviceId);
+    for (const candidate of this.handshakes)
+      if (candidate.id === deviceId) {
+        this.handshakes.delete(candidate);
+        candidate.socket.close(4003, "device_revoked");
+      }
     const connection = this.agents.get(deviceId);
     if (connection) {
       this.dropAgent(connection);
@@ -270,6 +313,8 @@ export class Connections {
   close() {
     clearInterval(this.expiry);
     for (const browser of this.browsers) browser.socket.terminate();
+    for (const candidate of this.handshakes) candidate.socket.terminate();
+    this.handshakes.clear();
     for (const connection of [...this.agents.values()]) {
       this.dropAgent(connection);
       connection.socket.terminate();

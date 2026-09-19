@@ -55,6 +55,7 @@ import { OpenFiles } from "./files/open-files";
 import { UploadDialog } from "./files/upload-dialog";
 import { returnToService } from "./lib/login-return";
 import { PortDialog } from "./devices/port-dialog";
+import { ReleaseNotice } from "./components/release-notice";
 
 export function App() {
   const { t, i18n } = useTranslation();
@@ -350,6 +351,7 @@ export function App() {
             </MenuContent>
           </Menu>
         </header>
+        <ReleaseNotice />
         <div className="flex min-h-0 flex-1">
           <aside className="desktop-rail scroll-area shrink-0 overflow-auto border-r border-border bg-muted/60">
             {navigation}

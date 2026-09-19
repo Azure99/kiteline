@@ -107,6 +107,7 @@ export interface Device {
   lastSeenAt: string | null;
   snapshot?: Metadata;
   editorBytes?: number;
+  release?: { agentVersion: string | null; serverVersion: string; observedAt: string };
 }
 export interface Entry {
   name: string;
