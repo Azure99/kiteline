@@ -7,6 +7,7 @@ import { rpc } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import {
+  Dialog,
   DialogClose,
   DialogContent,
   DialogFooter,
@@ -18,9 +19,11 @@ import { IconButton } from "../components/icon-button";
 export function DirectoryDialog({
   deviceId,
   onAdded,
+  onClose,
 }: {
   deviceId: string;
   onAdded: (workspace: Workspace) => void;
+  onClose: () => void;
 }) {
   const { t } = useTranslation();
 
@@ -29,7 +32,9 @@ export function DirectoryDialog({
   const [listing, setListing] = useState<DirectoryListing>();
   const [error, setError] = useState<unknown>();
   const [invalid, setInvalid] = useState(false);
-  const [busy, setBusy] = useState(true);
+  const [reading, setReading] = useState(true);
+  const [writing, setWriting] = useState(false);
+  const busy = reading || writing;
   const [revision, setRevision] = useState(0);
   const [newName, setNewName] = useState<string>();
   const [cursor, setCursor] = useState<string>();
@@ -42,7 +47,7 @@ export function DirectoryDialog({
   }, []);
   useEffect(() => {
     const controller = new AbortController();
-    setBusy(true);
+    setReading(true);
     setError(undefined);
     setInvalid(false);
     void rpc(deviceId, "directories.list", { absolutePath: path, cursor }, controller.signal)
@@ -56,7 +61,7 @@ export function DirectoryDialog({
         },
       )
       .finally(() => {
-        if (!controller.signal.aborted) setBusy(false);
+        if (!controller.signal.aborted) setReading(false);
       });
     return () => controller.abort();
   }, [deviceId, path, cursor, revision]);
@@ -68,7 +73,7 @@ export function DirectoryDialog({
   }
   async function add() {
     if (!listing) return;
-    setBusy(true);
+    setWriting(true);
     setError(undefined);
     setInvalid(false);
     try {
@@ -79,7 +84,7 @@ export function DirectoryDialog({
     } catch (error) {
       setError(error);
     } finally {
-      setBusy(false);
+      setWriting(false);
     }
   }
   async function mkdir() {
@@ -88,7 +93,7 @@ export function DirectoryDialog({
       setInvalid(true);
       return;
     }
-    setBusy(true);
+    setWriting(true);
     setError(undefined);
     setInvalid(false);
     try {
@@ -100,129 +105,141 @@ export function DirectoryDialog({
     } catch (error) {
       setError(error);
     } finally {
-      setBusy(false);
+      setWriting(false);
     }
   }
   return (
-    <DialogContent>
-      <DialogHeader>
-        <DialogTitle>{t(($) => $.devices.addWorkspace)}</DialogTitle>
-      </DialogHeader>
-      <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
-        <form
-          className="flex items-center gap-1"
-          onSubmit={(event) => {
-            event.preventDefault();
-            go(input);
-          }}
-        >
-          <IconButton
-            label={t(($) => $.files.parentDirectory)}
-            disabled={busy || !listing?.parentPath}
-            onClick={() => go(listing!.parentPath!)}
-          >
-            <ArrowUp />
-          </IconButton>
-          <Input
-            aria-label={t(($) => $.devices.absolutePath)}
-            disabled={busy}
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            autoComplete="off"
-          />
-          <IconButton label={t(($) => $.devices.goDirectory)} disabled={busy} type="submit">
-            <RefreshCw />
-          </IconButton>
-          <IconButton
-            label={t(($) => $.files.newDirectory)}
-            disabled={busy || !listing}
-            onClick={() => setNewName("")}
-          >
-            <FolderPlus />
-          </IconButton>
-        </form>
-        {newName !== undefined && (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !writing) onClose();
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t(($) => $.devices.addWorkspace)}</DialogTitle>
+        </DialogHeader>
+        <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
           <form
-            className="flex gap-2"
+            className="flex items-center gap-1"
             onSubmit={(event) => {
               event.preventDefault();
-              void mkdir();
+              go(input);
             }}
           >
-            <Input
-              aria-label={t(($) => $.devices.newDirectoryName)}
-              value={newName}
-              onChange={(event) => setNewName(event.target.value)}
-              autoFocus
-            />
-            <Button type="submit" disabled={busy}>
-              {t(($) => $.devices.new)}
-            </Button>
-            <Button variant="ghost" onClick={() => setNewName(undefined)}>
-              {t(($) => $.common.cancel)}
-            </Button>
-          </form>
-        )}
-        {invalid && (
-          <p role="alert" className="text-sm text-destructive">
-            {t(($) => $.devices.directoryNameRequired)}
-          </p>
-        )}
-        {!!error && (
-          <div role="alert" className="text-sm text-destructive">
-            <ErrorNotice error={error} />
-          </div>
-        )}
-        <div className="scroll-area min-h-40 flex-1 overflow-auto" aria-busy={busy}>
-          {listing?.entries.items.map((entry, index) => (
-            <button
-              className="flex min-h-9 w-full items-center gap-3 rounded px-2 py-1.5 text-left hover:bg-muted disabled:opacity-50 max-[959px]:min-h-11"
-              key={entry.path ?? index}
-              disabled={busy || !entry.path || !["directory", "symlink"].includes(entry.kind)}
-              onClick={() => go(entry.path!)}
+            <IconButton
+              label={t(($) => $.files.parentDirectory)}
+              disabled={busy || !listing?.parentPath}
+              onClick={() => go(listing!.parentPath!)}
             >
-              <Folder size={17} className="shrink-0 text-primary" />
-              <span className="min-w-0 break-all">{entry.name}</span>
-              {entry.unavailableReason && (
-                <span className="ml-auto text-xs text-destructive">
-                  {t(($) => $.files.nameEncoding)}
-                </span>
-              )}
-              {entry.kind === "symlink" && (
-                <span className="ml-auto text-xs text-muted-foreground">
-                  {t(($) => $.devices.link)}
-                </span>
-              )}
-            </button>
-          ))}
-          {busy && (
-            <p role="status" className="p-3 text-sm text-muted-foreground">
-              {t(($) => $.common.reading)}
+              <ArrowUp />
+            </IconButton>
+            <Input
+              aria-label={t(($) => $.devices.absolutePath)}
+              disabled={busy}
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              autoComplete="off"
+            />
+            <IconButton label={t(($) => $.devices.goDirectory)} disabled={busy} type="submit">
+              <RefreshCw />
+            </IconButton>
+            <IconButton
+              label={t(($) => $.files.newDirectory)}
+              disabled={busy || !listing}
+              onClick={() => setNewName("")}
+            >
+              <FolderPlus />
+            </IconButton>
+          </form>
+          {newName !== undefined && (
+            <form
+              className="flex gap-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void mkdir();
+              }}
+            >
+              <Input
+                aria-label={t(($) => $.devices.newDirectoryName)}
+                disabled={busy}
+                value={newName}
+                onChange={(event) => setNewName(event.target.value)}
+                autoFocus
+              />
+              <Button type="submit" disabled={busy}>
+                {t(($) => $.devices.new)}
+              </Button>
+              <Button variant="ghost" disabled={writing} onClick={() => setNewName(undefined)}>
+                {t(($) => $.common.cancel)}
+              </Button>
+            </form>
+          )}
+          {invalid && (
+            <p role="alert" className="text-sm text-destructive">
+              {t(($) => $.devices.directoryNameRequired)}
             </p>
           )}
-          {listing?.entries.items.length === 0 && !busy && (
-            <p className="p-3 text-sm text-muted-foreground">{t(($) => $.files.emptyDirectory)}</p>
+          {!!error && (
+            <div role="alert" className="text-sm text-destructive">
+              <ErrorNotice error={error} />
+            </div>
+          )}
+          <div className="scroll-area min-h-40 flex-1 overflow-auto" aria-busy={busy}>
+            {listing?.entries.items.map((entry, index) => (
+              <button
+                className="flex min-h-9 w-full items-center gap-3 rounded px-2 py-1.5 text-left hover:bg-muted disabled:opacity-50 max-[959px]:min-h-11"
+                key={entry.path ?? index}
+                disabled={busy || !entry.path || !["directory", "symlink"].includes(entry.kind)}
+                onClick={() => go(entry.path!)}
+              >
+                <Folder size={17} className="shrink-0 text-primary" />
+                <span className="min-w-0 break-all">{entry.name}</span>
+                {entry.unavailableReason && (
+                  <span className="ml-auto text-xs text-destructive">
+                    {t(($) => $.files.nameEncoding)}
+                  </span>
+                )}
+                {entry.kind === "symlink" && (
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {t(($) => $.devices.link)}
+                  </span>
+                )}
+              </button>
+            ))}
+            {busy && (
+              <p role="status" className="p-3 text-sm text-muted-foreground">
+                {t(($) => $.common.reading)}
+              </p>
+            )}
+            {listing?.entries.items.length === 0 && !busy && (
+              <p className="p-3 text-sm text-muted-foreground">
+                {t(($) => $.files.emptyDirectory)}
+              </p>
+            )}
+          </div>
+          {listing?.entries.nextCursor && (
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={() => {
+                setCursor(listing.entries.nextCursor);
+                setRevision((r) => r + 1);
+              }}
+            >
+              {t(($) => $.common.nextPage)}
+            </Button>
           )}
         </div>
-        {listing?.entries.nextCursor && (
-          <Button
-            variant="outline"
-            disabled={busy}
-            onClick={() => {
-              setCursor(listing.entries.nextCursor);
-              setRevision((r) => r + 1);
-            }}
-          >
-            {t(($) => $.common.nextPage)}
+        <DialogFooter>
+          <DialogClose disabled={writing} render={<Button variant="outline" />}>
+            {t(($) => $.common.cancel)}
+          </DialogClose>
+          <Button disabled={busy || !listing || !!error} onClick={() => void add()}>
+            {t(($) => $.devices.selectDirectory)}
           </Button>
-        )}
-      </div>
-      <DialogFooter>
-        <DialogClose render={<Button variant="outline" />}>{t(($) => $.common.cancel)}</DialogClose>
-        <Button disabled={busy || !listing || !!error} onClick={() => void add()}>
-          {t(($) => $.devices.selectDirectory)}
-        </Button>
-      </DialogFooter>
-    </DialogContent>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import type {
+  BrowserEvent,
   FileProgress,
   GitWriteArguments,
   GitWriteMethod,
@@ -79,9 +80,7 @@ export class GitActions {
     value.result = undefined;
     this.notify();
     const progress = (event: Event) => {
-      const message = (
-        event as CustomEvent<FileProgress & { type: string; id: string; deviceId: string }>
-      ).detail;
+      const message = (event as CustomEvent<BrowserEvent>).detail;
       if (
         message.type === "request.progress" &&
         message.id === request.id &&

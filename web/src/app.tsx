@@ -14,11 +14,18 @@ import {
   Upload,
   Globe,
 } from "lucide-react";
-import type { KitelineError, Device } from "@kiteline/shared/protocol";
+import type { BrowserEvent, Device } from "@kiteline/shared/protocol";
 import { Auth, type Session } from "./auth";
 import { ApiError, api, errorMessage, post } from "./lib/api";
 import { ErrorDetails, ErrorNotice } from "./components/error-notice";
-import { devicePath, navigate, useRoute, workspacePath } from "./lib/navigation";
+import {
+  currentPath,
+  devicePath,
+  navigate,
+  navigateWorkspace,
+  useRoute,
+  workspacePath,
+} from "./lib/navigation";
 import { useDevices } from "./use-devices";
 import { Button } from "./components/ui/button";
 import {
@@ -62,7 +69,7 @@ export function App() {
   const [error, setError] = useState<{ cause: unknown; downloadPath?: string }>();
   const [binding, setBinding] = useState(false);
   const [picker, setPicker] = useState(false);
-  const [directoryDevice, setDirectoryDevice] = useState<Device>();
+  const [directoryDevice, setDirectoryDevice] = useState<{ device: Device; origin: string }>();
   const [action, setAction] = useState<DeviceAction>();
   const [portDevice, setPortDevice] = useState<string>();
   useEffect(() => setPortDevice(undefined), [route.deviceId]);
@@ -94,9 +101,9 @@ export function App() {
           {
             deviceId: route.deviceId,
             workspaceId: route.workspaceId,
-            path: route.query.get("file") ?? "",
+            path: route.query.file ?? "",
           },
-          route.query.get("draft") ?? undefined,
+          route.query.draft,
         )
       : undefined;
   useLayoutEffect(() => {
@@ -110,15 +117,7 @@ export function App() {
       }
     };
     const failed = (event: Event) => {
-      const message = (
-        event as CustomEvent<{
-          type: string;
-          channelId: string;
-          error: KitelineError;
-          purpose?: string;
-          path?: string;
-        }>
-      ).detail;
+      const message = (event as CustomEvent<BrowserEvent>).detail;
       if (message.type === "channel.failed") {
         drafts.fileFailed(message.channelId, message.error);
         if (message.purpose === "download" && message.error.code !== "cancelled")
@@ -415,9 +414,13 @@ export function App() {
                     className="flex shrink-0 gap-5 border-b border-border bg-muted/60 px-4 max-[959px]:gap-0 max-[959px]:px-0"
                   >
                     {[
-                      { id: "terminal", name: t(($) => $.common.terminal), icon: Terminal },
-                      { id: "files", name: t(($) => $.common.files), icon: Folder },
-                      { id: "git", name: t(($) => $.common.git), icon: GitBranch },
+                      {
+                        id: "terminal" as const,
+                        name: t(($) => $.common.terminal),
+                        icon: Terminal,
+                      },
+                      { id: "files" as const, name: t(($) => $.common.files), icon: Folder },
+                      { id: "git" as const, name: t(($) => $.common.git), icon: GitBranch },
                     ].map((tool) => (
                       <button
                         key={tool.id}
@@ -425,8 +428,9 @@ export function App() {
                         aria-selected={route.tool === tool.id}
                         className="tool-tab flex min-h-10 items-center justify-center gap-2 text-sm"
                         onClick={() =>
-                          navigate(
-                            workspacePath(device.id, workspace.id, tool.id) + location.search,
+                          navigateWorkspace(
+                            { deviceId: device.id, workspaceId: workspace.id },
+                            tool.id,
                           )
                         }
                       >
@@ -479,7 +483,7 @@ export function App() {
                 key={device.id}
                 device={device}
                 onNavigate={choose}
-                onAdd={setDirectoryDevice}
+                onAdd={(device) => setDirectoryDevice({ device, origin: currentPath() })}
                 onAction={setAction}
                 onPort={() => setPortDevice(device.id)}
               />
@@ -521,39 +525,27 @@ export function App() {
           }
         />
       ))}
-      <Dialog
-        open={!!directoryDevice}
-        onOpenChange={(open) => {
-          if (!open) setDirectoryDevice(undefined);
-        }}
-      >
-        {directoryDevice && (
-          <DirectoryDialog
-            deviceId={directoryDevice.id}
-            onAdded={(w) => {
-              const id = directoryDevice.id;
-              setDirectoryDevice(undefined);
-              choose(workspacePath(id, w.id));
-            }}
-          />
-        )}
-      </Dialog>
-      <Dialog
-        open={!!action}
-        onOpenChange={(open) => {
-          if (!open) setAction(undefined);
-        }}
-      >
-        {action && (
-          <DeviceActionDialog
-            action={action}
-            onDone={() => {
-              setAction(undefined);
-              void refresh().catch((error: unknown) => setError({ cause: error }));
-            }}
-          />
-        )}
-      </Dialog>
+      {directoryDevice && (
+        <DirectoryDialog
+          deviceId={directoryDevice.device.id}
+          onClose={() => setDirectoryDevice(undefined)}
+          onAdded={(w) => {
+            const id = directoryDevice.device.id;
+            setDirectoryDevice(undefined);
+            if (currentPath() === directoryDevice.origin) choose(workspacePath(id, w.id));
+          }}
+        />
+      )}
+      {action && (
+        <DeviceActionDialog
+          action={action}
+          onClose={() => setAction(undefined)}
+          onDone={() => {
+            setAction(undefined);
+            void refresh().catch((error: unknown) => setError({ cause: error }));
+          }}
+        />
+      )}
     </>
   );
 }

@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import {
   AppError,
   limits,
@@ -10,7 +9,6 @@ import {
   type GitHistory,
   type Repo,
 } from "@kiteline/shared/protocol";
-import type { CursorBudget } from "../cursor-budget.js";
 import { relativePath } from "../files/paths.js";
 import { boundedDiff, numstatReader, selectedPatch, rawReader, type RawChange } from "./diff.js";
 import { commandLine, git, NulRecords, utf8 } from "./process.js";
@@ -154,120 +152,47 @@ async function binary(
   reader.end();
   return result;
 }
-interface Cursor {
-  workspaceId: string;
-  repoId: string;
-  commit: string;
-  parentOid?: string;
-  prepared: boolean;
-  offset: number;
-  busy: boolean;
-  timer: NodeJS.Timeout;
-  release: () => void;
-  controller: AbortController;
-}
-export class GitHistoryReads {
-  private cursors = new Map<string, Cursor>();
-  constructor(private budget: CursorBudget) {}
-  async files(
-    workspaceId: string,
-    repo: Repo,
-    oid: string,
-    parent: string | undefined,
-    token: string | undefined,
-    signal: AbortSignal,
-  ): Promise<CommitFiles> {
-    const id = token ?? randomUUID();
-    let cursor = this.cursors.get(id);
-    if (
-      token &&
-      (!cursor ||
-        cursor.workspaceId !== workspaceId ||
-        cursor.repoId !== repo.id ||
-        cursor.commit !== oid)
-    )
-      throw new AppError("conflict", "Commit file list has expired; refresh");
-    if (!cursor) {
-      cursor = {
-        workspaceId,
-        repoId: repo.id,
-        commit: oid,
-        prepared: false,
-        offset: 0,
-        busy: false,
-        release: this.budget.reserve(),
-        controller: new AbortController(),
-        timer: setTimeout(() => this.closeCursor(id), limits.cursorLifetime),
-      };
-      this.cursors.set(id, cursor);
+export async function commitFiles(
+  repo: Repo,
+  oid: string,
+  parent: string | undefined,
+  offset: number,
+  signal: AbortSignal,
+): Promise<CommitFiles> {
+  const { commit, base, parentOid } = await comparison(repo, oid, parent, signal);
+  const files: CommitFile[] = [];
+  let count = 0,
+    bytes = 512,
+    full = false;
+  await changes(repo, base, commit, signal, (change) => {
+    const item = {
+      path: change.path,
+      oldPath: change.oldPath,
+      status: change.status,
+      binary: false,
+    };
+    const size = Buffer.byteLength(JSON.stringify(item)) + 1;
+    if (size + 512 > limits.resultBytes)
+      throw new AppError("limit_exceeded", "A commit file entry exceeds the size limit");
+    if (count++ < offset || full) return;
+    if (files.length >= limits.listPageEntries || bytes + size > limits.resultBytes) {
+      full = true;
+      return;
     }
-    if (cursor.busy) throw new AppError("busy", "Commit file list is being read");
-    cursor.busy = true;
-    signal = AbortSignal.any([signal, cursor.controller.signal]);
-    const items: CommitFile[] = [];
-    let count = 0,
-      bytes = 512,
-      full = false;
-    try {
-      const { commit, base, parentOid } = await comparison(repo, oid, parent, signal);
-      if (cursor.prepared && cursor.parentOid !== parentOid)
-        throw new AppError("conflict", "Parent of the commit file list has changed; refresh");
-      cursor.parentOid = parentOid;
-      cursor.prepared = true;
-      await changes(repo, base, commit, signal, (change) => {
-        const item = {
-          path: change.path,
-          oldPath: change.oldPath,
-          status: change.status,
-          binary: false,
-        };
-        const size = Buffer.byteLength(JSON.stringify(item)) + 1;
-        if (size + 512 > limits.resultBytes)
-          throw new AppError("limit_exceeded", "A commit file entry exceeds the size limit");
-        if (count++ < cursor!.offset || full) return;
-        if (items.length >= limits.listPageEntries || bytes + size > limits.resultBytes) {
-          full = true;
-          return;
-        }
-        bytes += size;
-        items.push(item);
-      });
-      const binaries = await binary(
-        repo,
-        base,
-        commit,
-        items.map((item) => item.path),
-        signal,
-      );
-      for (const item of items) item.binary = binaries.has(item.path);
-      signal.throwIfAborted();
-      cursor.offset += items.length;
-      const more = cursor.offset < count;
-      if (more) cursor.timer.refresh();
-      else this.closeCursor(id);
-      return { parentOid, files: { items, truncated: more, ...(more ? { nextCursor: id } : {}) } };
-    } catch (error) {
-      this.closeCursor(id);
-      throw error;
-    } finally {
-      cursor.busy = false;
-    }
-  }
-  private closeCursor(id: string) {
-    const cursor = this.cursors.get(id);
-    if (!cursor) return;
-    this.cursors.delete(id);
-    clearTimeout(cursor.timer);
-    cursor.release();
-    cursor.controller.abort(new AppError("cancelled", "Commit file reading has ended"));
-  }
-  retain(workspaceIds: Set<string>) {
-    for (const [id, cursor] of this.cursors)
-      if (!workspaceIds.has(cursor.workspaceId)) this.closeCursor(id);
-  }
-  close() {
-    for (const id of this.cursors.keys()) this.closeCursor(id);
-  }
+    bytes += size;
+    files.push(item);
+  });
+  const binaries = await binary(
+    repo,
+    base,
+    commit,
+    files.map((item) => item.path),
+    signal,
+  );
+  for (const item of files) item.binary = binaries.has(item.path);
+  signal.throwIfAborted();
+  const nextOffset = offset + files.length;
+  return { parentOid, files, ...(nextOffset < count ? { nextOffset } : {}) };
 }
 export async function commitDiff(
   repo: Repo,

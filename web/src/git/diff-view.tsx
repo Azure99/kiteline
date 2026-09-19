@@ -10,7 +10,6 @@ import { ErrorNotice, ErrorDetails } from "../components/error-notice";
 
 export type DiffTarget = {
   path: string;
-  oldPath?: string;
 } & ({ side: "worktree" | "staged" } | { side: "commit"; commitOid: string; parentOid?: string });
 export function DiffView({
   deviceId,

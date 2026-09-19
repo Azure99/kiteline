@@ -9,6 +9,9 @@ import {
   limits,
   record,
   string,
+  type AgentEvent,
+  type BrowserEvent,
+  type WorkspaceEvent,
   type Metadata,
   type Reply,
 } from "@kiteline/shared/protocol";
@@ -47,7 +50,6 @@ export class Connections {
   private readonly expiry: NodeJS.Timeout;
   onLoginClosed?: (loginId: string) => void;
   onAgentClosed?: (connection: AgentConnection) => void;
-  onAgentMessage?: (connection: AgentConnection, message: Record<string, unknown>) => void;
 
   constructor(private store: Store) {
     this.expiry = setInterval(() => {
@@ -72,10 +74,10 @@ export class Connections {
     });
   }
   broadcastDevices() {
-    const event = { type: "devices.changed", devices: this.devices() };
+    const event = { type: "devices.changed", devices: this.devices() } satisfies BrowserEvent;
     for (const browser of this.browsers) send(browser.socket, event);
   }
-  notify(loginId: string, event: unknown) {
+  notify(loginId: string, event: BrowserEvent) {
     for (const browser of this.browsers)
       if (browser.login.id === loginId) send(browser.socket, event);
   }
@@ -107,6 +109,7 @@ export class Connections {
           connection.snapshot = checkMetadata(message.snapshot);
           clearTimeout(helloTimeout);
           this.store.snapshot(id, connection.snapshot);
+          this.store.connected(id);
           this.broadcastDevices();
           this.updateWatch(id);
         } else if (!connection.snapshot) throw new AppError("invalid_argument", "hello required");
@@ -135,15 +138,19 @@ export class Connections {
         } else if (message.type === "request.progress") {
           const pending = this.pending.get(string(message.id));
           if (pending?.connection === connection)
-            this.notify(pending.loginId, { ...message, deviceId: id });
+            this.notify(pending.loginId, {
+              ...(message as unknown as Extract<AgentEvent, { type: "request.progress" }>),
+              deviceId: id,
+            });
         } else if (
           ["workspace.changed", "sessions.changed", "watch.status"].includes(String(message.type))
         ) {
           const workspaceId = string(message.workspaceId);
+          const event = { ...(message as WorkspaceEvent), deviceId: id } satisfies BrowserEvent;
           for (const browser of this.browsers)
             if (browser.targets.some((t) => t.deviceId === id && t.workspaceId === workspaceId))
-              send(browser.socket, { ...message, deviceId: id });
-        } else this.onAgentMessage?.(connection, message);
+              send(browser.socket, event);
+        }
       } catch {
         socket.close(1008, "invalid_control_message");
       }
@@ -175,7 +182,7 @@ export class Connections {
     const browser: Browser = { socket, login, targets: [] };
     this.browsers.add(browser);
     heartbeat(socket);
-    send(socket, { type: "devices.changed", devices: this.devices() });
+    send(socket, { type: "devices.changed", devices: this.devices() } satisfies BrowserEvent);
     socket.on("message", (data, binary) => {
       try {
         if (binary) throw new Error("Expected JSON");

@@ -21,12 +21,20 @@ import { IconButton } from "../components/icon-button";
 import { Button } from "../components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
 import { useMobile } from "../lib/use-mobile";
-import { navigate, useRoute } from "../lib/navigation";
+import {
+  currentPath,
+  currentRoute,
+  navigateWorkspace,
+  updateWorkspaceQuery,
+  useRoute,
+  type WorkspaceQuery,
+} from "../lib/navigation";
 import { FileExplorer } from "./explorer";
 import { FileNameDialog, type NameAction } from "./name-dialog";
 import { isWithin, movedPath, parentPath, useFileBrowser } from "./use-browser";
 import { DraftView } from "./draft-view";
-import { showDraft, useDrafts, type DraftStore } from "./drafts";
+import { useDrafts, type DraftStore } from "./drafts";
+import { showDraft } from "./navigation";
 import { FileOperationDialog, type FileAction } from "./operation-dialog";
 import { ImagePreview } from "./image-preview";
 import { downloadFile, type FileTarget } from "./content";
@@ -50,13 +58,13 @@ export function Files({
 
   const route = useRoute();
   const mobile = useMobile();
-  const folder = route.query.get("folder") ?? ".";
-  const reveal = route.query.get("reveal");
+  const folder = route.query.folder ?? ".";
+  const reveal = route.query.reveal;
   const [expanded, setExpanded] = useState(new Set(["."]));
   const [selected, setSelected] = useState(new Set<string>());
   const [selecting, setSelecting] = useState(false);
   const [listOpen, setListOpen] = useState(true);
-  const [action, setAction] = useState<NameAction>();
+  const [action, setAction] = useState<NameAction & { origin: string }>();
   const [operation, setOperation] = useState<FileAction>();
   const [notice, setNotice] = useState<
     { kind: "downloadStarted"; path: string } | { kind: "renamed" | "created" }
@@ -64,10 +72,10 @@ export function Files({
   const fileInput = useRef<HTMLInputElement>(null);
   const enabled = device.status === "online";
   const { pages, load, forget } = useFileBrowser(device.id, workspace.id, visible && enabled);
-  const queryFile = route.query.get("file");
-  const queryDraft = route.query.get("draft");
-  const isImage = route.query.get("preview") === "image";
-  const searching = route.query.get("search") === "1";
+  const queryFile = route.query.file;
+  const queryDraft = route.query.draft;
+  const isImage = route.query.preview === "image";
+  const searching = route.query.search === true;
   const drafts = useDrafts(store);
   const draft = drafts.find(
     (item) =>
@@ -83,12 +91,14 @@ export function Files({
     if (!visible || !queryFile || !enabled || isImage) return;
     const target = { deviceId: device.id, workspaceId: workspace.id, path: queryFile };
     const existing = store.find(target, queryDraft ?? undefined);
-    if (!existing) {
-      const opened = store.open({
-        ...target,
-        deviceName: device.name,
-        workspaceName: workspace.name,
-      });
+    if (!existing || queryDraft !== existing.id) {
+      const opened =
+        existing ??
+        store.open({
+          ...target,
+          deviceName: device.name,
+          workspaceName: workspace.name,
+        });
       showDraft(opened, true);
     }
   }, [
@@ -128,29 +138,22 @@ export function Files({
       window.removeEventListener("kiteline:download", downloaded);
     };
   }, [device.id, workspace.id, load]);
-  function updateQuery(query: URLSearchParams, replace = false) {
-    const path = location.pathname + (query.size ? `?${query}` : "");
-    if (path !== location.pathname + location.search) navigate(path, replace);
+  const target = { deviceId: device.id, workspaceId: workspace.id };
+  function updateQuery(query: WorkspaceQuery, replace = false) {
+    updateWorkspaceQuery(target, query, replace);
+  }
+  function beginAction(action: NameAction) {
+    setAction({ ...action, origin: currentPath() });
   }
   function setFilePath(path?: string) {
-    const query = new URLSearchParams(location.search);
-    if (path) query.set("file", path);
-    else query.delete("file");
-    query.delete("draft");
-    query.delete("preview");
-    updateQuery(query);
+    updateQuery({ file: path, draft: undefined, preview: undefined });
   }
   function enter(path: string) {
     setSelected(new Set());
-    const query = new URLSearchParams(location.search);
-    if (path === ".") query.delete("folder");
-    else query.set("folder", path);
-    if (mobile) {
-      query.delete("file");
-      query.delete("draft");
-      query.delete("preview");
-    }
-    updateQuery(query);
+    updateQuery({
+      folder: path,
+      ...(mobile ? { file: undefined, draft: undefined, preview: undefined } : {}),
+    });
     setExpanded((old) => {
       const next = new Set(old);
       if (next.has(path) && !mobile && path !== ".") next.delete(path);
@@ -177,12 +180,14 @@ export function Files({
   }
   function preview(entry: Pick<Entry, "path">) {
     setNotice(undefined);
-    const query = new URLSearchParams({
+    navigateWorkspace(target, "files", {
       file: entry.path!,
       folder: parentPath(entry.path!),
       preview: "image",
+      draft: undefined,
+      search: undefined,
+      reveal: undefined,
     });
-    updateQuery(query);
   }
   function download(path: string) {
     downloadFile({ deviceId: device.id, workspaceId: workspace.id, path });
@@ -198,13 +203,15 @@ export function Files({
     const nextPath = (path: string) =>
       moves.reduce((next, move) => movedPath(next, move.from, move.to), path);
     for (const { from } of moves) forget(from);
-    const query = new URLSearchParams(location.search);
-    const nextFolder = nextPath(query.get("folder") ?? ".");
-    if (nextFolder === ".") query.delete("folder");
-    else query.set("folder", nextFolder);
-    const file = query.get("file");
-    if (file) query.set("file", nextPath(file));
-    updateQuery(query, true);
+    const query = currentRoute().query;
+    updateQuery(
+      {
+        folder: nextPath(query.folder ?? "."),
+        file: query.file ? nextPath(query.file) : undefined,
+        reveal: query.reveal ? nextPath(query.reveal) : undefined,
+      },
+      true,
+    );
     const next = new Set([...expanded].map(nextPath));
     setExpanded(next);
     for (const path of next) if (!expanded.has(path)) void load(path);
@@ -233,11 +240,7 @@ export function Files({
         workspaceName={workspace.name}
         visible={searching}
         disabled={!enabled}
-        onBack={() => {
-          const query = new URLSearchParams(location.search);
-          query.delete("search");
-          updateQuery(query);
-        }}
+        onBack={() => updateQuery({ search: undefined })}
         onOpen={(match) => {
           const target = { deviceId: device.id, workspaceId: workspace.id, path: match.path };
           if (!match.line && !store.find(target) && /\.(png|jpe?g|webp|gif)$/i.test(match.path)) {
@@ -293,18 +296,14 @@ export function Files({
         <IconButton
           label={t(($) => $.files.searchFiles)}
           disabled={!enabled}
-          onClick={() => {
-            const query = new URLSearchParams(location.search);
-            query.set("search", "1");
-            updateQuery(query);
-          }}
+          onClick={() => updateQuery({ search: true })}
         >
           <Search />
         </IconButton>
         <IconButton
           label={t(($) => $.files.newFile)}
           disabled={!enabled}
-          onClick={() => setAction({ kind: "file", parent: folder })}
+          onClick={() => beginAction({ kind: "file", parent: folder })}
         >
           <FilePlus2 />
         </IconButton>
@@ -335,7 +334,7 @@ export function Files({
             </MenuItem>
             <MenuItem
               disabled={!enabled}
-              onClick={() => setAction({ kind: "directory", parent: folder })}
+              onClick={() => beginAction({ kind: "directory", parent: folder })}
             >
               <FolderPlus />
               {t(($) => $.files.newDirectory)}
@@ -436,7 +435,7 @@ export function Files({
                   return next;
                 })
               }
-              onRename={(entry) => setAction({ kind: "rename", entry })}
+              onRename={(entry) => beginAction({ kind: "rename", entry })}
               onAction={(kind, entry) => setOperation({ kind, entries: [entry] })}
               onDownload={(entry) => download(entry.path!)}
               onImage={preview}
@@ -491,7 +490,8 @@ export function Files({
             if (result.from) {
               moveViewPaths([{ from: result.from, to: result.to }]);
             }
-            if (result.entry?.kind === "file") open(result.entry);
+            if (result.entry?.kind === "file" && currentPath() === action.origin)
+              open(result.entry);
             void load(parentPath(result.to));
             setSelected(new Set());
           }}
@@ -516,14 +516,13 @@ export function Files({
               moveViewPaths(completed.map((item) => ({ from: item.path, to: item.targetPath! })));
             }
             if (operation.kind === "delete") {
-              const query = new URLSearchParams(location.search);
+              let folder = currentRoute().query.folder ?? ".";
               for (const item of completed) {
                 store.deleted(device.id, workspace.id, item.path);
                 forget(item.path);
-                if (isWithin(query.get("folder") ?? ".", item.path))
-                  query.set("folder", parentPath(item.path));
+                if (isWithin(folder, item.path)) folder = parentPath(item.path);
               }
-              updateQuery(query, true);
+              updateQuery({ folder }, true);
             }
             const affected = new Set<string>();
             for (const item of items) {

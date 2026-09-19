@@ -25,7 +25,9 @@ import {
   environmentFile,
   installationFile,
   installationPaths,
+  installationUseFile,
   installDirectory,
+  lockInstallation,
   packageDirectory,
   readInstallation,
   unitName,
@@ -55,6 +57,11 @@ async function stopped(installation: Installation) {
     throw new Error(
       "Agent is still running. Stop the foreground process or run service stop first; this operation has not ended existing tasks.",
     );
+}
+async function installationStopped(installation: Installation) {
+  const lock = await lockInstallation("exclusive");
+  await lock.close();
+  await stopped(installation);
 }
 async function unitIs(state: "active" | "enabled") {
   if (!(await exists(unitFile))) return false;
@@ -150,7 +157,6 @@ async function checkServiceEnvironment(installation: Installation) {
     ...Object.entries(env).map(([key, value]) => `${key}=${value}`),
     launcher,
     "check",
-    "--service",
   ]);
 }
 async function writeUnit(installation: Installation, source = installDirectory) {
@@ -202,7 +208,7 @@ async function installProgram(user: string, service: boolean) {
   try {
     await writeFile(
       environmentFile,
-      `# Directory values: double-quoted absolute paths, without escapes.\nKITELINE_AGENT_HOME=${JSON.stringify(join(installation.home, ".local/share/kiteline-agent"))}\nKITELINE_AGENT_RUN_DIR=${JSON.stringify(join(installation.home, ".local/share/kiteline-agent/run"))}\n`,
+      `# Directory values: double-quoted absolute paths, without escapes.\nKITELINE_AGENT_HOME=${JSON.stringify(join(installation.home, ".local/share/kiteline-agent"))}\n`,
       { flag: "wx", mode: 0o640 },
     );
   } catch (error) {
@@ -211,6 +217,9 @@ async function installProgram(user: string, service: boolean) {
   await chown(environmentFile, 0, installation.gid);
   await chmod(environmentFile, 0o640);
   await installationPaths(installation);
+  await writeFile(installationUseFile, "", { flag: "a", mode: 0o640 });
+  await chown(installationUseFile, 0, installation.gid);
+  await chmod(installationUseFile, 0o640);
   try {
     await cp(packageDirectory, installDirectory, { recursive: true, verbatimSymlinks: true });
     await mkdir("/usr/local/bin", { recursive: true });
@@ -270,7 +279,7 @@ async function waitReady(installation: Installation) {
 }
 async function upgrade(installation: Installation, archive: string, yes: boolean) {
   const runningService = await unitIs("active");
-  if (!runningService) await stopped(installation);
+  if (!runningService) await installationStopped(installation);
   const restartService = runningService || (await unitIs("enabled"));
   const hasUnit = await exists(unitFile);
   const path = resolve(archive);
@@ -315,7 +324,7 @@ async function upgrade(installation: Installation, archive: string, yes: boolean
       yes,
     );
     if (runningService) await command("systemctl", ["stop", unitName]);
-    await stopped(installation);
+    await installationStopped(installation);
     await rename(installDirectory, previous);
     keepPrevious = true;
     try {
@@ -352,7 +361,7 @@ async function upgrade(installation: Installation, archive: string, yes: boolean
   }
 }
 async function uninstall(installation: Installation, purge: boolean, yes: boolean) {
-  if (!(await unitIs("active"))) await stopped(installation);
+  if (!(await unitIs("active"))) await installationStopped(installation);
   const hasUnit = await exists(unitFile);
   const paths = await installationPaths(installation);
   await confirm(
@@ -360,7 +369,7 @@ async function uninstall(installation: Installation, purge: boolean, yes: boolea
     yes,
   );
   if (hasUnit) await command("systemctl", ["disable", "--now", unitName]);
-  await stopped(installation);
+  await installationStopped(installation);
   await rm(unitFile, { force: true });
   await rm(launcher, { force: true });
   await rm(installDirectory, { recursive: true });

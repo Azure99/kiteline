@@ -13,7 +13,8 @@ import {
 } from "../components/ui/dialog";
 import { IconButton } from "../components/icon-button";
 import { ApiError } from "../lib/api";
-import { draftError, isDirty, showDraft, useDrafts, type Draft, type DraftStore } from "./drafts";
+import { draftError, isDirty, useDrafts, type Draft, type DraftStore } from "./drafts";
+import { requestCloseDraft, showDraft } from "./navigation";
 import { TextEditor } from "./text-editor";
 import { formatBytes } from "./use-browser";
 import { downloadFile, type DiskText } from "./content";
@@ -103,7 +104,7 @@ export function DraftView({
             </button>
             <IconButton
               label={t(($) => $.common.closeNamed, { name: item.path })}
-              onClick={() => store.requestClose(item)}
+              onClick={() => requestCloseDraft(store, item)}
             >
               <X size={13} />
             </IconButton>
@@ -280,7 +281,6 @@ export function DraftView({
                   try {
                     store.adopt(draft, disk);
                     setDisk(undefined);
-                    showDraft(draft, true);
                   } catch (reason) {
                     setError(reason);
                   }
@@ -327,7 +327,6 @@ export function DraftView({
                 if (submitted !== generation.current || !store.has(draft)) return;
                 if (saved) {
                   closeSaveAs();
-                  showDraft(draft, true);
                 } else
                   setError(
                     draft.error ??

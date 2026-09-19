@@ -25,7 +25,6 @@ interface UploadRow {
   sent: number;
   status: "pending" | "sending" | "succeeded" | "failed" | "unknown" | "skipped";
   error?: unknown;
-  collision?: boolean;
 }
 
 export function UploadDialog({
@@ -100,7 +99,7 @@ export function UploadDialog({
       if (stop.current) break;
       const controller = new AbortController();
       active.current = controller;
-      update(row.id, { status: "sending", sent: 0, error: undefined, collision: false });
+      update(row.id, { status: "sending", sent: 0, error: undefined });
       try {
         await uploadFile(
           { deviceId, workspaceId, path: row.path },
@@ -118,7 +117,6 @@ export function UploadDialog({
             controller.signal.aborted && !(reason instanceof ApiError)
               ? new ApiError("cancelled", "Upload cancelled", "failed")
               : reason,
-          collision: reason instanceof ApiError && reason.code === "conflict",
         });
       } finally {
         active.current = undefined;
@@ -173,7 +171,6 @@ export function UploadDialog({
                     update(row.id, {
                       path: event.target.value,
                       version: undefined,
-                      collision: false,
                       error: undefined,
                     })
                   }
@@ -274,7 +271,7 @@ export function UploadDialog({
           inspection={conflict.inspection}
           onClose={() => setConflict(undefined)}
           onChoose={(path, version) => {
-            update(conflict.row.id, { path, version, error: undefined, collision: false });
+            update(conflict.row.id, { path, version, error: undefined });
             setConflict(undefined);
           }}
         />

@@ -10,6 +10,7 @@ import {
   record,
   string,
   type Reply,
+  type AgentEvent,
   type FileProgress,
   type RpcResult,
 } from "@kiteline/shared/protocol";
@@ -29,7 +30,7 @@ import { CursorBudget } from "./cursor-budget.js";
 import { Repositories } from "./git/repos.js";
 import { status } from "./git/status.js";
 import { workingDiff } from "./git/diff.js";
-import { branches, commitDiff, GitHistoryReads, history } from "./git/history.js";
+import { branches, commitDiff, commitFiles, history } from "./git/history.js";
 import { WorkspaceWatches } from "./watches.js";
 import { GitWriteQueue } from "./git/queue.js";
 import { changeIndex, discard, discardScope, gitPaths, reviewDiscard } from "./git/paths.js";
@@ -39,6 +40,7 @@ import { finishOperation } from "./git/operation.js";
 import { HttpChannels } from "./http/channels.js";
 import { listeningPorts } from "./http/ports.js";
 import { diagnose } from "./doctor.js";
+import { TemporaryFiles } from "./files/temporary.js";
 
 const gitWriteMethods = new Set([
   "git.stage",
@@ -60,12 +62,12 @@ export class Agent {
   readonly cursorBudget = new CursorBudget();
   readonly directories = new Directories(this.cursorBudget);
   readonly repos: Repositories;
-  readonly gitHistory = new GitHistoryReads(this.cursorBudget);
   readonly watches: WorkspaceWatches;
   readonly gitWrites: GitWriteQueue;
   readonly sessions: Sessions;
   readonly files: Files;
   readonly textFiles: TextFiles;
+  private readonly temporaryFiles: TemporaryFiles;
   readonly fileOperations: FileOperations;
   private readonly local: LocalServer;
   private readonly channels: TerminalChannels;
@@ -84,9 +86,7 @@ export class Agent {
     readonly identity: Identity,
   ) {
     this.metadata = new MetadataStore(config);
-    this.watches = new WorkspaceWatches(config.limits.watchDirectories, (event) =>
-      this.send(event),
-    );
+    this.watches = new WorkspaceWatches((event) => this.send(event));
     this.repos = new Repositories(this.metadata, this.cursorBudget);
     this.gitWrites = new GitWriteQueue(this.repos);
     this.repos.onObserved = (workspaceId, repo) => this.watches.repo(workspaceId, repo);
@@ -94,8 +94,9 @@ export class Agent {
     this.files = new Files(this.metadata, this.directories);
     this.metadata.onChange = (snapshot) => this.send({ type: "metadata.snapshot", snapshot });
     this.sessions = new Sessions(config, this.metadata);
-    this.textFiles = new TextFiles(config, this.metadata);
-    this.fileOperations = new FileOperations(this.metadata, this.textFiles.temporary);
+    this.temporaryFiles = new TemporaryFiles(config.dataDir);
+    this.textFiles = new TextFiles(config, this.metadata, this.temporaryFiles);
+    this.fileOperations = new FileOperations(this.metadata, this.temporaryFiles);
     this.channels = new TerminalChannels(
       this.sessions,
       config,
@@ -104,7 +105,8 @@ export class Agent {
     );
     this.fileChannels = new FileChannels(
       this.textFiles,
-      new BinaryFiles(config, this.metadata, this.textFiles.temporary),
+      new BinaryFiles(config, this.metadata, this.temporaryFiles),
+      this.temporaryFiles,
       config,
       identity,
       () => this.channels.count + this.httpChannels.count,
@@ -115,7 +117,8 @@ export class Agent {
       identity,
       () => this.channels.count + this.fileChannels.count,
     );
-    this.sessions.onChanged = (workspaceId) => this.send({ type: "sessions.changed", workspaceId });
+    this.sessions.onChanged = (workspaceId) =>
+      this.send({ type: "sessions.changed", workspaceId } satisfies AgentEvent);
     this.local = new LocalServer(config, (method, params, signal) => {
       if (method === "doctor")
         return diagnose(this.config, signal, {
@@ -134,7 +137,8 @@ export class Agent {
           throw new AppError("busy", "Terminal is still being created");
         return Promise.resolve(item.identity);
       }
-      if (!["sessions.list", "sessions.create", "sessions.end"].includes(method))
+      if (method === "sessions.end") return this.sessions.end(undefined, string(params.sessionId));
+      if (!["sessions.list", "sessions.create"].includes(method))
         throw new AppError("unsupported", "Unsupported local operation");
       return this.dispatch(method, params, signal);
     });
@@ -143,7 +147,7 @@ export class Agent {
     await mkdir(this.config.dataDir, { recursive: true, mode: 0o700 });
     await mkdir(this.config.runDir, { recursive: true, mode: 0o700 });
     await this.metadata.load();
-    await this.textFiles.temporary.cleanStartup();
+    await this.temporaryFiles.cleanStartup();
     await this.local.start();
     this.connect();
   }
@@ -177,6 +181,17 @@ export class Agent {
       lastPong = Date.now();
     });
     socket.on("error", (error) => console.error("Control connection:", error.message));
+    socket.on("unexpected-response", (_request, response) => {
+      const hint =
+        response.statusCode === 426
+          ? "Install the agent version provided by this server."
+          : response.statusCode === 401
+            ? "Check the device binding and credentials."
+            : "Check the server URL and reverse proxy.";
+      console.error(`Control connection: HTTP ${response.statusCode}. ${hint}`);
+      response.resume();
+      socket.terminate();
+    });
     socket.on("message", (raw, binary) => {
       try {
         if (binary) throw new AppError("invalid_argument", "Expected JSON");
@@ -222,7 +237,8 @@ export class Agent {
                   : this.config.limits.rpcTimeout,
           );
           void this.dispatch(method, params, controller.signal, (progress) => {
-            if (this.socket === socket) this.send({ type: "request.progress", id, ...progress });
+            if (this.socket === socket)
+              this.send({ type: "request.progress", id, ...progress } satisfies AgentEvent);
           })
             .then(
               (result) => ({ id, outcome: "succeeded", result }) as Reply,
@@ -265,7 +281,6 @@ export class Agent {
           this.watched.clear();
           for (const workspace of workspaces) this.watched.add(workspace.id);
           void this.repos.retain(this.watched);
-          this.gitHistory.retain(this.watched);
           this.watches.set(workspaces);
         }
       } catch (error) {
@@ -281,7 +296,6 @@ export class Agent {
       this.watched.clear();
       void this.watches.close();
       void this.repos.close();
-      this.gitHistory.close();
       this.channels.close();
       void this.fileChannels.close();
       this.httpChannels.close();
@@ -494,12 +508,13 @@ export class Agent {
           signal,
         ) satisfies Promise<RpcResult<typeof method>>;
       case "git.commitFiles":
-        return this.gitHistory.files(
-          string(params.workspaceId),
+        return commitFiles(
           await this.repos.resolve(string(params.workspaceId), string(params.repoId), signal),
           string(params.commitOid),
           params.parentOid === undefined ? undefined : string(params.parentOid),
-          params.cursor === undefined ? undefined : string(params.cursor),
+          params.offset === undefined
+            ? 0
+            : integer(params.offset, "offset", 0, Number.MAX_SAFE_INTEGER),
           signal,
         ) satisfies Promise<RpcResult<typeof method>>;
       case "git.branches":
@@ -538,7 +553,6 @@ export class Agent {
           params.cursor === undefined ? undefined : string(params.cursor),
           signal,
         );
-        this.watches.listed(string(params.workspaceId), result.resolvedPath);
         return result satisfies RpcResult<typeof method>;
       }
       case "files.inspect":
@@ -619,7 +633,7 @@ export class Agent {
         ) satisfies RpcResult<typeof method>;
       case "sessions.end":
         return this.sessions.end(
-          params.workspaceId === undefined ? undefined : string(params.workspaceId),
+          string(params.workspaceId),
           string(params.sessionId),
         ) satisfies Promise<RpcResult<typeof method>>;
       case "sessions.recover":
@@ -678,7 +692,6 @@ export class Agent {
     await this.directories.close();
     await this.repos.close();
     await this.watches.close();
-    this.gitHistory.close();
     await this.sessions.close();
   }
 }

@@ -302,18 +302,7 @@ export class FileOperations {
               position,
             );
             if (!bytesRead) throw new AppError("conflict", "Source file shrank during copying");
-            let written = 0;
-            while (written < bytesRead) {
-              signal.throwIfAborted();
-              const next = await output.handle.write(
-                block,
-                written,
-                bytesRead - written,
-                position + written,
-              );
-              if (!next.bytesWritten) throw new AppError("io_error", "Copying could not continue");
-              written += next.bytesWritten;
-            }
+            await this.temporary.write(output, block.subarray(0, bytesRead), position, signal);
             position += bytesRead;
             bytes(bytesRead);
           }
@@ -347,11 +336,7 @@ export class FileOperations {
       if (error instanceof OperationError && error.outcome === "unknown") uncertain = true;
       throw error;
     } finally {
-      if (temporary) {
-        if ("handle" in temporary)
-          await this.temporary.closeFile(temporary as import("./temporary.js").Temporary);
-        if (!published && !uncertain) await this.temporary.discard(temporary);
-      }
+      if (temporary) await this.temporary.release(temporary, { published, uncertain });
     }
   }
 

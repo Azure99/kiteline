@@ -96,6 +96,68 @@ async function fixture() {
   return { app, store, config, call, device, origin, close };
 }
 
+test("last connected records successful hello, not metadata updates or disconnect", async () => {
+  const f = await fixture();
+  const peer = await f.device();
+  const connected = f.store.devices()[0]!.lastSeenAt;
+  expect(connected).not.toBeNull();
+  const snapshot = f.app.connections.devices()[0]!.snapshot!;
+  peer.socket.send(
+    JSON.stringify({ type: "metadata.snapshot", snapshot: { ...snapshot, revision: 1 } }),
+  );
+  await expect.poll(() => f.store.devices()[0]!.snapshot?.revision).toBe(1);
+  expect(f.store.devices()[0]!.lastSeenAt).toBe(connected);
+  peer.socket.close();
+  await expect.poll(() => f.app.connections.devices()[0]!.status).toBe("offline");
+  expect(f.store.devices()[0]!.lastSeenAt).toBe(connected);
+  const next = new WebSocket(
+    f.origin.replace("http:", "ws:") + "/api/agent/control?protocolVersion=1",
+    {
+      headers: { authorization: `Bearer ${peer.deviceToken}` },
+    },
+  );
+  await once(next, "open");
+  expect(f.store.devices()[0]!.lastSeenAt).toBe(connected);
+  next.send(
+    JSON.stringify({
+      type: "hello",
+      protocolVersion: 1,
+      agentVersion: "test",
+      editorBytes: 2000,
+      snapshot,
+    }),
+  );
+  await expect.poll(() => f.app.connections.devices()[0]!.status).toBe("online");
+  expect(f.store.devices()[0]!.lastSeenAt! > connected!).toBe(true);
+});
+
+test("WebSocket handshake distinguishes protocol, authentication, origin and missing channel", async () => {
+  const f = await fixture();
+  const login = f.store.createSession(60_000);
+  for (const [path, headers, status] of [
+    ["/api/agent/control?protocolVersion=2", {}, 426],
+    ["/api/agent/control?protocolVersion=1", {}, 401],
+    ["/api/events", { origin: "https://other.test" }, 403],
+    [
+      "/api/channels/missing/terminal",
+      { origin: f.config.publicUrl, cookie: `kiteline_session=${login.token}` },
+      404,
+    ],
+  ] as const) {
+    const socket = new WebSocket(f.origin.replace("http:", "ws:") + path, { headers });
+    socket.on("error", () => {});
+    const response = await new Promise<number>((resolve) =>
+      socket.on("unexpected-response", (_request, response) => {
+        response.resume();
+        socket.terminate();
+        resolve(response.statusCode!);
+      }),
+    );
+    expect(response).toBe(status);
+    await expect.poll(() => socket.readyState).toBe(WebSocket.CLOSED);
+  }
+});
+
 test("malformed static URL encoding returns a client error", async () => {
   const f = await fixture();
   const response = await f.call("/devices/%");
@@ -138,6 +200,7 @@ test("binding returns versioned installation commands from the configured public
   expect(value.commands.foreground).not.toContain("--service");
   expect(value.commands.service).toContain("--service");
   expect(value.commands.bind).toContain("--if-unbound");
+  expect(value.commands.bind).toContain("kiteline-agent check &&");
   expect(f.store.binding(value.bindingId).status).toBe("pending");
 });
 
@@ -314,8 +377,7 @@ test("terminal channel has separate pairing deadlines, stays with its login, and
       },
     }),
   );
-  const created = (await (await pending).json()) as { channelId: string; expiresAt: string };
-  expect(new Date(created.expiresAt).getTime() - Date.now()).toBeGreaterThan(600);
+  const created = (await (await pending).json()) as { channelId: string };
   expect(
     await (
       await f.call(
@@ -337,7 +399,7 @@ test("terminal channel has separate pairing deadlines, stays with its login, and
       refused.terminate();
     });
   });
-  expect(rejected).toBe(401);
+  expect(rejected).toBe(404);
   await delay(420);
   const browser = new WebSocket(`${endpoint}/api/channels/${created.channelId}/terminal`, {
     headers: { cookie, origin: f.config.publicUrl },

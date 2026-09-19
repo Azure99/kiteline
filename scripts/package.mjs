@@ -15,7 +15,6 @@ import {
 } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { basename, resolve, join, relative } from "node:path";
-import { pathToFileURL } from "node:url";
 
 const root = resolve(import.meta.dirname, "..");
 const release = JSON.parse(readFileSync(join(root, "deploy/release.json"), "utf8"));
@@ -23,7 +22,7 @@ const [kind, arch] = process.argv.slice(2);
 if (!["server", "agent"].includes(kind) || !Object.hasOwn(release.nodeArchives, arch ?? ""))
   throw new Error("Usage: pnpm package agent|server amd64|arm64 (build both agents before server)");
 const node = release.nodeArchives[arch];
-const version = JSON.parse(readFileSync(join(root, "agent/package.json"), "utf8")).version;
+const { version } = JSON.parse(readFileSync(join(root, "shared/src/version.json"), "utf8"));
 const output = join(root, "dist/releases");
 const cache = "/var/tmp/kiteline-release-cache";
 const temporary = mkdtempSync("/var/tmp/kiteline-package-");
@@ -128,23 +127,26 @@ try {
   mkdirSync(output, { recursive: true });
   const filename = `node-v${release.node}-linux-${node.architecture}.tar.xz`;
   const archive = join(cache, filename);
-  if (!existsSync(archive))
-    run("curl", [
-      "--fail",
-      "--location",
-      "--output",
-      archive,
-      `https://nodejs.org/dist/v${release.node}/${filename}`,
-    ]);
-  if (digest(archive) !== node.sha256) throw new Error("Node archive checksum mismatch");
+  if (!existsSync(archive) || digest(archive) !== node.sha256) {
+    rmSync(archive, { force: true });
+    const pending = `${archive}.${process.pid}.pending`;
+    try {
+      run("curl", [
+        "--fail",
+        "--location",
+        "--output",
+        pending,
+        `https://nodejs.org/dist/v${release.node}/${filename}`,
+      ]);
+      if (digest(pending) !== node.sha256) throw new Error("Node archive checksum mismatch");
+      renameSync(pending, archive);
+    } finally {
+      rmSync(pending, { force: true });
+    }
+  }
   run("tar", ["-xJf", archive, "-C", temporary]);
   const runtime = join(temporary, filename.slice(0, -7));
   run("pnpm", ["build"]);
-  const { appVersion } = await import(pathToFileURL(join(root, "shared/dist/protocol/index.js")));
-  for (const component of ["server", "shared", "terminal-recorder", "web"])
-    if (JSON.parse(readFileSync(join(root, component, "package.json"), "utf8")).version !== version)
-      throw new Error(`${component} package version differs from agent`);
-  if (appVersion !== version) throw new Error("appVersion differs from package version");
   const native = join(temporary, "native");
   if (kind === "agent") {
     mkdirSync(native);

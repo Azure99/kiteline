@@ -33,8 +33,7 @@ export function cookie(request: IncomingMessage) {
 export function origin(request: IncomingMessage, expected: string) {
   if (request.headers.origin !== expected) throw new AppError("forbidden", "Origin mismatch");
 }
-export function failure(response: ServerResponse, error: unknown) {
-  const detail = asError(error);
+export function errorStatus(error: unknown) {
   const statuses: Record<string, number> = {
     unauthenticated: 401,
     forbidden: 403,
@@ -45,8 +44,11 @@ export function failure(response: ServerResponse, error: unknown) {
     invalid_argument: 400,
     offline: 503,
   };
+  return statuses[asError(error).code] ?? 500;
+}
+export function failure(response: ServerResponse, error: unknown) {
   if (response.headersSent) response.destroy();
-  else json(response, statuses[detail.code] ?? 500, { error: detail });
+  else json(response, errorStatus(error), { error: asError(error) });
 }
 export class AttemptLimiter {
   private sources = new Map<string, { count: number; until: number }>();

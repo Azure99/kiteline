@@ -19,7 +19,6 @@ import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu"
 import { devicePath, workspacePath } from "../lib/navigation";
 import type { DeviceAction } from "./device-actions";
 import { useEffect, useState } from "react";
-import { Dialog } from "../components/ui/dialog";
 import { TerminalSettings } from "../terminal/settings";
 import { rpc } from "../lib/api";
 import { IconButton } from "../components/icon-button";
@@ -245,9 +244,7 @@ export function DeviceDetail({
           <ErrorNotice error={countError} />
         </div>
       )}
-      <Dialog open={settings} onOpenChange={setSettings}>
-        {settings && <TerminalSettings device={device} />}
-      </Dialog>
+      {settings && <TerminalSettings device={device} onClose={() => setSettings(false)} />}
     </section>
   );
 }

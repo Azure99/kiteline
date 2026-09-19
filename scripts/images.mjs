@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const release = JSON.parse(readFileSync(resolve(root, "deploy/release.json"), "utf8"));
-const version = JSON.parse(readFileSync(resolve(root, "agent/package.json"), "utf8")).version;
+const { version } = JSON.parse(readFileSync(resolve(root, "shared/src/version.json"), "utf8"));
 const arch = process.argv[2];
 if (!Object.hasOwn(release.nodeArchives, arch ?? ""))
   throw new Error("Usage: pnpm images amd64|arm64");

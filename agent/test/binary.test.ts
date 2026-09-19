@@ -14,7 +14,7 @@ import {
 import { join } from "node:path";
 import { defaultAgentLimits } from "../src/config.js";
 import { MetadataStore } from "../src/metadata.js";
-import { TextFiles } from "../src/files/text.js";
+import { TemporaryFiles } from "../src/files/temporary.js";
 import { BinaryFiles } from "../src/files/binary.js";
 import { locate, versionOf } from "../src/files/paths.js";
 
@@ -35,13 +35,13 @@ async function setup() {
   };
   const metadata = new MetadataStore(config);
   const { id } = await metadata.add(root);
-  const text = new TextFiles(config, metadata);
-  const files = new BinaryFiles(config, metadata, text.temporary);
-  return { home, root, config, id, text, files, signal: new AbortController().signal };
+  const temporary = new TemporaryFiles(home);
+  const files = new BinaryFiles(config, metadata, temporary);
+  return { home, root, config, id, temporary, files, signal: new AbortController().signal };
 }
 
 test("binary upload is independent of text limits and replaces only the confirmed link entry", async () => {
-  const { root, home, id, files, text, signal } = await setup();
+  const { root, home, id, files, temporary, signal } = await setup();
   await writeFile(join(root, "shared"), "original");
   await symlink("shared", join(root, "config"));
   const where = await locate(root, "config");
@@ -57,19 +57,24 @@ test("binary upload is independent of text limits and replaces only the confirme
   const upload = await files.prepare(id, "config", bytes.length, false, version, signal);
   try {
     for (let i = 0; i < bytes.length; i += 65536)
-      await text.write(upload, bytes.subarray(i, i + 65536), signal);
+      upload.received += await temporary.write(
+        upload.temporary,
+        bytes.subarray(i, i + 65536),
+        upload.received,
+        signal,
+      );
     expect(await files.save(upload, signal)).toMatchObject({ path: "config", size: bytes.length });
   } finally {
-    await text.cleanup(upload);
+    await temporary.release(upload.temporary, upload);
   }
   expect(await readFile(join(root, "config"))).toEqual(bytes);
   expect(await readFile(join(root, "shared"), "utf8")).toBe("original");
   expect(JSON.parse(await readFile(join(home, "temporary-files.json"), "utf8"))).toEqual([]);
   const competing = await files.prepare(id, "new", 3, true, undefined, signal);
-  await text.write(competing, Buffer.from("new"), signal);
+  competing.received = await temporary.write(competing.temporary, Buffer.from("new"), 0, signal);
   await writeFile(join(root, "new"), "competitor");
   await expect(files.save(competing, signal)).rejects.toMatchObject({ code: "conflict" });
-  await text.cleanup(competing);
+  await temporary.release(competing.temporary, competing);
   expect(await readFile(join(root, "new"), "utf8")).toBe("competitor");
 });
 

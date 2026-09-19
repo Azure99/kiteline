@@ -10,6 +10,7 @@ import { terminalCli } from "./terminal-cli.js";
 import { doctorCli } from "./doctor.js";
 import { installCli, serviceCli } from "./service.js";
 import { checkPrerequisites } from "./prerequisites.js";
+import { installDirectory, lockInstallation, packageDirectory } from "./installation.js";
 
 async function input(prompt: string) {
   if (!process.stdin.isTTY) {
@@ -38,7 +39,7 @@ async function main() {
     return;
   }
   if (command === "check") {
-    await checkPrerequisites(process.argv.includes("--service"));
+    await checkPrerequisites();
     return;
   }
   if (command === "service") {
@@ -58,12 +59,22 @@ async function main() {
       "Usage: kiteline-agent install --user USER | check | bind --server HTTPS_ORIGIN [--if-unbound] | run | doctor | service | terminal | workspace",
     );
   const config = await agentConfig();
-  await mkdir(config.dataDir, { recursive: true, mode: 0o700 });
-  const release = await lockfile.lock(config.dataDir, {
-    lockfilePath: resolve(config.dataDir, "process.lock"),
-    realpath: false,
-  });
+  const installationUse =
+    packageDirectory === installDirectory ? await lockInstallation("shared") : undefined;
+  let releaseState: (() => Promise<void>) | undefined;
+  async function release() {
+    try {
+      await releaseState?.();
+    } finally {
+      await installationUse?.close();
+    }
+  }
   try {
+    await mkdir(config.dataDir, { recursive: true, mode: 0o700 });
+    releaseState = await lockfile.lock(config.dataDir, {
+      lockfilePath: resolve(config.dataDir, "process.lock"),
+      realpath: false,
+    });
     if (command === "bind") {
       const index = process.argv.indexOf("--server");
       const server = new URL(string(index < 0 ? undefined : process.argv[index + 1], "server"));

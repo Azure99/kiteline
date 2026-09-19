@@ -3,14 +3,14 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, mkdir, writeFile, rm, rename, chmod, symlink } from "node:fs/promises";
 import { join } from "node:path";
-import { limits } from "@kiteline/shared/protocol";
+import { AppError, limits } from "@kiteline/shared/protocol";
 import { MetadataStore } from "../src/metadata.js";
 import { CursorBudget } from "../src/cursor-budget.js";
 import { defaultAgentLimits } from "../src/config.js";
 import { Repositories } from "../src/git/repos.js";
 import { observeIndex, status } from "../src/git/status.js";
 import { workingDiff } from "../src/git/diff.js";
-import { branches, commitDiff, GitHistoryReads, history } from "../src/git/history.js";
+import { branches, commitDiff, commitFiles, history } from "../src/git/history.js";
 
 const run = promisify(execFile);
 const roots: string[] = [];
@@ -153,8 +153,7 @@ test("diff preserves machine paths, rename, modes, binary and both sides without
   await repos.close();
 }, 15_000);
 test("history anchors pages and root commit files continue with exact paths and binary metadata", async () => {
-  const { root, cli, repo, workspace, repos } = await setup();
-  const reads = new GitHistoryReads(new CursorBudget());
+  const { root, cli, repo, repos } = await setup();
   expect(await history(repo, undefined, 0, signals())).toEqual({ commits: [] });
   await Promise.all(
     Array.from({ length: 503 }, (_, i) => writeFile(join(root, `item-${i}`), "text\n")),
@@ -172,22 +171,18 @@ test("history anchors pages and root commit files continue with exact paths and 
     subject: "root subject",
   });
   const oid = original.anchorOid!;
-  const pending = reads.files(workspace.id, repo, oid, undefined, undefined, signals());
+  const controller = new AbortController();
+  const pending = commitFiles(repo, oid, undefined, 0, controller.signal);
   const cancelled = expect(pending).rejects.toMatchObject({ code: "cancelled" });
-  reads.retain(new Set());
+  controller.abort(new AppError("cancelled", "Read cancelled"));
   await cancelled;
-  const first = await reads.files(workspace.id, repo, oid, undefined, undefined, signals());
-  expect(first.files.items.length).toBe(500);
-  expect(first.files.truncated).toBe(true);
-  const second = await reads.files(
-    workspace.id,
-    repo,
-    oid,
-    undefined,
-    first.files.nextCursor,
-    signals(),
-  );
-  const all = [...first.files.items, ...second.files.items];
+  const first = await commitFiles(repo, oid, undefined, 0, signals());
+  expect(first.files.length).toBe(500);
+  expect(first.nextOffset).toBe(500);
+  expect(await commitFiles(repo, oid, undefined, 0, signals())).toEqual(first);
+  const second = await commitFiles(repo, oid, undefined, first.nextOffset!, signals());
+  expect(second.nextOffset).toBeUndefined();
+  const all = [...first.files, ...second.files];
   expect(all.length).toBe(505);
   expect(new Set(all.map((item) => item.path)).size).toBe(505);
   expect(all.find((item) => item.path === "binary")?.binary).toBe(true);
@@ -198,12 +193,32 @@ test("history anchors pages and root commit files continue with exact paths and 
   await cli("commit", "--allow-empty", "-m", "new head");
   expect((await history(repo, oid, 0, signals())).commits.map((item) => item.oid)).toEqual([oid]);
   expect((await history(repo, undefined, 0, signals())).commits.length).toBe(2);
-  reads.close();
+  await repos.close();
+}, 15_000);
+test("commit file offsets continue at the actual byte-limited page length", async () => {
+  const { root, cli, repo, repos } = await setup();
+  const prefix = Array.from({ length: 8 }, () => "d".repeat(220)).join("/");
+  await mkdir(join(root, prefix), { recursive: true });
+  const paths = Array.from(
+    { length: 300 },
+    (_, i) => `${prefix}/item-${String(i).padStart(3, "0")}`,
+  );
+  await Promise.all(paths.map((path) => writeFile(join(root, path), "text\n")));
+  await cli("add", ".");
+  await cli("commit", "-m", "long paths");
+  const oid = (await history(repo, undefined, 0, signals())).anchorOid!;
+  const first = await commitFiles(repo, oid, undefined, 0, signals());
+  expect(first.files.length).toBeGreaterThan(0);
+  expect(first.files.length).toBeLessThan(paths.length);
+  expect(first.nextOffset).toBe(first.files.length);
+  expect(Buffer.byteLength(JSON.stringify(first))).toBeLessThan(limits.resultBytes);
+  const second = await commitFiles(repo, oid, undefined, first.nextOffset!, signals());
+  expect([...first.files, ...second.files].map((file) => file.path)).toEqual(paths);
+  expect(second.nextOffset).toBeUndefined();
   await repos.close();
 }, 15_000);
 test("merge parents are explicit and branches expose linked worktree occupancy", async () => {
-  const { root, home, cli, repo, workspace, repos } = await setup();
-  const reads = new GitHistoryReads(new CursorBudget());
+  const { root, home, cli, repo, repos } = await setup();
   await writeFile(join(root, "root"), "base");
   await cli("add", ".");
   await cli("commit", "-m", "base");
@@ -218,18 +233,18 @@ test("merge parents are explicit and branches expose linked worktree occupancy",
   await cli("merge", "--no-ff", "feature", "-m", "merge");
   const merge = (await history(repo, undefined, 0, signals())).commits[0]!;
   expect(merge.parents.length).toBe(2);
-  await expect(
-    reads.files(workspace.id, repo, merge.oid, undefined, undefined, signals()),
-  ).rejects.toMatchObject({ code: "invalid_argument" });
+  await expect(commitFiles(repo, merge.oid, undefined, 0, signals())).rejects.toMatchObject({
+    code: "invalid_argument",
+  });
   expect(
-    (
-      await reads.files(workspace.id, repo, merge.oid, merge.parents[0], undefined, signals())
-    ).files.items.map((item) => item.path),
+    (await commitFiles(repo, merge.oid, merge.parents[0], 0, signals())).files.map(
+      (item) => item.path,
+    ),
   ).toEqual(["feature"]);
   expect(
-    (
-      await reads.files(workspace.id, repo, merge.oid, merge.parents[1], undefined, signals())
-    ).files.items.map((item) => item.path),
+    (await commitFiles(repo, merge.oid, merge.parents[1], 0, signals())).files.map(
+      (item) => item.path,
+    ),
   ).toEqual(["main"]);
   const linked = join(home, "linked\t路径\n");
   await cli("worktree", "add", linked, "feature");
@@ -239,7 +254,6 @@ test("merge parents are explicit and branches expose linked worktree occupancy",
     worktreePath: linked,
   });
   expect(list.branches.find((item) => item.name === "main")?.current).toBe(true);
-  reads.close();
   await repos.close();
 }, 15_000);
 test("single-file diffs exclude descendants when a file becomes a directory", async () => {

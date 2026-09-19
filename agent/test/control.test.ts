@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -9,13 +9,15 @@ import { getCACertificates, setDefaultCACertificates } from "node:tls";
 import { WebSocket, WebSocketServer } from "ws";
 import { Agent } from "../src/control.js";
 import { defaultAgentLimits } from "../src/config.js";
+import { localRequest } from "../src/local.js";
 
-test("stale workspace subscriptions preserve the control connection and remaining watches", async () => {
+test("control reconnects after handshake rejection, retains valid watches and scopes remote session end", async () => {
   const root = await mkdtemp("/var/tmp/kiteline-agent-control-");
   const certificates = getCACertificates("default");
   let agent: Agent | undefined;
   let server: ReturnType<typeof createServer> | undefined;
   let sockets: WebSocketServer | undefined;
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
   try {
     const key = join(root, "key.pem"),
       cert = join(root, "cert.pem");
@@ -42,7 +44,13 @@ test("stale workspace subscriptions preserve the control connection and remainin
     );
     setDefaultCACertificates([...certificates, await readFile(cert, "utf8")]);
     server = createServer({ key: await readFile(key), cert: await readFile(cert) });
-    sockets = new WebSocketServer({ server });
+    sockets = new WebSocketServer({ noServer: true });
+    const refusals = [401, 426];
+    server.on("upgrade", (request, socket, head) => {
+      const status = refusals.shift();
+      if (status) socket.end(`HTTP/1.1 ${status} Rejected\r\nConnection: close\r\n\r\n`);
+      else sockets!.handleUpgrade(request, socket, head, (ws) => sockets!.emit("connection", ws));
+    });
     const messages: Record<string, unknown>[] = [];
     let peer: WebSocket | undefined;
     sockets.once("connection", (socket) => {
@@ -64,7 +72,9 @@ test("stale workspace subscriptions preserve the control connection and remainin
     const removed = await agent.metadata.add(join(root, "removed"));
     const active = await agent.metadata.add(join(root, "active"));
     await agent.start();
-    await expect.poll(() => peer).toBeDefined();
+    await expect.poll(() => peer, { timeout: 8000 }).toBeDefined();
+    expect(log.mock.calls.flat().join("\n")).toContain("HTTP 401. Check the device binding");
+    expect(log.mock.calls.flat().join("\n")).toContain("HTTP 426. Install the agent version");
     const socket = peer!;
     await expect.poll(() => messages.some((message) => message.type === "hello")).toBe(true);
     await agent.dispatch(
@@ -105,6 +115,23 @@ test("stale workspace subscriptions preserve the control connection and remainin
       )
       .toMatchObject({ reply: { outcome: "succeeded", result: { sessions: [] } } });
     expect(socket.readyState).toBe(WebSocket.OPEN);
+    const signal = new AbortController().signal;
+    const session = await agent.sessions.create(active.id, undefined, undefined, signal);
+    await expect(
+      agent.dispatch("sessions.end", { sessionId: session.id }, signal),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
+    await expect(
+      agent.dispatch("sessions.end", { workspaceId: removed.id, sessionId: session.id }, signal),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(agent.sessions.list(active.id).sessions.map((item) => item.id)).toContain(session.id);
+    await expect(
+      agent.dispatch("sessions.end", { workspaceId: active.id, sessionId: session.id }, signal),
+    ).resolves.toEqual({ ended: true });
+    const local = await agent.sessions.create(active.id, undefined, undefined, signal);
+    await expect(
+      localRequest(agent.config, "sessions.end", { sessionId: local.id }),
+    ).resolves.toEqual({ ended: true });
+    expect(agent.sessions.list().sessions).toEqual([]);
   } finally {
     await agent?.close();
     for (const socket of sockets?.clients ?? []) socket.terminate();
@@ -112,5 +139,6 @@ test("stale workspace subscriptions preserve the control connection and remainin
     if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
     setDefaultCACertificates(certificates);
     await rm(root, { recursive: true, force: true });
+    log.mockRestore();
   }
 }, 15000);

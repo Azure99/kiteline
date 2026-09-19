@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { useEffect } from "react";
 import { ErrorNotice } from "../components/error-notice";
 import { Files, Circle, X } from "lucide-react";
 import { Button } from "../components/ui/button";
@@ -11,13 +12,26 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../components/ui/dialog";
-import { draftError, isDirty, showDraft, useDrafts, type DraftStore } from "./drafts";
+import { draftError, isDirty, useDrafts, type DraftStore } from "./drafts";
+import { closeDraft, requestCloseDraft, showDraft, syncDraftPath } from "./navigation";
+import { useRoute } from "../lib/navigation";
 
 export function OpenFiles({ store }: { store: DraftStore }) {
   const { t } = useTranslation();
 
   const drafts = useDrafts(store);
   const closing = drafts.find((item) => item.id === store.closing);
+  const route = useRoute();
+  const selected = drafts.find(
+    (draft) =>
+      draft.deviceId === route.deviceId &&
+      draft.workspaceId === route.workspaceId &&
+      draft.id === route.query.draft,
+  );
+  const selectedPath = selected?.path;
+  useEffect(() => {
+    if (selected) syncDraftPath(selected);
+  }, [selected, selectedPath, route.query.file]);
   return (
     <>
       <Menu>
@@ -44,7 +58,7 @@ export function OpenFiles({ store }: { store: DraftStore }) {
               </MenuItem>
               <IconButton
                 label={t(($) => $.common.closeNamed, { name: draft.path })}
-                onClick={() => store.requestClose(draft)}
+                onClick={() => requestCloseDraft(store, draft)}
               >
                 <X />
               </IconButton>
@@ -84,7 +98,7 @@ export function OpenFiles({ store }: { store: DraftStore }) {
               >
                 {t(($) => $.common.cancel)}
               </Button>
-              <Button variant="outline" onClick={() => store.close(closing)}>
+              <Button variant="outline" onClick={() => closeDraft(store, closing)}>
                 {t(($) => $.files.discardChanges)}
               </Button>
               <Button
@@ -92,7 +106,7 @@ export function OpenFiles({ store }: { store: DraftStore }) {
                 onClick={() => {
                   void store.save(closing).then((saved) => {
                     if (saved && store.closing === closing.id && !isDirty(closing))
-                      store.close(closing);
+                      closeDraft(store, closing);
                   });
                 }}
               >

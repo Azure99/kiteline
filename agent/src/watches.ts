@@ -1,57 +1,45 @@
-import { watch, type FSWatcher } from "node:fs";
-import { opendir, realpath, stat } from "node:fs/promises";
-import { join } from "node:path";
-import { limits, type Repo, type Workspace } from "@kiteline/shared/protocol";
+import type { Stats } from "node:fs";
+import { dirname, relative, sep } from "node:path";
+import { watch, type FSWatcher } from "chokidar";
+import { limits, type Repo, type Workspace, type WorkspaceEvent } from "@kiteline/shared/protocol";
 
-const excluded = new Set([".git", "node_modules", ".pnpm", ".venv", "dist", "build", "target"]);
-const gitTrees = ["refs", "rebase-merge", "rebase-apply", "sequencer"];
-interface Target {
+const excluded = new Set(["node_modules", ".pnpm", ".venv", "dist", "build", "target"]);
+const gitTrees = new Set(["refs", "rebase-merge", "rebase-apply", "sequencer"]);
+interface Watched {
+  watcher: FSWatcher;
   owners: Set<string>;
-  identity: string;
+  ready: boolean;
+  error?: string;
 }
 interface Active {
   root: string;
   repos: Map<string, Repo>;
-  recent: Set<string>;
-}
-interface Watched extends Target {
-  watcher: FSWatcher;
+  metadataRoots: string[];
+  tree?: Watched;
 }
 
 export class WorkspaceWatches {
   private active = new Map<string, Active>();
-  private entries = new Map<string, Watched>();
+  private git = new Map<string, Watched>();
+  private closing = new Set<Promise<void>>();
   private pending = new Set<string>();
-  private errors = new Map<string, string>();
-  private timer?: NodeJS.Timeout;
   private events?: NodeJS.Timeout;
-  private generation = 0;
-  private rebuilding?: Promise<void>;
-  constructor(
-    private capacity: number,
-    private send: (event: unknown) => void,
-  ) {}
+  constructor(private send: (event: WorkspaceEvent) => void) {}
 
   set(workspaces: Workspace[]) {
     const ids = new Set(workspaces.map((item) => item.id));
-    for (const id of this.active.keys())
+    for (const [id, active] of this.active)
       if (!ids.has(id)) {
+        if (active.tree) this.stop(active.tree);
         this.active.delete(id);
         this.pending.delete(id);
-        this.errors.delete(id);
       }
     for (const item of workspaces)
       if (!this.active.has(item.id))
-        this.active.set(item.id, { root: item.path, repos: new Map(), recent: new Set() });
-    for (const [path, item] of this.entries) {
-      for (const id of item.owners) if (!ids.has(id)) item.owners.delete(id);
-      if (!item.owners.size) {
-        item.watcher.close();
-        this.entries.delete(path);
-      }
-    }
-    this.schedule();
+        this.active.set(item.id, { root: item.path, repos: new Map(), metadataRoots: [] });
+    this.reconcile();
   }
+
   repo(workspaceId: string, repo: Repo) {
     const active = this.active.get(workspaceId);
     if (!active) return;
@@ -59,23 +47,16 @@ export class WorkspaceWatches {
     if (previous?.id === repo.id) return;
     if (previous) active.repos.delete(previous.id);
     active.repos.set(repo.id, repo);
-    this.schedule();
+    this.reconcile();
   }
-  listed(workspaceId: string, path: string) {
-    const active = this.active.get(workspaceId);
-    if (!active) return;
-    active.recent.delete(path);
-    active.recent.add(path);
-    while (active.recent.size > this.capacity)
-      active.recent.delete(active.recent.values().next().value!);
-    this.schedule();
-  }
+
   reposComplete(workspaceId: string, repoIds: Set<string>) {
     const active = this.active.get(workspaceId);
     if (!active) return;
     for (const id of active.repos.keys()) if (!repoIds.has(id)) active.repos.delete(id);
-    this.schedule();
+    this.reconcile();
   }
+
   changed(workspaceId: string, immediate = false) {
     if (!this.active.has(workspaceId)) return;
     if (immediate) {
@@ -90,143 +71,139 @@ export class WorkspaceWatches {
       this.pending.clear();
     }, limits.watchDebounce);
   }
+
   private emit(workspaceId: string) {
     this.send({ type: "workspace.changed", workspaceId, scopes: ["files", "git", "repos"] });
   }
-  private schedule() {
-    this.generation++;
-    clearTimeout(this.timer);
-    this.timer = setTimeout(() => {
-      this.timer = undefined;
-      if (this.rebuilding) {
-        this.schedule();
-        return;
-      }
-      this.rebuilding = this.rebuild().finally(() => {
-        this.rebuilding = undefined;
-      });
-    }, limits.watchDebounce);
-  }
-  private async rebuild() {
-    const generation = this.generation;
-    const desired = new Map<string, Target>();
-    const metadataRoots = new Set<string>();
-    const errors = new Map<string, string>();
-    const current = () => generation === this.generation;
-    const degraded = (id: string, reason: string) => errors.set(id, reason);
-    const add = async (path: string, id: string, optional = false) => {
-      if (!current()) return;
-      try {
-        path = await realpath(path);
-        const info = await stat(path, { bigint: true });
-        if (!info.isDirectory()) return;
-        const existing = desired.get(path);
-        if (existing) {
-          existing.owners.add(id);
-          return path;
-        }
-        if (desired.size >= this.capacity) {
-          degraded(id, "Watched directory limit reached");
-          return;
-        }
-        desired.set(path, { owners: new Set([id]), identity: `${info.dev}:${info.ino}` });
-        return path;
-      } catch (error) {
-        if (!optional || (error as NodeJS.ErrnoException).code !== "ENOENT")
-          degraded(id, (error as Error).message);
-      }
-    };
-    const tree = async (root: string, id: string, metadata = false) => {
-      const first = await add(root, id, metadata);
-      if (!first) return;
-      if (!metadata && metadataRoots.has(first)) return;
-      const queue = [first];
-      for (let index = 0; index < queue.length && current(); index++) {
-        try {
-          const directory = await opendir(queue[index]!);
-          for await (const entry of directory) {
-            if (!current()) return;
-            const child = join(queue[index]!, entry.name);
-            if (
-              !entry.isDirectory() ||
-              (!metadata && (excluded.has(entry.name) || metadataRoots.has(child)))
-            )
-              continue;
-            const path = await add(child, id);
-            if (path) queue.push(path);
-            else if (desired.size >= this.capacity) return;
-          }
-        } catch (error) {
-          degraded(id, (error as Error).message);
-        }
-      }
-    };
+
+  private reconcile() {
+    const desired = new Map<string, Set<string>>();
     for (const [id, active] of this.active)
-      for (const repo of active.repos.values()) {
-        for (const root of new Set([repo.gitDir, repo.commonDir])) {
-          const path = await add(root, id);
-          if (path) metadataRoots.add(path);
-          for (const name of gitTrees) await tree(join(root, name), id, true);
+      for (const repo of active.repos.values())
+        for (const root of [repo.gitDir, repo.commonDir]) {
+          if (!desired.has(root)) desired.set(root, new Set());
+          desired.get(root)!.add(id);
         }
+    for (const [root, entry] of this.git)
+      if (!desired.has(root)) {
+        this.stop(entry);
+        this.git.delete(root);
       }
-    for (const [id, active] of this.active)
-      for (const path of [...active.recent].reverse()) await add(path, id);
-    for (const [id, active] of this.active) await tree(active.root, id);
-    if (!current()) return;
-    for (const [path, item] of this.entries)
-      if (desired.get(path)?.identity !== item.identity) {
-        item.watcher.close();
-        this.entries.delete(path);
-      }
-    for (const [path, target] of desired) {
-      const existing = this.entries.get(path);
-      if (existing) {
-        existing.owners = target.owners;
-        continue;
-      }
-      try {
-        const watcher = watch(path, { recursive: false }, (event, filename) => {
-          const item = this.entries.get(path);
-          if (!item) return;
-          for (const id of item.owners) this.changed(id);
-          if (event === "rename" || !filename) this.schedule();
-        });
-        watcher.on("error", (error) => {
-          const item = this.entries.get(path);
-          item?.watcher.close();
-          this.entries.delete(path);
-          for (const id of item?.owners ?? []) {
-            this.errors.set(id, error.message);
-            this.report(id);
-          }
-          this.schedule();
-        });
-        this.entries.set(path, { ...target, watcher });
-      } catch (error) {
-        for (const id of target.owners) degraded(id, (error as Error).message);
-      }
+    for (const [root, owners] of desired) {
+      const existing = this.git.get(root);
+      if (existing) existing.owners = owners;
+      else
+        this.git.set(
+          root,
+          this.start(root, (path, info) => ignoreGit(root, path, info), owners),
+        );
     }
-    this.errors = errors;
-    for (const id of this.active.keys()) this.report(id);
+    for (const [id, active] of this.active) {
+      const metadataRoots = [...desired.keys()]
+        .filter((root) => {
+          const path = relative(active.root, root);
+          return (
+            within(active.root, root) &&
+            !path.split(sep).some((name) => name === ".git" || excluded.has(name))
+          );
+        })
+        .sort();
+      if (
+        !active.tree ||
+        metadataRoots.length !== active.metadataRoots.length ||
+        metadataRoots.some((root, index) => root !== active.metadataRoots[index])
+      ) {
+        if (active.tree) this.stop(active.tree);
+        active.metadataRoots = metadataRoots;
+        active.tree = this.start(
+          active.root,
+          (path) => ignoreTree(active.root, metadataRoots, path),
+          new Set([id]),
+        );
+      }
+      this.report(id);
+    }
   }
+
+  private start(
+    root: string,
+    ignored: (path: string, info?: Stats) => boolean,
+    owners: Set<string>,
+  ): Watched {
+    const parent = dirname(root);
+    const watcher = watch([root, parent], {
+      // Watching the parent boundary lets Chokidar reattach a replaced root.
+      ignored: (path, info) => path !== parent && (!within(root, path) || ignored(path, info)),
+      ignoreInitial: true,
+      followSymlinks: false,
+      usePolling: false,
+    });
+    const entry: Watched = { watcher, owners, ready: false };
+    watcher.on("all", () => {
+      for (const id of entry.owners) this.changed(id);
+    });
+    watcher.on("ready", () => {
+      entry.ready = true;
+      for (const id of entry.owners) this.report(id);
+    });
+    watcher.on("error", (error) => {
+      entry.error = error instanceof Error ? error.message : String(error);
+      for (const id of entry.owners) this.report(id);
+    });
+    return entry;
+  }
+
   private report(workspaceId: string) {
+    const active = this.active.get(workspaceId);
+    if (!active?.tree) return;
+    const entries = [
+      active.tree,
+      ...[...this.git.values()].filter((entry) => entry.owners.has(workspaceId)),
+    ];
+    const reason = entries.find((entry) => entry.error)?.error;
+    if (!reason && entries.some((entry) => !entry.ready)) return;
     this.send({
       type: "watch.status",
       workspaceId,
-      status: this.errors.has(workspaceId) ? "degraded" : "normal",
-      reason: this.errors.get(workspaceId),
+      status: reason ? "degraded" : "normal",
+      reason,
     });
   }
-  async close() {
-    this.generation++;
-    clearTimeout(this.timer);
-    clearTimeout(this.events);
-    this.timer = this.events = undefined;
-    for (const item of this.entries.values()) item.watcher.close();
-    this.entries.clear();
-    this.active.clear();
-    this.pending.clear();
-    this.errors.clear();
-    await this.rebuilding;
+
+  private stop(entry: Watched) {
+    const closing = entry.watcher
+      .close()
+      .catch((error: unknown) => console.error("Watcher cleanup:", error));
+    this.closing.add(closing);
+    void closing.then(() => this.closing.delete(closing));
   }
+
+  async close() {
+    clearTimeout(this.events);
+    this.events = undefined;
+    this.pending.clear();
+    this.set([]);
+    await Promise.all(this.closing);
+  }
+}
+
+function within(root: string, path: string) {
+  return path === root || path.startsWith(root.endsWith(sep) ? root : root + sep);
+}
+
+function ignoreTree(root: string, metadataRoots: string[], path: string) {
+  const parts = relative(root, path).split(sep);
+  const git = parts.indexOf(".git");
+  return (
+    parts.some((name) => excluded.has(name)) ||
+    (git !== -1 && git < parts.length - 1) ||
+    metadataRoots.some((metadata) => path !== metadata && within(metadata, path))
+  );
+}
+
+function ignoreGit(root: string, path: string, info?: Stats) {
+  const local = relative(root, path);
+  if (!local) return false;
+  const parts = local.split(sep);
+  return !gitTrees.has(parts[0]!) && (parts.length > 1 || info?.isDirectory() === true);
 }

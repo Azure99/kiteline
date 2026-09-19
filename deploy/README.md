@@ -14,19 +14,20 @@ pnpm package server amd64
 pnpm images amd64
 ```
 
-每个server都携带两架构agent；两份agent须先构建。ARM64 server再执行`pnpm package server arm64`、`pnpm images arm64`，串行控制内存。包及对应`.sha256`在`dist/releases/`；server镜像为`kiteline-server:0.1.0-amd64`/`arm64`。本仓库不自动发布镜像，跨机器可用`docker save/load`搬运。清单记录commit、dirty、实际输入sourceDigest、Node/native与校验；组装server发现来源不一致时要求重建agent。
+每个server都携带两架构agent；两份agent须先构建。ARM64 server再执行`pnpm package server arm64`、`pnpm images arm64`，串行控制内存。包及对应`.sha256`在`dist/releases/`；产品版本来自[version.json](../shared/src/version.json)，镜像名为`kiteline-server:<版本>-<amd64|arm64>`。本仓库不自动发布镜像，跨机器可用`docker save/load`搬运。清单记录commit、dirty、实际输入sourceDigest、Node/native与校验；组装server发现来源不一致时要求重建agent。
 
 ## Server 与已有 HTTPS 反代
 
 镜像按前节构建或导入后，启动 server。默认只发布宿主 `127.0.0.1:8080`，管理数据保存在 `server-data` 卷；不占用 80/443、不管理证书。
 
 ```sh
+export KITELINE_VERSION=$(node -p 'require("./shared/src/version.json").version')
 export KITELINE_PUBLIC_URL=https://kiteline.example.com
 docker compose -f deploy/compose.yaml up -d
 docker compose -f deploy/compose.yaml logs server
 ```
 
-已有反代将 `https://kiteline.example.com` 转发到 `http://127.0.0.1:8080`，透传 Host、Origin、Cookie 和 Upgrade，允许长连接及流式正文，关闭正文缓冲和写请求重放。`KITELINE_PUBLIC_URL` 填最终 HTTPS origin（含实际非默认端口），浏览器和 agent 都使用它，不填内部 HTTP upstream。
+上述版本读取命令在源码根目录执行；仅导入镜像时，直接将 `KITELINE_VERSION` 设置为导入的发布版本。已有反代将 `https://kiteline.example.com` 转发到 `http://127.0.0.1:8080`，透传 Host、Origin、Cookie 和 Upgrade，允许长连接及流式正文，关闭正文缓冲和写请求重放。`KITELINE_PUBLIC_URL` 填最终 HTTPS origin（含实际非默认端口），浏览器和 agent 都使用它，不填内部 HTTP upstream。
 
 端口不同可设置 `KITELINE_HTTP_PORT=18080`；反代在另一主机/容器时，可设置 `KITELINE_HTTP_BIND` 为可达的宿主地址，或将反代接入 Compose 网络、使用 `http://server:8080`。另一容器的 `127.0.0.1` 不是宿主机。ARM64 镜像另设 `KITELINE_ARCH=arm64`。
 
@@ -46,11 +47,11 @@ docker compose -f deploy/compose.yaml up -d server
 
 在网页设备列表点击“绑定设备”，生成并复制接入命令，在目标 Linux 机器以日常项目用户执行。命令从当前 server 下载配套包并校验，安装时需要 sudo，绑定与运行仍属于该用户。默认前台运行，Ctrl-C 停止；以后直接 `kiteline-agent run`，无需重新绑定。选择“后台常驻”才安装并启动 systemd 服务，需要非 root 用户与运行中的 systemd。
 
-目标机需要 curl、Git 2.43+、ripgrep 14+、SSH 和项目使用的 Shell/CLI。缺项时命令停止并给出安装建议，不自动修改系统依赖；Ubuntu 24.04 可执行：
+目标机需要 curl、Git 2.43+、ripgrep 14+、SSH、flock（util-linux）和项目使用的 Shell/CLI。缺项时命令停止并给出安装建议，不自动修改系统依赖；Ubuntu 24.04 可执行：
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y curl ca-certificates git ripgrep openssh-client ncurses-bin locales
+sudo apt-get install -y curl ca-certificates git ripgrep openssh-client ncurses-bin locales util-linux
 ```
 
 Node、recorder、固定 tmux、terminfo 和文件 helper 已随包提供，无需 npm/编译器。安装失败后先处理具体原因，再执行命令；绑定码已过期则在网页重新生成。程序已安装但绑定失败时不重复替换安装；已有身份或不同版本会停止，不自动重绑/升级。若已登记但未在线，先核对本地凭据和 `kiteline-agent run` 输出；凭据丢失在网页撤销残留身份并重新生成绑定码，不能把未知结果当成普通过期重试。
@@ -58,10 +59,12 @@ Node、recorder、固定 tmux、terminfo 和文件 helper 已随包提供，无�
 也可手工取得完整包及 `.sha256`，校验、解压、安装，再用网页“已安装，仅绑定”命令绑定：
 
 ```sh
-sha256sum --check kiteline-agent-0.1.0-linux-amd64.tar.gz.sha256
-tar -xzf kiteline-agent-0.1.0-linux-amd64.tar.gz
-./kiteline-agent-0.1.0-linux-amd64/bin/kiteline-agent check
-sudo ./kiteline-agent-0.1.0-linux-amd64/bin/kiteline-agent install --user YOUR_USER
+# KITELINE_VERSION 设为下载的版本；ARM64 将 amd64 换成 arm64。
+kiteline_package="kiteline-agent-${KITELINE_VERSION}-linux-amd64"
+sha256sum --check "$kiteline_package.tar.gz.sha256"
+tar -xzf "$kiteline_package.tar.gz"
+"./$kiteline_package/bin/kiteline-agent" check
+sudo "./$kiteline_package/bin/kiteline-agent" install --user YOUR_USER
 # 执行网页提供的绑定命令后：
 kiteline-agent run
 ```
@@ -76,17 +79,21 @@ kiteline-agent terminal attach SESSION_ID
 
 CLI 与运行进程共用 `/etc/kiteline-agent.env` 中的目录。`KITELINE_AGENT_HOME` 和 `KITELINE_AGENT_RUN_DIR` 使用单行双引号绝对路径，不使用转义或尾部注释；新安装默认状态在项目用户的 `~/.local/share/kiteline-agent`，socket 在该目录下的 `run/`。其他服务环境如 PATH、SSH_AUTH_SOCK、LANG 也在该文件配置，重启后生效。`kiteline-agent doctor` 检查实际进程环境；仓库认证是否成功仍以实际 Git 同步为准。
 
-前台转常驻：先 Ctrl-C 停止，再执行 `sudo kiteline-agent service install --user YOUR_USER` 和 `sudo kiteline-agent service start`。常驻转前台：先 `sudo kiteline-agent service stop`、`sudo kiteline-agent service disable`，再 `kiteline-agent run`。两者保留身份和 workspace，但停止会结束终端任务。旧安装仍使用 `/run/kiteline-agent` 时，转前台前先在环境文件改成项目用户可写的稳定目录。
+前台转常驻：先 Ctrl-C 停止，再执行 `sudo kiteline-agent service install --user YOUR_USER` 和 `sudo kiteline-agent service start`。常驻转前台：先 `sudo kiteline-agent service stop`、`sudo kiteline-agent service disable`，再 `kiteline-agent run`。两者保留身份和 workspace，但停止会结束终端任务。默认共用状态目录下的 `run/`。
 
 ```sh
 kiteline-agent service status
 sudo kiteline-agent service logs --follow
 sudo kiteline-agent service stop
-sudo kiteline-agent service upgrade --archive /path/to/kiteline-agent-0.1.0-linux-amd64.tar.gz
+sudo kiteline-agent service upgrade --archive "/path/to/kiteline-agent-${KITELINE_VERSION}-linux-amd64.tar.gz"
 sudo kiteline-agent service uninstall
 ```
 
 升级需要旁边的 `.sha256` 文件并明确确认，会结束当前终端，保留绑定、workspace 和配置；新服务未就绪时恢复旧安装并报告结果。前台方式须先停止，升级后仍保持停止；卸载默认保留状态与环境文件，`--purge-state` 只移除 agent 自己的状态 JSON，保留目录和项目文件。
+
+### 运行与维护补充
+
+Linux 的 Unix socket 完整路径限 103 字节。显式使用 `/run` 等易失运行目录时，启动前及系统重启后需准备属于运行用户的可写目录。
 
 ## 自行准备的容器
 

@@ -10,6 +10,7 @@ import { tmuxBinary, tmuxEnvironment } from "@kiteline/shared/terminal/node";
 import { agentConfig, agentPaths, defaultAgentLimits, type AgentConfig } from "./config.js";
 import { localRequest } from "./local.js";
 import { packageDirectory, environmentFile } from "./installation.js";
+import { checkFileHelper, checkToolVersion, toolRequirements } from "./tool-checks.js";
 
 const execute = promisify(execFile);
 interface Item {
@@ -105,15 +106,9 @@ export async function diagnose(
     });
   }
   await check("tmux execution", () => command(tmuxBinary, ["-V"]));
-  await check("Helper execution", async () => {
-    try {
-      await command(join(native, "bin/rename-noreplace"), []);
-    } catch (error) {
-      if ((error as { code?: number }).code === 2) return "Loadable; usage exit code 2";
-      throw error;
-    }
-    throw new Error("Helper did not return the expected usage status");
-  });
+  await check("Helper execution", () =>
+    checkFileHelper(join(native, "bin/rename-noreplace"), command),
+  );
   if (!runtime) {
     add(
       "Runtime environment",
@@ -160,23 +155,8 @@ export async function diagnose(
     await access(runtime.shell, constants.X_OK);
     return runtime.shell;
   });
-  for (const [file, minimum] of [
-    ["git", "2.43"],
-    ["rg", "14.0"],
-  ] as const) {
-    await check(file, async () => {
-      const version = (await command(file, ["--version"])).split("\n")[0]!;
-      const found = /(\d+)\.(\d+)/.exec(version),
-        required = minimum.split(".").map(Number);
-      if (
-        !found ||
-        Number(found[1]) < required[0]! ||
-        (Number(found[1]) === required[0] && Number(found[2]) < required[1]!)
-      )
-        throw new Error(`${version}; requires >= ${minimum}`);
-      return version;
-    });
-  }
+  for (const tool of toolRequirements)
+    await check(tool.file, () => checkToolVersion(tool, command));
   await check("Git configuration sources", async () => {
     try {
       const value = await command("git", [

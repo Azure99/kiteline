@@ -185,7 +185,7 @@ function CommitView({
   const loaded = useRef(false);
   const mobile = useMobile();
   const load = useCallback(
-    async (cursor?: string) => {
+    async (offset = 0) => {
       request.current?.abort();
       const controller = new AbortController();
       request.current = controller;
@@ -195,18 +195,13 @@ function CommitView({
         const next = await rpc(
           deviceId,
           "git.commitFiles",
-          { workspaceId, repoId, commitOid: commit.oid, parentOid: parent, cursor },
+          { workspaceId, repoId, commitOid: commit.oid, parentOid: parent, offset },
           controller.signal,
         );
         if (controller.signal.aborted) return;
         loaded.current = true;
         setValue((old) =>
-          cursor && old
-            ? {
-                ...next,
-                files: { ...next.files, items: [...old.files.items, ...next.files.items] },
-              }
-            : next,
+          offset > 0 && old ? { ...next, files: [...old.files, ...next.files] } : next,
         );
       } catch (error) {
         if (!controller.signal.aborted) setError(error);
@@ -280,13 +275,12 @@ function CommitView({
           className={`${mobile && target ? "hidden" : ""} scroll-area w-full overflow-auto border-border min-[960px]:w-72 min-[960px]:shrink-0 min-[960px]:border-r`}
           aria-label={t(($) => $.git.commitFiles)}
         >
-          {value?.files.items.map((file) => (
+          {value?.files.map((file) => (
             <button
               key={file.path}
               onClick={() =>
                 setTarget({
                   path: file.path,
-                  oldPath: file.oldPath,
                   side: "commit",
                   commitOid: commit.oid,
                   parentOid: parent,
@@ -304,15 +298,15 @@ function CommitView({
           {busy && (
             <p className="p-4 text-xs text-muted-foreground">{t(($) => $.common.reading)}</p>
           )}
-          {!!(!busy && !error && !value?.files.items.length) && (
+          {!!(!busy && !error && !value?.files.length) && (
             <p className="p-4 text-xs text-muted-foreground">{t(($) => $.git.noFileChanges)}</p>
           )}
-          {value?.files.nextCursor && (
+          {value?.nextOffset !== undefined && (
             <Button
               variant="ghost"
               className="w-full"
               disabled={busy || !active}
-              onClick={() => void load(value.files.nextCursor)}
+              onClick={() => void load(value.nextOffset)}
             >
               {t(($) => $.git.loadMore)}
             </Button>

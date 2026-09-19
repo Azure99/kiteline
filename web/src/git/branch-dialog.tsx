@@ -39,6 +39,7 @@ export function BranchDialog({
           <DialogTitle>{t(($) => $.git.createBranch)}</DialogTitle>
         </DialogHeader>
         <form
+          className="flex min-h-0 flex-col"
           onSubmit={(event) => {
             event.preventDefault();
             if (!name.trim() || actions.get(target).request) return;
@@ -50,7 +51,7 @@ export function BranchDialog({
             onClose();
           }}
         >
-          <div className="space-y-3 p-4">
+          <div className="space-y-3 overflow-auto p-4">
             <label className="block space-y-1 text-sm">
               <span>{t(($) => $.git.branchName)}</span>
               <Input autoFocus value={name} onChange={(event) => setName(event.target.value)} />

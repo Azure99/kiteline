@@ -3,7 +3,7 @@ import { ChevronDown, ChevronRight, Folder, Plus, Server } from "lucide-react";
 import { useState } from "react";
 import type { Device } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
-import { devicePath, workspacePath } from "../lib/navigation";
+import { devicePath, workspaceDestination, type WorkspaceTool } from "../lib/navigation";
 
 export function DeviceNavigation({
   devices,
@@ -16,7 +16,7 @@ export function DeviceNavigation({
   devices: Device[];
   deviceId?: string;
   workspaceId?: string;
-  tool?: string;
+  tool?: WorkspaceTool;
   onNavigate: (path: string) => void;
   onBind: () => void;
 }) {
@@ -76,7 +76,11 @@ export function DeviceNavigation({
               <button
                 key={w.id}
                 className={`flex min-h-9 w-full items-center gap-2 rounded py-1.5 pl-8 pr-2 text-left text-xs hover:bg-muted max-[959px]:min-h-11 max-[959px]:text-sm ${deviceId === d.id && workspaceId === w.id ? "bg-primary-soft text-primary" : "text-muted-foreground"}`}
-                onClick={() => onNavigate(workspacePath(d.id, w.id, tool))}
+                onClick={() =>
+                  onNavigate(
+                    workspaceDestination({ deviceId: d.id, workspaceId: w.id }, tool ?? "terminal"),
+                  )
+                }
               >
                 <Folder size={14} className="shrink-0" />
                 <span className="min-w-0 truncate" title={w.path}>

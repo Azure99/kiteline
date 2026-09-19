@@ -1,4 +1,4 @@
-import { Compartment, EditorState } from "@codemirror/state";
+import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import {
   EditorView,
   drawSelection,
@@ -27,7 +27,12 @@ const theme = EditorView.theme({
   "@media (max-width: 959px)": { "&": { fontSize: "16px" } },
 });
 
-export function textState(text: string, language: Compartment, phrases = new Compartment()) {
+export function textState(
+  text: string,
+  language: Compartment,
+  phrases = new Compartment(),
+  languageSupport: Extension = [],
+) {
   return EditorState.create({
     doc: text,
     extensions: [
@@ -39,7 +44,7 @@ export function textState(text: string, language: Compartment, phrases = new Com
       bracketMatching(),
       syntaxHighlighting(defaultHighlightStyle),
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
-      language.of([]),
+      language.of(languageSupport),
       phrases.of(EditorState.phrases.of(editorPhrases())),
     ],
   });

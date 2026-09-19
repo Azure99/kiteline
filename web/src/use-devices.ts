@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Device } from "@kiteline/shared/protocol";
+import type { BrowserEvent, Device } from "@kiteline/shared/protocol";
 import { api } from "./lib/api";
 import type { Session } from "./auth";
 
@@ -47,8 +47,8 @@ export function useDevices(
           window.dispatchEvent(new Event("kiteline:connected"));
         };
         socket.onmessage = (event) => {
-          const message = JSON.parse(String(event.data)) as { type: string; devices?: Device[] };
-          if (message.type === "devices.changed" && message.devices) setDevices(message.devices);
+          const message = JSON.parse(String(event.data)) as BrowserEvent;
+          if (message.type === "devices.changed") setDevices(message.devices);
           window.dispatchEvent(new CustomEvent("kiteline:event", { detail: message }));
         };
         socket.onclose = () => {

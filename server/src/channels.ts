@@ -24,7 +24,6 @@ interface Channel {
   loginId: string;
   connection: AgentConnection;
   timer: NodeJS.Timeout;
-  expiresAt: string;
   kind: "terminal.attach" | "file.read" | "file.write" | "http.proxy";
   params: Record<string, unknown>;
   agent?: WebSocket;
@@ -102,7 +101,6 @@ export class Channels {
       ready: pending.ready.then(
         (): ChannelReady => ({
           channelId: pending.id,
-          expiresAt: pending.item.expiresAt,
           meta: pending.item.meta!,
         }),
       ),
@@ -131,7 +129,6 @@ export class Channels {
       this.config.limits.channelsPerDevice
     )
       return unavailable(new AppError("busy", "Device channel limit reached"));
-    const expiresAt = new Date(Date.now() + this.config.limits.channelPairTimeout).toISOString();
     let item: Channel;
     const ready = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(
@@ -142,7 +139,6 @@ export class Channels {
         id,
         connection,
         loginId: login.id,
-        expiresAt,
         kind,
         params,
         timer,
@@ -220,7 +216,6 @@ export class Channels {
             throw new AppError("unsupported", "Unsupported image type");
         }
         clearTimeout(item.timer);
-        item.expiresAt = new Date(Date.now() + this.config.limits.channelPairTimeout).toISOString();
         if (item.download)
           this.content(id, item.loginId, item.download.request, item.download.response);
         else
@@ -355,9 +350,9 @@ export class Channels {
       type: "channel.failed",
       channelId: id,
       deviceId,
-      workspaceId: params.workspaceId,
-      path: params.path,
-      purpose: params.purpose,
+      workspaceId: params.workspaceId as string,
+      path: params.path as string,
+      purpose: params.purpose as "text" | "image" | "download",
       error: asError(error),
       outcome: "failed",
     });

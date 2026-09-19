@@ -25,14 +25,21 @@ import { Button } from "../components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
 import { ApiError, rpc } from "../lib/api";
 import { useMobile } from "../lib/use-mobile";
-import { showDraft, type DraftStore } from "../files/drafts";
+import type { DraftStore } from "../files/drafts";
+import { showDraft } from "../files/navigation";
 import { DiffView, type DiffTarget } from "./diff-view";
 import { inSide, selectionOf, type ChangeSide } from "./selection";
 import { useGitStatus } from "./use-status";
 import { HistoryView } from "./history-view";
 import { BranchesView } from "./branches-view";
 import { useWorkspaceRefresh } from "../lib/use-workspace-refresh";
-import { navigate, useRoute, workspacePath } from "../lib/navigation";
+import {
+  currentRoute,
+  isWorkspaceRoute,
+  navigateWorkspace,
+  updateWorkspaceQuery,
+  useRoute,
+} from "../lib/navigation";
 import { parentPath } from "../files/use-browser";
 import { type GitActions, useGitActivity } from "./actions";
 import {
@@ -64,12 +71,8 @@ export function GitTool({
   const { t } = useTranslation();
 
   const route = useRoute();
-  const requestedRepo = route.tool === "git" ? route.query.get("repo") : null;
+  const requestedRepo = route.query.repo;
   const [repos, setRepos] = useState<Repo[]>([]);
-  const [repoId, setRepoId] = useState<string | undefined>(requestedRepo ?? undefined);
-  useEffect(() => {
-    if (requestedRepo) setRepoId(requestedRepo);
-  }, [requestedRepo]);
   const [scan, setScan] = useState<RepoDiscovery>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
@@ -115,7 +118,6 @@ export function GitTool({
         const entries = new Map((found.complete ? [] : old).map((item) => [item.id, item]));
         for (const repo of scanned.current.values()) entries.set(repo.id, repo);
         const next = [...entries.values()].sort((a, b) => a.path.localeCompare(b.path));
-        setRepoId((selected) => selected ?? next.find((item) => item.available)?.id ?? next[0]?.id);
         return next;
       });
       setScan(found);
@@ -139,20 +141,18 @@ export function GitTool({
     };
   }, [enabled, discover]);
   useWorkspaceRefresh(device.id, workspace.id, enabled, "repos", discover);
-  const selectedRepoId = requestedRepo ?? repoId;
+  const selectedRepoId = requestedRepo ?? repos.find((item) => item.available)?.id ?? repos[0]?.id;
   const repo = repos.find((item) => item.id === selectedRepoId);
   const activeRepoId = repo?.id;
   useEffect(() => {
     if (route.tool !== "git" || requestedRepo || !activeRepoId) return;
-    const query = new URLSearchParams(location.search);
-    query.set("repo", activeRepoId);
-    navigate(location.pathname + `?${query}`, true);
-  }, [route.tool, requestedRepo, activeRepoId]);
+    const current = currentRoute();
+    const target = { deviceId: device.id, workspaceId: workspace.id };
+    if (current.tool === "git" && isWorkspaceRoute(current, target) && !current.query.repo)
+      updateWorkspaceQuery(target, { repo: activeRepoId }, true);
+  }, [route.tool, requestedRepo, activeRepoId, device.id, workspace.id]);
   function chooseRepo(id: string) {
-    setRepoId(id);
-    const query = new URLSearchParams(location.search);
-    query.set("repo", id);
-    navigate(location.pathname + `?${query}`);
+    updateWorkspaceQuery({ deviceId: device.id, workspaceId: workspace.id }, { repo: id });
   }
   function openFile(path: string) {
     if (!repo) return;
@@ -169,11 +169,14 @@ export function GitTool({
   function locateFile(path: string) {
     if (!repo) return;
     const full = repo.path === "." ? path : `${repo.path}/${path}`;
-    navigate(
-      workspacePath(device.id, workspace.id, "files") +
-        "?" +
-        new URLSearchParams({ folder: parentPath(full), reveal: full }),
-    );
+    navigateWorkspace({ deviceId: device.id, workspaceId: workspace.id }, "files", {
+      folder: parentPath(full),
+      reveal: full,
+      file: undefined,
+      draft: undefined,
+      preview: undefined,
+      search: undefined,
+    });
   }
   const picker = (
     <Menu>
@@ -407,7 +410,9 @@ function Changes({
         actions={actions}
         target={actionTarget}
         onLocate={onLocate}
-        onTerminal={() => navigate(workspacePath(device.id, workspace.id))}
+        onTerminal={() =>
+          navigateWorkspace({ deviceId: device.id, workspaceId: workspace.id }, "terminal")
+        }
       />
       {value?.operation && (
         <OperationBar
@@ -415,7 +420,9 @@ function Changes({
           target={actionTarget}
           actions={actions}
           disabled={!enabled}
-          onTerminal={() => navigate(workspacePath(device.id, workspace.id))}
+          onTerminal={() =>
+            navigateWorkspace({ deviceId: device.id, workspaceId: workspace.id }, "terminal")
+          }
         />
       )}
       {view === "history" && (
@@ -544,7 +551,6 @@ function Changes({
                               ? onFile(entry.path)
                               : setTarget({
                                   path: entry.path,
-                                  oldPath: entry.oldPath,
                                   side: side === "staged" ? "staged" : "worktree",
                                 })
                           }

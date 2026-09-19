@@ -6,6 +6,7 @@ import { api, post, rpc } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import {
+  Dialog,
   DialogClose,
   DialogContent,
   DialogFooter,
@@ -19,9 +20,11 @@ export type DeviceAction =
 export function DeviceActionDialog({
   action,
   onDone,
+  onClose,
 }: {
   action: DeviceAction;
   onDone: () => void;
+  onClose: () => void;
 }) {
   const { t } = useTranslation();
 
@@ -69,54 +72,61 @@ export function DeviceActionDialog({
     }
   }
   return (
-    <DialogContent>
-      <form className="flex min-h-0 flex-col" onSubmit={(event) => void submit(event)}>
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-3 overflow-auto p-5">
-          {renaming ? (
-            <label className="block space-y-2">
-              <span>{t(($) => $.common.name)}</span>
-              <Input
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                required
-                maxLength={256}
-                autoFocus
-              />
-            </label>
-          ) : (
-            <>
-              <p className="break-all font-medium">{target.name}</p>
-              <p className="text-sm text-muted-foreground">
-                {action.type === "revoke"
-                  ? t(($) => $.devices.revokeHint)
-                  : t(($) => $.devices.removeHint)}
-              </p>
-            </>
-          )}
-          {!!error && (
-            <div role="alert" className="text-sm text-destructive">
-              <ErrorNotice error={error} />
-            </div>
-          )}
-        </div>
-        <DialogFooter>
-          <DialogClose render={<Button variant="outline" />}>
-            {t(($) => $.common.cancel)}
-          </DialogClose>
-          <Button type="submit" variant={renaming ? "default" : "destructive"} disabled={busy}>
-            {busy
-              ? t(($) => $.auth.processing)
-              : renaming
-                ? t(($) => $.common.save)
-                : action.type === "revoke"
-                  ? t(($) => $.devices.revoke)
-                  : t(($) => $.devices.remove)}
-          </Button>
-        </DialogFooter>
-      </form>
-    </DialogContent>
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !busy) onClose();
+      }}
+    >
+      <DialogContent>
+        <form className="flex min-h-0 flex-col" onSubmit={(event) => void submit(event)}>
+          <DialogHeader>
+            <DialogTitle>{title}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 overflow-auto p-5">
+            {renaming ? (
+              <label className="block space-y-2">
+                <span>{t(($) => $.common.name)}</span>
+                <Input
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  required
+                  maxLength={256}
+                  autoFocus
+                />
+              </label>
+            ) : (
+              <>
+                <p className="break-all font-medium">{target.name}</p>
+                <p className="text-sm text-muted-foreground">
+                  {action.type === "revoke"
+                    ? t(($) => $.devices.revokeHint)
+                    : t(($) => $.devices.removeHint)}
+                </p>
+              </>
+            )}
+            {!!error && (
+              <div role="alert" className="text-sm text-destructive">
+                <ErrorNotice error={error} />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <DialogClose disabled={busy} render={<Button variant="outline" />}>
+              {t(($) => $.common.cancel)}
+            </DialogClose>
+            <Button type="submit" variant={renaming ? "default" : "destructive"} disabled={busy}>
+              {busy
+                ? t(($) => $.auth.processing)
+                : renaming
+                  ? t(($) => $.common.save)
+                  : action.type === "revoke"
+                    ? t(($) => $.devices.revoke)
+                    : t(($) => $.devices.remove)}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

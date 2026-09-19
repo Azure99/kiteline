@@ -6,11 +6,10 @@ import { Group, Panel, Separator } from "react-resizable-panels";
 import { Maximize2, PanelBottom, Plus, RefreshCw, X } from "lucide-react";
 import type { Device, Workspace } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
-import { Dialog } from "../components/ui/dialog";
 import { IconButton } from "../components/icon-button";
 import { TerminalView, type TerminalActions } from "./terminal-view";
 import { TerminalSettings } from "./settings";
-import { navigate, useRoute, workspacePath } from "../lib/navigation";
+import { navigateWorkspace, updateWorkspaceQuery, useRoute } from "../lib/navigation";
 import { useMobile } from "../lib/use-mobile";
 import { useSessions } from "./use-sessions";
 import {
@@ -49,7 +48,7 @@ export function WorkspaceTerminal({
   const remote = useSessions(device, workspace.id);
   const mobile = useMobile();
   const route = useRoute();
-  const routeSession = route.query.get("session");
+  const routeSession = route.query.session ?? null;
   const lastRouteSession = useRef<string | null | undefined>(undefined);
   const lastTool = useRef<string | undefined>(undefined);
   const displays = useRef(new Map<string, TerminalActions>());
@@ -81,10 +80,12 @@ export function WorkspaceTerminal({
     const returning = route.tool === "terminal" && lastTool.current !== "terminal";
     lastTool.current = route.tool;
     if (returning && !routeSession && selected) {
-      const query = new URLSearchParams(location.search);
-      query.set("session", selected);
       lastRouteSession.current = selected;
-      navigate(location.pathname + `?${query}`, true);
+      updateWorkspaceQuery(
+        { deviceId: device.id, workspaceId: workspace.id },
+        { session: selected },
+        true,
+      );
       return;
     }
     if (lastRouteSession.current === routeSession) return;
@@ -99,7 +100,16 @@ export function WorkspaceTerminal({
       else setError(new ApiError("not_found", "The terminal does not exist or has ended"));
     } else if (route.tool === "terminal" && previous !== undefined)
       setLayout((old) => ({ ...old, current: undefined }));
-  }, [routeSession, route.tool, selected, remote.loaded, sessions, setError]);
+  }, [
+    routeSession,
+    route.tool,
+    selected,
+    remote.loaded,
+    sessions,
+    setError,
+    device.id,
+    workspace.id,
+  ]);
   const register = useCallback((id: string, value: TerminalActions | null) => {
     if (value) displays.current.set(id, value);
     else {
@@ -118,12 +128,13 @@ export function WorkspaceTerminal({
   function applyMain(next: TerminalLayout, tool = route.tool, replace = false) {
     setLayout(next);
     const id = currentGroup(next)?.active;
-    const query = new URLSearchParams(location.search);
-    if (id) query.set("session", id);
-    else query.delete("session");
     lastRouteSession.current = id ?? null;
-    const path = workspacePath(device.id, workspace.id, tool) + (query.size ? `?${query}` : "");
-    if (path !== location.pathname + location.search) navigate(path, replace);
+    navigateWorkspace(
+      { deviceId: device.id, workspaceId: workspace.id },
+      tool ?? "terminal",
+      { session: id },
+      replace,
+    );
   }
   function choose(id: string, dock = false) {
     if (dock) setLayout((old) => ({ ...old, dock: id, dockOpen: true }));
@@ -152,18 +163,19 @@ export function WorkspaceTerminal({
     const session = await remote.create(shortcutId);
     if (!session) return;
     setLayout((old) => {
+      if (dock) return { ...old, dock: session.id, dockOpen: true };
       const next =
         target && old.groups.some((item) => item.id === target)
           ? moveSession(old, session.id, target)
           : selectSession(old, session.id);
-      if (dock) return { ...next, current: old.current, dock: session.id, dockOpen: true };
       return { ...next, dock: old.dock ?? session.id };
     });
     if (!dock) {
-      const query = new URLSearchParams(location.search);
-      query.set("session", session.id);
       lastRouteSession.current = session.id;
-      navigate(location.pathname + `?${query}`);
+      updateWorkspaceQuery(
+        { deviceId: device.id, workspaceId: workspace.id },
+        { session: session.id },
+      );
     }
   }
   function command(kind: SessionCommand, id: string, dock = false) {
@@ -382,9 +394,7 @@ export function WorkspaceTerminal({
           onChange={remote.change}
         />
       )}
-      <Dialog open={settings} onOpenChange={setSettings}>
-        {settings && <TerminalSettings device={device} />}
-      </Dialog>
+      {settings && <TerminalSettings device={device} onClose={() => setSettings(false)} />}
     </>
   );
 }

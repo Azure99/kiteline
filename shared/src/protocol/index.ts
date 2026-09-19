@@ -1,6 +1,9 @@
+import release from "../version.json" with { type: "json" };
+
 export const protocolVersion = 1;
-export const appVersion = "0.1.0";
+export const appVersion = release.version;
 export const terminalProfile = "xterm-c1";
+export { rpcMutates } from "./rpc.js";
 export type {
   RpcMethods,
   RpcMethod,
@@ -258,8 +261,9 @@ export interface CommitFile {
   binary: boolean;
 }
 export interface CommitFiles {
-  files: Page<CommitFile>;
+  files: CommitFile[];
   parentOid?: string;
+  nextOffset?: number;
 }
 export interface Branch {
   name: string;
@@ -288,6 +292,24 @@ export interface FileProgress {
   completedItems?: number;
   bytes?: number;
 }
+export type WorkspaceEvent =
+  | { type: "workspace.changed"; workspaceId: string; scopes: ("files" | "git" | "repos")[] }
+  | { type: "sessions.changed"; workspaceId: string }
+  | { type: "watch.status"; workspaceId: string; status: "normal" | "degraded"; reason?: string };
+export type AgentEvent = WorkspaceEvent | ({ type: "request.progress"; id: string } & FileProgress);
+export type BrowserEvent =
+  | { type: "devices.changed"; devices: Device[] }
+  | (AgentEvent & { deviceId: string })
+  | {
+      type: "channel.failed";
+      channelId: string;
+      deviceId: string;
+      workspaceId: string;
+      path: string;
+      purpose: "text" | "image" | "download";
+      error: KitelineError;
+      outcome: "failed";
+    };
 export interface TextFormat {
   bom: boolean;
   lineEnding: "lf" | "crlf";
@@ -310,14 +332,12 @@ export interface FileMeta {
 export interface UploadedFile {
   path: string;
   size: number;
-  targetVersion: string;
 }
 export interface SavedFile extends UploadedFile {
   revision: string;
 }
 export interface ChannelReady<T = TerminalMeta | FileMeta> {
   channelId: string;
-  expiresAt: string;
   meta: T;
 }
 

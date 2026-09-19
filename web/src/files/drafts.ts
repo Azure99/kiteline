@@ -3,10 +3,9 @@ import { Compartment, type EditorState } from "@codemirror/state";
 import type { KitelineError, Device, TextFormat } from "@kiteline/shared/protocol";
 import { encodeText } from "@kiteline/shared/text";
 import { ApiError, errorMessage, rpc } from "../lib/api";
-import { navigate, workspacePath } from "../lib/navigation";
 import { readText, writeText, type DiskText, type FileTarget } from "./content";
 import { textState } from "./editor-state";
-import { isWithin, movedPath, parentPath } from "./use-browser";
+import { isWithin, movedPath } from "./use-browser";
 
 export type DraftNotice =
   | "loadingCapacity"
@@ -33,7 +32,6 @@ export interface Draft extends FileTarget {
   baseRaw: string;
   revision?: string;
   resolvedPath?: string;
-  mode?: number;
   scrollTop: number;
   scrollLeft: number;
   location?: { line: number; range?: [number, number] };
@@ -41,7 +39,7 @@ export interface Draft extends FileTarget {
   error?: unknown;
   observationError?: unknown;
   notice?: DraftNotice;
-  unknownSave?: { target: FileTarget; raw: string; text: string };
+  unknownSave?: { target: FileTarget; raw: string };
   missing?: boolean;
   diskChanged?: boolean;
   request?: AbortController;
@@ -166,13 +164,17 @@ export class DraftStore {
     }
     draft.path = disk.target.path;
     draft.format = disk.meta as TextFormat;
-    draft.state = textState(disk.text, draft.language, draft.phrases);
+    draft.state = textState(
+      disk.text,
+      draft.language,
+      draft.phrases,
+      draft.state ? draft.language.get(draft.state) : undefined,
+    );
     draft.bytes = size;
     draft.baseText = disk.text;
     draft.baseRaw = disk.raw;
     draft.revision = disk.meta.revision;
     draft.resolvedPath = disk.meta.resolvedPath;
-    draft.mode = disk.meta.mode;
     draft.unknownSave = undefined;
     draft.missing = false;
     draft.error = undefined;
@@ -259,7 +261,6 @@ export class DraftStore {
           draft.unknownSave = {
             target: { deviceId: draft.deviceId, workspaceId: draft.workspaceId, path },
             raw,
-            text,
           };
       }
       return false;
@@ -294,12 +295,6 @@ export class DraftStore {
         draft.error = undefined;
         draft.notice = "diskMatches";
         window.dispatchEvent(new CustomEvent("kiteline:file-written", { detail: unknown.target }));
-        const query = new URLSearchParams(location.search);
-        if (query.get("draft") === draft.id) {
-          query.set("file", draft.path);
-          query.set("folder", parentPath(draft.path));
-          navigate(`${location.pathname}?${query}`, true);
-        }
       }
       return disk;
     } catch (error) {
@@ -406,12 +401,6 @@ export class DraftStore {
       this.changed();
     }
   }
-  requestClose(draft: Draft) {
-    if (isDirty(draft)) {
-      this.closing = draft.id;
-      this.changed();
-    } else this.close(draft);
-  }
   private markMissing(draft: Draft, notice: DraftNotice) {
     draft.diskActivity++;
     draft.request?.abort();
@@ -466,12 +455,6 @@ export class DraftStore {
     this.items = this.items.filter((item) => item !== draft);
     if (this.closing === draft.id) this.closing = undefined;
     this.changed();
-    const query = new URLSearchParams(location.search);
-    if (query.get("draft") === draft.id) {
-      query.delete("draft");
-      query.delete("file");
-      navigate(location.pathname + (query.size ? `?${query}` : ""), true);
-    }
   }
   clear() {
     for (const item of this.items) item.request?.abort();
@@ -482,14 +465,6 @@ export class DraftStore {
 }
 export function useDrafts(store: DraftStore) {
   return useSyncExternalStore(store.subscribe, store.snapshot);
-}
-export function showDraft(draft: Draft, replace = false) {
-  const query = new URLSearchParams({
-    file: draft.path,
-    draft: draft.id,
-    folder: parentPath(draft.path),
-  });
-  navigate(`${workspacePath(draft.deviceId, draft.workspaceId, "files")}?${query}`, replace);
 }
 export function draftError(draft: Draft) {
   const error = draft.error ?? draft.observationError;

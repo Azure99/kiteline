@@ -1,6 +1,5 @@
 {
   "name": "@kiteline/agent",
-  "version": "0.1.0",
   "private": true,
   "type": "module",
   "files": [
@@ -8,6 +7,7 @@
   ],
   "dependencies": {
     "@kiteline/shared": "workspace:*",
+    "chokidar": "5.0.0",
     "image-size": "2.0.4",
     "proper-lockfile": "4.1.2",
     "stream-json": "3.6.0",

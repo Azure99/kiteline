@@ -1,4 +1,10 @@
-import type { KitelineError, RpcArguments, RpcReply, RpcResult } from "@kiteline/shared/protocol";
+import {
+  rpcMutates,
+  type KitelineError,
+  type RpcArguments,
+  type RpcReply,
+  type RpcResult,
+} from "@kiteline/shared/protocol";
 import { i18n } from "../i18n";
 import { en } from "../i18n/en";
 
@@ -50,22 +56,7 @@ export function rpcReply<A extends RpcArguments>(
     `/api/devices/${encodeURIComponent(deviceId)}/rpc`,
     { id, method, params },
     signal,
-    ![
-      "directories.list",
-      "ports.list",
-      "sessions.list",
-      "files.list",
-      "files.inspect",
-      "files.search",
-      "repos.discover",
-      "git.status",
-      "git.diff",
-      "git.history",
-      "git.commitFiles",
-      "git.branches",
-      "git.review",
-      "git.remotes",
-    ].includes(method),
+    rpcMutates[method],
   );
 }
 export async function rpc<A extends RpcArguments>(

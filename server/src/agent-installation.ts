@@ -8,7 +8,7 @@ const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
 export function installationCommands(publicUrl: string, code: string) {
   const origin = quote(publicUrl);
-  const bind = `kiteline-agent check --service && printf '%s\\n' ${quote(code)} | kiteline-agent bind --server ${origin} --if-unbound`;
+  const bind = `kiteline-agent check && printf '%s\\n' ${quote(code)} | kiteline-agent bind --server ${origin} --if-unbound`;
   const command = (service: boolean) => `(
 set -e
 for kiteline_tool in curl mktemp; do

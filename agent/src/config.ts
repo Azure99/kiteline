@@ -27,7 +27,6 @@ export const defaultAgentLimits = {
   terminalSessionsPerDevice: 32,
   terminalStallTimeout: 10_000,
   channelsPerDevice: 128,
-  watchDirectories: 8192,
 };
 export interface Identity {
   deviceId: string;
@@ -48,14 +47,11 @@ export async function atomicJson(path: string, value: unknown) {
 }
 export async function agentPaths() {
   const installed = await installedPaths();
+  if (installed) return installed;
   const dataDir = resolve(
-    process.env.KITELINE_AGENT_HOME ??
-      installed?.dataDir ??
-      resolve(homedir(), ".local/share/kiteline-agent"),
+    process.env.KITELINE_AGENT_HOME ?? resolve(homedir(), ".local/share/kiteline-agent"),
   );
-  const runDir = resolve(
-    process.env.KITELINE_AGENT_RUN_DIR ?? installed?.runDir ?? resolve(dataDir, "run"),
-  );
+  const runDir = resolve(process.env.KITELINE_AGENT_RUN_DIR ?? resolve(dataDir, "run"));
   return { dataDir, runDir };
 }
 export async function agentConfig(): Promise<AgentConfig> {

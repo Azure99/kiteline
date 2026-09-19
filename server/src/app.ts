@@ -1,11 +1,11 @@
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import { WebSocketServer } from "ws";
 import { AppError, appVersion, limits, record, string } from "@kiteline/shared/protocol";
 import type { ServerConfig } from "./config.js";
 import { Store, password } from "./store.js";
-import { AttemptLimiter, body, cookie, failure, json, origin } from "./http.js";
+import { AttemptLimiter, body, cookie, errorStatus, failure, json, origin } from "./http.js";
 import { bearer, Connections } from "./connections.js";
 import { Channels } from "./channels.js";
 import { HttpProxy, isProxyPath } from "./http-proxy.js";
@@ -251,10 +251,8 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       } else socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
     } catch (error) {
       const status =
-        error instanceof AppError && error.code === "forbidden"
-          ? "403 Forbidden"
-          : "401 Unauthorized";
-      socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
+        error instanceof AppError && error.code === "unsupported" ? 426 : errorStatus(error);
+      socket.end(`HTTP/1.1 ${status} ${STATUS_CODES[status]}\r\nConnection: close\r\n\r\n`);
     }
   });
   return {

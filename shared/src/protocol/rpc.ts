@@ -46,7 +46,7 @@ export interface RpcMethods {
   "sessions.list": Contract<{ workspaceId?: string }, { sessions: Session[] }>;
   "sessions.create": Contract<WorkspaceParams & { name?: string; shortcutId?: string }, Session>;
   "sessions.rename": Contract<SessionParams & { name: string }, Session>;
-  "sessions.end": Contract<{ workspaceId?: string; sessionId: string }, { ended: boolean }>;
+  "sessions.end": Contract<SessionParams, { ended: boolean }>;
   "sessions.recover": Contract<SessionParams, Session>;
   "sessions.redraw": Contract<SessionParams, Session>;
   "settings.update": Contract<{ historyLines: number }, Metadata["settings"]>;
@@ -74,7 +74,7 @@ export interface RpcMethods {
   >;
   "git.history": Contract<RepoParams & { anchorOid?: string; offset?: number }, GitHistory>;
   "git.commitFiles": Contract<
-    RepoParams & { commitOid: string; parentOid?: string; cursor?: string },
+    RepoParams & { commitOid: string; parentOid?: string; offset?: number },
     CommitFiles
   >;
   "git.branches": Contract<RepoParams, { branches: Branch[] }>;
@@ -110,6 +110,51 @@ export interface RpcMethods {
 }
 
 export type RpcMethod = keyof RpcMethods;
+export const rpcMutates: Record<RpcMethod, boolean> = {
+  "ports.list": false,
+  "directories.list": false,
+  "directories.mkdir": true,
+  "workspaces.add": true,
+  "workspaces.rename": true,
+  "workspaces.remove": true,
+  "sessions.list": false,
+  "sessions.create": true,
+  "sessions.rename": true,
+  "sessions.end": true,
+  "sessions.recover": true,
+  "sessions.redraw": true,
+  "settings.update": true,
+  "shortcuts.put": true,
+  "shortcuts.remove": true,
+  "files.list": false,
+  "files.inspect": false,
+  "files.create": true,
+  "files.rename": true,
+  "files.copy": true,
+  "files.move": true,
+  "files.delete": true,
+  "files.search": false,
+  "repos.discover": false,
+  "git.status": false,
+  "git.diff": false,
+  "git.history": false,
+  "git.commitFiles": false,
+  "git.branches": false,
+  "git.remotes": false,
+  "git.review": false,
+  "git.stage": true,
+  "git.unstage": true,
+  "git.discard": true,
+  "git.commit": true,
+  "git.branch.create": true,
+  "git.branch.switch": true,
+  "git.branch.delete": true,
+  "git.fetch": true,
+  "git.pull": true,
+  "git.push": true,
+  "git.continue": true,
+  "git.abort": true,
+};
 export type RpcParams<M extends RpcMethod> = RpcMethods[M]["params"];
 export type RpcResult<M extends RpcMethod> = RpcMethods[M]["result"];
 export type RpcRequest<M extends RpcMethod = RpcMethod> = {

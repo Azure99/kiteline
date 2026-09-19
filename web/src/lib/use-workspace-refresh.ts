@@ -1,14 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { limits } from "@kiteline/shared/protocol";
-
-interface WorkspaceEvent {
-  type: string;
-  deviceId: string;
-  workspaceId: string;
-  scopes?: string[];
-  status?: "normal" | "degraded";
-  reason?: string;
-}
+import { limits, type BrowserEvent } from "@kiteline/shared/protocol";
 export function useWorkspaceRefresh(
   deviceId: string,
   workspaceId: string,
@@ -46,12 +37,12 @@ export function useWorkspaceRefresh(
       timer ??= setTimeout(() => void run(), limits.watchDebounce);
     };
     const event = (event: Event) => {
-      const value = (event as CustomEvent<WorkspaceEvent>).detail;
+      const value = (event as CustomEvent<BrowserEvent>).detail;
       if (
         value.type === "workspace.changed" &&
         value.deviceId === deviceId &&
         value.workspaceId === workspaceId &&
-        value.scopes?.includes(scope)
+        value.scopes.includes(scope)
       )
         schedule();
     };
@@ -79,7 +70,7 @@ export function useWatchStatus(deviceId: string, workspaceId: string) {
   useEffect(() => {
     setReason(undefined);
     const event = (event: Event) => {
-      const value = (event as CustomEvent<WorkspaceEvent>).detail;
+      const value = (event as CustomEvent<BrowserEvent>).detail;
       if (
         value.type === "watch.status" &&
         value.deviceId === deviceId &&

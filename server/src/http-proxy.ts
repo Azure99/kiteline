@@ -1,5 +1,4 @@
 import {
-  Agent,
   request as httpRequest,
   ServerResponse,
   STATUS_CODES,
@@ -190,14 +189,12 @@ export class HttpProxy {
       upgraded = false,
       sentHead = false;
     let channelId: string | undefined = undefined;
-    const agent = new Agent({ keepAlive: false });
     const finish = (error?: unknown) => {
       if (finished) return;
       finished = true;
       request.unpipe();
       upstream?.destroy();
       peer?.destroy();
-      agent.destroy();
       if (channelId) {
         if (error) this.channels.cancel(channelId, error);
         else this.channels.finishHttp(channelId);
@@ -228,9 +225,8 @@ export class HttpProxy {
       return;
     }
     if (finished) return tunnel.destroy();
-    agent.createConnection = () => tunnel;
     upstream = httpRequest({
-      agent,
+      createConnection: () => tunnel,
       hostname: "localhost",
       port: target.port,
       method: request.method,

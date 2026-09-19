@@ -12,6 +12,7 @@ import { consumeFileFrames, sendFileFrame } from "@kiteline/shared/file-stream";
 import type { AgentConfig, Identity } from "../config.js";
 import type { TextFiles, FileRead, TextWrite } from "./text.js";
 import type { BinaryFiles, UploadWrite } from "./binary.js";
+import type { TemporaryFiles } from "./temporary.js";
 
 interface Channel {
   socket: WebSocket;
@@ -32,6 +33,7 @@ export class FileChannels {
   constructor(
     private files: TextFiles,
     private binaryFiles: BinaryFiles,
+    private temporary: TemporaryFiles,
     private config: AgentConfig,
     private identity: Identity,
     private otherChannels: () => number,
@@ -106,7 +108,16 @@ export class FileChannels {
           }
         } else if (channel.write) {
           if (binary) {
-            await this.files.write(channel.write.value, data, signal);
+            const item = channel.write.value;
+            signal.throwIfAborted();
+            if (item.received + data.length > item.size)
+              throw new AppError("invalid_argument", "Received body exceeds the declared length");
+            item.received += await this.temporary.write(
+              item.temporary,
+              data,
+              item.received,
+              signal,
+            );
             if (data.length) touch();
           } else if (frame?.type === "end") {
             let reply;
@@ -243,7 +254,8 @@ export class FileChannels {
       await channel.prepare;
       await channel.dispose();
       await channel.read?.close();
-      if (channel.write) await this.files.cleanup(channel.write.value);
+      if (channel.write)
+        await this.temporary.release(channel.write.value.temporary, channel.write.value);
     })().catch((error: unknown) => console.error("File cleanup:", error));
     this.cleanup.add(cleanup);
     void cleanup.finally(() => {

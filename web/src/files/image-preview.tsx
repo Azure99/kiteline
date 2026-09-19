@@ -2,7 +2,7 @@ import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
 import { Download, Maximize, RefreshCw, Scan, ZoomIn, ZoomOut } from "lucide-react";
-import type { KitelineError, FileMeta } from "@kiteline/shared/protocol";
+import type { BrowserEvent, FileMeta } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
 import { ApiError } from "../lib/api";
 import { downloadFile, readImage, type FileTarget } from "./content";
@@ -27,9 +27,7 @@ export function ImagePreview({ target, disabled }: { target: FileTarget; disable
     const controller = new AbortController();
     let url: string | undefined, channelId: string | undefined, failure: ApiError | undefined;
     const failed = (event: Event) => {
-      const message = (
-        event as CustomEvent<{ type: string; channelId: string; error: KitelineError }>
-      ).detail;
+      const message = (event as CustomEvent<BrowserEvent>).detail;
       if (message.type === "channel.failed" && message.channelId === channelId) {
         failure = new ApiError(
           message.error.code,

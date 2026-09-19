@@ -3,6 +3,9 @@ import type { Device } from "@kiteline/shared/protocol";
 import { DraftStore, draftError, isDirty } from "../src/files/drafts";
 import { ApiError } from "../src/lib/api";
 import type { DiskText, FileTarget } from "../src/files/content";
+import { LanguageDescription, syntaxTree } from "@codemirror/language";
+import { languages } from "@codemirror/language-data";
+import { closeDraft } from "../src/files/navigation";
 
 const transport = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn() }));
 vi.mock("../src/files/content", () => ({ readText: transport.read, writeText: transport.write }));
@@ -36,6 +39,48 @@ beforeEach(() => {
   vi.stubGlobal("window", new EventTarget());
 });
 afterEach(() => vi.unstubAllGlobals());
+
+test("closing a duplicate-path draft does not clear the file-only target of another draft", async () => {
+  const { store, draft } = await opened();
+  transport.read.mockResolvedValueOnce(disk("other", "b", "b.txt"));
+  const duplicate = store.open({
+    ...target,
+    path: "b.txt",
+    deviceName: "Device",
+    workspaceName: "Workspace",
+  });
+  await vi.waitFor(() => expect(duplicate.state).toBeDefined());
+  store.adopt(duplicate, disk("other", "moved", "a.txt"));
+  const browser = Object.assign(new EventTarget(), {
+    location: new URL(
+      "https://kiteline.test/devices/device/workspaces/workspace/git?file=a.txt&repo=r",
+    ),
+  });
+  vi.stubGlobal("window", browser);
+  vi.stubGlobal("PopStateEvent", Event);
+  vi.stubGlobal("history", {
+    replaceState: (_state: unknown, _title: string, path: string) => {
+      browser.location = new URL(path, browser.location);
+    },
+  });
+  closeDraft(store, duplicate);
+  expect(browser.location.searchParams.get("file")).toBe("a.txt");
+  expect(store.find(target)).toBe(draft);
+  closeDraft(store, draft);
+  expect(browser.location.searchParams.has("file")).toBe(false);
+  expect(browser.location.pathname.endsWith("/git")).toBe(true);
+  expect(browser.location.searchParams.get("repo")).toBe("r");
+});
+
+test("reloading a draft retains its loaded language support", async () => {
+  const { store, draft } = await opened();
+  const support = await LanguageDescription.matchFilename(languages, "a.js")!.load();
+  store.update(draft, draft.state!.update({ effects: draft.language.reconfigure(support) }).state);
+  store.adopt(draft, disk("const count = 2;", "reloaded", "a.js"));
+  expect(draft.state!.doc.toString()).toBe("const count = 2;");
+  expect(syntaxTree(draft.state!).topNode.name).toBe("Script");
+  expect(syntaxTree(draft.state!).toString()).toContain("VariableDeclaration");
+});
 
 test("save retains later typing and unknown save-as checks its submitted target", async () => {
   const { store, draft } = await opened();

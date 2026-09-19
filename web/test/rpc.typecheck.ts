@@ -9,6 +9,8 @@ export async function checkRpcContracts(deviceId: string, target: GitTarget, met
   // @ts-expect-error sessions.list cannot produce a file listing
   const files: FileListing = result;
   void files;
+  // @ts-expect-error remote session end must include its workspace
+  await rpc(deviceId, "sessions.end", { sessionId: "s" });
   // @ts-expect-error method spelling is checked
   await rpc(deviceId, "git.stats", { workspaceId: "w", repoId: "r" });
   const invalidCommit = {

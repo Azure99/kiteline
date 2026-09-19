@@ -15,7 +15,7 @@ import type { MetadataStore } from "../metadata.js";
 import { publish } from "../mutations.js";
 import { locate, readEntry, relativePath, versionOf } from "./paths.js";
 import { renameNoReplace } from "./rename.js";
-import { TemporaryFiles, type Temporary } from "./temporary.js";
+import type { TemporaryFiles, Temporary } from "./temporary.js";
 
 export interface FileRead {
   meta: FileMeta;
@@ -41,13 +41,11 @@ export interface TextWrite {
 }
 
 export class TextFiles {
-  readonly temporary: TemporaryFiles;
   constructor(
     private config: AgentConfig,
     private metadata: MetadataStore,
-  ) {
-    this.temporary = new TemporaryFiles(config.dataDir);
-  }
+    private temporary: TemporaryFiles,
+  ) {}
   private absolute(workspaceId: string, path: string) {
     return join(this.metadata.workspace(workspaceId).path, relativePath(path));
   }
@@ -166,29 +164,6 @@ export class TextFiles {
     };
   }
 
-  async write(
-    item: Pick<TextWrite, "size" | "received" | "temporary">,
-    bytes: Buffer,
-    signal: AbortSignal,
-  ) {
-    signal.throwIfAborted();
-    if (item.received + bytes.length > item.size)
-      throw new AppError("invalid_argument", "Received body exceeds the declared length");
-    let offset = 0;
-    while (offset < bytes.length) {
-      signal.throwIfAborted();
-      const result = await item.temporary.handle.write(
-        bytes,
-        offset,
-        bytes.length - offset,
-        item.received + offset,
-      );
-      if (!result.bytesWritten) throw new AppError("io_error", "File writing could not continue");
-      offset += result.bytesWritten;
-    }
-    item.received += bytes.length;
-  }
-
   async save(item: TextWrite, signal: AbortSignal): Promise<SavedFile> {
     if (item.received !== item.size)
       throw new AppError("invalid_argument", "Received body length is incomplete");
@@ -198,7 +173,6 @@ export class TextFiles {
     return publish(async () => {
       signal.throwIfAborted();
       await this.temporary.checkLocked(item.temporary);
-      const absolute = this.absolute(item.workspaceId, item.path);
       let target: string;
       let mode = 0o666 & ~process.umask();
       if (item.createOnly) {
@@ -247,14 +221,10 @@ export class TextFiles {
         throw error;
       }
       try {
-        const published = await stat(target, { bigint: true });
-        const location = await locate(this.metadata.workspace(item.workspaceId).path, item.path);
-        const finalEntry = await lstat(absolute, { bigint: true });
         const result = {
           path: item.path,
           size: item.size,
-          revision: revisionOf(target, published.dev, content),
-          targetVersion: versionOf(location.parent, location.name, finalEntry),
+          revision: revisionOf(target, BigInt(item.temporary.dev), content),
         };
         await this.temporary.forgetLocked(item.temporary);
         return result;
@@ -272,10 +242,6 @@ export class TextFiles {
     }, signal);
   }
 
-  async cleanup(item: Pick<TextWrite, "temporary" | "published" | "uncertain">) {
-    await this.temporary.closeFile(item.temporary);
-    if (!item.published && !item.uncertain) await this.temporary.discard(item.temporary);
-  }
   private async currentVersion(workspaceId: string, path: string, signal: AbortSignal) {
     const resolvedPath = await realpath(this.absolute(workspaceId, path));
     const file = await open(resolvedPath, constants.O_RDONLY | constants.O_NONBLOCK);

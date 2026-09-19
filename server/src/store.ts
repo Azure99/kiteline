@@ -183,9 +183,10 @@ export class Store {
       throw new AppError("not_found", "Device not found");
   }
   snapshot(id: string, snapshot: Metadata) {
-    this.db
-      .prepare("UPDATE devices SET snapshot=?,lastSeenAt=? WHERE id=?")
-      .run(JSON.stringify(snapshot), new Date().toISOString(), id);
+    this.db.prepare("UPDATE devices SET snapshot=? WHERE id=?").run(JSON.stringify(snapshot), id);
+  }
+  connected(id: string) {
+    this.db.prepare("UPDATE devices SET lastSeenAt=? WHERE id=?").run(new Date().toISOString(), id);
   }
   close() {
     this.db.close();

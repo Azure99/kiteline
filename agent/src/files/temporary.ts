@@ -116,6 +116,31 @@ export class TemporaryFiles {
     await temporary.handle.close();
   }
 
+  async write(temporary: Temporary, bytes: Buffer, position: number, signal: AbortSignal) {
+    signal.throwIfAborted();
+    let offset = 0;
+    while (offset < bytes.length) {
+      signal.throwIfAborted();
+      const { bytesWritten } = await temporary.handle.write(
+        bytes,
+        offset,
+        bytes.length - offset,
+        position + offset,
+      );
+      if (!bytesWritten) throw new AppError("io_error", "File writing could not continue");
+      offset += bytesWritten;
+    }
+    return offset;
+  }
+
+  async release(
+    temporary: TrackedTemporary,
+    { published, uncertain }: { published: boolean; uncertain: boolean },
+  ) {
+    if ("handle" in temporary) await this.closeFile(temporary as Temporary);
+    if (!published && !uncertain) await this.discard(temporary);
+  }
+
   async discard(temporary: TrackedTemporary) {
     if ("handle" in temporary) await this.closeFile(temporary as Temporary);
     await publish(() => this.removeLocked(temporary));

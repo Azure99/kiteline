@@ -34,13 +34,14 @@ async function setup() {
   };
   const metadata = new MetadataStore(config);
   const workspace = await metadata.add(root);
-  const files = new TextFiles(config, metadata);
+  const temporary = new TemporaryFiles(data);
+  const files = new TextFiles(config, metadata, temporary);
   const signal = new AbortController().signal;
-  return { root, data, id: workspace.id, files, signal, config };
+  return { root, data, id: workspace.id, files, temporary, signal, config };
 }
 
 test("text revisions survive same-byte inode replacement and save follows links atomically", async () => {
-  const { files, id, root, signal } = await setup();
+  const { files, temporary, id, root, signal } = await setup();
   const original = Buffer.from("\uFEFFa\r\n中\r\n");
   await writeFile(join(root, "target"), original, { mode: 0o640 });
   await symlink("target", join(root, "link"));
@@ -61,9 +62,9 @@ test("text revisions survive same-byte inode replacement and save follows links 
   await current.finish();
   const bytes = Buffer.from(encodeText("edited\n", format));
   const write = await files.prepare(id, "link", bytes.length, false, first.meta.revision, signal);
-  await files.write(write, bytes, signal);
+  write.received = await temporary.write(write.temporary, bytes, 0, signal);
   const saved = await files.save(write, signal);
-  await files.cleanup(write);
+  await temporary.release(write.temporary, write);
   expect(await readlink(join(root, "link"))).toBe("target");
   expect(await readFile(join(root, "target"))).toEqual(bytes);
   expect((await stat(join(root, "target"))).mode & 0o777).toBe(0o640);
@@ -73,21 +74,21 @@ test("text revisions survive same-byte inode replacement and save follows links 
 });
 
 test("late saves conflict after content changes or rename and never recreate the old target", async () => {
-  const { files, id, root, signal, data } = await setup();
+  const { files, temporary, id, root, signal, data } = await setup();
   await writeFile(join(root, "a"), "old");
   const before = await files.read(id, "a", signal);
   await before.finish();
   const write = await files.prepare(id, "a", 3, false, before.meta.revision, signal);
-  await files.write(write, Buffer.from("new"), signal);
+  write.received = await temporary.write(write.temporary, Buffer.from("new"), 0, signal);
   await writeFile(join(root, "a"), "external");
   await expect(files.save(write, signal)).rejects.toMatchObject({ code: "conflict" });
-  await files.cleanup(write);
+  await temporary.release(write.temporary, write);
   expect(await readFile(join(root, "a"), "utf8")).toBe("external");
   const next = await files.prepare(id, "a", 3, false, before.meta.revision, signal);
-  await files.write(next, Buffer.from("new"), signal);
+  next.received = await temporary.write(next.temporary, Buffer.from("new"), 0, signal);
   await rename(join(root, "a"), join(root, "renamed"));
   await expect(files.save(next, signal)).rejects.toMatchObject({ code: "conflict" });
-  await files.cleanup(next);
+  await temporary.release(next.temporary, next);
   await expect(stat(join(root, "a"))).rejects.toMatchObject({ code: "ENOENT" });
   expect(JSON.parse(await readFile(join(data, "temporary-files.json"), "utf8"))).toEqual([]);
 });
@@ -112,32 +113,55 @@ test("read completion detects changed content, rejects non-text and enforces enc
 });
 
 test("startup cleans only the registered temporary identity and exclusive saves reject races", async () => {
-  const { files, id, root, data, signal } = await setup();
+  const { files, temporary, id, root, data, signal } = await setup();
   const pending = await files.prepare(id, "new", 3, true, undefined, signal);
-  await files.write(pending, Buffer.from("new"), signal);
-  await files.temporary.closeFile(pending.temporary);
+  pending.received = await temporary.write(pending.temporary, Buffer.from("new"), 0, signal);
+  await temporary.closeFile(pending.temporary);
   await writeFile(join(root, ".kiteline-unregistered.tmp"), "keep");
   const restored = new TemporaryFiles(data);
   await restored.cleanStartup();
   await expect(stat(pending.temporary.path)).rejects.toMatchObject({ code: "ENOENT" });
   expect(await readFile(join(root, ".kiteline-unregistered.tmp"), "utf8")).toBe("keep");
   const race = await files.prepare(id, "new", 3, true, undefined, signal);
-  await files.write(race, Buffer.from("new"), signal);
+  race.received = await temporary.write(race.temporary, Buffer.from("new"), 0, signal);
   await symlink("missing", join(root, "new"));
   await expect(files.save(race, signal)).rejects.toMatchObject({ code: "EEXIST" });
-  await files.cleanup(race);
+  await temporary.release(race.temporary, race);
   expect(await readlink(join(root, "new"))).toBe("missing");
 });
 
 test("lowering the editor limit still allows saving a reduced draft against its original version", async () => {
-  const { files, id, root, config, signal } = await setup();
+  const { files, temporary, id, root, config, signal } = await setup();
   await writeFile(join(root, "a"), "long baseline");
   const before = await files.read(id, "a", signal);
   await before.finish();
   config.limits.editorBytes = 4;
   const write = await files.prepare(id, "a", 3, false, before.meta.revision, signal);
-  await files.write(write, Buffer.from("new"), signal);
+  write.received = await temporary.write(write.temporary, Buffer.from("new"), 0, signal);
   await files.save(write, signal);
-  await files.cleanup(write);
+  await temporary.release(write.temporary, write);
   expect(await readFile(join(root, "a"), "utf8")).toBe("new");
+});
+
+test("cancelled temporary writes are removed while uncertain publication retains its record", async () => {
+  const { files, temporary, id, data, signal } = await setup();
+  const cancelled = await files.prepare(id, "cancelled", 6, true, undefined, signal);
+  cancelled.received = await temporary.write(cancelled.temporary, Buffer.from("one"), 0, signal);
+  const controller = new AbortController();
+  controller.abort(new Error("cancelled"));
+  await expect(
+    temporary.write(cancelled.temporary, Buffer.from("two"), cancelled.received, controller.signal),
+  ).rejects.toThrow("cancelled");
+  await temporary.release(cancelled.temporary, cancelled);
+  await expect(stat(cancelled.temporary.path)).rejects.toMatchObject({ code: "ENOENT" });
+  expect(JSON.parse(await readFile(join(data, "temporary-files.json"), "utf8"))).toEqual([]);
+
+  const uncertain = await files.prepare(id, "uncertain", 3, true, undefined, signal);
+  uncertain.received = await temporary.write(uncertain.temporary, Buffer.from("new"), 0, signal);
+  uncertain.uncertain = true;
+  await temporary.release(uncertain.temporary, uncertain);
+  expect(await readFile(uncertain.temporary.path, "utf8")).toBe("new");
+  expect(JSON.parse(await readFile(join(data, "temporary-files.json"), "utf8"))).toMatchObject([
+    { name: uncertain.temporary.name },
+  ]);
 });

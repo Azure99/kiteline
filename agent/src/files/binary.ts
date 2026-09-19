@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { lstat, open, realpath, rename } from "node:fs/promises";
+import { open, realpath, rename } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { imageSize } from "image-size";
 import {
@@ -12,7 +12,7 @@ import type { AgentConfig } from "../config.js";
 import type { MetadataStore } from "../metadata.js";
 import { publish } from "../mutations.js";
 import { checkTarget, targetAgain } from "./destination.js";
-import { locate, relativePath, versionOf } from "./paths.js";
+import { locate, relativePath } from "./paths.js";
 import { renameNoReplace } from "./rename.js";
 import { readExact, type FileRead } from "./text.js";
 import type { Temporary, TemporaryFiles } from "./temporary.js";
@@ -182,14 +182,8 @@ export class BinaryFiles {
         throw error;
       }
       try {
-        const info = await lstat(current.absolute, { bigint: true });
-        const result = {
-          path: item.path,
-          size: item.size,
-          targetVersion: versionOf(current.parent, current.name, info),
-        };
         await this.temporary.forgetLocked(item.temporary);
-        return result;
+        return { path: item.path, size: item.size };
       } catch (error) {
         throw new OperationError(
           "io_error",

@@ -64,7 +64,7 @@ if [ ! -e /etc/kiteline-agent.json ]; then
     package="$temporary/$name"
     (cd "$package" && sha256sum --status --check SHA256SUMS)
     [ "$("$package/bin/kiteline-agent" --version)" = "$version" ] || fail "Package version mismatch"
-    if "$service"; then "$package/bin/kiteline-agent" check --service; else "$package/bin/kiteline-agent" check; fi
+    "$package/bin/kiteline-agent" check
     as_root "$package/bin/kiteline-agent" install --user "$user"
     rm -rf "$temporary"
     trap - EXIT

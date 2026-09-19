@@ -85,6 +85,7 @@ export function TextEditor({
     let active = true;
     const editor = view.current;
     const language = LanguageDescription.matchFilename(languages, draft.path);
+    editor?.dispatch({ effects: draft.language.reconfigure([]) });
     if (language && editor)
       void language
         .load()
