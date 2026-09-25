@@ -14,7 +14,7 @@ pnpm package server amd64
 pnpm images amd64
 ```
 
-每个server都携带两架构agent；两份agent须先构建。ARM64 server再执行`pnpm package server arm64`、`pnpm images arm64`，串行控制内存。包及对应`.sha256`在`dist/releases/`；产品版本来自[version.json](../shared/src/version.json)，镜像名为`kiteline-server:<版本>-<amd64|arm64>`。本仓库不自动发布镜像，跨机器可用`docker save/load`搬运。清单记录commit、dirty、实际输入sourceDigest、Node/native与校验；组装server发现来源不一致时要求重建agent。
+默认每个server携带两架构agent，两份agent须先构建。内部迭代只打amd64时，依次执行`pnpm package agent amd64`、`pnpm package server amd64 --agent-arch=amd64`、`pnpm images amd64`；该server只提供amd64接入包，不混入旧ARM资源。ARM64 server完整发布再执行`pnpm package server arm64`、`pnpm images arm64`，串行控制内存。包及对应`.sha256`在`dist/releases/`；产品版本来自[version.json](../shared/src/version.json)，镜像名为`kiteline-server:<版本>-<amd64|arm64>`。本仓库不自动发布镜像，跨机器可用`docker save/load`搬运。清单记录commit、dirty、实际输入sourceDigest、Node/native与校验；组装server发现来源不一致时要求重建agent。
 
 ## Server 与已有 HTTPS 反代
 

@@ -1,6 +1,6 @@
 import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ChevronDown,
   ChevronLeft,
@@ -55,6 +55,7 @@ import { CommitBox } from "./commit-box";
 import { BranchDialog } from "./branch-dialog";
 import { RemoteActions } from "./remote-actions";
 import { OperationBar } from "./operation-bar";
+import { GitFilePath, GitViewHeader, type GitView } from "./view-header";
 
 export function GitTool({
   device,
@@ -300,10 +301,27 @@ function Changes({
   const mobile = useMobile();
   const state = useGitStatus(device.id, workspace.id, repo.id, visible && enabled);
   const [target, setTarget] = useState<DiffTarget>();
-  const [view, setView] = useState<"changes" | "history" | "branches">("changes");
+  const [view, setView] = useState<GitView>("changes");
+  const [refresh, setRefresh] = useState(0);
+  const selectionVersion = useRef(0);
+  const selectTarget = (next?: DiffTarget) => {
+    selectionVersion.current++;
+    setTarget(next);
+  };
+  const selectView = (next: GitView) => {
+    selectionVersion.current++;
+    setView(next);
+  };
+  useEffect(() => {
+    if (!visible) selectionVersion.current++;
+  }, [visible]);
   const { value, selected, setSelected } = state;
   const actionTarget = { deviceId: device.id, workspaceId: workspace.id, repoId: repo.id };
   const activity = useGitActivity(actions, actionTarget);
+  const diffRefresh = useMemo(
+    () => [value, activity.revision, refresh],
+    [value, activity.revision, refresh],
+  );
   const [discarding, setDiscarding] = useState<{ paths: string[]; scope: DiscardScope }>();
   const [branchStart, setBranchStart] = useState<string>();
   const disabled = !enabled || !!activity.request;
@@ -311,12 +329,44 @@ function Changes({
   useEffect(() => {
     if (visible && enabled && activity.revision) void load();
   }, [activity.revision, visible, enabled, load]);
-  function indexAction(paths: string[], kind: "stage" | "unstage") {
+  async function indexAction(paths: string[], kind: "stage" | "unstage") {
     if (kind === "stage" && !confirmDiskVersion(store, actionTarget, repo.path, paths)) return;
     const params = { paths: [...new Set(paths)] };
-    if (kind === "stage") void actions.run(actionTarget, "git.stage", params);
-    else void actions.run(actionTarget, "git.unstage", params);
+    const selection = selectionVersion.current;
+    const result =
+      kind === "stage"
+        ? await actions.run(actionTarget, "git.stage", params)
+        : await actions.run(actionTarget, "git.unstage", params);
+    if (
+      result &&
+      selection === selectionVersion.current &&
+      target &&
+      view === "changes" &&
+      paths.includes(target.path)
+    ) {
+      setTarget({ path: target.path, side: kind === "stage" ? "staged" : "worktree" });
+    }
   }
+  const renderHeader = (preview?: DiffTarget, onBack?: () => void) => (
+    <GitViewHeader
+      view={view}
+      count={value?.totalCount ?? 0}
+      target={preview}
+      disabled={!enabled}
+      onView={selectView}
+      onBack={onBack}
+      onRefresh={() => {
+        void state.load();
+        setRefresh((value) => value + 1);
+      }}
+      onFile={onFile}
+      onCreateBranch={
+        view === "branches" && value?.head.oid && !disabled
+          ? () => setBranchStart(value.head.oid!)
+          : undefined
+      }
+    />
+  );
   const select = (entry: GitEntry, side: ChangeSide) => {
     const item = selectionOf(entry, side);
     setSelected((old) =>
@@ -333,7 +383,7 @@ function Changes({
           <button
             className="flex min-h-10 min-w-0 flex-1 items-center gap-2 text-xs max-[959px]:min-h-11"
             title={value?.head.oid ?? undefined}
-            onClick={() => setView("branches")}
+            onClick={() => selectView("branches")}
           >
             <GitBranch size={15} className="shrink-0" />
             <span className="truncate">
@@ -355,44 +405,8 @@ function Changes({
             head={value?.head}
           />
         </div>
-        <div
-          role="tablist"
-          aria-label={t(($) => $.git.views)}
-          className="flex min-h-9 shrink-0 items-center gap-4 border-b border-border px-4 text-xs"
-        >
-          {(
-            [
-              ["changes", t(($) => $.git.changes)],
-              ["history", t(($) => $.git.history)],
-              ["branches", t(($) => $.git.branches)],
-            ] as const
-          ).map(([id, label]) => (
-            <button
-              key={id}
-              role="tab"
-              aria-selected={view === id}
-              onClick={() => setView(id)}
-              className={`flex min-h-9 items-center justify-center gap-2 border-b-2 px-1 max-[959px]:min-h-11 max-[959px]:min-w-11 ${view === id ? "border-primary text-primary" : "border-transparent"}`}
-            >
-              {label}
-              {id === "changes" && (
-                <span className="rounded bg-muted px-1.5">
-                  {(value?.totalCount ?? 0).toLocaleString(i18n.resolvedLanguage)}
-                </span>
-              )}
-            </button>
-          ))}
-          <span className="ml-auto hidden text-muted-foreground min-[960px]:block">
-            {state.busy ? t(($) => $.common.reading) : ""}
-          </span>
-          <IconButton
-            label={t(($) => $.git.refreshStatus)}
-            disabled={!enabled || state.busy}
-            onClick={() => void state.load()}
-          >
-            <RefreshCw />
-          </IconButton>
-        </div>
+        {view !== "history" &&
+          renderHeader(view === "changes" ? target : undefined, () => selectTarget())}
         {!!(state.error || state.notice) && (
           <div
             role={state.error ? "alert" : "status"}
@@ -432,7 +446,8 @@ function Changes({
           repoId={repo.id}
           active={visible && enabled}
           visible={visible}
-          onFile={onFile}
+          refreshKey={refresh}
+          renderHeader={renderHeader}
           onBranch={(oid) => {
             if (!disabled) setBranchStart(oid);
           }}
@@ -445,7 +460,7 @@ function Changes({
           repoId={repo.id}
           active={visible && enabled}
           actions={actions}
-          headOid={value?.head.oid}
+          refreshKey={refresh}
         />
       )}
       <div className={view === "changes" ? "flex min-h-0 flex-1" : "hidden"}>
@@ -526,9 +541,9 @@ function Changes({
                       {entries.map((entry) => (
                         <div
                           key={entry.path}
-                          className={`flex min-h-11 items-center gap-2 border-b border-border/50 px-3 ${target?.path === entry.path && (target.side === side || side === "conflict") ? "bg-primary-soft" : ""}`}
+                          className={`flex min-h-8 items-center gap-1 border-b border-border/50 px-2 max-[959px]:min-h-11 ${target?.path === entry.path && (target.side === side || side === "conflict") ? "bg-primary-soft" : ""}`}
                         >
-                          <label className="flex min-h-11 items-center justify-center max-[959px]:min-w-11">
+                          <label className="flex min-h-8 items-center justify-center max-[959px]:min-h-11 max-[959px]:min-w-11">
                             <input
                               type="checkbox"
                               aria-label={t(($) => $.git.selectNamed, {
@@ -551,23 +566,16 @@ function Changes({
                             onClick={() =>
                               side === "conflict"
                                 ? onFile(entry.path)
-                                : setTarget({
+                                : selectTarget({
                                     path: entry.path,
                                     side: side === "staged" ? "staged" : "worktree",
                                   })
                             }
-                            className="min-h-11 min-w-0 flex-1 py-2 text-left text-xs"
+                            className="flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left text-xs max-[959px]:min-h-11"
                           >
-                            <span className="block truncate">
-                              {entry.path.split("/").at(-1) || entry.path}
-                            </span>
-                            {entry.path.includes("/") && (
-                              <span className="block truncate text-[10px] text-muted-foreground">
-                                {entry.path}
-                              </span>
-                            )}
+                            <GitFilePath path={entry.path} />
                             {entry.submodule && (
-                              <span className="block text-[10px] text-muted-foreground">
+                              <span className="shrink-0 text-[10px] text-muted-foreground">
                                 {t(($) =>
                                   entry.submodule!.commitChanged
                                     ? entry.submodule!.trackedDirty ||
@@ -640,9 +648,7 @@ function Changes({
             workspaceId={workspace.id}
             repoId={repo.id}
             target={target}
-            refreshKey={value}
-            onBack={() => setTarget(undefined)}
-            onFile={() => onFile(target.path)}
+            refreshKey={diffRefresh}
           />
         ) : (
           !mobile && (

@@ -1,15 +1,14 @@
 import { useTranslation } from "react-i18next";
 import { ApiError } from "../lib/api";
 import { ErrorNotice } from "../components/error-notice";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Group, Panel, Separator } from "react-resizable-panels";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Group, Panel, Separator, type GroupImperativeHandle } from "react-resizable-panels";
 import {
   Folder,
   GitBranch,
   Terminal,
   Maximize2,
   PanelBottom,
-  Plus,
   Minimize2,
   Columns2,
   Fullscreen,
@@ -17,7 +16,6 @@ import {
   Minimize,
 } from "lucide-react";
 import type { Device, Workspace } from "@kiteline/shared/protocol";
-import { Button } from "../components/ui/button";
 import { IconButton } from "../components/icon-button";
 import { WatchStatus } from "../components/watch-status";
 import { ToolLayout } from "../components/tool-layout";
@@ -37,7 +35,6 @@ import {
 } from "./groups";
 import { SplitPanes } from "./split-panes";
 import { SessionMenu, type SessionCommand } from "./session-menu";
-import type { DisplayState } from "./display";
 import { SessionPicker, NewSessionButtons } from "./session-controls";
 import { SessionDialog, type SessionAction } from "./session-dialog";
 import { GroupTabs, useTerminalDrag } from "./group-tabs";
@@ -73,8 +70,12 @@ export function WorkspaceTerminal({
   const lastTool = useRef<string | undefined>(undefined);
   const displays = useRef(new Map<string, TerminalActions>());
   const names = useRef(new Map<string, string>());
-  const dockActions = useRef<TerminalActions>(null);
-  const [statuses, setStatuses] = useState<Record<string, DisplayState["status"]>>({});
+  const dockActions = useRef(new Map<string, TerminalActions>());
+  const [opened, setOpened] = useState(() => ({
+    main: new Set<string>(),
+    dock: new Set<string>(),
+  }));
+  const dockPanels = useRef<GroupImperativeHandle>(null);
   const [settings, setSettings] = useState(false);
   const [action, setAction] = useState<SessionAction>();
   const group = currentGroup(layout);
@@ -82,9 +83,39 @@ export function WorkspaceTerminal({
   const sessions = remote.sessions;
   const { setError } = remote;
   const find = (id?: string) => sessions.find((session) => session.id === id);
-  const members = group?.members.filter((id) => !!find(id) || displays.current.has(id)) ?? [];
+  const groups = layout.groups
+    .map((item) => ({
+      ...item,
+      members: item.members.filter((id) => !!find(id) || opened.main.has(id)),
+    }))
+    .filter((item) => item.members.length);
+  const members = groups.find((item) => item.id === group?.id)?.members ?? [];
   const dockId =
-    layout.dock && (find(layout.dock) || dockActions.current) ? layout.dock : undefined;
+    layout.dock && (find(layout.dock) || opened.dock.has(layout.dock)) ? layout.dock : undefined;
+  const dockExpanded = layout.dockOpen && !mobile;
+  const visibleMembers = visible
+    ? members.filter((id) => (!mobile && !group?.maximized) || id === selected).join(",")
+    : "";
+  useLayoutEffect(() => {
+    const main = visibleMembers ? visibleMembers.split(",") : [];
+    const dock = !visible && dockExpanded && dockId ? [dockId] : [];
+    setOpened((old) =>
+      main.every((id) => old.main.has(id)) && dock.every((id) => old.dock.has(id))
+        ? old
+        : {
+            main: new Set([...old.main, ...main]),
+            dock: new Set([...old.dock, ...dock]),
+          },
+    );
+  }, [visibleMembers, visible, dockExpanded, dockId]);
+  useLayoutEffect(() => {
+    if (visible) return;
+    const size = dockExpanded ? layout.dockSize : 0;
+    const frame = requestAnimationFrame(() =>
+      dockPanels.current?.setLayout({ tool: 100 - size, dock: size }),
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [visible, dockExpanded, layout.dockSize]);
   const enabled = device.status === "online" && !remote.busy;
   const split = !mobile && members.length > 1 && !group?.maximized;
   const multipleGroups = !mobile && layout.groups.length > 1;
@@ -96,21 +127,20 @@ export function WorkspaceTerminal({
     for (const id of names.current.keys())
       if (
         !sessions.some((session) => session.id === id) &&
-        !displays.current.has(id) &&
-        !(layout.dock === id && dockActions.current)
+        !opened.main.has(id) &&
+        !opened.dock.has(id)
       )
         names.current.delete(id);
-  }, [sessions, layout, statuses]);
+  }, [sessions, opened]);
   useEffect(() => {
     layouts.set(key, layout);
   }, [key, layout, layouts]);
   useEffect(() => {
     if (!remote.loaded) return;
-    const kept = new Set([...sessions.map((session) => session.id), ...displays.current.keys()]);
-    const dockKept = new Set(sessions.map((session) => session.id));
-    if (dockId && dockActions.current) dockKept.add(dockId);
+    const kept = new Set([...sessions.map((session) => session.id), ...opened.main]);
+    const dockKept = new Set([...sessions.map((session) => session.id), ...opened.dock]);
     setLayout((old) => retainSessions(old, kept, dockKept));
-  }, [sessions, remote.loaded, layout, mobile, dockId]);
+  }, [sessions, remote.loaded, opened]);
   useEffect(() => {
     if (!remote.loaded) return;
     const returning = route.tool === "terminal" && lastTool.current !== "terminal";
@@ -128,10 +158,7 @@ export function WorkspaceTerminal({
     const previous = lastRouteSession.current;
     lastRouteSession.current = routeSession;
     if (routeSession) {
-      if (
-        sessions.some((session) => session.id === routeSession) ||
-        displays.current.has(routeSession)
-      )
+      if (sessions.some((session) => session.id === routeSession) || opened.main.has(routeSession))
         setLayout((old) => selectSession(old, routeSession));
       else setError(new ApiError("not_found", "The terminal does not exist or has ended"));
     } else if (route.tool === "terminal" && previous !== undefined)
@@ -145,21 +172,11 @@ export function WorkspaceTerminal({
     setError,
     device.id,
     workspace.id,
+    opened.main,
   ]);
   const register = useCallback((id: string, value: TerminalActions | null) => {
     if (value) displays.current.set(id, value);
-    else {
-      displays.current.delete(id);
-      setStatuses((old) => {
-        if (!(id in old)) return old;
-        const next = { ...old };
-        delete next[id];
-        return next;
-      });
-    }
-  }, []);
-  const status = useCallback((id: string, value: DisplayState["status"]) => {
-    setStatuses((old) => (old[id] === value ? old : { ...old, [id]: value }));
+    else displays.current.delete(id);
   }, []);
   function applyMain(next: TerminalLayout, tool = route.tool, replace = false) {
     setLayout(next);
@@ -173,8 +190,7 @@ export function WorkspaceTerminal({
     );
   }
   function choose(id: string, dock = false) {
-    if (!find(id) && !(dock ? dockId === id && dockActions.current : displays.current.has(id)))
-      return;
+    if (!find(id) && !(dock ? opened.dock.has(id) : opened.main.has(id))) return;
     if (dock) setLayout((old) => ({ ...old, dock: id, dockOpen: true }));
     else applyMain(selectSession(layout, id));
   }
@@ -182,6 +198,12 @@ export function WorkspaceTerminal({
     if (selected !== id) applyMain(selectSession(layout, id), route.tool, true);
   }
   function close(id: string, dock = false) {
+    setOpened((old) => {
+      const region = dock ? "dock" : "main";
+      const next = new Set(old[region]);
+      next.delete(id);
+      return { ...old, [region]: next };
+    });
     if (dock) setLayout((old) => ({ ...old, dock: undefined }));
     else applyMain(closeSession(layout, id));
   }
@@ -217,9 +239,8 @@ export function WorkspaceTerminal({
     }
   }
   function command(kind: SessionCommand, id: string, dock = false) {
-    const display = dock ? dockActions.current : displays.current.get(id);
-    if (kind === "redisplay") display?.redisplay();
-    else if (kind === "redraw") display?.redraw();
+    const display = (dock ? dockActions : displays).current.get(id);
+    if (kind === "redraw") display?.redraw();
     else if (kind === "larger" || kind === "smaller") display?.fontSize(kind === "larger" ? 1 : -1);
     else if (kind === "close") close(id, dock);
     else {
@@ -234,6 +255,7 @@ export function WorkspaceTerminal({
         id={id}
         session={find(id)}
         layout={layout}
+        mobile={mobile}
         dock={dock}
         label={label}
         disabled={!enabled}
@@ -252,9 +274,7 @@ export function WorkspaceTerminal({
         selected={dock ? dockId : selected}
         dock={dock}
         groups={dock ? [] : layout.groups}
-        retained={
-          dock ? (dockId && dockActions.current ? [dockId] : []) : [...displays.current.keys()]
-        }
+        retained={[...(dock ? opened.dock : opened.main)]}
         name={name}
         iconOnly={!dock && (multipleGroups || split)}
         uncertain={remote.uncertainCreate}
@@ -270,10 +290,11 @@ export function WorkspaceTerminal({
       />
     );
   }
-  function newButtons(dock = false) {
+  function newButtons(dock = false, showLabel = false) {
     return (
       <NewSessionButtons
         dock={dock}
+        showLabel={showLabel}
         disabled={!enabled}
         shortcuts={device.snapshot?.shortcuts ?? []}
         onCreate={(shortcut) => void create(dock, false, shortcut)}
@@ -347,7 +368,7 @@ export function WorkspaceTerminal({
             <GroupTabs
               layout={layout}
               name={name}
-              canDrag={(id) => !!find(id) || displays.current.has(id)}
+              canDrag={(id) => !!find(id) || opened.main.has(id)}
               drag={drag}
               onSelect={choose}
             />
@@ -374,28 +395,31 @@ export function WorkspaceTerminal({
           )}
           <IconButton
             label={focusMode ? t(($) => $.terminal.exitFocus) : t(($) => $.terminal.enterFocus)}
+            onPointerDown={(event) => {
+              if (mobile) event.preventDefault();
+            }}
             onClick={focusMode ? onExitFocus : onEnterFocus}
           >
             {focusMode ? <Minimize /> : <Fullscreen />}
           </IconButton>
           {menu(split ? undefined : selected)}
         </div>
-        {group && members.length ? (
+        {groups.length > 0 && (
           <SplitPanes
             deviceId={device.id}
             workspaceId={workspace.id}
-            group={group}
-            members={members}
+            groups={groups}
+            current={group?.id}
+            opened={opened.main}
             sessions={sessions}
             mobile={mobile}
             visible={visible}
             onSizes={(sizes) => patchGroup({ sizes })}
             events={{
               actions: register,
-              status,
               focus,
               close,
-              maximize: () => patchGroup({ maximized: !group.maximized }),
+              maximize: () => patchGroup({ maximized: !group?.maximized }),
               menu: (id) =>
                 menu(
                   id,
@@ -408,19 +432,18 @@ export function WorkspaceTerminal({
               drag,
             }}
           />
-        ) : (
+        )}
+        {!members.length && (
           <div className="flex min-h-0 flex-1 items-center justify-center">
-            <Button variant="outline" disabled={!enabled} onClick={() => void create()}>
-              <Plus />
-              {t(($) => $.terminal.new)}
-            </Button>
+            {newButtons(false, true)}
           </div>
         )}
       </div>
       <div className={visible ? "hidden" : "flex min-h-0 flex-1 flex-col"}>
         <ToolLayout>
           <Group
-            id={`companion-${workspace.id}-${layout.dockOpen && !mobile ? "open" : "closed"}`}
+            id={`companion-${workspace.id}`}
+            groupRef={dockPanels}
             orientation="vertical"
             className="min-h-0 min-w-0 flex-1"
             onLayoutChanged={(sizes, meta) => {
@@ -434,51 +457,67 @@ export function WorkspaceTerminal({
             >
               {children}
             </Panel>
-            {layout.dockOpen && !mobile && (
-              <>
-                <Separator className="split-divider" aria-label={t(($) => $.terminal.resizeDock)} />
-                <Panel
-                  id="dock"
-                  minSize={170}
-                  defaultSize={`${layout.dockSize}%`}
-                  className="flex h-full min-h-0 flex-col"
+            <Separator
+              disabled={!dockExpanded}
+              className={dockExpanded ? "split-divider" : "hidden"}
+              aria-label={t(($) => $.terminal.resizeDock)}
+            />
+            <Panel
+              id="dock"
+              minSize={dockExpanded ? 170 : 0}
+              maxSize={dockExpanded ? "100%" : "0%"}
+              defaultSize={`${dockExpanded ? layout.dockSize : 0}%`}
+              className="flex h-full min-h-0 flex-col"
+            >
+              <div
+                id="companion-terminal"
+                className={
+                  dockExpanded
+                    ? "flex min-h-9 shrink-0 items-center gap-1 border-b border-border bg-muted/50 px-2"
+                    : "hidden"
+                }
+              >
+                {picker(true)}
+                <span className="flex-1" />
+                {newButtons(true)}
+                {dockId && (
+                  <>
+                    <IconButton
+                      label={t(($) => $.terminal.expandTerminal)}
+                      disabled={!find(dockId) && !opened.main.has(dockId)}
+                      onClick={() => applyMain(selectSession(layout, dockId), "terminal")}
+                    >
+                      <Maximize2 />
+                    </IconButton>
+                  </>
+                )}
+                {menu(dockId, true)}
+              </div>
+              {[...opened.dock].map((id) => (
+                <div
+                  key={id}
+                  data-dock-session-id={id}
+                  className={
+                    dockExpanded && dockId === id ? "flex min-h-0 flex-1 flex-col" : "hidden"
+                  }
                 >
-                  <div
-                    id="companion-terminal"
-                    className="flex min-h-9 shrink-0 items-center gap-1 border-b border-border bg-muted/50 px-2"
-                  >
-                    {picker(true)}
-                    <span className="flex-1" />
-                    {newButtons(true)}
-                    {dockId && (
-                      <>
-                        <IconButton
-                          label={t(($) => $.terminal.expandTerminal)}
-                          disabled={!find(dockId) && !displays.current.has(dockId)}
-                          onClick={() => applyMain(selectSession(layout, dockId), "terminal")}
-                        >
-                          <Maximize2 />
-                        </IconButton>
-                      </>
-                    )}
-                    {menu(dockId, true)}
-                  </div>
-                  {dockId ? (
-                    <TerminalView
-                      key={dockId}
-                      ref={dockActions}
-                      deviceId={device.id}
-                      workspaceId={workspace.id}
-                      sessionId={dockId}
-                    />
-                  ) : (
-                    <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-                      {t(($) => $.terminal.selectSession)}
-                    </div>
-                  )}
-                </Panel>
-              </>
-            )}
+                  <TerminalView
+                    ref={(value) => {
+                      if (value) dockActions.current.set(id, value);
+                      else dockActions.current.delete(id);
+                    }}
+                    deviceId={device.id}
+                    workspaceId={workspace.id}
+                    sessionId={id}
+                  />
+                </div>
+              ))}
+              {!dockId && dockExpanded && (
+                <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+                  {t(($) => $.terminal.selectSession)}
+                </div>
+              )}
+            </Panel>
           </Group>
         </ToolLayout>
       </div>

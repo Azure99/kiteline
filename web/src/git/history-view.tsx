@@ -1,13 +1,12 @@
 import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   GitCommitHorizontal,
-  RefreshCw,
   GitBranch,
 } from "lucide-react";
 import type { Commit, CommitFiles, GitHistory } from "@kiteline/shared/protocol";
@@ -18,6 +17,7 @@ import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu"
 import { rpc } from "../lib/api";
 import { useMobile } from "../lib/use-mobile";
 import { DiffView, type DiffTarget } from "./diff-view";
+import { GitFilePath } from "./view-header";
 
 interface Props {
   deviceId: string;
@@ -25,13 +25,14 @@ interface Props {
   repoId: string;
   active: boolean;
   visible: boolean;
-  onFile: (path: string) => void;
+  refreshKey: number;
+  renderHeader(target?: DiffTarget, onBack?: () => void): ReactNode;
   onBranch?: (oid: string) => void;
 }
 export function HistoryView(props: Props) {
   const { t, i18n } = useTranslation();
 
-  const { deviceId, workspaceId, repoId, active } = props;
+  const { deviceId, workspaceId, repoId, active, refreshKey, renderHeader } = props;
   const [value, setValue] = useState<GitHistory>();
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<Commit>();
@@ -40,6 +41,7 @@ export function HistoryView(props: Props) {
   const request = useRef<AbortController>(undefined);
   const pages = useRef<number[]>([]);
   const position = useRef<{ anchor?: string; offset: number }>({ offset: 0 });
+  const lastRefresh = useRef(refreshKey);
   const load = useCallback(
     async (nextPosition = position.current, visited = pages.current) => {
       const { anchor, offset } = nextPosition;
@@ -72,29 +74,28 @@ export function HistoryView(props: Props) {
     [deviceId, workspaceId, repoId],
   );
   useEffect(() => {
-    if (active) void load();
+    if (active) {
+      if (lastRefresh.current !== refreshKey) void load({ offset: 0 }, []);
+      else void load();
+      lastRefresh.current = refreshKey;
+    }
     return () => request.current?.abort();
-  }, [active, load]);
+  }, [active, load, refreshKey]);
   return (
     <>
-      <div className={`${selected ? "hidden" : "flex"} min-h-0 flex-1 flex-col`}>
-        <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border px-3 text-xs text-muted-foreground">
-          <span className="mr-auto">{value?.anchorOid?.slice(0, 8)}</span>
-          <IconButton
-            label={t(($) => $.git.refreshHistory)}
-            disabled={busy || !active}
-            onClick={() => {
-              void load({ offset: 0 }, []);
-            }}
-          >
-            <RefreshCw />
-          </IconButton>
-        </div>
-        {!!error && (
+      {!selected && (
+        <ToolHeader visible={props.visible} order={2}>
+          {renderHeader()}
+        </ToolHeader>
+      )}
+      {!!error && (
+        <ToolHeader visible={props.visible} order={3}>
           <div role="alert" className="px-4 py-2 text-xs text-destructive">
             <ErrorNotice error={error} />
           </div>
-        )}
+        </ToolHeader>
+      )}
+      <div className={`${selected ? "hidden" : "flex"} min-h-0 flex-1 flex-col`}>
         <div className="scroll-area min-h-0 flex-1 overflow-auto">
           {value?.commits.map((commit) => (
             <button
@@ -173,8 +174,9 @@ function CommitView({
   commit,
   active,
   visible,
+  refreshKey,
+  renderHeader,
   onBack,
-  onFile,
   onBranch,
 }: Props & { commit: Commit; onBack: () => void }) {
   const { t } = useTranslation();
@@ -186,6 +188,7 @@ function CommitView({
   const [error, setError] = useState<unknown>();
   const request = useRef<AbortController>(undefined);
   const loaded = useRef(false);
+  const lastRefresh = useRef(refreshKey);
   const mobile = useMobile();
   const load = useCallback(
     async (offset = 0) => {
@@ -223,32 +226,38 @@ function CommitView({
     loaded.current = false;
   }, [load]);
   useEffect(() => {
-    if (active && !loaded.current) void load();
+    if (active && (!loaded.current || lastRefresh.current !== refreshKey)) {
+      void load();
+      lastRefresh.current = refreshKey;
+    }
     return () => request.current?.abort();
-  }, [active, load]);
+  }, [active, load, refreshKey]);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <ToolHeader visible={visible} order={2}>
-        <div className="flex shrink-0 items-center gap-2 border-b border-border p-2">
-          <IconButton label={t(($) => $.git.backHistory)} onClick={onBack}>
-            <ArrowLeft />
-          </IconButton>
-          <span className="min-w-0 flex-1 truncate text-xs" title={commit.subject}>
-            {commit.subject}
-          </span>
-          <span className="font-mono text-[11px] text-muted-foreground">
-            {commit.oid.slice(0, 8)}
-          </span>
-          {onBranch && (
-            <IconButton
-              label={t(($) => $.git.branchFromCommit)}
-              disabled={!active}
-              onClick={() => onBranch(commit.oid)}
-            >
-              <GitBranch />
+        {renderHeader(target, () => setTarget(undefined))}
+        {(!mobile || !target) && (
+          <div className="flex shrink-0 items-center gap-2 border-b border-border p-2">
+            <IconButton label={t(($) => $.git.backHistory)} onClick={onBack}>
+              <ArrowLeft />
             </IconButton>
-          )}
-        </div>
+            <span className="min-w-0 flex-1 truncate text-xs" title={commit.subject}>
+              {commit.subject}
+            </span>
+            <span className="font-mono text-[11px] text-muted-foreground">
+              {commit.oid.slice(0, 8)}
+            </span>
+            {onBranch && (
+              <IconButton
+                label={t(($) => $.git.branchFromCommit)}
+                disabled={!active}
+                onClick={() => onBranch(commit.oid)}
+              >
+                <GitBranch />
+              </IconButton>
+            )}
+          </div>
+        )}
         {commit.parents.length > 1 && (
           <div className="shrink-0 border-b border-border px-3">
             <Menu>
@@ -292,10 +301,10 @@ function CommitView({
                     parentOid: parent,
                   })
                 }
-                className="flex min-h-11 w-full items-center gap-3 border-b border-border px-4 py-2 text-left text-xs hover:bg-primary-soft"
+                className="flex min-h-8 w-full items-center gap-2 border-b border-border px-3 text-left text-xs hover:bg-primary-soft max-[959px]:min-h-11"
               >
                 <span className="font-mono text-muted-foreground">{file.status}</span>
-                <span className="min-w-0 flex-1 break-all">{file.path}</span>
+                <GitFilePath path={file.path} />
                 {file.binary && (
                   <span className="text-muted-foreground">{t(($) => $.git.binary)}</span>
                 )}
@@ -317,20 +326,13 @@ function CommitView({
                 {t(($) => $.git.loadMore)}
               </Button>
             )}
-            {!!(!busy && error) && (
-              <Button variant="ghost" disabled={!active} onClick={() => void load()}>
-                <RefreshCw />
-                {t(($) => $.common.retry)}
-              </Button>
-            )}
           </aside>
         </ToolSidebar>
         {target && (
           <DiffView
             key={JSON.stringify(target)}
             {...{ deviceId, workspaceId, repoId, target }}
-            onBack={() => setTarget(undefined)}
-            onFile={() => onFile(target.path)}
+            refreshKey={refreshKey}
           />
         )}
       </div>

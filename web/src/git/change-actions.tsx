@@ -89,6 +89,7 @@ export function RowActions({
           <MoreHorizontal />
         </MenuTrigger>
         <MenuContent>
+          <p className="max-w-72 px-2 py-1 text-xs break-all text-muted-foreground">{entry.path}</p>
           <MenuItem onClick={onFile}>
             <FolderOpen />
             {t(($) => $.git.openFiles)}
@@ -164,6 +165,12 @@ export function GitFeedback({
     "git.push": "Push",
   };
   if (!value.request && !value.error && !value.completed) return null;
+  if (
+    !value.request &&
+    !value.error &&
+    (value.completed === "git.stage" || value.completed === "git.unstage")
+  )
+    return null;
   return (
     <div className="max-h-40 shrink-0 overflow-auto border-b border-border px-3 py-2 text-xs">
       <div className="flex flex-wrap items-center gap-2">

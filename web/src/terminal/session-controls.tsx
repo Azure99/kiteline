@@ -130,46 +130,42 @@ export function NewSessionButtons({
   dock,
   disabled,
   onCreate,
+  showLabel = false,
 }: {
   shortcuts: Shortcut[];
   dock: boolean;
   disabled: boolean;
   onCreate(shortcutId?: string): void;
+  showLabel?: boolean;
 }) {
   const { t } = useTranslation();
 
   return (
-    <>
-      <IconButton
-        label={dock ? t(($) => $.terminal.newDock) : t(($) => $.terminal.new)}
-        disabled={disabled}
-        onClick={() => onCreate()}
+    <Menu>
+      <MenuTrigger
+        render={
+          <Button
+            variant={showLabel ? "outline" : "ghost"}
+            size={showLabel ? "default" : "icon"}
+            aria-label={dock ? t(($) => $.terminal.newDock) : t(($) => $.terminal.new)}
+            disabled={disabled}
+          />
+        }
       >
         <Plus />
-      </IconButton>
-      {!!shortcuts.length && (
-        <Menu>
-          <MenuTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label={t(($) => $.terminal.shortcutMenu)}
-                disabled={disabled}
-              />
-            }
-          >
-            <ChevronDown />
-          </MenuTrigger>
-          <MenuContent>
-            {shortcuts.map((shortcut) => (
-              <MenuItem key={shortcut.id} onClick={() => onCreate(shortcut.id)}>
-                {shortcut.name}
-              </MenuItem>
-            ))}
-          </MenuContent>
-        </Menu>
-      )}
-    </>
+        {showLabel && t(($) => $.terminal.new)}
+      </MenuTrigger>
+      <MenuContent>
+        <MenuItem onClick={() => onCreate()}>
+          <SquareTerminal />
+          Shell
+        </MenuItem>
+        {shortcuts.map((shortcut) => (
+          <MenuItem key={shortcut.id} onClick={() => onCreate(shortcut.id)}>
+            {shortcut.name}
+          </MenuItem>
+        ))}
+      </MenuContent>
+    </Menu>
   );
 }

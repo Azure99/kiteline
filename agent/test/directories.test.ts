@@ -105,3 +105,26 @@ test("agent shutdown waits for an accepted workspace publication", async () => {
     agent.dispatch("workspaces.add", { absolutePath: dataDir }, new AbortController().signal),
   ).rejects.toMatchObject({ code: "cancelled" });
 });
+
+test("new device shortcuts do not replace saved customizations or restore deleted defaults", async () => {
+  const dataDir = await directory();
+  const metadata = new MetadataStore(config(dataDir));
+  await metadata.load();
+  expect(metadata.value.shortcuts.map(({ name, command }) => [name, command])).toEqual([
+    ["Claude Code", "claude"],
+    ["Codex", "codex"],
+    ["OpenCode", "opencode"],
+  ]);
+  await metadata.update((value) => {
+    value.shortcuts = [{ id: "custom", name: "Project", command: "./project.sh" }];
+  });
+  const restored = new MetadataStore(config(dataDir));
+  await restored.load();
+  expect(restored.value.shortcuts).toEqual(metadata.value.shortcuts);
+  await restored.update((value) => {
+    value.shortcuts = [];
+  });
+  const empty = new MetadataStore(config(dataDir));
+  await empty.load();
+  expect(empty.value.shortcuts).toEqual([]);
+});

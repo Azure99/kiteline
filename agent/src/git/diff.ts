@@ -144,7 +144,9 @@ export async function workingDiff(
     (side === "staged" && [".", "?"].includes(selected.indexStatus)) ||
     (side === "worktree" && selected.worktreeStatus === ".")
   )
-    throw new AppError("conflict", "Selected change no longer applies; refresh");
+    throw new AppError("conflict", "Selected change no longer applies; refresh", {
+      reason: "change_unavailable",
+    });
   if (selected.indexStatus === "?") {
     const info = await lstat(join(repo.rootPath, path));
     if (!info.isFile() && !info.isSymbolicLink())
@@ -188,7 +190,10 @@ export async function workingDiff(
     onData: raw.data,
   });
   raw.end();
-  if (!change) throw new AppError("conflict", "Selected change no longer applies; refresh");
+  if (!change)
+    throw new AppError("conflict", "Selected change no longer applies; refresh", {
+      reason: "change_unavailable",
+    });
   let binary = false;
   const nums = numstatReader((itemPath, isBinary) => {
     if (itemPath === path) binary = isBinary;

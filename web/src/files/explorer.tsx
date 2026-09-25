@@ -12,6 +12,7 @@ import {
   FolderInput,
   Trash2,
   Download,
+  Info,
 } from "lucide-react";
 import type { Entry } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
@@ -36,6 +37,7 @@ export function FileExplorer({
   onAction,
   onDownload,
   onMore,
+  onDetails,
 }: {
   path: string;
   depth?: number;
@@ -53,8 +55,9 @@ export function FileExplorer({
   onAction: (kind: "copy" | "move" | "delete", entry: Entry) => void;
   onDownload: (entry: Entry) => void;
   onMore: (path: string) => void;
+  onDetails: (entry: Entry) => void;
 }) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
 
   const page = pages[path];
   return (
@@ -66,11 +69,11 @@ export function FileExplorer({
         return (
           <div key={entry.path ?? `invalid-${index}`}>
             <div
-              className={`file-row group flex min-h-11 items-center pr-1 ${currentFile === entry.path ? "bg-primary-soft" : "hover:bg-muted"}`}
+              className={`file-row group flex min-h-8 items-center pr-1 max-[959px]:min-h-11 ${currentFile === entry.path ? "bg-primary-soft" : "hover:bg-muted"}`}
               style={{ paddingLeft: 8 + depth * 14 }}
             >
               {selecting && (
-                <label className="flex min-h-11 w-9 shrink-0 cursor-pointer items-center justify-center">
+                <label className="flex size-8 shrink-0 cursor-pointer items-center justify-center max-[959px]:size-11">
                   <input
                     type="checkbox"
                     aria-label={t(($) => $.files.selectNamed, { name: entry.name })}
@@ -82,7 +85,7 @@ export function FileExplorer({
                 </label>
               )}
               <button
-                className="flex min-h-11 min-w-0 flex-1 items-center gap-2 py-1.5 text-left disabled:opacity-50"
+                className="flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left disabled:opacity-50 max-[959px]:min-h-11"
                 disabled={!entry.path || disabled}
                 title={entry.linkTarget ? `${entry.name} -> ${entry.linkTarget}` : entry.name}
                 onClick={() => (folder ? onFolder(entry.path!) : onOpen(entry))}
@@ -98,22 +101,16 @@ export function FileExplorer({
                   size={16}
                   className={`shrink-0 ${folder ? "text-primary" : "text-muted-foreground"}`}
                 />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate whitespace-pre text-sm">{entry.name}</span>
-                  <span className="block truncate text-[11px] text-muted-foreground">
+                <span className="min-w-0 flex-1 truncate whitespace-pre text-sm">{entry.name}</span>
+                {(entry.unavailableReason || entry.kind === "file" || entry.kind === "other") && (
+                  <span className="shrink-0 text-[11px] text-muted-foreground">
                     {entry.unavailableReason
                       ? t(($) => $.files.nameEncoding)
-                      : folder
-                        ? t(($) => $.common.directory)
-                        : entry.kind === "symlink"
-                          ? t(($) => $.files.linkPath, { path: entry.linkTarget ?? "" })
-                          : entry.kind === "other"
-                            ? t(($) => $.files.specialFile)
-                            : formatBytes(entry.size)}
-                    {entry.mtime &&
-                      ` · ${new Date(entry.mtime).toLocaleString(i18n.resolvedLanguage)}`}
+                      : entry.kind === "other"
+                        ? t(($) => $.files.specialFile)
+                        : formatBytes(entry.size)}
                   </span>
-                </span>
+                )}
                 {mobile && folder && (
                   <ChevronRight size={16} className="shrink-0 text-muted-foreground" />
                 )}
@@ -133,6 +130,10 @@ export function FileExplorer({
                     <MoreHorizontal />
                   </MenuTrigger>
                   <MenuContent>
+                    <MenuItem onClick={() => onDetails(entry)}>
+                      <Info />
+                      {t(($) => $.files.details)}
+                    </MenuItem>
                     {(entry.kind === "file" || entry.kind === "symlink") && (
                       <>
                         <MenuItem onClick={() => onDownload(entry)}>
@@ -184,6 +185,7 @@ export function FileExplorer({
                   onAction,
                   onDownload,
                   onMore,
+                  onDetails,
                 }}
                 path={entry.path!}
                 depth={depth + 1}

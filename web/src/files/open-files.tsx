@@ -1,10 +1,9 @@
 import { useTranslation } from "react-i18next";
 import { useEffect } from "react";
 import { ErrorNotice } from "../components/error-notice";
-import { Files, Circle, X } from "lucide-react";
+import { Circle, X } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { IconButton } from "../components/icon-button";
-import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
 import {
   Dialog,
   DialogContent,
@@ -16,7 +15,15 @@ import { draftError, isDirty, useDrafts, type DraftStore } from "./drafts";
 import { closeDraft, requestCloseDraft, showDraft, syncDraftPath } from "./navigation";
 import { useRoute } from "../lib/navigation";
 
-export function OpenFiles({ store }: { store: DraftStore }) {
+export function OpenFiles({
+  store,
+  open,
+  onOpenChange,
+}: {
+  store: DraftStore;
+  open: boolean;
+  onOpenChange(open: boolean): void;
+}) {
   const { t } = useTranslation();
 
   const drafts = useDrafts(store);
@@ -34,38 +41,38 @@ export function OpenFiles({ store }: { store: DraftStore }) {
   }, [selected, selectedPath, route.query.file]);
   return (
     <>
-      <Menu>
-        <MenuTrigger
-          render={
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={t(($) => $.files.openCount, { count: drafts.length })}
-              disabled={!drafts.length}
-            />
-          }
-        >
-          <Files />
-        </MenuTrigger>
-        <MenuContent>
-          {drafts.map((draft) => (
-            <div key={draft.id} className="flex items-center">
-              <MenuItem onClick={() => showDraft(draft)}>
-                <span className="min-w-0 max-w-64 truncate" title={draft.path}>
-                  {draft.deviceName} / {draft.workspaceName} / {draft.path}
-                </span>
-                {isDirty(draft) && <Circle size={7} fill="currentColor" />}
-              </MenuItem>
-              <IconButton
-                label={t(($) => $.common.closeNamed, { name: draft.path })}
-                onClick={() => requestCloseDraft(store, draft)}
-              >
-                <X />
-              </IconButton>
-            </div>
-          ))}
-        </MenuContent>
-      </Menu>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t(($) => $.files.openCount, { count: drafts.length })}</DialogTitle>
+          </DialogHeader>
+          <div className="scroll-area overflow-auto p-2">
+            {drafts.map((draft) => (
+              <div key={draft.id} className="flex items-center">
+                <Button
+                  variant="ghost"
+                  className="min-w-0 flex-1 justify-start"
+                  onClick={() => {
+                    onOpenChange(false);
+                    showDraft(draft);
+                  }}
+                >
+                  <span className="min-w-0 truncate" title={draft.path}>
+                    {draft.deviceName} / {draft.workspaceName} / {draft.path}
+                  </span>
+                  {isDirty(draft) && <Circle size={7} fill="currentColor" />}
+                </Button>
+                <IconButton
+                  label={t(($) => $.common.closeNamed, { name: draft.path })}
+                  onClick={() => requestCloseDraft(store, draft)}
+                >
+                  <X />
+                </IconButton>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog
         open={!!closing}
         onOpenChange={(open) => {

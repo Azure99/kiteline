@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { LanguageMenu, LanguageOptions } from "./components/language-menu";
+import { trackViewport } from "./lib/viewport";
+import { LanguageOptions } from "./components/language-menu";
 import {
   ChevronDown,
   LogOut,
@@ -13,6 +14,7 @@ import {
   Globe,
   PanelLeftClose,
   PanelLeftOpen,
+  Files as FilesIcon,
 } from "lucide-react";
 import type { BrowserEvent, Device } from "@kiteline/shared/protocol";
 import { Auth, type Session } from "./auth";
@@ -63,6 +65,7 @@ export function App() {
   const [error, setError] = useState<{ cause: unknown; downloadPath?: string }>();
   const [binding, setBinding] = useState(false);
   const [picker, setPicker] = useState(false);
+  const [openFiles, setOpenFiles] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [directoryDevice, setDirectoryDevice] = useState<{ device: Device; origin: string }>();
   const [action, setAction] = useState<DeviceAction>();
@@ -144,21 +147,7 @@ export function App() {
       window.removeEventListener("kiteline:event", failed);
     };
   }, [drafts]);
-  useEffect(() => {
-    const viewport = window.visualViewport;
-    const resize = () =>
-      document.documentElement.style.setProperty(
-        "--app-height",
-        `${viewport?.height ?? window.innerHeight}px`,
-      );
-    resize();
-    viewport?.addEventListener("resize", resize);
-    window.addEventListener("resize", resize);
-    return () => {
-      viewport?.removeEventListener("resize", resize);
-      window.removeEventListener("resize", resize);
-    };
-  }, []);
+  useEffect(trackViewport, []);
   async function loadSession() {
     setLoading(true);
     setAuthError("");
@@ -254,7 +243,10 @@ export function App() {
     );
   return (
     <>
-      <div className="flex h-[var(--app-height,100dvh)] min-h-0 flex-col overflow-hidden">
+      <div
+        data-terminal-focus={terminalFocus.active ? "" : undefined}
+        className="fixed top-[var(--app-top,0px)] left-0 flex h-[var(--app-height,100dvh)] w-full min-h-0 flex-col overflow-hidden"
+      >
         <header
           hidden={terminalFocus.active}
           className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3 max-[959px]:gap-1 max-[959px]:px-2"
@@ -317,7 +309,6 @@ export function App() {
             title={connected ? t(($) => $.common.connected) : t(($) => $.common.disconnected)}
             aria-label={connected ? t(($) => $.common.connected) : t(($) => $.common.disconnected)}
           />
-          <OpenFiles store={drafts} />
           {device && device.status !== "revoked" && (
             <IconButton label={t(($) => $.shell.openPort)} onClick={() => setPortDevice(device.id)}>
               <Globe />
@@ -348,7 +339,6 @@ export function App() {
                 </MenuContent>
               </Menu>
             )}
-            <LanguageMenu />
           </div>
           <Menu>
             <MenuTrigger
@@ -370,9 +360,14 @@ export function App() {
               )}
             </MenuTrigger>
             <MenuContent>
+              <MenuItem onClick={() => setOpenFiles(true)}>
+                <FilesIcon />
+                {t(($) => $.files.openFiles)}
+              </MenuItem>
+              <div className="my-1 border-t border-border" />
+              <LanguageOptions />
+              <div className="my-1 border-t border-border" />
               <div className="min-[960px]:hidden">
-                <LanguageOptions />
-                <div className="my-1 border-t border-border" />
                 {uploads.map((item) => (
                   <MenuItem key={item.id} onClick={() => setActiveUpload(item.id)}>
                     <Upload />
@@ -505,6 +500,7 @@ export function App() {
           </main>
         </div>
       </div>
+      <OpenFiles store={drafts} open={openFiles} onOpenChange={setOpenFiles} />
       {device && portDevice === device.id && device.status !== "revoked" && (
         <PortDialog key={device.id} device={device} onClose={() => setPortDevice(undefined)} />
       )}

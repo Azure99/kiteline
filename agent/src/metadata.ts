@@ -9,7 +9,11 @@ export class MetadataStore {
     schemaVersion: 1,
     revision: 0,
     workspaces: [],
-    shortcuts: [],
+    shortcuts: [
+      { id: "claude", name: "Claude Code", command: "claude" },
+      { id: "codex", name: "Codex", command: "codex" },
+      { id: "opencode", name: "OpenCode", command: "opencode" },
+    ],
     settings: { historyLines: 10_000 },
   };
   onChange?: (snapshot: Metadata) => void;

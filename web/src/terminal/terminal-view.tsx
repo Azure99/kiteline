@@ -19,6 +19,7 @@ import { Terminal } from "@xterm/xterm";
 import { ErrorNotice } from "../components/error-notice";
 import { TouchControls } from "./touch-controls";
 import { useMobile } from "../lib/use-mobile";
+import { prepareKeyboard, virtualKeyboard } from "../lib/viewport";
 import {
   Dialog,
   DialogContent,
@@ -29,7 +30,6 @@ import {
 import "@xterm/xterm/css/xterm.css";
 
 export interface TerminalActions {
-  redisplay(): void;
   redraw(): void;
   fontSize(delta: number): void;
   focus(): void;
@@ -39,13 +39,11 @@ export function TerminalView({
   workspaceId,
   sessionId,
   ref,
-  onStatus,
 }: {
   deviceId: string;
   workspaceId: string;
   sessionId: string;
   ref?: Ref<TerminalActions>;
-  onStatus?: (status: DisplayState["status"]) => void;
 }) {
   const { t } = useTranslation();
   useServerVersion();
@@ -92,14 +90,10 @@ export function TerminalView({
       });
   }
   useImperativeHandle(ref, () => ({
-    redisplay,
     redraw: () => setRedrawDialog(true),
     fontSize: (delta) => display.current?.changeFontSize(delta),
     focus: () => display.current?.focus(),
   }));
-  useEffect(() => {
-    onStatus?.(state.status);
-  }, [state.status, onStatus]);
   async function recover() {
     const signal = operations.current.signal;
     setRecovering(true);
@@ -167,18 +161,22 @@ export function TerminalView({
     terminal?.textarea?.setAttribute("aria-label", Terminal.strings.promptLabel);
     element.current?.removeAttribute("title");
   }, [terminal, t]);
+  useEffect(() => {
+    if (virtualKeyboard)
+      terminal?.textarea?.setAttribute("virtualkeyboardpolicy", mobile ? "manual" : "auto");
+  }, [terminal, mobile]);
   async function paste() {
     try {
       display.current?.paste(await navigator.clipboard.readText());
       setControl(false);
-      display.current?.focus();
+      if (!mobile) display.current?.focus();
     } catch (error) {
       setNotice(error);
     }
   }
   const auxiliary = (value: string) => {
     display.current?.input(value);
-    display.current?.focus();
+    if (!mobile) display.current?.focus();
     setControl(false);
   };
   return (
@@ -270,6 +268,14 @@ export function TerminalView({
       <div
         className="terminal-aux flex shrink-0 items-center gap-0.5 border-t px-1.5 py-0.5"
         onPointerDown={(event) => event.preventDefault()}
+        onClick={(event) => {
+          if (
+            mobile &&
+            event.target instanceof Element &&
+            event.target.closest("button:not(:disabled)")
+          )
+            navigator.vibrate?.(10);
+        }}
       >
         <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
           <button className="aux-key" onClick={() => auxiliary("\x1b")}>
@@ -283,7 +289,7 @@ export function TerminalView({
             aria-pressed={ctrl}
             onClick={() => {
               setControl(!ctrl);
-              display.current?.focus();
+              if (!mobile) display.current?.focus();
             }}
           >
             Ctrl
@@ -325,20 +331,24 @@ export function TerminalView({
           })}
         </div>
         <IconButton
-          label={t(($) => $.terminal.keyboard)}
-          disabled={state.status !== "ready"}
-          onClick={() => {
-            if (terminal && !terminal.options.disableStdin) terminal.focus();
-          }}
-        >
-          <Keyboard />
-        </IconButton>
-        <IconButton
           label={t(($) => $.terminal.paste)}
           disabled={state.status !== "ready"}
           onClick={() => void paste()}
         >
           <ClipboardPaste />
+        </IconButton>
+        <IconButton
+          label={t(($) => $.terminal.keyboard)}
+          disabled={state.status !== "ready"}
+          onClick={() => {
+            if (terminal && !terminal.options.disableStdin) {
+              prepareKeyboard();
+              terminal.focus();
+              if (mobile) virtualKeyboard?.show();
+            }
+          }}
+        >
+          <Keyboard />
         </IconButton>
       </div>
       <Dialog

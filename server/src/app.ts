@@ -211,6 +211,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       ".svg": "image/svg+xml",
       ".png": "image/png",
       ".ico": "image/x-icon",
+      ".webmanifest": "application/manifest+json",
       ".woff2": "font/woff2",
     };
     let content: Buffer;

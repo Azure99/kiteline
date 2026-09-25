@@ -122,6 +122,13 @@ test("diff preserves machine paths, rename, modes, binary and both sides without
   await cli("add", ".");
   await cli("commit", "-m", "base");
   await cli("config", "diff.suppressBlankEmpty", "true");
+  await expect(workingDiff(repo, old, "worktree", signals())).rejects.toMatchObject({
+    code: "conflict",
+    details: { reason: "change_unavailable" },
+  });
+  await expect(workingDiff(repo, "../outside", "worktree", signals())).rejects.not.toMatchObject({
+    details: { reason: "change_unavailable" },
+  });
   await cli("config", "color.diff", "always");
   await cli("mv", "--", old, next);
   await writeFile(join(root, next), "one\n\nchanged");

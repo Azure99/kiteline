@@ -2,38 +2,40 @@ import { useTranslation } from "react-i18next";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { Decoration, Diff, Hunk, parseDiff, type FileData, type HunkTokens } from "react-diff-view";
 import "react-diff-view/style/index.css";
-import { ArrowLeft, FilePenLine, RefreshCw } from "lucide-react";
 import { limits, type GitDiff } from "@kiteline/shared/protocol";
-import { IconButton } from "../components/icon-button";
-import { errorMessage, rpc } from "../lib/api";
+import { ApiError, errorMessage, rpc } from "../lib/api";
 import { ErrorNotice, ErrorDetails } from "../components/error-notice";
 
 export type DiffTarget = {
   path: string;
 } & ({ side: "worktree" | "staged" } | { side: "commit"; commitOid: string; parentOid?: string });
+
+function comparisonUnavailable(error: unknown) {
+  return (
+    error instanceof ApiError &&
+    error.code === "conflict" &&
+    (error.details as { reason?: string } | undefined)?.reason === "change_unavailable"
+  );
+}
 export function DiffView({
   deviceId,
   workspaceId,
   repoId,
   target,
   refreshKey,
-  onBack,
-  onFile,
 }: {
   deviceId: string;
   workspaceId: string;
   repoId: string;
   target: DiffTarget;
   refreshKey?: unknown;
-  onBack: () => void;
-  onFile: () => void;
 }) {
   const { t } = useTranslation();
 
   const [value, setValue] = useState<GitDiff>();
   const [error, setError] = useState<unknown>();
   const [busy, setBusy] = useState(false);
-  const [retry, setRetry] = useState(0);
+  const unavailable = comparisonUnavailable(error);
   useEffect(() => {
     const controller = new AbortController();
     setBusy(true);
@@ -51,47 +53,30 @@ export function DiffView({
             );
         },
         (error) => {
-          if (!controller.signal.aborted) setError(error);
+          if (!controller.signal.aborted) {
+            setError(error);
+            if (comparisonUnavailable(error)) setValue(undefined);
+          }
         },
       )
       .finally(() => {
         if (!controller.signal.aborted) setBusy(false);
       });
     return () => controller.abort();
-  }, [deviceId, workspaceId, repoId, target, refreshKey, retry]);
+  }, [deviceId, workspaceId, repoId, target, refreshKey]);
   return (
     <section
       className="flex min-h-0 min-w-0 flex-1 flex-col"
       aria-label="Git diff"
       aria-busy={busy}
     >
-      <div className="flex min-h-10 shrink-0 items-center gap-1 border-b border-border px-2">
-        <IconButton label={t(($) => $.git.backChanges)} onClick={onBack}>
-          <ArrowLeft />
-        </IconButton>
-        <span className="min-w-0 flex-1 truncate text-xs" title={target.path}>
-          {target.path}
-        </span>
-        <span className="text-[11px] text-muted-foreground">
-          {target.side === "staged"
-            ? t(($) => $.git.index)
-            : target.side === "commit"
-              ? t(($) => $.git.commit)
-              : t(($) => $.git.worktree)}
-        </span>
-        <IconButton label={t(($) => $.git.openFiles)} onClick={onFile}>
-          <FilePenLine />
-        </IconButton>
-        <IconButton
-          label={t(($) => $.git.refreshDiff)}
-          disabled={busy}
-          onClick={() => setRetry((n) => n + 1)}
-        >
-          <RefreshCw />
-        </IconButton>
-      </div>
       <div className="scroll-area min-h-0 min-w-0 flex-1 overflow-auto">
-        {!!error && (
+        {unavailable && (
+          <p role="status" className="p-4 text-sm text-muted-foreground">
+            {t(($) => $.git.changeUnavailable)}
+          </p>
+        )}
+        {!!error && !unavailable && (
           <div role="alert" className="break-words p-4 text-sm text-destructive">
             {value ? (
               <>

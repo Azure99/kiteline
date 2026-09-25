@@ -191,6 +191,9 @@ select {
   min-width: 100%;
   height: auto;
 }
+.terminal-keyboard-clipped > .xterm {
+  height: auto;
+}
 .terminal-notice,
 .workbench-notice {
   /* Language changes must not resize xterm and clear its selection. */

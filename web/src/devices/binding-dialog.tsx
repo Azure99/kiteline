@@ -1,6 +1,6 @@
 import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import type { Device } from "@kiteline/shared/protocol";
 import { api, post } from "../lib/api";
@@ -40,10 +40,10 @@ export function BindingDialog({
   const [result, setResult] = useState<Result>();
   const [error, setError] = useState<unknown>();
   const [copyError, setCopyError] = useState<unknown>();
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(true);
   const [mode, setMode] = useState<"foreground" | "service">("foreground");
   const [copied, setCopied] = useState("");
-  async function create() {
+  const create = useCallback(async () => {
     setError(undefined);
     setCopyError(undefined);
     setBusy(true);
@@ -56,7 +56,13 @@ export function BindingDialog({
     } finally {
       setBusy(false);
     }
-  }
+  }, []);
+  const started = useRef(false);
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    void create();
+  }, [create]);
   useEffect(() => {
     if (!binding) return;
     const controller = new AbortController();
@@ -101,9 +107,13 @@ export function BindingDialog({
       </DialogHeader>
       <div className="space-y-4 overflow-auto p-5">
         {!binding ? (
-          <Button disabled={busy} onClick={() => void create()}>
-            {busy ? t(($) => $.devices.generating) : t(($) => $.devices.generateCommand)}
-          </Button>
+          busy ? (
+            <p role="status" className="text-sm text-muted-foreground">
+              {t(($) => $.devices.generating)}
+            </p>
+          ) : (
+            <Button onClick={() => void create()}>{t(($) => $.common.retry)}</Button>
+          )
         ) : (
           <>
             <div className="flex flex-wrap items-center justify-between gap-2 text-muted-foreground">

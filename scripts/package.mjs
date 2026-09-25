@@ -15,12 +15,26 @@ import {
 } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { basename, resolve, join, relative } from "node:path";
+import { parseArgs } from "node:util";
 
 const root = resolve(import.meta.dirname, "..");
 const release = JSON.parse(readFileSync(join(root, "deploy/release.json"), "utf8"));
-const [kind, arch] = process.argv.slice(2);
-if (!["server", "agent"].includes(kind) || !Object.hasOwn(release.nodeArchives, arch ?? ""))
-  throw new Error("Usage: pnpm package agent|server amd64|arm64 (build both agents before server)");
+const { positionals, values } = parseArgs({
+  allowPositionals: true,
+  options: { "agent-arch": { type: "string" } },
+});
+const [kind, arch] = positionals;
+const agentArch = values["agent-arch"];
+if (
+  positionals.length !== 2 ||
+  !["server", "agent"].includes(kind) ||
+  !Object.hasOwn(release.nodeArchives, arch ?? "") ||
+  (agentArch !== undefined &&
+    (kind !== "server" || !Object.hasOwn(release.nodeArchives, agentArch)))
+)
+  throw new Error(
+    "Usage: pnpm package agent|server amd64|arm64 [--agent-arch=amd64|arm64 (server only)]",
+  );
 const node = release.nodeArchives[arch];
 const { version } = JSON.parse(readFileSync(join(root, "shared/src/version.json"), "utf8"));
 const output = join(root, "dist/releases");
@@ -69,26 +83,28 @@ function sourceDigest() {
   return hash.digest("hex");
 }
 function agentArchives(sourceHash) {
-  return Object.entries(release.nodeArchives).map(([architecture, runtime]) => {
-    const name = `kiteline-agent-${version}-linux-${architecture}`;
-    const archive = join(output, `${name}.tar.gz`);
-    const checksum = archive + ".sha256";
-    if (!existsSync(archive) || !existsSync(checksum))
-      throw new Error(`Build agent ${architecture} first`);
-    if (digest(archive) !== readFileSync(checksum, "utf8").trim().split(/\s+/)[0])
-      throw new Error(`Agent archive checksum mismatch: ${architecture}`);
-    const manifest = JSON.parse(text("tar", ["-xOf", archive, `${name}/release.json`]));
-    if (
-      manifest.kind !== "agent" ||
-      manifest.version !== version ||
-      manifest.architecture !== runtime.architecture ||
-      manifest.sourceDigest !== sourceHash
-    )
-      throw new Error(
-        `Agent ${architecture} must match this source/version/architecture; rebuild it`,
-      );
-    return { archive, checksum };
-  });
+  return Object.entries(release.nodeArchives)
+    .filter(([architecture]) => agentArch === undefined || architecture === agentArch)
+    .map(([architecture, runtime]) => {
+      const name = `kiteline-agent-${version}-linux-${architecture}`;
+      const archive = join(output, `${name}.tar.gz`);
+      const checksum = archive + ".sha256";
+      if (!existsSync(archive) || !existsSync(checksum))
+        throw new Error(`Build agent ${architecture} first`);
+      if (digest(archive) !== readFileSync(checksum, "utf8").trim().split(/\s+/)[0])
+        throw new Error(`Agent archive checksum mismatch: ${architecture}`);
+      const manifest = JSON.parse(text("tar", ["-xOf", archive, `${name}/release.json`]));
+      if (
+        manifest.kind !== "agent" ||
+        manifest.version !== version ||
+        manifest.architecture !== runtime.architecture ||
+        manifest.sourceDigest !== sourceHash
+      )
+        throw new Error(
+          `Agent ${architecture} must match this source/version/architecture; rebuild it`,
+        );
+      return { archive, checksum };
+    });
 }
 function deploy(name, target) {
   run("pnpm", [

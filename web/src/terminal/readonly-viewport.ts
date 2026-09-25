@@ -3,18 +3,23 @@ import type { Terminal } from "@xterm/xterm";
 export function scrollTerminalLines(terminal: Terminal, lines: number) {
   const container = terminal.element!.parentElement!;
   if (
-    !container.classList.contains("terminal-readonly") ||
+    !(
+      container.classList.contains("terminal-readonly") ||
+      container.classList.contains("terminal-keyboard-clipped")
+    ) ||
     !scrollClippedScreen(terminal, 0, lines * terminal.dimensions!.css.cell.height)
   ) {
     terminal.scrollLines(lines);
   }
 }
 
-function scrollClippedScreen(terminal: Terminal, x: number, y: number) {
+export function scrollClippedScreen(terminal: Terminal, x: number, y: number) {
   const container = terminal.element!.parentElement!;
   const { viewportY, baseY } = terminal.buffer.active;
   const left = container.scrollLeft;
   container.scrollLeft += x;
+  if (container.classList.contains("terminal-keyboard-clipped") && y < 0 && viewportY > 0)
+    return false;
   if (y > 0 && viewportY < baseY) return false;
   const top = container.scrollTop;
   container.scrollTop += y;

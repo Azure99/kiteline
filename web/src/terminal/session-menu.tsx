@@ -22,19 +22,12 @@ import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu"
 import { Button } from "../components/ui/button";
 import { groupFor, type TerminalLayout } from "./groups";
 
-export type SessionCommand =
-  | "rename"
-  | "end"
-  | "copy"
-  | "redisplay"
-  | "redraw"
-  | "larger"
-  | "smaller"
-  | "close";
+export type SessionCommand = "rename" | "end" | "copy" | "redraw" | "larger" | "smaller" | "close";
 export function SessionMenu({
   id,
   session,
   layout,
+  mobile,
   dock,
   disabled,
   label,
@@ -47,6 +40,7 @@ export function SessionMenu({
   id?: string;
   session?: Session;
   layout: TerminalLayout;
+  mobile: boolean;
   dock?: boolean;
   disabled: boolean;
   label?: string;
@@ -84,7 +78,7 @@ export function SessionMenu({
         )}
         {id && (
           <>
-            {!dock && (
+            {!dock && !mobile && (
               <>
                 <MenuItem disabled={disabled} onClick={onSplit}>
                   <Plus />
@@ -137,10 +131,6 @@ export function SessionMenu({
             )}
             {session && (
               <>
-                <MenuItem onClick={() => onCommand("redisplay", id)}>
-                  <RefreshCw />
-                  {t(($) => $.terminal.redisplay)}
-                </MenuItem>
                 <MenuItem onClick={() => onCommand("redraw", id)}>
                   <RefreshCw />
                   {t(($) => $.terminal.redrawProgram)}

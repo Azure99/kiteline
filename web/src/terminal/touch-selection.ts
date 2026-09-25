@@ -20,6 +20,7 @@ export class TouchSelection {
   private disposables: { dispose(): void }[];
   private screen: HTMLElement;
   private container: HTMLElement;
+  private geometryFrame = 0;
   constructor(
     private terminal: Terminal,
     private changed: (handles?: SelectionHandles) => void,
@@ -27,13 +28,7 @@ export class TouchSelection {
     this.screen = terminal.screenElement!;
     this.container = terminal.element!.parentElement!;
     this.disposables = [
-      adaptTouchGestures(
-        this.container,
-        () => this.active,
-        () => {
-          if (!terminal.options.disableStdin) terminal.focus();
-        },
-      ),
+      adaptTouchGestures(this.container, () => this.active),
       terminal.onSelectionChange(() => {
         this.revision++;
         this.refresh();
@@ -64,7 +59,12 @@ export class TouchSelection {
     this.screen.addEventListener("contextmenu", this.suppress, true);
     this.screen.addEventListener("click", this.suppress, true);
     this.container.addEventListener("scroll", this.scrolled);
+    window.addEventListener("kiteline:viewport", this.geometry);
   }
+  private geometry = () => {
+    cancelAnimationFrame(this.geometryFrame);
+    this.geometryFrame = requestAnimationFrame(() => this.refresh());
+  };
   private start = (event: TouchEvent) => {
     this.end();
     if (event.touches.length !== 1) return;
@@ -282,5 +282,7 @@ export class TouchSelection {
     this.screen.removeEventListener("contextmenu", this.suppress, true);
     this.screen.removeEventListener("click", this.suppress, true);
     this.container.removeEventListener("scroll", this.scrolled);
+    window.removeEventListener("kiteline:viewport", this.geometry);
+    cancelAnimationFrame(this.geometryFrame);
   }
 }

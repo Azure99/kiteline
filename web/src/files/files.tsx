@@ -30,6 +30,7 @@ import {
   type WorkspaceQuery,
 } from "../lib/navigation";
 import { FileExplorer } from "./explorer";
+import { FileDetails } from "./file-details";
 import { FileNameDialog, type NameAction } from "./name-dialog";
 import { isWithin, movedPath, parentPath, useFileBrowser } from "./use-browser";
 import { DraftView } from "./draft-view";
@@ -66,6 +67,7 @@ export function Files({
   const [listOpen, setListOpen] = useState(true);
   const [action, setAction] = useState<NameAction & { origin: string }>();
   const [operation, setOperation] = useState<FileAction>();
+  const [details, setDetails] = useState<Entry>();
   const [notice, setNotice] = useState<
     { kind: "downloadStarted"; path: string } | { kind: "renamed" | "created" }
   >();
@@ -402,6 +404,7 @@ export function Files({
                 onAction={(kind, entry) => setOperation({ kind, entries: [entry] })}
                 onDownload={(entry) => download(entry.path!)}
                 onMore={(path) => void load(path, true)}
+                onDetails={setDetails}
               />
             </aside>
           </ToolSidebar>
@@ -444,6 +447,7 @@ export function Files({
           </section>
         )}
       </div>
+      {details && <FileDetails entry={details} onClose={() => setDetails(undefined)} />}
       {action && (
         <FileNameDialog
           deviceId={device.id}

@@ -1,13 +1,12 @@
 import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { GitBranch, RefreshCw, Plus, Trash2, ArrowRightLeft } from "lucide-react";
+import { GitBranch, Trash2, ArrowRightLeft } from "lucide-react";
 import type { Branch } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
 import { rpc } from "../lib/api";
 import { useWorkspaceRefresh } from "../lib/use-workspace-refresh";
 import { type GitActions, useGitActivity } from "./actions";
-import { BranchDialog } from "./branch-dialog";
 
 export function BranchesView({
   deviceId,
@@ -15,14 +14,14 @@ export function BranchesView({
   repoId,
   active,
   actions,
-  headOid,
+  refreshKey,
 }: {
   deviceId: string;
   workspaceId: string;
   repoId: string;
   active: boolean;
   actions: GitActions;
-  headOid?: string | null;
+  refreshKey: number;
 }) {
   const { t } = useTranslation();
 
@@ -32,7 +31,6 @@ export function BranchesView({
   const request = useRef<AbortController>(undefined);
   const target = { deviceId, workspaceId, repoId };
   const activity = useGitActivity(actions, target);
-  const [creating, setCreating] = useState(false);
   const disabled = !active || !!activity.request;
   const load = useCallback(async () => {
     request.current?.abort();
@@ -62,26 +60,10 @@ export function BranchesView({
   }, [active, load]);
   useWorkspaceRefresh(deviceId, workspaceId, active, "git", load);
   useEffect(() => {
-    if (active && activity.revision) void load();
-  }, [active, activity.revision, load]);
+    if (active && (activity.revision || refreshKey)) void load();
+  }, [active, activity.revision, refreshKey, load]);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex min-h-10 shrink-0 items-center justify-end border-b border-border px-3">
-        <IconButton
-          label={t(($) => $.git.createBranch)}
-          disabled={disabled || !headOid}
-          onClick={() => setCreating(true)}
-        >
-          <Plus />
-        </IconButton>
-        <IconButton
-          label={t(($) => $.git.refreshBranches)}
-          disabled={!active || busy}
-          onClick={() => void load()}
-        >
-          <RefreshCw />
-        </IconButton>
-      </div>
       {!!error && (
         <div role="alert" className="px-4 py-2 text-xs text-destructive">
           <ErrorNotice error={error} />
@@ -141,14 +123,6 @@ export function BranchesView({
           </p>
         )}
       </div>
-      {creating && (
-        <BranchDialog
-          target={target}
-          actions={actions}
-          startOid={headOid ?? undefined}
-          onClose={() => setCreating(false)}
-        />
-      )}
     </div>
   );
 }

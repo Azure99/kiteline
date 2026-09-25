@@ -6,12 +6,10 @@ import type { Session } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
 import { TerminalView, type TerminalActions } from "./terminal-view";
 import type { TerminalGroup } from "./groups";
-import type { DisplayState } from "./display";
 import { memberTarget, type useTerminalDrag } from "./group-tabs";
 
 export interface PaneEvents {
   actions(id: string, value: TerminalActions | null): void;
-  status(id: string, status: DisplayState["status"]): void;
   focus(id: string): void;
   close(id: string): void;
   maximize(): void;
@@ -21,8 +19,9 @@ export interface PaneEvents {
 export function SplitPanes({
   deviceId,
   workspaceId,
-  group,
-  members,
+  groups,
+  current,
+  opened,
   sessions,
   mobile,
   visible,
@@ -31,8 +30,9 @@ export function SplitPanes({
 }: {
   deviceId: string;
   workspaceId: string;
-  group: TerminalGroup;
-  members: string[];
+  groups: TerminalGroup[];
+  current?: string;
+  opened: ReadonlySet<string>;
   sessions: Session[];
   mobile: boolean;
   visible: boolean;
@@ -42,70 +42,90 @@ export function SplitPanes({
   const { t } = useTranslation();
 
   const panels = useRef<GroupImperativeHandle>(null);
-  const single = mobile || group.maximized;
+  const group = groups.find((item) => item.id === current);
+  const members = group?.members ?? [];
+  const direction = group?.direction ?? "horizontal";
+  const allMembers = groups.flatMap((item) => item.members);
+  const single = mobile || !!group?.maximized;
   const layout = Object.fromEntries(
-    members.map((id) => [
+    allMembers.map((id) => [
       id,
-      single ? (id === group.active ? 100 : 0) : (group.sizes[id] ?? 100 / members.length),
+      !group || !members.includes(id)
+        ? 0
+        : single
+          ? id === group.active
+            ? 100
+            : 0
+          : (group.sizes[id] ?? 100 / members.length),
     ]),
   );
   const layoutKey = JSON.stringify(layout);
   useLayoutEffect(() => {
     if (!visible) return;
-    const frame = requestAnimationFrame(() =>
-      panels.current?.setLayout(JSON.parse(layoutKey) as Record<string, number>),
-    );
+    const frame = requestAnimationFrame(() => {
+      const sizes = JSON.parse(layoutKey) as Record<string, number>;
+      const order = Object.keys(panels.current?.getLayout() ?? {});
+      // The component applies constraints in its registered order, including hidden panels.
+      if (order.length)
+        panels.current?.setLayout(Object.fromEntries(order.map((id) => [id, sizes[id]!])));
+    });
     return () => cancelAnimationFrame(frame);
-  }, [layoutKey, group.direction, visible]);
+  }, [layoutKey, direction, visible]);
   return (
-    <div className="scroll-area min-h-0 flex-1 overflow-auto">
+    <div className={group ? "scroll-area min-h-0 flex-1 overflow-auto" : "hidden"}>
       <Group
-        id={`terminal-${workspaceId}-${members.join("_")}`}
+        // Re-register layout order without remounting the keyed terminal panels.
+        id={`terminal-${workspaceId}-${allMembers.join(":")}`}
         groupRef={panels}
-        orientation={group.direction}
+        orientation={direction}
         disabled={single}
         className="h-full min-h-full"
         style={{
-          minWidth: !single && group.direction === "horizontal" ? members.length * 180 : undefined,
-          minHeight: !single && group.direction === "vertical" ? members.length * 120 : undefined,
+          minWidth: !single && direction === "horizontal" ? members.length * 180 : undefined,
+          minHeight: !single && direction === "vertical" ? members.length * 120 : undefined,
         }}
         onLayoutChanged={(sizes, meta) => {
-          if (meta.isUserInteraction && !single) onSizes(sizes);
+          if (meta.isUserInteraction && !single)
+            onSizes(Object.fromEntries(members.map((id) => [id, sizes[id]!])));
         }}
       >
-        {members.flatMap((id, index) => [
-          index > 0 && (
-            <Separator
-              key={`divider:${id}`}
-              disabled={single}
-              className={single ? "hidden" : "split-divider"}
-              aria-label={t(($) => $.terminal.resize)}
-            />
-          ),
-          <Panel
-            key={id}
-            id={id}
-            minSize={single ? 0 : group.direction === "horizontal" ? 180 : 120}
-            maxSize={single && id !== group.active ? "0%" : "100%"}
-            defaultSize={`${layout[id]}%`}
-            className="flex h-full min-h-0 min-w-0 flex-col"
-          >
-            {(!mobile || id === group.active) && (
-              <TerminalPane
-                key={id}
-                id={id}
-                deviceId={deviceId}
-                workspaceId={workspaceId}
-                session={sessions.find((session) => session.id === id)}
-                active={id === group.active}
-                group={group}
-                showHeader={!mobile && !group.maximized && members.length > 1}
-                hidden={single && id !== group.active}
-                events={events}
+        {allMembers.flatMap((id) => {
+          const owner = groups.find((item) => item.members.includes(id))!;
+          const shown = owner === group && (!single || id === group.active);
+          const divider = shown && !single && members.indexOf(id) > 0;
+          return [
+            divider && (
+              <Separator
+                key={`divider:${id}`}
+                className="split-divider"
+                aria-label={t(($) => $.terminal.resize)}
               />
-            )}
-          </Panel>,
-        ])}
+            ),
+            <Panel
+              key={id}
+              id={id}
+              minSize={!shown || single ? 0 : direction === "horizontal" ? 180 : 120}
+              maxSize={shown ? "100%" : "0%"}
+              defaultSize={`${layout[id]}%`}
+              className="flex h-full min-h-0 min-w-0 flex-col"
+            >
+              {opened.has(id) && (
+                <TerminalPane
+                  key={id}
+                  id={id}
+                  deviceId={deviceId}
+                  workspaceId={workspaceId}
+                  session={sessions.find((session) => session.id === id)}
+                  active={id === owner.active}
+                  group={owner}
+                  showHeader={!mobile && !owner.maximized && owner.members.length > 1}
+                  hidden={!shown}
+                  events={events}
+                />
+              )}
+            </Panel>,
+          ];
+        })}
       </Group>
     </div>
   );
@@ -197,13 +217,7 @@ function TerminalPane({
           </IconButton>
         </header>
       )}
-      <TerminalView
-        ref={actions}
-        deviceId={deviceId}
-        workspaceId={workspaceId}
-        sessionId={id}
-        onStatus={(status) => events.status(id, status)}
-      />
+      <TerminalView ref={actions} deviceId={deviceId} workspaceId={workspaceId} sessionId={id} />
     </div>
   );
 }

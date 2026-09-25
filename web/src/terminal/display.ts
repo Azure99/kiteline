@@ -20,6 +20,8 @@ import { ApiError, api, post } from "../lib/api";
 import { i18n } from "../i18n";
 import { retainReadonlyViewport } from "./readonly-viewport";
 import { versionedPath } from "../lib/release";
+import { isKeyboardOpen } from "../lib/viewport";
+import { KeyboardViewport } from "./keyboard-viewport";
 
 export interface DisplayState {
   status: "connecting" | "ready" | "ended" | "error";
@@ -47,6 +49,8 @@ export class TerminalDisplay {
   private snapshotRemaining = 0;
   private consumed = 0;
   private proposed?: { cols: number; rows: number };
+  private effective?: { cols: number; rows: number; width: number; font: number };
+  private keyboardViewport?: KeyboardViewport;
   private cleanups: (() => void)[] = [];
   state: DisplayState = { status: "connecting" };
   constructor(
@@ -64,6 +68,7 @@ export class TerminalDisplay {
   ) {
     this.observer = new ResizeObserver(() => this.resize());
     this.observer.observe(element);
+    window.addEventListener("kiteline:viewport", this.viewportChanged);
     element.addEventListener("paste", this.onPaste, true);
     void this.connect(history);
   }
@@ -191,7 +196,11 @@ export class TerminalDisplay {
           fontFamily: "'Cascadia Code', 'DejaVu Sans Mono', monospace",
           fontSize: Math.max(
             10,
-            Math.min(24, Number(localStorage.getItem("kiteline.terminal-font-size")) || 13),
+            Math.min(
+              24,
+              Number(localStorage.getItem("kiteline.terminal-font-size")) ||
+                (matchMedia("(max-width: 959px)").matches ? 12 : 13),
+            ),
           ),
           lineHeight: 1.2,
           cursorBlink: true,
@@ -227,6 +236,7 @@ export class TerminalDisplay {
           () => binary.dispose(),
         );
         terminal.open(this.element);
+        this.keyboardViewport = new KeyboardViewport(terminal, this.reportReading);
         const readingEvents = [
           terminal.onScroll(this.reportReading),
           terminal.onWriteParsed(this.reportReading),
@@ -265,6 +275,8 @@ export class TerminalDisplay {
         if (this.terminal) {
           this.terminal.options.disableStdin = true;
           freezeMouse(this.terminal);
+          this.keyboardViewport?.dispose();
+          this.keyboardViewport = undefined;
           this.cleanups.push(retainReadonlyViewport(this.terminal));
         }
         this.change({
@@ -326,6 +338,7 @@ export class TerminalDisplay {
     )
       return;
     if (!this.resize()) return;
+    this.keyboardViewport?.followInput();
     if (
       data.length > limits.dataChunkBytes ||
       this.socket.bufferedAmount + data.length > limits.terminalPendingBytes
@@ -359,6 +372,7 @@ export class TerminalDisplay {
     try {
       if (!this.resize()) return;
       this.send({ type: "paste", text });
+      this.keyboardViewport?.followInput();
       this.terminal?.scrollToBottom();
     } catch (error) {
       this.change({ ...this.state, error, notice: undefined });
@@ -377,11 +391,13 @@ export class TerminalDisplay {
     this.interaction?.reading(
       !!buffer &&
         ((buffer.type === "normal" && buffer.viewportY < buffer.baseY) ||
+          this.keyboardViewport?.isReading() ||
           (this.receivedEnd &&
             this.element.scrollTop + this.element.clientHeight < this.element.scrollHeight - 1)),
     );
   };
   scrollToBottom() {
+    this.keyboardViewport?.followInput();
     this.terminal?.scrollToBottom();
     if (this.receivedEnd) this.element.scrollTop = this.element.scrollHeight;
     this.reportReading();
@@ -399,10 +415,23 @@ export class TerminalDisplay {
       return false;
     const bounds = this.element.getBoundingClientRect();
     if (!bounds.width || !bounds.height) return false;
-    const size = this.fitAddon.proposeDimensions();
+    let size = this.fitAddon.proposeDimensions();
     if (!size) return false;
+    const font = this.terminal.options.fontSize!;
+    const keyboard = isKeyboardOpen();
+    if (keyboard) {
+      if (
+        this.effective &&
+        Math.abs(this.effective.width - bounds.width) < 1 &&
+        this.effective.font === font
+      ) {
+        size = { cols: this.effective.cols, rows: this.effective.rows };
+      } else if (!this.effective) size.rows = this.terminal.rows;
+    }
     size.cols = Math.min(limits.terminalMaxCols, size.cols);
     size.rows = Math.min(limits.terminalMaxRows, size.rows);
+    this.effective = { ...size, width: bounds.width, font };
+    this.keyboardViewport?.update(keyboard);
     if (size.cols !== this.proposed?.cols || size.rows !== this.proposed?.rows) {
       try {
         this.send({ type: "resize", ...size });
@@ -415,6 +444,9 @@ export class TerminalDisplay {
     this.terminal.options.disableStdin = false;
     return true;
   }
+  private viewportChanged = () => {
+    this.resize();
+  };
   private fail(error: unknown) {
     if (this.disposed) return;
     this.finalFrame = true;
@@ -444,6 +476,8 @@ export class TerminalDisplay {
     this.ready = false;
     this.abort.abort();
     this.observer.disconnect();
+    window.removeEventListener("kiteline:viewport", this.viewportChanged);
+    this.keyboardViewport?.dispose();
     this.socket?.close();
     this.cancelChannel();
     this.element.removeEventListener("paste", this.onPaste, true);
