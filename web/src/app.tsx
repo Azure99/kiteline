@@ -58,6 +58,7 @@ import { returnToService } from "./lib/login-return";
 import { PortDialog } from "./devices/port-dialog";
 import { ReleaseNotice } from "./components/release-notice";
 import { useTerminalFocus } from "./terminal/use-terminal-focus";
+import { ScheduledTasksPage } from "./schedules/scheduled-tasks";
 
 export function App() {
   const { t, i18n } = useTranslation();
@@ -453,6 +454,8 @@ export function App() {
                   {t(($) => $.shell.backDevices)}
                 </Button>
               </div>
+            ) : route.schedule ? (
+              <ScheduledTasksPage devices={devices} connected={connected} route={route.schedule} />
             ) : !route.deviceId ? (
               <Home
                 devices={devices}

@@ -19,6 +19,7 @@ import {
 } from "@kiteline/shared/protocol";
 import type { Login, Store } from "./store.js";
 import { requireVersion, versionMismatch } from "./http.js";
+import { taskSnapshot } from "./task-summary.js";
 
 export interface AgentConnection {
   id: string;
@@ -26,6 +27,7 @@ export interface AgentConnection {
   socket: WebSocket;
   snapshot?: Metadata;
   editorBytes?: number;
+  taskRevision?: number;
 }
 interface Pending {
   loginId: string;
@@ -100,6 +102,12 @@ export class Connections {
     const event = { type: "devices.changed", devices: this.devices() } satisfies BrowserEvent;
     for (const browser of this.browsers) send(browser.socket, event);
   }
+  taskSummaries(deviceId?: string) {
+    return this.store.taskSummaries(deviceId).map((item) => ({
+      ...item,
+      current: this.agents.get(item.deviceId)?.taskRevision !== undefined,
+    }));
+  }
   notify(loginId: string, event: BrowserEvent) {
     for (const browser of this.browsers)
       if (browser.login.id === loginId) send(browser.socket, event);
@@ -156,6 +164,17 @@ export class Connections {
             connection.snapshot = snapshot;
             this.store.snapshot(id, snapshot);
             this.broadcastDevices();
+          }
+        } else if (message.type === "tasks.snapshot") {
+          const snapshot = taskSnapshot(message);
+          if (
+            connection.taskRevision === undefined ||
+            snapshot.revision > connection.taskRevision
+          ) {
+            connection.taskRevision = snapshot.revision;
+            this.store.taskSnapshot(id, snapshot);
+            for (const browser of this.browsers)
+              send(browser.socket, { type: "tasks.changed", deviceId: id } satisfies BrowserEvent);
           }
         } else if (message.type === "rpc.result") {
           const reply = record(message.reply);

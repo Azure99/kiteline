@@ -1,8 +1,10 @@
 import { spawn } from "node:child_process";
 import { isUtf8 } from "node:buffer";
 import { createHash } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import { AppError, asError, OperationError, limits } from "@kiteline/shared/protocol";
 import { BytePrefix } from "../buffers.js";
+import { groupRunning } from "../process-group.js";
 
 interface Options {
   input?: Buffer | string;
@@ -47,30 +49,37 @@ export async function git(
   let error: unknown;
   let clipped = false;
   let killTimer: NodeJS.Timeout | undefined;
-  let terminated: Promise<void> | undefined;
+  let groupEnded = false;
+  let groupFailure = false;
+  const groupError = (reason: unknown) => {
+    error ??= reason;
+    if (!groupFailure) console.error("Git process group:", asError(reason).message);
+    groupFailure = true;
+  };
   const stop = () => {
-    if (child.pid) {
+    if (child.pid && !groupEnded && !killTimer) {
       try {
         process.kill(-child.pid, "SIGTERM");
-      } catch {
-        // The process group may already have exited.
+      } catch (reason) {
+        if ((reason as NodeJS.ErrnoException).code !== "ESRCH") groupError(reason);
       }
-      terminated ??= new Promise<void>((resolve) => {
-        killTimer = setTimeout(() => {
-          try {
-            process.kill(-child.pid!, "SIGKILL");
-          } catch {
-            /* Already exited. */
-          }
-          resolve();
-        }, 1000);
-      });
+      killTimer = setTimeout(() => {
+        try {
+          process.kill(-child.pid!, "SIGKILL");
+        } catch (reason) {
+          if ((reason as NodeJS.ErrnoException).code !== "ESRCH") groupError(reason);
+        }
+      }, 1000);
     }
   };
   const abort = () => stop();
   signal.addEventListener("abort", abort, { once: true });
-  child.on("error", (reason) => {
-    error = reason;
+  const exited = new Promise<number | null>((resolve) => {
+    child.on("error", (reason) => {
+      error ??= reason;
+      if (!child.pid) resolve(null);
+    });
+    child.once("exit", resolve);
   });
   child.stdin.on("error", (reason: NodeJS.ErrnoException) => {
     if (reason.code !== "EPIPE") {
@@ -99,20 +108,54 @@ export async function git(
     }
   });
   child.stderr.on("data", (chunk: Buffer) => stderr.append(chunk));
+  const output = Promise.all(
+    [child.stdout, child.stderr].map(
+      (stream) =>
+        new Promise<void>((resolve) => {
+          stream.once("end", resolve);
+          stream.once("error", (reason) => {
+            error ??= reason;
+            stop();
+          });
+          stream.once("close", () => {
+            if (!stream.readableEnded)
+              error ??= new AppError("io_error", "Git output closed before EOF");
+            resolve();
+          });
+        }),
+    ),
+  );
   child.stdin.end(options.input);
-  const code = await new Promise<number | null>((resolve) => child.once("close", resolve));
-  signal.removeEventListener("abort", abort);
-  if (terminated && child.pid) {
-    let groupAlive = false;
+  const code = await exited;
+  let interval = 50;
+  while (child.pid) {
     try {
-      process.kill(-child.pid, 0);
-      groupAlive = true;
-    } catch {
-      /* No remaining group. */
+      if (!(await groupRunning(child.pid))) break;
+    } catch (reason) {
+      groupError(reason);
     }
-    if (groupAlive) await terminated;
+    await delay(interval);
+    interval = Math.min(interval * 2, 500);
   }
+  groupEnded = true;
   clearTimeout(killTimer);
+  const drainTimer = setTimeout(() => {
+    if (!child.stdout.readableEnded || !child.stderr.readableEnded) {
+      error ??= new AppError(
+        "io_error",
+        "Git output pipes did not close after the process group ended",
+      );
+      child.stdout.destroy();
+      child.stderr.destroy();
+    }
+  }, 1000);
+  try {
+    await output;
+  } finally {
+    clearTimeout(drainTimer);
+    signal.removeEventListener("abort", abort);
+    child.stdin.destroy();
+  }
   const result = {
     stdout: stdout.text(),
     stderr: stderr.text(),

@@ -4,6 +4,7 @@ export const protocolVersion = 1;
 export const appVersion = release.version;
 export const terminalProfile = "xterm-c1";
 export { rpcMutates } from "./rpc.js";
+export * from "./schedules.js";
 export type {
   RpcMethods,
   RpcMethod,
@@ -312,6 +313,7 @@ export type WorkspaceEvent =
 export type AgentEvent = WorkspaceEvent | ({ type: "request.progress"; id: string } & FileProgress);
 export type BrowserEvent =
   | { type: "devices.changed"; devices: Device[] }
+  | { type: "tasks.changed"; deviceId: string }
   | (AgentEvent & { deviceId: string })
   | {
       type: "channel.failed";

@@ -291,6 +291,94 @@ test("write queue cancellation is prompt, preserves ordering and bounded output 
   expect(result.truncated).toBe(true);
   expect(await cli("log", "-1", "--format=%s")).toBe("base\n");
 });
+
+test("a hook escaping with output pipes reports unknown after the original group ends", async () => {
+  const { root, cli, repo, repos, workspace, write } = await setup();
+  let escaped: number | undefined;
+  try {
+    await write("file", "value");
+    await cli("add", "file");
+    await write(
+      ".git/hooks/post-commit",
+      "#!/bin/sh\nsetsid sh -c 'echo $$ > .git/escaped.pid; exec sleep 30' &\n",
+    );
+    await chmod(join(root, ".git/hooks/post-commit"), 0o755);
+    const queue = new GitWriteQueue(repos);
+    const result = queue.run(workspace.id, repo.id, signal(), () =>
+      git(root, ["commit", "-m", "committed"], signal(), { write: true }),
+    );
+    const rejected = expect(result).rejects.toMatchObject({
+      outcome: "unknown",
+      message: expect.stringContaining("pipes did not close"),
+    });
+    await expect
+      .poll(async () => {
+        escaped = Number(await readFile(join(root, ".git/escaped.pid"), "utf8"));
+        return escaped;
+      })
+      .toBeGreaterThan(0);
+    await rejected;
+    expect(await cli("log", "-1", "--format=%s")).toBe("committed\n");
+    await queue.run(workspace.id, repo.id, signal(), () =>
+      git(root, ["tag", "after-hook"], signal(), { write: true }),
+    );
+    expect(process.kill(escaped!, 0)).toBe(true);
+  } finally {
+    if (escaped) process.kill(-escaped, "SIGKILL");
+  }
+});
+
+test("Git keeps its write owner through live descendants and a temporary group check failure", async () => {
+  const { root, cli, repo, repos, workspace, write } = await setup();
+  const realKill = process.kill.bind(process);
+  const warning = vi.spyOn(console, "error").mockImplementation(() => {});
+  let unavailable = true;
+  const kill = vi.spyOn(process, "kill").mockImplementation((pid, value) => {
+    if (pid < 0 && value === 0 && unavailable)
+      throw Object.assign(new Error("Git group check unavailable"), { code: "EACCES" });
+    return realKill(pid, value);
+  });
+  try {
+    await write("file", "value");
+    await cli("add", "file");
+    await write(
+      ".git/hooks/post-commit",
+      "#!/bin/sh\n(sleep 1.5; echo done > .git/descendant-done) </dev/null >/dev/null 2>&1 &\n",
+    );
+    await chmod(join(root, ".git/hooks/post-commit"), 0o755);
+    // Resolve queue metadata before injecting failure into the real Git owner.
+    unavailable = false;
+    const queue = new GitWriteQueue(repos);
+    const running = queue.run(workspace.id, repo.id, signal(), () => {
+      unavailable = true;
+      return git(root, ["commit", "-m", "group"], signal(), { write: true });
+    });
+    const rejected = expect(running).rejects.toMatchObject({ outcome: "unknown" });
+    await expect.poll(() => warning.mock.calls.length).toBeGreaterThan(0);
+    unavailable = false;
+    const cancelled = new AbortController();
+    const waiting = queue.run(workspace.id, repo.id, cancelled.signal, async () => {
+      throw new Error("Cancelled queue entry ran");
+    });
+    const cancelledResult = expect(waiting).rejects.toThrow("cancel waiting");
+    cancelled.abort(new Error("cancel waiting"));
+    await cancelledResult;
+    let nextRan = false;
+    const next = queue.run(workspace.id, repo.id, signal(), async () => {
+      expect(await readFile(join(root, ".git/descendant-done"), "utf8")).toBe("done\n");
+      nextRan = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(nextRan).toBe(false);
+    await rejected;
+    await next;
+    await expect(git(join(root, "missing"), ["status"], signal())).rejects.toThrow();
+  } finally {
+    unavailable = false;
+    kill.mockRestore();
+    warning.mockRestore();
+  }
+});
 test("cancelling Git stops a detached-output hook before releasing the write queue", async () => {
   const { root, repo, repos, workspace, cli, write } = await setup();
   await write("base", "base");

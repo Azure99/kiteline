@@ -10,6 +10,7 @@ import { tmuxBinary, tmuxEnvironment } from "@kiteline/shared/terminal/node";
 import { agentConfig, agentPaths, defaultAgentLimits, type AgentConfig } from "./config.js";
 import { localRequest } from "./local.js";
 import { packageDirectory, environmentFile } from "./installation.js";
+import type { ScheduledTasks } from "./tasks/index.js";
 import {
   bundledRipgrep,
   checkBundledRipgrep,
@@ -37,6 +38,7 @@ interface Runtime {
   shell: string;
   recorderPid?: number;
   sessions: Session[];
+  schedules: ReturnType<ScheduledTasks["status"]>;
 }
 function nativeFacts(identity: Record<string, unknown>) {
   const facts = { ...identity };
@@ -72,7 +74,7 @@ export async function diagnose(
   };
   add(
     "Configuration",
-    `data=${config.dataDir}; run=${config.runDir}; metadata=${join(config.dataDir, "agent.json")}`,
+    `data=${config.dataDir}; run=${config.runDir}; metadata=${join(config.dataDir, "agent.json")}; schedules=${join(config.dataDir, "tasks")}`,
   );
   await check("Node", async () => {
     const info = JSON.parse(await readFile(join(packageDirectory, "release.json"), "utf8"));
@@ -171,6 +173,12 @@ export async function diagnose(
     "Recorder",
     runtime.recorderPid ? `pid=${runtime.recorderPid}` : "Not running",
     runtime.sessions.length && !runtime.recorderPid ? "warn" : "ok",
+  );
+  const schedules = runtime.schedules;
+  add(
+    "Scheduled Tasks",
+    `ready=${schedules.ready}; tasks=${schedules.tasks}; active=${schedules.active}; needs_review=${schedules.needsReview}${schedules.storageError ? `; ${schedules.storageError}` : ""}`,
+    schedules.storageError ? "error" : !schedules.ready || schedules.needsReview ? "warn" : "ok",
   );
   for (const session of runtime.sessions)
     add(

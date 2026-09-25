@@ -47,6 +47,8 @@ import { listeningPorts } from "./http/ports.js";
 import { diagnose } from "./doctor.js";
 import { TemporaryFiles } from "./files/temporary.js";
 import { connectServerSocket } from "./network.js";
+import { ScheduledTasks } from "./tasks/index.js";
+import { scheduleMethods, scheduleRpc } from "./tasks/rpc.js";
 
 const gitWriteMethods = new Set([
   "git.stage",
@@ -79,6 +81,7 @@ export class Agent {
   readonly sessions: Sessions;
   readonly files: Files;
   readonly textFiles: TextFiles;
+  readonly schedules: ScheduledTasks;
   private readonly temporaryFiles: TemporaryFiles;
   readonly fileOperations: FileOperations;
   private readonly local: LocalServer;
@@ -100,6 +103,10 @@ export class Agent {
     readonly identity: Identity,
   ) {
     this.metadata = new MetadataStore(config);
+    this.schedules = new ScheduledTasks(config);
+    this.schedules.onChange = (snapshot) => {
+      if (this.connectionId) this.send({ type: "tasks.snapshot", ...snapshot });
+    };
     this.watches = new WorkspaceWatches((event) => this.send(event));
     this.repos = new Repositories(this.metadata, this.cursorBudget);
     this.gitWrites = new GitWriteQueue(this.repos);
@@ -144,6 +151,7 @@ export class Agent {
           shell: this.config.shell,
           recorderPid: this.sessions.recorder.pid,
           sessions: this.sessions.list().sessions,
+          schedules: this.schedules.status(),
         });
       if (method === "workspaces.list")
         return Promise.resolve({ workspaces: this.metadata.value.workspaces });
@@ -154,7 +162,7 @@ export class Agent {
         return Promise.resolve(item.identity);
       }
       if (method === "sessions.end") return this.sessions.end(undefined, string(params.sessionId));
-      if (!["sessions.list", "sessions.create"].includes(method))
+      if (!["sessions.list", "sessions.create", ...scheduleMethods].includes(method))
         throw new AppError("unsupported", "Unsupported local operation");
       return this.dispatch(method, params, signal);
     });
@@ -164,8 +172,14 @@ export class Agent {
     await mkdir(this.config.runDir, { recursive: true, mode: 0o700 });
     await this.metadata.load();
     await this.temporaryFiles.cleanStartup();
-    await this.local.start();
-    this.connect();
+    await this.schedules.load();
+    try {
+      await this.local.start();
+      this.connect();
+    } catch (error) {
+      await this.schedules.close();
+      throw error;
+    }
   }
   send(message: unknown) {
     const text = JSON.stringify(message);
@@ -254,6 +268,7 @@ export class Agent {
           this.connectionId = string(message.connectionId);
           this.connectionError = undefined;
           this.delay = 1000;
+          this.send({ type: "tasks.snapshot", ...this.schedules.snapshot() });
         } else if (message.type === "channel.open") {
           if (message.connectionId !== this.connectionId)
             throw new AppError("conflict", "Stale control connection");
@@ -399,6 +414,21 @@ export class Agent {
     signal.throwIfAborted();
     const method = knownRpcMethod(rawMethod);
     switch (method) {
+      case "tasks.list":
+      case "tasks.get":
+      case "tasks.preview":
+      case "tasks.create":
+      case "tasks.update":
+      case "tasks.pause":
+      case "tasks.resume":
+      case "tasks.acknowledge":
+      case "tasks.delete":
+      case "tasks.run":
+      case "runs.list":
+      case "runs.get":
+      case "runs.output":
+      case "runs.stop":
+        return scheduleRpc(this.schedules, method, params, signal);
       case "ports.list":
         return listeningPorts(signal) satisfies Promise<RpcResult<typeof method>>;
       case "git.remotes":
@@ -744,18 +774,30 @@ export class Agent {
   }
   async close() {
     this.stopped = true;
-    clearTimeout(this.reconnect);
-    this.socket?.terminate();
-    this.channels.close();
-    await this.fileChannels.close();
-    this.httpChannels.close();
-    for (const controller of this.requests.values())
-      controller.abort(new AppError("cancelled", "Agent is stopping"));
-    await this.local.close();
-    await Promise.allSettled([...this.tasks]);
-    await this.directories.close();
-    await this.repos.close();
-    await this.watches.close();
-    await this.sessions.close();
+    const schedulesClosed = this.schedules.close().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    let cleanupError: unknown;
+    try {
+      clearTimeout(this.reconnect);
+      this.socket?.terminate();
+      this.channels.close();
+      await this.fileChannels.close();
+      this.httpChannels.close();
+      for (const controller of this.requests.values())
+        controller.abort(new AppError("cancelled", "Agent is stopping"));
+      await this.local.close();
+      await Promise.allSettled([...this.tasks]);
+      await this.directories.close();
+      await this.repos.close();
+      await this.watches.close();
+      await this.sessions.close();
+    } catch (error) {
+      cleanupError = error;
+    }
+    const scheduleError = await schedulesClosed;
+    if (cleanupError) throw cleanupError;
+    if (scheduleError) throw scheduleError;
   }
 }

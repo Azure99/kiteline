@@ -8,6 +8,7 @@
   "dependencies": {
     "@kiteline/shared": "workspace:*",
     "chokidar": "5.0.0",
+    "croner": "10.0.1",
     "https-proxy-agent": "9.1.0",
     "image-size": "2.0.4",
     "proper-lockfile": "4.1.2",

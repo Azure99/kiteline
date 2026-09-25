@@ -7,6 +7,7 @@ import { AppError, appVersion, record, string } from "@kiteline/shared/protocol"
 import { agentConfig, atomicJson, readIdentity } from "./config.js";
 import { Agent } from "./control.js";
 import { terminalCli } from "./terminal-cli.js";
+import { scheduleCli } from "./schedule-cli.js";
 import { doctorCli } from "./doctor.js";
 import { installCli, serviceCli } from "./service.js";
 import { checkPrerequisites } from "./prerequisites.js";
@@ -35,6 +36,16 @@ async function main() {
     return;
   }
   const command = process.argv[2];
+  if (command === "schedule") {
+    await scheduleCli(process.argv.slice(3));
+    return;
+  }
+  if (command === "--help" || command === "-h" || command === undefined) {
+    console.log(
+      "Usage: kiteline-agent install | check | bind | run | doctor | service | terminal | workspace | schedule\nScheduled Tasks: kiteline-agent schedule --help",
+    );
+    return;
+  }
   if (command === "install") {
     await installCli(process.argv.slice(3));
     return;
@@ -57,7 +68,7 @@ async function main() {
   }
   if (command !== "run" && command !== "bind")
     throw new Error(
-      "Usage: kiteline-agent install --user USER | check | bind --server HTTP_OR_HTTPS_ORIGIN [--if-unbound] | run | doctor | service | terminal | workspace",
+      "Usage: kiteline-agent install --user USER | check | bind --server HTTP_OR_HTTPS_ORIGIN [--if-unbound] | run | doctor | service | terminal | workspace | schedule",
     );
   const config = await agentConfig();
   const installationUse =

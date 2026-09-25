@@ -27,6 +27,11 @@ export const defaultAgentLimits = {
   terminalSessionsPerDevice: 32,
   terminalStallTimeout: 10_000,
   channelsPerDevice: 128,
+  tasksPerDevice: 100,
+  taskRunsPerDevice: 4,
+  taskHistoryRuns: 20,
+  taskOutputBytes: 1024 * 1024,
+  taskOutputTotalBytes: 128 * 1024 * 1024,
 };
 export interface Identity {
   deviceId: string;
@@ -41,8 +46,11 @@ export async function atomicJson(path: string, value: unknown) {
   try {
     await writeFile(temporary, JSON.stringify(value) + "\n", { flag: "wx", mode: 0o600 });
     await rename(temporary, path);
-  } finally {
-    await rm(temporary, { force: true });
+  } catch (error) {
+    await rm(temporary, { force: true }).catch((cleanup: unknown) =>
+      console.error("Atomic JSON temporary cleanup:", cleanup),
+    );
+    throw error;
   }
 }
 export async function agentPaths() {

@@ -15,11 +15,12 @@ import {
   FileText,
   GitBranch,
   Terminal,
+  CalendarClock,
 } from "lucide-react";
 import type { Device } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
-import { devicePath, workspacePath } from "../lib/navigation";
+import { devicePath, workspacePath, schedulePath } from "../lib/navigation";
 import type { DeviceAction } from "./device-actions";
 import { useEffect, useState } from "react";
 import { TerminalSettings } from "../terminal/settings";
@@ -49,12 +50,18 @@ export function Home({
 
   return (
     <section className="scroll-area overflow-auto p-5">
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-base font-semibold">Kiteline</h1>
-        <Button onClick={() => onBind()}>
-          <Plus />
-          {t(($) => $.devices.bind)}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => onNavigate(schedulePath())}>
+            <CalendarClock />
+            {t(($) => $.schedules.title)}
+          </Button>
+          <Button onClick={() => onBind()}>
+            <Plus />
+            {t(($) => $.devices.bind)}
+          </Button>
+        </div>
       </div>
       {recentTargets.length > 0 && (
         <section className="mb-7" aria-label={t(($) => $.home.recentWorkspaces)}>
@@ -268,6 +275,14 @@ export function DeviceDetail({
           {t(($) => $.common.add)}
         </Button>
       </div>
+      <Button
+        variant="outline"
+        className="mb-4"
+        onClick={() => onNavigate(schedulePath({ filter: device.id }))}
+      >
+        <CalendarClock />
+        {t(($) => $.schedules.title)}
+      </Button>
       <div className="divide-y divide-border border-y border-border">
         {device.snapshot?.workspaces.map((w) => (
           <div key={w.id} className="flex items-center gap-2">

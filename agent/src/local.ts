@@ -3,11 +3,15 @@ import { chmod, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AppError,
+  OperationError,
+  asError,
   errorReply,
   limits,
   record,
+  rpcMutates,
   string,
   type Reply,
+  type RpcMethod,
 } from "@kiteline/shared/protocol";
 import type { AgentConfig } from "./config.js";
 
@@ -87,6 +91,15 @@ export function localRequest<T>(
   params: Record<string, unknown> = {},
 ): Promise<T> {
   return new Promise((resolve, reject) => {
+    let sent = false;
+    const fail = (error: unknown) => {
+      const detail = asError(error);
+      reject(
+        sent && rpcMutates[method as RpcMethod]
+          ? new OperationError(detail.code, detail.message, "unknown", undefined, detail.details)
+          : error,
+      );
+    };
     const client = request(
       {
         socketPath: join(config.runDir, "agent.sock"),
@@ -104,25 +117,31 @@ export function localRequest<T>(
             response.destroy(new Error("Local result is too large"));
           else chunks.push(chunk);
         });
-        response.on("error", reject);
+        response.on("error", fail);
         response.on("end", () => {
           try {
             const reply = JSON.parse(Buffer.concat(chunks).toString()) as Reply<T>;
             if (reply.outcome === "succeeded") resolve(reply.result);
             else
               reject(
-                new AppError(reply.error.code, reply.error.message, {
-                  outcome: reply.outcome,
-                  result: reply.result,
-                }),
+                new OperationError(
+                  reply.error.code,
+                  reply.error.message,
+                  reply.outcome,
+                  reply.result,
+                  reply.error.details,
+                ),
               );
           } catch (error) {
-            reject(error);
+            fail(error);
           }
         });
       },
     );
-    client.on("error", reject);
+    client.on("finish", () => {
+      sent = true;
+    });
+    client.on("error", fail);
     client.end(JSON.stringify({ method, params }));
   });
 }

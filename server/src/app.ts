@@ -101,6 +101,10 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       if (path === "/api/agent/upgrade-command" && method === "GET")
         return json(response, 200, upgradeCommand(entryOrigin));
       requireVersion(url.searchParams.get("appVersion"), "web");
+      if (path === "/api/tasks" && method === "GET")
+        return json(response, 200, {
+          devices: connections.taskSummaries(url.searchParams.get("deviceId") ?? undefined),
+        });
       if (path === "/api/bindings" && method === "POST") {
         const binding = store.newBinding();
         return json(response, 200, {

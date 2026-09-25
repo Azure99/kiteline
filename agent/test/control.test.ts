@@ -160,7 +160,21 @@ test("control reconnects after handshake rejection, retains valid watches and sc
     await expect
       .poll(() => log.mock.calls.flat().join("\n"), { timeout: 5000 })
       .toContain("Install the matching release 0.3.0-test");
+    await localRequest(agent.config, "tasks.create", {
+      taskId: "doctor-schedule",
+      input: {
+        name: "Doctor schedule",
+        command: "printf ready",
+        cwd: root,
+        schedule: { kind: "cron", expression: "0 9 * * *" },
+        timezone: "UTC",
+      },
+    });
     const report = await localRequest<DoctorReport>(agent.config, "doctor");
+    expect(report.items.find((item) => item.name === "Scheduled Tasks")).toMatchObject({
+      status: "ok",
+      detail: "ready=true; tasks=1; active=0; needs_review=0",
+    });
     expect(report.items.find((item) => item.name === "server")?.detail).toContain(
       "last server version=0.3.0-test",
     );

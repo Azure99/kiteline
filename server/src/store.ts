@@ -2,7 +2,14 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { resolve } from "node:path";
 import bcrypt from "bcryptjs";
-import { AppError, limits, type Device, type Metadata } from "@kiteline/shared/protocol";
+import {
+  AppError,
+  limits,
+  type Device,
+  type Metadata,
+  type TaskSnapshot,
+  type DeviceTaskSummary,
+} from "@kiteline/shared/protocol";
 
 export const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const secret = (bytes = 32) => randomBytes(bytes).toString("base64url");
@@ -32,7 +39,8 @@ export class Store {
       CREATE TABLE IF NOT EXISTS setup (id INTEGER PRIMARY KEY CHECK(id=1), hash TEXT NOT NULL, expiresAt TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, expiresAt TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS devices (id TEXT PRIMARY KEY, name TEXT NOT NULL, tokenHash TEXT UNIQUE NOT NULL, revoked INTEGER NOT NULL DEFAULT 0, lastSeenAt TEXT, snapshot TEXT);
-      CREATE TABLE IF NOT EXISTS bindings (id TEXT PRIMARY KEY, hash TEXT UNIQUE NOT NULL, expiresAt TEXT NOT NULL, consumedDeviceId TEXT REFERENCES devices(id));`);
+      CREATE TABLE IF NOT EXISTS bindings (id TEXT PRIMARY KEY, hash TEXT UNIQUE NOT NULL, expiresAt TEXT NOT NULL, consumedDeviceId TEXT REFERENCES devices(id));
+      CREATE TABLE IF NOT EXISTS taskSummaries (deviceId TEXT PRIMARY KEY REFERENCES devices(id), snapshot TEXT NOT NULL, observedAt TEXT NOT NULL);`);
   }
   initialized() {
     return !!this.db.prepare("SELECT id FROM owner WHERE id=1").get();
@@ -187,6 +195,30 @@ export class Store {
   }
   connected(id: string) {
     this.db.prepare("UPDATE devices SET lastSeenAt=? WHERE id=?").run(new Date().toISOString(), id);
+  }
+  taskSnapshot(id: string, snapshot: TaskSnapshot) {
+    this.db
+      .prepare(
+        "INSERT INTO taskSummaries(deviceId,snapshot,observedAt) VALUES(?,?,?) ON CONFLICT(deviceId) DO UPDATE SET snapshot=excluded.snapshot,observedAt=excluded.observedAt",
+      )
+      .run(id, JSON.stringify(snapshot), new Date().toISOString());
+  }
+  taskSummaries(deviceId?: string): Omit<DeviceTaskSummary, "current">[] {
+    const rows = this.db
+      .prepare(
+        `SELECT devices.id AS deviceId,taskSummaries.snapshot,taskSummaries.observedAt
+      FROM devices LEFT JOIN taskSummaries ON devices.id=taskSummaries.deviceId
+      ${deviceId === undefined ? "" : "WHERE devices.id=?"} ORDER BY devices.rowid`,
+      )
+      .all(...(deviceId === undefined ? [] : [deviceId])) as {
+      deviceId: string;
+      snapshot: string | null;
+      observedAt: string | null;
+    }[];
+    return rows.map((row) => ({
+      ...row,
+      snapshot: row.snapshot === null ? null : (JSON.parse(row.snapshot) as TaskSnapshot),
+    }));
   }
   close() {
     this.db.close();

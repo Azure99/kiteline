@@ -20,7 +20,7 @@ RUN --mount=type=bind,source=dist/releases,target=/var/tmp/release \
     cd /var/tmp/release \
     && sha256sum --check kiteline-server-${VERSION}-linux-${TARGETARCH}.tar.gz.sha256 \
     && mkdir /opt/kiteline-server \
-    && tar -xzf kiteline-server-${VERSION}-linux-${TARGETARCH}.tar.gz --strip-components=1 -C /opt/kiteline-server \
+    && tar -xzf kiteline-server-${VERSION}-linux-${TARGETARCH}.tar.gz --no-same-owner --strip-components=1 -C /opt/kiteline-server \
     && cd /opt/kiteline-server && sha256sum --status --check SHA256SUMS \
     && userdel ubuntu && groupadd --gid 1000 kiteline \
     && useradd --uid 1000 --gid kiteline --create-home kiteline \

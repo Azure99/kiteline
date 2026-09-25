@@ -74,7 +74,7 @@ Node、recorder、固定 tmux、terminfo 和文件 helper 已随包提供，无�
 # KITELINE_VERSION 设为下载的版本；ARM64 将 amd64 换成 arm64。
 kiteline_package="kiteline-agent-${KITELINE_VERSION}-linux-amd64"
 sha256sum -c "$kiteline_package.tar.gz.sha256"
-tar -xzf "$kiteline_package.tar.gz"
+tar -xpzf "$kiteline_package.tar.gz" --no-same-owner
 "./$kiteline_package/bin/kiteline-agent" check
 sudo "./$kiteline_package/bin/kiteline-agent" install --user YOUR_USER
 # 执行网页提供的绑定命令后：
@@ -91,7 +91,7 @@ kiteline-agent terminal attach SESSION_ID
 
 CLI 与运行进程共用 `/etc/kiteline-agent.env` 中的目录。`KITELINE_AGENT_HOME` 和 `KITELINE_AGENT_RUN_DIR` 使用单行双引号绝对路径，不使用转义或尾部注释；新安装默认状态在项目用户的 `~/.local/share/kiteline-agent`，socket 在该目录下的 `run/`。其他服务环境如 PATH、SSH_AUTH_SOCK、LANG 也在该文件配置，重启后生效。`kiteline-agent doctor` 检查实际进程环境；仓库认证是否成功仍以实际 Git 同步为准。
 
-前台转常驻：先 Ctrl-C 停止，再执行 `sudo kiteline-agent service install --user YOUR_USER` 和 `sudo kiteline-agent service start`。常驻转前台：先 `sudo kiteline-agent service stop`、`sudo kiteline-agent service disable`，再 `kiteline-agent run`。两者保留身份和 workspace，但停止会结束终端任务。默认共用状态目录下的 `run/`。
+前台转常驻：先 Ctrl-C 停止，再执行 `sudo kiteline-agent service install --user YOUR_USER` 和 `sudo kiteline-agent service start`。常驻转前台：先 `sudo kiteline-agent service stop`、`sudo kiteline-agent service disable`，再 `kiteline-agent run`。两者保留身份、workspace、定时任务定义及有限结果，但停止会结束终端及在途定时运行。默认共用状态目录下的 `run/`。
 
 ```sh
 kiteline-agent service status
@@ -101,7 +101,25 @@ sudo kiteline-agent service upgrade --archive "/path/to/kiteline-agent-${KITELIN
 sudo kiteline-agent service uninstall
 ```
 
-更新server后，刷新网页；设备版本不匹配时，在设备详情动作中选“升级agent”，复制命令到该设备的独立终端或SSH执行。命令从当前网页入口下载配套包和`.sha256`，调用上述upgrade，无需重新绑定；换入口下载不会更改agent已保存的连接地址。前台先自行停止，完成后再运行`kiteline-agent run`；systemd沿原方式重启。卸载默认保留状态与环境文件，`--purge-state`只移除agent自己的状态JSON，保留目录和项目文件。
+更新server后，刷新网页；设备版本不匹配时，在设备详情动作中选“升级agent”，复制命令到该设备的独立终端或SSH执行。命令从当前网页入口下载配套包和`.sha256`，调用上述upgrade，无需重新绑定；换入口下载不会更改agent已保存的连接地址。前台先自行停止，完成后再运行`kiteline-agent run`；systemd沿原方式重启。卸载默认保留状态与环境文件，`--purge-state`移除agent自己的状态JSON及`tasks/`内的任务定义和有限结果，保留状态根目录、项目与命令另写的报告文件。
+
+### 定时任务
+
+网页主页和设备详情均可进入“定时任务”。CLI须以agent运行用户执行；agent需持续运行，但不要求relay在线，也不会因为创建任务自动开启常驻服务。
+
+```sh
+kiteline-agent schedule --help
+kiteline-agent schedule create --name 'Daily review' --cron '0 9 * * 1-5' \
+  --timezone Asia/Shanghai --cwd '/srv/My Project' --command './daily-review.sh' --json
+kiteline-agent schedule list --json
+kiteline-agent schedule run TASK_ID --json
+kiteline-agent schedule status RUN_ID --json
+kiteline-agent schedule output RUN_ID --stream stdout --offset 0 --json
+kiteline-agent schedule pause TASK_ID --json
+kiteline-agent schedule stop RUN_ID --json
+```
+
+定义和有限结果保存在设备状态目录的`tasks/`；暂停、错过执行、异常重启核查及JSON/退出码含义统一见`kiteline-agent schedule --help`。升级确认前会列出在途运行；升级不重新绑定，保留任务数据目录，结果继续遵守有限留存规则。
 
 ### Agent 出站代理
 
@@ -114,7 +132,7 @@ export NO_PROXY=localhost,127.0.0.1,.internal.example
 kiteline-agent run
 ```
 
-HTTP/WS使用HTTP代理变量，HTTPS/WSS使用HTTPS代理变量；上例HTTP选小写`http_proxy`，也供安装下载的curl使用。systemd 将相同的 `KEY=value` 写入 `/etc/kiteline-agent.env`，不带 `export`，在维护窗口停止/启动服务后生效；只在执行 `systemctl` 的 Shell 中 export 不会改变服务环境。停止会结束终端任务。前台只共用该文件的安装目录项，不自动加载其中的代理变量。
+HTTP/WS使用HTTP代理变量，HTTPS/WSS使用HTTPS代理变量；上例HTTP选小写`http_proxy`，也供安装下载的curl使用。systemd 将相同的 `KEY=value` 写入 `/etc/kiteline-agent.env`，不带 `export`，在维护窗口停止/启动服务后生效；只在执行 `systemctl` 的 Shell 中 export 不会改变服务环境。停止会结束终端及在途定时运行。前台只共用该文件的安装目录项，不自动加载其中的代理变量。
 
 设备本地 HTTP 服务始终直连。新 Shell/AI CLI 继承 agent 的环境，但程序是否使用代理由自身决定；现有任务不会自动更新。同名非空小写变量优先；未配置协议代理时回退 ALL_PROXY，HTTPS 不回退 HTTP_PROXY。NO_PROXY 指定直连目标，仅支持 HTTP(S) 代理。
 
@@ -122,11 +140,13 @@ HTTP/WS使用HTTP代理变量，HTTPS/WSS使用HTTPS代理变量；上例HTTP选
 
 Linux 的 Unix socket 完整路径限 103 字节。显式使用 `/run` 等易失运行目录时，启动前及系统重启后需准备属于运行用户的可写目录。
 
-维护需明确确认，停止会结束终端任务，保留配置、绑定和 workspace。新服务未就绪时恢复旧安装并报告结果；前台升级后保持停止。
+维护需明确确认，停止会结束终端及在途定时运行，保留配置、绑定和 workspace。新服务未就绪时恢复旧安装并报告结果；前台升级后保持停止。
 
 短接入命令的外层 curl 失败时，POSIX 管道退出状态未必非零；以实际绑定和设备在线状态确认完成。
 
 开启 `KITELINE_TRUST_PROXY_PROTO` 后，只将 HTTP 端口交给可信客户端或反代；环境代理须允许 CONNECT，包括目标为 HTTP 的连接。
+
+定时任务停机错过不补跑，暂停仅停止后续调度，不停止在途运行。异常退出后的待核查结果需明确处理，历史为有限留存；实际参数见 `kiteline-agent schedule --help`。
 
 ## 自行准备的容器
 

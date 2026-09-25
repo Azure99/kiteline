@@ -14,6 +14,12 @@ export interface WorkspaceQuery {
   reveal?: string;
   search?: boolean;
 }
+export interface ScheduleRoute {
+  filter?: string;
+  deviceId?: string;
+  taskId?: string;
+  runId?: string;
+}
 export function currentPath() {
   return window.location.pathname + window.location.search;
 }
@@ -36,6 +42,15 @@ export function useRoute() {
 }
 export function parseRoute(url: URL) {
   const params = url.searchParams;
+  const schedule: ScheduleRoute | undefined =
+    url.pathname === "/tasks"
+      ? {
+          filter: params.get("device") ?? undefined,
+          deviceId: params.get("target") ?? undefined,
+          taskId: params.get("task") ?? undefined,
+          runId: params.get("run") ?? undefined,
+        }
+      : undefined;
   const query: WorkspaceQuery = {
     session: params.get("session") ?? undefined,
     repo: params.get("repo") ?? undefined,
@@ -56,12 +71,25 @@ export function parseRoute(url: URL) {
     return { valid: false, query };
   }
   return {
-    valid: !!match || url.pathname === "/",
-    deviceId,
+    valid: !!match || url.pathname === "/" || !!schedule,
+    deviceId: schedule?.deviceId ?? schedule?.filter ?? deviceId,
     workspaceId,
     tool: match?.[3] as WorkspaceTool | undefined,
     query,
+    schedule,
   };
+}
+export function schedulePath(route: ScheduleRoute = {}) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries({
+    device: route.filter,
+    target: route.deviceId,
+    task: route.taskId,
+    run: route.runId,
+  }))
+    if (value !== undefined) params.set(key, value);
+  const search = params.toString();
+  return `/tasks${search ? `?${search}` : ""}`;
 }
 export function devicePath(deviceId: string) {
   return `/devices/${encodeURIComponent(deviceId)}`;

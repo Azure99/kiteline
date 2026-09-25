@@ -24,6 +24,15 @@ import type {
   Shortcut,
   Workspace,
 } from "./index.js";
+import type {
+  ScheduledTask,
+  ScheduledTaskInput,
+  ScheduledTaskSummary,
+  TaskSchedule,
+  TaskRun,
+  TaskRunSummary,
+  TaskOutput,
+} from "./schedules.js";
 
 type Contract<P, R> = { params: P; result: R };
 type WorkspaceParams = { workspaceId: string };
@@ -37,6 +46,35 @@ type BranchTarget = RepoParams & { name: string; refOid: string };
 type FileResults = { items: FileItemResult[] };
 
 export interface RpcMethods {
+  "tasks.list": Contract<
+    { offset?: number },
+    { items: ScheduledTaskSummary[]; offset: number; total: number }
+  >;
+  "tasks.get": Contract<{ taskId: string }, ScheduledTask>;
+  "tasks.preview": Contract<
+    { schedule: TaskSchedule; timezone?: string },
+    { timezone: string; nextRunAts: string[] }
+  >;
+  "tasks.create": Contract<{ taskId: string; input: ScheduledTaskInput }, ScheduledTask>;
+  "tasks.update": Contract<
+    { taskId: string; expectedRevision: number; changes: Partial<ScheduledTaskInput> },
+    ScheduledTask
+  >;
+  "tasks.pause": Contract<{ taskId: string }, ScheduledTask>;
+  "tasks.resume": Contract<{ taskId: string }, ScheduledTask>;
+  "tasks.acknowledge": Contract<{ taskId: string; runId: string }, ScheduledTask>;
+  "tasks.delete": Contract<{ taskId: string; acknowledgeRunId?: string }, { removed: true }>;
+  "tasks.run": Contract<{ taskId: string; runId: string }, TaskRun>;
+  "runs.list": Contract<
+    { taskId: string; offset?: number },
+    { items: TaskRunSummary[]; offset: number; total: number }
+  >;
+  "runs.get": Contract<{ runId: string }, TaskRun>;
+  "runs.output": Contract<
+    { runId: string; stream: "stdout" | "stderr"; offset: number; limit?: number },
+    TaskOutput
+  >;
+  "runs.stop": Contract<{ runId: string }, TaskRun>;
   "ports.list": Contract<Record<string, never>, ListeningPorts>;
   "directories.list": Contract<{ absolutePath: string; cursor?: string }, DirectoryListing>;
   "directories.mkdir": Contract<{ absolutePath: string }, { path: string }>;
@@ -111,6 +149,20 @@ export interface RpcMethods {
 
 export type RpcMethod = keyof RpcMethods;
 export const rpcMutates: Record<RpcMethod, boolean> = {
+  "tasks.list": false,
+  "tasks.get": false,
+  "tasks.preview": false,
+  "tasks.create": true,
+  "tasks.update": true,
+  "tasks.pause": true,
+  "tasks.resume": true,
+  "tasks.acknowledge": true,
+  "tasks.delete": true,
+  "tasks.run": true,
+  "runs.list": false,
+  "runs.get": false,
+  "runs.output": false,
+  "runs.stop": true,
   "ports.list": false,
   "directories.list": false,
   "directories.mkdir": true,

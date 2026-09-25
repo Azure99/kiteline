@@ -75,7 +75,7 @@ if [ ! -e /etc/kiteline-agent.json ]; then
     curl --fail --show-error --location --proto "$protocols" --proto-redir "$protocols" "$base" -o "$temporary/$name.tar.gz"
     curl --fail --show-error --location --proto "$protocols" --proto-redir "$protocols" "$base.sha256" -o "$temporary/$name.tar.gz.sha256"
     (cd "$temporary" && sha256sum -c "$name.tar.gz.sha256")
-    tar -xzf "$temporary/$name.tar.gz" -C "$temporary" --no-same-owner
+    tar -xpzf "$temporary/$name.tar.gz" -C "$temporary" --no-same-owner
     package="$temporary/$name"
     (cd "$package" && sha256sum -c SHA256SUMS >/dev/null)
     [ "$("$package/bin/kiteline-agent" --version)" = "$version" ] || fail "Package version mismatch"

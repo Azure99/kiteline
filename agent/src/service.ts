@@ -19,6 +19,7 @@ import { createInterface } from "node:readline/promises";
 import { parseArgs, parseEnv, promisify } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
 import lockfile from "proper-lockfile";
+import type { RpcResult } from "@kiteline/shared/protocol";
 import { localRequest } from "./local.js";
 import { atomicJson } from "./config.js";
 import {
@@ -269,6 +270,7 @@ async function installProgram(user: string, service: boolean, protectSignals: ()
   await chmod(installationUseFile, 0o640);
   try {
     await cp(packageDirectory, installDirectory, { recursive: true, verbatimSymlinks: true });
+    await command("chown", ["-h", "-R", "-P", "0:0", "--", installDirectory]);
     await mkdir("/usr/local/bin", { recursive: true });
     await symlink(join(installDirectory, "bin/kiteline-agent"), launcher);
     await atomicJson(installationFile, installation);
@@ -456,26 +458,64 @@ async function upgrade(
       replacement,
     ]);
     const version = await verifyPackage(replacement);
-    try {
-      const sessions = await command("runuser", [
-        "-u",
-        installation.user,
-        "--",
-        "env",
-        "-u",
-        "KITELINE_AGENT_HOME",
-        "-u",
-        "KITELINE_AGENT_RUN_DIR",
-        launcher,
-        "terminal",
-        "list",
-      ]);
-      console.log(sessions || "No active terminals.");
-    } catch {
-      console.log("Could not read current sessions; the service may still have active tasks.");
+    if (runningService) {
+      try {
+        const sessions = await command("runuser", [
+          "-u",
+          installation.user,
+          "--",
+          "env",
+          "-u",
+          "KITELINE_AGENT_HOME",
+          "-u",
+          "KITELINE_AGENT_RUN_DIR",
+          launcher,
+          "terminal",
+          "list",
+        ]);
+        console.log(sessions || "No active terminals.");
+      } catch {
+        console.log("Could not read current sessions; the service may still have active tasks.");
+      }
+      try {
+        let offset = 0,
+          active = 0;
+        while (true) {
+          const response = JSON.parse(
+            await command("runuser", [
+              "-u",
+              installation.user,
+              "--",
+              "env",
+              "-u",
+              "KITELINE_AGENT_HOME",
+              "-u",
+              "KITELINE_AGENT_RUN_DIR",
+              launcher,
+              "schedule",
+              "list",
+              "--offset",
+              String(offset),
+              "--json",
+            ]),
+          ) as { result: RpcResult<"tasks.list"> };
+          for (const task of response.result.items) {
+            if (!task.currentRun) continue;
+            active++;
+            console.log(
+              `Scheduled task ${task.id} (${task.name}): run=${task.currentRun.id}; state=${task.currentRun.state}`,
+            );
+          }
+          offset += response.result.items.length;
+          if (!response.result.items.length || offset >= response.result.total) break;
+        }
+        if (!active) console.log("No active scheduled runs.");
+      } catch {
+        console.log("Could not read scheduled runs; their current state is unknown.");
+      }
     }
     await confirm(
-      `Upgrading to ${version} will end all terminal tasks for this agent while preserving the binding, configuration, and workspaces.`,
+      `Upgrading to ${version} will end all terminals and in-flight scheduled runs while preserving the binding, configuration, workspaces, scheduled task definitions and retained results.`,
       yes,
     );
     protectSignals();
@@ -514,12 +554,12 @@ async function upgrade(
         recoveryErrors.push(recoveryError);
       }
       throw failures(
-        `${recoveryErrors.length === 1 ? "Upgrade failed; the previous installation and service state have been restored" : "Upgrade failed and recovery also failed"}. Stopped terminal tasks cannot be recovered. ${await reportServiceState()}`,
+        `${recoveryErrors.length === 1 ? "Upgrade failed; the previous installation and service state have been restored" : "Upgrade failed and recovery also failed"}. Stopped terminals and scheduled runs cannot be resumed. ${await reportServiceState()}`,
         recoveryErrors,
       );
     }
     keepPrevious = false;
-    completion = `Upgraded to ${version}. ${restartService ? "Service started; the original terminals have ended." : "Not started; run kiteline-agent run as the project user."}`;
+    completion = `Upgraded to ${version}. ${restartService ? "Service started; previous terminals and scheduled runs have ended. Scheduled task definitions and retained results are preserved." : "Not started; run kiteline-agent run as the project user."}`;
   } catch (error) {
     errors.push(error);
   } finally {
@@ -548,13 +588,14 @@ async function uninstall(
   const enabledService = hasUnit ? await enabledState() : undefined;
   if (!runningService) await (await installationStopped(installation)).close();
   const paths = await installationPaths(installation);
+  const tasksDirectory = join(paths.dataDir, "tasks");
   const purgePaths = purge
-    ? ["agent.json", "connection.json", "config.json", "temporary-files.json"].map((name) =>
-        join(paths.dataDir, name),
+    ? ["agent.json", "connection.json", "config.json", "temporary-files.json", "tasks"].map(
+        (name) => join(paths.dataDir, name),
       )
     : [];
   await confirm(
-    `Uninstalling will end all terminals and remove the program. ${purge ? `Also delete state at ${paths.dataDir}.` : `Retain state at ${paths.dataDir}.`}`,
+    `Uninstalling will end all terminals and in-flight scheduled runs and remove the program. ${purge ? `Also delete agent state, scheduled task definitions and retained results at ${paths.dataDir}.` : `Retain state, scheduled task definitions and results at ${paths.dataDir}.`}`,
     yes,
   );
   let useLock: Awaited<ReturnType<typeof installationStopped>> | undefined;
@@ -586,7 +627,8 @@ async function uninstall(
     await rm(installDirectory, { recursive: true });
     await rm(installationFile, { force: true });
     if (hasUnit) await command("systemctl", ["daemon-reload"]);
-    for (const path of purgePaths) await rm(path, { force: true });
+    for (const path of purgePaths)
+      await rm(path, { force: true, recursive: path === tasksDirectory });
     completion = `Uninstalled; ${purge ? "agent state removed" : "state and environment configuration retained"}.`;
   } catch (error) {
     errors.push(error);
