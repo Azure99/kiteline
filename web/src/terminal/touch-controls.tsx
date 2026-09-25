@@ -30,13 +30,19 @@ export function TouchControls({
   useEffect(() => {
     const current = new TouchSelection(terminal, setHandles, tapped);
     selection.current = current;
-    return () => {
-      current.dispose();
-      selection.current = undefined;
-      setHandles(undefined);
-      setNotice(undefined);
-      setCopying(false);
+    // Reconnection can dispose xterm before React cleans up this effect.
+    const addon = {
+      activate() {},
+      dispose() {
+        current.dispose();
+        selection.current = undefined;
+        setHandles(undefined);
+        setNotice(undefined);
+        setCopying(false);
+      },
     };
+    terminal.loadAddon(addon);
+    return () => addon.dispose();
   }, [terminal]);
   useEffect(() => {
     if (notice?.kind !== "copied") return;

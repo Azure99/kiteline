@@ -28,6 +28,9 @@ export interface RecoverTerminal extends TerminalIdentity {
   rows: number;
   historyLines: number;
 }
+export type TerminalSource =
+  | ({ type: "create" } & CreateTerminal)
+  | ({ type: "recover" } & RecoverTerminal);
 export type TerminalEvent =
   | { type: "output"; data: string }
   | { type: "resize"; cols: number; rows: number };
@@ -48,8 +51,7 @@ export type TerminalFrame =
   | { type: "error"; code: string; message: string }
   | { type: "input.error"; code: string; message: string; outcome: "failed" | "unknown" };
 export type RecorderRequest =
-  | ({ type: "create"; id: string } & CreateTerminal)
-  | ({ type: "recover"; id: string } & RecoverTerminal)
+  | ({ id: string } & TerminalSource)
   | { type: "end" | "redraw"; id: string; sessionId: string }
   | {
       type: "attach";

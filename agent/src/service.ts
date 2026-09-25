@@ -26,6 +26,7 @@ import {
   installationFile,
   installationPaths,
   installationUseFile,
+  InstallationLockCloseError,
   installDirectory,
   lockInstallation,
   packageDirectory,
@@ -60,18 +61,50 @@ async function stopped(installation: Installation) {
 }
 async function installationStopped(installation: Installation) {
   const lock = await lockInstallation("exclusive");
-  await lock.close();
-  await stopped(installation);
+  try {
+    await stopped(installation);
+    return lock;
+  } catch (error) {
+    try {
+      await lock.close();
+    } catch (cleanupError) {
+      throw new InstallationLockCloseError([error, cleanupError]);
+    }
+    throw error;
+  }
+}
+function failures(message: string, errors: unknown[]) {
+  return new AggregateError(errors, `${message}: ${errors.map(String).join("; ")}`);
+}
+async function cleanup(errors: unknown[], resource: string, action: () => Promise<unknown>) {
+  try {
+    await action();
+  } catch (error) {
+    errors.push(new Error(`Could not clean up ${resource}: ${String(error)}`, { cause: error }));
+  }
 }
 async function unitIs(state: "active" | "enabled") {
   if (!(await exists(unitFile))) return false;
-  try {
-    const value = await command("systemctl", [`is-${state}`, unitName]);
-    return value === state || (state === "enabled" && value === "enabled-runtime");
-  } catch (error) {
-    if ([1, 3, 4].includes((error as { code: number }).code)) return false;
-    throw error;
+  if (state === "enabled") {
+    const value = await enabledState();
+    return value === "enabled" || value === "enabled-runtime";
   }
+  // show loads an inactive unit that older systemd may have already unloaded.
+  const output = await command("systemctl", [
+    "show",
+    "--property=LoadState",
+    "--property=ActiveState",
+    unitName,
+  ]);
+  const { LoadState, ActiveState } = Object.fromEntries(
+    output.split("\n").map((line) => line.split("=")),
+  );
+  if (LoadState === "loaded") {
+    if (ActiveState === "active") return true;
+    if (["inactive", "failed", "activating", "deactivating", "reloading"].includes(ActiveState))
+      return false;
+  }
+  throw new Error(`Could not determine service state: ${output}`);
 }
 async function command(file: string, args: string[], cwd?: string) {
   return (
@@ -148,16 +181,32 @@ async function checkServiceEnvironment(installation: Installation) {
     LANG: "C.UTF-8",
     ...parseEnv(source),
   };
-  await command("runuser", [
-    "-u",
-    installation.user,
-    "--",
-    "env",
-    "-i",
-    ...Object.entries(env).map(([key, value]) => `${key}=${value}`),
-    launcher,
-    "check",
-  ]);
+  // Only the target-user bootstrap receives the service environment.
+  const check = execute(
+    "runuser",
+    [
+      "-u",
+      installation.user,
+      "--",
+      join(installDirectory, "runtime/bin/node"),
+      "-e",
+      `const env = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+const result = require("node:child_process").spawnSync(process.argv[1], ["check"], {
+  env, stdio: ["ignore", "inherit", "inherit"],
+});
+if (result.error) throw result.error;
+process.exitCode = result.status ?? 1;`,
+      launcher,
+    ],
+    { encoding: "utf8", maxBuffer: 128 * 1024 },
+  );
+  let inputError: Error | undefined;
+  check.child.stdin?.on("error", (error: Error) => {
+    inputError = error;
+  });
+  check.child.stdin?.end(JSON.stringify(env));
+  await check;
+  if (inputError) throw inputError;
 }
 async function writeUnit(installation: Installation, source = installDirectory) {
   const quote = (value: string) => JSON.stringify(value.replaceAll("%", "%%"));
@@ -175,7 +224,7 @@ async function writeUnit(installation: Installation, source = installDirectory) 
   );
   await command("systemctl", ["daemon-reload"]);
 }
-async function installProgram(user: string, service: boolean) {
+async function installProgram(user: string, service: boolean, protectSignals: () => void) {
   const installation = await account(user, service);
   const previous = await readInstallation();
   if (previous) {
@@ -189,10 +238,7 @@ async function installProgram(user: string, service: boolean) {
     await checkServiceEnvironment(previous);
     await writeUnit(previous);
     await command("systemctl", ["enable", unitName]);
-    console.log(
-      "System service is enabled but not started. Run sudo kiteline-agent service start.",
-    );
-    return;
+    return "System service is enabled but not started. Run sudo kiteline-agent service start.";
   }
   for (const path of [installDirectory, unitFile, launcher]) {
     try {
@@ -204,6 +250,7 @@ async function installProgram(user: string, service: boolean) {
   }
   await verifyPackage(packageDirectory);
   if (service) await command("systemctl", ["daemon-reload"]);
+  protectSignals();
   await mkdir("/opt", { recursive: true });
   try {
     await writeFile(
@@ -232,28 +279,67 @@ async function installProgram(user: string, service: boolean) {
       await command("systemctl", ["enable", unitName]);
     }
   } catch (error) {
-    if (service) await command("systemctl", ["disable", unitName]).catch(() => {});
+    const errors = [error];
+    if (service)
+      await cleanup(errors, "service enablement", () =>
+        command("systemctl", ["disable", unitName]),
+      );
     for (const path of [launcher, unitFile, installationFile, installDirectory])
-      await rm(path, { recursive: true, force: true });
-    if (service) await command("systemctl", ["daemon-reload"]).catch(() => {});
-    throw error;
+      await cleanup(errors, path, () => rm(path, { recursive: true, force: true }));
+    if (service)
+      await cleanup(errors, "systemd unit cache", () => command("systemctl", ["daemon-reload"]));
+    throw failures("Installation failed", errors);
   }
-  console.log(
-    `Installed but not started. As ${installation.user}, run kiteline-agent bind --server <http-or-https-origin>, then ${service ? "sudo kiteline-agent service start" : "kiteline-agent run"}.
-Environment configuration: ${environmentFile}`,
-  );
+  return `Installed but not started. As ${installation.user}, run kiteline-agent bind --server <http-or-https-origin>, then ${service ? "sudo kiteline-agent service start" : "kiteline-agent run"}.
+Environment configuration: ${environmentFile}`;
 }
-async function install(user: string, service: boolean) {
+async function manageInstallation(action: (protectSignals: () => void) => Promise<string | void>) {
   await mkdir("/opt", { recursive: true });
   const release = await lockfile.lock("/opt", {
     lockfilePath: "/opt/.kiteline-agent-install.lock",
     realpath: false,
   });
+  const errors: unknown[] = [];
+  let completion: string | void = undefined;
+  let protectedSignals = false;
+  let interrupted = false;
+  const handlers = Object.entries({ SIGHUP: 129, SIGINT: 130, SIGTERM: 143 }).map(
+    ([signal, code]) => ({
+      signal: signal as NodeJS.Signals,
+      handler: () => {
+        if (interrupted) return;
+        interrupted = true;
+        process.exitCode = code;
+        console.error(
+          `${signal} received; finishing installation changes and cleanup before exit.`,
+        );
+      },
+    }),
+  );
+  const protectSignals = () => {
+    if (protectedSignals) return;
+    protectedSignals = true;
+    for (const { signal, handler } of handlers) process.on(signal, handler);
+  };
   try {
-    await installProgram(user, service);
+    completion = await action(protectSignals);
+  } catch (error) {
+    errors.push(error);
   } finally {
-    await release();
+    await cleanup(errors, "/opt/.kiteline-agent-install.lock", release);
+    for (const { signal, handler } of handlers) process.off(signal, handler);
   }
+  if (errors.length)
+    throw failures(
+      completion
+        ? `${completion} Installation lock cleanup failed`
+        : "Installation management failed",
+      errors,
+    );
+  if (completion) console.log(completion);
+}
+async function install(user: string, service: boolean) {
+  await manageInstallation((protectSignals) => installProgram(user, service, protectSignals));
 }
 export async function installCli(args: string[]) {
   const { values } = parseArgs({ args, options: { user: { type: "string" } } });
@@ -277,9 +363,63 @@ async function waitReady(installation: Installation) {
   }
   throw new Error("Service could not complete local RPC initialization");
 }
-async function upgrade(installation: Installation, archive: string, yes: boolean) {
+async function enabledState() {
+  try {
+    return await command("systemctl", ["is-enabled", unitName]);
+  } catch (error) {
+    const { code, stdout } = error as { code: number; stdout?: string };
+    if ([1, 3, 4].includes(code) && stdout?.trim() === "disabled") return "disabled";
+    throw error;
+  }
+}
+async function reportServiceState() {
+  try {
+    if (!(await exists(unitFile))) return "No system service unit.";
+    return `Service active=${await unitIs("active")}, enabled=${await enabledState()}.`;
+  } catch (error) {
+    return `Service state could not be read: ${String(error)}`;
+  }
+}
+async function restoreService(installation: Installation, active: boolean, enabled?: string) {
+  const errors: unknown[] = [];
+  if (enabled !== undefined) {
+    try {
+      if ((await enabledState()) !== enabled) {
+        await command("systemctl", ["disable", unitName]);
+        if (enabled === "enabled" || enabled === "enabled-runtime")
+          await command("systemctl", [
+            "enable",
+            ...(enabled === "enabled-runtime" ? ["--runtime"] : []),
+            unitName,
+          ]);
+      }
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  try {
+    if ((await unitIs("active")) !== active)
+      await command("systemctl", [active ? "start" : "stop", unitName]);
+  } catch (error) {
+    errors.push(error);
+  }
+  if (active) {
+    try {
+      await waitReady(installation);
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (errors.length) throw failures("Service state restoration was incomplete", errors);
+}
+async function upgrade(
+  installation: Installation,
+  archive: string,
+  yes: boolean,
+  protectSignals: () => void,
+) {
   const runningService = await unitIs("active");
-  if (!runningService) await installationStopped(installation);
+  if (!runningService) await (await installationStopped(installation)).close();
   const restartService = runningService || (await unitIs("enabled"));
   const hasUnit = await exists(unitFile);
   const path = resolve(archive);
@@ -290,8 +430,23 @@ async function upgrade(installation: Installation, archive: string, yes: boolean
   const replacement = join(temporary, "new"),
     previous = join(temporary, "previous");
   let keepPrevious = false;
+  let useLock: Awaited<ReturnType<typeof installationStopped>> | undefined;
+  let lockCloseFailed = false;
+  let startAttempted = false;
+  let completion: string | undefined;
+  const errors: unknown[] = [];
+  async function closeUseLock() {
+    try {
+      await useLock?.close();
+      useLock = undefined;
+    } catch (error) {
+      lockCloseFailed = true;
+      throw error;
+    }
+  }
   try {
     await mkdir(replacement);
+    await chmod(replacement, 0o755);
     await command("tar", [
       "-xzf",
       path,
@@ -323,64 +478,143 @@ async function upgrade(installation: Installation, archive: string, yes: boolean
       `Upgrading to ${version} will end all terminal tasks for this agent while preserving the binding, configuration, and workspaces.`,
       yes,
     );
-    if (runningService) await command("systemctl", ["stop", unitName]);
-    await installationStopped(installation);
-    await rename(installDirectory, previous);
-    keepPrevious = true;
+    protectSignals();
     try {
+      if (runningService) await command("systemctl", ["stop", unitName]);
+      useLock = await installationStopped(installation);
+      await rename(installDirectory, previous);
+      keepPrevious = true;
       await rename(replacement, installDirectory);
       if (hasUnit) await writeUnit(installation);
+      await closeUseLock();
       if (restartService) {
+        startAttempted = true;
         await command("systemctl", ["start", unitName]);
         await waitReady(installation);
       }
     } catch (error) {
-      if (restartService) await command("systemctl", ["stop", unitName]);
-      await rm(installDirectory, { recursive: true, force: true });
-      await rename(previous, installDirectory);
-      keepPrevious = false;
-      if (hasUnit) await writeUnit(installation);
-      if (restartService) await command("systemctl", ["start", unitName]).catch(() => {});
-      throw new Error(
-        "Upgrade failed; the complete previous installation has been restored, but the original terminals have ended. Check service status/logs.",
-        {
-          cause: error,
-        },
+      const recoveryErrors = [error];
+      try {
+        if (lockCloseFailed || error instanceof InstallationLockCloseError)
+          throw new Error(
+            "Installation lock close failed; lock ownership is unknown. Program trees are retained without starting the service.",
+            { cause: error },
+          );
+        if (keepPrevious) {
+          if (startAttempted) await command("systemctl", ["stop", unitName]);
+          useLock ??= await installationStopped(installation);
+          await rm(installDirectory, { recursive: true, force: true });
+          await rename(previous, installDirectory);
+          keepPrevious = false;
+          if (hasUnit) await writeUnit(installation);
+        }
+        await closeUseLock();
+        if (hasUnit) await restoreService(installation, runningService);
+      } catch (recoveryError) {
+        recoveryErrors.push(recoveryError);
+      }
+      throw failures(
+        `${recoveryErrors.length === 1 ? "Upgrade failed; the previous installation and service state have been restored" : "Upgrade failed and recovery also failed"}. Stopped terminal tasks cannot be recovered. ${await reportServiceState()}`,
+        recoveryErrors,
       );
     }
     keepPrevious = false;
-    console.log(
-      `Upgraded to ${version}. ${restartService ? "Service started; the original terminals have ended." : "Not started; run kiteline-agent run as the project user."}`,
-    );
+    completion = `Upgraded to ${version}. ${restartService ? "Service started; the original terminals have ended." : "Not started; run kiteline-agent run as the project user."}`;
+  } catch (error) {
+    errors.push(error);
   } finally {
+    await cleanup(errors, installationUseFile, closeUseLock);
     if (keepPrevious)
       console.error(
         `Previous installation is retained at ${previous}; restore it and check the service.`,
       );
-    else await rm(temporary, { recursive: true, force: true });
+    else await cleanup(errors, temporary, () => rm(temporary, { recursive: true, force: true }));
   }
+  if (errors.length)
+    throw failures(
+      completion ? `${completion} Cleanup failed` : "Upgrade did not complete",
+      errors,
+    );
+  return completion;
 }
-async function uninstall(installation: Installation, purge: boolean, yes: boolean) {
-  if (!(await unitIs("active"))) await installationStopped(installation);
+async function uninstall(
+  installation: Installation,
+  purge: boolean,
+  yes: boolean,
+  protectSignals: () => void,
+) {
   const hasUnit = await exists(unitFile);
+  const runningService = await unitIs("active");
+  const enabledService = hasUnit ? await enabledState() : undefined;
+  if (!runningService) await (await installationStopped(installation)).close();
   const paths = await installationPaths(installation);
+  const purgePaths = purge
+    ? ["agent.json", "connection.json", "config.json", "temporary-files.json"].map((name) =>
+        join(paths.dataDir, name),
+      )
+    : [];
   await confirm(
     `Uninstalling will end all terminals and remove the program. ${purge ? `Also delete state at ${paths.dataDir}.` : `Retain state at ${paths.dataDir}.`}`,
     yes,
   );
-  if (hasUnit) await command("systemctl", ["disable", "--now", unitName]);
-  await installationStopped(installation);
-  await rm(unitFile, { force: true });
-  await rm(launcher, { force: true });
-  await rm(installDirectory, { recursive: true });
-  await rm(installationFile, { force: true });
-  if (hasUnit) await command("systemctl", ["daemon-reload"]);
-  if (purge)
-    for (const name of ["agent.json", "connection.json", "config.json", "temporary-files.json"])
-      await rm(join(paths.dataDir, name), { force: true });
-  console.log(
-    `Uninstalled; ${purge ? "agent state removed" : "state and environment configuration retained"}.`,
-  );
+  let useLock: Awaited<ReturnType<typeof installationStopped>> | undefined;
+  const errors: unknown[] = [];
+  let completion: string | undefined;
+  protectSignals();
+  try {
+    if (hasUnit) await command("systemctl", ["disable", "--now", unitName]);
+    useLock = await installationStopped(installation);
+  } catch (error) {
+    errors.push(error);
+    try {
+      if (error instanceof InstallationLockCloseError)
+        throw new Error("Installation lock ownership is unknown; the service was not restarted.", {
+          cause: error,
+        });
+      if (hasUnit) await restoreService(installation, runningService, enabledService);
+    } catch (recoveryError) {
+      errors.push(recoveryError);
+    }
+    throw failures(
+      `Uninstall failed before removing the program. ${await reportServiceState()}`,
+      errors,
+    );
+  }
+  try {
+    await rm(unitFile, { force: true });
+    await rm(launcher, { force: true });
+    await rm(installDirectory, { recursive: true });
+    await rm(installationFile, { force: true });
+    if (hasUnit) await command("systemctl", ["daemon-reload"]);
+    for (const path of purgePaths) await rm(path, { force: true });
+    completion = `Uninstalled; ${purge ? "agent state removed" : "state and environment configuration retained"}.`;
+  } catch (error) {
+    errors.push(error);
+  } finally {
+    await cleanup(errors, installationUseFile, () => useLock.close());
+  }
+  if (errors.length) {
+    for (const path of [
+      installDirectory,
+      launcher,
+      unitFile,
+      installationFile,
+      paths.dataDir,
+      ...purgePaths,
+    ]) {
+      try {
+        console.error(`${path} present=${await exists(path)}`);
+      } catch (inspectionError) {
+        errors.push(inspectionError);
+      }
+    }
+    console.error(`State directory: ${paths.dataDir}. ${await reportServiceState()}`);
+    throw failures(
+      completion ? `${completion} Cleanup failed` : "Uninstall did not complete",
+      errors,
+    );
+  }
+  return completion;
 }
 export async function serviceCli(args: string[]) {
   const { values } = parseArgs({
@@ -418,33 +652,34 @@ export async function serviceCli(args: string[]) {
     await install(values.user, true);
     return;
   }
-  const installation = await readInstallation();
-  if (!installation) throw new Error("kiteline-agent is not installed");
-  if (action === "check") {
-    if (installation.uid === 0) throw new Error("System service requires a non-root project user");
-    await checkServiceEnvironment(installation);
-    console.log("Service environment checks passed.");
-  } else if (action === "start" || action === "stop") {
-    if (action === "start" && !(await unitIs("active"))) {
-      await stopped(installation);
+  await manageInstallation(async (protectSignals) => {
+    const installation = await readInstallation();
+    if (!installation) throw new Error("kiteline-agent is not installed");
+    if (action === "check") {
+      if (installation.uid === 0)
+        throw new Error("System service requires a non-root project user");
       await checkServiceEnvironment(installation);
-    }
-    await command("systemctl", [action, unitName]);
-    if (action === "start") await waitReady(installation);
-  } else if (action === "disable") {
-    await stopped(installation);
-    await command("systemctl", ["disable", unitName]);
-    console.log(
-      "Service startup at boot is disabled. Run kiteline-agent run as the project user to run in the foreground.",
-    );
-  } else if (action === "upgrade") {
-    if (!values.archive)
-      throw new Error("Usage: kiteline-agent service upgrade --archive RELEASE.tar.gz [--yes]");
-    await upgrade(installation, values.archive, values.yes);
-  } else if (action === "uninstall")
-    await uninstall(installation, values["purge-state"], values.yes);
-  else
-    throw new Error(
-      "Usage: kiteline-agent service install/check/start/status/logs/stop/disable/upgrade/uninstall",
-    );
+      return "Service environment checks passed.";
+    } else if (action === "start" || action === "stop") {
+      if (action === "start" && !(await unitIs("active"))) {
+        await stopped(installation);
+        await checkServiceEnvironment(installation);
+      }
+      await command("systemctl", [action, unitName]);
+      if (action === "start") await waitReady(installation);
+    } else if (action === "disable") {
+      await stopped(installation);
+      await command("systemctl", ["disable", unitName]);
+      return "Service startup at boot is disabled. Run kiteline-agent run as the project user to run in the foreground.";
+    } else if (action === "upgrade") {
+      if (!values.archive)
+        throw new Error("Usage: kiteline-agent service upgrade --archive RELEASE.tar.gz [--yes]");
+      return upgrade(installation, values.archive, values.yes, protectSignals);
+    } else if (action === "uninstall")
+      return uninstall(installation, values["purge-state"], values.yes, protectSignals);
+    else
+      throw new Error(
+        "Usage: kiteline-agent service install/check/start/status/logs/stop/disable/upgrade/uninstall",
+      );
+  });
 }

@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "vitest";
-import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { AppError, terminalProfile } from "@kiteline/shared/protocol";
@@ -309,3 +309,72 @@ test("a failed end does not permanently block recovery of a surviving task", asy
   await until(() => agent.sessions.get(session.id).session.webStatus !== "recovering");
   expect(agent.sessions.get(session.id).session.webStatus).toBe("available");
 }, 10000);
+
+test("a failed tmux kill marks the session unavailable and can recover the same live task", async () => {
+  const { agent, workspace, dataDir, signal } = await fixture();
+  const session = await agent.sessions.create(workspace.id, undefined, undefined, signal);
+  const identity = agent.sessions.get(session.id).identity;
+  const pane = () => tmux(identity.socket, ["display-message", "-p", "#{pane_pid} #{pane_dead}"]);
+  const before = await pane();
+  let ended = false;
+  agent.sessions.onFrame = (message) => {
+    if (message.type === "ended") ended = true;
+  };
+  await rename(identity.socket, identity.socket + ".held");
+  try {
+    await expect(agent.sessions.end(workspace.id, session.id)).rejects.toMatchObject({
+      code: "command_failed",
+    });
+  } finally {
+    await rename(identity.socket + ".held", identity.socket);
+  }
+  expect(ended).toBe(false);
+  expect(agent.sessions.get(session.id).session).toMatchObject({
+    webStatus: "unavailable",
+    historyGap: true,
+  });
+  expect(await pane()).toBe(before);
+  expect(agent.sessions.recover(workspace.id, session.id).webStatus).toBe("recovering");
+  await until(() => agent.sessions.get(session.id).session.webStatus !== "recovering");
+  expect(agent.sessions.get(session.id).session.webStatus).toBe("available");
+  expect(await pane()).toBe(before);
+  let ready = false;
+  let consumed = 0;
+  let output = "";
+  agent.sessions.onFrame = (message) => {
+    if (message.type === "frame" && message.frame.type === "ready") ready = true;
+    if (message.type === "bytes") {
+      const bytes = Buffer.from(message.dataBase64, "base64");
+      output += bytes.toString();
+      consumed += bytes.length;
+      agent.sessions.recorder.send({
+        type: "consumed",
+        sessionId: session.id,
+        attachmentId: "after-kill",
+        bytes: consumed,
+      });
+    }
+  };
+  await agent.sessions.recorder.request({
+    type: "attach",
+    sessionId: session.id,
+    attachmentId: "after-kill",
+    terminalProfile,
+    historyGap: true,
+    history: "retained",
+  });
+  await until(() => ready);
+  agent.sessions.recorder.send({
+    type: "input",
+    sessionId: session.id,
+    attachmentId: "after-kill",
+    dataBase64: Buffer.from("printf 'AFTER-KILL\\n' | tee survived.txt\r").toString("base64"),
+  });
+  await until(
+    async () =>
+      output.includes("AFTER-KILL\r\n") &&
+      (await readFile(join(dataDir, "survived.txt"), "utf8").catch(() => "")) === "AFTER-KILL\n",
+  );
+  await agent.sessions.end(workspace.id, session.id);
+  expect(agent.sessions.list().sessions).toEqual([]);
+}, 15000);

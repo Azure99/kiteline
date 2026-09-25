@@ -229,8 +229,12 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
   server.requestTimeout = 0;
   const sockets = new WebSocketServer({ noServer: true, maxPayload: limits.controlMessageBytes });
   const httpSockets = new WebSocketServer({ noServer: true, maxPayload: limits.dataChunkBytes });
-  server.on("connect", (request, socket, head) => void proxy.handle(request, socket, head));
+  server.on("connect", (request, socket, head) => {
+    socket.on("error", () => socket.destroy());
+    void proxy.handle(request, socket, head);
+  });
   server.on("upgrade", (request, socket, head) => {
+    socket.on("error", () => socket.destroy());
     request.socket.setKeepAlive(true, limits.tcpKeepAliveDelayMs);
     try {
       if (isProxyPath(request.url ?? "")) {
@@ -276,13 +280,15 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
         sockets.handleUpgrade(request, socket, head, (ws) =>
           connections.acceptBrowser(ws, session),
         );
-      } else socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+      } else
+        socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n", () => socket.destroy());
     } catch (error) {
       const status =
         error instanceof AppError && error.code === "unsupported" ? 426 : errorStatus(error);
       const payload = JSON.stringify({ error: asError(error) });
       socket.end(
         `HTTP/1.1 ${status} ${STATUS_CODES[status]}\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nContent-Length: ${Buffer.byteLength(payload)}\r\nConnection: close\r\n\r\n${payload}`,
+        () => socket.destroy(),
       );
     }
   });

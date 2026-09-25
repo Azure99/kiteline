@@ -99,8 +99,12 @@ export function boundedDiff(patch: string, summary: DiffSummary, truncated: bool
 }
 export const patchConfig = ["-c", "core.quotePath=true", "-c", "diff.suppressBlankEmpty=false"];
 function leafPathspecs(paths: string[]) {
-  // A literal Git path also selects descendants; exclude its directory form.
-  return paths.flatMap((path) => [`:(top,literal)${path}`, `:(top,literal,exclude)${path}/`]);
+  return paths.flatMap((path) => {
+    const escaped = path.replace(/[\\*?[\]]/g, "\\$&");
+    // Git 2.23 otherwise treats the plain prefix as the gitlink itself.
+    const prefix = escaped.startsWith("\\") ? escaped : `\\${escaped}`;
+    return [`:(top,literal)${path}`, `:(top,glob,exclude)${prefix}/**`];
+  });
 }
 export async function selectedPatch(
   repo: Repo,
@@ -117,7 +121,7 @@ export async function selectedPatch(
   for (const group of groups) {
     const result = await git(
       repo.rootPath,
-      [...patchConfig, "--no-literal-pathspecs", ...args, "--patch", "--", ...leafPathspecs(group)],
+      [...patchConfig, ...args, "--patch", "--", ...leafPathspecs(group)],
       signal,
       { truncate: true, maxBytes: remaining },
     );
@@ -157,7 +161,7 @@ export async function workingDiff(
     const args = ["diff", "--no-index", ...diffOptions];
     const nums = await git(
       repo.rootPath,
-      [...args, "--numstat", "-z", "--", "/dev/null", path],
+      [...args, "--numstat", "-z", "--", "/dev/null", `./${path}`],
       signal,
       { allowedCodes: [0, 1] },
     );
@@ -169,13 +173,17 @@ export async function workingDiff(
     };
     const patch = await git(
       repo.rootPath,
-      [...patchConfig, ...args, "--patch", "--", "/dev/null", path],
+      [...patchConfig, ...args, "--patch", "--", "/dev/null", `./${path}`],
       signal,
       { allowedCodes: [0, 1], truncate: true },
     );
     return boundedDiff(patch.text, summary, patch.truncated);
   }
-  const paths = side === "staged" && selected.oldPath ? [selected.oldPath, path] : [path];
+  const paths =
+    side === "staged" && selected.indexStatus === "R" && selected.oldPath
+      ? [selected.oldPath, path]
+      : [path];
+  const pathspecs = paths.map((path) => `:(top,literal)${path}`);
   const args = [
     "diff",
     ...(side === "staged" ? ["--cached"] : []),
@@ -186,7 +194,7 @@ export async function workingDiff(
   const raw = rawReader((item) => {
     if (item.path === path) change = item;
   });
-  await git(repo.rootPath, [...args, "--raw", "--no-abbrev", "-z", "--", ...paths], signal, {
+  await git(repo.rootPath, [...args, "--raw", "--no-abbrev", "-z", "--", ...pathspecs], signal, {
     onData: raw.data,
   });
   raw.end();
@@ -198,7 +206,7 @@ export async function workingDiff(
   const nums = numstatReader((itemPath, isBinary) => {
     if (itemPath === path) binary = isBinary;
   });
-  await git(repo.rootPath, [...args, "--numstat", "-z", "--", ...paths], signal, {
+  await git(repo.rootPath, [...args, "--numstat", "-z", "--", ...pathspecs], signal, {
     onData: nums.data,
   });
   nums.end();

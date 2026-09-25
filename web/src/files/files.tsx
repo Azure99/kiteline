@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowUp,
@@ -25,6 +25,7 @@ import { useMobile } from "../lib/use-mobile";
 import {
   currentPath,
   currentRoute,
+  isWorkspaceRoute,
   updateWorkspaceQuery,
   useRoute,
   type WorkspaceQuery,
@@ -36,7 +37,7 @@ import { isWithin, movedPath, parentPath, useFileBrowser } from "./use-browser";
 import { DraftView } from "./draft-view";
 import { useDrafts, type Draft, type DraftStore } from "./drafts";
 import { showDraft, showFile } from "./navigation";
-import { FileOperationDialog, type FileAction } from "./operation-dialog";
+import type { FileAction, FileOperationResult } from "./operation-dialog";
 import { FileContent } from "./file-content";
 import { downloadFile, type FileTarget } from "./content";
 import { FileSearch } from "./search-view";
@@ -48,12 +49,14 @@ export function Files({
   visible,
   store,
   onUpload,
+  onOperation,
 }: {
   device: Device;
   workspace: Workspace;
   visible: boolean;
   store: DraftStore;
   onUpload: (files: File[], folder: string) => void;
+  onOperation: (action: FileAction, folder: string) => void;
 }) {
   const { t, i18n } = useTranslation();
 
@@ -66,7 +69,6 @@ export function Files({
   const [selecting, setSelecting] = useState(false);
   const [listOpen, setListOpen] = useState(true);
   const [action, setAction] = useState<NameAction & { origin: string }>();
-  const [operation, setOperation] = useState<FileAction>();
   const [details, setDetails] = useState<Entry>();
   const [notice, setNotice] = useState<
     { kind: "downloadStarted"; path: string } | { kind: "renamed" | "created" }
@@ -181,6 +183,38 @@ export function Files({
     setExpanded(next);
     for (const path of next) if (!expanded.has(path)) void load(path);
   }
+  const operated = useEffectEvent((event: Event) => {
+    const { deviceId, workspaceId, kind, items } = (event as CustomEvent<FileOperationResult>)
+      .detail;
+    const route = currentRoute();
+    if (deviceId !== device.id || workspaceId !== workspace.id || !isWorkspaceRoute(route, target))
+      return;
+    const completed = items.filter((item) => item.outcome === "succeeded");
+    if (kind === "move")
+      moveViewPaths(completed.map((item) => ({ from: item.path, to: item.targetPath! })));
+    if (kind === "delete") {
+      let folder = route.query.folder ?? ".";
+      for (const item of completed) {
+        forget(item.path);
+        if (isWithin(folder, item.path)) folder = parentPath(item.path);
+      }
+      updateQuery({ folder }, true);
+    }
+    const affected = new Set<string>();
+    for (const item of items) {
+      affected.add(parentPath(item.path));
+      if (item.targetPath) affected.add(parentPath(item.targetPath));
+      if (kind !== "copy" && item.outcome !== "succeeded")
+        for (const path of mobile ? [folder] : expanded)
+          if (isWithin(path, item.path)) affected.add(path);
+    }
+    for (const path of affected) void load(path);
+    setSelected(new Set());
+  });
+  useEffect(() => {
+    window.addEventListener("kiteline:files-operated", operated);
+    return () => window.removeEventListener("kiteline:files-operated", operated);
+  }, []);
   function selectedAction(kind: FileAction["kind"]) {
     const entries = new Map(
       Object.values(pages)
@@ -195,7 +229,7 @@ export function Files({
         ),
     );
     const chosen = paths.flatMap((path) => (entries.get(path) ? [entries.get(path)!] : []));
-    if (chosen.length) setOperation({ kind, entries: chosen });
+    if (chosen.length) onOperation({ kind, entries: chosen }, folder);
   }
   return (
     <div className={visible ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
@@ -401,7 +435,7 @@ export function Files({
                   })
                 }
                 onRename={(entry) => beginAction({ kind: "rename", entry })}
-                onAction={(kind, entry) => setOperation({ kind, entries: [entry] })}
+                onAction={(kind, entry) => onOperation({ kind, entries: [entry] }, folder)}
                 onDownload={(entry) => download(entry.path!)}
                 onMore={(path) => void load(path, true)}
                 onDetails={setDetails}
@@ -466,46 +500,6 @@ export function Files({
             if (result.entry?.kind === "file" && currentPath() === action.origin)
               open(result.entry);
             void load(parentPath(result.to));
-            setSelected(new Set());
-          }}
-        />
-      )}
-      {operation && (
-        <FileOperationDialog
-          deviceId={device.id}
-          workspaceId={workspace.id}
-          action={operation}
-          folder={folder}
-          onClose={() => setOperation(undefined)}
-          onResult={(items) => {
-            const completed = items.filter((item) => item.outcome === "succeeded");
-            if (operation.kind !== "copy")
-              for (const item of items)
-                if (item.outcome === "partial" || item.outcome === "unknown")
-                  void store.checkMissing(device.id, workspace.id, item.path);
-            if (operation.kind === "move") {
-              for (const item of completed)
-                void store.rename(device.id, workspace.id, item.path, item.targetPath!);
-              moveViewPaths(completed.map((item) => ({ from: item.path, to: item.targetPath! })));
-            }
-            if (operation.kind === "delete") {
-              let folder = currentRoute().query.folder ?? ".";
-              for (const item of completed) {
-                store.deleted(device.id, workspace.id, item.path);
-                forget(item.path);
-                if (isWithin(folder, item.path)) folder = parentPath(item.path);
-              }
-              updateQuery({ folder }, true);
-            }
-            const affected = new Set<string>();
-            for (const item of items) {
-              affected.add(parentPath(item.path));
-              if (item.targetPath) affected.add(parentPath(item.targetPath));
-              if (operation.kind !== "copy" && item.outcome !== "succeeded")
-                for (const path of mobile ? [folder] : expanded)
-                  if (isWithin(path, item.path)) affected.add(path);
-            }
-            for (const path of affected) void load(path);
             setSelected(new Set());
           }}
         />

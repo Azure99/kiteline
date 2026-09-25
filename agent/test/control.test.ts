@@ -3,14 +3,15 @@ import { execFileSync } from "node:child_process";
 import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:https";
-import type { AddressInfo } from "node:net";
+import { createServer as createHttpServer } from "node:http";
+import type { AddressInfo, Socket } from "node:net";
 import { join } from "node:path";
 import { getCACertificates, setDefaultCACertificates } from "node:tls";
 import { WebSocket, WebSocketServer } from "ws";
 import { Agent } from "../src/control.js";
 import { defaultAgentLimits } from "../src/config.js";
 import { localRequest } from "../src/local.js";
-import { appVersion, type Session } from "@kiteline/shared/protocol";
+import { appVersion, limits, OperationError, type Session } from "@kiteline/shared/protocol";
 import type { DoctorReport } from "../src/doctor.js";
 
 test("control reconnects after handshake rejection, retains valid watches and scopes remote session end", async () => {
@@ -138,6 +139,10 @@ test("control reconnects after handshake rejection, retains valid watches and sc
       .toMatchObject({ reply: { outcome: "succeeded", result: { sessions: [] } } });
     expect(socket.readyState).toBe(WebSocket.OPEN);
     const signal = new AbortController().signal;
+    for (const method of ["missing.operation", "toString"])
+      await expect(agent.dispatch(method, {}, signal)).rejects.toMatchObject({
+        code: "unsupported",
+      });
     const session = await agent.sessions.create(active.id, undefined, undefined, signal);
     await expect(
       agent.dispatch("sessions.end", { sessionId: session.id }, signal),
@@ -184,3 +189,76 @@ test("control reconnects after handshake rejection, retains valid watches and sc
     log.mockRestore();
   }
 }, 20000);
+
+test("control bounds replies without losing outcomes and ignores buffered requests after rejection", async () => {
+  const root = await mkdtemp("/var/tmp/kiteline-control-budget-");
+  const server = createHttpServer();
+  const sockets = new WebSocketServer({ server });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const agent = new Agent(
+    { dataDir: root, runDir: join(root, "run"), shell: "/bin/bash", limits: defaultAgentLimits },
+    {
+      deviceId: "test",
+      deviceToken: "test",
+      server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    },
+  );
+  try {
+    const connection = once(sockets, "connection");
+    await agent.start();
+    const [peer] = (await connection) as [WebSocket];
+    const replies: Record<string, unknown>[] = [];
+    peer.on("message", (data) => {
+      const message = JSON.parse(data.toString());
+      if (message.type === "rpc.result") replies.push(message.reply);
+    });
+    // Exercise the wire limit independently of how each tool produces its result.
+    const dispatch = vi.spyOn(agent, "dispatch");
+    for (const outcome of ["failed", "partial", "unknown", "succeeded"] as const) {
+      const large = "x".repeat(limits.controlMessageBytes);
+      if (outcome === "succeeded") dispatch.mockResolvedValueOnce(large);
+      else dispatch.mockRejectedValueOnce(new OperationError("command_failed", large, outcome));
+      peer.send(
+        JSON.stringify({ type: "rpc.request", id: outcome, method: "sessions.list", params: {} }),
+      );
+      await expect
+        .poll(() => replies.find((r) => r.id === outcome))
+        .toMatchObject({
+          outcome: outcome === "succeeded" ? "unknown" : outcome,
+          error: { code: "limit_exceeded" },
+        });
+    }
+    dispatch.mockRestore();
+    const closed = once(peer, "close");
+    const transport = (peer as WebSocket & { _socket: Socket })._socket;
+    transport.cork();
+    peer.send(
+      JSON.stringify({
+        type: "rpc.request",
+        id: "invalid",
+        method: "workspaces.add",
+        params: null,
+      }),
+    );
+    peer.send(
+      JSON.stringify({
+        type: "rpc.request",
+        id: "following",
+        method: "settings.update",
+        params: { historyLines: 1234 },
+      }),
+    );
+    transport.uncork();
+    await closed;
+    await agent.close();
+    expect(agent.metadata.value.settings.historyLines).not.toBe(1234);
+  } finally {
+    vi.restoreAllMocks();
+    await agent.close();
+    for (const peer of sockets.clients) peer.terminate();
+    await new Promise<void>((resolve) => sockets.close(() => resolve()));
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(root, { recursive: true, force: true });
+  }
+});

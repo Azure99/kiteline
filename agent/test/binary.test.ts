@@ -9,6 +9,7 @@ import {
   rename,
   symlink,
   lstat,
+  chmod,
   rm,
 } from "node:fs/promises";
 import { join } from "node:path";
@@ -69,6 +70,9 @@ test("binary upload is independent of text limits and replaces only the confirme
   }
   expect(await readFile(join(root, "config"))).toEqual(bytes);
   expect(await readFile(join(root, "shared"), "utf8")).toBe("original");
+  const info = await lstat(join(root, "config"));
+  expect(info.isFile()).toBe(true);
+  expect(info.mode & 0o777).toBe(0o666 & ~process.umask());
   expect(JSON.parse(await readFile(join(home, "temporary-files.json"), "utf8"))).toEqual([]);
   const competing = await files.prepare(id, "new", 3, true, undefined, signal);
   competing.received = await temporary.write(competing.temporary, Buffer.from("new"), 0, signal);
@@ -76,6 +80,55 @@ test("binary upload is independent of text limits and replaces only the confirme
   await expect(files.save(competing, signal)).rejects.toMatchObject({ code: "conflict" });
   await temporary.release(competing.temporary, competing);
   expect(await readFile(join(root, "new"), "utf8")).toBe("competitor");
+});
+
+test.each([0o600, 0o755, undefined])(
+  "upload preserves regular target permissions: %s",
+  async (mode) => {
+    const { root, home, id, files, temporary, signal } = await setup();
+    const path = join(root, "target");
+    let version: string | undefined;
+    if (mode !== undefined) {
+      await writeFile(path, "before");
+      await chmod(path, mode);
+      const where = await locate(root, "target");
+      version = versionOf(where.parent, where.name, await lstat(path, { bigint: true }));
+    }
+    const upload = await files.prepare(id, "target", 5, mode === undefined, version, signal);
+    try {
+      upload.received = await temporary.write(upload.temporary, Buffer.from("after"), 0, signal);
+      await files.save(upload, signal);
+    } finally {
+      await temporary.release(upload.temporary, upload);
+    }
+    expect(await readFile(path, "utf8")).toBe("after");
+    expect((await lstat(path)).mode & 0o777).toBe(mode ?? 0o666 & ~process.umask());
+    expect(JSON.parse(await readFile(join(home, "temporary-files.json"), "utf8"))).toEqual([]);
+  },
+);
+
+test("upload cancellation and changed targets leave no published or temporary file", async () => {
+  const { root, home, id, files, temporary, signal } = await setup();
+  const controller = new AbortController();
+  const upload = await files.prepare(id, "cancelled", 1, true, undefined, signal);
+  upload.received = await temporary.write(upload.temporary, Buffer.from("x"), 0, signal);
+  controller.abort();
+  await expect(files.save(upload, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+  await temporary.release(upload.temporary, upload);
+  await expect(lstat(join(root, "cancelled"))).rejects.toMatchObject({ code: "ENOENT" });
+
+  const path = join(root, "changed");
+  await writeFile(path, "before", { mode: 0o600 });
+  const where = await locate(root, "changed");
+  const version = versionOf(where.parent, where.name, await lstat(path, { bigint: true }));
+  const changed = await files.prepare(id, "changed", 1, false, version, signal);
+  changed.received = await temporary.write(changed.temporary, Buffer.from("x"), 0, signal);
+  await writeFile(path, "external");
+  await expect(files.save(changed, signal)).rejects.toMatchObject({ code: "conflict" });
+  await temporary.release(changed.temporary, changed);
+  expect(await readFile(path, "utf8")).toBe("external");
+  expect((await lstat(path)).mode & 0o777).toBe(0o600);
+  expect(JSON.parse(await readFile(join(home, "temporary-files.json"), "utf8"))).toEqual([]);
 });
 
 test("download retains the initial handle and length while append, replace or late truncation is allowed", async () => {

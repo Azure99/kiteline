@@ -56,6 +56,68 @@ test("leaving a workspace cancels its active discovery without returning a dead 
   await cancelled;
   await repos.close();
 });
+test.each(["mod", "module[*]\n\\link", "[prefix]module", "-mod", "项目"])(
+  "gitlink %s diffs include pointer changes without selecting a replacement directory",
+  async (path) => {
+    const { root, cli, repo, repos } = await setup();
+    await cli("commit", "--allow-empty", "-m", "one");
+    const one = (await cli("rev-parse", "HEAD")).stdout.trim();
+    await cli("commit", "--allow-empty", "-m", "two");
+    const two = (await cli("rev-parse", "HEAD")).stdout.trim();
+    await cli("update-index", "--add", "--cacheinfo", `160000,${one},${path}`);
+    await cli("commit", "-m", "module base");
+    await cli("clone", "--no-checkout", "--", ".", path);
+    await run("git", ["checkout", two], { cwd: join(root, path) });
+    const worktree = await workingDiff(repo, path, "worktree", signals());
+    await cli("update-index", "--cacheinfo", `160000,${two},${path}`);
+    const staged = await workingDiff(repo, path, "staged", signals());
+    await cli("commit", "-m", "module pointer");
+    const oid = (await cli("rev-parse", "HEAD")).stdout.trim();
+    const historical = await commitDiff(repo, oid, undefined, path, signals());
+    for (const result of [worktree, staged, historical]) {
+      expect(result.patch).toContain(`-Subproject commit ${one}`);
+      expect(result.patch).toContain(`+Subproject commit ${two}`);
+    }
+    await rm(join(root, path), { recursive: true });
+    await mkdir(join(root, path, "deep"), { recursive: true });
+    await writeFile(join(root, path, "child.txt"), "unselected child\n");
+    await writeFile(join(root, path, "deep/child.txt"), "unselected deeper child\n");
+    await cli("update-index", "--force-remove", "--", path);
+    await cli("add", "-A");
+    const removed = await workingDiff(repo, path, "staged", signals());
+    expect(removed.patch).toContain(`-Subproject commit ${two}`);
+    expect(removed.patch).not.toContain("unselected");
+    await cli("commit", "-m", "replace module with directory");
+    await cli(
+      "update-index",
+      "--force-remove",
+      "--",
+      `${path}/child.txt`,
+      `${path}/deep/child.txt`,
+    );
+    await rm(join(root, path), { recursive: true });
+    await cli("clone", "--no-checkout", "--", ".", path);
+    await run("git", ["checkout", two], { cwd: join(root, path) });
+    await cli("update-index", "--add", "--cacheinfo", `160000,${two},${path}`);
+    const restored = await workingDiff(repo, path, "staged", signals());
+    await cli("commit", "-m", "replace directory with module");
+    const restoredOid = (await cli("rev-parse", "HEAD")).stdout.trim();
+    const restoredHistory = await commitDiff(repo, restoredOid, undefined, path, signals());
+    for (const result of [restored, restoredHistory]) {
+      expect(result.patch).toContain(`+Subproject commit ${two}`);
+      expect(result.patch).not.toContain("unselected");
+    }
+    await repos.close();
+  },
+);
+test("untracked dash previews the file rather than standard input", async () => {
+  const { root, repo, repos } = await setup();
+  await writeFile(join(root, "-"), "actual file\n");
+  const result = await workingDiff(repo, "-", "worktree", signals());
+  expect(result.summary.path).toBe("-");
+  expect(result.patch).toContain("+actual file");
+  await repos.close();
+});
 test("discovery keeps nested and linked worktrees distinct and excludes external parents and directory links", async () => {
   const { root, home, cli, metadata, workspace, repos, repo } = await setup();
   await writeFile(join(root, "base"), "base");

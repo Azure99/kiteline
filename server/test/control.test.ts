@@ -9,7 +9,7 @@ import { WebSocket } from "ws";
 import { createKitelineServer } from "../src/app.js";
 import { Store } from "../src/store.js";
 import type { ServerConfig } from "../src/config.js";
-import { appVersion, protocolVersion } from "@kiteline/shared/protocol";
+import { appVersion, limits, protocolVersion } from "@kiteline/shared/protocol";
 
 const agentPath = `/api/agent/control?protocolVersion=${protocolVersion}&appVersion=${appVersion}`;
 const webPath = (path: string) =>
@@ -119,6 +119,71 @@ test("last connected records successful hello, not metadata updates or disconnec
   );
   await expect.poll(() => f.app.connections.devices()[0]!.status).toBe("online");
   expect(f.store.devices()[0]!.lastSeenAt! > connected!).toBe(true);
+});
+
+test("long RPC diagnostics preserve the reply and the device connection", async () => {
+  const f = await fixture();
+  const peer = await f.device();
+  const login = f.store.createSession(60_000);
+  const pending = f.call(
+    `/api/devices/${peer.deviceId}/rpc`,
+    "POST",
+    {
+      id: "long-error",
+      method: "git.commit",
+      params: {},
+    },
+    `kiteline_session_http=${login.token}`,
+  );
+  await expect.poll(() => peer.messages.some((m) => m.type === "rpc.request")).toBe(true);
+  const diagnostic = "hook output\n".repeat(1000) + "\u0000";
+  peer.socket.send(
+    JSON.stringify({
+      type: "rpc.result",
+      reply: {
+        id: "long-error",
+        outcome: "unknown",
+        error: { code: "command_failed", message: diagnostic },
+      },
+    }),
+  );
+  expect(await (await pending).json()).toMatchObject({
+    outcome: "unknown",
+    error: { message: diagnostic },
+  });
+  expect(f.app.connections.devices()[0]!.status).toBe("online");
+});
+
+test("channel envelope budget is checked before reserving a channel", async () => {
+  const f = await fixture();
+  f.config.limits.channelsPerDevice = 1;
+  const peer = await f.device();
+  const login = f.store.createSession(60_000);
+  const cookie = `kiteline_session_http=${login.token}`;
+  const body = {
+    kind: "terminal.attach",
+    params: {
+      workspaceId: "work",
+      sessionId: "session",
+      terminalProfile: "xterm-c1",
+      padding: "",
+    },
+  };
+  body.params.padding = "x".repeat(
+    limits.controlMessageBytes - Buffer.byteLength(JSON.stringify(body)) - 10,
+  );
+  const rejected = await f.call(`/api/devices/${peer.deviceId}/channels`, "POST", body, cookie);
+  expect(rejected.status).toBe(413);
+  expect(await rejected.json()).toMatchObject({ error: { code: "limit_exceeded" } });
+  expect(peer.messages.some((m) => m.type === "channel.open")).toBe(false);
+  body.params.padding = "";
+  const pending = f.call(`/api/devices/${peer.deviceId}/channels`, "POST", body, cookie);
+  await expect.poll(() => peer.messages.some((m) => m.type === "channel.open")).toBe(true);
+  const channel = peer.messages.find((m) => m.type === "channel.open")!;
+  const cancelled = await f.call(`/api/channels/${channel.channelId}`, "DELETE", undefined, cookie);
+  await cancelled.arrayBuffer();
+  await (await pending).arrayBuffer();
+  expect(f.app.connections.devices()[0]!.status).toBe("online");
 });
 
 test("WebSocket handshake distinguishes protocol, authentication, origin and missing channel", async () => {

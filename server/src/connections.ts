@@ -167,7 +167,8 @@ export class Connections {
             if (reply.outcome !== "succeeded") {
               const error = record(reply.error);
               string(error.code);
-              string(error.message);
+              if (typeof error.message !== "string")
+                throw new AppError("invalid_argument", "Invalid diagnostic message");
             }
             this.pending.delete(requestId);
             pending.resolve(reply as unknown as Reply);

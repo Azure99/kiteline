@@ -11,11 +11,13 @@ import {
   limits,
   protocolVersion,
   record,
+  rpcMutates,
   string,
   type Reply,
   type AgentEvent,
   type FileProgress,
   type RpcResult,
+  type RpcMethod,
 } from "@kiteline/shared/protocol";
 import type { AgentConfig, Identity } from "./config.js";
 import { MetadataStore } from "./metadata.js";
@@ -61,6 +63,12 @@ const gitWriteMethods = new Set([
   "git.abort",
 ]);
 
+function knownRpcMethod(method: string): RpcMethod {
+  if (!Object.hasOwn(rpcMutates, method))
+    throw new AppError("unsupported", `Unsupported operation: ${method}`);
+  return method as RpcMethod;
+}
+
 export class Agent {
   readonly metadata: MetadataStore;
   readonly cursorBudget = new CursorBudget();
@@ -97,10 +105,10 @@ export class Agent {
     this.gitWrites = new GitWriteQueue(this.repos);
     this.repos.onObserved = (workspaceId, repo) => this.watches.repo(workspaceId, repo);
     this.repos.onComplete = (workspaceId, ids) => this.watches.reposComplete(workspaceId, ids);
-    this.files = new Files(this.metadata, this.directories);
+    this.temporaryFiles = new TemporaryFiles(config.dataDir);
+    this.files = new Files(this.metadata, this.directories, this.temporaryFiles);
     this.metadata.onChange = (snapshot) => this.send({ type: "metadata.snapshot", snapshot });
     this.sessions = new Sessions(config, this.metadata);
-    this.temporaryFiles = new TemporaryFiles(config.dataDir);
     this.textFiles = new TextFiles(config, this.metadata, this.temporaryFiles);
     this.fileOperations = new FileOperations(this.metadata, this.temporaryFiles);
     this.channels = new TerminalChannels(
@@ -235,6 +243,7 @@ export class Agent {
       })();
     });
     socket.on("message", (raw, binary) => {
+      if (socket.readyState !== WebSocket.OPEN) return;
       try {
         if (binary) throw new AppError("invalid_argument", "Expected JSON");
         const message = record(JSON.parse(raw.toString()));
@@ -299,7 +308,7 @@ export class Agent {
                     type: "rpc.result",
                     reply: {
                       id,
-                      outcome: reply.outcome === "succeeded" ? "unknown" : "failed",
+                      outcome: reply.outcome === "succeeded" ? "unknown" : reply.outcome,
                       error: {
                         code: "limit_exceeded",
                         message: "Operation result exceeds the size limit; refresh to verify",
@@ -381,13 +390,14 @@ export class Agent {
     return operation;
   }
   private async perform(
-    method: string,
+    rawMethod: string,
     params: Record<string, unknown>,
     signal: AbortSignal,
     progress?: (value: FileProgress) => void,
   ): Promise<unknown> {
     if (this.stopped) throw new AppError("cancelled", "Agent is stopping");
     signal.throwIfAborted();
+    const method = knownRpcMethod(rawMethod);
     switch (method) {
       case "ports.list":
         return listeningPorts(signal) satisfies Promise<RpcResult<typeof method>>;
@@ -726,8 +736,10 @@ export class Agent {
           return { removed: true };
         }, signal) satisfies Promise<RpcResult<typeof method>>;
       }
-      default:
-        throw new AppError("unsupported", `Unsupported operation: ${method}`);
+      default: {
+        const unhandled: never = method;
+        throw new AppError("unsupported", `Unsupported operation: ${unhandled}`);
+      }
     }
   }
   async close() {

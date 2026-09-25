@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import {
+  chmod,
   mkdtemp,
   mkdir,
   writeFile,
@@ -20,7 +21,8 @@ import { changeIndex, reviewDiscard, discard } from "../src/git/paths.js";
 import { GitWriteQueue } from "../src/git/queue.js";
 import { git } from "../src/git/process.js";
 import { commit, createBranch, changeBranch } from "../src/git/refs.js";
-import { observeIndex, headIdentity } from "../src/git/status.js";
+import { observeIndex, headIdentity, status } from "../src/git/status.js";
+import { workingDiff } from "../src/git/diff.js";
 
 const exec = promisify(execFile);
 const roots: string[] = [];
@@ -85,6 +87,77 @@ test("stage and unstage exact names on unborn HEAD, keeping other staged data", 
   await expect(readFile(join(root, name))).rejects.toMatchObject({ code: "ENOENT" });
   expect(await cli("ls-files", "-z")).toBe("third\0");
 });
+test.each([
+  "GIT_LITERAL_PATHSPECS",
+  "GIT_GLOB_PATHSPECS",
+  "GIT_NOGLOB_PATHSPECS",
+  "GIT_ICASE_PATHSPECS",
+])("selected paths and hooks retain their matching rules with inherited %s", async (variable) => {
+  const { root, repo, cli, write, stage, unstage } = await setup();
+  const path = "literal[*]\nfile.txt";
+  await write(path, "base\n");
+  await write("unselected.txt", "base\n");
+  await cli("add", ".");
+  await cli("commit", "-m", "base");
+  await write(
+    ".git/hooks/post-index-change",
+    "#!/bin/sh\ngit diff --cached --name-only -z -- '*.txt' > .git/hook-files\n",
+  );
+  await chmod(join(root, ".git/hooks/post-index-change"), 0o755);
+  await write(
+    ".git/hooks/pre-commit",
+    "#!/bin/sh\nif test -n \"$(git diff --cached --name-only -- '*.txt')\"; then\n  echo hook-rejected >&2\n  exit 1\nfi\n",
+  );
+  await chmod(join(root, ".git/hooks/pre-commit"), 0o755);
+  await write(path, "changed\n");
+  await write("unselected.txt", "not selected\n");
+  await write("LITERAL[*]\nfile.txt", "unselected case variant\n");
+  vi.stubEnv(variable, "1");
+  await stage([path]);
+  expect(await readFile(join(root, ".git/hook-files"), "utf8")).toBe(path + "\0");
+  await expect(
+    commit(repo, "blocked", (await observeIndex(repo, signal())).token, signal()),
+  ).rejects.toThrow("hook-rejected");
+  expect(await cli("log", "-1", "--format=%s")).toBe("base\n");
+  await stage(["unselected.txt"]);
+  await unstage([path]);
+  expect(await readFile(join(root, ".git/hook-files"), "utf8")).toBe("unselected.txt\0");
+  const review = await reviewDiscard(repo, [path], "worktree", signal());
+  await discard(repo, review.paths, "worktree", review.reviewToken, signal());
+  expect(await readFile(join(root, path), "utf8")).toBe("base\n");
+  expect(await readFile(join(root, "unselected.txt"), "utf8")).toBe("not selected\n");
+  expect(await cli("show", ":unselected.txt")).toBe("not selected\n");
+});
+test("copy diff, unstage and discard leave independent source changes intact", async () => {
+  const { root, repo, cli, write, stage, unstage } = await setup();
+  const original = Array.from({ length: 100 }, (_, i) => `line ${i}\n`).join("");
+  await write("source.txt", original);
+  await cli("add", ".");
+  await cli("commit", "-m", "base");
+  await cli("config", "status.renames", "copies");
+  await write("copy.txt", original);
+  await write("source.txt", original + "source staged change\n");
+  await stage(["copy.txt", "source.txt"]);
+  const before = await status(repo, 0, undefined, signal());
+  expect(before.entries.find((entry) => entry.path === "copy.txt")).toMatchObject({
+    indexStatus: "C",
+    oldPath: "source.txt",
+  });
+  const patch = await workingDiff(repo, "copy.txt", "staged", signal());
+  expect(patch.patch).toContain("+line 99");
+  expect(patch.patch).not.toContain("source staged change");
+  await unstage(["copy.txt"]);
+  expect(await cli("diff", "--cached", "--name-only")).toBe("source.txt\n");
+  await stage(["copy.txt"]);
+  const review = await reviewDiscard(repo, ["copy.txt"], "all", signal());
+  expect(review.paths).toEqual(["copy.txt"]);
+  await discard(repo, review.paths, "all", review.reviewToken, signal());
+  await expect(readFile(join(root, "copy.txt"))).rejects.toMatchObject({ code: "ENOENT" });
+  expect(await readFile(join(root, "source.txt"), "utf8")).toBe(
+    original + "source staged change\n",
+  );
+  expect(await cli("show", ":source.txt")).toBe(original + "source staged change\n");
+});
 test.each([false, true])(
   "file/directory replacement stages and unstages by explicit leaves (%s)",
   async (directoryFirst) => {
@@ -113,6 +186,28 @@ test.each([false, true])(
     for (const path of next) expect(await readFile(join(root, path), "utf8")).toBe("new " + path);
   },
 );
+test("exact index actions allow related removals in the same batch and preserve sibling prefixes", async () => {
+  const { root, cli, write, stage, unstage } = await setup();
+  await write("config", "old file");
+  await write("config-other/deep/file", "independent");
+  await cli("add", ".");
+  await cli("commit", "-m", "base");
+  await write("config-other/deep/file", "independent staged change");
+  await stage(["config-other/deep/file"]);
+  await rm(join(root, "config"));
+  await write("config/deep/file", "new child");
+  await expect(stage(["config/deep/file"])).rejects.toMatchObject({
+    details: { blockedPaths: ["config"] },
+  });
+  await stage(["config", "config/deep/file"]);
+  expect(await cli("show", ":config/deep/file")).toBe("new child");
+  await expect(unstage(["config"])).rejects.toMatchObject({
+    details: { blockedPaths: ["config/deep/file"] },
+  });
+  await unstage(["config", "config/deep/file"]);
+  expect(await cli("diff", "--cached", "--name-only")).toBe("config-other/deep/file\n");
+  expect(await cli("show", ":config-other/deep/file")).toBe("independent staged change");
+});
 test("rename actions and discard token preserve independent old-path data until explicitly reviewed", async () => {
   const { root, cli, repo, write, stage, unstage } = await setup();
   await write("old", "one\ntwo\nthree\n");

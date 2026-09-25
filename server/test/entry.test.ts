@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { once } from "node:events";
 import { request, type OutgoingHttpHeaders } from "node:http";
-import type { AddressInfo } from "node:net";
+import { connect, type AddressInfo } from "node:net";
 import { WebSocket } from "ws";
 import { appVersion } from "@kiteline/shared/protocol";
 import { createKitelineServer } from "../src/app.js";
@@ -69,8 +69,75 @@ async function fixture(trustProxyProto: boolean) {
     await once(socket, "open");
     return socket;
   }
-  return { store, call, events, port };
+  return { store, call, events, port, server: app.server };
 }
+
+test("raw upgrade and CONNECT rejections drain responses and release half-open peers", async () => {
+  const f = await fixture(false);
+  const session = f.store.createSession(60_000);
+  const device = f.store.bind(f.store.newBinding().code, "Raw connection test");
+  const redirect = `/proxy/${device.deviceId}/5173`;
+  for (const [path, status] of [
+    ["/nope", 404],
+    ["/api/events", 426],
+    ["/proxy/missing/5173/", 404],
+    ["CONNECT", 405],
+    [redirect, 308],
+  ] as const) {
+    const socket = connect({ host: "127.0.0.1", port: f.port, allowHalfOpen: true });
+    cleanup.push(async () => {
+      socket.destroy();
+    });
+    await once(socket, "connect");
+    const chunks: Buffer[] = [];
+    socket.on("data", (chunk: Buffer) => chunks.push(chunk));
+    const ended = once(socket, "end");
+    socket.write(
+      path === "CONNECT"
+        ? "CONNECT example.test:443 HTTP/1.1\r\nHost: example.test:443\r\n\r\n"
+        : `GET ${path} HTTP/1.1\r\nHost: 127.0.0.1:${f.port}\r\nOrigin: http://127.0.0.1:${f.port}\r\nCookie: kiteline_session_http=${session.token}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n`,
+    );
+    await ended;
+    const response = Buffer.concat(chunks).toString();
+    const boundary = response.indexOf("\r\n\r\n");
+    expect(boundary).toBeGreaterThan(0);
+    const head = response.slice(0, boundary);
+    const body = response.slice(boundary + 4);
+    expect(head).toContain(`HTTP/1.1 ${status} `);
+    const length = /content-length: (\d+)/i.exec(head);
+    expect(Buffer.byteLength(body)).toBe(length ? Number(length[1]) : 0);
+    if (status === 426) expect(JSON.parse(body).error.code).toBe("version_mismatch");
+    if (status === 308) expect(head).toContain(`location: ${redirect}/`);
+  }
+  await expect
+    .poll(
+      () =>
+        new Promise<number>((resolve, reject) =>
+          f.server.getConnections((error, count) => (error ? reject(error) : resolve(count))),
+        ),
+    )
+    .toBe(0);
+});
+
+test("a reset during a raw rejection leaves the server available", async () => {
+  const f = await fixture(false);
+  for (const path of ["/nope", "/api/events", "/proxy/missing/5173/", "CONNECT"]) {
+    for (let attempt = 0; attempt < 16; attempt++) {
+      const socket = connect(f.port, "127.0.0.1");
+      socket.on("error", () => {});
+      await once(socket, "connect");
+      socket.write(
+        path === "CONNECT"
+          ? "CONNECT example.test:443 HTTP/1.1\r\nHost: example.test:443\r\n\r\n"
+          : `GET ${path} HTTP/1.1\r\nHost: 127.0.0.1:${f.port}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n`,
+      );
+      const closed = new Promise<void>((resolve) => socket.once("close", () => resolve()));
+      socket.resetAndDestroy();
+      await closed;
+    }
+  }
+  expect((await f.call("/healthz", { host: `127.0.0.1:${f.port}` })).status).toBe(200);
+});
 
 test("request authority and explicit proxy trust determine HTTP and Upgrade origins", async () => {
   const direct = await fixture(false);

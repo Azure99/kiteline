@@ -15,7 +15,7 @@ pnpm images amd64
 
 上述单平台构建命令只打amd64，并在server中提供配套amd64接入包。需要完整双架构发布时，先构建两种agent，再省略server的`--agent-arch`；ARM64 server另执行`pnpm package server arm64`、`pnpm images arm64`，串行控制内存。包及对应`.sha256`在`dist/releases/`；产品版本来自[version.json](../shared/src/version.json)，镜像名为`kiteline-server:<版本>-<amd64|arm64>`。本仓库不自动发布镜像，跨机器可用`docker save/load`搬运。清单记录commit、dirty、实际输入sourceDigest、Node/native与校验；组装server发现来源不一致时要求重建agent。
 
-`package agent amd64`自动构建/复用静态组件；也可单独用 `node scripts/build-agent-static.mjs` 预构建到`dist/agent-static-amd64/`。来源与SHA在[agent-static.json](agent-static.json)，工具链版本在[agent-static-packages.txt](agent-static-packages.txt)；固定官方Node源码，无Node补丁。首次构建需数GiB内存和较长编译时间，Node固定3个编译任务，8GiB构建机避免同时运行其他重负载。Docker分别缓存Node/native阶段，业务JS变更不触发Node重编；源下载缓存在`/var/tmp/kiteline-release-cache`并核验SHA。输出携带许可证、实际工具包清单、输入身份和文件校验，ELF检查拒绝动态加载器或库依赖。组件升级需同步来源/工具链和代表环境验收，不能只替换二进制。
+`package agent amd64`自动构建/复用静态组件；也可单独用 `node scripts/build-agent-static.mjs` 预构建到`dist/agent-static-amd64/`。来源与SHA在[agent-static.json](agent-static.json)，工具链版本在[agent-static-packages.txt](agent-static-packages.txt)；固定官方Node源码，无Node补丁。首次构建需数GiB内存和较长编译时间，Node固定3个编译任务，8GiB构建机避免同时运行其他重负载。Docker分别缓存Node/native阶段，业务JS变更不触发Node重编；工具链清单变更会使两者重编，验证时不能用旧缓存命中替代冷构建。源下载缓存在`/var/tmp/kiteline-release-cache`并核验SHA。输出携带许可证、实际工具包清单、输入身份和文件校验，ELF检查拒绝动态加载器或库依赖。组件升级需同步来源/工具链和代表环境验收，不能只替换二进制。
 
 ## Server 部署
 

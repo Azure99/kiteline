@@ -11,7 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../components/ui/dialog";
-import { type GitActions, type GitTarget, useGitActivity } from "./actions";
+import { type GitActions, type GitTarget, useGitMessage } from "./actions";
 
 export function CommitBox({
   target,
@@ -28,14 +28,14 @@ export function CommitBox({
 }) {
   const { t } = useTranslation();
 
-  const value = useGitActivity(actions, target);
+  const message = useGitMessage(actions, target);
   const [open, setOpen] = useState(false);
   const available =
     !disabled && !!status?.stagedCount && !status.hasConflicts && !!status.indexToken;
   const submit = () => {
-    if (!available || !value.message.trim() || !status?.indexToken) return;
+    if (!available || !message.trim() || !status?.indexToken) return;
     void actions.run(target, "git.commit", {
-      message: value.message,
+      message,
       indexToken: status.indexToken,
     });
     setOpen(false);
@@ -45,12 +45,12 @@ export function CommitBox({
       aria-label={t(($) => $.git.commitMessage)}
       placeholder={t(($) => $.git.commitMessage)}
       rows={3}
-      value={value.message}
+      value={message}
       onChange={(event) => actions.message(target, event.target.value)}
     />
   );
   const button = (
-    <Button disabled={!available || !value.message.trim()} onClick={submit}>
+    <Button disabled={!available || !message.trim()} onClick={submit}>
       <Check />
       {t(($) => $.git.commit)}
     </Button>

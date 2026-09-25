@@ -1,8 +1,7 @@
 import { AppError, asError, terminalProfile } from "@kiteline/shared/protocol";
 import { setTimeout as delay } from "node:timers/promises";
 import type {
-  CreateTerminal,
-  RecoverTerminal,
+  TerminalSource,
   TerminalIdentity,
   RecorderConfig,
   RecorderMessage,
@@ -30,12 +29,12 @@ export class RecordedSession {
   private starting?: Promise<TerminalIdentity>;
   private initialized: boolean;
   constructor(
-    readonly options: CreateTerminal | RecoverTerminal,
+    readonly options: TerminalSource,
     readonly config: RecorderConfig,
     private emit: (message: RecorderMessage, owner?: string) => boolean,
     private release: () => void,
   ) {
-    this.initialized = "shell" in options;
+    this.initialized = options.type === "create";
     this.model = new Model(options.cols, options.rows, options.historyLines, (error) =>
       this.fault(error),
     );
@@ -201,12 +200,17 @@ export class RecordedSession {
   async end() {
     await this.starting?.catch(() => {});
     this.control.dispose();
-    await tmux(
-      this.options.socket,
-      ["kill-server"],
-      undefined,
-      AbortSignal.timeout(this.config.channelPairTimeout),
-    );
+    try {
+      await tmux(
+        this.options.socket,
+        ["kill-server"],
+        undefined,
+        AbortSignal.timeout(this.config.channelPairTimeout),
+      );
+    } catch (error) {
+      this.fault(error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    }
     this.finish(null);
   }
   async close() {

@@ -13,7 +13,7 @@ import {
   forwardUserInput,
   freezeMouse,
   normalizePaste,
-  retainScrollUpHistory,
+  adaptTerminalScrolling,
   terminalOptions,
 } from "@kiteline/shared/terminal";
 import { ApiError, api, post } from "../lib/api";
@@ -217,9 +217,10 @@ export class TerminalDisplay {
         terminal.unicode.activeVersion = "6";
         terminal.loadAddon(this.fitAddon);
         terminal.loadAddon(new WebLinksAddon(openLink, { hover: hoverLink, leave: leaveLink }));
-        const scroll = retainScrollUpHistory(terminal);
+        const scroll = adaptTerminalScrolling(terminal);
         const source = forwardUserInput(terminal, (text) => {
-          if (text.length === 1 && text.charCodeAt(0) <= 127 && this.interaction?.control()) {
+          const control = this.interaction?.control();
+          if (control && text.length === 1 && text.charCodeAt(0) <= 127) {
             if (/[ @-_a-z?]/.test(text))
               text = String.fromCharCode(
                 text === "?" ? 127 : text.toUpperCase().charCodeAt(0) & 31,
@@ -268,7 +269,6 @@ export class TerminalDisplay {
           throw new Error("Terminal restoration is incomplete");
         this.ready = true;
         this.change({ ...this.state, status: "ready" });
-        this.resize();
         break;
       case "ended":
         this.ready = false;

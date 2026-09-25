@@ -24,10 +24,15 @@ import {
 } from "../components/ui/dialog";
 import { childPath, formatBytes } from "./use-browser";
 import { FileConflictDialog } from "./conflict-dialog";
+import type { WorkspaceTarget } from "../lib/navigation";
 
 export interface FileAction {
   kind: "copy" | "move" | "delete";
   entries: Entry[];
+}
+export interface FileOperationResult extends WorkspaceTarget {
+  kind: FileAction["kind"];
+  items: FileItemResult[];
 }
 interface Row {
   entry: Entry;
@@ -40,6 +45,8 @@ interface Row {
 export function FileOperationDialog({
   deviceId,
   workspaceId,
+  deviceName,
+  workspaceName,
   action,
   folder,
   onClose,
@@ -47,6 +54,8 @@ export function FileOperationDialog({
 }: {
   deviceId: string;
   workspaceId: string;
+  deviceName: string;
+  workspaceName: string;
   action: FileAction;
   folder: string;
   onClose: () => void;
@@ -266,6 +275,9 @@ export function FileOperationDialog({
                 { count: rows.length },
               )}
             </DialogTitle>
+            <p className="mt-1 break-words text-xs text-muted-foreground">
+              {deviceName} / {workspaceName} / {folder}
+            </p>
           </DialogHeader>
           <div className="scroll-area min-h-0 space-y-3 overflow-auto p-4">
             {action.kind === "delete" ? (

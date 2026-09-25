@@ -16,12 +16,12 @@ ENV LANG=C.UTF-8 TMPDIR=/var/tmp
 FROM base AS server
 ARG TARGETARCH
 ARG VERSION
-COPY dist/releases/kiteline-server-${VERSION}-linux-${TARGETARCH}.tar.gz* /var/tmp/release/
-RUN cd /var/tmp/release && sha256sum --check *.sha256 \
+RUN --mount=type=bind,source=dist/releases,target=/var/tmp/release \
+    cd /var/tmp/release \
+    && sha256sum --check kiteline-server-${VERSION}-linux-${TARGETARCH}.tar.gz.sha256 \
     && mkdir /opt/kiteline-server \
-    && tar -xzf *.tar.gz --strip-components=1 -C /opt/kiteline-server \
+    && tar -xzf kiteline-server-${VERSION}-linux-${TARGETARCH}.tar.gz --strip-components=1 -C /opt/kiteline-server \
     && cd /opt/kiteline-server && sha256sum --status --check SHA256SUMS \
-    && rm -rf /var/tmp/release \
     && userdel ubuntu && groupadd --gid 1000 kiteline \
     && useradd --uid 1000 --gid kiteline --create-home kiteline \
     && mkdir -p /var/lib/kiteline && chown kiteline:kiteline /var/lib/kiteline \

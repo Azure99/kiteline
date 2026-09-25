@@ -5,7 +5,7 @@ import { AppError, limits } from "@kiteline/shared/protocol";
 import {
   atGround,
   mouseEncodingVT,
-  retainScrollUpHistory,
+  adaptTerminalScrolling,
   terminalOptions,
 } from "@kiteline/shared/terminal";
 import type { TerminalEvent } from "@kiteline/shared/ipc";
@@ -25,6 +25,7 @@ export class Model {
   private serializer = new SerializeAddon();
   private decoder = new StringDecoder("utf8");
   private queue: Promise<unknown> = Promise.resolve();
+  private pendingOutput?: { parts: string[]; bytes: number };
   private pendingBytes = 0;
   private checkpoint?: Omit<Snapshot, "tail">;
   private tail: TerminalEvent[] = [];
@@ -41,11 +42,13 @@ export class Model {
   ) {
     this.terminal = new Terminal({ ...terminalOptions(historyLines), cols, rows });
     this.terminal.unicode.activeVersion = "6";
-    retainScrollUpHistory(this.terminal);
+    adaptTerminalScrolling(this.terminal);
     this.terminal.loadAddon(this.serializer);
     this.rotate();
   }
   ordered<T>(action: () => T | Promise<T>): Promise<T> {
+    // Only adjacent output that has not started parsing can share a batch.
+    this.pendingOutput = undefined;
     const next = this.queue.then(action);
     this.queue = next.catch(() => {});
     return next;
@@ -62,15 +65,24 @@ export class Model {
       );
       return;
     }
+    if (this.pendingOutput && this.pendingOutput.bytes + bytes <= limits.dataChunkBytes) {
+      this.pendingOutput.parts.push(data);
+      this.pendingOutput.bytes += bytes;
+      return;
+    }
+    const batch = { parts: [data], bytes };
     void this.ordered(async () => {
+      if (this.pendingOutput === batch) this.pendingOutput = undefined;
       try {
         if (this.stopped) return;
+        const data = batch.parts.join("");
         await new Promise<void>((resolve) => this.terminal.write(data, resolve));
         this.record({ type: "output", data });
       } finally {
-        this.pendingBytes -= bytes;
+        this.pendingBytes -= batch.bytes;
       }
     }).catch((error: Error) => this.fault(error));
+    this.pendingOutput = batch;
   }
   resize(cols: number, rows: number) {
     void this.ordered(() => {
@@ -174,7 +186,7 @@ export class Model {
         if (history === "screen") {
           if (atGround(this.terminal)) snapshot = { ...this.serialize(true), tail: [] };
         } else {
-          if (atGround(this.terminal)) this.rotate();
+          if (atGround(this.terminal) && (!this.checkpoint || this.tail.length > 0)) this.rotate();
           if (this.checkpoint) snapshot = { ...this.checkpoint, tail: this.tail.slice() };
           else if (this.snapshotError && atGround(this.terminal)) throw this.snapshotError;
         }

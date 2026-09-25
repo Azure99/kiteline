@@ -94,9 +94,19 @@ async function leaves(repo: Repo, paths: string[], source: "HEAD" | "index", sig
       const [mode, , oid] = record.subarray(0, tab).toString("ascii").split(" ");
       if (wanted.has(path)) found.set(path, { mode: mode!, oid: oid!, stage: 0 });
     });
-    await git(repo.rootPath, ["ls-tree", "-z", "--full-tree", "HEAD", "--", ...paths], signal, {
-      onData: reader.data,
-    });
+    await git(
+      repo.rootPath,
+      [
+        "ls-tree",
+        "-z",
+        "--full-tree",
+        "HEAD",
+        "--",
+        ...paths.map((path) => `:(top,literal)${path}`),
+      ],
+      signal,
+      { onData: reader.data },
+    );
     reader.end();
   }
   return found;
@@ -112,7 +122,13 @@ async function selectedStatus(
   const renamed = new Map<string, GitEntry>();
   await readStatus(repo, signal, (entry) => {
     if (wanted.has(entry.path)) found.set(entry.path, entry);
-    if (aliases && entry.oldPath && wanted.has(entry.oldPath)) renamed.set(entry.oldPath, entry);
+    if (
+      aliases &&
+      entry.oldPath &&
+      (entry.indexStatus === "R" || (aliases === "all" && entry.worktreeStatus === "R")) &&
+      wanted.has(entry.oldPath)
+    )
+      renamed.set(entry.oldPath, entry);
   });
   for (const [path, entry] of renamed)
     if (!found.has(path) || (aliases === "index" && found.get(path)?.indexStatus === "?"))
@@ -121,13 +137,23 @@ async function selectedStatus(
 }
 async function checkIndex(repo: Repo, add: string[], remove: string[], signal: AbortSignal) {
   const removed = new Set(remove);
+  const targets = new Set(add);
+  const ancestors = new Set<string>();
+  for (const path of add)
+    for (let slash = path.indexOf("/"); slash !== -1; slash = path.indexOf("/", slash + 1))
+      ancestors.add(path.slice(0, slash));
   const blocked = new Blockers();
   await indexRecords(repo, signal, (path) => {
-    if (
-      !removed.has(path) &&
-      add.some((target) => path.startsWith(target + "/") || target.startsWith(path + "/"))
-    )
+    if (removed.has(path)) return;
+    if (ancestors.has(path)) {
       blocked.add(path);
+      return;
+    }
+    for (let slash = path.indexOf("/"); slash !== -1; slash = path.indexOf("/", slash + 1))
+      if (targets.has(path.slice(0, slash))) {
+        blocked.add(path);
+        return;
+      }
   });
   blocked.check(
     "Stage the deletion of the related old item or unstage the related new item before operating on this file",
@@ -248,11 +274,12 @@ export async function changeIndex(
     await forceRemove(repo, remove, signal);
     done(remove);
     if (add.length) {
+      const pathspecs = add.map((path) => `:(top,literal)${path}`);
       await git(
         repo.rootPath,
         kind === "stage"
-          ? ["add", "-A", "--", ...add]
-          : ["restore", "--no-recurse-submodules", "--source=HEAD", "--staged", "--", ...add],
+          ? ["add", "-A", "--", ...pathspecs]
+          : ["restore", "--no-recurse-submodules", "--source=HEAD", "--staged", "--", ...pathspecs],
         signal,
         { write: true },
       );
@@ -285,7 +312,11 @@ async function discardPlan(
     const entry = selected.get(path);
     if (!entry || (scope === "worktree" && entry.worktreeStatus === "."))
       throw new AppError("conflict", `${path} has changed state; refresh`);
-    if (scope === "all" && entry.oldPath) {
+    if (
+      scope === "all" &&
+      entry.oldPath &&
+      (entry.indexStatus === "R" || entry.worktreeStatus === "R")
+    ) {
       paths.add(entry.oldPath);
       renamedOrigins.add(entry.oldPath);
     }
@@ -399,7 +430,7 @@ export async function discard(
           ...(scope === "all" ? ["--source=HEAD", "--staged"] : []),
           "--worktree",
           "--",
-          ...plan.restore,
+          ...plan.restore.map((path) => `:(top,literal)${path}`),
         ],
         signal,
         { write: true },

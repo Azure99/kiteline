@@ -4,6 +4,7 @@ import {
   AppError,
   asError,
   integer,
+  limits,
   record,
   string,
   type TerminalMeta,
@@ -124,6 +125,15 @@ export class Channels {
       throw error;
     };
     if (!connection?.snapshot) return unavailable(this.connections.unavailableError(deviceId));
+    const message = {
+      type: "channel.open",
+      channelId: id,
+      connectionId: connection.connectionId,
+      kind,
+      params,
+    };
+    if (Buffer.byteLength(JSON.stringify(message)) > limits.controlMessageBytes)
+      return unavailable(new AppError("limit_exceeded", "Channel request exceeds the size limit"));
     if (
       [...this.entries.values()].filter((item) => item.connection === connection).length >=
       this.config.limits.channelsPerDevice
@@ -148,13 +158,7 @@ export class Channels {
       };
       this.entries.set(id, item);
     });
-    send(connection.socket, {
-      type: "channel.open",
-      channelId: id,
-      connectionId: connection.connectionId,
-      kind,
-      params,
-    });
+    send(connection.socket, message);
     return { id, ready, item: item! };
   }
   checkAgent(id: string, deviceId: string, connectionId: string) {

@@ -217,8 +217,10 @@ export class FileOperations {
       try {
         await publish(async () => {
           await verify(root, source);
+          await this.temporary.assertRelocatableLocked(source.location, source.info);
           const current = await targetAgain(root, item.targetPath, target);
           const destination = await checkTarget(current, item, source.info.isDirectory());
+          if (destination) await this.temporary.assertRelocatableLocked(current, destination);
           if (destination && sameObject(source.info, destination))
             throw new AppError(
               "invalid_argument",
@@ -243,20 +245,27 @@ export class FileOperations {
         done(item.targetPath);
         return capture(root, item.targetPath);
       }, signal);
-      await this.children(root, source, signal, result, async (child) => {
-        const childTarget = join(item.targetPath, child.location.name);
-        await this.copyMove(
-          root,
-          child,
-          { path: child.path, targetPath: childTarget, collision: "error" },
-          move,
-          signal,
-          result,
-          done,
-          bytes,
-          created,
-        );
-      });
+      await this.children(
+        root,
+        source,
+        signal,
+        result,
+        async (child) => {
+          const childTarget = join(item.targetPath, child.location.name);
+          await this.copyMove(
+            root,
+            child,
+            { path: child.path, targetPath: childTarget, collision: "error" },
+            move,
+            signal,
+            result,
+            done,
+            bytes,
+            created,
+          );
+        },
+        { omitTemporary: true },
+      );
       await publish(async () => {
         await verify(root, created);
         signal.throwIfAborted();
@@ -265,6 +274,7 @@ export class FileOperations {
       if (move)
         await publish(async () => {
           await verify(root, source);
+          await this.temporary.assertRelocatableLocked(source.location, source.info);
           signal.throwIfAborted();
           await rmdir(source.location.absolute);
         }, signal);
@@ -278,7 +288,13 @@ export class FileOperations {
     try {
       if (source.info.isSymbolicLink()) {
         const text = await readlink(source.location.absolute, { encoding: "buffer" });
-        temporary = await this.temporary.createLink(target.parent, target.parentInfo, text, signal);
+        temporary = await this.temporary.createLink(
+          target.parent,
+          target.parentInfo,
+          text,
+          signal,
+          { path: join(root, item.targetPath) },
+        );
       } else {
         const file = await open(
           source.location.absolute,
@@ -289,7 +305,9 @@ export class FileOperations {
           if (!info.isFile() || !sameObject(info, source.info))
             throw new AppError("conflict", "Source file has changed");
           copied = { ...source, info };
-          const output = await this.temporary.create(target.parent, target.parentInfo, signal);
+          const output = await this.temporary.create(target.parent, target.parentInfo, signal, {
+            path: join(root, item.targetPath),
+          });
           temporary = output;
           const block = Buffer.alloc(limits.dataChunkBytes);
           let position = 0;
@@ -318,7 +336,12 @@ export class FileOperations {
       await publish(async () => {
         await this.temporary.checkLocked(temporary!);
         const current = await targetAgain(root, item.targetPath, target);
-        await checkTarget(current, item, false);
+        const destination = await checkTarget(current, item, false);
+        if (move) {
+          await this.temporary.assertRelocatableLocked(source.location, source.info, temporary);
+          if (destination)
+            await this.temporary.assertRelocatableLocked(current, destination, temporary);
+        }
         signal.throwIfAborted();
         if (item.collision === "replace") await rename(temporary!.path, current.absolute);
         else await renameNoReplace(temporary!.path, current.absolute);
@@ -329,6 +352,7 @@ export class FileOperations {
       if (move)
         await publish(async () => {
           await verify(root, copied, true);
+          await this.temporary.assertRelocatableLocked(copied.location, copied.info);
           signal.throwIfAborted();
           await unlink(copied.location.absolute);
         }, signal);
@@ -346,6 +370,7 @@ export class FileOperations {
     signal: AbortSignal,
     result: ResultState,
     visit: (child: ObjectRef) => Promise<void>,
+    { omitTemporary = false }: { omitTemporary?: boolean } = {},
   ) {
     await publish(() => verify(root, source), signal);
     const directory = await opendir(source.location.absolute, {
@@ -364,9 +389,12 @@ export class FileOperations {
             throw new AppError("unsupported", "Name is not valid UTF-8; the item is retained");
           const child = await publish(async () => {
             await verify(root, source);
-            return capture(root, path);
+            const child = await capture(root, path);
+            return omitTemporary && this.temporary.ownsLocked(child.location, child.info)
+              ? undefined
+              : child;
           }, signal);
-          await visit(child);
+          if (child) await visit(child);
         } catch (error) {
           fail(result, path, error);
         }

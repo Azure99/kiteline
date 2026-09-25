@@ -29,7 +29,7 @@ export function GitViewHeader({
   onCreateBranch,
 }: {
   view: GitView;
-  count: number;
+  count?: number;
   target?: DiffTarget;
   disabled: boolean;
   onView(view: GitView): void;
@@ -57,7 +57,7 @@ export function GitViewHeader({
               className={`flex min-h-9 items-center justify-center gap-2 border-b-2 px-1 max-[959px]:min-h-11 max-[959px]:min-w-11 ${view === id ? "border-primary text-primary" : "border-transparent"}`}
             >
               {t(($) => $.git[id])}
-              {id === "changes" && (
+              {id === "changes" && count !== undefined && (
                 <span className="rounded bg-muted px-1.5">
                   {count.toLocaleString(i18n.resolvedLanguage)}
                 </span>

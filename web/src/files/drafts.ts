@@ -20,6 +20,16 @@ export type DraftNotice =
   | "deletedDraft"
   | "missingDraft";
 
+interface SaveSnapshot {
+  target: FileTarget;
+  raw: string;
+}
+
+interface PendingSave extends SaveSnapshot {
+  sourcePath: string;
+  reconciliation?: Promise<void>;
+}
+
 export interface Draft extends FileTarget {
   id: string;
   deviceName: string;
@@ -40,7 +50,8 @@ export interface Draft extends FileTarget {
   error?: unknown;
   observationError?: unknown;
   notice?: DraftNotice;
-  unknownSave?: { target: FileTarget; raw: string };
+  pendingSave?: PendingSave;
+  unknownSave?: SaveSnapshot;
   missing?: boolean;
   diskChanged?: boolean;
   request?: AbortController;
@@ -208,8 +219,8 @@ export class DraftStore {
     } catch (error) {
       if (this.has(draft) && draft.request === request && draft.path === path) draft.error = error;
     } finally {
-      draft.diskActivity++;
       if (draft.request === request) {
+        draft.diskActivity++;
         draft.busy = undefined;
         draft.request = undefined;
       }
@@ -219,13 +230,18 @@ export class DraftStore {
   async save(draft: Draft, path = draft.path, revision: string | null = draft.revision ?? null) {
     if (!this.canSave(draft) || !this.has(draft)) return false;
     draft.diskActivity++;
-    const originalPath = draft.path;
     const text = draft.state!.doc.toString();
     const bytes = encodeText(text, draft.format);
     const raw = new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes);
     const request = new AbortController();
     draft.request = request;
     draft.busy = "saving";
+    const pending: PendingSave = {
+      target: { deviceId: draft.deviceId, workspaceId: draft.workspaceId, path },
+      raw,
+      sourcePath: draft.path,
+    };
+    draft.pendingSave = pending;
     draft.error = undefined;
     this.changed();
     try {
@@ -241,7 +257,7 @@ export class DraftStore {
         }),
       );
       if (!this.has(draft) || draft.request !== request) return false;
-      if (draft.path !== originalPath) {
+      if (draft.path !== pending.sourcePath) {
         draft.notice = "savedOldPath";
         return false;
       }
@@ -263,20 +279,24 @@ export class DraftStore {
       draft.notice = duplicate ? "duplicateDraft" : undefined;
       return true;
     } catch (error) {
-      if (this.has(draft) && draft.request === request && draft.path === originalPath) {
+      // A failed save still needs the revision of its renamed source file.
+      while (draft.request === request && pending.reconciliation) {
+        const reconciliation = pending.reconciliation;
+        await reconciliation;
+        if (pending.reconciliation === reconciliation) break;
+      }
+      if (this.has(draft) && draft.request === request && draft.path === pending.sourcePath) {
         draft.error = error;
         if (error instanceof ApiError && error.outcome === "unknown")
-          draft.unknownSave = {
-            target: { deviceId: draft.deviceId, workspaceId: draft.workspaceId, path },
-            raw,
-          };
+          draft.unknownSave = { target: pending.target, raw: pending.raw };
       }
       return false;
     } finally {
-      draft.diskActivity++;
       if (draft.request === request) {
+        draft.diskActivity++;
         draft.busy = undefined;
         draft.request = undefined;
+        draft.pendingSave = undefined;
       }
       if (this.has(draft)) this.changed();
     }
@@ -294,22 +314,14 @@ export class DraftStore {
       const disk = await this.read(draft, unknown?.target ?? { ...draft }, request);
       if (!this.has(draft) || draft.request !== request || draft.path !== path) return;
       if (unknown && disk.raw === unknown.raw) {
-        draft.path = unknown.target.path;
-        draft.baseRaw = disk.raw;
-        draft.baseText = disk.text;
-        draft.revision = disk.meta.revision;
-        draft.unknownSave = undefined;
-        draft.missing = false;
-        draft.error = undefined;
-        draft.notice = "diskMatches";
-        window.dispatchEvent(new CustomEvent("kiteline:file-written", { detail: unknown.target }));
+        this.confirmSave(draft, disk);
       }
       return disk;
     } catch (error) {
       if (this.has(draft) && draft.request === request && draft.path === path) draft.error = error;
     } finally {
-      draft.diskActivity++;
       if (draft.request === request) {
+        draft.diskActivity++;
         draft.request = undefined;
         draft.busy = undefined;
       }
@@ -352,6 +364,7 @@ export class DraftStore {
         draft.deviceId === target.deviceId &&
         draft.workspaceId === target.workspaceId &&
         (isWithin(draft.path, target.path) ||
+          (draft.pendingSave && isWithin(draft.pendingSave.target.path, target.path)) ||
           (draft.unknownSave && isWithin(draft.unknownSave.target.path, target.path))),
     );
     const result = await rpc(target.deviceId, "files.rename", {
@@ -361,6 +374,114 @@ export class DraftStore {
     });
     void this.rename(target.deviceId, target.workspaceId, result.from, result.to, drafts);
     return result;
+  }
+  private confirmSave(draft: Draft, disk: DiskText) {
+    draft.path = disk.target.path;
+    draft.baseRaw = disk.raw;
+    draft.baseText = disk.text;
+    draft.revision = disk.meta.revision;
+    draft.resolvedPath = disk.meta.resolvedPath;
+    draft.unknownSave = undefined;
+    draft.missing = false;
+    draft.diskChanged = false;
+    draft.error = undefined;
+    draft.observationError = undefined;
+    draft.notice = this.items.some(
+      (item) =>
+        item !== draft &&
+        item.deviceId === draft.deviceId &&
+        item.workspaceId === draft.workspaceId &&
+        item.path === draft.path,
+    )
+      ? "duplicateDraft"
+      : "diskMatches";
+    window.dispatchEvent(new CustomEvent("kiteline:file-written", { detail: disk.target }));
+  }
+  private async checkMoved(
+    draft: Draft,
+    pending: PendingSave | undefined,
+    previous: Promise<void>,
+  ) {
+    const request = pending ? draft.request! : new AbortController();
+    if (!pending) {
+      draft.request = request;
+      draft.busy = "checking";
+    }
+    draft.readChannel = undefined;
+    draft.readError = undefined;
+    const source = { deviceId: draft.deviceId, workspaceId: draft.workspaceId, path: draft.path };
+    const snapshot = pending ?? draft.unknownSave;
+    const activity = draft.diskActivity;
+    const current = () =>
+      this.has(draft) &&
+      draft.request === request &&
+      draft.diskActivity === activity &&
+      draft.path === source.path;
+    let sourceDisk: DiskText | undefined;
+    try {
+      await previous;
+      if (!current()) return;
+      try {
+        sourceDisk = await readText(source, request.signal);
+        if (!current()) return;
+        draft.missing = false;
+        draft.observationError = undefined;
+        if (sourceDisk.raw === draft.baseRaw) {
+          draft.revision = sourceDisk.meta.revision;
+          draft.resolvedPath = sourceDisk.meta.resolvedPath;
+          draft.diskChanged = false;
+          draft.notice = undefined;
+        } else {
+          draft.diskChanged = true;
+          draft.notice = "diskChangedKept";
+        }
+      } catch (error) {
+        if (!current()) return;
+        draft.observationError = error;
+        draft.notice = undefined;
+        if (error instanceof ApiError && error.code === "not_found") draft.missing = true;
+      }
+      if (snapshot) {
+        try {
+          const disk =
+            snapshot.target.path === source.path
+              ? sourceDisk
+              : await readText(snapshot.target, request.signal);
+          if (!current()) return;
+          if (disk?.raw === snapshot.raw) {
+            this.confirmSave(draft, disk);
+            if (pending) {
+              draft.diskActivity++;
+              draft.pendingSave = undefined;
+              draft.request = undefined;
+              draft.busy = undefined;
+              request.abort();
+            }
+          }
+        } catch (error) {
+          // An observation cannot decide whether the independent write will publish.
+          if (current() && !pending) draft.error = error;
+        }
+      }
+    } finally {
+      if (
+        current() &&
+        this.items.some(
+          (item) =>
+            item !== draft &&
+            item.deviceId === draft.deviceId &&
+            item.workspaceId === draft.workspaceId &&
+            item.path === draft.path,
+        )
+      )
+        draft.notice = "duplicateDraft";
+      if (!pending && draft.request === request) {
+        draft.diskActivity++;
+        draft.request = undefined;
+        draft.busy = undefined;
+      }
+      if (this.has(draft)) this.changed();
+    }
   }
   async rename(
     deviceId: string,
@@ -375,45 +496,46 @@ export class DraftStore {
         item.deviceId === deviceId &&
         item.workspaceId === workspaceId &&
         (movedPath(item.path, from, to) !== item.path ||
+          (item.pendingSave &&
+            movedPath(item.pendingSave.target.path, from, to) !== item.pendingSave.target.path) ||
           (item.unknownSave &&
             movedPath(item.unknownSave.target.path, from, to) !== item.unknownSave.target.path)),
     );
+    let checking = Promise.resolve();
     for (const draft of moved) {
-      draft.request?.abort();
-      draft.request = undefined;
-      draft.busy = undefined;
+      draft.diskActivity++;
+      const pending = draft.pendingSave;
       draft.path = movedPath(draft.path, from, to);
       if (draft.unknownSave)
         draft.unknownSave.target.path = movedPath(draft.unknownSave.target.path, from, to);
       draft.notice = "checkingMoved";
+      if (pending && movedPath(pending.target.path, from, to) === pending.target.path) {
+        pending.sourcePath = draft.path;
+        pending.reconciliation = this.checkMoved(draft, pending, checking);
+        checking = pending.reconciliation;
+        continue;
+      }
+      draft.request?.abort();
+      draft.request = undefined;
+      draft.busy = undefined;
+      if (pending) {
+        draft.unknownSave = {
+          target: { ...pending.target, path: movedPath(pending.target.path, from, to) },
+          raw: pending.raw,
+        };
+        draft.pendingSave = undefined;
+      }
+      checking = this.checkMoved(draft, undefined, checking);
     }
     this.changed();
-    for (const draft of moved) {
-      const disk = await this.check(draft);
-      if (!disk || !this.has(draft)) continue;
-      if (disk.raw === draft.baseRaw) {
-        draft.revision = disk.meta.revision;
-        draft.resolvedPath = disk.meta.resolvedPath;
-        draft.notice = undefined;
-      } else draft.notice = "diskChangedKept";
-      if (
-        this.items.some(
-          (item) =>
-            item !== draft &&
-            item.deviceId === deviceId &&
-            item.workspaceId === workspaceId &&
-            item.path === draft.path,
-        )
-      )
-        draft.notice = "duplicateDraft";
-      this.changed();
-    }
+    await checking;
   }
   private markMissing(draft: Draft, notice: DraftNotice) {
     draft.diskActivity++;
     draft.request?.abort();
     draft.request = undefined;
     draft.busy = undefined;
+    draft.pendingSave = undefined;
     draft.missing = true;
     draft.notice = notice;
   }

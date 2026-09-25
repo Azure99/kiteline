@@ -9,11 +9,12 @@ import {
 import { createServer as secureServer } from "node:https";
 import { getCACertificates, setDefaultCACertificates } from "node:tls";
 import { once } from "node:events";
+import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
+import { connect, type AddressInfo, type Socket } from "node:net";
 import { WebSocket, WebSocketServer } from "ws";
 import { createKitelineServer } from "../src/app.js";
 import { Store } from "../src/store.js";
@@ -107,7 +108,7 @@ async function fixture(handler: RequestListener, channels = 128) {
   await agent.start();
   cleanup.push(async () => {
     await agent.close();
-    await kiteline.close();
+    if (kiteline.server.listening) await kiteline.close();
     tls.closeAllConnections();
     upstream.closeAllConnections();
     await new Promise<void>((resolve) => tls.close(() => resolve()));
@@ -294,6 +295,66 @@ test("real HTTP tunnel preserves raw paths, bodies, finite header rules and appl
   expect((await f.call(f.prefix + "/", "POST", { origin: "https://wrong.test" })).status).toBe(403);
   expect((await f.call(`/proxy/missing/${f.upstreamPort}/`)).status).toBe(404);
 }, 15_000);
+
+test.each(["reject", "upgrade"])(
+  "raw proxy %s releases a half-open browser after its final bytes",
+  async (mode) => {
+    const f = await fixture((_req, res) => res.end("HTTP"));
+    const servicePeers = new Set<Socket>();
+    let raw: Socket | undefined;
+    f.kiteline.server.on("upgrade", (req, socket) => {
+      if (req.url?.startsWith(f.prefix)) raw = socket as Socket;
+    });
+    f.upstream.on("upgrade", (req, socket) => {
+      servicePeers.add(socket as Socket);
+      socket.on("close", () => servicePeers.delete(socket as Socket));
+      const payload =
+        mode === "reject"
+          ? "HTTP/1.1 403 Forbidden\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello"
+          : "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " +
+            createHash("sha1")
+              .update(req.headers["sec-websocket-key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
+              .digest("base64") +
+            "\r\n\r\n\x81\x04last";
+      socket.end(Buffer.from(payload, "latin1"));
+    });
+    const browser = connect({ host: "127.0.0.1", port: f.port, allowHalfOpen: true });
+    const received: Buffer[] = [];
+    browser.on("data", (part: Buffer) => received.push(part));
+    browser.on("error", () => {});
+    let closing: Promise<void> | undefined;
+    let closed = false;
+    try {
+      await once(browser, "connect");
+      const end = once(browser, "end");
+      browser.write(
+        [
+          `GET ${f.prefix}/ HTTP/1.1`,
+          ...Object.entries(f.browserHeaders).map(([key, value]) => `${key}: ${value}`),
+          "Connection: Upgrade",
+          "Upgrade: websocket",
+          "Sec-WebSocket-Version: 13",
+          "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+          "",
+          "",
+        ].join("\r\n"),
+      );
+      await end;
+      expect(Buffer.concat(received).toString("latin1")).toContain(
+        mode === "reject" ? "\r\n\r\nhello" : "\r\n\r\n\x81\x04last",
+      );
+      closing = f.kiteline.close().then(() => {
+        closed = true;
+      });
+      await expect.poll(() => closed).toBe(true);
+    } finally {
+      browser.destroy();
+      raw?.destroy();
+      for (const peer of servicePeers) peer.destroy();
+      await closing;
+    }
+  },
+);
 
 test("upstream can reject a request before the client sends its body", async () => {
   const f = await fixture((_req, res) => res.writeHead(413).end("body rejected"));

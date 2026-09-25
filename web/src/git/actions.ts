@@ -34,6 +34,7 @@ const key = (target: GitTarget) => `${target.deviceId}:${target.workspaceId}:${t
 export class GitActions {
   private entries = new Map<string, GitActivity>();
   private listeners = new Set<() => void>();
+  private messageListeners = new Map<string, Set<() => void>>();
   private version = 0;
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -46,6 +47,19 @@ export class GitActions {
     this.version++;
     for (const listener of this.listeners) listener();
   }
+  subscribeMessage(target: GitTarget, listener: () => void) {
+    const id = key(target);
+    let listeners = this.messageListeners.get(id);
+    if (!listeners) this.messageListeners.set(id, (listeners = new Set()));
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+      if (!listeners.size) this.messageListeners.delete(id);
+    };
+  }
+  private notifyMessage(target: GitTarget) {
+    for (const listener of this.messageListeners.get(key(target)) ?? []) listener();
+  }
   get(target: GitTarget) {
     let value = this.entries.get(key(target));
     if (!value)
@@ -54,13 +68,15 @@ export class GitActions {
   }
   clear() {
     this.entries.clear();
+    for (const listeners of this.messageListeners.values())
+      for (const listener of listeners) listener();
     this.notify();
   }
   message(target: GitTarget, message: string) {
     const value = this.get(target);
     value.message = message;
     value.messageVersion++;
-    this.notify();
+    this.notifyMessage(target);
   }
   async run<A extends GitWriteArguments>(
     target: GitTarget,
@@ -108,7 +124,11 @@ export class GitActions {
         );
       value.error = undefined;
       value.result = reply.result;
-      if (method === "git.commit" && messageVersion === value.messageVersion) value.message = "";
+      if (method === "git.commit" && messageVersion === value.messageVersion) {
+        value.message = "";
+        value.messageVersion++;
+        this.notifyMessage(target);
+      }
       value.completed = method;
       return reply.result;
     } catch (error) {
@@ -139,4 +159,11 @@ export class GitActions {
 export function useGitActivity(store: GitActions, target: GitTarget) {
   useSyncExternalStore(store.subscribe, store.snapshot);
   return store.get(target);
+}
+export function useGitMessage(store: GitActions, target: GitTarget) {
+  useSyncExternalStore(
+    (listener) => store.subscribeMessage(target, listener),
+    () => store.get(target).messageVersion,
+  );
+  return store.get(target).message;
 }

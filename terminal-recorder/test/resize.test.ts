@@ -8,6 +8,7 @@ test("redraw keeps preceding Web and actual tmux sizes while the model parses ou
   const socket = directory + "/tmux.sock";
   const session = new RecordedSession(
     {
+      type: "create",
       sessionId: "resize",
       socket,
       tmuxSession: "kiteline",

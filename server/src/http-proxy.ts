@@ -131,7 +131,10 @@ a,button{display:inline-flex;align-items:center;min-height:44px;padding:0 12px;b
     connection: "close",
   };
   if (destination instanceof ServerResponse) destination.writeHead(status, headers).end(content);
-  else destination.end(rawHead(status, STATUS_CODES[status]!, headers) + content);
+  else
+    destination.end(rawHead(status, STATUS_CODES[status]!, headers) + content, () =>
+      destination.destroy(),
+    );
 }
 
 export class HttpProxy {
@@ -165,6 +168,7 @@ export class HttpProxy {
               "content-length": 0,
               connection: "close",
             }),
+            () => destination.destroy(),
           );
         return;
       }
@@ -215,7 +219,10 @@ export class HttpProxy {
       if (response?.writableFinished) finish();
       else finish(new AppError("cancelled", "HTTP connection closed"));
     });
-    destination.on("finish", () => finish());
+    destination.on("finish", () => {
+      finish();
+      browser?.destroy();
+    });
     request.on("aborted", () => fail(new AppError("cancelled", "Request cancelled")));
     request.on("error", fail);
     const pending = this.channels.createHttp(target.deviceId, login, target.port, fail);

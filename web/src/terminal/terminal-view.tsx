@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
 import {
   ArrowDown,
   ArrowLeft,
@@ -155,6 +155,9 @@ export function TerminalView({
       setReading(false);
     };
   }, [deviceId, workspaceId, sessionId, attempt, history]);
+  useLayoutEffect(() => {
+    if (state.status === "ready") display.current?.resize();
+  }, [state.status]);
   useEffect(() => {
     Terminal.strings.promptLabel = t(($) => $.terminal.inputLabel);
     Terminal.strings.tooMuchOutput = t(($) => $.terminal.tooMuchOutput);

@@ -20,18 +20,25 @@ export async function git(
   options: Options = {},
 ) {
   signal.throwIfAborted();
+  const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0", ...options.env };
+  for (const name of [
+    "GIT_LITERAL_PATHSPECS",
+    "GIT_GLOB_PATHSPECS",
+    "GIT_NOGLOB_PATHSPECS",
+    "GIT_ICASE_PATHSPECS",
+  ])
+    delete env[name];
   const child = spawn(
     "git",
     [
       "--no-pager",
-      "--literal-pathspecs",
       ...(options.write ? [] : ["--no-optional-locks", "-c", "color.ui=false"]),
       ...args,
     ],
     {
       cwd: root,
       detached: true,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...options.env },
+      env,
       stdio: ["pipe", "pipe", "pipe"],
     },
   );

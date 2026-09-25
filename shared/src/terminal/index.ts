@@ -7,6 +7,9 @@ interface BufferState {
   ybase: number;
   savedY: number;
 }
+interface CsiParameters {
+  params: Int32Array;
+}
 interface TerminalCore {
   _bufferService: {
     buffer: BufferState;
@@ -17,18 +20,23 @@ interface TerminalCore {
     _parser: { currentState: number };
     _eraseAttrData(): unknown;
     markRangeDirty(start: number, end: number): void;
+    scrollUp(params: CsiParameters): boolean;
+    scrollDown(params: CsiParameters): boolean;
+    insertLines(params: CsiParameters): boolean;
+    deleteLines(params: CsiParameters): boolean;
   };
   coreService: { triggerDataEvent(data: string, wasUserInput?: boolean): void };
   mouseStateService: { activeEncoding: string; activeProtocol: string };
 }
 interface AdaptableTerminal {
+  rows: number;
   parser: {
     registerCsiHandler(
       id: { final: string },
       handler: (params: (number | number[])[]) => boolean,
     ): Disposable;
   };
-  options: { disableStdin?: boolean };
+  options: { disableStdin?: boolean; scrollback?: number };
 }
 function core(terminal: object) {
   return (terminal as { _core: TerminalCore })._core;
@@ -42,12 +50,36 @@ export function terminalOptions(historyLines: number) {
   };
 }
 // These private reads belong to the fixed xterm-c1 profile; upgrade both consumers together.
-export function retainScrollUpHistory(terminal: AdaptableTerminal) {
+export function adaptTerminalScrolling(terminal: AdaptableTerminal): Disposable {
   const internal = core(terminal);
-  return terminal.parser.registerCsiHandler({ final: "S" }, (params) => {
+  const input = internal._inputHandler;
+  const restore = (["scrollUp", "scrollDown", "insertLines", "deleteLines"] as const).map(
+    (name) => {
+      const original = input[name];
+      input[name] = function (params) {
+        const buffer = internal._bufferService.buffer;
+        const count = params.params[0]!;
+        // Further iterations only replace blank rows with blank rows.
+        params.params[0] = Math.min(count || 1, buffer.scrollBottom - buffer.scrollTop + 1);
+        try {
+          return original.call(this, params);
+        } finally {
+          params.params[0] = count;
+        }
+      };
+      return () => {
+        input[name] = original;
+      };
+    },
+  );
+  const history = terminal.parser.registerCsiHandler({ final: "S" }, (params) => {
     const buffer = internal._bufferService.buffer;
     if (buffer !== internal._bufferService.buffers.normal || buffer.scrollTop !== 0) return false;
-    const count = typeof params[0] === "number" ? params[0] || 1 : 1;
+    // Once retained history and the scroll region are blank, further scrolls add no content.
+    const count = Math.min(
+      typeof params[0] === "number" ? params[0] || 1 : 1,
+      terminal.rows + (terminal.options.scrollback ?? 0),
+    );
     for (let index = 0; index < count; index++) {
       const before = buffer.ybase;
       internal._bufferService.scroll(internal._inputHandler._eraseAttrData());
@@ -56,6 +88,12 @@ export function retainScrollUpHistory(terminal: AdaptableTerminal) {
     internal._inputHandler.markRangeDirty(buffer.scrollTop, buffer.scrollBottom);
     return true;
   });
+  return {
+    dispose: () => {
+      history.dispose();
+      for (const reset of restore) reset();
+    },
+  };
 }
 export function atGround(terminal: object) {
   return core(terminal)._inputHandler._parser.currentState === 0;

@@ -60,7 +60,9 @@ export class BinaryFiles {
       await checkTarget(location, { targetPath: path, collision, expectedTargetVersion }, false);
       return location;
     }, signal);
-    const temporary = await this.temporary.create(target.parent, target.parentInfo, signal);
+    const temporary = await this.temporary.create(target.parent, target.parentInfo, signal, {
+      path: join(root, path),
+    });
     return {
       workspaceId,
       path,
@@ -79,8 +81,6 @@ export class BinaryFiles {
   async save(item: UploadWrite, signal: AbortSignal): Promise<UploadedFile> {
     if (item.received !== item.size)
       throw new AppError("invalid_argument", "Received body length is incomplete");
-    await item.temporary.handle.chmod(0o666 & ~process.umask());
-    await this.temporary.closeFile(item.temporary);
     return publish(async () => {
       await this.temporary.checkLocked(item.temporary);
       const current = await targetAgain(
@@ -88,7 +88,11 @@ export class BinaryFiles {
         item.path,
         item.target,
       );
-      await checkTarget(current, item, false);
+      const target = await checkTarget(current, item, false);
+      await item.temporary.handle.chmod(
+        target?.isFile() ? Number(target.mode & 0o777n) : 0o666 & ~process.umask(),
+      );
+      await this.temporary.closeFile(item.temporary);
       signal.throwIfAborted();
       try {
         if (item.collision === "replace") await rename(item.temporary.path, current.absolute);

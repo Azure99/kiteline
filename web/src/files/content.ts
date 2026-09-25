@@ -34,7 +34,7 @@ async function channel(target: FileTarget, kind: string, params: object, signal:
   );
   if (signal.aborted) {
     void release(ready.channelId);
-    signal.throwIfAborted();
+    throw new DOMException("The operation was aborted", "AbortError");
   }
   return ready;
 }

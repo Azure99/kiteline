@@ -60,7 +60,9 @@ export function RowActions({
         disabled={disabled || (!staged && !stageable(entry))}
         onClick={() =>
           onIndex(
-            staged && entry.oldPath ? [entry.path, entry.oldPath] : [entry.path],
+            staged && entry.indexStatus === "R" && entry.oldPath
+              ? [entry.path, entry.oldPath]
+              : [entry.path],
             staged ? "unstage" : "stage",
           )
         }
@@ -94,7 +96,7 @@ export function RowActions({
             <FolderOpen />
             {t(($) => $.git.openFiles)}
           </MenuItem>
-          {staged && entry.oldPath && (
+          {staged && entry.indexStatus === "R" && entry.oldPath && (
             <MenuItem disabled={disabled} onClick={() => onIndex([entry.path], "unstage")}>
               <Minus />
               {t(($) => $.git.unstageNewPath)}

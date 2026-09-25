@@ -15,6 +15,14 @@ export interface Installation {
   gid: number;
   home: string;
 }
+export class InstallationLockCloseError extends AggregateError {
+  constructor(errors: unknown[]) {
+    super(
+      errors,
+      `Installation lock ownership is unknown because ${installationUseFile} could not be closed: ${errors.map(String).join("; ")}`,
+    );
+  }
+}
 export async function lockInstallation(mode: "shared" | "exclusive") {
   const file = await open(installationUseFile, "r");
   try {
@@ -38,7 +46,11 @@ export async function lockInstallation(mode: "shared" | "exclusive") {
     });
     return file;
   } catch (error) {
-    await file.close();
+    try {
+      await file.close();
+    } catch (cleanupError) {
+      throw new InstallationLockCloseError([error, cleanupError]);
+    }
     throw error;
   }
 }

@@ -350,7 +350,7 @@ function Changes({
   const renderHeader = (preview?: DiffTarget, onBack?: () => void) => (
     <GitViewHeader
       view={view}
-      count={value?.totalCount ?? 0}
+      count={value?.totalCount}
       target={preview}
       disabled={!enabled}
       onView={selectView}
@@ -470,6 +470,11 @@ function Changes({
             aria-label={t(($) => $.git.changeList)}
           >
             <div className="scroll-area min-h-0 flex-1 overflow-auto">
+              {!value && state.busy && (
+                <p role="status" className="px-4 py-3 text-xs text-muted-foreground">
+                  {t(($) => $.common.reading)}
+                </p>
+              )}
               {(
                 [
                   ["conflict", t(($) => $.git.conflicts)],
@@ -477,7 +482,8 @@ function Changes({
                   ["worktree", t(($) => $.git.worktreeChanges)],
                 ] as const
               ).map(([side, label]) => {
-                const entries = value?.entries.filter((entry) => inSide(entry, side)) ?? [];
+                if (!value) return null;
+                const entries = value.entries.filter((entry) => inSide(entry, side));
                 const chosen = entries.filter((entry) =>
                   selected.some((item) => item.path === entry.path && item.side === side),
                 );
@@ -488,10 +494,9 @@ function Changes({
                       <ChevronDown size={13} />
                       {label}
                       <span className="ml-auto">
-                        {(side === "staged"
-                          ? (value?.stagedCount ?? 0)
-                          : entries.length
-                        ).toLocaleString(i18n.resolvedLanguage)}
+                        {(side === "staged" ? value.stagedCount : entries.length).toLocaleString(
+                          i18n.resolvedLanguage,
+                        )}
                       </span>
                       {!!chosen.length && (
                         <>
@@ -508,7 +513,7 @@ function Changes({
                             onClick={() =>
                               indexAction(
                                 chosen.flatMap((entry) =>
-                                  side === "staged" && entry.oldPath
+                                  side === "staged" && entry.indexStatus === "R" && entry.oldPath
                                     ? [entry.path, entry.oldPath]
                                     : [entry.path],
                                 ),
@@ -608,10 +613,14 @@ function Changes({
             </div>
             <div className="flex min-h-10 shrink-0 items-center gap-1 border-t border-border px-3 text-xs text-muted-foreground">
               <span className="mr-auto">
-                {value?.entries.length
-                  ? `${(value.offset + 1).toLocaleString(i18n.resolvedLanguage)}–${(value.offset + value.entries.length).toLocaleString(i18n.resolvedLanguage)}`
-                  : "0"}{" "}
-                / {(value?.totalCount ?? 0).toLocaleString(i18n.resolvedLanguage)}
+                {value && (
+                  <>
+                    {value.entries.length
+                      ? `${(value.offset + 1).toLocaleString(i18n.resolvedLanguage)}–${(value.offset + value.entries.length).toLocaleString(i18n.resolvedLanguage)}`
+                      : "0"}{" "}
+                    / {value.totalCount.toLocaleString(i18n.resolvedLanguage)}
+                  </>
+                )}
               </span>
               <IconButton
                 label={t(($) => $.git.previousPage)}

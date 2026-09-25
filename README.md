@@ -60,3 +60,5 @@ pnpm build
 ## 终端适配
 
 Web 与 recorder 共用固定 xterm 适配，普通屏幕顶部的 CSI S 滚动参考 [xterm PR6011](https://github.com/xtermjs/xterm.js/pull/6011)，依赖固定版本内部接口。tmux 的粘贴补丁读取原任务的 `wp->base.mode`，使本机 copy-mode 不改变任务的括号粘贴模式；任务未开启此模式时，正文中的回车可能直接执行命令。
+
+重复与滚动次数分别受剩余列和滚动区高度限制，依据固定 tmux 3.4 的 [REP](https://github.com/tmux/tmux/blob/3.4/input.c#L1568) 和 [scrollup](https://github.com/tmux/tmux/blob/3.4/screen-write.c#L1456)。字形、宽度和换行仍由 xterm 处理。

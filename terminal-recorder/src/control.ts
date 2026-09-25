@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { AppError, limits } from "@kiteline/shared/protocol";
 import { readLines } from "@kiteline/shared/stdio";
 import { tmuxBinary, tmuxEnvironment } from "@kiteline/shared/terminal/node";
-import type { CreateTerminal, RecoverTerminal, TerminalIdentity } from "@kiteline/shared/ipc";
+import type { CreateTerminal, TerminalSource, TerminalIdentity } from "@kiteline/shared/ipc";
 
 interface Pending {
   resolve: (result: string[]) => void;
@@ -62,14 +62,14 @@ export class Control {
   private initialDeath?: number | null;
   identity?: TerminalIdentity;
   constructor(
-    private options: CreateTerminal | RecoverTerminal,
+    private options: TerminalSource,
     private events: ControlEvents,
     private timeout: number,
   ) {}
 
   async start(): Promise<TerminalIdentity> {
     const o = this.options;
-    const creating = "shell" in o;
+    const creating = o.type === "create";
     const config = join(dirname(this.options.socket), "tmux.conf");
     if (creating) await writeFile(config, preset(o), { mode: 0o600 });
     if (this.disposed) throw new AppError("cancelled", "Terminal creation interrupted");
@@ -86,13 +86,16 @@ export class Control {
           String(o.cols),
           "-y",
           String(o.rows),
-          "-c",
-          o.workspacePath,
-          ...(o.command === undefined ? [o.shell, "-l"] : [o.shell, "-lc", o.command]),
+          // tmux removes one escape before a trailing argv semicolon.
+          ...(o.command === undefined ? [o.shell, "-l"] : [o.shell, "-lc", o.command]).map(
+            (value) => value.replace(/;$/, "\\;"),
+          ),
         ]
       : ["attach-session", "-E", "-t", o.tmuxSession];
     if (!creating) this.identity = o;
     this.child = spawn(tmuxBinary, ["-S", o.socket, "-f", config, "-u", "-C", ...command], {
+      // -c expands tmux formats; the new private server inherits this literal cwd.
+      cwd: creating ? o.workspacePath : undefined,
       env: tmuxEnvironment(),
       stdio: "pipe",
     });

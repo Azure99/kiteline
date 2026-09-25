@@ -12,11 +12,13 @@ import type { MetadataStore } from "../metadata.js";
 import { publish } from "../mutations.js";
 import { entryName, locate, protectRoot, readEntry, relativePath, versionOf } from "./paths.js";
 import { renameNoReplace } from "./rename.js";
+import type { TemporaryFiles } from "./temporary.js";
 
 export class Files {
   constructor(
     private metadata: MetadataStore,
     private directories: Directories,
+    private temporary: TemporaryFiles,
   ) {}
 
   async list(
@@ -110,6 +112,7 @@ export class Files {
       const to = join(dirname(path), name);
       if (path === to)
         throw new AppError("invalid_argument", "New name is the same as the original name");
+      await this.temporary.assertRelocatableLocked(source, info);
       signal?.throwIfAborted();
       await renameNoReplace(source.absolute, join(source.parent, name));
       return { from: path, to };

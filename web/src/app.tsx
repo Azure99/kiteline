@@ -49,6 +49,11 @@ import { DraftStore, isDirty } from "./files/drafts";
 import { DraftView } from "./files/draft-view";
 import { OpenFiles } from "./files/open-files";
 import { UploadDialog } from "./files/upload-dialog";
+import {
+  FileOperationDialog,
+  type FileAction,
+  type FileOperationResult,
+} from "./files/operation-dialog";
 import { returnToService } from "./lib/login-return";
 import { PortDialog } from "./devices/port-dialog";
 import { ReleaseNotice } from "./components/release-notice";
@@ -84,6 +89,14 @@ export function App() {
     }[]
   >([]);
   const [activeUpload, setActiveUpload] = useState<string>();
+  const [fileOperation, setFileOperation] = useState<{
+    deviceId: string;
+    workspaceId: string;
+    deviceName: string;
+    workspaceName: string;
+    folder: string;
+    action: FileAction;
+  }>();
   const {
     devices,
     loaded: devicesLoaded,
@@ -189,6 +202,7 @@ export function App() {
       setPortDevice(undefined);
       setUploads([]);
       setActiveUpload(undefined);
+      setFileOperation(undefined);
     };
     window.addEventListener("kiteline:unauthenticated", expire);
     return () => window.removeEventListener("kiteline:unauthenticated", expire);
@@ -202,6 +216,7 @@ export function App() {
       gitActions.clear();
       setUploads([]);
       setActiveUpload(undefined);
+      setFileOperation(undefined);
       setSession(undefined);
     } catch (error) {
       setError({ cause: error });
@@ -480,6 +495,16 @@ export function App() {
                       workspace={workspace}
                       visible={route.tool === "files"}
                       store={drafts}
+                      onOperation={(action, folder) =>
+                        setFileOperation({
+                          deviceId: device.id,
+                          workspaceId: workspace.id,
+                          deviceName: device.name,
+                          workspaceName: workspace.name,
+                          folder,
+                          action,
+                        })
+                      }
                       onUpload={(files, folder) => {
                         const id = newId();
                         setUploads((old) => [
@@ -553,6 +578,29 @@ export function App() {
           }
         />
       ))}
+      {fileOperation && (
+        <FileOperationDialog
+          {...fileOperation}
+          onClose={() => setFileOperation(undefined)}
+          onResult={(items) => {
+            const { deviceId, workspaceId, action } = fileOperation;
+            for (const item of items) {
+              if (action.kind === "copy") continue;
+              if (item.outcome === "succeeded") {
+                if (action.kind === "move")
+                  void drafts.rename(deviceId, workspaceId, item.path, item.targetPath!);
+                else drafts.deleted(deviceId, workspaceId, item.path);
+              } else if (item.outcome === "partial" || item.outcome === "unknown")
+                void drafts.checkMissing(deviceId, workspaceId, item.path);
+            }
+            window.dispatchEvent(
+              new CustomEvent<FileOperationResult>("kiteline:files-operated", {
+                detail: { deviceId, workspaceId, kind: action.kind, items },
+              }),
+            );
+          }}
+        />
+      )}
       {directoryDevice && (
         <DirectoryDialog
           deviceId={directoryDevice.device.id}
