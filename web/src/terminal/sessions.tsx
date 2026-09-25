@@ -3,10 +3,21 @@ import { ApiError } from "../lib/api";
 import { ErrorNotice } from "../components/error-notice";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
-import { Maximize2, PanelBottom, Plus, RefreshCw, X } from "lucide-react";
+import {
+  Folder,
+  GitBranch,
+  Terminal,
+  Maximize2,
+  PanelBottom,
+  Plus,
+  Minimize2,
+  Settings,
+  X,
+} from "lucide-react";
 import type { Device, Workspace } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
 import { IconButton } from "../components/icon-button";
+import { WatchStatus } from "../components/watch-status";
 import { TerminalView, type TerminalActions } from "./terminal-view";
 import { TerminalSettings } from "./settings";
 import { navigateWorkspace, updateWorkspaceQuery, useRoute } from "../lib/navigation";
@@ -52,6 +63,7 @@ export function WorkspaceTerminal({
   const lastRouteSession = useRef<string | null | undefined>(undefined);
   const lastTool = useRef<string | undefined>(undefined);
   const displays = useRef(new Map<string, TerminalActions>());
+  const names = useRef(new Map<string, string>());
   const dockActions = useRef<TerminalActions>(null);
   const [statuses, setStatuses] = useState<Record<string, DisplayState["status"]>>({});
   const [settings, setSettings] = useState(false);
@@ -65,6 +77,21 @@ export function WorkspaceTerminal({
   const dockId =
     layout.dock && (find(layout.dock) || dockActions.current) ? layout.dock : undefined;
   const enabled = device.status === "online" && !remote.busy;
+  const split = !mobile && members.length > 1 && !group?.maximized;
+  const multipleGroups = !mobile && layout.groups.length > 1;
+  function name(id: string) {
+    return find(id)?.name ?? names.current.get(id) ?? t(($) => $.terminal.ended);
+  }
+  useEffect(() => {
+    for (const session of sessions) names.current.set(session.id, session.name);
+    for (const id of names.current.keys())
+      if (
+        !sessions.some((session) => session.id === id) &&
+        !displays.current.has(id) &&
+        !(layout.dock === id && dockActions.current)
+      )
+        names.current.delete(id);
+  }, [sessions, layout, statuses]);
   useEffect(() => {
     layouts.set(key, layout);
   }, [key, layout, layouts]);
@@ -137,6 +164,8 @@ export function WorkspaceTerminal({
     );
   }
   function choose(id: string, dock = false) {
+    if (!find(id) && !(dock ? dockId === id && dockActions.current : displays.current.has(id)))
+      return;
     if (dock) setLayout((old) => ({ ...old, dock: id, dockOpen: true }));
     else applyMain(selectSession(layout, id));
   }
@@ -190,7 +219,7 @@ export function WorkspaceTerminal({
       setAction({ kind, session });
     }
   }
-  function menu(id?: string, dock = false, label?: string) {
+  function menu(id?: string, dock = false, label?: string, includeSettings = true) {
     return (
       <SessionMenu
         id={id}
@@ -203,7 +232,7 @@ export function WorkspaceTerminal({
         onMove={move}
         onSplit={() => void create(false, true)}
         onDirection={(direction) => patchGroup({ direction, maximized: false })}
-        onSettings={() => setSettings(true)}
+        onSettings={includeSettings ? () => setSettings(true) : undefined}
       />
     );
   }
@@ -213,7 +242,21 @@ export function WorkspaceTerminal({
         sessions={sessions}
         selected={dock ? dockId : selected}
         dock={dock}
+        groups={dock ? [] : layout.groups}
+        retained={
+          dock ? (dockId && dockActions.current ? [dockId] : []) : [...displays.current.keys()]
+        }
+        name={name}
+        iconOnly={!dock && (multipleGroups || split)}
         uncertain={remote.uncertainCreate}
+        refreshDisabled={device.status !== "online"}
+        onRefresh={() => void remote.refresh()}
+        onDragStart={
+          !dock && !mobile && selected && !multipleGroups && !split
+            ? (event) => drag.start(event, selected)
+            : undefined
+        }
+        onDragEnd={drag.end}
         onSelect={(id) => choose(id, dock)}
       />
     );
@@ -230,6 +273,48 @@ export function WorkspaceTerminal({
   }
   return (
     <>
+      <div className="flex shrink-0 items-center border-b border-border bg-muted/60 px-4 max-[959px]:px-0">
+        <div
+          role="tablist"
+          aria-label={t(($) => $.shell.tools)}
+          className="flex min-w-0 flex-1 gap-5 max-[959px]:gap-0"
+        >
+          {[
+            { id: "terminal" as const, name: t(($) => $.common.terminal), icon: Terminal },
+            { id: "files" as const, name: t(($) => $.common.files), icon: Folder },
+            { id: "git" as const, name: t(($) => $.common.git), icon: GitBranch },
+          ].map((tool) => (
+            <button
+              key={tool.id}
+              role="tab"
+              aria-selected={route.tool === tool.id}
+              className="tool-tab flex min-h-10 items-center justify-center gap-2 text-sm"
+              onClick={() =>
+                navigateWorkspace({ deviceId: device.id, workspaceId: workspace.id }, tool.id)
+              }
+            >
+              <tool.icon size={15} />
+              {tool.name}
+            </button>
+          ))}
+        </div>
+        {!visible && (
+          <IconButton
+            className="max-[959px]:hidden"
+            label={
+              layout.dockOpen ? t(($) => $.terminal.collapseDock) : t(($) => $.terminal.expandDock)
+            }
+            aria-expanded={layout.dockOpen}
+            aria-controls="companion-terminal"
+            onClick={() =>
+              setLayout((old) => ({ ...old, dockOpen: !old.dockOpen, dock: old.dock ?? selected }))
+            }
+          >
+            <PanelBottom />
+          </IconButton>
+        )}
+      </div>
+      <WatchStatus deviceId={device.id} workspaceId={workspace.id} />
       {!!remote.error && (
         <div
           role="alert"
@@ -246,30 +331,34 @@ export function WorkspaceTerminal({
       <div className={visible ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
         <div className="flex min-h-10 shrink-0 items-center gap-1 border-b border-border bg-muted/50 px-2">
           {picker()}
-          <span className="flex-1" />
+          {!mobile && (multipleGroups || drag.dragging) ? (
+            <GroupTabs
+              layout={layout}
+              name={name}
+              canDrag={(id) => !!find(id) || displays.current.has(id)}
+              drag={drag}
+              onSelect={choose}
+            />
+          ) : (
+            <span className="flex-1" />
+          )}
           {newButtons()}
-          <IconButton
-            label={t(($) => $.terminal.refreshSessions)}
-            disabled={device.status !== "online"}
-            onClick={() => void remote.refresh()}
-          >
-            <RefreshCw />
-          </IconButton>
-          {selected && (
-            <IconButton label={t(($) => $.terminal.closeDisplay)} onClick={() => close(selected)}>
-              <X />
+          {!mobile && group?.maximized && members.length > 1 && (
+            <IconButton
+              label={t(($) => $.terminal.restoreSplit)}
+              onClick={() => patchGroup({ maximized: false })}
+            >
+              <Minimize2 />
             </IconButton>
           )}
-          {menu(selected)}
+          {split ? (
+            <IconButton label={t(($) => $.terminal.settings)} onClick={() => setSettings(true)}>
+              <Settings />
+            </IconButton>
+          ) : (
+            menu(selected)
+          )}
         </div>
-        <GroupTabs
-          layout={layout}
-          sessions={sessions}
-          mobile={mobile}
-          drag={drag}
-          onSelect={choose}
-          ended={new Set(Object.keys(statuses).filter((id) => statuses[id] === "ended"))}
-        />
         {group && members.length ? (
           <SplitPanes
             deviceId={device.id}
@@ -291,11 +380,11 @@ export function WorkspaceTerminal({
                   id,
                   false,
                   t(($) => $.common.actionsNamed, {
-                    name: find(id)?.name ?? t(($) => $.common.terminal),
+                    name: name(id),
                   }),
+                  false,
                 ),
-              dragStart: drag.start,
-              dragEnd: drag.end,
+              drag,
             }}
           />
         ) : (
@@ -308,18 +397,6 @@ export function WorkspaceTerminal({
         )}
       </div>
       <div className={visible ? "hidden" : "flex min-h-0 flex-1 flex-col"}>
-        <div className="flex min-h-9 shrink-0 items-center justify-end border-b border-border px-2 max-[959px]:hidden">
-          <IconButton
-            label={
-              layout.dockOpen ? t(($) => $.terminal.collapseDock) : t(($) => $.terminal.expandDock)
-            }
-            onClick={() =>
-              setLayout((old) => ({ ...old, dockOpen: !old.dockOpen, dock: old.dock ?? selected }))
-            }
-          >
-            <PanelBottom />
-          </IconButton>
-        </div>
         <Group
           id={`companion-${workspace.id}-${layout.dockOpen && !mobile ? "open" : "closed"}`}
           orientation="vertical"
@@ -344,7 +421,10 @@ export function WorkspaceTerminal({
                 defaultSize={`${layout.dockSize}%`}
                 className="flex h-full min-h-0 flex-col"
               >
-                <div className="flex min-h-9 shrink-0 items-center gap-1 border-b border-border bg-muted/50 px-2">
+                <div
+                  id="companion-terminal"
+                  className="flex min-h-9 shrink-0 items-center gap-1 border-b border-border bg-muted/50 px-2"
+                >
                   {picker(true)}
                   <span className="flex-1" />
                   {newButtons(true)}
@@ -356,12 +436,6 @@ export function WorkspaceTerminal({
                         onClick={() => applyMain(selectSession(layout, dockId), "terminal")}
                       >
                         <Maximize2 />
-                      </IconButton>
-                      <IconButton
-                        label={t(($) => $.terminal.closeDock)}
-                        onClick={() => close(dockId, true)}
-                      >
-                        <X />
                       </IconButton>
                     </>
                   )}

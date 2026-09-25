@@ -91,6 +91,20 @@ sudo kiteline-agent service uninstall
 
 更新server后，刷新网页；设备版本不匹配时，在设备详情动作中选“升级agent”，复制命令到该设备的独立终端或SSH执行。命令下载当前server配套包和`.sha256`并调用上述upgrade，无需重新绑定。前台先自行停止，完成后再运行`kiteline-agent run`；systemd沿原方式重启。卸载默认保留状态与环境文件，`--purge-state`只移除agent自己的状态JSON，保留目录和项目文件。
 
+### Agent 出站代理
+
+绑定及控制/数据 WSS 共用环境代理。前台 `bind`/`run` 使用当前 Shell 的环境，例如：
+
+```sh
+export HTTPS_PROXY=http://127.0.0.1:7890
+export NO_PROXY=localhost,127.0.0.1,.internal.example
+kiteline-agent run
+```
+
+systemd 将相同的 `KEY=value` 写入 `/etc/kiteline-agent.env`，不带 `export`，在维护窗口停止/启动服务后生效；只在执行 `systemctl` 的 Shell 中 export 不会改变服务环境。停止会结束终端任务。前台只共用该文件的安装目录项，不自动加载其中的代理变量。
+
+设备本地 HTTP 服务始终直连。新 Shell/AI CLI 继承 agent 的环境，但程序是否使用代理由自身决定；现有任务不会自动更新。同名非空小写变量优先；未配置协议代理时回退 ALL_PROXY，HTTPS 不回退 HTTP_PROXY。NO_PROXY 指定直连目标，仅支持 HTTP(S) 代理。
+
 ### 运行与维护补充
 
 Linux 的 Unix socket 完整路径限 103 字节。显式使用 `/run` 等易失运行目录时，启动前及系统重启后需准备属于运行用户的可写目录。

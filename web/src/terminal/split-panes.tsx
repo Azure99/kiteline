@@ -1,12 +1,13 @@
 import { useTranslation } from "react-i18next";
-import { useEffect, useLayoutEffect, useRef, type DragEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import { Group, Panel, Separator, type GroupImperativeHandle } from "react-resizable-panels";
-import { Maximize2, Minimize2, SquareTerminal, X } from "lucide-react";
+import { Maximize2, SquareTerminal, X } from "lucide-react";
 import type { Session } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
 import { TerminalView, type TerminalActions } from "./terminal-view";
 import type { TerminalGroup } from "./groups";
 import type { DisplayState } from "./display";
+import { memberTarget, type useTerminalDrag } from "./group-tabs";
 
 export interface PaneEvents {
   actions(id: string, value: TerminalActions | null): void;
@@ -15,8 +16,7 @@ export interface PaneEvents {
   close(id: string): void;
   maximize(): void;
   menu(id: string): ReactNode;
-  dragStart(event: DragEvent, id: string): void;
-  dragEnd(): void;
+  drag: ReturnType<typeof useTerminalDrag>;
 }
 export function SplitPanes({
   deviceId,
@@ -98,9 +98,8 @@ export function SplitPanes({
                 workspaceId={workspaceId}
                 session={sessions.find((session) => session.id === id)}
                 active={id === group.active}
-                maximized={group.maximized}
-                multiple={members.length > 1}
-                mobile={mobile}
+                group={group}
+                showHeader={!mobile && !group.maximized && members.length > 1}
                 hidden={single && id !== group.active}
                 events={events}
               />
@@ -118,9 +117,8 @@ function TerminalPane({
   workspaceId,
   session,
   active,
-  maximized,
-  multiple,
-  mobile,
+  group,
+  showHeader,
   hidden,
   events,
 }: {
@@ -129,9 +127,8 @@ function TerminalPane({
   workspaceId: string;
   session?: Session;
   active: boolean;
-  maximized: boolean;
-  multiple: boolean;
-  mobile: boolean;
+  group: TerminalGroup;
+  showHeader: boolean;
   hidden: boolean;
   events: PaneEvents;
 }) {
@@ -153,39 +150,53 @@ function TerminalPane({
       onPointerDown={() => events.focus(id)}
       onFocusCapture={() => events.focus(id)}
     >
-      <header className="terminal-pane-header flex min-h-8 shrink-0 items-center gap-1 px-2 max-[959px]:hidden">
-        <button
-          draggable={!mobile}
-          onDragStart={(event) => events.dragStart(event, id)}
-          onDragEnd={events.dragEnd}
-          onClick={() => {
-            events.focus(id);
-            actions.current?.focus();
-          }}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left text-xs"
-          title={name.current ?? t(($) => $.common.terminal)}
+      {showHeader && (
+        <header
+          className="terminal-pane-header flex min-h-8 shrink-0 items-center gap-1 px-2"
+          data-direction={group.direction}
+          data-drop-before={events.drag.target?.key === `${id}:before`}
+          data-drop-after={events.drag.target?.key === `${id}:after`}
+          onDragOver={(event) =>
+            events.drag.over(
+              event,
+              memberTarget(event, group, id, group.direction === "horizontal"),
+            )
+          }
+          onDrop={(event) =>
+            events.drag.drop(
+              event,
+              memberTarget(event, group, id, group.direction === "horizontal"),
+            )
+          }
         >
-          <SquareTerminal size={13} className="shrink-0" />
-          <span className="truncate">{name.current ?? t(($) => $.common.terminal)}</span>
-        </button>
-        {multiple && (
-          <IconButton
-            label={maximized ? t(($) => $.terminal.restoreSplit) : t(($) => $.terminal.maximize)}
-            onClick={events.maximize}
+          <button
+            draggable
+            onDragStart={(event) => events.drag.start(event, id)}
+            onDragEnd={events.drag.end}
+            onClick={() => {
+              events.focus(id);
+              actions.current?.focus();
+            }}
+            className="flex min-w-0 flex-1 items-center gap-2 text-left text-xs"
+            title={name.current ?? t(($) => $.common.terminal)}
           >
-            {maximized ? <Minimize2 /> : <Maximize2 />}
+            <SquareTerminal size={13} className="shrink-0" />
+            <span className="truncate">{name.current ?? t(($) => $.common.terminal)}</span>
+          </button>
+          <IconButton label={t(($) => $.terminal.maximize)} onClick={events.maximize}>
+            <Maximize2 />
           </IconButton>
-        )}
-        {events.menu(id)}
-        <IconButton
-          label={t(($) => $.terminal.closeNamed, {
-            name: name.current ?? t(($) => $.common.terminal),
-          })}
-          onClick={() => events.close(id)}
-        >
-          <X />
-        </IconButton>
-      </header>
+          {events.menu(id)}
+          <IconButton
+            label={t(($) => $.terminal.closeNamed, {
+              name: name.current ?? t(($) => $.common.terminal),
+            })}
+            onClick={() => events.close(id)}
+          >
+            <X />
+          </IconButton>
+        </header>
+      )}
       <TerminalView
         ref={actions}
         deviceId={deviceId}

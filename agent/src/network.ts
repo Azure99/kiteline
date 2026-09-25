@@ -1,0 +1,76 @@
+import { Agent as HttpsAgent } from "node:https";
+import type { ConnectionOptions } from "node:tls";
+import { getProxyForUrl } from "proxy-from-env";
+import { HttpsProxyAgent } from "https-proxy-agent";
+import { Agent, Pool, ProxyAgent } from "undici";
+import { WebSocket, type ClientOptions } from "ws";
+
+function proxyFor(target: string | URL) {
+  const url = new URL(target);
+  if (url.protocol === "wss:") url.protocol = "https:";
+  const proxy = getProxyForUrl(url.href);
+  if (proxy && !["http:", "https:"].includes(new URL(proxy).protocol))
+    throw new Error("Agent environment proxy must use HTTP or HTTPS");
+  return proxy;
+}
+
+export async function fetchServerJson(url: URL, options: RequestInit) {
+  const controller = new AbortController();
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, controller.signal])
+    : controller.signal;
+  // Node accepts the net cancellation option in TLS connectors too.
+  const tlsOptions: ConnectionOptions & { signal: AbortSignal } = { signal };
+  const dispatcher = new Agent({
+    factory(origin) {
+      const proxy = proxyFor(origin);
+      if (!proxy) return new Pool(origin, { connect: { signal } });
+      const { username, password } = new URL(proxy);
+      // Undici's URL authentication omits credentials with an empty password.
+      const token =
+        username || password
+          ? `Basic ${Buffer.from(`${decodeURIComponent(username)}:${decodeURIComponent(password)}`).toString("base64")}`
+          : undefined;
+      return new ProxyAgent({ uri: proxy, token, proxyTls: tlsOptions, requestTls: tlsOptions });
+    },
+  });
+  try {
+    const request = { ...options, dispatcher, signal };
+    const response = await fetch(url, request);
+    return { ok: response.ok, body: (await response.json()) as unknown };
+  } finally {
+    controller.abort();
+    await dispatcher.destroy();
+  }
+}
+
+export function connectServerSocket(
+  url: URL,
+  options: ClientOptions & { handshakeTimeout: number },
+) {
+  const proxy = proxyFor(url);
+  const controller = new AbortController();
+  const agent = proxy
+    ? new HttpsProxyAgent(proxy, { signal: controller.signal })
+    : new HttpsAgent();
+  let socket: WebSocket;
+  try {
+    socket = new WebSocket(url, { ...options, agent });
+  } catch (error) {
+    controller.abort();
+    agent.destroy();
+    throw error;
+  }
+  // ws's handshake timeout does not cover an Agent's pending CONNECT/TLS dial.
+  const deadline = setTimeout(() => {
+    controller.abort(new Error("Server connection timed out"));
+    socket.terminate();
+  }, options.handshakeTimeout);
+  socket.once("open", () => clearTimeout(deadline));
+  socket.once("close", () => {
+    clearTimeout(deadline);
+    controller.abort();
+    agent.destroy();
+  });
+  return socket;
+}

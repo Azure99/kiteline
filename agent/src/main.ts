@@ -11,6 +11,7 @@ import { doctorCli } from "./doctor.js";
 import { installCli, serviceCli } from "./service.js";
 import { checkPrerequisites } from "./prerequisites.js";
 import { installDirectory, lockInstallation, packageDirectory } from "./installation.js";
+import { fetchServerJson } from "./network.js";
 
 async function input(prompt: string) {
   if (!process.stdin.isTTY) {
@@ -96,13 +97,13 @@ async function main() {
       const code = await input("Binding code: ");
       let value: Record<string, unknown>;
       try {
-        const response = await fetch(new URL("/api/agent/bind", server), {
+        const response = await fetchServerJson(new URL("/api/agent/bind", server), {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ code, name: hostname() }),
           signal: AbortSignal.timeout(config.limits.channelPairTimeout),
         });
-        value = record(await response.json());
+        value = record(response.body);
         if (!response.ok)
           throw new AppError(String(record(value.error).code), String(record(value.error).message));
       } catch (error) {
@@ -153,6 +154,6 @@ async function main() {
   }
 }
 main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : error);
+  console.error(error);
   process.exitCode = 1;
 });

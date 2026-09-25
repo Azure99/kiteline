@@ -78,6 +78,8 @@ export const en = {
     invalidCredentials: "Check your sign-in credentials.",
   },
   shell: {
+    collapseSidebar: "Collapse device sidebar",
+    expandSidebar: "Expand device sidebar",
     switchWorkspace: "Switch device and workspace",
     deviceWorkspaces: "Devices and workspaces",
     openPort: "Open port",
@@ -201,7 +203,6 @@ export const en = {
     expandDock: "Expand terminal panel",
     resizeDock: "Resize terminal panel",
     expandTerminal: "Open in Terminal",
-    closeDock: "Close panel display",
     selectSession: "Select terminal session",
     taskEnded: "The original task has ended",
     recoveryFailed: "Terminal recovery failed",

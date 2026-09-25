@@ -13,6 +13,7 @@ import type { AgentConfig, Identity } from "../config.js";
 import type { TextFiles, FileRead, TextWrite } from "./text.js";
 import type { BinaryFiles, UploadWrite } from "./binary.js";
 import type { TemporaryFiles } from "./temporary.js";
+import { connectServerSocket } from "../network.js";
 
 interface Channel {
   socket: WebSocket;
@@ -49,7 +50,7 @@ export class FileChannels {
     const url = new URL(`/api/agent/channels/${encodeURIComponent(id)}`, this.identity.server);
     url.protocol = "wss:";
     url.searchParams.set("connectionId", connectionId);
-    const socket = new WebSocket(url, {
+    const socket = connectServerSocket(url, {
       headers: { authorization: `Bearer ${this.identity.deviceToken}` },
       maxPayload: limits.controlMessageBytes,
       handshakeTimeout: this.config.limits.channelPairTimeout,

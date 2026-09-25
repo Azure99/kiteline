@@ -188,11 +188,19 @@ select {
   outline: 2px solid var(--primary);
   outline-offset: -2px;
 }
-.terminal-member[data-drop-before="true"] {
+.terminal-member[data-drop-before="true"],
+.terminal-pane-header[data-drop-before="true"] {
   box-shadow: inset 3px 0 var(--primary);
 }
-.terminal-member[data-drop-after="true"] {
+.terminal-member[data-drop-after="true"],
+.terminal-pane-header[data-drop-after="true"] {
   box-shadow: inset -3px 0 var(--primary);
+}
+.terminal-pane-header[data-direction="vertical"][data-drop-before="true"] {
+  box-shadow: inset 0 3px var(--primary);
+}
+.terminal-pane-header[data-direction="vertical"][data-drop-after="true"] {
+  box-shadow: inset 0 -3px var(--primary);
 }
 .split-divider {
   flex-shrink: 0;

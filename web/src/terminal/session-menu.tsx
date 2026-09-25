@@ -54,7 +54,7 @@ export function SessionMenu({
   onMove(id: string, target?: string, before?: string): void;
   onSplit(): void;
   onDirection(direction: "horizontal" | "vertical"): void;
-  onSettings(): void;
+  onSettings?(): void;
 }) {
   const { t } = useTranslation();
 
@@ -76,10 +76,12 @@ export function SessionMenu({
         <MoreHorizontal />
       </MenuTrigger>
       <MenuContent>
-        <MenuItem onClick={onSettings}>
-          <Settings />
-          {t(($) => $.terminal.settings)}
-        </MenuItem>
+        {onSettings && (
+          <MenuItem onClick={onSettings}>
+            <Settings />
+            {t(($) => $.terminal.settings)}
+          </MenuItem>
+        )}
         {id && (
           <>
             {!dock && (

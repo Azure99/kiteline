@@ -43,6 +43,7 @@ import { HttpChannels } from "./http/channels.js";
 import { listeningPorts } from "./http/ports.js";
 import { diagnose } from "./doctor.js";
 import { TemporaryFiles } from "./files/temporary.js";
+import { connectServerSocket } from "./network.js";
 
 const gitWriteMethods = new Set([
   "git.stage",
@@ -174,11 +175,19 @@ export class Agent {
     url.searchParams.set("protocolVersion", String(protocolVersion));
     url.searchParams.set("appVersion", appVersion);
     url.protocol = "wss:";
-    const socket = new WebSocket(url, {
-      headers: { authorization: `Bearer ${this.identity.deviceToken}` },
-      maxPayload: limits.controlMessageBytes,
-      handshakeTimeout: this.config.limits.channelPairTimeout,
-    });
+    let socket: WebSocket;
+    try {
+      socket = connectServerSocket(url, {
+        headers: { authorization: `Bearer ${this.identity.deviceToken}` },
+        maxPayload: limits.controlMessageBytes,
+        handshakeTimeout: this.config.limits.channelPairTimeout,
+      });
+    } catch (error) {
+      this.connectionError = asError(error).message;
+      console.error("Control connection:", this.connectionError);
+      this.scheduleReconnect();
+      return;
+    }
     let failure: string | undefined;
     this.socket = socket;
     let lastPong = Date.now();
@@ -343,9 +352,12 @@ export class Agent {
         console.error(`Remote connection stopped: ${reason.toString()}`);
         return;
       }
-      this.reconnect = setTimeout(() => this.connect(), this.delay + Math.random() * 300);
-      this.delay = Math.min(30_000, this.delay * 2);
+      this.scheduleReconnect();
     });
+  }
+  private scheduleReconnect() {
+    this.reconnect = setTimeout(() => this.connect(), this.delay + Math.random() * 300);
+    this.delay = Math.min(30_000, this.delay * 2);
   }
   dispatch(
     method: string,

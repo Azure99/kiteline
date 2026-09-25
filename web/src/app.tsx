@@ -1,10 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { LanguageMenu } from "./components/language-menu";
+import { LanguageMenu, LanguageOptions } from "./components/language-menu";
 import {
-  ChevronRight,
-  Folder,
-  GitBranch,
+  ChevronDown,
   LogOut,
   MoreHorizontal,
   RefreshCw,
@@ -13,19 +11,14 @@ import {
   X,
   Upload,
   Globe,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import type { BrowserEvent, Device } from "@kiteline/shared/protocol";
 import { Auth, type Session } from "./auth";
 import { ApiError, api, errorMessage, post } from "./lib/api";
 import { ErrorDetails, ErrorNotice } from "./components/error-notice";
-import {
-  currentPath,
-  devicePath,
-  navigate,
-  navigateWorkspace,
-  useRoute,
-  workspacePath,
-} from "./lib/navigation";
+import { currentPath, devicePath, navigate, useRoute, workspacePath } from "./lib/navigation";
 import { useDevices } from "./use-devices";
 import { Button } from "./components/ui/button";
 import {
@@ -48,7 +41,6 @@ import type { TerminalLayout } from "./terminal/groups";
 import { Files } from "./files/files";
 import { GitTool } from "./git/git";
 import { GitActions } from "./git/actions";
-import { WatchStatus } from "./components/watch-status";
 import { DraftStore, isDirty } from "./files/drafts";
 import { DraftView } from "./files/draft-view";
 import { OpenFiles } from "./files/open-files";
@@ -70,6 +62,7 @@ export function App() {
   const [error, setError] = useState<{ cause: unknown; downloadPath?: string }>();
   const [binding, setBinding] = useState(false);
   const [picker, setPicker] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [directoryDevice, setDirectoryDevice] = useState<{ device: Device; origin: string }>();
   const [action, setAction] = useState<DeviceAction>();
   const [portDevice, setPortDevice] = useState<string>();
@@ -251,28 +244,51 @@ export function App() {
   return (
     <>
       <div className="flex h-[var(--app-height,100dvh)] min-h-0 flex-col overflow-hidden">
-        <header className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3 max-[959px]:flex-wrap max-[959px]:gap-y-0">
-          <button
-            className="hidden w-48 shrink-0 items-center gap-2 text-sm font-semibold min-[960px]:flex"
-            onClick={() => choose("/devices")}
-          >
-            <span className="flex size-6 items-center justify-center rounded bg-primary text-white">
-              <Terminal size={17} />
-            </span>
-            Kiteline
-          </button>
+        <header className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3 max-[959px]:gap-1 max-[959px]:px-2">
+          <div className="hidden shrink-0 items-center gap-2 min-[960px]:flex">
+            <IconButton
+              label={
+                sidebarOpen ? t(($) => $.shell.collapseSidebar) : t(($) => $.shell.expandSidebar)
+              }
+              aria-expanded={sidebarOpen}
+              aria-controls="device-sidebar"
+              onClick={() => setSidebarOpen((open) => !open)}
+            >
+              {sidebarOpen ? <PanelLeftClose /> : <PanelLeftOpen />}
+            </IconButton>
+            <button
+              className="flex items-center gap-2 text-sm font-semibold"
+              onClick={() => choose("/devices")}
+            >
+              <span className="flex size-6 items-center justify-center rounded bg-primary text-white">
+                <Terminal size={17} />
+              </span>
+              Kiteline
+            </button>
+          </div>
           <Dialog open={picker} onOpenChange={setPicker}>
             <DialogTrigger
               render={
                 <Button
                   variant="ghost"
-                  size="icon"
-                  className="min-[960px]:hidden"
+                  className="min-w-0 flex-1 shrink justify-start px-2 text-left"
                   aria-label={t(($) => $.shell.switchWorkspace)}
+                  title={workspace ? `${device?.name} / ${workspace.name}` : device?.name}
                 />
               }
             >
               <Server />
+              <span className="flex min-w-0 flex-col min-[960px]:flex-row min-[960px]:items-center min-[960px]:gap-2">
+                <span className="truncate">
+                  {workspace?.name ?? device?.name ?? t(($) => $.common.devices)}
+                </span>
+                {workspace && (
+                  <span className="truncate text-xs font-normal text-muted-foreground">
+                    {device?.name}
+                  </span>
+                )}
+              </span>
+              <ChevronDown />
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
@@ -281,25 +297,8 @@ export function App() {
               <div className="scroll-area overflow-auto">{navigation}</div>
             </DialogContent>
           </Dialog>
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5 py-2 text-sm max-[959px]:order-last max-[959px]:basis-full max-[959px]:pt-0">
-            <button
-              onClick={() => choose(device ? devicePath(device.id) : "/devices")}
-              className="max-w-full truncate"
-              title={device?.name}
-            >
-              {device?.name ?? t(($) => $.common.devices)}
-            </button>
-            {workspace && (
-              <>
-                <ChevronRight size={13} className="shrink-0 text-muted-foreground" />
-                <span className="max-w-full truncate font-medium" title={workspace.path}>
-                  {workspace.name}
-                </span>
-              </>
-            )}
-          </div>
           <span
-            className="status-dot max-[959px]:ml-auto"
+            className="status-dot"
             data-status={connected ? "online" : "offline"}
             title={connected ? t(($) => $.common.connected) : t(($) => $.common.disconnected)}
             aria-label={connected ? t(($) => $.common.connected) : t(($) => $.common.disconnected)}
@@ -310,40 +309,65 @@ export function App() {
               <Globe />
             </IconButton>
           )}
-          {!!uploads.length && (
-            <Menu>
-              <MenuTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={t(($) => $.shell.uploadStatus, { count: uploads.length })}
-                  />
-                }
-              >
-                <Upload />
-              </MenuTrigger>
-              <MenuContent>
+          <div className="hidden items-center gap-2 min-[960px]:flex">
+            {!!uploads.length && (
+              <Menu>
+                <MenuTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={t(($) => $.shell.uploadStatus, { count: uploads.length })}
+                    />
+                  }
+                >
+                  <Upload />
+                </MenuTrigger>
+                <MenuContent>
+                  {uploads.map((item) => (
+                    <MenuItem key={item.id} onClick={() => setActiveUpload(item.id)}>
+                      <span className="min-w-0 break-all" title={item.label}>
+                        {item.label} · {item.files.length.toLocaleString(i18n.resolvedLanguage)}
+                      </span>
+                    </MenuItem>
+                  ))}
+                </MenuContent>
+              </Menu>
+            )}
+            <LanguageMenu />
+          </div>
+          <Menu>
+            <MenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="relative"
+                  aria-label={t(($) => $.shell.ownerMenu)}
+                />
+              }
+            >
+              <MoreHorizontal />
+              {!!uploads.length && (
+                <span
+                  className="absolute right-1 top-1 size-1.5 rounded-full bg-primary min-[960px]:hidden"
+                  aria-label={t(($) => $.shell.uploadStatus, { count: uploads.length })}
+                />
+              )}
+            </MenuTrigger>
+            <MenuContent>
+              <div className="min-[960px]:hidden">
+                <LanguageOptions />
+                <div className="my-1 border-t border-border" />
                 {uploads.map((item) => (
                   <MenuItem key={item.id} onClick={() => setActiveUpload(item.id)}>
-                    <span className="min-w-0 break-all" title={item.label}>
+                    <Upload />
+                    <span className="min-w-0 break-all">
                       {item.label} · {item.files.length.toLocaleString(i18n.resolvedLanguage)}
                     </span>
                   </MenuItem>
                 ))}
-              </MenuContent>
-            </Menu>
-          )}
-          <LanguageMenu />
-          <Menu>
-            <MenuTrigger
-              render={
-                <Button variant="ghost" size="icon" aria-label={t(($) => $.shell.ownerMenu)} />
-              }
-            >
-              <MoreHorizontal />
-            </MenuTrigger>
-            <MenuContent>
+              </div>
               <MenuItem onClick={() => void logout()}>
                 <LogOut />
                 {t(($) => $.shell.logout)}
@@ -353,7 +377,11 @@ export function App() {
         </header>
         <ReleaseNotice />
         <div className="flex min-h-0 flex-1">
-          <aside className="desktop-rail scroll-area shrink-0 overflow-auto border-r border-border bg-muted/60">
+          <aside
+            id="device-sidebar"
+            hidden={!sidebarOpen}
+            className="desktop-rail scroll-area shrink-0 overflow-auto border-r border-border bg-muted/60"
+          >
             {navigation}
           </aside>
           <main className="flex min-w-0 flex-1 flex-col">
@@ -410,38 +438,6 @@ export function App() {
                 <p className="p-6 text-muted-foreground">{t(($) => $.shell.workspaceRemoved)}</p>
               ) : (
                 <>
-                  <div
-                    role="tablist"
-                    aria-label={t(($) => $.shell.tools)}
-                    className="flex shrink-0 gap-5 border-b border-border bg-muted/60 px-4 max-[959px]:gap-0 max-[959px]:px-0"
-                  >
-                    {[
-                      {
-                        id: "terminal" as const,
-                        name: t(($) => $.common.terminal),
-                        icon: Terminal,
-                      },
-                      { id: "files" as const, name: t(($) => $.common.files), icon: Folder },
-                      { id: "git" as const, name: t(($) => $.common.git), icon: GitBranch },
-                    ].map((tool) => (
-                      <button
-                        key={tool.id}
-                        role="tab"
-                        aria-selected={route.tool === tool.id}
-                        className="tool-tab flex min-h-10 items-center justify-center gap-2 text-sm"
-                        onClick={() =>
-                          navigateWorkspace(
-                            { deviceId: device.id, workspaceId: workspace.id },
-                            tool.id,
-                          )
-                        }
-                      >
-                        <tool.icon size={15} />
-                        {tool.name}
-                      </button>
-                    ))}
-                  </div>
-                  <WatchStatus deviceId={device.id} workspaceId={workspace.id} />
                   <WorkspaceTerminal
                     key={`${device.id}:${workspace.id}`}
                     device={device}

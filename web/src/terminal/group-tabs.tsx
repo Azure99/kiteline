@@ -1,10 +1,25 @@
 import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { SquareTerminal } from "lucide-react";
-import type { Session } from "@kiteline/shared/protocol";
-import type { TerminalLayout } from "./groups";
+import type { TerminalGroup, TerminalLayout } from "./groups";
 
 type Target = { groupId?: string; before?: string; key: string };
+export function memberTarget(
+  event: DragEvent,
+  group: TerminalGroup,
+  id: string,
+  horizontal = true,
+): Target {
+  const bounds = event.currentTarget.getBoundingClientRect();
+  const after = horizontal
+    ? event.clientX > bounds.left + bounds.width / 2
+    : event.clientY > bounds.top + bounds.height / 2;
+  return {
+    groupId: group.id,
+    before: after ? group.members[group.members.indexOf(id) + 1] : id,
+    key: `${id}:${after ? "after" : "before"}`,
+  };
+}
 export function useTerminalDrag(
   enabled: boolean,
   move: (id: string, groupId?: string, before?: string) => void,
@@ -48,16 +63,14 @@ export function useTerminalDrag(
 }
 export function GroupTabs({
   layout,
-  sessions,
-  ended,
-  mobile,
+  name,
+  canDrag,
   drag,
   onSelect,
 }: {
   layout: TerminalLayout;
-  sessions: Session[];
-  ended: ReadonlySet<string>;
-  mobile: boolean;
+  name(id: string): string;
+  canDrag(id: string): boolean;
   drag: ReturnType<typeof useTerminalDrag>;
   onSelect(id: string): void;
 }) {
@@ -65,7 +78,7 @@ export function GroupTabs({
 
   if (!layout.groups.length) return null;
   return (
-    <div className="terminal-groups scroll-area flex shrink-0 items-center gap-2 overflow-x-auto border-b border-border px-2 py-1.5">
+    <div className="terminal-groups scroll-area flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
       {layout.groups.map((group, index) => {
         const target = { groupId: group.id, key: group.id };
         return (
@@ -78,19 +91,7 @@ export function GroupTabs({
             onDragOver={(event) => drag.over(event, target)}
             onDrop={(event) => drag.drop(event, target)}
           >
-            {group.members.map((id, memberIndex) => {
-              const name =
-                sessions.find((session) => session.id === id)?.name ??
-                (ended.has(id) ? t(($) => $.terminal.ended) : t(($) => $.common.terminal));
-              function position(event: DragEvent) {
-                const bounds = event.currentTarget.getBoundingClientRect();
-                const after = event.clientX > bounds.left + bounds.width / 2;
-                return {
-                  groupId: group.id,
-                  before: after ? group.members[memberIndex + 1] : id,
-                  key: `${id}:${after ? "after" : "before"}`,
-                };
-              }
+            {group.members.map((id) => {
               return (
                 <button
                   key={id}
@@ -100,21 +101,21 @@ export function GroupTabs({
                   data-drop-before={drag.target?.key === `${id}:before`}
                   data-drop-after={drag.target?.key === `${id}:after`}
                   onClick={() => onSelect(id)}
-                  draggable={!mobile}
+                  draggable={canDrag(id)}
                   onDragStart={(event) => drag.start(event, id)}
                   onDragEnd={drag.end}
                   onDragOver={(event) => {
                     event.stopPropagation();
-                    drag.over(event, position(event));
+                    drag.over(event, memberTarget(event, group, id));
                   }}
                   onDrop={(event) => {
                     event.stopPropagation();
-                    drag.drop(event, position(event));
+                    drag.drop(event, memberTarget(event, group, id));
                   }}
-                  title={name}
+                  title={name(id)}
                 >
                   <SquareTerminal size={13} className="shrink-0" />
-                  <span className="truncate">{name}</span>
+                  <span className="truncate">{name(id)}</span>
                 </button>
               );
             })}

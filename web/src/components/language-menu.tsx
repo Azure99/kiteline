@@ -12,15 +12,23 @@ export function LanguageMenu() {
         <Languages />
       </MenuTrigger>
       <MenuContent>
-        <MenuRadioGroup
-          value={languagePreference()}
-          onValueChange={(value) => void setLanguagePreference(value as LanguagePreference)}
-        >
-          <MenuRadioItem value="auto">{t(($) => $.common.browserLanguage)}</MenuRadioItem>
-          <MenuRadioItem value="en">English</MenuRadioItem>
-          <MenuRadioItem value="zh-CN">简体中文</MenuRadioItem>
-        </MenuRadioGroup>
+        <LanguageOptions />
       </MenuContent>
     </Menu>
+  );
+}
+
+export function LanguageOptions() {
+  const { t } = useTranslation();
+  return (
+    <MenuRadioGroup
+      aria-label={t(($) => $.common.language)}
+      value={languagePreference()}
+      onValueChange={(value) => void setLanguagePreference(value as LanguagePreference)}
+    >
+      <MenuRadioItem value="auto">{t(($) => $.common.browserLanguage)}</MenuRadioItem>
+      <MenuRadioItem value="en">English</MenuRadioItem>
+      <MenuRadioItem value="zh-CN">简体中文</MenuRadioItem>
+    </MenuRadioGroup>
   );
 }

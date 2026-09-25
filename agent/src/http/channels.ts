@@ -4,6 +4,7 @@ import { WebSocket } from "ws";
 import { AppError, asError, integer, limits, record } from "@kiteline/shared/protocol";
 import { httpStream } from "@kiteline/shared/http-stream";
 import type { AgentConfig, Identity } from "../config.js";
+import { connectServerSocket } from "../network.js";
 
 interface Channel {
   socket: WebSocket;
@@ -29,7 +30,7 @@ export class HttpChannels {
     const url = new URL(`/api/agent/channels/${encodeURIComponent(id)}`, this.identity.server);
     url.protocol = "wss:";
     url.searchParams.set("connectionId", connectionId);
-    const socket = new WebSocket(url, {
+    const socket = connectServerSocket(url, {
       headers: { authorization: `Bearer ${this.identity.deviceToken}` },
       maxPayload: limits.dataChunkBytes,
       handshakeTimeout: this.config.limits.channelPairTimeout,

@@ -78,6 +78,8 @@ export const zhCN = {
     invalidCredentials: "请核对登录凭据。",
   },
   shell: {
+    collapseSidebar: "收起设备侧栏",
+    expandSidebar: "展开设备侧栏",
     switchWorkspace: "切换设备和 workspace",
     deviceWorkspaces: "设备与 workspace",
     openPort: "访问端口",
@@ -198,7 +200,6 @@ export const zhCN = {
     expandDock: "展开配套终端",
     resizeDock: "调整配套终端高度",
     expandTerminal: "在 Terminal 展开",
-    closeDock: "关闭配套显示",
     selectSession: "选择终端会话",
     taskEnded: "原任务已结束",
     recoveryFailed: "终端恢复失败",

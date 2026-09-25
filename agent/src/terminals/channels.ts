@@ -12,6 +12,7 @@ import type { RecorderMessage, RecorderRequest } from "@kiteline/shared/ipc";
 import { heartbeat, sendFrame } from "@kiteline/shared/ws";
 import type { AgentConfig, Identity } from "../config.js";
 import type { Sessions } from "./sessions.js";
+import { connectServerSocket } from "../network.js";
 
 interface Channel {
   id: string;
@@ -41,7 +42,7 @@ export class TerminalChannels {
     const url = new URL(`/api/agent/channels/${encodeURIComponent(id)}`, this.identity.server);
     url.protocol = "wss:";
     url.searchParams.set("connectionId", connectionId);
-    const socket = new WebSocket(url, {
+    const socket = connectServerSocket(url, {
       headers: { authorization: `Bearer ${this.identity.deviceToken}` },
       maxPayload: limits.controlMessageBytes,
       handshakeTimeout: this.config.limits.channelPairTimeout,

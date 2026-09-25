@@ -50,7 +50,10 @@ export function DeviceNavigation({
             >
               <span className="status-dot" data-status={d.status} />
               <Server size={15} className="shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1 truncate" title={d.name}>
+              <span
+                className="min-w-0 flex-1 truncate max-[959px]:whitespace-normal max-[959px]:break-all"
+                title={d.name}
+              >
                 {d.name}
               </span>
             </button>
@@ -83,7 +86,10 @@ export function DeviceNavigation({
                 }
               >
                 <Folder size={14} className="shrink-0" />
-                <span className="min-w-0 truncate" title={w.path}>
+                <span
+                  className="min-w-0 truncate max-[959px]:whitespace-normal max-[959px]:break-all"
+                  title={w.path}
+                >
                   {w.name}
                 </span>
               </button>
