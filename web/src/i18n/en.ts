@@ -1,4 +1,8 @@
 export const en = {
+  home: {
+    open: "Kiteline home",
+    recentWorkspaces: "Recent workspaces",
+  },
   release: {
     webMismatch:
       "Web {{web}} / Server {{server}}: remote operations are paused. Copy any unsaved content before reloading.",
@@ -192,7 +196,18 @@ export const en = {
     terminals_one: "{{count, number}} terminal",
     terminals_other: "{{count, number}} terminals",
   },
+  shortcutIcons: {
+    terminal: "Terminal",
+    sparkles: "Sparkles",
+    code: "Code",
+    bot: "Assistant",
+    rocket: "Rocket",
+    wrench: "Tools",
+    search: "Search",
+    play: "Run",
+  },
   terminal: {
+    shortcutIcon: "Icon",
     missing: "Terminal not found or already ended",
     refreshSessions: "Refresh sessions",
     closeDisplay: "Close display",
@@ -231,11 +246,13 @@ export const en = {
     actions: "Terminal actions",
     settings: "Terminal settings",
     createSplit: "New split terminal",
+    splitRight: "Split right",
+    splitDown: "Split down",
     separateGroup: "Move to a new group",
     moveEarlier: "Move earlier",
     moveLater: "Move later",
-    horizontal: "Split horizontally",
-    vertical: "Split vertically",
+    horizontal: "Arrange group horizontally",
+    vertical: "Arrange group vertically",
     fontLarger: "Increase font size",
     fontSmaller: "Decrease font size",
     localCommand: "Local attach command",

@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import { ErrorNotice } from "../components/error-notice";
 import { useEffect, useRef, useState } from "react";
 import { Pencil, Plus, Save, Trash2, X } from "lucide-react";
-import type { Device, RpcParams } from "@kiteline/shared/protocol";
+import { shortcutIcons, type Device, type RpcParams } from "@kiteline/shared/protocol";
 import { rpc } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "../components/ui/dialog";
 import { IconButton } from "../components/icon-button";
+import { ShortcutIcon } from "./shortcut-icon";
 
 export function TerminalSettings({ device, onClose }: { device: Device; onClose: () => void }) {
   const { t } = useTranslation();
@@ -105,6 +106,7 @@ export function TerminalSettings({ device, onClose }: { device: Device; onClose:
             <div className="divide-y divide-border border-y border-border">
               {shortcuts.map((shortcut) => (
                 <div key={shortcut.id} className="flex items-center gap-2 py-2">
+                  <ShortcutIcon icon={shortcut.icon} />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium">{shortcut.name}</p>
                     <p
@@ -156,6 +158,23 @@ export function TerminalSettings({ device, onClose }: { device: Device; onClose:
                   });
                 }}
               >
+                <fieldset className="space-y-1" disabled={busy}>
+                  <legend className="text-sm">{t(($) => $.terminal.shortcutIcon)}</legend>
+                  <div className="grid w-fit grid-cols-8 gap-1 max-[959px]:grid-cols-4">
+                    {shortcutIcons.map((icon) => (
+                      <IconButton
+                        key={icon}
+                        type="button"
+                        label={t(($) => $.shortcutIcons[icon])}
+                        aria-pressed={(editing.icon ?? "terminal") === icon}
+                        className="aria-pressed:border-primary aria-pressed:bg-accent aria-pressed:text-primary"
+                        onClick={() => editShortcut({ ...editing, icon })}
+                      >
+                        <ShortcutIcon icon={icon} />
+                      </IconButton>
+                    ))}
+                  </div>
+                </fieldset>
                 <label className="block space-y-1 text-sm">
                   <span>{t(($) => $.common.name)}</span>
                   <Input

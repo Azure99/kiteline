@@ -12,6 +12,9 @@ import {
   Settings,
   Trash2,
   Download,
+  FileText,
+  GitBranch,
+  Terminal,
 } from "lucide-react";
 import type { Device } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
@@ -22,27 +25,79 @@ import { useEffect, useState } from "react";
 import { TerminalSettings } from "../terminal/settings";
 import { rpc } from "../lib/api";
 import { UpgradeDialog } from "./upgrade-dialog";
+import type { RecentWorkspace } from "./recent-workspaces";
 
-export function DeviceList({
+const toolIcons = { terminal: Terminal, files: FileText, git: GitBranch };
+
+export function Home({
   devices,
+  recents,
   onNavigate,
   onBind,
 }: {
   devices: Device[];
+  recents: RecentWorkspace[];
   onNavigate: (path: string) => void;
   onBind: () => void;
 }) {
   const { t } = useTranslation();
+  const recentTargets = recents.flatMap((entry) => {
+    const device = devices.find((item) => item.id === entry.deviceId && item.status !== "revoked");
+    const workspace = device?.snapshot?.workspaces.find((item) => item.id === entry.workspaceId);
+    return device && workspace ? [{ entry, device, workspace }] : [];
+  });
 
   return (
     <section className="scroll-area overflow-auto p-5">
       <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-base font-semibold">{t(($) => $.common.devices)}</h1>
+        <h1 className="text-base font-semibold">Kiteline</h1>
         <Button onClick={() => onBind()}>
           <Plus />
           {t(($) => $.devices.bind)}
         </Button>
       </div>
+      {recentTargets.length > 0 && (
+        <section className="mb-7" aria-label={t(($) => $.home.recentWorkspaces)}>
+          <h2 className="mb-3 text-sm font-semibold">{t(($) => $.home.recentWorkspaces)}</h2>
+          <div className="divide-y divide-border border-y border-border">
+            {recentTargets.map(({ entry, device, workspace }) => {
+              const ToolIcon = toolIcons[entry.lastTool];
+              return (
+                <button
+                  key={`${device.id}:${workspace.id}`}
+                  className="flex min-h-14 w-full items-center gap-3 py-2 text-left hover:bg-muted"
+                  onClick={() => onNavigate(workspacePath(device.id, workspace.id, entry.lastTool))}
+                >
+                  <Folder size={18} className="shrink-0 text-primary" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium" title={workspace.name}>
+                      {workspace.name}
+                    </span>
+                    <span
+                      className="block truncate text-xs text-muted-foreground"
+                      title={`${device.name} · ${workspace.path}`}
+                    >
+                      {device.name} · {workspace.path}
+                    </span>
+                  </span>
+                  <span
+                    className="status-dot shrink-0"
+                    data-status={device.status}
+                    aria-label={t(($) => $.common[device.status])}
+                  />
+                  <ToolIcon
+                    size={16}
+                    className="shrink-0 text-muted-foreground"
+                    aria-label={t(($) => $.common[entry.lastTool])}
+                  />
+                  <ChevronRight size={15} className="shrink-0" />
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
+      <h2 className="mb-3 text-sm font-semibold">{t(($) => $.common.devices)}</h2>
       {devices.length === 0 ? (
         <div className="py-16 text-center text-muted-foreground">
           <Monitor size={30} className="mx-auto mb-3" />

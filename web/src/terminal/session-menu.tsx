@@ -7,7 +7,6 @@ import {
   Maximize2,
   MoreHorizontal,
   Pencil,
-  Plus,
   RefreshCw,
   Rows2,
   Settings,
@@ -20,7 +19,13 @@ import {
 import type { Session } from "@kiteline/shared/protocol";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
 import { Button } from "../components/ui/button";
-import { groupFor, type TerminalLayout } from "./groups";
+import {
+  groupFor,
+  members,
+  type MemberPosition,
+  type SplitDirection,
+  type TerminalLayout,
+} from "./groups";
 
 export type SessionCommand = "rename" | "end" | "copy" | "redraw" | "larger" | "smaller" | "close";
 export function SessionMenu({
@@ -45,15 +50,16 @@ export function SessionMenu({
   disabled: boolean;
   label?: string;
   onCommand(command: SessionCommand, id: string): void;
-  onMove(id: string, target?: string, before?: string): void;
-  onSplit(): void;
-  onDirection(direction: "horizontal" | "vertical"): void;
+  onMove(id: string, target?: string, position?: MemberPosition): void;
+  onSplit(direction: SplitDirection): void;
+  onDirection(direction: SplitDirection): void;
   onSettings?(): void;
 }) {
   const { t } = useTranslation();
 
   const group = id ? groupFor(layout, id) : undefined;
-  const index = group && id ? group.members.indexOf(id) : -1;
+  const ids = group ? members(group) : [];
+  const index = id ? ids.indexOf(id) : -1;
   return (
     <Menu>
       <MenuTrigger
@@ -80,11 +86,15 @@ export function SessionMenu({
           <>
             {!dock && !mobile && (
               <>
-                <MenuItem disabled={disabled} onClick={onSplit}>
-                  <Plus />
-                  {t(($) => $.terminal.createSplit)}
+                <MenuItem disabled={disabled} onClick={() => onSplit("horizontal")}>
+                  <Columns2 />
+                  {t(($) => $.terminal.splitRight)}
                 </MenuItem>
-                <MenuItem disabled={!group || group.members.length < 2} onClick={() => onMove(id)}>
+                <MenuItem disabled={disabled} onClick={() => onSplit("vertical")}>
+                  <Rows2 />
+                  {t(($) => $.terminal.splitDown)}
+                </MenuItem>
+                <MenuItem disabled={ids.length < 2} onClick={() => onMove(id)}>
                   <Split />
                   {t(($) => $.terminal.separateGroup)}
                 </MenuItem>
@@ -100,29 +110,23 @@ export function SessionMenu({
                   ))}
                 <MenuItem
                   disabled={index <= 0}
-                  onClick={() => onMove(id, group!.id, group!.members[index - 1])}
+                  onClick={() => onMove(id, group!.id, { anchor: ids[index - 1]!, side: "before" })}
                 >
                   <ArrowUp />
                   {t(($) => $.terminal.moveEarlier)}
                 </MenuItem>
                 <MenuItem
-                  disabled={!group || index === group.members.length - 1}
-                  onClick={() => onMove(id, group!.id, group!.members[index + 2])}
+                  disabled={!group || index === ids.length - 1}
+                  onClick={() => onMove(id, group!.id, { anchor: ids[index + 1]!, side: "after" })}
                 >
                   <ArrowDown />
                   {t(($) => $.terminal.moveLater)}
                 </MenuItem>
-                <MenuItem
-                  disabled={!group || group.members.length < 2}
-                  onClick={() => onDirection("horizontal")}
-                >
+                <MenuItem disabled={ids.length < 2} onClick={() => onDirection("horizontal")}>
                   <Columns2 />
                   {t(($) => $.terminal.horizontal)}
                 </MenuItem>
-                <MenuItem
-                  disabled={!group || group.members.length < 2}
-                  onClick={() => onDirection("vertical")}
-                >
+                <MenuItem disabled={ids.length < 2} onClick={() => onDirection("vertical")}>
                   <Rows2 />
                   {t(($) => $.terminal.vertical)}
                 </MenuItem>

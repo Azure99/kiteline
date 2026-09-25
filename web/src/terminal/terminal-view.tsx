@@ -19,7 +19,7 @@ import { Terminal } from "@xterm/xterm";
 import { ErrorNotice } from "../components/error-notice";
 import { TouchControls } from "./touch-controls";
 import { useMobile } from "../lib/use-mobile";
-import { prepareKeyboard, virtualKeyboard } from "../lib/viewport";
+import { terminalKeyboard } from "./keyboard-input";
 import {
   Dialog,
   DialogContent,
@@ -57,6 +57,7 @@ export function TerminalView({
   const [notice, setNotice] = useState<unknown>();
   const [ctrl, setCtrl] = useState(false);
   const mobile = useMobile();
+  const input = useRef<() => void>(() => {});
   const control = useRef(false);
   function setControl(value: boolean) {
     control.current = value;
@@ -162,8 +163,13 @@ export function TerminalView({
     element.current?.removeAttribute("title");
   }, [terminal, t]);
   useEffect(() => {
-    if (virtualKeyboard)
-      terminal?.textarea?.setAttribute("virtualkeyboardpolicy", mobile ? "manual" : "auto");
+    if (!terminal?.textarea) return;
+    const keyboard = terminalKeyboard(terminal, mobile);
+    input.current = keyboard.activate;
+    return () => {
+      keyboard.dispose();
+      input.current = () => {};
+    };
   }, [terminal, mobile]);
   async function paste() {
     try {
@@ -253,7 +259,15 @@ export function TerminalView({
       )}
       <div className="terminal-viewport relative flex min-h-0 flex-1">
         <div ref={element} className="terminal-canvas min-h-0 min-w-0 flex-1" />
-        {terminal && <TouchControls terminal={terminal} deviceId={deviceId} />}
+        {terminal && (
+          <TouchControls
+            terminal={terminal}
+            deviceId={deviceId}
+            onTap={() => {
+              if (mobile) input.current();
+            }}
+          />
+        )}
         {reading && (
           <div className="absolute bottom-3 right-4 rounded bg-[#39414c] shadow">
             <IconButton
@@ -340,13 +354,7 @@ export function TerminalView({
         <IconButton
           label={t(($) => $.terminal.keyboard)}
           disabled={state.status !== "ready"}
-          onClick={() => {
-            if (terminal && !terminal.options.disableStdin) {
-              prepareKeyboard();
-              terminal.focus();
-              if (mobile) virtualKeyboard?.show();
-            }
-          }}
+          onClick={() => input.current()}
         >
           <Keyboard />
         </IconButton>

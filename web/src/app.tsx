@@ -37,7 +37,8 @@ import { DirectoryDialog } from "./devices/directory-dialog";
 import { DeviceActionDialog, type DeviceAction } from "./devices/device-actions";
 
 import { DeviceNavigation } from "./devices/device-navigation";
-import { DeviceList, DeviceDetail } from "./devices/device-views";
+import { Home, DeviceDetail } from "./devices/device-views";
+import { useRecentWorkspaces } from "./devices/recent-workspaces";
 import { WorkspaceTerminal } from "./terminal/sessions";
 import type { TerminalLayout } from "./terminal/groups";
 import { Files } from "./files/files";
@@ -84,10 +85,12 @@ export function App() {
   const [activeUpload, setActiveUpload] = useState<string>();
   const {
     devices,
+    loaded: devicesLoaded,
     connected,
     error: connectionError,
     refresh,
   } = useDevices(!!session, route.deviceId, route.workspaceId, setSession);
+  const recents = useRecentWorkspaces(route, devices, devicesLoaded, !!session);
   const device = devices.find((d) => d.id === route.deviceId);
   const workspace = device?.snapshot?.workspaces.find((w) => w.id === route.workspaceId);
   const terminalFocus = useTerminalFocus(
@@ -251,8 +254,9 @@ export function App() {
           hidden={terminalFocus.active}
           className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3 max-[959px]:gap-1 max-[959px]:px-2"
         >
-          <div className="hidden shrink-0 items-center gap-2 min-[960px]:flex">
+          <div className="flex shrink-0 items-center gap-2">
             <IconButton
+              className="max-[959px]:hidden"
               label={
                 sidebarOpen ? t(($) => $.shell.collapseSidebar) : t(($) => $.shell.expandSidebar)
               }
@@ -263,13 +267,14 @@ export function App() {
               {sidebarOpen ? <PanelLeftClose /> : <PanelLeftOpen />}
             </IconButton>
             <button
-              className="flex items-center gap-2 text-sm font-semibold"
+              className="flex min-h-9 items-center justify-center gap-2 text-sm font-semibold max-[959px]:size-11"
+              aria-label={t(($) => $.home.open)}
               onClick={() => choose("/devices")}
             >
               <span className="flex size-6 items-center justify-center rounded bg-primary text-white">
                 <Terminal size={17} />
               </span>
-              Kiteline
+              <span className="max-[959px]:hidden">Kiteline</span>
             </button>
           </div>
           <Dialog open={picker} onOpenChange={setPicker}>
@@ -426,7 +431,12 @@ export function App() {
                 </Button>
               </div>
             ) : !route.deviceId ? (
-              <DeviceList devices={devices} onNavigate={choose} onBind={() => setBinding(true)} />
+              <Home
+                devices={devices}
+                recents={recents}
+                onNavigate={choose}
+                onBind={() => setBinding(true)}
+              />
             ) : orphan ? (
               <DraftView
                 key={orphan.id}

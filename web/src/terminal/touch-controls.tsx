@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { Copy, X, ExternalLink } from "lucide-react";
 import type { Terminal } from "@xterm/xterm";
 import { TouchSelection, type SelectionHandles } from "./touch-selection";
@@ -7,7 +7,15 @@ import { IconButton } from "../components/icon-button";
 import { deviceServiceLink } from "../lib/device-service";
 import { ErrorNotice } from "../components/error-notice";
 
-export function TouchControls({ terminal, deviceId }: { terminal: Terminal; deviceId: string }) {
+export function TouchControls({
+  terminal,
+  deviceId,
+  onTap,
+}: {
+  terminal: Terminal;
+  deviceId: string;
+  onTap: () => void;
+}) {
   const { t } = useTranslation();
 
   const [handles, setHandles] = useState<SelectionHandles>();
@@ -17,8 +25,9 @@ export function TouchControls({ terminal, deviceId }: { terminal: Terminal; devi
   const layer = useRef<HTMLDivElement>(null);
   const service = handles ? deviceServiceLink(terminal.getSelection(), deviceId) : undefined;
   const halfWidth = service ? 68 : 50;
+  const tapped = useEffectEvent(onTap);
   useEffect(() => {
-    const current = new TouchSelection(terminal, setHandles);
+    const current = new TouchSelection(terminal, setHandles, tapped);
     selection.current = current;
     return () => {
       current.dispose();

@@ -50,7 +50,7 @@ export interface RpcMethods {
   "sessions.recover": Contract<SessionParams, Session>;
   "sessions.redraw": Contract<SessionParams, Session>;
   "settings.update": Contract<{ historyLines: number }, Metadata["settings"]>;
-  "shortcuts.put": Contract<{ id?: string; name: string; command: string }, Shortcut>;
+  "shortcuts.put": Contract<Omit<Shortcut, "id"> & { id?: string }, Shortcut>;
   "shortcuts.remove": Contract<{ id: string }, { removed: boolean }>;
   "files.list": Contract<FileParams & { cursor?: string }, FileListing>;
   "files.inspect": Contract<FileParams & { suggestCopyName?: boolean }, FileInspection>;

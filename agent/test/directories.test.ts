@@ -5,6 +5,7 @@ import { Directories } from "../src/directories.js";
 import { Agent } from "../src/control.js";
 import { MetadataStore } from "../src/metadata.js";
 import { defaultAgentLimits, type AgentConfig } from "../src/config.js";
+import { checkMetadata } from "@kiteline/shared/protocol";
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -127,4 +128,46 @@ test("new device shortcuts do not replace saved customizations or restore delete
   const empty = new MetadataStore(config(dataDir));
   await empty.load();
   expect(empty.value.shortcuts).toEqual([]);
+});
+
+test("shortcut icons round-trip through RPC and metadata, and omitting one clears the old value", async () => {
+  const dataDir = await directory();
+  const agent = new Agent(config(dataDir), {
+    deviceId: "test",
+    deviceToken: "test",
+    server: "https://localhost",
+  });
+  cleanups.push(() => agent.close());
+  const signal = new AbortController().signal;
+  await agent.dispatch(
+    "shortcuts.put",
+    { id: "claude", name: "Custom", command: "echo custom", icon: "rocket" },
+    signal,
+  );
+  const read = async () =>
+    checkMetadata(JSON.parse(await readFile(join(dataDir, "agent.json"), "utf8")));
+  expect((await read()).shortcuts[0]).toMatchObject({
+    name: "Custom",
+    command: "echo custom",
+    icon: "rocket",
+  });
+  await expect(
+    agent.dispatch(
+      "shortcuts.put",
+      { id: "claude", name: "Custom", command: "echo custom", icon: "other" },
+      signal,
+    ),
+  ).rejects.toMatchObject({ code: "invalid_argument" });
+  const result = await agent.dispatch(
+    "shortcuts.put",
+    { id: "claude", name: "Custom", command: "echo custom" },
+    signal,
+  );
+  expect(result).not.toHaveProperty("icon", "rocket");
+  expect((await read()).shortcuts[0]).toEqual({
+    id: "claude",
+    name: "Custom",
+    command: "echo custom",
+  });
+  expect(agent.metadata.hello().snapshot.shortcuts[0]?.icon).toBeUndefined();
 });

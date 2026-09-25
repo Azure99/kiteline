@@ -5,6 +5,7 @@ import {
   AppError,
   appVersion,
   asError,
+  checkShortcutIcon,
   errorReply,
   integer,
   limits,
@@ -707,11 +708,12 @@ export class Agent {
         const id = params.id === undefined ? randomUUID() : string(params.id);
         const name = string(params.name, "name", 256);
         const command = string(params.command, "command", 65536);
+        const icon = checkShortcutIcon(params.icon);
         return this.metadata.update((metadata) => {
           const previous = metadata.shortcuts.find((item) => item.id === id);
           if (params.id !== undefined && !previous)
             throw new AppError("not_found", "Shortcut does not exist");
-          const shortcut = { id, name, command };
+          const shortcut = { id, name, command, icon };
           if (previous) Object.assign(previous, shortcut);
           else metadata.shortcuts.push(shortcut);
           return shortcut;

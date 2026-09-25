@@ -11,7 +11,7 @@ export function useDevices(
   onSession?: (session: Session) => void,
 ) {
   const serverVersion = useServerVersion();
-  const [devices, setDevices] = useState<Device[]>([]);
+  const [devices, setDevices] = useState<Device[]>();
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<unknown>();
   const socketRef = useRef<WebSocket | null>(null);
@@ -74,5 +74,5 @@ export function useDevices(
       setConnected(false);
     };
   }, [active, refresh, onSession, serverVersion]);
-  return { devices, connected, error, refresh };
+  return { devices: devices ?? [], loaded: devices !== undefined, connected, error, refresh };
 }

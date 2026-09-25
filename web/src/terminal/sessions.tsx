@@ -11,12 +11,15 @@ import {
   PanelBottom,
   Minimize2,
   Columns2,
+  Rows2,
   Fullscreen,
   X,
   Minimize,
 } from "lucide-react";
 import type { Device, Workspace } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
+import { Button } from "../components/ui/button";
+import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
 import { WatchStatus } from "../components/watch-status";
 import { ToolLayout } from "../components/tool-layout";
 import { TerminalView, type TerminalActions } from "./terminal-view";
@@ -31,6 +34,13 @@ import {
   closeSession,
   moveSession,
   retainSessions,
+  members as groupMembers,
+  groupFor,
+  splitSession,
+  arrangeGroup,
+  resizeSplit,
+  type MemberPosition,
+  type SplitDirection,
   type TerminalLayout,
 } from "./groups";
 import { SplitPanes } from "./split-panes";
@@ -83,13 +93,12 @@ export function WorkspaceTerminal({
   const sessions = remote.sessions;
   const { setError } = remote;
   const find = (id?: string) => sessions.find((session) => session.id === id);
-  const groups = layout.groups
-    .map((item) => ({
-      ...item,
-      members: item.members.filter((id) => !!find(id) || opened.main.has(id)),
-    }))
-    .filter((item) => item.members.length);
-  const members = groups.find((item) => item.id === group?.id)?.members ?? [];
+  const groups = retainSessions(
+    layout,
+    new Set([...sessions.map((session) => session.id), ...opened.main]),
+  ).groups;
+  const shownGroup = groups.find((item) => item.id === group?.id);
+  const members = shownGroup ? groupMembers(shownGroup) : [];
   const dockId =
     layout.dock && (find(layout.dock) || opened.dock.has(layout.dock)) ? layout.dock : undefined;
   const dockExpanded = layout.dockOpen && !mobile;
@@ -207,8 +216,8 @@ export function WorkspaceTerminal({
     if (dock) setLayout((old) => ({ ...old, dock: undefined }));
     else applyMain(closeSession(layout, id));
   }
-  function move(id: string, target?: string, before?: string) {
-    applyMain(moveSession(layout, id, target, before));
+  function move(id: string, target?: string, position?: MemberPosition) {
+    applyMain(moveSession(layout, id, target, position));
   }
   const drag = useTerminalDrag(!mobile, move);
   function patchGroup(change: Partial<NonNullable<typeof group>>) {
@@ -218,16 +227,18 @@ export function WorkspaceTerminal({
       groups: old.groups.map((item) => (item.id === group.id ? { ...item, ...change } : item)),
     }));
   }
-  async function create(dock = false, split = false, shortcutId?: string) {
-    const target = split ? group?.id : undefined;
+  async function create(
+    dock = false,
+    shortcutId?: string,
+    split?: { groupId: string; anchor: string; direction: SplitDirection },
+  ) {
     const session = await remote.create(shortcutId);
     if (!session) return;
     setLayout((old) => {
       if (dock) return { ...old, dock: session.id, dockOpen: true };
-      const next =
-        target && old.groups.some((item) => item.id === target)
-          ? moveSession(old, session.id, target)
-          : selectSession(old, session.id);
+      const next = split
+        ? splitSession(old, session.id, split.groupId, split.anchor, split.direction)
+        : selectSession(old, session.id);
       return { ...next, dock: old.dock ?? session.id };
     });
     if (!dock) {
@@ -237,6 +248,14 @@ export function WorkspaceTerminal({
         { session: session.id },
       );
     }
+  }
+  function createSplit(id: string | undefined, direction: SplitDirection) {
+    const owner = id ? groupFor(layout, id) : undefined;
+    void create(
+      false,
+      undefined,
+      owner && id ? { groupId: owner.id, anchor: id, direction } : undefined,
+    );
   }
   function command(kind: SessionCommand, id: string, dock = false) {
     const display = (dock ? dockActions : displays).current.get(id);
@@ -261,8 +280,11 @@ export function WorkspaceTerminal({
         disabled={!enabled}
         onCommand={(kind, value) => command(kind, value, dock)}
         onMove={move}
-        onSplit={() => void create(false, true)}
-        onDirection={(direction) => patchGroup({ direction, maximized: false })}
+        onSplit={(direction) => createSplit(id, direction)}
+        onDirection={(direction) => {
+          const owner = id ? groupFor(layout, id) : undefined;
+          if (owner) setLayout((old) => arrangeGroup(old, owner.id, direction));
+        }}
         onSettings={includeSettings ? () => setSettings(true) : undefined}
       />
     );
@@ -297,7 +319,7 @@ export function WorkspaceTerminal({
         showLabel={showLabel}
         disabled={!enabled}
         shortcuts={device.snapshot?.shortcuts ?? []}
-        onCreate={(shortcut) => void create(dock, false, shortcut)}
+        onCreate={(shortcut) => void create(dock, shortcut)}
       />
     );
   }
@@ -377,13 +399,30 @@ export function WorkspaceTerminal({
           )}
           {newButtons()}
           {!mobile && (
-            <IconButton
-              label={t(($) => $.terminal.createSplit)}
-              disabled={!enabled}
-              onClick={() => void create(false, true)}
-            >
-              <Columns2 />
-            </IconButton>
+            <Menu>
+              <MenuTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    disabled={!enabled}
+                    aria-label={t(($) => $.terminal.createSplit)}
+                  />
+                }
+              >
+                <Columns2 />
+              </MenuTrigger>
+              <MenuContent>
+                <MenuItem onClick={() => createSplit(selected, "horizontal")}>
+                  <Columns2 />
+                  {t(($) => $.terminal.splitRight)}
+                </MenuItem>
+                <MenuItem onClick={() => createSplit(selected, "vertical")}>
+                  <Rows2 />
+                  {t(($) => $.terminal.splitDown)}
+                </MenuItem>
+              </MenuContent>
+            </Menu>
           )}
           {!mobile && group?.maximized && members.length > 1 && (
             <IconButton
@@ -414,7 +453,9 @@ export function WorkspaceTerminal({
             sessions={sessions}
             mobile={mobile}
             visible={visible}
-            onSizes={(sizes) => patchGroup({ sizes })}
+            onSizes={(groupId, splitId, sizes) =>
+              setLayout((old) => resizeSplit(old, groupId, splitId, sizes))
+            }
             events={{
               actions: register,
               focus,

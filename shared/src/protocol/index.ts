@@ -88,10 +88,22 @@ export interface TerminalMeta {
   terminalInputBytes: number;
   controlMessageBytes: number;
 }
+export const shortcutIcons = [
+  "terminal",
+  "sparkles",
+  "code",
+  "bot",
+  "rocket",
+  "wrench",
+  "search",
+  "play",
+] as const;
+export type ShortcutIcon = (typeof shortcutIcons)[number];
 export interface Shortcut {
   id: string;
   name: string;
   command: string;
+  icon?: ShortcutIcon;
 }
 export interface Metadata {
   schemaVersion: 1;
@@ -403,6 +415,12 @@ export function integer(value: unknown, name: string, min: number, max: number):
     throw new AppError("invalid_argument", `Invalid ${name}`);
   return value;
 }
+export function checkShortcutIcon(value: unknown): ShortcutIcon | undefined {
+  if (value === undefined) return undefined;
+  const icon = shortcutIcons.find((item) => item === value);
+  if (!icon) throw new AppError("invalid_argument", "Invalid shortcut icon");
+  return icon;
+}
 export function checkMetadata(value: unknown): Metadata {
   const data = record(value);
   if (data.schemaVersion !== 1 || !Array.isArray(data.workspaces) || !Array.isArray(data.shortcuts))
@@ -419,6 +437,7 @@ export function checkMetadata(value: unknown): Metadata {
     string(s.id, "shortcut id", 128);
     string(s.name, "shortcut name", 256);
     string(s.command, "command", 65536);
+    checkShortcutIcon(s.icon);
   }
   integer(record(data.settings).historyLines, "historyLines", 0, 50_000);
   return data as unknown as Metadata;

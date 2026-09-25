@@ -1,9 +1,9 @@
 import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { SquareTerminal } from "lucide-react";
-import type { TerminalGroup, TerminalLayout } from "./groups";
+import { members, type MemberPosition, type TerminalGroup, type TerminalLayout } from "./groups";
 
-type Target = { groupId?: string; before?: string; key: string };
+type Target = { groupId?: string; position?: MemberPosition; key: string };
 export function memberTarget(
   event: DragEvent,
   group: TerminalGroup,
@@ -16,13 +16,13 @@ export function memberTarget(
     : event.clientY > bounds.top + bounds.height / 2;
   return {
     groupId: group.id,
-    before: after ? group.members[group.members.indexOf(id) + 1] : id,
+    position: { anchor: id, side: after ? "after" : "before" },
     key: `${id}:${after ? "after" : "before"}`,
   };
 }
 export function useTerminalDrag(
   enabled: boolean,
-  move: (id: string, groupId?: string, before?: string) => void,
+  move: (id: string, groupId?: string, position?: MemberPosition) => void,
 ) {
   const id = useRef<string | undefined>(undefined);
   const [dragging, setDragging] = useState(false);
@@ -50,7 +50,7 @@ export function useTerminalDrag(
     event.preventDefault();
     const sessionId = id.current;
     end();
-    move(sessionId, next.groupId, next.before);
+    move(sessionId, next.groupId, next.position);
   }
   useEffect(() => {
     const cancel = (event: KeyboardEvent) => {
@@ -91,7 +91,7 @@ export function GroupTabs({
             onDragOver={(event) => drag.over(event, target)}
             onDrop={(event) => drag.drop(event, target)}
           >
-            {group.members.map((id) => {
+            {members(group).map((id) => {
               return (
                 <button
                   key={id}

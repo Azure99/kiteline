@@ -5,7 +5,8 @@ import type { Session, Shortcut } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
 import { IconButton } from "../components/icon-button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
-import type { TerminalGroup } from "./groups";
+import { members, type TerminalGroup } from "./groups";
+import { ShortcutIcon } from "./shortcut-icon";
 
 export function SessionPicker({
   sessions,
@@ -39,7 +40,7 @@ export function SessionPicker({
   const { t, i18n } = useTranslation();
   const [open, setOpen] = useState(false);
   const available = new Set([...sessions.map((session) => session.id), ...retained]);
-  const grouped = new Set(groups.flatMap((group) => group.members));
+  const grouped = new Set(groups.flatMap(members));
   const other = [...available].filter((id) => !grouped.has(id));
   const label = dock ? t(($) => $.terminal.selectDock) : t(($) => $.terminal.selectSession);
   function item(id: string) {
@@ -105,12 +106,14 @@ export function SessionPicker({
             role="group"
             aria-label={t(($) => $.terminal.group, { number: index + 1 })}
           >
-            {(groups.length > 1 || group.members.length > 1) && (
+            {(groups.length > 1 || members(group).length > 1) && (
               <div className="px-2 py-1 text-xs text-muted-foreground">
                 {t(($) => $.terminal.group, { number: index + 1 })}
               </div>
             )}
-            {group.members.filter((id) => available.has(id)).map(item)}
+            {members(group)
+              .filter((id) => available.has(id))
+              .map(item)}
           </div>
         ))}
         {other.length > 0 && groups.length > 0 && <div className="my-1 border-t border-border" />}
@@ -162,6 +165,7 @@ export function NewSessionButtons({
         </MenuItem>
         {shortcuts.map((shortcut) => (
           <MenuItem key={shortcut.id} onClick={() => onCreate(shortcut.id)}>
+            <ShortcutIcon icon={shortcut.icon} />
             {shortcut.name}
           </MenuItem>
         ))}

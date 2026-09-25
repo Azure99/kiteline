@@ -1,5 +1,9 @@
 import type { TranslationResources } from "./en";
 export const zhCN = {
+  home: {
+    open: "Kiteline 主页",
+    recentWorkspaces: "最近工作区",
+  },
   release: {
     webMismatch: "Web {{web}} / Server {{server}}：远程操作已暂停。刷新前请复制未保存的内容。",
     reload: "刷新页面",
@@ -189,7 +193,18 @@ export const zhCN = {
     terminals_one: "{{count, number}} 个终端",
     terminals_other: "{{count, number}} 个终端",
   },
+  shortcutIcons: {
+    terminal: "终端",
+    sparkles: "星光",
+    code: "代码",
+    bot: "助手",
+    rocket: "火箭",
+    wrench: "工具",
+    search: "搜索",
+    play: "运行",
+  },
   terminal: {
+    shortcutIcon: "图标",
     missing: "终端不存在或已结束",
     refreshSessions: "刷新会话",
     closeDisplay: "关闭显示",
@@ -227,11 +242,13 @@ export const zhCN = {
     actions: "终端操作",
     settings: "终端设置",
     createSplit: "新建并分屏",
+    splitRight: "向右分屏",
+    splitDown: "向下分屏",
     separateGroup: "拆为独立组",
     moveEarlier: "向前移动",
     moveLater: "向后移动",
-    horizontal: "横向分屏",
-    vertical: "纵向分屏",
+    horizontal: "整组横排",
+    vertical: "整组竖排",
     fontLarger: "增大字号",
     fontSmaller: "减小字号",
     localCommand: "本机接续命令",

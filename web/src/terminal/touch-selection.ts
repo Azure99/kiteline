@@ -24,11 +24,17 @@ export class TouchSelection {
   constructor(
     private terminal: Terminal,
     private changed: (handles?: SelectionHandles) => void,
+    onTap: () => void,
   ) {
     this.screen = terminal.screenElement!;
     this.container = terminal.element!.parentElement!;
     this.disposables = [
-      adaptTouchGestures(this.container, () => this.active),
+      adaptTouchGestures(
+        this.container,
+        this.screen,
+        () => this.active || terminal.hasSelection(),
+        onTap,
+      ),
       terminal.onSelectionChange(() => {
         this.revision++;
         this.refresh();

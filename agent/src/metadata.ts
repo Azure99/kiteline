@@ -10,9 +10,9 @@ export class MetadataStore {
     revision: 0,
     workspaces: [],
     shortcuts: [
-      { id: "claude", name: "Claude Code", command: "claude" },
-      { id: "codex", name: "Codex", command: "codex" },
-      { id: "opencode", name: "OpenCode", command: "opencode" },
+      { id: "claude", name: "Claude Code", command: "claude", icon: "sparkles" },
+      { id: "codex", name: "Codex", command: "codex", icon: "code" },
+      { id: "opencode", name: "OpenCode", command: "opencode", icon: "terminal" },
     ],
     settings: { historyLines: 10_000 },
   };

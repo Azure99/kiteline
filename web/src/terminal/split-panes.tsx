@@ -1,11 +1,11 @@
 import { useTranslation } from "react-i18next";
-import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
-import { Group, Panel, Separator, type GroupImperativeHandle } from "react-resizable-panels";
+import { useCallback, useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
+import { Group, Panel, Separator } from "react-resizable-panels";
 import { Maximize2, SquareTerminal, X } from "lucide-react";
 import type { Session } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
 import { TerminalView, type TerminalActions } from "./terminal-view";
-import type { TerminalGroup } from "./groups";
+import { members, parentSplit, type TerminalGroup, type TerminalNode } from "./groups";
 import { memberTarget, type useTerminalDrag } from "./group-tabs";
 
 export interface PaneEvents {
@@ -37,98 +37,143 @@ export function SplitPanes({
   mobile: boolean;
   visible: boolean;
   events: PaneEvents;
-  onSizes(sizes: Record<string, number>): void;
+  onSizes(groupId: string, splitId: string, sizes: Record<string, number>): void;
 }) {
   const { t } = useTranslation();
-
-  const panels = useRef<GroupImperativeHandle>(null);
+  const surface = useRef<HTMLDivElement>(null);
+  const panes = useRef(new Map<string, HTMLDivElement>());
+  const frame = useRef(0);
   const group = groups.find((item) => item.id === current);
-  const members = group?.members ?? [];
-  const direction = group?.direction ?? "horizontal";
-  const allMembers = groups.flatMap((item) => item.members);
   const single = mobile || !!group?.maximized;
-  const layout = Object.fromEntries(
-    allMembers.map((id) => [
-      id,
-      !group || !members.includes(id)
-        ? 0
-        : single
-          ? id === group.active
-            ? 100
-            : 0
-          : (group.sizes[id] ?? 100 / members.length),
-    ]),
-  );
-  const layoutKey = JSON.stringify(layout);
+  const minimum = group && !single ? minimumSize(group.root) : { width: 0, height: 0 };
+  const measure = useCallback(() => {
+    const element = surface.current;
+    if (!element || !element.clientWidth || !element.clientHeight) return;
+    const origin = element.getBoundingClientRect();
+    for (const leaf of element.querySelectorAll<HTMLElement>("[data-layout-session]")) {
+      const pane = panes.current.get(leaf.dataset.layoutSession!);
+      if (!pane) continue;
+      const rect = leaf.getBoundingClientRect();
+      Object.assign(pane.style, {
+        left: `${rect.left - origin.left}px`,
+        top: `${rect.top - origin.top}px`,
+        width: `${rect.width}px`,
+        height: `${rect.height}px`,
+      });
+    }
+  }, []);
+  const scheduleMeasure = useCallback(() => {
+    cancelAnimationFrame(frame.current);
+    frame.current = requestAnimationFrame(measure);
+  }, [measure]);
   useLayoutEffect(() => {
-    if (!visible) return;
-    const frame = requestAnimationFrame(() => {
-      const sizes = JSON.parse(layoutKey) as Record<string, number>;
-      const order = Object.keys(panels.current?.getLayout() ?? {});
-      // The component applies constraints in its registered order, including hidden panels.
-      if (order.length)
-        panels.current?.setLayout(Object.fromEntries(order.map((id) => [id, sizes[id]!])));
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [layoutKey, direction, visible]);
-  return (
-    <div className={group ? "scroll-area min-h-0 flex-1 overflow-auto" : "hidden"}>
+    const element = surface.current;
+    if (single || !visible || !element) return;
+    measure();
+    const observer = new ResizeObserver(scheduleMeasure);
+    observer.observe(element);
+    element.querySelectorAll("[data-layout-session]").forEach((leaf) => observer.observe(leaf));
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame.current);
+    };
+  }, [group, single, opened, visible, measure, scheduleMeasure]);
+  function skeleton(node: TerminalNode): ReactNode {
+    if ("sessionId" in node)
+      return <div className="h-full w-full" data-layout-session={node.sessionId} />;
+    return (
       <Group
-        // Re-register layout order without remounting the keyed terminal panels.
-        id={`terminal-${workspaceId}-${allMembers.join(":")}`}
-        groupRef={panels}
-        orientation={direction}
-        disabled={single}
-        className="h-full min-h-full"
-        style={{
-          minWidth: !single && direction === "horizontal" ? members.length * 180 : undefined,
-          minHeight: !single && direction === "vertical" ? members.length * 120 : undefined,
-        }}
+        key={`${node.id}:${node.children.map((child) => child.id).join(":")}`}
+        id={node.id}
+        orientation={node.direction}
+        defaultLayout={node.sizes}
+        className="h-full w-full"
+        onLayoutChange={scheduleMeasure}
         onLayoutChanged={(sizes, meta) => {
-          if (meta.isUserInteraction && !single)
-            onSizes(Object.fromEntries(members.map((id) => [id, sizes[id]!])));
+          if (meta.isUserInteraction && group) onSizes(group.id, node.id, sizes);
         }}
       >
-        {allMembers.flatMap((id) => {
-          const owner = groups.find((item) => item.members.includes(id))!;
-          const shown = owner === group && (!single || id === group.active);
-          const divider = shown && !single && members.indexOf(id) > 0;
-          return [
-            divider && (
-              <Separator
-                key={`divider:${id}`}
-                className="split-divider"
-                aria-label={t(($) => $.terminal.resize)}
-              />
-            ),
-            <Panel
+        {node.children.flatMap((child, index) => [
+          index > 0 && (
+            <Separator
+              key={`divider:${child.id}`}
+              className="split-divider"
+              aria-label={t(($) => $.terminal.resize)}
+            />
+          ),
+          <Panel
+            key={child.id}
+            id={child.id}
+            minSize={minimumSize(child)[node.direction === "horizontal" ? "width" : "height"]}
+          >
+            {skeleton(child)}
+          </Panel>,
+        ])}
+      </Group>
+    );
+  }
+  return (
+    <div className={group ? "scroll-area min-h-0 flex-1 overflow-auto" : "hidden"}>
+      <div
+        ref={surface}
+        className="relative h-full min-h-full"
+        style={{ minWidth: minimum.width, minHeight: minimum.height }}
+      >
+        {group &&
+          (single ? (
+            <div className="h-full w-full" data-layout-session={group.active} />
+          ) : (
+            skeleton(group.root)
+          ))}
+        {/* Display siblings stay in opening order; only the empty layout skeleton is reparented. */}
+        {[...opened].map((id) => {
+          const owner = groups.find((item) => members(item).includes(id));
+          const shown = !!owner && owner === group && visible && (!single || id === group.active);
+          return (
+            <div
               key={id}
-              id={id}
-              minSize={!shown || single ? 0 : direction === "horizontal" ? 180 : 120}
-              maxSize={shown ? "100%" : "0%"}
-              defaultSize={`${layout[id]}%`}
-              className="flex h-full min-h-0 min-w-0 flex-col"
+              ref={(element) => {
+                if (element) panes.current.set(id, element);
+                else panes.current.delete(id);
+              }}
+              hidden={!shown}
+              className="absolute flex min-h-0 min-w-0 flex-col"
+              style={
+                single
+                  ? { left: 0, top: 0, width: "100%", height: "100%" }
+                  : { width: 0, height: 0 }
+              }
             >
-              {opened.has(id) && (
+              {owner && (
                 <TerminalPane
-                  key={id}
                   id={id}
                   deviceId={deviceId}
                   workspaceId={workspaceId}
                   session={sessions.find((session) => session.id === id)}
                   active={id === owner.active}
                   group={owner}
-                  showHeader={!mobile && !owner.maximized && owner.members.length > 1}
+                  showHeader={!mobile && !owner.maximized && members(owner).length > 1}
                   hidden={!shown}
                   events={events}
                 />
               )}
-            </Panel>,
-          ];
+            </div>
+          );
         })}
-      </Group>
+      </div>
     </div>
   );
+}
+
+function minimumSize(node: TerminalNode): { width: number; height: number } {
+  if ("sessionId" in node) return { width: 180, height: 120 };
+  const children = node.children.map(minimumSize);
+  const sum = (axis: "width" | "height") =>
+    children.reduce((total, child) => total + child[axis], 4 * (children.length - 1));
+  const max = (axis: "width" | "height") => Math.max(...children.map((child) => child[axis]));
+  return node.direction === "horizontal"
+    ? { width: sum("width"), height: max("height") }
+    : { width: max("width"), height: sum("height") };
 }
 
 function TerminalPane({
@@ -153,7 +198,7 @@ function TerminalPane({
   events: PaneEvents;
 }) {
   const { t } = useTranslation();
-
+  const direction = parentSplit(group.root, id)?.direction ?? "horizontal";
   const name = useRef(session?.name);
   if (session) name.current = session.name;
   const actions = useRef<TerminalActions>(null);
@@ -173,20 +218,14 @@ function TerminalPane({
       {showHeader && (
         <header
           className="terminal-pane-header flex min-h-8 shrink-0 items-center gap-1 px-2"
-          data-direction={group.direction}
+          data-direction={direction}
           data-drop-before={events.drag.target?.key === `${id}:before`}
           data-drop-after={events.drag.target?.key === `${id}:after`}
           onDragOver={(event) =>
-            events.drag.over(
-              event,
-              memberTarget(event, group, id, group.direction === "horizontal"),
-            )
+            events.drag.over(event, memberTarget(event, group, id, direction === "horizontal"))
           }
           onDrop={(event) =>
-            events.drag.drop(
-              event,
-              memberTarget(event, group, id, group.direction === "horizontal"),
-            )
+            events.drag.drop(event, memberTarget(event, group, id, direction === "horizontal"))
           }
         >
           <button

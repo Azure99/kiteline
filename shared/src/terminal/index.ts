@@ -90,17 +90,56 @@ export function normalizePaste(text: string) {
 export const touchHoldMs = 550;
 export const touchSlopPx = 8;
 
-// Fixed xterm beta inertia omits coordinates; touch never requests input focus.
-export function adaptTouchGestures(screen: HTMLElement, selecting: () => boolean): Disposable {
+// Fixed xterm beta inertia omits coordinates; only an explicit tap requests focus.
+export function adaptTouchGestures(
+  container: HTMLElement,
+  screen: HTMLElement,
+  selecting: () => boolean,
+  onTap: () => void,
+): Disposable {
   let last: { clientX: number; clientY: number } | undefined;
   let blocked = false;
+  let contact:
+    | { identifier: number; x: number; y: number; started: number; eligible: boolean }
+    | undefined;
+  const document = container.ownerDocument;
   const touch = (event: TouchEvent) => {
+    const inBody = screen.contains(event.target as Node);
+    if (!contact && !inBody) return;
     const point = event.changedTouches[0];
     if (point) last = { clientX: point.clientX, clientY: point.clientY };
-    if (event.type === "touchstart" && !selecting()) blocked = false;
+    if (event.type === "touchstart") {
+      if (contact) contact.eligible = false;
+      else if (point && inBody && event.touches.length === 1) {
+        blocked = selecting();
+        contact = {
+          identifier: point.identifier,
+          x: point.clientX,
+          y: point.clientY,
+          started: event.timeStamp,
+          eligible: !blocked,
+        };
+      }
+      return;
+    }
+    if (!contact) return;
+    if (event.type === "touchmove" || event.type === "touchcancel" || selecting())
+      contact.eligible = false;
+    if (event.type !== "touchend" && event.type !== "touchcancel") return;
+    const tap =
+      contact.eligible &&
+      event.type === "touchend" &&
+      event.touches.length === 0 &&
+      point?.identifier === contact.identifier &&
+      event.timeStamp - contact.started < touchHoldMs &&
+      Math.hypot(point.clientX - contact.x, point.clientY - contact.y) <= touchSlopPx;
+    if (event.touches.length === 0) contact = undefined;
+    else contact.eligible = false;
+    if (tap) onTap();
   };
   const gesture = (raw: Event) => {
     const event = raw as Event & { clientX?: number; clientY?: number };
+    if (contact && event.type === "-xterm-gesturechange") contact.eligible = false;
     if (selecting()) blocked = true;
     if (blocked || event.type === "-xterm-gesturetap") {
       event.preventDefault();
@@ -124,14 +163,14 @@ export function adaptTouchGestures(screen: HTMLElement, selecting: () => boolean
   const touches = ["touchstart", "touchmove", "touchend", "touchcancel"] as const;
   const gestures = ["-xterm-gesturechange", "-xterm-gesturetap", "-xterm-gesturecontextmenu"];
   for (const name of touches)
-    screen.addEventListener(name, touch, { capture: true, passive: true });
-  for (const name of gestures) screen.addEventListener(name, gesture, true);
-  screen.addEventListener("mousedown", mouse, true);
+    document.addEventListener(name, touch, { capture: true, passive: true });
+  for (const name of gestures) container.addEventListener(name, gesture, true);
+  container.addEventListener("mousedown", mouse, true);
   return {
     dispose: () => {
-      for (const name of touches) screen.removeEventListener(name, touch, true);
-      for (const name of gestures) screen.removeEventListener(name, gesture, true);
-      screen.removeEventListener("mousedown", mouse, true);
+      for (const name of touches) document.removeEventListener(name, touch, { capture: true });
+      for (const name of gestures) container.removeEventListener(name, gesture, true);
+      container.removeEventListener("mousedown", mouse, true);
     },
   };
 }
