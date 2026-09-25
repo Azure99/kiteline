@@ -1,10 +1,14 @@
 import { afterEach, expect, test } from "vitest";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { appendFile, cp, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { appendFile, cp, mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Repo, Workspace } from "@kiteline/shared/protocol";
 import { WorkspaceWatches } from "../src/watches.js";
+import { Repositories } from "../src/git/repos.js";
+import { MetadataStore } from "../src/metadata.js";
+import { CursorBudget } from "../src/cursor-budget.js";
+import { defaultAgentLimits } from "../src/config.js";
 
 const run = promisify(execFile);
 const cleanups: (() => Promise<void>)[] = [];
@@ -58,7 +62,8 @@ test("shared Git metadata invalidates both active worktrees", async () => {
     b = join(root, "b");
   const git = (...args: string[]) => run("git", args, { cwd: a });
   await mkdir(a);
-  await git("init", "-b", "main");
+  await git("init");
+  await git("symbolic-ref", "HEAD", "refs/heads/main");
   await git(
     "-c",
     "user.name=Test",
@@ -221,4 +226,41 @@ test("a bare workspace watches Git state without recursively watching objects", 
   await writeFile(join(root, "objects", "cc", "object"), "ignored");
   await new Promise((resolve) => setTimeout(resolve, 450));
   expect(events).toEqual([]);
+});
+
+test("discovery resolves a linked .git directory for external metadata watching", async () => {
+  const { root, watches, events, workspace } = await setup();
+  const project = join(root, "project");
+  const metadataPath = join(root, "metadata");
+  await run("git", ["init", project]);
+  await run("git", [
+    "-C",
+    project,
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.test",
+    "commit",
+    "--allow-empty",
+    "-m",
+    "base",
+  ]);
+  await rename(join(project, ".git"), metadataPath);
+  await symlink("../metadata", join(project, ".git"));
+  const metadata = new MetadataStore({
+    dataDir: join(root, "data"),
+    runDir: join(root, "run"),
+    shell: "/bin/sh",
+    limits: { ...defaultAgentLimits },
+  });
+  const repos = new Repositories(metadata, new CursorBudget());
+  cleanups.push(() => repos.close());
+  const repo = await repos.inspect(project, root, new AbortController().signal);
+  expect(repo.commonDir).toBe(metadataPath);
+  watches.set([workspace("a", project)]);
+  watches.repo("a", repo);
+  await until(() => events.some((event) => event.status === "normal"));
+  events.length = 0;
+  await run("git", ["-C", project, "update-ref", "refs/heads/external", "HEAD"]);
+  await until(() => events.some((event) => event.type === "workspace.changed"));
 });

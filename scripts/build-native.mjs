@@ -10,18 +10,14 @@ import {
 } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
+import { prepareRipgrep } from "./prepare-ripgrep.mjs";
 
 const root = resolve(import.meta.dirname, "..");
-const recorderDependencies = JSON.parse(
-  readFileSync(resolve(root, "terminal-recorder/package.json"), "utf8"),
-).dependencies;
-const webDependencies = JSON.parse(
-  readFileSync(resolve(root, "web/package.json"), "utf8"),
-).dependencies;
 const destination = resolve(process.env.KITELINE_NATIVE_OUTPUT ?? resolve(root, "dist/native"));
 const directory = mkdtempSync("/var/tmp/kiteline-native-");
 const tarball = resolve(directory, "tmux.tar.gz");
-const checksum = "551ab8dea0bf505c0ad6b7bb35ef567cdde0ccb84357df142c254f35a23e19aa";
+const { tmux } = JSON.parse(readFileSync(resolve(root, "deploy/agent-static.json"), "utf8"));
+const checksum = tmux.sha256;
 const digest = (file) => createHash("sha256").update(readFileSync(file)).digest("hex");
 function run(command, args, cwd = directory) {
   const result = spawnSync(command, args, { cwd, stdio: "inherit" });
@@ -31,16 +27,10 @@ function run(command, args, cwd = directory) {
 
 try {
   mkdirSync(destination, { recursive: true });
-  run("curl", [
-    "--fail",
-    "--location",
-    "--output",
-    tarball,
-    "https://github.com/tmux/tmux/releases/download/3.4/tmux-3.4.tar.gz",
-  ]);
+  run("curl", ["--fail", "--location", "--output", tarball, tmux.url]);
   if (digest(tarball) !== checksum) throw new Error("tmux source checksum mismatch");
   run("tar", ["-xzf", tarball]);
-  const source = resolve(directory, "tmux-3.4");
+  const source = resolve(directory, `tmux-${tmux.version}`);
   run("patch", ["-p1", "-i", resolve(root, "native/tmux-paste.patch")], source);
   run("./configure", ["--quiet", "--disable-sixel", `--prefix=${destination}`], source);
   run("make", ["-s", "-j2"], source);
@@ -89,10 +79,11 @@ try {
     resolve(destination, "identity.json"),
     JSON.stringify(
       {
+        linkage: "dynamic",
         node: process.version,
         architecture: process.arch,
         libraries,
-        tmux: "3.4",
+        tmux: tmux.version,
         tmuxSource: checksum,
         patch: digest(resolve(root, "native/tmux-paste.patch")),
         helper: digest(resolve(root, "native/rename-noreplace.c")),
@@ -101,10 +92,7 @@ try {
         helperBinary: digest(resolve(destination, "bin/rename-noreplace")),
         helperFlags: ["-Wall", "-Wextra", "-Werror", "-O2"],
         configure: ["--disable-sixel"],
-        headless: recorderDependencies["@xterm/headless"],
-        xterm: webDependencies["@xterm/xterm"],
-        serialize: recorderDependencies["@xterm/addon-serialize"],
-        profile: "xterm-c1",
+        ...(process.arch === "x64" ? { ripgrep: prepareRipgrep(destination) } : {}),
       },
       null,
       2,

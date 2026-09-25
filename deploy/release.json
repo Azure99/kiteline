@@ -5,6 +5,16 @@
     "sha256": "6bac2a01979e210d9eac1d4d56747ec709ea60654744d66705dc3c36e7629e50"
   },
   "node": "24.20.0",
+  "ripgrep": {
+    "version": "15.2.0",
+    "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-unknown-linux-musl.tar.gz",
+    "sha256": "33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c",
+    "checksumUrl": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-unknown-linux-musl.tar.gz.sha256",
+    "pcre2License": {
+      "url": "https://raw.githubusercontent.com/PCRE2Project/pcre2/pcre2-10.45/LICENCE.md",
+      "sha256": "9cf7ac6976099a1d856826d3ef1b093bd6b84489dc6100628ac79e740cf9885a"
+    }
+  },
   "nodeArchives": {
     "amd64": {
       "architecture": "x64",

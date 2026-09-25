@@ -251,17 +251,10 @@ export async function changeIndex(
       await git(
         repo.rootPath,
         kind === "stage"
-          ? ["add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"]
-          : [
-              "restore",
-              "--no-recurse-submodules",
-              "--source=HEAD",
-              "--staged",
-              "--pathspec-from-file=-",
-              "--pathspec-file-nul",
-            ],
+          ? ["add", "-A", "--", ...add]
+          : ["restore", "--no-recurse-submodules", "--source=HEAD", "--staged", "--", ...add],
         signal,
-        { input: nul(add), write: true },
+        { write: true },
       );
       done(add);
     }
@@ -405,11 +398,11 @@ export async function discard(
           "--no-recurse-submodules",
           ...(scope === "all" ? ["--source=HEAD", "--staged"] : []),
           "--worktree",
-          "--pathspec-from-file=-",
-          "--pathspec-file-nul",
+          "--",
+          ...plan.restore,
         ],
         signal,
-        { input: nul(plan.restore), write: true },
+        { write: true },
       );
       done(plan.restore);
     }

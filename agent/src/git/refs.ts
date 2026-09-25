@@ -67,7 +67,7 @@ export async function createBranch(
     ? await commitOid(repo, startOid, signal)
     : (await headIdentity(repo.rootPath, signal)).oid;
   if (!start) throw new AppError("conflict", "Current repository has no commits yet");
-  await git(repo.rootPath, ["branch", "--no-recurse-submodules", "--", name, start], signal, {
+  await git(repo.rootPath, ["-c", "submodule.recurse=false", "branch", "--", name, start], signal, {
     write: true,
   });
   if (switchTo) {

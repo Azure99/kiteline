@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { lstat } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   AppError,
   limits,
@@ -17,7 +17,7 @@ export const diffOptions = [
   "--no-color",
   "--no-ext-diff",
   "--no-textconv",
-  "--no-relative",
+  "--relative=",
   "--ignore-submodules=none",
 ];
 export async function headIdentity(root: string, signal: AbortSignal): Promise<HeadIdentity> {
@@ -34,14 +34,9 @@ export async function headIdentity(root: string, signal: AbortSignal): Promise<H
 }
 export async function observeIndex(repo: Repo, signal: AbortSignal) {
   const head = await headIdentity(repo.rootPath, signal);
-  const path = commandLine(
-    (
-      await git(
-        repo.rootPath,
-        ["rev-parse", "--path-format=absolute", "--git-path", "index"],
-        signal,
-      )
-    ).bytes,
+  const path = resolve(
+    repo.rootPath,
+    commandLine((await git(repo.rootPath, ["rev-parse", "--git-path", "index"], signal)).bytes),
   );
   let present = true;
   try {

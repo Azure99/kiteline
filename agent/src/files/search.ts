@@ -7,6 +7,7 @@ import type { Token } from "stream-json/parser.js";
 import { AppError, limits, type SearchMatch, type SearchResult } from "@kiteline/shared/protocol";
 import { SearchJson } from "./search-json.js";
 import { BytePrefix } from "../buffers.js";
+import { bundledRipgrep, ripgrepBinary } from "../tool-checks.js";
 
 export async function searchFiles(
   root: string,
@@ -22,7 +23,7 @@ export async function searchFiles(
       : ["--no-config", "--json", "--hidden", "--fixed-strings", "-g", "!.git", "-e", query];
   if (includeIgnored) args.push("--no-ignore");
   args.push("--", ".");
-  const child = spawn("rg", args, { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(ripgrepBinary, args, { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
   let spawnError: NodeJS.ErrnoException | undefined;
   child.on("error", (error) => {
     spawnError = error;
@@ -123,7 +124,9 @@ export async function searchFiles(
     throw new AppError(
       spawnError.code === "ENOENT" ? "unsupported" : "io_error",
       spawnError.code === "ENOENT"
-        ? "ripgrep (rg) is not installed on the device"
+        ? bundledRipgrep
+          ? "Bundled ripgrep is unavailable; rebuild native components or reinstall the matching agent package"
+          : "ripgrep (rg) is not installed on the device"
         : spawnError.message,
     );
   if (!limited && (failure || (code !== 0 && code !== 1)))

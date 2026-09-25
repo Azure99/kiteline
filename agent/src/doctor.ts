@@ -10,7 +10,13 @@ import { tmuxBinary, tmuxEnvironment } from "@kiteline/shared/terminal/node";
 import { agentConfig, agentPaths, defaultAgentLimits, type AgentConfig } from "./config.js";
 import { localRequest } from "./local.js";
 import { packageDirectory, environmentFile } from "./installation.js";
-import { checkFileHelper, checkToolVersion, toolRequirements } from "./tool-checks.js";
+import {
+  bundledRipgrep,
+  checkBundledRipgrep,
+  checkFileHelper,
+  checkToolVersion,
+  toolRequirements,
+} from "./tool-checks.js";
 
 const execute = promisify(execFile);
 interface Item {
@@ -31,6 +37,11 @@ interface Runtime {
   shell: string;
   recorderPid?: number;
   sessions: Session[];
+}
+function nativeFacts(identity: Record<string, unknown>) {
+  const facts = { ...identity };
+  for (const key of ["headless", "xterm", "serialize", "profile", "ripgrep"]) delete facts[key];
+  return facts;
 }
 export async function diagnose(
   config: Pick<AgentConfig, "dataDir" | "runDir">,
@@ -72,45 +83,69 @@ export async function diagnose(
     return `${process.execPath}; ${process.version} ${process.arch}; release=${info.version}`;
   });
   const native = join(packageDirectory, "dist/native");
-  await check("Terminal build identity", async () => {
+  let nativeLinkage: "static-musl" | "dynamic" | undefined;
+  await check("Native build identity", async () => {
     const identity = JSON.parse(await readFile(join(native, "identity.json"), "utf8"));
     const release = JSON.parse(await readFile(join(packageDirectory, "release.json"), "utf8"));
-    const recorderRequire = createRequire(join(packageDirectory, "terminal-recorder/package.json"));
-    if (
-      !isDeepStrictEqual(release.native, identity) ||
-      recorderRequire("@xterm/headless/package.json").version !== identity.headless ||
-      recorderRequire("@xterm/addon-serialize/package.json").version !== identity.serialize
-    )
-      throw new Error(
-        "Recorder dependencies or release manifest do not match the terminal build identity",
-      );
     const hash = async (file: string) =>
       createHash("sha256")
         .update(await readFile(file))
         .digest("hex");
     if (
+      !isDeepStrictEqual(nativeFacts(release.native), nativeFacts(identity)) ||
       identity.architecture !== process.arch ||
-      identity.profile !== terminalProfile ||
+      !["static-musl", "dynamic"].includes(identity.linkage) ||
       (await hash(tmuxBinary)) !== identity.tmuxBinary ||
       (await hash(join(native, "bin/rename-noreplace"))) !== identity.helperBinary
     )
       throw new Error(
-        "Native components, architecture, or terminalProfile do not match the build identity",
+        "Native components, linkage, architecture or release manifest do not match the build identity",
+      );
+    nativeLinkage = identity.linkage;
+    return `tmux=${identity.tmux}; linkage=${nativeLinkage}; patch=${identity.patch}`;
+  });
+  await check("Recorder build identity", async () => {
+    const identity = JSON.parse(await readFile(join(native, "identity.json"), "utf8"));
+    const release = JSON.parse(await readFile(join(packageDirectory, "release.json"), "utf8"));
+    const recorderRequire = createRequire(join(packageDirectory, "terminal-recorder/package.json"));
+    if (
+      ["headless", "serialize", "xterm", "profile"].some(
+        (key) => identity[key] !== release.native?.[key],
+      ) ||
+      identity.profile !== terminalProfile ||
+      recorderRequire("@xterm/headless/package.json").version !== identity.headless ||
+      recorderRequire("@xterm/addon-serialize/package.json").version !== identity.serialize
+    )
+      throw new Error(
+        "Recorder dependencies, terminalProfile or release manifest do not match the build identity",
       );
     await access(join(packageDirectory, "terminal-recorder/dist/main.js"), constants.R_OK);
-    return `tmux=${identity.tmux}; profile=${identity.profile}; patch=${identity.patch}; headless=${identity.headless}; xterm=${identity.xterm}`;
+    return `profile=${identity.profile}; headless=${identity.headless}; serialize=${identity.serialize}; xterm=${identity.xterm}`;
   });
-  for (const name of ["tmux", "rename-noreplace"]) {
-    await check(`${name} shared libraries`, async () => {
-      const result = await command("ldd", [join(native, "bin", name)]);
-      if (result.includes("not found")) throw new Error(result);
-      return result;
-    });
-  }
+  if (!nativeLinkage)
+    add("Native linkage", "Unknown; shared library requirements could not be verified", "warn");
+  else
+    for (const name of ["tmux", "rename-noreplace"]) {
+      await check(`${name} shared libraries`, async () => {
+        if (nativeLinkage === "static-musl")
+          return "Static musl; no host dynamic libraries required";
+        const result = await command("ldd", [join(native, "bin", name)]);
+        if (result.includes("not found")) throw new Error(result);
+        return result;
+      });
+    }
   await check("tmux execution", () => command(tmuxBinary, ["-V"]));
   await check("Helper execution", () =>
     checkFileHelper(join(native, "bin/rename-noreplace"), command),
   );
+  if (bundledRipgrep)
+    await check("Bundled ripgrep", async () => {
+      const identity = JSON.parse(await readFile(join(native, "identity.json"), "utf8"));
+      const release = JSON.parse(await readFile(join(packageDirectory, "release.json"), "utf8"));
+      if (!isDeepStrictEqual(identity.ripgrep, release.native?.ripgrep))
+        throw new Error("Bundled ripgrep does not match the release manifest");
+      return checkBundledRipgrep(command);
+    });
   if (!runtime) {
     add(
       "Runtime environment",
@@ -167,7 +202,6 @@ export async function diagnose(
       const value = await command("git", [
         "config",
         "--show-origin",
-        "--show-scope",
         "--get-regexp",
         "^(user\\.|credential\\.|core\\.sshcommand|gpg\\.|commit\\.gpgsign)",
       ]);

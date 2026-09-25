@@ -4,7 +4,7 @@
 
 ## 生成交付物
 
-在已安装依赖的源码目录执行；构建机需要 Docker BuildKit（Dockerfile 1.6+），可通过 binfmt/QEMU 构建另一架构。用户运行发布包不需要 npm 或编译器。基础镜像、Node 和用于引导系统 CA 的 Ubuntu 证书包身份集中在 [release.json](release.json)，构建不使用反代镜像。
+在已安装依赖的源码目录执行；构建机需要 Docker BuildKit（Dockerfile 1.6+）及binutils的readelf，可通过 binfmt/QEMU 构建另一架构。用户运行发布包不需要 npm 或编译器。基础镜像、Node、amd64 rg官方归档及用于引导系统CA的Ubuntu证书包身份集中在[release.json](release.json)，构建不使用反代镜像。rg与适用许可证随包归档，不参与Node重编。
 
 ```sh
 pnpm install --frozen-lockfile
@@ -14,6 +14,8 @@ pnpm images amd64
 ```
 
 上述单平台构建命令只打amd64，并在server中提供配套amd64接入包。需要完整双架构发布时，先构建两种agent，再省略server的`--agent-arch`；ARM64 server另执行`pnpm package server arm64`、`pnpm images arm64`，串行控制内存。包及对应`.sha256`在`dist/releases/`；产品版本来自[version.json](../shared/src/version.json)，镜像名为`kiteline-server:<版本>-<amd64|arm64>`。本仓库不自动发布镜像，跨机器可用`docker save/load`搬运。清单记录commit、dirty、实际输入sourceDigest、Node/native与校验；组装server发现来源不一致时要求重建agent。
+
+`package agent amd64`自动构建/复用静态组件；也可单独用 `node scripts/build-agent-static.mjs` 预构建到`dist/agent-static-amd64/`。来源与SHA在[agent-static.json](agent-static.json)，工具链版本在[agent-static-packages.txt](agent-static-packages.txt)；固定官方Node源码，无Node补丁。首次构建需数GiB内存和较长编译时间，Node固定3个编译任务，8GiB构建机避免同时运行其他重负载。Docker分别缓存Node/native阶段，业务JS变更不触发Node重编；源下载缓存在`/var/tmp/kiteline-release-cache`并核验SHA。输出携带许可证、实际工具包清单、输入身份和文件校验，ELF检查拒绝动态加载器或库依赖。组件升级需同步来源/工具链和代表环境验收，不能只替换二进制。
 
 ## Server 部署
 
@@ -50,12 +52,19 @@ docker compose -f deploy/compose.yaml up -d server
 
 网页自动生成当前访问地址的 `curl .../connect.sh | sh -s -- 'CODE'` 命令，后台方式只追加 `--service`。实际命令含下载协议限制：HTTPS不降级，HTTP可用HTTP/HTTPS；绑定码保留为 shell 参数，不进入下载 URL。目标设备必须能够访问该地址，不能从手机的 localhost 地址给另一台机器绑定。
 
-目标机需要 curl、Git 2.43+、ripgrep 14+、SSH、flock（util-linux）和项目使用的 Shell/CLI。缺项时命令停止并给出安装建议，不自动修改系统依赖；Ubuntu 24.04 可执行：
+amd64目标机需要 curl、Git 2.23.0+、SSH、flock（util-linux）、有效的 UTF-8 locale 和项目使用的 Shell/CLI，rg已随包提供。缺项时命令停止并给出安装建议，不自动修改系统依赖。ARM工具要求见[运行基线](#平台要求)。下面的基础依赖命令以 root 执行，普通用户加 sudo：
 
 ```sh
-sudo apt-get update
-sudo apt-get install -y curl ca-certificates git ripgrep openssh-client ncurses-bin locales util-linux
+# Ubuntu 24.04 / Debian 12
+apt-get update
+apt-get install -y curl ca-certificates tar gzip coreutils git openssh-client ncurses-bin locales util-linux
+# Alpine 3.23
+apk add curl ca-certificates tar gzip coreutils musl-utils git openssh-client ncurses musl-locales util-linux
+# CentOS 7.9：另外提供 Git 2.23.0+，默认仓库版本不足。
+yum install -y curl ca-certificates tar gzip coreutils openssh-clients ncurses glibc-common util-linux
 ```
+
+用 `locale -a` 确认已安装的 UTF-8 locale，`locale charmap` 应输出 UTF-8。CentOS 7 可使用已安装的 `en_US.UTF-8`；若该 locale 已安装，可在运行接入命令的 Shell 中执行 `export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8`。`LC_ALL` 优先于 `LC_CTYPE` 和 `LANG`。后台模式还需在首次接入前将相同设置写入 `/etc/kiteline-agent.env`；服务默认的 `LANG=C.UTF-8` 不能代替该系统实际安装的 locale。保留该文件原有内容；前台只读取其中的目录项，locale 沿用启动 Shell。
 
 Node、recorder、固定 tmux、terminfo 和文件 helper 已随包提供，无需 npm/编译器。安装失败后先处理具体原因，再执行命令；绑定码已过期则在网页重新生成。程序已安装但绑定失败时不重复替换安装；已有身份或不同版本会停止，不自动重绑/升级。若已登记但未在线，先核对本地凭据和 `kiteline-agent run` 输出；凭据丢失在网页撤销残留身份并重新生成绑定码，不能把未知结果当成普通过期重试。
 
@@ -64,7 +73,7 @@ Node、recorder、固定 tmux、terminfo 和文件 helper 已随包提供，无�
 ```sh
 # KITELINE_VERSION 设为下载的版本；ARM64 将 amd64 换成 arm64。
 kiteline_package="kiteline-agent-${KITELINE_VERSION}-linux-amd64"
-sha256sum --check "$kiteline_package.tar.gz.sha256"
+sha256sum -c "$kiteline_package.tar.gz.sha256"
 tar -xzf "$kiteline_package.tar.gz"
 "./$kiteline_package/bin/kiteline-agent" check
 sudo "./$kiteline_package/bin/kiteline-agent" install --user YOUR_USER
@@ -137,7 +146,10 @@ linked worktree 同时挂载工作目录、gitDir 和 commonDir；`.git` 指向�
 
 ## 平台要求
 
-| 组件                         | 运行前提                                               |
-| ---------------------------- | ------------------------------------------------------ |
-| Linux agent amd64、arm64     | Ubuntu 24.04；另需 Git 2.43+、rg 14+、SSH 和项目 Shell |
-| server 包及镜像 amd64、arm64 | Ubuntu 24.04                                           |
+| 组件                         | 运行前提                                                             |
+| ---------------------------- | -------------------------------------------------------------------- |
+| Linux agent amd64            | Ubuntu 24.04、Debian 12、Alpine 3.23、CentOS 7.9；静态 musl，rg 随包 |
+| Linux agent arm64            | Ubuntu 24.04；另需 rg 14+                                            |
+| server 包及镜像 amd64、arm64 | Ubuntu 24.04                                                         |
+
+设备还需 Git 2.23+、SSH、有效 UTF-8 locale 和项目使用的 Shell/CLI。Linux 静态包不替代这些外部程序的系统依赖，也不加载 glibc NSS 插件或动态 Node addon。Linux 文件发布要求内核与文件系统支持 `renameat2(RENAME_NOREPLACE)`；CentOS 7.9 amd64 基线为含此回移植的 `3.10.0-1160.el7.x86_64`。

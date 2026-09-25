@@ -1,0 +1,39 @@
+ARG ALPINE
+FROM ${ALPINE} AS toolchain
+ENV TMPDIR=/var/tmp
+COPY packages.txt /var/tmp/packages.txt
+RUN xargs apk add --no-cache < /var/tmp/packages.txt \
+    && apk info -vv | sort > /var/tmp/build-packages.txt
+WORKDIR /var/tmp/build
+
+FROM toolchain AS runtime
+COPY node.tar.xz build-static-node.sh node-inputs.json ./
+RUN sh build-static-node.sh
+COPY licenses/ /output/runtime/licenses/
+COPY --from=toolchain /var/tmp/build-packages.txt /output/runtime/build-packages.txt
+COPY node-inputs.json /output/runtime/inputs.json
+
+FROM toolchain AS native
+COPY libevent* ncurses* tmux.tar.gz build-static-native.sh ./
+COPY tmux-paste.patch rename-noreplace.c tmux.terminfo native-inputs.json ./
+RUN sh build-static-native.sh
+COPY licenses/musl-COPYRIGHT /output/native/licenses/musl-COPYRIGHT
+COPY --from=toolchain /var/tmp/build-packages.txt /output/native/build-packages.txt
+COPY native-inputs.json /output/native/inputs.json
+
+FROM toolchain AS verified
+COPY --from=runtime /output/ /output/
+COPY --from=native /output/ /output/
+RUN for file in /output/runtime/bin/node /output/native/bin/*; do \
+      readelf -l "$file" > /var/tmp/headers; \
+      readelf -d "$file" > /var/tmp/dynamic; \
+      if grep -q INTERP /var/tmp/headers || grep -q NEEDED /var/tmp/dynamic; then \
+        echo "Unexpected dynamic dependency: $file" >&2; exit 1; \
+      fi; \
+    done \
+    && /output/runtime/bin/node --version \
+    && /output/native/bin/tmux -V \
+    && cd /output && find runtime native -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+
+FROM scratch
+COPY --from=verified /output/ /output/

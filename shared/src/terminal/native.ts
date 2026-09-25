@@ -8,7 +8,10 @@ export const terminfoDirectory = resolve(root, "dist/native/share/terminfo");
 export function tmuxEnvironment() {
   const environment: NodeJS.ProcessEnv = {
     ...process.env,
-    TERMINFO_DIRS: `${terminfoDirectory}:${process.env.TERMINFO_DIRS ?? ""}`,
+    TERMINFO_DIRS:
+      [terminfoDirectory, `${terminfoDirectory}-legacy`, process.env.TERMINFO_DIRS]
+        .filter(Boolean)
+        .join(":") + ":",
   };
   delete environment.TMUX;
   return environment;

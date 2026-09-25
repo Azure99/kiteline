@@ -94,7 +94,7 @@ async function verifyPackage(directory: string) {
   const release = JSON.parse(await readFile(join(directory, "release.json"), "utf8"));
   if (release.kind !== "agent" || release.architecture !== process.arch)
     throw new Error("A complete agent package matching the current Linux architecture is required");
-  await command("sha256sum", ["--status", "--check", "SHA256SUMS"], directory);
+  await command("sh", ["-c", "sha256sum -c SHA256SUMS >/dev/null"], directory);
   if ((await command(join(directory, "runtime/bin/node"), ["--version"])) !== `v${release.node}`)
     throw new Error("Bundled Node does not match the installation manifest");
   if (

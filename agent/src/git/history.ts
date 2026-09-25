@@ -1,3 +1,4 @@
+import { basename, dirname } from "node:path";
 import {
   AppError,
   limits,
@@ -228,31 +229,38 @@ export async function commitDiff(
 }
 export async function branches(repo: Repo, signal: AbortSignal) {
   const head = await headIdentity(repo.rootPath, signal);
-  const occupied = new Map<string, string>();
-  let path = "";
-  const worktrees = new NulRecords((record) => {
-    const field = utf8(record);
-    if (field.startsWith("worktree ")) path = field.slice(9);
-    else if (field.startsWith("branch ")) occupied.set(field.slice(7), path);
-  });
-  await git(repo.rootPath, ["worktree", "list", "--porcelain", "-z"], signal, {
-    onData: worktrees.data,
-  });
-  worktrees.end();
   const output = await git(
     repo.rootPath,
-    ["for-each-ref", "--color=never", "--format=%(refname)%00%(objectname)%00", "refs/heads/"],
+    [
+      "for-each-ref",
+      "--color=never",
+      "--format=%(refname)%00%(objectname)%00%(worktreepath)%00",
+      "refs/heads/",
+    ],
     signal,
   );
   const fields = utf8(output.bytes).split("\0");
+  // Git also reports the bare main entry as a worktree path.
+  const mainPath = basename(repo.commonDir) === ".git" ? dirname(repo.commonDir) : repo.commonDir;
+  const bareRoot =
+    fields.includes(mainPath) &&
+    commandLine(
+      (
+        await git(
+          repo.rootPath,
+          [`--git-dir=${repo.commonDir}`, "rev-parse", "--is-bare-repository"],
+          signal,
+        )
+      ).bytes,
+    ) === "true";
   const result: Branch[] = [];
-  for (let i = 0; i + 1 < fields.length; i += 2) {
+  for (let i = 0; i + 2 < fields.length; i += 3) {
     const ref = fields[i]!.replace(/^\n/, "");
     result.push({
       name: ref.slice(11),
       oid: fields[i + 1]!,
       current: ref === head.symbolicRef,
-      worktreePath: occupied.get(ref),
+      worktreePath: bareRoot && fields[i + 2] === mainPath ? undefined : fields[i + 2] || undefined,
     });
   }
   if (Buffer.byteLength(JSON.stringify({ branches: result })) > limits.resultBytes)

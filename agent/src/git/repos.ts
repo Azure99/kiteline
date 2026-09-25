@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { isUtf8 } from "node:buffer";
 import type { Dir } from "node:fs";
 import { lstat, opendir, realpath, stat } from "node:fs/promises";
-import { isAbsolute, join, relative } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import {
   AppError,
   asError,
@@ -63,7 +63,7 @@ export class Repositories {
   async inspect(path: string, workspaceRoot: string, signal: AbortSignal): Promise<Repo> {
     const root = await realpath(path);
     const readPath = async (option: string) =>
-      commandLine((await git(root, ["rev-parse", "--path-format=absolute", option], signal)).bytes);
+      realpath(resolve(root, commandLine((await git(root, ["rev-parse", option], signal)).bytes)));
     const bare =
       commandLine((await git(root, ["rev-parse", "--is-bare-repository"], signal)).bytes) ===
       "true";

@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { AppError, limits } from "@kiteline/shared/protocol";
@@ -6,6 +6,7 @@ import { searchFiles } from "../src/files/search.js";
 
 const roots: string[] = [];
 afterEach(async () => {
+  vi.unstubAllEnvs();
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 async function setup() {
@@ -82,4 +83,33 @@ test("cancellation and deadlines stop rg and differ from no matches", async () =
     matches: [],
     truncated: false,
   });
+});
+
+test("quoted global excludes and escaped directory rules apply to both search modes", async () => {
+  const home = await setup();
+  const root = join(home, "project");
+  await mkdir(join(root, ".git"), { recursive: true });
+  await mkdir(join(root, "build"));
+  await writeFile(join(home, ".gitconfig"), '[core]\n excludesFile = "~/rules"\n');
+  await writeFile(join(home, "rules"), "*.sql\n");
+  await writeFile(join(root, ".gitignore"), "build\\/\n");
+  await writeFile(join(root, "build/artifact.txt"), "needle\n");
+  await writeFile(join(root, "keep.txt"), "needle\n");
+  await writeFile(join(root, "drop.sql"), "needle\n");
+  vi.stubEnv("HOME", home);
+  for (const mode of ["name", "content"] as const) {
+    const query = mode === "name" ? "." : "needle";
+    const paths = (await searchFiles(root, mode, query, false, signal())).matches.map(
+      (item) => item.path,
+    );
+    expect(paths.filter((path) => path !== ".gitignore")).toEqual(["keep.txt"]);
+    const all = (await searchFiles(root, mode, query, true, signal())).matches.map(
+      (item) => item.path,
+    );
+    expect(all.filter((path) => path !== ".gitignore").sort()).toEqual([
+      "build/artifact.txt",
+      "drop.sql",
+      "keep.txt",
+    ]);
+  }
 });

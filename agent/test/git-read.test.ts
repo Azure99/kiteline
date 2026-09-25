@@ -28,7 +28,8 @@ async function setup() {
       cwd: root,
       env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" },
     });
-  await cli("init", "-b", "main");
+  await cli("init");
+  await cli("symbolic-ref", "HEAD", "refs/heads/main");
   await cli("config", "user.name", "Kiteline Test");
   await cli("config", "user.email", "kiteline@example.test");
   const metadata = new MetadataStore({
@@ -253,16 +254,34 @@ test("merge parents are explicit and branches expose linked worktree occupancy",
       (item) => item.path,
     ),
   ).toEqual(["main"]);
-  const linked = join(home, "linked\t路径\n");
+  const linked = join(home, 'linked\t路径"\\\n');
   await cli("worktree", "add", linked, "feature");
+  await cli("worktree", "lock", linked);
   const list = await branches(repo, signals());
   expect(list.branches.find((item) => item.name === "feature")).toMatchObject({
     current: false,
     worktreePath: linked,
   });
   expect(list.branches.find((item) => item.name === "main")?.current).toBe(true);
+  await rename(linked, join(home, "moved-linked"));
+  expect(
+    (await branches(repo, signals())).branches.find((item) => item.name === "feature"),
+  ).toMatchObject({ worktreePath: linked });
   await repos.close();
 }, 15_000);
+test.each(["bare.git", ".git"])("bare %s does not occupy its HEAD branch", async (name) => {
+  const { root, home, cli, repos } = await setup();
+  await cli("commit", "--allow-empty", "-m", "base");
+  const bare = join(home, name);
+  const linked = join(home, "linked");
+  await run("git", ["clone", "--bare", root, bare]);
+  await run("git", ["--git-dir", bare, "worktree", "add", "-b", "linked", linked]);
+  const repo = await repos.inspect(linked, home, signals());
+  const list = (await branches(repo, signals())).branches;
+  expect(list.find((item) => item.name === "main")?.worktreePath).toBeUndefined();
+  expect(list.find((item) => item.name === "linked")?.worktreePath).toBe(linked);
+  await repos.close();
+});
 test("single-file diffs exclude descendants when a file becomes a directory", async () => {
   const { root, cli, repo, repos } = await setup();
   const path = "item\n[]*";

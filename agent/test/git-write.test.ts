@@ -32,7 +32,8 @@ async function setup() {
   const root = await mkdtemp("/var/tmp/kiteline-git-write-");
   roots.push(root);
   const cli = async (...args: string[]) => (await exec("git", args, { cwd: root })).stdout;
-  await cli("init", "-b", "main");
+  await cli("init");
+  await cli("symbolic-ref", "HEAD", "refs/heads/main");
   await cli("config", "user.name", "Kiteline Test");
   await cli("config", "user.email", "kiteline@example.test");
   const home = await mkdtemp("/var/tmp/kiteline-git-write-meta-");
@@ -270,7 +271,8 @@ test("branch mutations check target OID and preserve native occupancy and unmerg
   const linked = await mkdtemp("/var/tmp/kiteline-git-write-linked-");
   roots.push(linked);
   await cli("worktree", "add", linked, "topic");
-  await expect(changeBranch(repo, "topic", second, "switch", signal())).rejects.toThrow(/worktree/);
+  await expect(changeBranch(repo, "topic", second, "switch", signal())).rejects.toThrow(linked);
+  expect((await headIdentity(root, signal())).symbolicRef).toBe("refs/heads/main");
   await createBranch(repo, "removable", first, false, signal());
   expect(await changeBranch(repo, "removable", first, "delete", signal())).toEqual({
     deleted: true,

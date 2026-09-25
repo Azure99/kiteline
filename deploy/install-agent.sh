@@ -38,8 +38,19 @@ aarch64 | arm64) arch=arm64 ;;
 *) fail "Only Linux amd64/arm64 is supported" ;;
 esac
 
+install_hint() {
+    if command -v apk >/dev/null 2>&1; then
+        printf '%s' 'apk add curl ca-certificates tar gzip coreutils musl-utils'
+    elif command -v apt-get >/dev/null 2>&1; then
+        printf '%s' 'apt-get update && apt-get install -y curl ca-certificates tar gzip coreutils libc-bin'
+    elif command -v yum >/dev/null 2>&1; then
+        printf '%s' 'yum install -y curl ca-certificates tar gzip coreutils glibc-common'
+    else
+        printf '%s' 'Install curl, CA certificates, tar, gzip, sha256sum, mktemp, id, getent and readlink using your system package manager'
+    fi
+}
 for tool in curl tar gzip sha256sum mktemp id getent readlink; do
-    command -v "$tool" >/dev/null 2>&1 || fail "Missing $tool. Ubuntu 24.04: apt-get update && apt-get install -y curl ca-certificates tar gzip coreutils libc-bin (add sudo when running as a non-root user)"
+    command -v "$tool" >/dev/null 2>&1 || fail "Missing $tool. Base dependencies: $(install_hint) (use root or sudo for package installation)"
 done
 [ -z "${KITELINE_AGENT_HOME+x}${KITELINE_AGENT_RUN_DIR+x}" ] || fail "The connection command uses the installation configuration. Unset KITELINE_AGENT_HOME/KITELINE_AGENT_RUN_DIR environment overrides; configure existing custom directories in /etc/kiteline-agent.env."
 user=$(id -un)
@@ -63,10 +74,10 @@ if [ ! -e /etc/kiteline-agent.json ]; then
     base="$server/downloads/agent/$version/$name.tar.gz"
     curl --fail --show-error --location --proto "$protocols" --proto-redir "$protocols" "$base" -o "$temporary/$name.tar.gz"
     curl --fail --show-error --location --proto "$protocols" --proto-redir "$protocols" "$base.sha256" -o "$temporary/$name.tar.gz.sha256"
-    (cd "$temporary" && sha256sum --check "$name.tar.gz.sha256")
+    (cd "$temporary" && sha256sum -c "$name.tar.gz.sha256")
     tar -xzf "$temporary/$name.tar.gz" -C "$temporary" --no-same-owner
     package="$temporary/$name"
-    (cd "$package" && sha256sum --status --check SHA256SUMS)
+    (cd "$package" && sha256sum -c SHA256SUMS >/dev/null)
     [ "$("$package/bin/kiteline-agent" --version)" = "$version" ] || fail "Package version mismatch"
     "$package/bin/kiteline-agent" check
     as_root "$package/bin/kiteline-agent" install --user "$user"

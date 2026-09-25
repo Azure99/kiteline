@@ -6,7 +6,7 @@
 
 ## 从源码开发
 
-开发环境使用 Node 24.20.0 和 pnpm 11.25.0。Ubuntu 原生组件构建需要 `build-essential pkg-config libevent-dev libncurses-dev ncurses-term bison curl patch`，运行设备工具还需要 Git 2.43+、ripgrep 14+ 和 Shell。
+开发环境使用 Node 24.20.0 和 pnpm 11.25.0。Ubuntu 原生组件构建需要 `build-essential pkg-config libevent-dev libncurses-dev ncurses-term bison curl patch`，运行设备工具还需要 Git 2.23.0+ 和 Shell。amd64组件准备会取得固定rg到内部路径，不要求系统rg；Linux arm64 需要外部 rg 14+，运行基线为 Ubuntu 24.04。
 
 ```sh
 pnpm install

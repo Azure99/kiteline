@@ -25,7 +25,8 @@ async function setup() {
   const root = join(home, "project");
   await mkdir(root);
   const cli = async (...args: string[]) => (await exec("git", args, { cwd: root })).stdout;
-  await cli("init", "-b", "main");
+  await cli("init");
+  await cli("symbolic-ref", "HEAD", "refs/heads/main");
   await cli("config", "user.name", "Kiteline Test");
   await cli("config", "user.email", "kiteline@example.test");
   const metadata = new MetadataStore({
@@ -90,7 +91,9 @@ test.each(["--merge", "--apply"])(
   async (backend) => {
     const { repo, cli, write } = await divergent();
     await cli("switch", "topic");
-    await expect(cli("rebase", backend, "main")).rejects.toThrow();
+    await expect(
+      cli("rebase", ...(backend === "--apply" ? ["--whitespace=nowarn"] : [backend]), "main"),
+    ).rejects.toThrow();
     const first = await operation(repo);
     expect(first.kind).toBe("rebase");
     await write("f", "resolved one\n");
@@ -212,7 +215,8 @@ test("fetch pull push reuse local remotes and pull strategy; queued HEAD identit
   const { repo, root, home, cli, write } = await setup();
   const bare = join(home, "remote.git"),
     other = join(home, "other");
-  await exec("git", ["init", "--bare", "-b", "main", bare]);
+  await exec("git", ["init", "--bare", bare]);
+  await exec("git", ["--git-dir", bare, "symbolic-ref", "HEAD", "refs/heads/main"]);
   await cli("remote", "add", "origin", bare);
   await cli("push", "-u", "origin", "main");
   await exec("git", ["clone", bare, other]);

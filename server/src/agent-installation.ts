@@ -29,7 +29,7 @@ connect() {
     fi
     [ -n "$1" ] || { echo 'Missing binding code; generate a connection command in the web app' >&2; exit 1; }
     for kiteline_tool in curl mktemp; do
-        command -v "$kiteline_tool" >/dev/null || { echo "Missing $kiteline_tool; Ubuntu 24.04: sudo apt-get update && sudo apt-get install -y curl ca-certificates coreutils" >&2; exit 1; }
+        command -v "$kiteline_tool" >/dev/null || { echo "Missing $kiteline_tool; install curl, CA certificates and core utilities using your system package manager, then run this command again" >&2; exit 1; }
     done
     kiteline_install=$(mktemp /var/tmp/kiteline-install.XXXXXX)
     trap 'rm -f "$kiteline_install"' EXIT
@@ -49,7 +49,7 @@ export function upgradeCommand(entryOrigin: string) {
     command: `(
 set -e
 for kiteline_tool in curl mktemp uname id; do
-  command -v "$kiteline_tool" >/dev/null || { echo "Missing $kiteline_tool; Ubuntu 24.04: sudo apt-get update && sudo apt-get install -y curl ca-certificates coreutils" >&2; exit 1; }
+  command -v "$kiteline_tool" >/dev/null || { echo "Missing $kiteline_tool; install curl, CA certificates and core utilities using your system package manager, then run this command again" >&2; exit 1; }
 done
 [ "$(uname -s)" = Linux ] || { echo 'Only Linux is supported' >&2; exit 1; }
 case "$(uname -m)" in

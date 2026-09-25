@@ -8,6 +8,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   rmSync,
   symlinkSync,
@@ -16,6 +17,8 @@ import {
 import { spawnSync } from "node:child_process";
 import { basename, resolve, join, relative } from "node:path";
 import { parseArgs } from "node:util";
+import { buildStaticAgent } from "./build-agent-static.mjs";
+import { prepareRipgrep } from "./prepare-ripgrep.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const release = JSON.parse(readFileSync(join(root, "deploy/release.json"), "utf8"));
@@ -36,6 +39,7 @@ if (
     "Usage: pnpm package agent|server amd64|arm64 [--agent-arch=amd64|arm64 (server only)]",
   );
 const node = release.nodeArchives[arch];
+const staticAgent = kind === "agent" && arch === "amd64";
 const { version } = JSON.parse(readFileSync(join(root, "shared/src/version.json"), "utf8"));
 const output = join(root, "dist/releases");
 const cache = "/var/tmp/kiteline-release-cache";
@@ -125,15 +129,47 @@ function deploy(name, target) {
 }
 function checksums(directory) {
   const entries = [];
+  const expectedELFs = new Set(
+    staticAgent
+      ? [
+          "runtime/bin/node",
+          "dist/native/bin/tmux",
+          "dist/native/bin/rename-noreplace",
+          "dist/native/bin/rg",
+        ]
+      : [],
+  );
   function walk(path) {
     for (const name of readdirSync(path).sort()) {
       const file = join(path, name);
       const stat = lstatSync(file);
       if (stat.isDirectory()) walk(file);
-      else if (stat.isFile()) entries.push(`${digest(file)}  ${relative(directory, file)}`);
+      else if (stat.isFile()) {
+        const name = relative(directory, file);
+        const bytes = readFileSync(file);
+        if (staticAgent) {
+          if (name.endsWith(".node"))
+            throw new Error(`Dynamic Node addon is not supported: ${name}`);
+          if (bytes.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) {
+            if (!expectedELFs.delete(name)) throw new Error(`Unexpected agent ELF: ${name}`);
+            if (!(stat.mode & 0o111)) throw new Error(`Agent ELF is not executable: ${name}`);
+            if (
+              /INTERP/.test(text("readelf", ["-l", file])) ||
+              /NEEDED/.test(text("readelf", ["-d", file]))
+            )
+              throw new Error(`Dynamic dependency in static agent: ${name}`);
+          }
+        }
+        entries.push(`${createHash("sha256").update(bytes).digest("hex")}  ${name}`);
+      } else if (staticAgent && stat.isSymbolicLink()) {
+        const target = realpathSync(file);
+        if (target !== directory && !target.startsWith(directory + "/"))
+          throw new Error(`Agent symlink escapes package: ${file}`);
+      }
     }
   }
   walk(directory);
+  if (expectedELFs.size) throw new Error(`Missing agent ELF: ${[...expectedELFs].join(", ")}`);
   writeFileSync(join(directory, "SHA256SUMS"), entries.join("\n") + "\n");
 }
 try {
@@ -141,30 +177,65 @@ try {
   const agents = kind === "server" ? agentArchives(sourceHash) : [];
   mkdirSync(cache, { recursive: true });
   mkdirSync(output, { recursive: true });
-  const filename = `node-v${release.node}-linux-${node.architecture}.tar.xz`;
-  const archive = join(cache, filename);
-  if (!existsSync(archive) || digest(archive) !== node.sha256) {
-    rmSync(archive, { force: true });
-    const pending = `${archive}.${process.pid}.pending`;
-    try {
-      run("curl", [
-        "--fail",
-        "--location",
-        "--output",
-        pending,
-        `https://nodejs.org/dist/v${release.node}/${filename}`,
-      ]);
-      if (digest(pending) !== node.sha256) throw new Error("Node archive checksum mismatch");
-      renameSync(pending, archive);
-    } finally {
-      rmSync(pending, { force: true });
-    }
-  }
-  run("tar", ["-xJf", archive, "-C", temporary]);
-  const runtime = join(temporary, filename.slice(0, -7));
-  run("pnpm", ["build"]);
+  let runtime;
+  let staticBuild;
   const native = join(temporary, "native");
-  if (kind === "agent") {
+  if (staticAgent) {
+    const components = join(temporary, "static");
+    buildStaticAgent(components);
+    runtime = join(components, "runtime");
+    run("cp", ["-a", join(components, "native"), native]);
+    staticBuild = JSON.parse(readFileSync(join(components, "build.json"), "utf8"));
+  } else {
+    const filename = `node-v${release.node}-linux-${node.architecture}.tar.xz`;
+    const archive = join(cache, filename);
+    if (!existsSync(archive) || digest(archive) !== node.sha256) {
+      rmSync(archive, { force: true });
+      const pending = `${archive}.${process.pid}.pending`;
+      try {
+        run("curl", [
+          "--fail",
+          "--location",
+          "--output",
+          pending,
+          `https://nodejs.org/dist/v${release.node}/${filename}`,
+        ]);
+        if (digest(pending) !== node.sha256) throw new Error("Node archive checksum mismatch");
+        renameSync(pending, archive);
+      } finally {
+        rmSync(pending, { force: true });
+      }
+    }
+    run("tar", ["-xJf", archive, "-C", temporary]);
+    runtime = join(temporary, filename.slice(0, -7));
+  }
+  run("pnpm", ["build"]);
+  if (staticAgent) {
+    writeFileSync(
+      join(native, "identity.json"),
+      JSON.stringify(
+        {
+          linkage: "static-musl",
+          node: `v${release.node}`,
+          architecture: node.architecture,
+          tmux: staticBuild.native.sources.tmux.version,
+          tmuxSource: staticBuild.native.sources.tmux.sha256,
+          patch: staticBuild.native.patch,
+          helper: staticBuild.native.helper,
+          terminfo: staticBuild.native.terminfo,
+          terminfoResources: {
+            modern: digest(join(native, "share/terminfo/t/tmux-256color")),
+            legacy: digest(join(native, "share/terminfo-legacy/t/tmux-256color")),
+          },
+          tmuxBinary: digest(join(native, "bin/tmux")),
+          helperBinary: digest(join(native, "bin/rename-noreplace")),
+          ripgrep: prepareRipgrep(native),
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+  } else if (kind === "agent") {
     mkdirSync(native);
     const builder = `kiteline-native-builder:${arch}`;
     run("docker", [
@@ -217,6 +288,28 @@ try {
       "/src/scripts/build-native.mjs",
     ]);
   }
+  if (kind === "agent") {
+    const recorder = JSON.parse(
+      readFileSync(join(root, "terminal-recorder/package.json"), "utf8"),
+    ).dependencies;
+    const web = JSON.parse(readFileSync(join(root, "web/package.json"), "utf8")).dependencies;
+    const { terminalProfile } = await import("../shared/dist/protocol/index.js");
+    const identityPath = join(native, "identity.json");
+    writeFileSync(
+      identityPath,
+      JSON.stringify(
+        {
+          ...JSON.parse(readFileSync(identityPath, "utf8")),
+          headless: recorder["@xterm/headless"],
+          xterm: web["@xterm/xterm"],
+          serialize: recorder["@xterm/addon-serialize"],
+          profile: terminalProfile,
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+  }
   const sourceCommit = text("git", ["rev-parse", "HEAD"]);
   const sourceDirty = text("git", ["status", "--porcelain"]) !== "";
   const name = `kiteline-${kind}-${version}-linux-${arch}`;
@@ -240,9 +333,12 @@ try {
       for (const file of [archive, checksum]) cpSync(file, join(downloads, basename(file)));
     cpSync(join(root, "deploy/install-agent.sh"), join(downloads, "install.sh"));
   }
-  mkdirSync(join(destination, "runtime/bin"), { recursive: true });
-  cpSync(join(runtime, "bin/node"), join(destination, "runtime/bin/node"));
-  cpSync(join(runtime, "LICENSE"), join(destination, "runtime/LICENSE"));
+  if (staticAgent) run("cp", ["-a", runtime, join(destination, "runtime")]);
+  else {
+    mkdirSync(join(destination, "runtime/bin"), { recursive: true });
+    cpSync(join(runtime, "bin/node"), join(destination, "runtime/bin/node"));
+    cpSync(join(runtime, "LICENSE"), join(destination, "runtime/LICENSE"));
+  }
   mkdirSync(join(destination, "bin"));
   const launcher = join(destination, "bin", `kiteline-${kind}`);
   writeFileSync(
@@ -258,14 +354,18 @@ try {
         kind,
         architecture: node.architecture,
         node: release.node,
-        nodeArchive: node.sha256,
         sourceCommit,
         sourceDirty,
         sourceDigest: sourceHash,
         lockfile: digest(join(root, "pnpm-lock.yaml")),
-        ubuntu: release.ubuntu,
-        aptSources: digest(join(root, "deploy/ubuntu.sources")),
-        caCertificates: release.caCertificates,
+        ...(staticBuild
+          ? { staticBuild }
+          : {
+              nodeArchive: node.sha256,
+              ubuntu: release.ubuntu,
+              aptSources: digest(join(root, "deploy/ubuntu.sources")),
+              caCertificates: release.caCertificates,
+            }),
         native:
           kind === "agent"
             ? JSON.parse(readFileSync(join(native, "identity.json"), "utf8"))
