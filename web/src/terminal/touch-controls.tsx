@@ -140,7 +140,7 @@ export function TouchControls({
       {notice && (
         <div
           role={notice.kind === "copied" ? "status" : "alert"}
-          className="absolute bottom-3 left-1/2 z-30 flex max-h-[50%] max-w-[calc(100%_-_24px)] -translate-x-1/2 items-start gap-2 overflow-auto rounded border border-border bg-background px-3 py-2 text-sm text-foreground shadow-md"
+          className="absolute bottom-3 left-1/2 z-30 flex max-h-[50%] max-w-[calc(100%_-_24px)] items-start gap-2 overflow-auto rounded border border-border bg-background px-3 py-2 text-sm text-foreground shadow-md [transform:translateX(-50%)]"
           onPointerDown={(event) => event.preventDefault()}
         >
           {notice.kind === "copied" ? (

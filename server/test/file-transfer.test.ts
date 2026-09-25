@@ -10,7 +10,7 @@ async function connection() {
   const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
   await once(server, "listening");
   const address = server.address();
-  if (typeof address === "string") throw new Error("Expected socket address");
+  if (!address || typeof address === "string") throw new Error("Expected socket address");
   const incoming = once(server, "connection");
   const device = new WebSocket(`ws://127.0.0.1:${address.port}`);
   const [relay] = (await incoming) as [WebSocket];

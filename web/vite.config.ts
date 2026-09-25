@@ -1,10 +1,13 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { editorResetCompat } from "./build/editor-reset-compat.js";
 
 const serverProxy = { target: "http://127.0.0.1:8080", ws: true };
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss({ optimize: { minify: false } })],
+  css: { postcss: { plugins: [editorResetCompat()] } },
+  build: { target: "chrome97", cssTarget: "chrome97", cssCodeSplit: false },
   server: {
     proxy: {
       "/api": serverProxy,

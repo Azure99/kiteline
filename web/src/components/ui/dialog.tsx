@@ -18,7 +18,7 @@ export function DialogContent({ className, children, ...props }: Primitive.Popup
       <Primitive.Popup
         render={(props, state) => <div {...props} inert={!state.open} />}
         className={cn(
-          "dialog-content fixed z-50 flex max-h-[min(85dvh,760px)] w-[calc(100%_-_32px)] max-w-[560px] flex-col overflow-hidden rounded-md border border-border bg-background shadow-xl outline-none",
+          "dialog-content fixed z-50 flex w-[calc(100%_-_32px)] max-w-[560px] flex-col overflow-hidden rounded-md border border-border bg-background shadow-xl outline-none",
           className,
         )}
         {...props}

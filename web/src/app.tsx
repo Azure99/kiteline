@@ -94,6 +94,12 @@ export function App() {
   const recents = useRecentWorkspaces(route, devices, devicesLoaded, !!session);
   const device = devices.find((d) => d.id === route.deviceId);
   const workspace = device?.snapshot?.workspaces.find((w) => w.id === route.workspaceId);
+  const terminalPage =
+    !!session && route.valid && !!device && !!workspace && route.tool === "terminal";
+  useLayoutEffect(() => {
+    document.documentElement.toggleAttribute("data-terminal-active", terminalPage);
+    return () => document.documentElement.removeAttribute("data-terminal-active");
+  }, [terminalPage]);
   const terminalFocus = useTerminalFocus(
     session &&
       route.valid &&
@@ -221,7 +227,7 @@ export function App() {
   );
   if (loading || authError)
     return (
-      <div className="flex h-dvh flex-col items-center justify-center gap-4 bg-muted p-5">
+      <div className="flex h-[var(--viewport-height)] flex-col items-center justify-center gap-4 bg-muted p-5">
         <Terminal className="text-primary" />
         <div role={authError ? "alert" : "status"}>
           {authError ? <ErrorNotice error={authError} /> : t(($) => $.common.connecting)}
@@ -249,10 +255,8 @@ export function App() {
     <>
       <div
         data-terminal-focus={terminalFocus.active ? "" : undefined}
-        data-terminal-page={
-          route.valid && device && workspace && route.tool === "terminal" ? "" : undefined
-        }
-        className="fixed top-[var(--app-top,0px)] left-0 flex h-[var(--app-height,100dvh)] w-full min-h-0 flex-col overflow-hidden bg-background"
+        data-terminal-page={terminalPage ? "" : undefined}
+        className="fixed top-[var(--app-top,0px)] left-0 flex h-[var(--app-height,100vh)] w-full min-h-0 flex-col overflow-hidden bg-background"
       >
         <header
           hidden={terminalFocus.active}

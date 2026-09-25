@@ -15,6 +15,7 @@ export const prepareKeyboard = () => {
 
 // App owns these listeners; terminal displays read the same keyboard-height decision.
 export function trackViewport() {
+  const dynamicViewport = CSS.supports("height", "100dvh");
   const viewport = window.visualViewport;
   const keyboard = virtualKeyboard;
   let width = viewport?.width ?? window.innerWidth;
@@ -68,7 +69,7 @@ export function trackViewport() {
     fullscreen = nextFullscreen;
     document.documentElement.style.setProperty(
       "--app-height",
-      nextScale === 1 && top === 0 && !occluded ? "100dvh" : `${height}px`,
+      dynamicViewport && nextScale === 1 && top === 0 && !occluded ? "100dvh" : `${height}px`,
     );
     document.documentElement.style.setProperty("--app-top", `${top}px`);
     window.dispatchEvent(new Event("kiteline:viewport"));

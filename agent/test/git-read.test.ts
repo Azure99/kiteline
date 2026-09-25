@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, mkdir, writeFile, rm, rename, chmod, symlink } from "node:fs/promises";
@@ -15,7 +15,16 @@ import { branches, commitDiff, commitFiles, history } from "../src/git/history.j
 const run = promisify(execFile);
 const roots: string[] = [];
 const signals = () => new AbortController().signal;
+beforeEach(async () => {
+  const home = await mkdtemp("/var/tmp/kiteline-git-env-");
+  roots.push(home);
+  vi.stubEnv("HOME", home);
+  vi.stubEnv("XDG_CONFIG_HOME", join(home, ".config"));
+  vi.stubEnv("GIT_CONFIG_NOSYSTEM", "1");
+  vi.stubEnv("GIT_CONFIG_GLOBAL", undefined);
+});
 afterEach(async () => {
+  vi.unstubAllEnvs();
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 async function setup() {
@@ -23,11 +32,7 @@ async function setup() {
   roots.push(home);
   const root = join(home, "project");
   await mkdir(root);
-  const cli = (...args: string[]) =>
-    run("git", args, {
-      cwd: root,
-      env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" },
-    });
+  const cli = (...args: string[]) => run("git", args, { cwd: root });
   await cli("init");
   await cli("symbolic-ref", "HEAD", "refs/heads/main");
   await cli("config", "user.name", "Kiteline Test");

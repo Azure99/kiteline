@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import {
@@ -25,7 +25,16 @@ import { observeIndex, headIdentity } from "../src/git/status.js";
 const exec = promisify(execFile);
 const roots: string[] = [];
 const signal = () => new AbortController().signal;
+beforeEach(async () => {
+  const home = await mkdtemp("/var/tmp/kiteline-git-env-");
+  roots.push(home);
+  vi.stubEnv("HOME", home);
+  vi.stubEnv("XDG_CONFIG_HOME", join(home, ".config"));
+  vi.stubEnv("GIT_CONFIG_NOSYSTEM", "1");
+  vi.stubEnv("GIT_CONFIG_GLOBAL", undefined);
+});
 afterEach(async () => {
+  vi.unstubAllEnvs();
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 async function setup() {

@@ -1,3 +1,5 @@
+@import "@xterm/xterm/css/xterm.css";
+@import "react-diff-view/style/index.css";
 @import "tailwindcss";
 
 @theme inline {
@@ -13,6 +15,8 @@
 }
 
 :root {
+  --viewport-height: 100vh;
+  --viewport-large-height: 100vh;
   color-scheme: light;
   --background: #fff;
   --foreground: #323946;
@@ -37,8 +41,17 @@
   color: var(--foreground);
 }
 
-* {
-  box-sizing: border-box;
+@supports (height: 100dvh) {
+  :root {
+    --viewport-height: 100dvh;
+    --viewport-large-height: 100lvh;
+  }
+}
+
+@layer kiteline-editor-reset {
+  * {
+    box-sizing: border-box;
+  }
 }
 html,
 body,
@@ -51,41 +64,82 @@ body {
   font-size: 14px;
 }
 /* Keyboard animations can uncover the page before its viewport is resized. */
-:root:has([data-terminal-page]),
-body:has([data-terminal-page]) {
+:root[data-terminal-active],
+:root[data-terminal-active] body {
   background: var(--terminal);
   overflow: clip;
 }
-body:has([data-terminal-page]) {
-  min-height: 100lvh;
+:root[data-terminal-active] body {
+  min-height: var(--viewport-large-height);
 }
-:root:has([data-terminal-page])::backdrop {
+:root[data-terminal-active]::backdrop {
   background: var(--terminal);
 }
-button,
-input,
-textarea,
-select {
-  font: inherit;
-  letter-spacing: 0;
+@layer kiteline-editor-reset {
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+    letter-spacing: 0;
+  }
+  button {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: default;
+  }
+  button,
+  a,
+  input,
+  textarea,
+  select {
+    -webkit-tap-highlight-color: transparent;
+  }
+  ::selection {
+    background: #bbd1f4;
+  }
 }
-button {
-  cursor: pointer;
+@supports not (color: color-mix(in oklab, black, transparent)) {
+  :where(input, textarea):not([data-slot="input"])::placeholder {
+    color: currentColor;
+    opacity: 0.5;
+  }
+  .border-border\/50 {
+    border-color: rgb(226 230 237 / 50%);
+  }
+  .bg-amber-200\/70 {
+    background-color: #fee685b3;
+  }
+  .bg-black\/25 {
+    background-color: rgb(0 0 0 / 25%);
+  }
+  .bg-muted\/25 {
+    background-color: rgb(246 247 249 / 25%);
+  }
+  .bg-muted\/40 {
+    background-color: rgb(246 247 249 / 40%);
+  }
+  .bg-muted\/50 {
+    background-color: rgb(246 247 249 / 50%);
+  }
+  .bg-muted\/60 {
+    background-color: rgb(246 247 249 / 60%);
+  }
+  .bg-muted\/65 {
+    background-color: rgb(246 247 249 / 65%);
+  }
 }
-button:disabled {
-  cursor: default;
-}
-button,
-a,
-input,
-textarea,
-select {
-  -webkit-tap-highlight-color: transparent;
-}
-::selection {
-  background: #bbd1f4;
+.focus-visible\:ring-2:focus-visible {
+  box-shadow:
+    var(--tw-inset-shadow, 0 0 #0000),
+    var(--tw-inset-ring-shadow, 0 0 #0000),
+    var(--tw-ring-offset-shadow, 0 0 #0000),
+    0 0 0 2px var(--primary),
+    var(--tw-shadow, 0 0 #0000);
 }
 .dialog-content {
+  max-height: min(calc(var(--viewport-height) * 0.85), 760px);
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
@@ -121,6 +175,35 @@ select {
 @media (max-width: 959px) {
   .dialog-content:is([data-starting-style], [data-ending-style]) {
     translate: 0 8px;
+  }
+}
+@supports not (translate: 0 1px) {
+  .dialog-content {
+    transition:
+      opacity 160ms ease-out,
+      transform 160ms ease-out;
+  }
+  .menu-content {
+    transition:
+      opacity 120ms ease-out,
+      transform 120ms ease-out;
+  }
+  .tooltip-content {
+    transition:
+      opacity 100ms ease-out,
+      transform 100ms ease-out;
+  }
+  .menu-content:is([data-starting-style], [data-ending-style]),
+  .tooltip-content:is([data-starting-style], [data-ending-style]) {
+    transform: translateY(-2px);
+  }
+  .dialog-content:is([data-starting-style], [data-ending-style]) {
+    transform: translate(-50%, -50%) translateY(4px);
+  }
+  @media (max-width: 959px) {
+    .dialog-content:is([data-starting-style], [data-ending-style]) {
+      transform: translateY(8px);
+    }
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -334,7 +417,7 @@ select {
     transform: none;
     width: 100%;
     max-width: 100%;
-    max-height: 90dvh;
+    max-height: calc(var(--viewport-height) * 0.9);
     border-bottom: 0;
     border-radius: 8px 8px 0 0;
     padding-bottom: env(safe-area-inset-bottom);

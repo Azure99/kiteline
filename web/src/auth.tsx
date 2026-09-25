@@ -48,7 +48,7 @@ export function Auth({
     }
   }
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-muted px-6 py-12">
+    <main className="flex min-h-[var(--viewport-height)] items-center justify-center bg-muted px-6 py-12">
       <div className="w-full max-w-80">
         <ReleaseNotice />
         <div className="mb-9 flex items-center gap-3">

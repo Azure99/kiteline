@@ -1,7 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { Decoration, Diff, Hunk, parseDiff, type FileData, type HunkTokens } from "react-diff-view";
-import "react-diff-view/style/index.css";
 import { limits, type GitDiff } from "@kiteline/shared/protocol";
 import { ApiError, errorMessage, rpc } from "../lib/api";
 import { ErrorNotice, ErrorDetails } from "../components/error-notice";

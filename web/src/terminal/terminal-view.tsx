@@ -27,7 +27,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../components/ui/dialog";
-import "@xterm/xterm/css/xterm.css";
 
 export interface TerminalActions {
   redraw(): void;

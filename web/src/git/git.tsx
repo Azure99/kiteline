@@ -464,183 +464,179 @@ function Changes({
         />
       )}
       <div className={view === "changes" ? "flex min-h-0 flex-1" : "hidden"}>
-        {(!mobile || !target) && (
-          <ToolSidebar visible={visible && view === "changes"}>
-            <aside
-              className="flex min-h-0 w-full flex-col border-border min-[960px]:w-80 min-[960px]:shrink-0 min-[960px]:border-r"
-              aria-label={t(($) => $.git.changeList)}
-            >
-              <div className="scroll-area min-h-0 flex-1 overflow-auto">
-                {(
-                  [
-                    ["conflict", t(($) => $.git.conflicts)],
-                    ["staged", t(($) => $.git.stagedChanges)],
-                    ["worktree", t(($) => $.git.worktreeChanges)],
-                  ] as const
-                ).map(([side, label]) => {
-                  const entries = value?.entries.filter((entry) => inSide(entry, side)) ?? [];
-                  const chosen = entries.filter((entry) =>
-                    selected.some((item) => item.path === entry.path && item.side === side),
-                  );
-                  if (side === "conflict" && !entries.length) return null;
-                  return (
-                    <div key={side}>
-                      <div className="flex items-center gap-2 bg-muted/65 px-3 py-2 text-xs">
-                        <ChevronDown size={13} />
-                        {label}
-                        <span className="ml-auto">
-                          {(side === "staged"
-                            ? (value?.stagedCount ?? 0)
-                            : entries.length
-                          ).toLocaleString(i18n.resolvedLanguage)}
-                        </span>
-                        {!!chosen.length && (
-                          <>
-                            <IconButton
-                              label={
-                                side === "staged"
-                                  ? t(($) => $.git.unstageSelected)
-                                  : t(($) => $.git.stageSelected)
-                              }
-                              disabled={
-                                disabled ||
-                                (side !== "staged" && chosen.some((entry) => !stageable(entry)))
-                              }
-                              onClick={() =>
-                                indexAction(
-                                  chosen.flatMap((entry) =>
-                                    side === "staged" && entry.oldPath
-                                      ? [entry.path, entry.oldPath]
-                                      : [entry.path],
-                                  ),
-                                  side === "staged" ? "unstage" : "stage",
-                                )
-                              }
-                            >
-                              {side === "staged" ? <Minus /> : <Plus />}
-                            </IconButton>
-                            <IconButton
-                              label={
-                                side !== "worktree"
-                                  ? t(($) => $.git.discardSelectedAll)
-                                  : t(($) => $.git.discardSelectedWorktree)
-                              }
-                              disabled={disabled || chosen.some((entry) => !discardable(entry))}
-                              onClick={() =>
-                                setDiscarding({
-                                  paths: chosen.map((entry) => entry.path),
-                                  scope: side !== "worktree" ? "all" : "worktree",
-                                })
-                              }
-                            >
-                              <Undo2 />
-                            </IconButton>
-                          </>
-                        )}
-                      </div>
-                      {entries.map((entry) => (
-                        <div
-                          key={entry.path}
-                          className={`flex min-h-8 items-center gap-1 border-b border-border/50 px-2 max-[959px]:min-h-11 ${target?.path === entry.path && (target.side === side || side === "conflict") ? "bg-primary-soft" : ""}`}
-                        >
-                          <label className="flex min-h-8 items-center justify-center max-[959px]:min-h-11 max-[959px]:min-w-11">
-                            <input
-                              type="checkbox"
-                              aria-label={t(($) => $.git.selectNamed, {
-                                area: label,
-                                path: entry.path,
-                              })}
-                              checked={selected.some(
-                                (item) => item.side === side && item.path === entry.path,
-                              )}
-                              onChange={() => select(entry, side)}
-                            />
-                          </label>
-                          <span
-                            className={`w-3 shrink-0 font-mono text-xs ${side === "staged" ? "text-green-700" : "text-amber-700"}`}
-                          >
-                            {side === "staged" ? entry.indexStatus : entry.worktreeStatus}
-                          </span>
-                          <button
-                            title={entry.path}
-                            onClick={() =>
-                              side === "conflict"
-                                ? onFile(entry.path)
-                                : selectTarget({
-                                    path: entry.path,
-                                    side: side === "staged" ? "staged" : "worktree",
-                                  })
+        <ToolSidebar visible={visible && view === "changes" && (!mobile || !target)}>
+          <aside
+            className="flex min-h-0 w-full flex-col border-border min-[960px]:w-80 min-[960px]:shrink-0 min-[960px]:border-r"
+            aria-label={t(($) => $.git.changeList)}
+          >
+            <div className="scroll-area min-h-0 flex-1 overflow-auto">
+              {(
+                [
+                  ["conflict", t(($) => $.git.conflicts)],
+                  ["staged", t(($) => $.git.stagedChanges)],
+                  ["worktree", t(($) => $.git.worktreeChanges)],
+                ] as const
+              ).map(([side, label]) => {
+                const entries = value?.entries.filter((entry) => inSide(entry, side)) ?? [];
+                const chosen = entries.filter((entry) =>
+                  selected.some((item) => item.path === entry.path && item.side === side),
+                );
+                if (side === "conflict" && !entries.length) return null;
+                return (
+                  <div key={side}>
+                    <div className="flex items-center gap-2 bg-muted/65 px-3 py-2 text-xs">
+                      <ChevronDown size={13} />
+                      {label}
+                      <span className="ml-auto">
+                        {(side === "staged"
+                          ? (value?.stagedCount ?? 0)
+                          : entries.length
+                        ).toLocaleString(i18n.resolvedLanguage)}
+                      </span>
+                      {!!chosen.length && (
+                        <>
+                          <IconButton
+                            label={
+                              side === "staged"
+                                ? t(($) => $.git.unstageSelected)
+                                : t(($) => $.git.stageSelected)
                             }
-                            className="flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left text-xs max-[959px]:min-h-11"
+                            disabled={
+                              disabled ||
+                              (side !== "staged" && chosen.some((entry) => !stageable(entry)))
+                            }
+                            onClick={() =>
+                              indexAction(
+                                chosen.flatMap((entry) =>
+                                  side === "staged" && entry.oldPath
+                                    ? [entry.path, entry.oldPath]
+                                    : [entry.path],
+                                ),
+                                side === "staged" ? "unstage" : "stage",
+                              )
+                            }
                           >
-                            <GitFilePath path={entry.path} />
-                            {entry.submodule && (
-                              <span className="shrink-0 text-[10px] text-muted-foreground">
-                                {t(($) =>
-                                  entry.submodule!.commitChanged
-                                    ? entry.submodule!.trackedDirty ||
-                                      entry.submodule!.untrackedDirty
-                                      ? $.git.submodulePointerDirty
-                                      : $.git.submodulePointer
-                                    : entry.submodule!.trackedDirty ||
-                                        entry.submodule!.untrackedDirty
-                                      ? $.git.submoduleDirty
-                                      : $.git.submodule,
-                                )}
-                              </span>
-                            )}
-                          </button>
-                          <RowActions
-                            entry={entry}
-                            side={side}
-                            disabled={disabled}
-                            onIndex={indexAction}
-                            onDiscard={(paths, scope) => setDiscarding({ paths, scope })}
-                            onFile={() => onFile(entry.path)}
-                          />
-                        </div>
-                      ))}
-                      {!entries.length && (
-                        <p className="px-8 py-3 text-xs text-muted-foreground">
-                          {t(($) => $.git.noChanges)}
-                        </p>
+                            {side === "staged" ? <Minus /> : <Plus />}
+                          </IconButton>
+                          <IconButton
+                            label={
+                              side !== "worktree"
+                                ? t(($) => $.git.discardSelectedAll)
+                                : t(($) => $.git.discardSelectedWorktree)
+                            }
+                            disabled={disabled || chosen.some((entry) => !discardable(entry))}
+                            onClick={() =>
+                              setDiscarding({
+                                paths: chosen.map((entry) => entry.path),
+                                scope: side !== "worktree" ? "all" : "worktree",
+                              })
+                            }
+                          >
+                            <Undo2 />
+                          </IconButton>
+                        </>
                       )}
                     </div>
-                  );
-                })}
-              </div>
-              <div className="flex min-h-10 shrink-0 items-center gap-1 border-t border-border px-3 text-xs text-muted-foreground">
-                <span className="mr-auto">
-                  {value?.entries.length
-                    ? `${(value.offset + 1).toLocaleString(i18n.resolvedLanguage)}–${(value.offset + value.entries.length).toLocaleString(i18n.resolvedLanguage)}`
-                    : "0"}{" "}
-                  / {(value?.totalCount ?? 0).toLocaleString(i18n.resolvedLanguage)}
-                </span>
-                <IconButton
-                  label={t(($) => $.git.previousPage)}
-                  disabled={!value?.offset || state.busy}
-                  onClick={state.previous}
-                >
-                  <ChevronLeft />
-                </IconButton>
-                <IconButton
-                  label={t(($) => $.git.nextPage)}
-                  disabled={value?.nextOffset === undefined || state.busy}
-                  onClick={state.next}
-                >
-                  <ChevronRight />
-                </IconButton>
-              </div>
-              <CommitBox
-                target={actionTarget}
-                actions={actions}
-                status={value}
-                disabled={disabled}
-                mobile={mobile}
-              />
-            </aside>
-          </ToolSidebar>
-        )}
+                    {entries.map((entry) => (
+                      <div
+                        key={entry.path}
+                        className={`flex min-h-8 items-center gap-1 border-b border-border/50 px-2 max-[959px]:min-h-11 ${target?.path === entry.path && (target.side === side || side === "conflict") ? "bg-primary-soft" : ""}`}
+                      >
+                        <label className="flex min-h-8 items-center justify-center max-[959px]:min-h-11 max-[959px]:min-w-11">
+                          <input
+                            type="checkbox"
+                            aria-label={t(($) => $.git.selectNamed, {
+                              area: label,
+                              path: entry.path,
+                            })}
+                            checked={selected.some(
+                              (item) => item.side === side && item.path === entry.path,
+                            )}
+                            onChange={() => select(entry, side)}
+                          />
+                        </label>
+                        <span
+                          className={`w-3 shrink-0 font-mono text-xs ${side === "staged" ? "text-green-700" : "text-amber-700"}`}
+                        >
+                          {side === "staged" ? entry.indexStatus : entry.worktreeStatus}
+                        </span>
+                        <button
+                          title={entry.path}
+                          onClick={() =>
+                            side === "conflict"
+                              ? onFile(entry.path)
+                              : selectTarget({
+                                  path: entry.path,
+                                  side: side === "staged" ? "staged" : "worktree",
+                                })
+                          }
+                          className="flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left text-xs max-[959px]:min-h-11"
+                        >
+                          <GitFilePath path={entry.path} />
+                          {entry.submodule && (
+                            <span className="shrink-0 text-[10px] text-muted-foreground">
+                              {t(($) =>
+                                entry.submodule!.commitChanged
+                                  ? entry.submodule!.trackedDirty || entry.submodule!.untrackedDirty
+                                    ? $.git.submodulePointerDirty
+                                    : $.git.submodulePointer
+                                  : entry.submodule!.trackedDirty || entry.submodule!.untrackedDirty
+                                    ? $.git.submoduleDirty
+                                    : $.git.submodule,
+                              )}
+                            </span>
+                          )}
+                        </button>
+                        <RowActions
+                          entry={entry}
+                          side={side}
+                          disabled={disabled}
+                          onIndex={indexAction}
+                          onDiscard={(paths, scope) => setDiscarding({ paths, scope })}
+                          onFile={() => onFile(entry.path)}
+                        />
+                      </div>
+                    ))}
+                    {!entries.length && (
+                      <p className="px-8 py-3 text-xs text-muted-foreground">
+                        {t(($) => $.git.noChanges)}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex min-h-10 shrink-0 items-center gap-1 border-t border-border px-3 text-xs text-muted-foreground">
+              <span className="mr-auto">
+                {value?.entries.length
+                  ? `${(value.offset + 1).toLocaleString(i18n.resolvedLanguage)}–${(value.offset + value.entries.length).toLocaleString(i18n.resolvedLanguage)}`
+                  : "0"}{" "}
+                / {(value?.totalCount ?? 0).toLocaleString(i18n.resolvedLanguage)}
+              </span>
+              <IconButton
+                label={t(($) => $.git.previousPage)}
+                disabled={!value?.offset || state.busy}
+                onClick={state.previous}
+              >
+                <ChevronLeft />
+              </IconButton>
+              <IconButton
+                label={t(($) => $.git.nextPage)}
+                disabled={value?.nextOffset === undefined || state.busy}
+                onClick={state.next}
+              >
+                <ChevronRight />
+              </IconButton>
+            </div>
+            <CommitBox
+              target={actionTarget}
+              actions={actions}
+              status={value}
+              disabled={disabled}
+              mobile={mobile}
+            />
+          </aside>
+        </ToolSidebar>
         {target ? (
           <DiffView
             key={JSON.stringify(target)}

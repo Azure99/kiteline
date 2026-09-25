@@ -77,7 +77,8 @@ export function workspacePath(
     if (value === undefined || value === false || (key === "folder" && value === ".")) continue;
     params.set(key, value === true ? "1" : value);
   }
-  return `${devicePath(deviceId)}/workspaces/${encodeURIComponent(workspaceId)}/${tool}${params.size ? `?${params}` : ""}`;
+  const search = params.toString();
+  return `${devicePath(deviceId)}/workspaces/${encodeURIComponent(workspaceId)}/${tool}${search ? `?${search}` : ""}`;
 }
 export function isWorkspaceRoute(route: ReturnType<typeof parseRoute>, target: WorkspaceTarget) {
   return route.deviceId === target.deviceId && route.workspaceId === target.workspaceId;

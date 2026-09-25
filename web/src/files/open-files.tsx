@@ -57,8 +57,23 @@ export function OpenFiles({
                     showDraft(draft);
                   }}
                 >
-                  <span className="min-w-0 truncate" title={draft.path}>
-                    {draft.deviceName} / {draft.workspaceName} / {draft.path}
+                  <span
+                    className="min-w-0 flex-1 text-left"
+                    title={`${draft.deviceName} / ${draft.workspaceName} / ${draft.path}`}
+                  >
+                    <span className="flex min-w-0 items-baseline gap-2">
+                      <span className="min-w-0 flex-1 truncate">
+                        {draft.path.slice(draft.path.lastIndexOf("/") + 1)}
+                      </span>
+                      {draft.path.includes("/") && (
+                        <span className="max-w-1/2 truncate text-xs text-muted-foreground">
+                          {draft.path.slice(0, draft.path.lastIndexOf("/"))}
+                        </span>
+                      )}
+                    </span>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {draft.deviceName} / {draft.workspaceName}
+                    </span>
                   </span>
                   {isDirty(draft) && <Circle size={7} fill="currentColor" />}
                 </Button>

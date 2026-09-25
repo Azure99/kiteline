@@ -20,6 +20,7 @@ import { copyText } from "../lib/clipboard";
 export function PortDialog({ device, onClose }: { device: Device; onClose: () => void }) {
   const { t } = useTranslation();
 
+  const input = useRef<HTMLInputElement>(null);
   const [port, setPort] = useState("");
   const [retain, setRetain] = useState(false);
   const [ports, setPorts] = useState<ListeningPorts>();
@@ -67,7 +68,7 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
         if (!open) onClose();
       }}
     >
-      <DialogContent>
+      <DialogContent initialFocus={input}>
         <DialogHeader>
           <DialogTitle>{t(($) => $.shell.openPort)}</DialogTitle>
         </DialogHeader>
@@ -83,6 +84,7 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
             <label className="block space-y-2 text-sm">
               <span>{t(($) => $.devices.port)}</span>
               <Input
+                ref={input}
                 aria-label={t(($) => $.devices.port)}
                 inputMode="numeric"
                 pattern="[0-9]*"
@@ -92,7 +94,6 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
                   setPort(event.target.value);
                   setNotice(undefined);
                 }}
-                autoFocus
               />
             </label>
             <fieldset className="flex flex-wrap gap-x-5 gap-y-2 text-sm">

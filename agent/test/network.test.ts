@@ -2,6 +2,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { createServer, type RequestListener } from "node:http";
 import { createServer as createSecureServer } from "node:https";
 import { connect, type AddressInfo, type Socket } from "node:net";
+import type { Duplex } from "node:stream";
 import { once } from "node:events";
 import { execFileSync } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -54,7 +55,7 @@ async function fixture({
   const certificates = getCACertificates("default");
   setDefaultCACertificates([...certificates, tls.cert]);
   const peers = new Set<Socket>();
-  const proxyPeers = new Set<Socket>();
+  const proxyPeers = new Set<Duplex>();
   let mode: "forward" | "reject" | "connect-stall" | "tls-stall" = "forward";
   const requests: { target: string; auth?: string }[] = [];
   const { username, password } = new URL(`http://${credentials}@localhost`);

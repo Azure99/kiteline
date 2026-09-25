@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "tsc -b && pnpm --filter @kiteline/web build",
-    "typecheck": "tsc -b && pnpm --filter @kiteline/web typecheck",
+    "typecheck": "tsc -b && tsc -p tsconfig.tests.json && pnpm --filter @kiteline/web typecheck",
     "lint": "eslint server agent terminal-recorder shared web scripts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

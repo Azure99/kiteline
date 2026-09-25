@@ -1,6 +1,11 @@
 import { expect, test } from "vitest";
 import type { Device } from "@kiteline/shared/protocol";
-import { pruneRecents, readRecents, visitWorkspace } from "../src/devices/recent-workspaces";
+import {
+  pruneRecents,
+  readRecents,
+  visitWorkspace,
+  type RecentWorkspace,
+} from "../src/devices/recent-workspaces";
 
 const visit = (workspaceId: string) => ({
   deviceId: "device",
@@ -10,7 +15,7 @@ const visit = (workspaceId: string) => ({
 });
 
 test("recent visits retain eight distinct targets and replace the last tool on return", () => {
-  let recents = Array.from({ length: 8 }, (_, i) => visit(String(i)));
+  let recents: RecentWorkspace[] = Array.from({ length: 8 }, (_, i) => visit(String(i)));
   recents = visitWorkspace(recents, visit("new"));
   expect(recents.map((entry) => entry.workspaceId)).toEqual([
     "new",

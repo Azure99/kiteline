@@ -34,6 +34,7 @@ export function FileNameDialog({
 }) {
   const { t } = useTranslation();
 
+  const input = useRef<HTMLTextAreaElement>(null);
   const [name, setName] = useState(action.kind === "rename" ? action.entry.name : "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
@@ -87,7 +88,7 @@ export function FileNameDialog({
         }
       }}
     >
-      <DialogContent>
+      <DialogContent initialFocus={input}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
@@ -97,11 +98,11 @@ export function FileNameDialog({
               {action.kind === "rename" ? action.entry.path : action.parent}
             </p>
             <Textarea
+              ref={input}
               aria-label={t(($) => $.common.name)}
               rows={2}
               value={name}
               onChange={(event) => setName(event.target.value)}
-              autoFocus
               disabled={busy}
             />
             {invalid && (
