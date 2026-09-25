@@ -77,6 +77,48 @@ select {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
+  transition:
+    opacity 160ms ease-out,
+    translate 160ms ease-out;
+}
+.menu-content {
+  transition:
+    opacity 120ms ease-out,
+    translate 120ms ease-out;
+}
+.tooltip-content {
+  transition:
+    opacity 100ms ease-out,
+    translate 100ms ease-out;
+}
+.dialog-backdrop {
+  transition: opacity 160ms ease-out;
+}
+.menu-content:is([data-starting-style], [data-ending-style]),
+.tooltip-content:is([data-starting-style], [data-ending-style]) {
+  opacity: 0;
+  translate: 0 -2px;
+}
+.dialog-content:is([data-starting-style], [data-ending-style]) {
+  opacity: 0;
+  translate: 0 4px;
+}
+.dialog-backdrop:is([data-starting-style], [data-ending-style]) {
+  opacity: 0;
+}
+@media (max-width: 959px) {
+  .dialog-content:is([data-starting-style], [data-ending-style]) {
+    translate: 0 8px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .menu-content,
+  .tooltip-content,
+  .dialog-content,
+  .dialog-backdrop,
+  [data-slot="button"] {
+    transition: none;
+  }
 }
 .status-dot {
   width: 7px;
@@ -127,14 +169,16 @@ select {
   background: var(--terminal);
   color: var(--terminal-foreground);
 }
-.terminal-canvas {
+.terminal-viewport {
   padding: 10px 8px 4px;
+}
+.terminal-canvas {
   overflow: hidden;
 }
 .terminal-canvas .xterm {
   height: 100%;
 }
-.terminal-canvas .xterm-viewport {
+.terminal-canvas .xterm:not(.allow-transparency) .xterm-viewport {
   background: var(--terminal);
   overscroll-behavior: contain;
 }

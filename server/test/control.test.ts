@@ -358,13 +358,26 @@ test("binding returns versioned installation commands from the configured public
   const response = await f.call("/api/bindings", "POST", {}, `kiteline_session=${session.token}`);
   expect(response.status).toBe(200);
   const value = await response.json();
-  expect(value.commands.foreground).toContain(`${f.config.publicUrl}/install.sh`);
-  expect(value.commands.foreground).toContain(`--version '${appVersion}' --code '${value.code}'`);
+  expect(value.commands.foreground).toBe(
+    `curl -fsSL '${f.config.publicUrl}/connect.sh' | sh -s -- '${value.code}'`,
+  );
   expect(value.commands.foreground).not.toContain("--service");
   expect(value.commands.service).toContain("--service");
   expect(value.commands.bind).toContain("--if-unbound");
   expect(value.commands.bind).toContain("kiteline-agent check &&");
   expect(f.store.binding(value.bindingId).status).toBe("pending");
+  const entry = await f.call("/connect.sh");
+  expect(entry.status).toBe(200);
+  const script = await entry.text();
+  expect(script).toContain(`${f.config.publicUrl}/install.sh`);
+  expect(script).toContain(`--server '${f.config.publicUrl}' --version '${appVersion}'`);
+  expect(script).not.toContain(value.code);
+  const head = await f.call("/connect.sh", "HEAD");
+  expect(head.status).toBe(200);
+  expect(head.headers.get("content-length")).toBe(String(Buffer.byteLength(script)));
+  expect(head.headers.get("cache-control")).toBe("no-cache");
+  expect(await head.text()).toBe("");
+  expect((await f.call("/connect.sh", "POST")).status).toBe(405);
 });
 
 test("the matching upgrade command is available to an authenticated stale Web release", async () => {

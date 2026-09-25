@@ -52,7 +52,7 @@ test("text revisions survive same-byte inode replacement and save follows links 
     mode: 0o640,
     resolvedPath: join(root, "target"),
   });
-  const { text, format } = decodeText(first.bytes);
+  const { text, format } = decodeText(await first.read(0, first.meta.size));
   expect(Buffer.from(encodeText(text, format))).toEqual(original);
   await first.finish();
   await writeFile(join(root, "replacement"), original, { mode: 0o640 });
@@ -110,6 +110,45 @@ test("read completion detects changed content, rejects non-text and enforces enc
   const empty = await files.read(id, "empty", signal);
   await empty.finish();
   expect(empty.meta.size).toBe(0);
+});
+
+test("automatic open uses content and independent limits while preserving text semantics", async () => {
+  const { files, id, root, signal, config } = await setup();
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=",
+    "base64",
+  );
+  config.limits.editorBytes = 32;
+  await writeFile(join(root, "extensionless"), png);
+  const image = await files.read(id, "extensionless", signal, "open");
+  expect(image.meta).toMatchObject({ contentType: "image/png", width: 1, height: 1 });
+  expect(await image.read(0, image.meta.size)).toEqual(png);
+  await image.finish();
+  await expect(files.read(id, "extensionless", signal)).rejects.toMatchObject({
+    code: "limit_exceeded",
+  });
+  await writeFile(join(root, "text.png"), "\uFEFFtext\r\n");
+  const text = await files.read(id, "text.png", signal, "open");
+  expect(text.meta).toMatchObject({
+    contentType: "text/plain; charset=utf-8",
+    bom: true,
+    lineEnding: "crlf",
+  });
+  expect(text.meta.revision).toBeTruthy();
+  await writeFile(join(root, "text.png"), "changed");
+  await expect(text.finish()).rejects.toMatchObject({ code: "conflict" });
+  await writeFile(join(root, "large"), "x".repeat(33));
+  await expect(files.read(id, "large", signal, "open")).rejects.toMatchObject({
+    code: "limit_exceeded",
+  });
+  config.limits.imagePixels = 0;
+  await expect(files.read(id, "extensionless", signal, "open")).rejects.toMatchObject({
+    code: "limit_exceeded",
+  });
+  await writeFile(join(root, "broken"), png.subarray(0, 12));
+  await expect(files.read(id, "broken", signal, "open")).rejects.toMatchObject({
+    code: "unsupported",
+  });
 });
 
 test("startup cleans only the registered temporary identity and exclusive saves reject races", async () => {

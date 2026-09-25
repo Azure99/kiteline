@@ -1,5 +1,5 @@
 import type { IBufferCellPosition, Terminal } from "@xterm/xterm";
-import { adaptTouchGestures } from "@kiteline/shared/terminal";
+import { adaptTouchGestures, touchHoldMs, touchSlopPx } from "@kiteline/shared/terminal";
 import { scrollTerminalLines } from "./readonly-viewport";
 
 type Cell = IBufferCellPosition;
@@ -11,6 +11,7 @@ export interface SelectionHandles {
 }
 
 export class TouchSelection {
+  revision = 0;
   private active = false;
   private timer?: ReturnType<typeof setTimeout>;
   private edge?: ReturnType<typeof setInterval>;
@@ -26,8 +27,17 @@ export class TouchSelection {
     this.screen = terminal.screenElement!;
     this.container = terminal.element!.parentElement!;
     this.disposables = [
-      adaptTouchGestures(this.container, () => this.active),
-      terminal.onSelectionChange(() => this.refresh()),
+      adaptTouchGestures(
+        this.container,
+        () => this.active,
+        () => {
+          if (!terminal.options.disableStdin) terminal.focus();
+        },
+      ),
+      terminal.onSelectionChange(() => {
+        this.revision++;
+        this.refresh();
+      }),
       terminal.onScroll(() => this.refresh()),
       terminal.onWriteParsed(() => {
         const range = terminal.getSelectionPosition();
@@ -62,20 +72,23 @@ export class TouchSelection {
     this.touch = { x: touch.clientX, y: touch.clientY };
     this.timer = setTimeout(() => {
       if (this.touch) this.selectWord(this.touch);
-    }, 550);
+    }, touchHoldMs);
   };
   private move = (event: TouchEvent) => {
     const point = event.touches[0];
     if (
       !point ||
       event.touches.length !== 1 ||
-      (this.touch && Math.hypot(point.clientX - this.touch.x, point.clientY - this.touch.y) > 8)
+      (this.touch &&
+        Math.hypot(point.clientX - this.touch.x, point.clientY - this.touch.y) > touchSlopPx)
     )
       this.end();
   };
-  private end = () => {
+  private end = (event?: Event) => {
     clearTimeout(this.timer);
     this.touch = undefined;
+    // The selection menu can appear under the finger before touchend.
+    if (this.active && event?.cancelable) event.preventDefault();
   };
   private suppress = (event: Event) => {
     if (this.active) {
@@ -160,6 +173,7 @@ export class TouchSelection {
       }
     }
     this.active = true;
+    this.revision++;
     const a = this.fromIndex(first);
     this.terminal.select(a.x, a.y, end - first);
     this.refresh();
@@ -168,6 +182,7 @@ export class TouchSelection {
     this.stopDrag();
     const selected = this.terminal.getSelectionPosition();
     if (!selected) return;
+    this.revision++;
     this.drag = {
       anchor: { ...selected[side === "start" ? "end" : "start"] },
       point,
@@ -248,6 +263,7 @@ export class TouchSelection {
     });
   }
   cancel() {
+    this.revision++;
     this.end();
     this.stopDrag();
     const active = this.active;

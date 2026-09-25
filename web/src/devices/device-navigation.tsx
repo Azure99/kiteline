@@ -43,9 +43,11 @@ export function DeviceNavigation({
       </div>
       {devices.map((d) => (
         <div key={d.id}>
-          <div className="flex items-center">
+          <div
+            className={`flex items-center rounded ${deviceId === d.id && !tool ? "bg-primary-soft" : ""}`}
+          >
             <button
-              className={`flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded px-2 text-left text-sm hover:bg-muted max-[959px]:min-h-11 ${deviceId === d.id ? "bg-primary-soft" : ""}`}
+              className="flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded px-2 text-left text-sm hover:bg-muted max-[959px]:min-h-11"
               onClick={() => onNavigate(devicePath(d.id))}
             >
               <span className="status-dot" data-status={d.status} />

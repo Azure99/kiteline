@@ -11,13 +11,16 @@ import {
   PanelBottom,
   Plus,
   Minimize2,
-  Settings,
+  Columns2,
+  Fullscreen,
   X,
+  Minimize,
 } from "lucide-react";
 import type { Device, Workspace } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
 import { IconButton } from "../components/icon-button";
 import { WatchStatus } from "../components/watch-status";
+import { ToolLayout } from "../components/tool-layout";
 import { TerminalView, type TerminalActions } from "./terminal-view";
 import { TerminalSettings } from "./settings";
 import { navigateWorkspace, updateWorkspaceQuery, useRoute } from "../lib/navigation";
@@ -44,12 +47,18 @@ export function WorkspaceTerminal({
   workspace,
   visible,
   layouts,
+  focusMode,
+  onEnterFocus,
+  onExitFocus,
   children,
 }: {
   device: Device;
   workspace: Workspace;
   visible: boolean;
   layouts: Map<string, TerminalLayout>;
+  focusMode: boolean;
+  onEnterFocus(): void;
+  onExitFocus(): void;
   children: ReactNode;
 }) {
   const { t } = useTranslation();
@@ -273,7 +282,10 @@ export function WorkspaceTerminal({
   }
   return (
     <>
-      <div className="flex shrink-0 items-center border-b border-border bg-muted/60 px-4 max-[959px]:px-0">
+      <div
+        hidden={focusMode}
+        className="flex shrink-0 items-center border-b border-border bg-muted/60 px-4 max-[959px]:px-0"
+      >
         <div
           role="tablist"
           aria-label={t(($) => $.shell.tools)}
@@ -343,6 +355,15 @@ export function WorkspaceTerminal({
             <span className="flex-1" />
           )}
           {newButtons()}
+          {!mobile && (
+            <IconButton
+              label={t(($) => $.terminal.createSplit)}
+              disabled={!enabled}
+              onClick={() => void create(false, true)}
+            >
+              <Columns2 />
+            </IconButton>
+          )}
           {!mobile && group?.maximized && members.length > 1 && (
             <IconButton
               label={t(($) => $.terminal.restoreSplit)}
@@ -351,13 +372,13 @@ export function WorkspaceTerminal({
               <Minimize2 />
             </IconButton>
           )}
-          {split ? (
-            <IconButton label={t(($) => $.terminal.settings)} onClick={() => setSettings(true)}>
-              <Settings />
-            </IconButton>
-          ) : (
-            menu(selected)
-          )}
+          <IconButton
+            label={focusMode ? t(($) => $.terminal.exitFocus) : t(($) => $.terminal.enterFocus)}
+            onClick={focusMode ? onExitFocus : onEnterFocus}
+          >
+            {focusMode ? <Minimize /> : <Fullscreen />}
+          </IconButton>
+          {menu(split ? undefined : selected)}
         </div>
         {group && members.length ? (
           <SplitPanes
@@ -397,67 +418,69 @@ export function WorkspaceTerminal({
         )}
       </div>
       <div className={visible ? "hidden" : "flex min-h-0 flex-1 flex-col"}>
-        <Group
-          id={`companion-${workspace.id}-${layout.dockOpen && !mobile ? "open" : "closed"}`}
-          orientation="vertical"
-          className="min-h-0 flex-1"
-          onLayoutChanged={(sizes, meta) => {
-            if (meta.isUserInteraction) setLayout((old) => ({ ...old, dockSize: sizes.dock! }));
-          }}
-        >
-          <Panel
-            id="tool"
-            minSize={mobile || !layout.dockOpen ? 0 : 160}
-            className="flex h-full min-h-0 flex-col"
+        <ToolLayout>
+          <Group
+            id={`companion-${workspace.id}-${layout.dockOpen && !mobile ? "open" : "closed"}`}
+            orientation="vertical"
+            className="min-h-0 min-w-0 flex-1"
+            onLayoutChanged={(sizes, meta) => {
+              if (meta.isUserInteraction) setLayout((old) => ({ ...old, dockSize: sizes.dock! }));
+            }}
           >
-            {children}
-          </Panel>
-          {layout.dockOpen && !mobile && (
-            <>
-              <Separator className="split-divider" aria-label={t(($) => $.terminal.resizeDock)} />
-              <Panel
-                id="dock"
-                minSize={170}
-                defaultSize={`${layout.dockSize}%`}
-                className="flex h-full min-h-0 flex-col"
-              >
-                <div
-                  id="companion-terminal"
-                  className="flex min-h-9 shrink-0 items-center gap-1 border-b border-border bg-muted/50 px-2"
+            <Panel
+              id="tool"
+              minSize={mobile || !layout.dockOpen ? 0 : 160}
+              className="flex h-full min-h-0 flex-col"
+            >
+              {children}
+            </Panel>
+            {layout.dockOpen && !mobile && (
+              <>
+                <Separator className="split-divider" aria-label={t(($) => $.terminal.resizeDock)} />
+                <Panel
+                  id="dock"
+                  minSize={170}
+                  defaultSize={`${layout.dockSize}%`}
+                  className="flex h-full min-h-0 flex-col"
                 >
-                  {picker(true)}
-                  <span className="flex-1" />
-                  {newButtons(true)}
-                  {dockId && (
-                    <>
-                      <IconButton
-                        label={t(($) => $.terminal.expandTerminal)}
-                        disabled={!find(dockId) && !displays.current.has(dockId)}
-                        onClick={() => applyMain(selectSession(layout, dockId), "terminal")}
-                      >
-                        <Maximize2 />
-                      </IconButton>
-                    </>
-                  )}
-                  {menu(dockId, true)}
-                </div>
-                {dockId ? (
-                  <TerminalView
-                    key={dockId}
-                    ref={dockActions}
-                    deviceId={device.id}
-                    workspaceId={workspace.id}
-                    sessionId={dockId}
-                  />
-                ) : (
-                  <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-                    {t(($) => $.terminal.selectSession)}
+                  <div
+                    id="companion-terminal"
+                    className="flex min-h-9 shrink-0 items-center gap-1 border-b border-border bg-muted/50 px-2"
+                  >
+                    {picker(true)}
+                    <span className="flex-1" />
+                    {newButtons(true)}
+                    {dockId && (
+                      <>
+                        <IconButton
+                          label={t(($) => $.terminal.expandTerminal)}
+                          disabled={!find(dockId) && !displays.current.has(dockId)}
+                          onClick={() => applyMain(selectSession(layout, dockId), "terminal")}
+                        >
+                          <Maximize2 />
+                        </IconButton>
+                      </>
+                    )}
+                    {menu(dockId, true)}
                   </div>
-                )}
-              </Panel>
-            </>
-          )}
-        </Group>
+                  {dockId ? (
+                    <TerminalView
+                      key={dockId}
+                      ref={dockActions}
+                      deviceId={device.id}
+                      workspaceId={workspace.id}
+                      sessionId={dockId}
+                    />
+                  ) : (
+                    <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+                      {t(($) => $.terminal.selectSession)}
+                    </div>
+                  )}
+                </Panel>
+              </>
+            )}
+          </Group>
+        </ToolLayout>
       </div>
       {action && (
         <SessionDialog

@@ -11,7 +11,6 @@ import {
   Server,
   Settings,
   Trash2,
-  Globe,
   Download,
 } from "lucide-react";
 import type { Device } from "@kiteline/shared/protocol";
@@ -22,7 +21,6 @@ import type { DeviceAction } from "./device-actions";
 import { useEffect, useState } from "react";
 import { TerminalSettings } from "../terminal/settings";
 import { rpc } from "../lib/api";
-import { IconButton } from "../components/icon-button";
 import { UpgradeDialog } from "./upgrade-dialog";
 
 export function DeviceList({
@@ -84,13 +82,11 @@ export function DeviceDetail({
   onNavigate,
   onAdd,
   onAction,
-  onPort,
 }: {
   device: Device;
   onNavigate: (path: string) => void;
   onAdd: (device: Device) => void;
   onAction: (action: DeviceAction) => void;
-  onPort: () => void;
 }) {
   const { t, i18n } = useTranslation();
 
@@ -130,11 +126,6 @@ export function DeviceDetail({
       <div className="mb-2 flex items-center gap-3">
         <Server size={23} className="text-muted-foreground" />
         <h1 className="min-w-0 flex-1 break-all text-lg font-semibold">{device.name}</h1>
-        {device.status !== "revoked" && (
-          <IconButton label={t(($) => $.devices.devicePort)} onClick={onPort}>
-            <Globe />
-          </IconButton>
-        )}
         <Menu>
           <MenuTrigger
             render={
@@ -182,22 +173,22 @@ export function DeviceDetail({
             })}
           </span>
         )}
-      </div>
-      {device.release && (
-        <div className="mb-5 space-y-1 text-xs text-muted-foreground">
-          <p>
+        {device.release && (
+          <span>
             {t(($) => $.devices.releaseVersions, {
               agent: device.release.agentVersion ?? t(($) => $.devices.versionUnknown),
               server: device.release.serverVersion,
             })}
+          </span>
+        )}
+      </div>
+      {device.release && device.status !== "online" && (
+        <div className="mb-5 space-y-1 text-xs text-muted-foreground">
+          <p>
+            {t(($) => $.devices.versionObserved, {
+              time: new Date(device.release.observedAt).toLocaleString(i18n.resolvedLanguage),
+            })}
           </p>
-          {device.status !== "online" && (
-            <p>
-              {t(($) => $.devices.versionObserved, {
-                time: new Date(device.release.observedAt).toLocaleString(i18n.resolvedLanguage),
-              })}
-            </p>
-          )}
           {device.status === "offline" &&
             device.release.agentVersion !== device.release.serverVersion && (
               <p role="status" className="text-destructive">

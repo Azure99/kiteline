@@ -13,6 +13,7 @@ import {
 import type { Commit, CommitFiles, GitHistory } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
 import { IconButton } from "../components/icon-button";
+import { ToolHeader, ToolSidebar } from "../components/tool-layout";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
 import { rpc } from "../lib/api";
 import { useMobile } from "../lib/use-mobile";
@@ -23,6 +24,7 @@ interface Props {
   workspaceId: string;
   repoId: string;
   active: boolean;
+  visible: boolean;
   onFile: (path: string) => void;
   onBranch?: (oid: string) => void;
 }
@@ -170,6 +172,7 @@ function CommitView({
   repoId,
   commit,
   active,
+  visible,
   onBack,
   onFile,
   onBranch,
@@ -225,99 +228,103 @@ function CommitView({
   }, [active, load]);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center gap-2 border-b border-border p-2">
-        <IconButton label={t(($) => $.git.backHistory)} onClick={onBack}>
-          <ArrowLeft />
-        </IconButton>
-        <span className="min-w-0 flex-1 truncate text-xs" title={commit.subject}>
-          {commit.subject}
-        </span>
-        <span className="font-mono text-[11px] text-muted-foreground">
-          {commit.oid.slice(0, 8)}
-        </span>
-        {onBranch && (
-          <IconButton
-            label={t(($) => $.git.branchFromCommit)}
-            disabled={!active}
-            onClick={() => onBranch(commit.oid)}
-          >
-            <GitBranch />
+      <ToolHeader visible={visible} order={2}>
+        <div className="flex shrink-0 items-center gap-2 border-b border-border p-2">
+          <IconButton label={t(($) => $.git.backHistory)} onClick={onBack}>
+            <ArrowLeft />
           </IconButton>
+          <span className="min-w-0 flex-1 truncate text-xs" title={commit.subject}>
+            {commit.subject}
+          </span>
+          <span className="font-mono text-[11px] text-muted-foreground">
+            {commit.oid.slice(0, 8)}
+          </span>
+          {onBranch && (
+            <IconButton
+              label={t(($) => $.git.branchFromCommit)}
+              disabled={!active}
+              onClick={() => onBranch(commit.oid)}
+            >
+              <GitBranch />
+            </IconButton>
+          )}
+        </div>
+        {commit.parents.length > 1 && (
+          <div className="shrink-0 border-b border-border px-3">
+            <Menu>
+              <MenuTrigger render={<Button variant="ghost" />}>
+                <span className="text-xs">
+                  {t(($) => $.git.parentNumber, { number: commit.parents.indexOf(parent!) + 1 })} ·{" "}
+                  {parent?.slice(0, 8)}
+                </span>
+                <ChevronDown />
+              </MenuTrigger>
+              <MenuContent>
+                {commit.parents.map((oid, index) => (
+                  <MenuItem key={oid} onClick={() => setParent(oid)}>
+                    {t(($) => $.git.parentNumber, { number: index + 1 })} · {oid.slice(0, 8)}
+                  </MenuItem>
+                ))}
+              </MenuContent>
+            </Menu>
+          </div>
         )}
-      </div>
-      {commit.parents.length > 1 && (
-        <div className="shrink-0 border-b border-border px-3">
-          <Menu>
-            <MenuTrigger render={<Button variant="ghost" />}>
-              <span className="text-xs">
-                {t(($) => $.git.parentNumber, { number: commit.parents.indexOf(parent!) + 1 })} ·{" "}
-                {parent?.slice(0, 8)}
-              </span>
-              <ChevronDown />
-            </MenuTrigger>
-            <MenuContent>
-              {commit.parents.map((oid, index) => (
-                <MenuItem key={oid} onClick={() => setParent(oid)}>
-                  {t(($) => $.git.parentNumber, { number: index + 1 })} · {oid.slice(0, 8)}
-                </MenuItem>
-              ))}
-            </MenuContent>
-          </Menu>
-        </div>
-      )}
-      {!!error && (
-        <div role="alert" className="px-4 py-2 text-xs text-destructive">
-          <ErrorNotice error={error} />
-        </div>
-      )}
+        {!!error && (
+          <div role="alert" className="px-4 py-2 text-xs text-destructive">
+            <ErrorNotice error={error} />
+          </div>
+        )}
+      </ToolHeader>
       <div className="flex min-h-0 flex-1">
-        <aside
-          className={`${mobile && target ? "hidden" : ""} scroll-area w-full overflow-auto border-border min-[960px]:w-72 min-[960px]:shrink-0 min-[960px]:border-r`}
-          aria-label={t(($) => $.git.commitFiles)}
-        >
-          {value?.files.map((file) => (
-            <button
-              key={file.path}
-              onClick={() =>
-                setTarget({
-                  path: file.path,
-                  side: "commit",
-                  commitOid: commit.oid,
-                  parentOid: parent,
-                })
-              }
-              className="flex min-h-11 w-full items-center gap-3 border-b border-border px-4 py-2 text-left text-xs hover:bg-primary-soft"
-            >
-              <span className="font-mono text-muted-foreground">{file.status}</span>
-              <span className="min-w-0 flex-1 break-all">{file.path}</span>
-              {file.binary && (
-                <span className="text-muted-foreground">{t(($) => $.git.binary)}</span>
-              )}
-            </button>
-          ))}
-          {busy && (
-            <p className="p-4 text-xs text-muted-foreground">{t(($) => $.common.reading)}</p>
-          )}
-          {!!(!busy && !error && !value?.files.length) && (
-            <p className="p-4 text-xs text-muted-foreground">{t(($) => $.git.noFileChanges)}</p>
-          )}
-          {value?.nextOffset !== undefined && (
-            <Button
-              variant="ghost"
-              className="w-full"
-              disabled={busy || !active}
-              onClick={() => void load(value.nextOffset)}
-            >
-              {t(($) => $.git.loadMore)}
-            </Button>
-          )}
-          {!!(!busy && error) && (
-            <Button variant="ghost" disabled={!active} onClick={() => void load()}>
-              <RefreshCw />
-              {t(($) => $.common.retry)}
-            </Button>
-          )}
-        </aside>
+        <ToolSidebar visible={visible}>
+          <aside
+            className={`${mobile && target ? "hidden" : ""} scroll-area w-full overflow-auto border-border min-[960px]:w-72 min-[960px]:shrink-0 min-[960px]:border-r`}
+            aria-label={t(($) => $.git.commitFiles)}
+          >
+            {value?.files.map((file) => (
+              <button
+                key={file.path}
+                onClick={() =>
+                  setTarget({
+                    path: file.path,
+                    side: "commit",
+                    commitOid: commit.oid,
+                    parentOid: parent,
+                  })
+                }
+                className="flex min-h-11 w-full items-center gap-3 border-b border-border px-4 py-2 text-left text-xs hover:bg-primary-soft"
+              >
+                <span className="font-mono text-muted-foreground">{file.status}</span>
+                <span className="min-w-0 flex-1 break-all">{file.path}</span>
+                {file.binary && (
+                  <span className="text-muted-foreground">{t(($) => $.git.binary)}</span>
+                )}
+              </button>
+            ))}
+            {busy && (
+              <p className="p-4 text-xs text-muted-foreground">{t(($) => $.common.reading)}</p>
+            )}
+            {!!(!busy && !error && !value?.files.length) && (
+              <p className="p-4 text-xs text-muted-foreground">{t(($) => $.git.noFileChanges)}</p>
+            )}
+            {value?.nextOffset !== undefined && (
+              <Button
+                variant="ghost"
+                className="w-full"
+                disabled={busy || !active}
+                onClick={() => void load(value.nextOffset)}
+              >
+                {t(($) => $.git.loadMore)}
+              </Button>
+            )}
+            {!!(!busy && error) && (
+              <Button variant="ghost" disabled={!active} onClick={() => void load()}>
+                <RefreshCw />
+                {t(($) => $.common.retry)}
+              </Button>
+            )}
+          </aside>
+        </ToolSidebar>
         {target && (
           <DiffView
             key={JSON.stringify(target)}

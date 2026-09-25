@@ -32,7 +32,6 @@ test("workspace navigation retains known tool targets only within the same works
     draft: "d",
     folder: "src",
     reveal: "src/entry",
-    preview: "image" as const,
     search: true,
   };
   const url = new URL(workspacePath("d/1", "w", "files", query), "https://kiteline.test");

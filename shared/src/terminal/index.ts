@@ -87,14 +87,43 @@ export function normalizePaste(text: string) {
   return text.replace(/\r?\n/g, "\r").replaceAll("\x1b", "\u241b");
 }
 
-// Fixed xterm beta inertia omits coordinates used by its own mouse encoder.
-export function adaptTouchGestures(screen: HTMLElement, selecting: () => boolean): Disposable {
+export const touchHoldMs = 550;
+export const touchSlopPx = 8;
+
+// Fixed xterm beta inertia omits coordinates, and its TAP accepts small swipes.
+export function adaptTouchGestures(
+  screen: HTMLElement,
+  selecting: () => boolean,
+  onTap: () => void,
+): Disposable {
   let last: { clientX: number; clientY: number } | undefined;
+  let start: { x: number; y: number; time: number } | undefined;
+  let tap = false;
   let blocked = false;
   const touch = (event: TouchEvent) => {
-    if (event.type === "touchstart" && !selecting()) blocked = false;
     const point = event.changedTouches[0];
     if (point) last = { clientX: point.clientX, clientY: point.clientY };
+    if (event.type === "touchstart") {
+      if (!selecting()) blocked = false;
+      tap = false;
+      start =
+        event.touches.length === 1 && point
+          ? { x: point.clientX, y: point.clientY, time: Date.now() }
+          : undefined;
+    } else {
+      if (
+        event.type === "touchcancel" ||
+        (event.type === "touchmove" && event.touches.length !== 1) ||
+        (start &&
+          point &&
+          Math.hypot(point.clientX - start.x, point.clientY - start.y) > touchSlopPx)
+      )
+        start = undefined;
+      if (event.type === "touchend" || event.type === "touchcancel") {
+        tap = !!start && event.touches.length === 0 && Date.now() - start.time < touchHoldMs;
+        start = undefined;
+      }
+    }
   };
   const gesture = (raw: Event) => {
     const event = raw as Event & { clientX?: number; clientY?: number };
@@ -102,12 +131,23 @@ export function adaptTouchGestures(screen: HTMLElement, selecting: () => boolean
     if (blocked) {
       event.preventDefault();
       event.stopImmediatePropagation();
-    } else if (event.type === "-xterm-gesturechange" && last) {
-      event.clientX ??= last.clientX;
-      event.clientY ??= last.clientY;
+    } else if (event.type === "-xterm-gesturechange") {
+      start = undefined;
+      tap = false;
+      if (last) {
+        event.clientX ??= last.clientX;
+        event.clientY ??= last.clientY;
+      }
+    } else if (event.type === "-xterm-gesturetap") {
+      if (tap) onTap();
+      else {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
     }
+    if (event.type === "-xterm-gesturetap") tap = false;
   };
-  const touches = ["touchstart", "touchmove", "touchend"] as const;
+  const touches = ["touchstart", "touchmove", "touchend", "touchcancel"] as const;
   const gestures = ["-xterm-gesturechange", "-xterm-gesturetap", "-xterm-gesturecontextmenu"];
   for (const name of touches)
     screen.addEventListener(name, touch, { capture: true, passive: true });

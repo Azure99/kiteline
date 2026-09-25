@@ -18,13 +18,13 @@ import {
 } from "lucide-react";
 import type { Device, Entry, Workspace } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
+import { ToolHeader, ToolSidebar } from "../components/tool-layout";
 import { Button } from "../components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
 import { useMobile } from "../lib/use-mobile";
 import {
   currentPath,
   currentRoute,
-  navigateWorkspace,
   updateWorkspaceQuery,
   useRoute,
   type WorkspaceQuery,
@@ -33,10 +33,10 @@ import { FileExplorer } from "./explorer";
 import { FileNameDialog, type NameAction } from "./name-dialog";
 import { isWithin, movedPath, parentPath, useFileBrowser } from "./use-browser";
 import { DraftView } from "./draft-view";
-import { useDrafts, type DraftStore } from "./drafts";
-import { showDraft } from "./navigation";
+import { useDrafts, type Draft, type DraftStore } from "./drafts";
+import { showDraft, showFile } from "./navigation";
 import { FileOperationDialog, type FileAction } from "./operation-dialog";
-import { ImagePreview } from "./image-preview";
+import { FileContent } from "./file-content";
 import { downloadFile, type FileTarget } from "./content";
 import { FileSearch } from "./search-view";
 import { useWorkspaceRefresh } from "../lib/use-workspace-refresh";
@@ -74,45 +74,30 @@ export function Files({
   const { pages, load, forget } = useFileBrowser(device.id, workspace.id, visible && enabled);
   const queryFile = route.query.file;
   const queryDraft = route.query.draft;
-  const isImage = route.query.preview === "image";
+  const [location, setLocation] = useState<{ path: string; position: Draft["location"] }>();
   const searching = route.query.search === true;
-  const drafts = useDrafts(store);
-  const draft = drafts.find(
-    (item) =>
-      item.deviceId === device.id &&
-      item.workspaceId === workspace.id &&
-      (queryDraft ? item.id === queryDraft : item.path === queryFile),
+  const drafts = useDrafts(store).filter(
+    (item) => item.deviceId === device.id && item.workspaceId === workspace.id,
   );
+  const draft =
+    drafts.find((item) => item.id === queryDraft) ?? drafts.find((item) => item.path === queryFile);
   useWorkspaceRefresh(device.id, workspace.id, visible && enabled, "files", async (signal) => {
     await refresh(signal, true);
     if (draft && !signal.aborted) await store.observe(draft, signal);
   });
   useEffect(() => {
-    if (!visible || !queryFile || !enabled || isImage) return;
-    const target = { deviceId: device.id, workspaceId: workspace.id, path: queryFile };
-    const existing = store.find(target, queryDraft ?? undefined);
-    if (!existing || queryDraft !== existing.id) {
-      const opened =
-        existing ??
-        store.open({
-          ...target,
-          deviceName: device.name,
-          workspaceName: workspace.name,
-        });
-      showDraft(opened, true);
+    if (location && (!visible || searching || queryFile !== location.path)) {
+      setLocation(undefined);
+      return;
     }
-  }, [
-    visible,
-    queryFile,
-    queryDraft,
-    isImage,
-    enabled,
-    device.id,
-    device.name,
-    workspace.id,
-    workspace.name,
-    store,
-  ]);
+    if (!visible || searching || !draft) return;
+    if (location?.path === draft.path) {
+      draft.location = location.position;
+      store.changed();
+      setLocation(undefined);
+    }
+    if (queryDraft !== draft.id) showDraft(draft, true);
+  }, [visible, searching, draft, queryFile, queryDraft, location, store]);
   useEffect(() => {
     if (visible && enabled && folder !== ".") void load(folder);
   }, [visible, enabled, folder, load]);
@@ -146,13 +131,13 @@ export function Files({
     setAction({ ...action, origin: currentPath() });
   }
   function setFilePath(path?: string) {
-    updateQuery({ file: path, draft: undefined, preview: undefined });
+    updateQuery({ file: path, draft: undefined });
   }
   function enter(path: string) {
     setSelected(new Set());
     updateQuery({
       folder: path,
-      ...(mobile ? { file: undefined, draft: undefined, preview: undefined } : {}),
+      ...(mobile ? { file: undefined, draft: undefined } : {}),
     });
     setExpanded((old) => {
       const next = new Set(old);
@@ -164,30 +149,8 @@ export function Files({
   }
   function open(entry: Entry) {
     setNotice(undefined);
-    if (/\.(png|jpe?g|webp|gif)$/i.test(entry.name)) {
-      preview(entry);
-      return;
-    }
-    showDraft(
-      store.open({
-        deviceId: device.id,
-        workspaceId: workspace.id,
-        path: entry.path!,
-        deviceName: device.name,
-        workspaceName: workspace.name,
-      }),
-    );
-  }
-  function preview(entry: Pick<Entry, "path">) {
-    setNotice(undefined);
-    navigateWorkspace(target, "files", {
-      file: entry.path!,
-      folder: parentPath(entry.path!),
-      preview: "image",
-      draft: undefined,
-      search: undefined,
-      reveal: undefined,
-    });
+    setLocation(undefined);
+    showFile({ ...target, path: entry.path! });
   }
   function download(path: string) {
     downloadFile({ deviceId: device.id, workspaceId: workspace.id, path });
@@ -242,219 +205,213 @@ export function Files({
         disabled={!enabled}
         onBack={() => updateQuery({ search: undefined })}
         onOpen={(match) => {
-          const target = { deviceId: device.id, workspaceId: workspace.id, path: match.path };
-          if (!match.line && !store.find(target) && /\.(png|jpe?g|webp|gif)$/i.test(match.path)) {
-            preview(match);
-            return;
-          }
-          const opened = store.open({
-            ...target,
-            deviceName: device.name,
-            workspaceName: workspace.name,
-          });
-          if (match.line) {
-            opened.location = { line: match.line, range: match.ranges?.[0] };
-            store.changed();
-          }
-          showDraft(opened);
+          setLocation(
+            match.line
+              ? {
+                  path: match.path,
+                  position: { line: match.line, range: match.ranges?.[0] },
+                }
+              : undefined,
+          );
+          showFile({ ...target, path: match.path });
         }}
       />
-      <div
-        className={
-          searching
-            ? "hidden"
-            : "flex min-h-10 shrink-0 items-center gap-1 border-b border-border px-2"
-        }
-      >
-        {mobile && queryFile ? (
-          <IconButton label={t(($) => $.files.backDirectory)} onClick={() => setFilePath()}>
-            <ArrowLeft />
-          </IconButton>
-        ) : (
-          <IconButton
-            label={t(($) => $.files.parentDirectory)}
-            disabled={folder === "."}
-            onClick={() => enter(parentPath(folder))}
-          >
-            <ArrowUp />
-          </IconButton>
-        )}
-        {!mobile && (
-          <IconButton
-            label={t(($) => $.files.toggleList)}
-            onClick={() => setListOpen((open) => !open)}
-          >
-            <PanelLeft />
-          </IconButton>
-        )}
-        <span
-          className="min-w-0 flex-1 truncate text-xs"
-          title={pages[folder]?.listing?.resolvedPath}
+      <ToolHeader visible={visible}>
+        <div
+          className={
+            searching
+              ? "hidden"
+              : "flex min-h-10 shrink-0 items-center gap-1 border-b border-border px-2"
+          }
         >
-          {folder === "." ? workspace.name : folder}
-        </span>
-        <IconButton
-          label={t(($) => $.files.searchFiles)}
-          disabled={!enabled}
-          onClick={() => updateQuery({ search: true })}
-        >
-          <Search />
-        </IconButton>
-        <IconButton
-          label={t(($) => $.files.newFile)}
-          disabled={!enabled}
-          onClick={() => beginAction({ kind: "file", parent: folder })}
-        >
-          <FilePlus2 />
-        </IconButton>
-        <input
-          ref={fileInput}
-          type="file"
-          multiple
-          className="hidden"
-          aria-label={t(($) => $.files.uploadPicker)}
-          onChange={(event) => {
-            const files = Array.from(event.target.files ?? []);
-            if (files.length) onUpload(files, folder);
-            event.target.value = "";
-          }}
-        />
-        <Menu>
-          <MenuTrigger
-            render={
-              <Button variant="ghost" size="icon" aria-label={t(($) => $.files.moreActions)} />
-            }
-          >
-            <MoreHorizontal />
-          </MenuTrigger>
-          <MenuContent>
-            <MenuItem disabled={!enabled} onClick={() => fileInput.current?.click()}>
-              <Upload />
-              {t(($) => $.files.uploadFiles)}
-            </MenuItem>
-            <MenuItem
-              disabled={!enabled}
-              onClick={() => beginAction({ kind: "directory", parent: folder })}
+          {mobile && queryFile ? (
+            <IconButton label={t(($) => $.files.backDirectory)} onClick={() => setFilePath()}>
+              <ArrowLeft />
+            </IconButton>
+          ) : (
+            <IconButton
+              label={t(($) => $.files.parentDirectory)}
+              disabled={folder === "."}
+              onClick={() => enter(parentPath(folder))}
             >
-              <FolderPlus />
-              {t(($) => $.files.newDirectory)}
-            </MenuItem>
-            <MenuItem
-              onClick={() => {
-                setSelecting((value) => !value);
-                setSelected(new Set());
-              }}
+              <ArrowUp />
+            </IconButton>
+          )}
+          {!mobile && (
+            <IconButton
+              label={t(($) => $.files.toggleList)}
+              onClick={() => setListOpen((open) => !open)}
             >
-              <ListChecks />
-              {selecting ? t(($) => $.files.finishSelection) : t(($) => $.files.selectFiles)}
-            </MenuItem>
-            <MenuItem disabled={!enabled} onClick={() => void refresh()}>
-              <RefreshCw />
-              {t(($) => $.common.refresh)}
-            </MenuItem>
-          </MenuContent>
-        </Menu>
-      </div>
-      {!searching && !!selected.size && (
-        <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border px-3">
-          <span className="mr-auto text-xs">
-            {selected.size.toLocaleString(i18n.resolvedLanguage)}
+              <PanelLeft />
+            </IconButton>
+          )}
+          <span
+            className="min-w-0 flex-1 truncate text-xs"
+            title={pages[folder]?.listing?.resolvedPath}
+          >
+            {folder === "." ? workspace.name : folder}
           </span>
           <IconButton
-            label={t(($) => $.files.downloadSelected)}
+            label={t(($) => $.files.searchFiles)}
             disabled={!enabled}
-            onClick={() => {
-              const entries = new Map(
-                Object.values(pages)
-                  .flatMap((page) => page.listing?.entries.items ?? [])
-                  .map((entry) => [entry.path, entry]),
-              );
-              for (const path of selected) {
-                const entry = entries.get(path);
-                if (entry?.kind === "file" || entry?.kind === "symlink") download(path);
-              }
+            onClick={() => updateQuery({ search: true })}
+          >
+            <Search />
+          </IconButton>
+          <IconButton
+            label={t(($) => $.files.newFile)}
+            disabled={!enabled}
+            onClick={() => beginAction({ kind: "file", parent: folder })}
+          >
+            <FilePlus2 />
+          </IconButton>
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            className="hidden"
+            aria-label={t(($) => $.files.uploadPicker)}
+            onChange={(event) => {
+              const files = Array.from(event.target.files ?? []);
+              if (files.length) onUpload(files, folder);
+              event.target.value = "";
             }}
-          >
-            <Download />
-          </IconButton>
-          <IconButton
-            label={t(($) => $.files.copySelected)}
-            disabled={!enabled}
-            onClick={() => selectedAction("copy")}
-          >
-            <Copy />
-          </IconButton>
-          <IconButton
-            label={t(($) => $.files.moveSelected)}
-            disabled={!enabled}
-            onClick={() => selectedAction("move")}
-          >
-            <FolderInput />
-          </IconButton>
-          <IconButton
-            label={t(($) => $.files.deleteSelected)}
-            disabled={!enabled}
-            onClick={() => selectedAction("delete")}
-          >
-            <Trash2 />
-          </IconButton>
+          />
+          <Menu>
+            <MenuTrigger
+              render={
+                <Button variant="ghost" size="icon" aria-label={t(($) => $.files.moreActions)} />
+              }
+            >
+              <MoreHorizontal />
+            </MenuTrigger>
+            <MenuContent>
+              <MenuItem disabled={!enabled} onClick={() => fileInput.current?.click()}>
+                <Upload />
+                {t(($) => $.files.uploadFiles)}
+              </MenuItem>
+              <MenuItem
+                disabled={!enabled}
+                onClick={() => beginAction({ kind: "directory", parent: folder })}
+              >
+                <FolderPlus />
+                {t(($) => $.files.newDirectory)}
+              </MenuItem>
+              <MenuItem
+                onClick={() => {
+                  setSelecting((value) => !value);
+                  setSelected(new Set());
+                }}
+              >
+                <ListChecks />
+                {selecting ? t(($) => $.files.finishSelection) : t(($) => $.files.selectFiles)}
+              </MenuItem>
+              <MenuItem disabled={!enabled} onClick={() => void refresh()}>
+                <RefreshCw />
+                {t(($) => $.common.refresh)}
+              </MenuItem>
+            </MenuContent>
+          </Menu>
         </div>
-      )}
-      {!searching && notice && (
-        <p role="status" className="border-b border-border px-3 py-1 text-xs text-muted-foreground">
-          {notice.kind === "downloadStarted"
-            ? t(($) => $.files.downloadStarted, { path: notice.path })
-            : t(($) => $.files[notice.kind])}
-        </p>
-      )}
-      {!enabled && (
-        <p className="border-b border-border px-3 py-2 text-sm text-muted-foreground">
-          {device.status === "revoked"
-            ? t(($) => $.common.deviceRevoked)
-            : t(($) => $.common.deviceOffline)}
-        </p>
-      )}
+        {!searching && !!selected.size && (
+          <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border px-3">
+            <span className="mr-auto text-xs">
+              {selected.size.toLocaleString(i18n.resolvedLanguage)}
+            </span>
+            <IconButton
+              label={t(($) => $.files.downloadSelected)}
+              disabled={!enabled}
+              onClick={() => {
+                const entries = new Map(
+                  Object.values(pages)
+                    .flatMap((page) => page.listing?.entries.items ?? [])
+                    .map((entry) => [entry.path, entry]),
+                );
+                for (const path of selected) {
+                  const entry = entries.get(path);
+                  if (entry?.kind === "file" || entry?.kind === "symlink") download(path);
+                }
+              }}
+            >
+              <Download />
+            </IconButton>
+            <IconButton
+              label={t(($) => $.files.copySelected)}
+              disabled={!enabled}
+              onClick={() => selectedAction("copy")}
+            >
+              <Copy />
+            </IconButton>
+            <IconButton
+              label={t(($) => $.files.moveSelected)}
+              disabled={!enabled}
+              onClick={() => selectedAction("move")}
+            >
+              <FolderInput />
+            </IconButton>
+            <IconButton
+              label={t(($) => $.files.deleteSelected)}
+              disabled={!enabled}
+              onClick={() => selectedAction("delete")}
+            >
+              <Trash2 />
+            </IconButton>
+          </div>
+        )}
+        {!searching && notice && (
+          <p
+            role="status"
+            className="border-b border-border px-3 py-1 text-xs text-muted-foreground"
+          >
+            {notice.kind === "downloadStarted"
+              ? t(($) => $.files.downloadStarted, { path: notice.path })
+              : t(($) => $.files[notice.kind])}
+          </p>
+        )}
+        {!enabled && (
+          <p className="border-b border-border px-3 py-2 text-sm text-muted-foreground">
+            {device.status === "revoked"
+              ? t(($) => $.common.deviceRevoked)
+              : t(($) => $.common.deviceOffline)}
+          </p>
+        )}
+      </ToolHeader>
       <div className={searching ? "hidden" : "flex min-h-0 flex-1"}>
         {(mobile ? !queryFile : listOpen) && (
-          <aside
-            className="scroll-area w-full overflow-auto border-border bg-muted/25 min-[960px]:w-72 min-[960px]:shrink-0 min-[960px]:border-r"
-            aria-label={t(($) => $.files.list)}
-          >
-            <FileExplorer
-              path={mobile || reveal ? folder : "."}
-              {...{ pages, expanded, selected, mobile, selecting }}
-              currentFile={queryFile ?? reveal ?? undefined}
-              disabled={!enabled}
-              onFolder={enter}
-              onOpen={open}
-              onSelect={(path) =>
-                setSelected((old) => {
-                  const next = new Set(old);
-                  if (next.has(path)) next.delete(path);
-                  else next.add(path);
-                  return next;
-                })
-              }
-              onRename={(entry) => beginAction({ kind: "rename", entry })}
-              onAction={(kind, entry) => setOperation({ kind, entries: [entry] })}
-              onDownload={(entry) => download(entry.path!)}
-              onImage={preview}
-              onMore={(path) => void load(path, true)}
-            />
-          </aside>
+          <ToolSidebar visible={visible && !searching}>
+            <aside
+              className="scroll-area w-full overflow-auto border-border bg-muted/25 min-[960px]:w-72 min-[960px]:shrink-0 min-[960px]:border-r"
+              aria-label={t(($) => $.files.list)}
+            >
+              <FileExplorer
+                path={mobile || reveal ? folder : "."}
+                {...{ pages, expanded, selected, mobile, selecting }}
+                currentFile={queryFile ?? reveal ?? undefined}
+                disabled={!enabled}
+                onFolder={enter}
+                onOpen={open}
+                onSelect={(path) =>
+                  setSelected((old) => {
+                    const next = new Set(old);
+                    if (next.has(path)) next.delete(path);
+                    else next.add(path);
+                    return next;
+                  })
+                }
+                onRename={(entry) => beginAction({ kind: "rename", entry })}
+                onAction={(kind, entry) => setOperation({ kind, entries: [entry] })}
+                onDownload={(entry) => download(entry.path!)}
+                onMore={(path) => void load(path, true)}
+              />
+            </aside>
+          </ToolSidebar>
         )}
         {(!mobile || queryFile) && (
           <section
             className="flex min-w-0 flex-1 flex-col"
             aria-label={t(($) => $.files.fileContent)}
           >
-            {isImage && queryFile ? (
-              <ImagePreview
-                key={queryFile}
-                target={{ deviceId: device.id, workspaceId: workspace.id, path: queryFile }}
-                disabled={!enabled}
-              />
-            ) : draft ? (
+            {draft ? (
               <DraftView
                 key={draft.id}
                 store={store}
@@ -466,6 +423,18 @@ export function Files({
                       : t(($) => $.common.deviceOffline)
                     : undefined
                 }
+              />
+            ) : queryFile ? (
+              <FileContent
+                key={queryFile}
+                target={{
+                  ...target,
+                  path: queryFile,
+                  deviceName: device.name,
+                  workspaceName: workspace.name,
+                }}
+                store={store}
+                active={visible && !searching && enabled}
               />
             ) : (
               <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">

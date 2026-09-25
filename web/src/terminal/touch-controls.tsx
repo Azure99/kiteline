@@ -5,19 +5,14 @@ import type { Terminal } from "@xterm/xterm";
 import { TouchSelection, type SelectionHandles } from "./touch-selection";
 import { IconButton } from "../components/icon-button";
 import { deviceServiceLink } from "../lib/device-service";
+import { ErrorNotice } from "../components/error-notice";
 
-export function TouchControls({
-  terminal,
-  deviceId,
-  onError,
-}: {
-  terminal: Terminal;
-  deviceId: string;
-  onError: (error: unknown) => void;
-}) {
+export function TouchControls({ terminal, deviceId }: { terminal: Terminal; deviceId: string }) {
   const { t } = useTranslation();
 
   const [handles, setHandles] = useState<SelectionHandles>();
+  const [copying, setCopying] = useState(false);
+  const [notice, setNotice] = useState<{ kind: "copied" } | { kind: "error"; error: unknown }>();
   const selection = useRef<TouchSelection>(undefined);
   const layer = useRef<HTMLDivElement>(null);
   const service = handles ? deviceServiceLink(terminal.getSelection(), deviceId) : undefined;
@@ -29,8 +24,32 @@ export function TouchControls({
       current.dispose();
       selection.current = undefined;
       setHandles(undefined);
+      setNotice(undefined);
+      setCopying(false);
     };
   }, [terminal]);
+  useEffect(() => {
+    if (notice?.kind !== "copied") return;
+    const timer = setTimeout(() => setNotice(undefined), 1600);
+    return () => clearTimeout(timer);
+  }, [notice]);
+  async function copy() {
+    const current = selection.current;
+    const text = terminal.getSelection();
+    if (!current || !text || copying) return;
+    const revision = current.revision;
+    setCopying(true);
+    try {
+      await navigator.clipboard.writeText(text);
+      if (selection.current !== current) return;
+      if (current.revision === revision) current.cancel();
+      setNotice({ kind: "copied" });
+    } catch (error) {
+      if (selection.current === current) setNotice({ kind: "error", error });
+    } finally {
+      if (selection.current === current) setCopying(false);
+    }
+  }
   return (
     <div
       ref={layer}
@@ -86,11 +105,8 @@ export function TouchControls({
           >
             <IconButton
               label={t(($) => $.terminal.copySelected)}
-              onClick={() =>
-                void navigator.clipboard
-                  .writeText(terminal.getSelection())
-                  .catch((error: unknown) => onError(error))
-              }
+              disabled={copying}
+              onClick={() => void copy()}
             >
               <Copy />
             </IconButton>
@@ -110,6 +126,30 @@ export function TouchControls({
             )}
           </div>
         </>
+      )}
+      {notice && (
+        <div
+          role={notice.kind === "copied" ? "status" : "alert"}
+          className="absolute bottom-3 left-1/2 z-30 flex max-h-[50%] max-w-[calc(100%_-_24px)] -translate-x-1/2 items-start gap-2 overflow-auto rounded border border-border bg-background px-3 py-2 text-sm text-foreground shadow-md"
+          onPointerDown={(event) => event.preventDefault()}
+        >
+          {notice.kind === "copied" ? (
+            t(($) => $.common.copied)
+          ) : (
+            <>
+              <div className="pointer-events-auto min-w-0 break-words">
+                <ErrorNotice error={notice.error} />
+              </div>
+              <IconButton
+                className="pointer-events-auto"
+                label={t(($) => $.common.dismiss)}
+                onClick={() => setNotice(undefined)}
+              >
+                <X />
+              </IconButton>
+            </>
+          )}
+        </div>
       )}
     </div>
   );

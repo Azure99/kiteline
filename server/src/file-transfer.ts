@@ -92,7 +92,7 @@ export class FileTransfer {
   private headers() {
     this.response.writeHead(200, {
       "content-type":
-        this.purpose === "image"
+        this.purpose === "image" || this.purpose === "open"
           ? this.meta.contentType
           : this.purpose === "download"
             ? "application/octet-stream"

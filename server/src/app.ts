@@ -56,7 +56,10 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
     const path = url.pathname;
     const method = request.method ?? "GET";
     if (path.startsWith("/api/")) response.setHeader("x-kiteline-version", appVersion);
-    if (await serveAgentInstallation(path, config.downloadsDir, request, response)) return;
+    if (
+      await serveAgentInstallation(path, config.downloadsDir, config.publicUrl, request, response)
+    )
+      return;
     if (path === "/healthz" && method === "GET")
       return json(response, 200, { status: "ok", version: appVersion });
     if (path === "/api/agent/bind" && method === "POST") {

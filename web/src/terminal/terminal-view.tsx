@@ -6,7 +6,7 @@ import {
   ArrowRight,
   ArrowUp,
   ClipboardPaste,
-  Copy,
+  Keyboard,
   RefreshCw,
   X,
 } from "lucide-react";
@@ -167,16 +167,11 @@ export function TerminalView({
     terminal?.textarea?.setAttribute("aria-label", Terminal.strings.promptLabel);
     element.current?.removeAttribute("title");
   }, [terminal, t]);
-  async function clipboard(copy: boolean) {
+  async function paste() {
     try {
-      if (copy) {
-        const text = display.current?.terminal?.getSelection();
-        if (text) await navigator.clipboard.writeText(text);
-      } else display.current?.paste(await navigator.clipboard.readText());
-      if (!copy) {
-        setControl(false);
-        display.current?.focus();
-      }
+      display.current?.paste(await navigator.clipboard.readText());
+      setControl(false);
+      display.current?.focus();
     } catch (error) {
       setNotice(error);
     }
@@ -258,9 +253,9 @@ export function TerminalView({
           )}
         </div>
       )}
-      <div className="relative flex min-h-0 flex-1">
+      <div className="terminal-viewport relative flex min-h-0 flex-1">
         <div ref={element} className="terminal-canvas min-h-0 min-w-0 flex-1" />
-        {terminal && <TouchControls terminal={terminal} deviceId={deviceId} onError={setNotice} />}
+        {terminal && <TouchControls terminal={terminal} deviceId={deviceId} />}
         {reading && (
           <div className="absolute bottom-3 right-4 rounded bg-[#39414c] shadow">
             <IconButton
@@ -329,13 +324,19 @@ export function TerminalView({
             );
           })}
         </div>
-        <IconButton label={t(($) => $.terminal.copySelection)} onClick={() => void clipboard(true)}>
-          <Copy />
+        <IconButton
+          label={t(($) => $.terminal.keyboard)}
+          disabled={state.status !== "ready"}
+          onClick={() => {
+            if (terminal && !terminal.options.disableStdin) terminal.focus();
+          }}
+        >
+          <Keyboard />
         </IconButton>
         <IconButton
           label={t(($) => $.terminal.paste)}
           disabled={state.status !== "ready"}
-          onClick={() => void clipboard(false)}
+          onClick={() => void paste()}
         >
           <ClipboardPaste />
         </IconButton>
@@ -346,30 +347,28 @@ export function TerminalView({
           if (!redrawing) setRedrawDialog(open);
         }}
       >
-        {redrawDialog && (
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>{t(($) => $.terminal.redrawProgram)}</DialogTitle>
-            </DialogHeader>
-            <p className="px-5 py-4 text-sm text-muted-foreground">
-              {t(($) => $.terminal.redrawHint)}
-            </p>
-            {!!notice && (
-              <div role="alert" className="px-5 pb-4 text-sm text-destructive">
-                <ErrorNotice error={notice} />
-              </div>
-            )}
-            <DialogFooter>
-              <Button variant="ghost" disabled={redrawing} onClick={() => setRedrawDialog(false)}>
-                {t(($) => $.common.cancel)}
-              </Button>
-              <Button disabled={redrawing} onClick={() => void redraw()}>
-                <RefreshCw />
-                {t(($) => $.terminal.redraw)}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        )}
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t(($) => $.terminal.redrawProgram)}</DialogTitle>
+          </DialogHeader>
+          <p className="px-5 py-4 text-sm text-muted-foreground">
+            {t(($) => $.terminal.redrawHint)}
+          </p>
+          {!!notice && (
+            <div role="alert" className="px-5 pb-4 text-sm text-destructive">
+              <ErrorNotice error={notice} />
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="ghost" disabled={redrawing} onClick={() => setRedrawDialog(false)}>
+              {t(($) => $.common.cancel)}
+            </Button>
+            <Button disabled={redrawing} onClick={() => void redraw()}>
+              <RefreshCw />
+              {t(($) => $.terminal.redraw)}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
       </Dialog>
     </section>
   );

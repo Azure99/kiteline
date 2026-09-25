@@ -12,7 +12,6 @@ import {
   FolderInput,
   Trash2,
   Download,
-  Image,
 } from "lucide-react";
 import type { Entry } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
@@ -36,7 +35,6 @@ export function FileExplorer({
   onRename,
   onAction,
   onDownload,
-  onImage,
   onMore,
 }: {
   path: string;
@@ -54,7 +52,6 @@ export function FileExplorer({
   onRename: (entry: Entry) => void;
   onAction: (kind: "copy" | "move" | "delete", entry: Entry) => void;
   onDownload: (entry: Entry) => void;
-  onImage: (entry: Entry) => void;
   onMore: (path: string) => void;
 }) {
   const { t, i18n } = useTranslation();
@@ -142,10 +139,6 @@ export function FileExplorer({
                           <Download />
                           {t(($) => $.common.download)}
                         </MenuItem>
-                        <MenuItem onClick={() => onImage(entry)}>
-                          <Image />
-                          {t(($) => $.files.previewImage)}
-                        </MenuItem>
                       </>
                     )}
                     <MenuItem onClick={() => onRename(entry)}>
@@ -190,7 +183,6 @@ export function FileExplorer({
                   onRename,
                   onAction,
                   onDownload,
-                  onImage,
                   onMore,
                 }}
                 path={entry.path!}

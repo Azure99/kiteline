@@ -48,6 +48,7 @@ import { UploadDialog } from "./files/upload-dialog";
 import { returnToService } from "./lib/login-return";
 import { PortDialog } from "./devices/port-dialog";
 import { ReleaseNotice } from "./components/release-notice";
+import { useTerminalFocus } from "./terminal/use-terminal-focus";
 
 export function App() {
   const { t, i18n } = useTranslation();
@@ -86,6 +87,16 @@ export function App() {
   } = useDevices(!!session, route.deviceId, route.workspaceId, setSession);
   const device = devices.find((d) => d.id === route.deviceId);
   const workspace = device?.snapshot?.workspaces.find((w) => w.id === route.workspaceId);
+  const terminalFocus = useTerminalFocus(
+    session &&
+      route.valid &&
+      route.tool === "terminal" &&
+      device &&
+      device.status !== "revoked" &&
+      workspace
+      ? `${device.id}:${workspace.id}`
+      : undefined,
+  );
   const orphan =
     route.tool === "files" &&
     route.deviceId &&
@@ -244,7 +255,10 @@ export function App() {
   return (
     <>
       <div className="flex h-[var(--app-height,100dvh)] min-h-0 flex-col overflow-hidden">
-        <header className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3 max-[959px]:gap-1 max-[959px]:px-2">
+        <header
+          hidden={terminalFocus.active}
+          className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3 max-[959px]:gap-1 max-[959px]:px-2"
+        >
           <div className="hidden shrink-0 items-center gap-2 min-[960px]:flex">
             <IconButton
               label={
@@ -379,7 +393,7 @@ export function App() {
         <div className="flex min-h-0 flex-1">
           <aside
             id="device-sidebar"
-            hidden={!sidebarOpen}
+            hidden={!sidebarOpen || terminalFocus.active}
             className="desktop-rail scroll-area shrink-0 overflow-auto border-r border-border bg-muted/60"
           >
             {navigation}
@@ -444,6 +458,9 @@ export function App() {
                     workspace={workspace}
                     visible={route.tool === "terminal"}
                     layouts={terminalLayouts.current}
+                    focusMode={terminalFocus.active}
+                    onEnterFocus={terminalFocus.enter}
+                    onExitFocus={terminalFocus.exit}
                   >
                     <Files
                       device={device}
@@ -483,7 +500,6 @@ export function App() {
                 onNavigate={choose}
                 onAdd={(device) => setDirectoryDevice({ device, origin: currentPath() })}
                 onAction={setAction}
-                onPort={() => setPortDevice(device.id)}
               />
             )}
           </main>

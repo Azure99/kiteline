@@ -21,6 +21,10 @@ export interface DiskText {
   text: string;
   raw: string;
 }
+export interface DiskImage {
+  blob: Blob;
+  meta: FileMeta;
+}
 async function channel(target: FileTarget, kind: string, params: object, signal: AbortSignal) {
   const ready = await post<ChannelReady<FileMeta>>(
     `/api/devices/${encodeURIComponent(target.deviceId)}/channels`,
@@ -44,12 +48,13 @@ async function check(response: Response) {
   const data = (await response.json()) as { error: KitelineError };
   throw new ApiError(data.error.code, data.error.message, undefined, data.error.details);
 }
-export async function readText(
+async function readContentBytes(
   target: FileTarget,
+  purpose: "open" | "text",
   signal: AbortSignal,
   onChannel?: (id: string) => void,
-): Promise<DiskText> {
-  const ready = await channel(target, "file.read", { purpose: "text" }, signal);
+) {
+  const ready = await channel(target, "file.read", { purpose }, signal);
   onChannel?.(ready.channelId);
   try {
     const response = await fetch(versionedPath(`/api/channels/${ready.channelId}/content`), {
@@ -58,15 +63,36 @@ export async function readText(
     await check(response);
     const bytes = new Uint8Array(await response.arrayBuffer());
     if (bytes.length !== ready.meta.size) throw new Error("File transfer is incomplete");
-    return {
-      target,
-      meta: ready.meta,
-      text: decodeText(bytes).text,
-      raw: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes),
-    };
+    return { bytes, meta: ready.meta };
   } finally {
     void release(ready.channelId);
   }
+}
+function diskText(target: FileTarget, bytes: Uint8Array, meta: FileMeta): DiskText {
+  return {
+    target,
+    meta,
+    text: decodeText(bytes).text,
+    raw: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes),
+  };
+}
+export async function readText(
+  target: FileTarget,
+  signal: AbortSignal,
+  onChannel?: (id: string) => void,
+) {
+  const { bytes, meta } = await readContentBytes(target, "text", signal, onChannel);
+  return diskText(target, bytes, meta);
+}
+export async function readContent(
+  target: FileTarget,
+  signal: AbortSignal,
+  onChannel: (id: string) => void,
+): Promise<{ kind: "text"; value: DiskText } | { kind: "image"; value: DiskImage }> {
+  const { bytes, meta } = await readContentBytes(target, "open", signal, onChannel);
+  return meta.contentType.startsWith("image/")
+    ? { kind: "image", value: { blob: new Blob([bytes], { type: meta.contentType }), meta } }
+    : { kind: "text", value: diskText(target, bytes, meta) };
 }
 export async function writeText(
   target: FileTarget,
@@ -121,26 +147,6 @@ export function downloadFile(target: FileTarget) {
   link.click();
   link.remove();
   window.dispatchEvent(new CustomEvent("kiteline:download", { detail: target }));
-}
-
-export async function readImage(
-  target: FileTarget,
-  signal: AbortSignal,
-  onChannel: (id: string) => void,
-) {
-  const ready = await channel(target, "file.read", { purpose: "image" }, signal);
-  onChannel(ready.channelId);
-  try {
-    const response = await fetch(versionedPath(`/api/channels/${ready.channelId}/content`), {
-      signal,
-    });
-    await check(response);
-    const blob = await response.blob();
-    if (blob.size !== ready.meta.size) throw new Error("Image transfer is incomplete");
-    return { blob, meta: ready.meta };
-  } finally {
-    void release(ready.channelId);
-  }
 }
 
 export async function uploadFile(

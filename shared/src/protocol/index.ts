@@ -307,7 +307,7 @@ export type BrowserEvent =
       deviceId: string;
       workspaceId: string;
       path: string;
-      purpose: "text" | "image" | "download";
+      purpose: "open" | "text" | "image" | "download";
       error: KitelineError;
       outcome: "failed";
     };

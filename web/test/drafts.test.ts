@@ -40,6 +40,19 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
+test("preloaded open adopts once and never replaces an existing editor or its undo state", () => {
+  const store = new DraftStore();
+  store.limits([{ id: "device", editorBytes: 1024 } as Device], 4096);
+  const named = { ...target, deviceName: "Device", workspaceName: "Workspace" };
+  const draft = store.open(named, disk("base", "first"));
+  const edited = draft.state!.update({ changes: { from: 4, insert: " edited" } }).state;
+  store.update(draft, edited);
+  expect(store.open(named, disk("late disk", "second"))).toBe(draft);
+  expect(draft.state).toBe(edited);
+  expect(draft.revision).toBe("first");
+  expect(transport.read).not.toHaveBeenCalled();
+});
+
 test("closing a duplicate-path draft does not clear the file-only target of another draft", async () => {
   const { store, draft } = await opened();
   transport.read.mockResolvedValueOnce(disk("other", "b", "b.txt"));

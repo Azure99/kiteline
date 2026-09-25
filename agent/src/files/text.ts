@@ -1,15 +1,10 @@
 import { createHash } from "node:crypto";
-import { constants, type BigIntStats } from "node:fs";
-import { lstat, open, realpath, rename, stat, type FileHandle } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
-import {
-  AppError,
-  OperationError,
-  limits,
-  type FileMeta,
-  type SavedFile,
-} from "@kiteline/shared/protocol";
-import { decodeText, encodeText } from "@kiteline/shared/text";
+import { constants } from "node:fs";
+import { lstat, open, realpath, rename, stat } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { AppError, OperationError, limits, type SavedFile } from "@kiteline/shared/protocol";
+import { decodeText } from "@kiteline/shared/text";
+import { readFile, readExact, revisionOf, revisionDigest } from "./read.js";
 import type { AgentConfig } from "../config.js";
 import type { MetadataStore } from "../metadata.js";
 import { publish } from "../mutations.js";
@@ -17,16 +12,6 @@ import { locate, readEntry, relativePath, versionOf } from "./paths.js";
 import { renameNoReplace } from "./rename.js";
 import type { TemporaryFiles, Temporary } from "./temporary.js";
 
-export interface FileRead {
-  meta: FileMeta;
-  read: (position: number, size: number) => Promise<Buffer>;
-  close: () => Promise<void>;
-  finish: () => Promise<void>;
-}
-export interface TextRead extends FileRead {
-  bytes: Buffer;
-  info: BigIntStats;
-}
 export interface TextWrite {
   path: string;
   workspaceId: string;
@@ -49,66 +34,8 @@ export class TextFiles {
   private absolute(workspaceId: string, path: string) {
     return join(this.metadata.workspace(workspaceId).path, relativePath(path));
   }
-  async read(workspaceId: string, path: string, signal: AbortSignal): Promise<TextRead> {
-    const resolvedPath = await realpath(this.absolute(workspaceId, path));
-    const handle = await open(resolvedPath, constants.O_RDONLY | constants.O_NONBLOCK);
-    let closed = false;
-    const close = async () => {
-      if (!closed) {
-        closed = true;
-        await handle.close();
-      }
-    };
-    try {
-      signal.throwIfAborted();
-      const info = await handle.stat({ bigint: true });
-      if (!info.isFile())
-        throw new AppError("unsupported", "Only regular text files can be edited");
-      const size = Number(info.size);
-      if (size > this.config.limits.editorBytes)
-        throw new AppError("limit_exceeded", "File exceeds the text editing size limit");
-      const bytes = await readExact(handle, size, signal);
-      const { text, format } = decodeText(bytes);
-      if (encodeText(text, format).length > this.config.limits.editorBytes)
-        throw new AppError(
-          "limit_exceeded",
-          "Content encoded with the saved line ending format exceeds the editing size limit",
-        );
-      const check = async () => {
-        const after = await handle.stat({ bigint: true });
-        if (after.size !== info.size || after.mtimeNs !== info.mtimeNs)
-          throw new AppError("conflict", "File changed while being read; try again");
-      };
-      await check();
-      const finish = async () => {
-        try {
-          signal.throwIfAborted();
-          await check();
-        } finally {
-          await close();
-        }
-      };
-      if (!size) await finish();
-      return {
-        bytes,
-        info,
-        read: async (position, size) => bytes.subarray(position, position + size),
-        close,
-        finish: size ? finish : async () => {},
-        meta: {
-          size,
-          filename: basename(path),
-          contentType: "text/plain; charset=utf-8",
-          resolvedPath,
-          mode: Number(info.mode & 0o777n),
-          revision: revisionOf(resolvedPath, info.dev, bytes),
-          ...format,
-        },
-      };
-    } catch (error) {
-      await close().catch(() => {});
-      throw error;
-    }
+  read(workspaceId: string, path: string, signal: AbortSignal, purpose: "text" | "open" = "text") {
+    return readFile(this.absolute(workspaceId, path), purpose, this.config.limits, signal);
   }
 
   async prepare(
@@ -276,38 +203,4 @@ export class TextFiles {
       await file.close();
     }
   }
-}
-
-export async function readExact(
-  handle: FileHandle,
-  size: number,
-  signal: AbortSignal,
-  position = 0,
-) {
-  const result = Buffer.alloc(size);
-  let offset = 0;
-  while (offset < size) {
-    signal.throwIfAborted();
-    const { bytesRead } = await handle.read(
-      result,
-      offset,
-      Math.min(size - offset, limits.dataChunkBytes),
-      position + offset,
-    );
-    if (!bytesRead) throw new AppError("io_error", "File read is incomplete");
-    offset += bytesRead;
-  }
-  return result;
-}
-function revisionOf(path: string, dev: bigint, content: Buffer) {
-  return revisionDigest(path, dev, createHash("sha256").update(content).digest());
-}
-function revisionDigest(path: string, dev: bigint, digest: Buffer) {
-  return createHash("sha256")
-    .update(path)
-    .update("\0")
-    .update(String(dev))
-    .update("\0")
-    .update(digest)
-    .digest("hex");
 }

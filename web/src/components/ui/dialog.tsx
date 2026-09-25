@@ -14,8 +14,9 @@ export function DialogContent({ className, children, ...props }: Primitive.Popup
   const { t } = useTranslation();
   return (
     <Primitive.Portal>
-      <Primitive.Backdrop className="fixed inset-0 z-40 bg-black/25" />
+      <Primitive.Backdrop className="dialog-backdrop fixed inset-0 z-40 bg-black/25" />
       <Primitive.Popup
+        render={(props, state) => <div {...props} inert={!state.open} />}
         className={cn(
           "dialog-content fixed z-50 flex max-h-[min(85dvh,760px)] w-[calc(100%_-_32px)] max-w-[560px] flex-col overflow-hidden rounded-md border border-border bg-background shadow-xl outline-none",
           className,

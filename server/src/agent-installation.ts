@@ -9,17 +9,34 @@ const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 export function installationCommands(publicUrl: string, code: string) {
   const origin = quote(publicUrl);
   const bind = `kiteline-agent check && printf '%s\\n' ${quote(code)} | kiteline-agent bind --server ${origin} --if-unbound`;
-  const command = (service: boolean) => `(
-set -e
-for kiteline_tool in curl mktemp; do
-  command -v "$kiteline_tool" >/dev/null || { echo "Missing $kiteline_tool; Ubuntu 24.04: sudo apt-get update && sudo apt-get install -y curl ca-certificates coreutils" >&2; exit 1; }
-done
-kiteline_install=$(mktemp /var/tmp/kiteline-install.XXXXXX)
-trap 'rm -f "$kiteline_install"' EXIT
-curl -fsSL --proto '=https' --proto-redir '=https' ${quote(publicUrl + "/install.sh")} -o "$kiteline_install"
-sh "$kiteline_install" --server ${origin} --version ${quote(appVersion)} --code ${quote(code)}${service ? " --service" : ""}
-)`;
+  const command = (service: boolean) =>
+    `curl -fsSL ${quote(publicUrl + "/connect.sh")} | sh -s -- ${quote(code)}${service ? " --service" : ""}`;
   return { foreground: command(false), service: command(true), bind };
+}
+
+function connectionScript(publicUrl: string) {
+  return `#!/bin/sh
+set -eu
+
+connect() {
+    if [ "$#" -ne 1 ] && ! { [ "$#" -eq 2 ] && [ "$2" = --service ]; }; then
+        echo 'Usage: sh -s -- CODE [--service]' >&2
+        exit 1
+    fi
+    [ -n "$1" ] || { echo 'Missing binding code; generate a connection command in the web app' >&2; exit 1; }
+    for kiteline_tool in curl mktemp; do
+        command -v "$kiteline_tool" >/dev/null || { echo "Missing $kiteline_tool; Ubuntu 24.04: sudo apt-get update && sudo apt-get install -y curl ca-certificates coreutils" >&2; exit 1; }
+    done
+    kiteline_install=$(mktemp /var/tmp/kiteline-install.XXXXXX)
+    trap 'rm -f "$kiteline_install"' EXIT
+    curl -fsSL --proto '=https' --proto-redir '=https' ${quote(publicUrl + "/install.sh")} -o "$kiteline_install"
+    kiteline_code=$1
+    shift
+    sh "$kiteline_install" --server ${quote(publicUrl)} --version ${quote(appVersion)} --code "$kiteline_code" "$@"
+}
+
+connect "$@"
+`;
 }
 
 export function upgradeCommand(publicUrl: string) {
@@ -58,12 +75,25 @@ fi
 export async function serveAgentInstallation(
   path: string,
   directory: string,
+  publicUrl: string,
   request: IncomingMessage,
   response: ServerResponse,
 ) {
-  if (path !== "/install.sh" && !path.startsWith("/downloads/")) return false;
+  if (path !== "/connect.sh" && path !== "/install.sh" && !path.startsWith("/downloads/"))
+    return false;
   if (request.method !== "GET" && request.method !== "HEAD") {
     response.writeHead(405, { allow: "GET, HEAD" }).end();
+    return true;
+  }
+  if (path === "/connect.sh") {
+    const script = connectionScript(publicUrl);
+    response.writeHead(200, {
+      "content-type": "text/plain; charset=utf-8",
+      "content-length": Buffer.byteLength(script),
+      "cache-control": "no-cache",
+      "content-disposition": 'attachment; filename="connect.sh"',
+    });
+    response.end(request.method === "HEAD" ? undefined : script);
     return true;
   }
   let filename = path === "/install.sh" ? "install.sh" : undefined;

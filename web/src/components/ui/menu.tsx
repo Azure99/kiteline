@@ -23,7 +23,7 @@ export function MenuContent({ children }: { children: React.ReactNode }) {
   return (
     <Primitive.Portal>
       <Primitive.Positioner sideOffset={4} align="end" className="z-50">
-        <Primitive.Popup className="max-h-[var(--available-height)] min-w-40 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-md border border-border bg-background p-1 shadow-lg outline-none">
+        <Primitive.Popup className="menu-content max-h-[var(--available-height)] min-w-40 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-md border border-border bg-background p-1 shadow-lg outline-none">
           {children}
         </Primitive.Popup>
       </Primitive.Positioner>

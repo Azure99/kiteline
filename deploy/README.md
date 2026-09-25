@@ -47,6 +47,8 @@ docker compose -f deploy/compose.yaml up -d server
 
 在网页设备列表点击“绑定设备”，生成并复制接入命令，在目标 Linux 机器以日常项目用户执行。命令从当前 server 下载配套包并校验，安装时需要 sudo，绑定与运行仍属于该用户。默认前台运行，Ctrl-C 停止；以后直接 `kiteline-agent run`，无需重新绑定。选择“后台常驻”才安装并启动 systemd 服务，需要非 root 用户与运行中的 systemd。
 
+网页生成的命令形如 `curl -fsSL 'https://kiteline.example.com/connect.sh' | sh -s -- 'CODE'`，后台方式只追加 `--service`。绑定码保留为 shell 参数，不进入下载 URL；入口调用同一完整安装器。
+
 目标机需要 curl、Git 2.43+、ripgrep 14+、SSH、flock（util-linux）和项目使用的 Shell/CLI。缺项时命令停止并给出安装建议，不自动修改系统依赖；Ubuntu 24.04 可执行：
 
 ```sh
@@ -110,6 +112,8 @@ systemd 将相同的 `KEY=value` 写入 `/etc/kiteline-agent.env`，不带 `expo
 Linux 的 Unix socket 完整路径限 103 字节。显式使用 `/run` 等易失运行目录时，启动前及系统重启后需准备属于运行用户的可写目录。
 
 维护需明确确认，停止会结束终端任务，保留配置、绑定和 workspace。新服务未就绪时恢复旧安装并报告结果；前台升级后保持停止。
+
+短接入命令的外层 curl 失败时，POSIX 管道退出状态未必非零；以实际绑定和设备在线状态确认完成。
 
 ## 自行准备的容器
 

@@ -10,7 +10,8 @@ import {
 } from "@kiteline/shared/protocol";
 import { consumeFileFrames, sendFileFrame } from "@kiteline/shared/file-stream";
 import type { AgentConfig, Identity } from "../config.js";
-import type { TextFiles, FileRead, TextWrite } from "./text.js";
+import type { TextFiles, TextWrite } from "./text.js";
+import type { FileRead } from "./read.js";
 import type { BinaryFiles, UploadWrite } from "./binary.js";
 import type { TemporaryFiles } from "./temporary.js";
 import { connectServerSocket } from "../network.js";
@@ -150,8 +151,8 @@ export class FileChannels {
         const workspaceId = string(params.workspaceId);
         const path = string(params.path);
         let meta;
-        if (kind === "file.read" && params.purpose === "text") {
-          channel.read = await this.files.read(workspaceId, path, signal);
+        if (kind === "file.read" && (params.purpose === "text" || params.purpose === "open")) {
+          channel.read = await this.files.read(workspaceId, path, signal, params.purpose);
           meta = channel.read.meta;
         } else if (
           kind === "file.read" &&

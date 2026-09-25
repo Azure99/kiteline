@@ -127,7 +127,7 @@ export class DraftStore {
         (id ? item.id === id : item.path === target.path),
     );
   }
-  open(target: FileTarget & { deviceName: string; workspaceName: string }) {
+  open(target: FileTarget & { deviceName: string; workspaceName: string }, disk?: DiskText) {
     const existing = this.find(target);
     if (existing) return existing;
     const draft: Draft = {
@@ -144,7 +144,14 @@ export class DraftStore {
       diskActivity: 0,
     };
     this.items.push(draft);
-    void this.load(draft);
+    if (disk) {
+      try {
+        this.adopt(draft, disk);
+      } catch (error) {
+        draft.error = error;
+        this.changed();
+      }
+    } else void this.load(draft);
     return draft;
   }
   update(draft: Draft, state: EditorState) {

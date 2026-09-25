@@ -77,7 +77,7 @@ export class Channels {
       if (
         !(
           kind === "file.read"
-            ? ["text", "image", ...(download ? ["download"] : [])]
+            ? ["open", "text", "image", ...(download ? ["download"] : [])]
             : ["save", "upload"]
         ).includes(String(params.purpose))
       )
@@ -210,10 +210,16 @@ export class Channels {
           if (item.kind === "file.write" && meta.size !== item.params.size)
             throw new AppError("invalid_argument", "Declared file lengths do not match");
           if (
-            item.params.purpose === "image" &&
-            !["image/png", "image/jpeg", "image/webp", "image/gif"].includes(meta.contentType)
+            (item.params.purpose === "image" || item.params.purpose === "open") &&
+            ![
+              "image/png",
+              "image/jpeg",
+              "image/webp",
+              "image/gif",
+              ...(item.params.purpose === "open" ? ["text/plain; charset=utf-8"] : []),
+            ].includes(meta.contentType)
           )
-            throw new AppError("unsupported", "Unsupported image type");
+            throw new AppError("unsupported", "Unsupported file content type");
         }
         clearTimeout(item.timer);
         if (item.download)
@@ -352,7 +358,7 @@ export class Channels {
       deviceId,
       workspaceId: params.workspaceId as string,
       path: params.path as string,
-      purpose: params.purpose as "text" | "image" | "download",
+      purpose: params.purpose as "open" | "text" | "image" | "download",
       error: asError(error),
       outcome: "failed",
     });

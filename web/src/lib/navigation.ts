@@ -12,7 +12,6 @@ export interface WorkspaceQuery {
   draft?: string;
   folder?: string;
   reveal?: string;
-  preview?: "image";
   search?: boolean;
 }
 export function currentPath() {
@@ -44,7 +43,6 @@ export function parseRoute(url: URL) {
     draft: params.get("draft") ?? undefined,
     folder: params.get("folder") ?? undefined,
     reveal: params.get("reveal") ?? undefined,
-    preview: params.get("preview") === "image" ? "image" : undefined,
     search: params.get("search") === "1" ? true : undefined,
   };
   const match = /^\/devices(?:\/([^/]+)(?:\/workspaces\/([^/]+)\/(terminal|files|git))?)?\/?$/.exec(
