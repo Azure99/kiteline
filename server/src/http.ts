@@ -34,12 +34,35 @@ export async function body(request: IncomingMessage): Promise<unknown> {
     throw new AppError("invalid_argument", "Invalid JSON");
   }
 }
-export function cookie(request: IncomingMessage) {
+export function requestOrigin(request: IncomingMessage, trustProxyProto: boolean) {
+  const host = request.headers.host;
+  const protocol = trustProxyProto ? (request.headers["x-forwarded-proto"] ?? "http") : "http";
+  if (protocol !== "http" && protocol !== "https")
+    throw new AppError("invalid_argument", "Invalid X-Forwarded-Proto");
+  if (!host || request.headersDistinct.host?.length !== 1 || /[\s/@?#,\\]/.test(host))
+    throw new AppError("invalid_argument", "Invalid Host header");
+  try {
+    return new URL(`${protocol}://${host}`).origin;
+  } catch {
+    throw new AppError("invalid_argument", "Invalid Host header");
+  }
+}
+export const sessionCookieNames = ["kiteline_session", "kiteline_session_http"] as const;
+function cookieName(entryOrigin: string) {
+  return entryOrigin.startsWith("https:") ? sessionCookieNames[0] : sessionCookieNames[1];
+}
+export function sessionCookie(entryOrigin: string, token: string, expiresAt: string) {
+  const secure = entryOrigin.startsWith("https:") ? " Secure;" : "";
+  const expiry = token ? `Expires=${new Date(expiresAt).toUTCString()}` : "Max-Age=0";
+  return `${cookieName(entryOrigin)}=${token}; Path=/; HttpOnly;${secure} SameSite=Strict; ${expiry}`;
+}
+export function cookie(request: IncomingMessage, entryOrigin: string) {
+  const prefix = cookieName(entryOrigin) + "=";
   return request.headers.cookie
     ?.split(";")
     .map((s) => s.trim())
-    .find((s) => s.startsWith("kiteline_session="))
-    ?.slice("kiteline_session=".length);
+    .find((s) => s.startsWith(prefix))
+    ?.slice(prefix.length);
 }
 export function origin(request: IncomingMessage, expected: string) {
   if (request.headers.origin !== expected) throw new AppError("forbidden", "Origin mismatch");

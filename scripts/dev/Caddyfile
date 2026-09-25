@@ -8,7 +8,7 @@
 
 https://localhost:8443 {
 	tls internal
-	@server path /api/* /healthz /proxy/* /absproxy/*
+	@server path /api/* /healthz /proxy/* /absproxy/* /connect.sh /install.sh /downloads/*
 	reverse_proxy @server 127.0.0.1:8080 {
 		flush_interval 10ms
 		transport http {

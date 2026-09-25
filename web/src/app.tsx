@@ -1,3 +1,4 @@
+import { newId } from "./lib/id";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { trackViewport } from "./lib/viewport";
@@ -248,7 +249,10 @@ export function App() {
     <>
       <div
         data-terminal-focus={terminalFocus.active ? "" : undefined}
-        className="fixed top-[var(--app-top,0px)] left-0 flex h-[var(--app-height,100dvh)] w-full min-h-0 flex-col overflow-hidden"
+        data-terminal-page={
+          route.valid && device && workspace && route.tool === "terminal" ? "" : undefined
+        }
+        className="fixed top-[var(--app-top,0px)] left-0 flex h-[var(--app-height,100dvh)] w-full min-h-0 flex-col overflow-hidden bg-background"
       >
         <header
           hidden={terminalFocus.active}
@@ -473,7 +477,7 @@ export function App() {
                       visible={route.tool === "files"}
                       store={drafts}
                       onUpload={(files, folder) => {
-                        const id = crypto.randomUUID();
+                        const id = newId();
                         setUploads((old) => [
                           ...old,
                           {

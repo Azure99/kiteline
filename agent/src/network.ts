@@ -1,3 +1,4 @@
+import { Agent as HttpAgent } from "node:http";
 import { Agent as HttpsAgent } from "node:https";
 import type { ConnectionOptions } from "node:tls";
 import { getProxyForUrl } from "proxy-from-env";
@@ -8,6 +9,7 @@ import { WebSocket, type ClientOptions } from "ws";
 function proxyFor(target: string | URL) {
   const url = new URL(target);
   if (url.protocol === "wss:") url.protocol = "https:";
+  else if (url.protocol === "ws:") url.protocol = "http:";
   const proxy = getProxyForUrl(url.href);
   if (proxy && !["http:", "https:"].includes(new URL(proxy).protocol))
     throw new Error("Agent environment proxy must use HTTP or HTTPS");
@@ -52,7 +54,9 @@ export function connectServerSocket(
   const controller = new AbortController();
   const agent = proxy
     ? new HttpsProxyAgent(proxy, { signal: controller.signal })
-    : new HttpsAgent();
+    : url.protocol === "wss:"
+      ? new HttpsAgent()
+      : new HttpAgent();
   let socket: WebSocket;
   try {
     socket = new WebSocket(url, { ...options, agent });

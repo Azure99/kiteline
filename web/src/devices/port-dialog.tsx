@@ -15,6 +15,7 @@ import {
 import { IconButton } from "../components/icon-button";
 import { rpc } from "../lib/api";
 import { serviceURL } from "../lib/device-service";
+import { copyText } from "../lib/clipboard";
 
 export function PortDialog({ device, onClose }: { device: Device; onClose: () => void }) {
   const { t } = useTranslation();
@@ -53,7 +54,7 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
   async function copy() {
     if (!url) return;
     try {
-      await navigator.clipboard.writeText(url);
+      await copyText(url);
       setNotice({ kind: "copied" });
     } catch (error) {
       setNotice({ kind: "error", error });
@@ -175,7 +176,12 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" disabled={!url} onClick={() => void copy()}>
+            <Button
+              variant="outline"
+              disabled={!url}
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={() => void copy()}
+            >
               <Copy />
               {t(($) => $.devices.copyLink)}
             </Button>

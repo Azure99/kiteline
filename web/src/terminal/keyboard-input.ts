@@ -4,25 +4,29 @@ import { isKeyboardOpen, prepareKeyboard, virtualKeyboard } from "../lib/viewpor
 export function terminalKeyboard(terminal: Terminal, mobile: boolean) {
   const textarea = terminal.textarea!;
   const keyboard = mobile ? virtualKeyboard : undefined;
+  const managed = mobile && "virtualKeyboardPolicy" in textarea;
   let pending = false;
   let focusing = false;
   let frame = 0;
   const restore = () => {
     cancelAnimationFrame(frame);
     pending = false;
-    if (keyboard) textarea.setAttribute("virtualkeyboardpolicy", "manual");
+    if (managed) textarea.setAttribute("virtualkeyboardpolicy", "manual");
   };
   const viewport = () => {
     if (pending && !focusing && isKeyboardOpen()) restore();
   };
-  if (virtualKeyboard) textarea.setAttribute("virtualkeyboardpolicy", mobile ? "manual" : "auto");
+  if ("virtualKeyboardPolicy" in textarea)
+    textarea.setAttribute("virtualkeyboardpolicy", mobile ? "manual" : "auto");
   textarea.addEventListener("blur", restore);
   window.addEventListener("kiteline:viewport", viewport);
   return {
     activate() {
       if (terminal.options.disableStdin) return;
       prepareKeyboard();
-      if (keyboard && document.activeElement !== textarea) {
+      if (!keyboard && managed && !isKeyboardOpen() && document.activeElement === textarea)
+        textarea.blur();
+      if (managed && document.activeElement !== textarea) {
         pending = true;
         focusing = true;
         textarea.setAttribute("virtualkeyboardpolicy", "auto");

@@ -104,7 +104,7 @@ export class TerminalDisplay {
         versionedPath(`/api/channels/${encodeURIComponent(channel.channelId)}/terminal`),
         location.href,
       );
-      url.protocol = "wss:";
+      url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
       const socket = new WebSocket(url);
       this.socket = socket;
       socket.binaryType = "arraybuffer";

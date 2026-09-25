@@ -9,29 +9,30 @@
 ```sh
 pnpm install --frozen-lockfile
 pnpm package agent amd64
-pnpm package agent arm64
-pnpm package server amd64
+pnpm package server amd64 --agent-arch=amd64
 pnpm images amd64
 ```
 
-默认每个server携带两架构agent，两份agent须先构建。内部迭代只打amd64时，依次执行`pnpm package agent amd64`、`pnpm package server amd64 --agent-arch=amd64`、`pnpm images amd64`；该server只提供amd64接入包，不混入旧ARM资源。ARM64 server完整发布再执行`pnpm package server arm64`、`pnpm images arm64`，串行控制内存。包及对应`.sha256`在`dist/releases/`；产品版本来自[version.json](../shared/src/version.json)，镜像名为`kiteline-server:<版本>-<amd64|arm64>`。本仓库不自动发布镜像，跨机器可用`docker save/load`搬运。清单记录commit、dirty、实际输入sourceDigest、Node/native与校验；组装server发现来源不一致时要求重建agent。
+上述单平台构建命令只打amd64，并在server中提供配套amd64接入包。需要完整双架构发布时，先构建两种agent，再省略server的`--agent-arch`；ARM64 server另执行`pnpm package server arm64`、`pnpm images arm64`，串行控制内存。包及对应`.sha256`在`dist/releases/`；产品版本来自[version.json](../shared/src/version.json)，镜像名为`kiteline-server:<版本>-<amd64|arm64>`。本仓库不自动发布镜像，跨机器可用`docker save/load`搬运。清单记录commit、dirty、实际输入sourceDigest、Node/native与校验；组装server发现来源不一致时要求重建agent。
 
-## Server 与已有 HTTPS 反代
+## Server 部署
 
 镜像按前节构建或导入后，启动 server。默认只发布宿主 `127.0.0.1:8080`，管理数据保存在 `server-data` 卷；不占用 80/443、不管理证书。
 
 ```sh
 export KITELINE_VERSION=$(node -p 'require("./shared/src/version.json").version')
-export KITELINE_PUBLIC_URL=https://kiteline.example.com
+export KITELINE_HTTP_PORT=8443
 docker compose -f deploy/compose.yaml up -d
 docker compose -f deploy/compose.yaml logs server
 ```
 
-上述版本读取命令在源码根目录执行；仅导入镜像时，直接将 `KITELINE_VERSION` 设置为导入的发布版本。已有反代将 `https://kiteline.example.com` 转发到 `http://127.0.0.1:8080`，透传 Host、Origin、Cookie 和 Upgrade，允许长连接及流式正文，关闭正文缓冲和写请求重放。`KITELINE_PUBLIC_URL` 填最终 HTTPS origin（含实际非默认端口），浏览器和 agent 都使用它，不填内部 HTTP upstream。
+打开 http://localhost:8443。上述版本读取命令在源码根目录执行；仅导入镜像时，直接将 `KITELINE_VERSION` 设置为导入的发布版本。局域网访问时在启动前另设 `KITELINE_HTTP_BIND=0.0.0.0`，然后打开 `http://主机IP:8443`；端口可按需更改。
 
-端口不同可设置 `KITELINE_HTTP_PORT=18080`；反代在另一主机/容器时，可设置 `KITELINE_HTTP_BIND` 为可达的宿主地址，或将反代接入 Compose 网络、使用 `http://server:8080`。另一容器的 `127.0.0.1` 不是宿主机。ARM64 镜像另设 `KITELINE_ARCH=arm64`。
+使用已有 HTTPS 反代时，设置 `KITELINE_TRUST_PROXY_PROTO=1` 后运行同一 Compose 命令。反代将 HTTPS 入口转到发布的 HTTP 端口，保留原 Host（含端口）、覆盖 `X-Forwarded-Proto`，普通请求与 WebSocket Upgrade 都要处理。反代必须允许 WebSocket、SSE、流式响应与上传，不缓冲流式正文、不自动重放写请求，并为长连接设置合适期限。同一实例可同时使用多个域名和 HTTP 地址，各入口分别登录；不配置单一公开 URL。
 
-打开 `https://kiteline.example.com`，输入首次日志中的 setup token 并设置拥有者密码。需要新 token 时，先停止 server，在同一卷执行命令后重新启动：
+反代在另一主机/容器时，可设置 `KITELINE_HTTP_BIND` 为可达的宿主地址，或将反代接入 Compose 网络、使用 `http://server:8080`。另一容器的 `127.0.0.1` 不是宿主机。ARM64 镜像另设 `KITELINE_ARCH=arm64`。
+
+从所选入口打开网页，输入首次日志中的 setup token 并设置拥有者密码。需要新 token 时，先停止 server，在同一卷执行命令后重新启动：
 
 ```sh
 docker compose -f deploy/compose.yaml stop server
@@ -41,13 +42,13 @@ docker compose -f deploy/compose.yaml up -d server
 
 已初始化后的密码恢复将中间命令换成 `reset-password`，按提示输入新密码。不要换空卷；原登录会话会失效。备份可停止 server 后备份整个 `server-data` 卷，agent 登记和凭据单独备份，项目文件沿原方式备份。
 
-原生 server：校验并解压完整 server 包到 `/opt/kiteline-server`，创建专用 `kiteline` 用户及其可写的 `/var/lib/kiteline`，将 [unit](kiteline-server.service) 安装为 `/etc/systemd/system/kiteline-server.service`。`/etc/kiteline-server.env` 设置 `KITELINE_PUBLIC_URL=https://kiteline.example.com`，执行 `systemctl daemon-reload`、`systemctl enable --now kiteline-server`。已有反代转到 `http://127.0.0.1:8080`。查看 `journalctl -u kiteline-server` 取得初始化 token。恢复时停止 unit，用 `sudo -u kiteline env KITELINE_DATA_DIR=/var/lib/kiteline /opt/kiteline-server/bin/kiteline-server reset-password`，再启动 unit。
+原生 server：校验并解压完整 server 包到 `/opt/kiteline-server`，创建专用 `kiteline` 用户及其可写的 `/var/lib/kiteline`，将 [unit](kiteline-server.service) 安装为 `/etc/systemd/system/kiteline-server.service`。创建 `/etc/kiteline-server.env`，默认可只写 `KITELINE_TRUST_PROXY_PROTO=0`；接 HTTPS 反代时改为1，需要局域网直连或自定义端口时设置 `KITELINE_LISTEN_ADDR=0.0.0.0:8443`。执行 `systemctl daemon-reload`、`systemctl enable --now kiteline-server`，查看 `journalctl -u kiteline-server` 取得初始化 token。恢复时停止 unit，用 `sudo -u kiteline env KITELINE_DATA_DIR=/var/lib/kiteline /opt/kiteline-server/bin/kiteline-server reset-password`，再启动 unit。
 
 ## 原生 Agent
 
 在网页设备列表点击“绑定设备”，生成并复制接入命令，在目标 Linux 机器以日常项目用户执行。命令从当前 server 下载配套包并校验，安装时需要 sudo，绑定与运行仍属于该用户。默认前台运行，Ctrl-C 停止；以后直接 `kiteline-agent run`，无需重新绑定。选择“后台常驻”才安装并启动 systemd 服务，需要非 root 用户与运行中的 systemd。
 
-网页生成的命令形如 `curl -fsSL 'https://kiteline.example.com/connect.sh' | sh -s -- 'CODE'`，后台方式只追加 `--service`。绑定码保留为 shell 参数，不进入下载 URL；入口调用同一完整安装器。
+网页自动生成当前访问地址的 `curl .../connect.sh | sh -s -- 'CODE'` 命令，后台方式只追加 `--service`。实际命令含下载协议限制：HTTPS不降级，HTTP可用HTTP/HTTPS；绑定码保留为 shell 参数，不进入下载 URL。目标设备必须能够访问该地址，不能从手机的 localhost 地址给另一台机器绑定。
 
 目标机需要 curl、Git 2.43+、ripgrep 14+、SSH、flock（util-linux）和项目使用的 Shell/CLI。缺项时命令停止并给出安装建议，不自动修改系统依赖；Ubuntu 24.04 可执行：
 
@@ -91,19 +92,20 @@ sudo kiteline-agent service upgrade --archive "/path/to/kiteline-agent-${KITELIN
 sudo kiteline-agent service uninstall
 ```
 
-更新server后，刷新网页；设备版本不匹配时，在设备详情动作中选“升级agent”，复制命令到该设备的独立终端或SSH执行。命令下载当前server配套包和`.sha256`并调用上述upgrade，无需重新绑定。前台先自行停止，完成后再运行`kiteline-agent run`；systemd沿原方式重启。卸载默认保留状态与环境文件，`--purge-state`只移除agent自己的状态JSON，保留目录和项目文件。
+更新server后，刷新网页；设备版本不匹配时，在设备详情动作中选“升级agent”，复制命令到该设备的独立终端或SSH执行。命令从当前网页入口下载配套包和`.sha256`，调用上述upgrade，无需重新绑定；换入口下载不会更改agent已保存的连接地址。前台先自行停止，完成后再运行`kiteline-agent run`；systemd沿原方式重启。卸载默认保留状态与环境文件，`--purge-state`只移除agent自己的状态JSON，保留目录和项目文件。
 
 ### Agent 出站代理
 
-绑定及控制/数据 WSS 共用环境代理。前台 `bind`/`run` 使用当前 Shell 的环境，例如：
+绑定及控制/数据 WS/WSS 共用环境代理。前台 `bind`/`run` 使用当前 Shell 的环境，例如：
 
 ```sh
 export HTTPS_PROXY=http://127.0.0.1:7890
+export http_proxy=http://127.0.0.1:7890
 export NO_PROXY=localhost,127.0.0.1,.internal.example
 kiteline-agent run
 ```
 
-systemd 将相同的 `KEY=value` 写入 `/etc/kiteline-agent.env`，不带 `export`，在维护窗口停止/启动服务后生效；只在执行 `systemctl` 的 Shell 中 export 不会改变服务环境。停止会结束终端任务。前台只共用该文件的安装目录项，不自动加载其中的代理变量。
+HTTP/WS使用HTTP代理变量，HTTPS/WSS使用HTTPS代理变量；上例HTTP选小写`http_proxy`，也供安装下载的curl使用。systemd 将相同的 `KEY=value` 写入 `/etc/kiteline-agent.env`，不带 `export`，在维护窗口停止/启动服务后生效；只在执行 `systemctl` 的 Shell 中 export 不会改变服务环境。停止会结束终端任务。前台只共用该文件的安装目录项，不自动加载其中的代理变量。
 
 设备本地 HTTP 服务始终直连。新 Shell/AI CLI 继承 agent 的环境，但程序是否使用代理由自身决定；现有任务不会自动更新。同名非空小写变量优先；未配置协议代理时回退 ALL_PROXY，HTTPS 不回退 HTTP_PROXY。NO_PROXY 指定直连目标，仅支持 HTTP(S) 代理。
 
@@ -114,6 +116,8 @@ Linux 的 Unix socket 完整路径限 103 字节。显式使用 `/run` 等易失
 维护需明确确认，停止会结束终端任务，保留配置、绑定和 workspace。新服务未就绪时恢复旧安装并报告结果；前台升级后保持停止。
 
 短接入命令的外层 curl 失败时，POSIX 管道退出状态未必非零；以实际绑定和设备在线状态确认完成。
+
+开启 `KITELINE_TRUST_PROXY_PROTO` 后，只将 HTTP 端口交给可信客户端或反代；环境代理须允许 CONNECT，包括目标为 HTTP 的连接。
 
 ## 自行准备的容器
 
@@ -129,7 +133,7 @@ linked worktree 同时挂载工作目录、gitDir 和 commonDir；`.git` 指向�
 
 同容器终端启动的服务可直接从端口入口访问，无需发布宿主端口。独立服务容器可使用 `network_mode: service:agent` 明确共享网络；普通 bridge 的其他容器和宿主 localhost 不属于 agent 的 localhost。原生 agent 则能访问已发布到宿主本地端口的容器服务。
 
-普通路径代理尽力兼容相对地址；Vite 使用“保留路径”并设置对应 `base`、实际域名 `server.allowedHosts`，HMR 沿相同入口使用 WSS。应用写死的根相对 API/登录回调仍需项目配置。
+普通路径代理尽力兼容相对地址；Vite 使用“保留路径”并设置对应 `base`、实际域名 `server.allowedHosts`，HMR 沿相同入口使用 WS/WSS。应用写死的根相对 API/登录回调仍需项目配置。
 
 ## 平台要求
 

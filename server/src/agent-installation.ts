@@ -5,16 +5,20 @@ import { pipeline } from "node:stream/promises";
 import { AppError, appVersion } from "@kiteline/shared/protocol";
 
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+function curlCommand(entryOrigin: string) {
+  const protocols = entryOrigin.startsWith("https:") ? "=https" : "=http,https";
+  return `curl -fsSL --proto '${protocols}' --proto-redir '${protocols}'`;
+}
 
-export function installationCommands(publicUrl: string, code: string) {
-  const origin = quote(publicUrl);
+export function installationCommands(entryOrigin: string, code: string) {
+  const origin = quote(entryOrigin);
   const bind = `kiteline-agent check && printf '%s\\n' ${quote(code)} | kiteline-agent bind --server ${origin} --if-unbound`;
   const command = (service: boolean) =>
-    `curl -fsSL ${quote(publicUrl + "/connect.sh")} | sh -s -- ${quote(code)}${service ? " --service" : ""}`;
+    `${curlCommand(entryOrigin)} ${quote(entryOrigin + "/connect.sh")} | sh -s -- ${quote(code)}${service ? " --service" : ""}`;
   return { foreground: command(false), service: command(true), bind };
 }
 
-function connectionScript(publicUrl: string) {
+function connectionScript(entryOrigin: string) {
   return `#!/bin/sh
 set -eu
 
@@ -29,17 +33,17 @@ connect() {
     done
     kiteline_install=$(mktemp /var/tmp/kiteline-install.XXXXXX)
     trap 'rm -f "$kiteline_install"' EXIT
-    curl -fsSL --proto '=https' --proto-redir '=https' ${quote(publicUrl + "/install.sh")} -o "$kiteline_install"
+    ${curlCommand(entryOrigin)} ${quote(entryOrigin + "/install.sh")} -o "$kiteline_install"
     kiteline_code=$1
     shift
-    sh "$kiteline_install" --server ${quote(publicUrl)} --version ${quote(appVersion)} --code "$kiteline_code" "$@"
+    sh "$kiteline_install" --server ${quote(entryOrigin)} --version ${quote(appVersion)} --code "$kiteline_code" "$@"
 }
 
 connect "$@"
 `;
 }
 
-export function upgradeCommand(publicUrl: string) {
+export function upgradeCommand(entryOrigin: string) {
   return {
     version: appVersion,
     command: `(
@@ -60,9 +64,9 @@ fi
 kiteline_upgrade=$(mktemp -d /var/tmp/kiteline-agent-upgrade.XXXXXX)
 trap 'rm -rf "$kiteline_upgrade"' EXIT
 kiteline_name="kiteline-agent-${appVersion}-linux-$kiteline_arch.tar.gz"
-kiteline_base=${quote(publicUrl + "/downloads/agent/" + appVersion + "/")}"$kiteline_name"
-curl -fsSL --proto '=https' --proto-redir '=https' "$kiteline_base" -o "$kiteline_upgrade/$kiteline_name"
-curl -fsSL --proto '=https' --proto-redir '=https' "$kiteline_base.sha256" -o "$kiteline_upgrade/$kiteline_name.sha256"
+kiteline_base=${quote(entryOrigin + "/downloads/agent/" + appVersion + "/")}"$kiteline_name"
+${curlCommand(entryOrigin)} "$kiteline_base" -o "$kiteline_upgrade/$kiteline_name"
+${curlCommand(entryOrigin)} "$kiteline_base.sha256" -o "$kiteline_upgrade/$kiteline_name.sha256"
 if [ "$(id -u)" -eq 0 ]; then
   /usr/local/bin/kiteline-agent service upgrade --archive "$kiteline_upgrade/$kiteline_name"
 else
@@ -75,7 +79,7 @@ fi
 export async function serveAgentInstallation(
   path: string,
   directory: string,
-  publicUrl: string,
+  entryOrigin: string,
   request: IncomingMessage,
   response: ServerResponse,
 ) {
@@ -86,7 +90,7 @@ export async function serveAgentInstallation(
     return true;
   }
   if (path === "/connect.sh") {
-    const script = connectionScript(publicUrl);
+    const script = connectionScript(entryOrigin);
     response.writeHead(200, {
       "content-type": "text/plain; charset=utf-8",
       "content-length": Buffer.byteLength(script),

@@ -50,6 +50,18 @@ body,
 body {
   font-size: 14px;
 }
+/* Keyboard animations can uncover the page before its viewport is resized. */
+:root:has([data-terminal-page]),
+body:has([data-terminal-page]) {
+  background: var(--terminal);
+  overflow: clip;
+}
+body:has([data-terminal-page]) {
+  min-height: 100lvh;
+}
+:root:has([data-terminal-page])::backdrop {
+  background: var(--terminal);
+}
 button,
 input,
 textarea,

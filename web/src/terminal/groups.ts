@@ -1,3 +1,4 @@
+import { newId } from "../lib/id";
 export type SplitDirection = "horizontal" | "vertical";
 export interface TerminalLeaf {
   id: string;
@@ -53,18 +54,18 @@ export function parentSplit(node: TerminalNode, sessionId: string): TerminalSpli
   return undefined;
 }
 function leaf(sessionId: string): TerminalLeaf {
-  return { id: crypto.randomUUID(), sessionId };
+  return { id: newId(), sessionId };
 }
 function branch(direction: SplitDirection, children: TerminalNode[]): TerminalSplit {
   return {
-    id: crypto.randomUUID(),
+    id: newId(),
     direction,
     children,
     sizes: Object.fromEntries(children.map((child) => [child.id, 100 / children.length])),
   };
 }
 function newGroup(sessionId: string): TerminalGroup {
-  return { id: crypto.randomUUID(), root: leaf(sessionId), active: sessionId, maximized: false };
+  return { id: newId(), root: leaf(sessionId), active: sessionId, maximized: false };
 }
 function insert(
   node: TerminalNode,

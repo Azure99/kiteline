@@ -49,7 +49,7 @@ export class FileChannels {
       this.count < this.config.limits.transfersPerDevice &&
       this.count + this.otherChannels() < this.config.limits.channelsPerDevice;
     const url = new URL(`/api/agent/channels/${encodeURIComponent(id)}`, this.identity.server);
-    url.protocol = "wss:";
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     url.searchParams.set("connectionId", connectionId);
     const socket = connectServerSocket(url, {
       headers: { authorization: `Bearer ${this.identity.deviceToken}` },

@@ -39,7 +39,7 @@ export function useDevices(
         await refresh();
         if (stopped || !webCompatible()) return;
         const url = new URL(versionedPath("/api/events"), location.origin);
-        url.protocol = "wss:";
+        url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
         socket = new WebSocket(url);
         socketRef.current = socket;
         socket.onopen = () => {

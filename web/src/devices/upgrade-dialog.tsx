@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, Copy } from "lucide-react";
 import { api } from "../lib/api";
+import { copyText } from "../lib/clipboard";
 import { ErrorNotice } from "../components/error-notice";
 import { Button } from "../components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
@@ -42,10 +43,10 @@ export function UpgradeDialog({ onClose }: { onClose: () => void }) {
               <p className="text-muted-foreground">{t(($) => $.devices.upgradeHint)}</p>
               <Button
                 variant="outline"
+                onPointerDown={(event) => event.preventDefault()}
                 onClick={() => {
                   setError(undefined);
-                  void navigator.clipboard
-                    .writeText(upgrade.command)
+                  void copyText(upgrade.command)
                     .then(() => setCopied(true))
                     .catch(setError);
                 }}

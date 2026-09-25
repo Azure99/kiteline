@@ -175,7 +175,7 @@ export class Agent {
     const url = new URL("/api/agent/control", this.identity.server);
     url.searchParams.set("protocolVersion", String(protocolVersion));
     url.searchParams.set("appVersion", appVersion);
-    url.protocol = "wss:";
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     let socket: WebSocket;
     try {
       socket = connectServerSocket(url, {

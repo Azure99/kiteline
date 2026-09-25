@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { createServer } from "node:http";
+import { createServer, type RequestListener } from "node:http";
 import { createServer as createSecureServer } from "node:https";
 import { connect, type AddressInfo, type Socket } from "node:net";
 import { once } from "node:events";
@@ -17,7 +17,11 @@ afterEach(async () => {
   vi.unstubAllEnvs();
 });
 
-async function fixture(secureProxy = false, credentials = "user:pass") {
+async function fixture({
+  secureProxy = false,
+  secureTarget = true,
+  credentials = "user:pass",
+} = {}) {
   for (const name of ["http_proxy", "https_proxy", "all_proxy", "no_proxy"])
     for (const key of [name, name.toUpperCase()]) vi.stubEnv(key, "");
   const root = await mkdtemp("/var/tmp/kiteline-network-");
@@ -55,19 +59,34 @@ async function fixture(secureProxy = false, credentials = "user:pass") {
   const requests: { target: string; auth?: string }[] = [];
   const { username, password } = new URL(`http://${credentials}@localhost`);
   const authorization = `Basic ${Buffer.from(`${decodeURIComponent(username)}:${decodeURIComponent(password)}`).toString("base64")}`;
-  const target = createSecureServer(tls, async (req, res) => {
+  const protocol = secureTarget ? "https" : "http";
+  const handler: RequestListener = async (req, res) => {
     const parts: Buffer[] = [];
     for await (const part of req) parts.push(Buffer.from(part));
     if (req.url === "/redirect") {
-      res.writeHead(307, { location: `https://localhost:${port}/json` }).end();
+      res.writeHead(307, { location: `${protocol}://localhost:${port}/json` }).end();
+      return;
+    }
+    if (req.url === "/stall") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.flushHeaders();
       return;
     }
     res.writeHead(200, { "content-type": "application/json", "content-encoding": "gzip" });
     res.end(
       gzipSync(JSON.stringify({ method: req.method, body: Buffer.concat(parts).toString() })),
     );
+  };
+  const target = secureTarget ? createSecureServer(tls, handler) : createServer(handler);
+  const ws = new WebSocketServer({ noServer: true });
+  target.on("upgrade", (req, socket, head) => {
+    if (req.url === "/stall") {
+      socket.on("end", () => socket.end());
+      socket.resume();
+      return;
+    }
+    ws.handleUpgrade(req, socket, head, (peer) => ws.emit("connection", peer));
   });
-  const ws = new WebSocketServer({ server: target });
   ws.on("connection", (socket) => socket.on("message", (data) => socket.send(data)));
   const proxy = secureProxy ? createSecureServer(tls) : createServer();
   for (const server of [target, proxy])
@@ -92,7 +111,8 @@ async function fixture(secureProxy = false, credentials = "user:pass") {
     if (mode === "connect-stall") return;
     socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
     if (mode === "tls-stall") return;
-    const upstream = connect({ host: "127.0.0.1", port }, () => {
+    const destination = new URL(`http://${req.url}`);
+    const upstream = connect({ host: destination.hostname, port: Number(destination.port) }, () => {
       if (head.length) upstream.write(head);
       socket.pipe(upstream).pipe(socket);
     });
@@ -106,7 +126,7 @@ async function fixture(secureProxy = false, credentials = "user:pass") {
   proxy.listen(0, "127.0.0.1");
   await once(proxy, "listening");
   const proxyUrl = `${secureProxy ? "https" : "http"}://${credentials}@localhost:${(proxy.address() as AddressInfo).port}`;
-  vi.stubEnv("HTTPS_PROXY", proxyUrl);
+  vi.stubEnv(secureTarget ? "HTTPS_PROXY" : "HTTP_PROXY", proxyUrl);
   cleanup.push(async () => {
     for (const socket of ws.clients) socket.terminate();
     for (const socket of peers) socket.destroy();
@@ -119,31 +139,41 @@ async function fixture(secureProxy = false, credentials = "user:pass") {
     await rm(root, { recursive: true, force: true });
   });
   return {
-    url: new URL(`https://127.0.0.1:${port}/json`),
-    wsUrl: new URL(`wss://127.0.0.1:${port}/`),
+    url: new URL(`${protocol}://127.0.0.1:${port}/json`),
+    wsUrl: new URL(`${secureTarget ? "wss" : "ws"}://127.0.0.1:${port}/`),
     proxyUrl,
     requests,
     proxyPeers,
+    peers,
     setMode(value: typeof mode) {
       mode = value;
     },
   };
 }
 
-test.each([false, true])(
-  "JSON and WSS use the selected HTTP(S) proxy (%s), then honor NO_PROXY",
-  async (secure) => {
-    const f = await fixture(secure);
+test.each([
+  { secureProxy: false, secureTarget: false },
+  { secureProxy: true, secureTarget: false },
+  { secureProxy: false, secureTarget: true },
+  { secureProxy: true, secureTarget: true },
+])(
+  "JSON and WS use the selected proxy ($secureProxy) for target TLS=$secureTarget, then honor NO_PROXY",
+  async ({ secureProxy, secureTarget }) => {
+    const f = await fixture({ secureProxy, secureTarget });
+    const variable = secureTarget ? "HTTPS_PROXY" : "HTTP_PROXY";
     const options = { method: "POST", body: JSON.stringify({ code: "test" }) };
     expect(await fetchServerJson(f.url, options)).toEqual({
       ok: true,
       body: { method: "POST", body: options.body },
     });
     expect(f.requests).toHaveLength(1);
-    expect(f.requests[0]?.auth).toBe(`Basic ${Buffer.from("user:pass").toString("base64")}`);
-    // Lowercase takes precedence; ALL_PROXY is also used for WSS's HTTPS target.
-    vi.stubEnv("HTTPS_PROXY", "http://127.0.0.1:1");
-    vi.stubEnv("https_proxy", f.proxyUrl);
+    expect(f.requests[0]).toEqual({
+      target: f.url.host,
+      auth: `Basic ${Buffer.from("user:pass").toString("base64")}`,
+    });
+    // Lowercase takes precedence; WS/WSS use the corresponding HTTP/HTTPS variables.
+    vi.stubEnv(variable, "http://127.0.0.1:1");
+    vi.stubEnv(variable.toLowerCase(), f.proxyUrl);
     const proxied = connectServerSocket(f.wsUrl, { handshakeTimeout: 300 });
     await once(proxied, "open");
     await new Promise((resolve) => setTimeout(resolve, 400));
@@ -151,8 +181,9 @@ test.each([false, true])(
     proxied.send("still connected");
     expect((await echo)[0].toString()).toBe("still connected");
     expect(f.requests).toHaveLength(2);
-    vi.stubEnv("HTTPS_PROXY", "");
-    vi.stubEnv("https_proxy", "");
+    expect(f.requests[1]?.target).toBe(f.url.host);
+    vi.stubEnv(variable, "");
+    vi.stubEnv(variable.toLowerCase(), "");
     vi.stubEnv("ALL_PROXY", f.proxyUrl);
     await fetchServerJson(f.url, options);
     expect(f.requests).toHaveLength(3);
@@ -175,7 +206,7 @@ test.each([false, true])(
 test.each(["token:", ":password", "to%3Aken:"])(
   "binding and WSS authenticate with partial proxy credentials (%s)",
   async (credentials) => {
-    const f = await fixture(false, credentials);
+    const f = await fixture({ credentials });
     expect((await fetchServerJson(f.url, { signal: AbortSignal.timeout(2000) })).ok).toBe(true);
     const socket = connectServerSocket(f.wsUrl, { handshakeTimeout: 300 });
     await once(socket, "open");
@@ -189,17 +220,20 @@ test.each(["token:", ":password", "to%3Aken:"])(
   },
 );
 
-test("binding redirects reselect the proxy for the destination and retain POST/compression", async () => {
-  const f = await fixture();
-  vi.stubEnv("NO_PROXY", "localhost");
-  const result = await fetchServerJson(new URL("/redirect", f.url), {
-    method: "POST",
-    body: "binding",
-  });
-  expect(result).toEqual({ ok: true, body: { method: "POST", body: "binding" } });
-  expect(f.requests).toHaveLength(1);
-  await expect.poll(() => f.proxyPeers.size).toBe(0);
-});
+test.each([false, true])(
+  "binding redirects reselect the proxy for TLS=%s and retain POST/compression",
+  async (secureTarget) => {
+    const f = await fixture({ secureTarget });
+    vi.stubEnv("NO_PROXY", "localhost");
+    const result = await fetchServerJson(new URL("/redirect", f.url), {
+      method: "POST",
+      body: "binding",
+    });
+    expect(result).toEqual({ ok: true, body: { method: "POST", body: "binding" } });
+    expect(f.requests).toHaveLength(1);
+    await expect.poll(() => f.proxyPeers.size).toBe(0);
+  },
+);
 
 test.each(["reject", "connect-stall", "tls-stall", "cancel"] as const)(
   "WSS %s releases the CONNECT socket",
@@ -229,5 +263,34 @@ test.each(["connect-stall", "tls-stall"] as const)(
     expect(() => connectServerSocket(f.wsUrl, { handshakeTimeout: 300 })).toThrow(
       "must use HTTP or HTTPS",
     );
+  },
+);
+
+test("HTTP binding cancellation and WS timeout release pending proxy connections", async () => {
+  const f = await fixture({ secureTarget: false });
+  f.setMode("connect-stall");
+  await expect(fetchServerJson(f.url, { signal: AbortSignal.timeout(150) })).rejects.toThrow();
+  await expect.poll(() => f.proxyPeers.size).toBe(0);
+  const socket = connectServerSocket(f.wsUrl, { handshakeTimeout: 150 });
+  socket.on("error", () => {});
+  await new Promise((resolve) => socket.once("close", resolve));
+  await expect.poll(() => f.proxyPeers.size).toBe(0);
+  expect(f.requests.map((r) => r.target)).toEqual([f.url.host, f.url.host]);
+});
+
+test.each([false, true])(
+  "direct HTTP/WS TLS=%s cancellation releases active sockets",
+  async (secureTarget) => {
+    const f = await fixture({ secureTarget });
+    vi.stubEnv("NO_PROXY", "*");
+    await expect(
+      fetchServerJson(new URL("/stall", f.url), { signal: AbortSignal.timeout(150) }),
+    ).rejects.toThrow();
+    await expect.poll(() => f.peers.size).toBe(0);
+    const socket = connectServerSocket(new URL("/stall", f.wsUrl), { handshakeTimeout: 150 });
+    socket.on("error", () => {});
+    await new Promise((resolve) => socket.once("close", resolve));
+    await expect.poll(() => f.peers.size).toBe(0);
+    expect(f.requests).toHaveLength(0);
   },
 );

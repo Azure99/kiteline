@@ -6,6 +6,7 @@ import type { Session } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
+import { copyText } from "../lib/clipboard";
 
 export interface SessionAction {
   kind: "rename" | "end" | "copy";
@@ -29,7 +30,7 @@ export function SessionDialog({
   const [error, setError] = useState<unknown>();
   async function copy() {
     try {
-      await navigator.clipboard.writeText(`kiteline-agent terminal attach ${action.session.id}`);
+      await copyText(`kiteline-agent terminal attach ${action.session.id}`);
       setCopied(true);
       setError(undefined);
     } catch (error) {
@@ -85,7 +86,7 @@ export function SessionDialog({
             {action.kind === "copy" ? t(($) => $.common.close) : t(($) => $.common.cancel)}
           </Button>
           {action.kind === "copy" ? (
-            <Button onClick={() => void copy()}>
+            <Button onPointerDown={(event) => event.preventDefault()} onClick={() => void copy()}>
               <Copy />
               {copied ? t(($) => $.common.copied) : t(($) => $.common.copy)}
             </Button>

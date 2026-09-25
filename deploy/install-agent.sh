@@ -24,7 +24,11 @@ while [ "$#" -gt 0 ]; do
     *) fail "Unknown option: $1" ;;
     esac
 done
-case "$server" in https://*) ;; *) fail "An HTTPS server URL is required" ;; esac
+case "$server" in
+https://*) protocols='=https' ;;
+http://*) protocols='=http,https' ;;
+*) fail "An HTTP or HTTPS server URL is required" ;;
+esac
 case "$version" in '' | *[!0-9A-Za-z.+-]*) fail "Invalid release version" ;; esac
 [ -n "$code" ] || fail "Missing binding code; generate a new connection command in the web app"
 [ "$(uname -s)" = Linux ] || fail "Only Linux is supported"
@@ -57,8 +61,8 @@ if [ ! -e /etc/kiteline-agent.json ]; then
     trap 'rm -rf "$temporary"' EXIT
     name="kiteline-agent-$version-linux-$arch"
     base="$server/downloads/agent/$version/$name.tar.gz"
-    curl --fail --show-error --location --proto '=https' --proto-redir '=https' "$base" -o "$temporary/$name.tar.gz"
-    curl --fail --show-error --location --proto '=https' --proto-redir '=https' "$base.sha256" -o "$temporary/$name.tar.gz.sha256"
+    curl --fail --show-error --location --proto "$protocols" --proto-redir "$protocols" "$base" -o "$temporary/$name.tar.gz"
+    curl --fail --show-error --location --proto "$protocols" --proto-redir "$protocols" "$base.sha256" -o "$temporary/$name.tar.gz.sha256"
     (cd "$temporary" && sha256sum --check "$name.tar.gz.sha256")
     tar -xzf "$temporary/$name.tar.gz" -C "$temporary" --no-same-owner
     package="$temporary/$name"

@@ -57,7 +57,7 @@ async function main() {
   }
   if (command !== "run" && command !== "bind")
     throw new Error(
-      "Usage: kiteline-agent install --user USER | check | bind --server HTTPS_ORIGIN [--if-unbound] | run | doctor | service | terminal | workspace",
+      "Usage: kiteline-agent install --user USER | check | bind --server HTTP_OR_HTTPS_ORIGIN [--if-unbound] | run | doctor | service | terminal | workspace",
     );
   const config = await agentConfig();
   const installationUse =
@@ -79,8 +79,8 @@ async function main() {
     if (command === "bind") {
       const index = process.argv.indexOf("--server");
       const server = new URL(string(index < 0 ? undefined : process.argv[index + 1], "server"));
-      if (server.protocol !== "https:")
-        throw new AppError("invalid_argument", "server must use HTTPS");
+      if (server.protocol !== "http:" && server.protocol !== "https:")
+        throw new AppError("invalid_argument", "server must use HTTP or HTTPS");
       if (process.argv.includes("--if-unbound")) {
         const exists = await lstat(resolve(config.dataDir, "connection.json")).then(
           () => true,

@@ -13,6 +13,7 @@ import {
 } from "../components/ui/dialog";
 import { IconButton } from "../components/icon-button";
 import { ApiError } from "../lib/api";
+import { copyText } from "../lib/clipboard";
 import { draftError, isDirty, useDrafts, type Draft, type DraftStore } from "./drafts";
 import { requestCloseDraft, showDraft } from "./navigation";
 import { TextEditor } from "./text-editor";
@@ -128,13 +129,12 @@ export function DraftView({
         <IconButton
           label={t(($) => $.files.copyText)}
           disabled={!draft.state}
+          onPointerDown={(event) => event.preventDefault()}
           onClick={() => {
-            void navigator.clipboard
-              .writeText(draft.state!.doc.toString())
-              .catch((reason: unknown) => {
-                draft.error = reason;
-                store.changed();
-              });
+            void copyText(draft.state!.doc.toString()).catch((reason: unknown) => {
+              draft.error = reason;
+              store.changed();
+            });
           }}
         >
           <Copy />

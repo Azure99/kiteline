@@ -60,7 +60,7 @@ async function fixture(handler: RequestListener, channels = 128) {
   const store = new Store(root);
   const config: ServerConfig = {
     dataDir: root,
-    publicUrl: "https://localhost",
+    trustProxyProto: true,
     hostname: "127.0.0.1",
     port: 0,
     webDir: root,
@@ -75,9 +75,15 @@ async function fixture(handler: RequestListener, channels = 128) {
   };
   const kiteline = createKitelineServer(config, store);
   const port = await listen(kiteline.server);
-  const tls = secureServer({ key, cert }, (req, res) => kiteline.server.emit("request", req, res));
-  tls.on("upgrade", (...args) => kiteline.server.emit("upgrade", ...args));
-  config.publicUrl = `https://127.0.0.1:${await listen(tls)}`;
+  const tls = secureServer({ key, cert }, (req, res) => {
+    req.headers["x-forwarded-proto"] = "https";
+    kiteline.server.emit("request", req, res);
+  });
+  tls.on("upgrade", (req, socket, head) => {
+    req.headers["x-forwarded-proto"] = "https";
+    kiteline.server.emit("upgrade", req, socket, head);
+  });
+  const entryOrigin = `https://127.0.0.1:${await listen(tls)}`;
   const upstream = createServer(handler),
     upstreamPort = await listen(upstream);
   const identity = store.bind(store.newBinding().code, "Proxy Device");
@@ -96,7 +102,7 @@ async function fixture(handler: RequestListener, channels = 128) {
         channelsPerDevice: channels,
       },
     },
-    { ...identity, server: config.publicUrl },
+    { ...identity, server: entryOrigin },
   );
   await agent.start();
   cleanup.push(async () => {
@@ -113,6 +119,12 @@ async function fixture(handler: RequestListener, channels = 128) {
   await expect.poll(() => kiteline.connections.devices()[0]?.status).toBe("online");
   const login = store.createSession(60_000);
   const cookie = `kiteline_session=${login.token}`;
+  const browserHeaders = {
+    cookie,
+    origin: entryOrigin,
+    host: new URL(entryOrigin).host,
+    "x-forwarded-proto": "https",
+  };
   const prefix = `/proxy/${identity.deviceId}/${upstreamPort}`;
   function open(path = prefix + "/", method = "GET", headers: Record<string, string> = {}) {
     const req = request({
@@ -120,7 +132,7 @@ async function fixture(handler: RequestListener, channels = 128) {
       port,
       path,
       method,
-      headers: { cookie, origin: config.publicUrl, ...headers },
+      headers: { ...browserHeaders, ...headers },
     });
     const result = new Promise<IncomingMessage>((resolve, reject) => {
       req.once("response", resolve);
@@ -153,6 +165,8 @@ async function fixture(handler: RequestListener, channels = 128) {
     identity,
     login,
     cookie,
+    entryOrigin,
+    browserHeaders,
     prefix,
     open,
     call,
@@ -177,7 +191,11 @@ test("real HTTP tunnel preserves raw paths, bodies, finite header rules and appl
       res
         .writeHead(302, {
           location: "/next",
-          "set-cookie": ["kiteline_session=bad; Path=/", "project=good; Path=/"],
+          "set-cookie": [
+            "kiteline_session=bad; Path=/",
+            "kiteline_session_http=bad; Path=/",
+            "project=good; Path=/",
+          ],
           "service-worker-allowed": "/",
         })
         .end();
@@ -196,7 +214,7 @@ test("real HTTP tunnel preserves raw paths, bodies, finite header rules and appl
     f.prefix + "/a//b/../c%2fd?",
     "POST",
     {
-      cookie: f.cookie + "; project=one",
+      cookie: f.cookie + "; kiteline_session_http=other; project=one",
       forwarded: "spoof",
       "x-forwarded-host": "wrong",
       connection: "close, x-hop",
@@ -214,13 +232,35 @@ test("real HTTP tunnel preserves raw paths, bodies, finite header rules and appl
     body: "hello",
     headers: {
       cookie: "project=one",
-      host: new URL(f.config.publicUrl).host,
+      host: new URL(f.entryOrigin).host,
       "x-forwarded-proto": "https",
       authorization: "Project auth",
     },
   });
   expect(JSON.parse(raw.text).headers).not.toHaveProperty("x-hop");
   expect(JSON.parse(raw.text).headers).not.toHaveProperty("forwarded");
+  const httpOrigin = `http://127.0.0.1:${f.port}`;
+  const http = await f.call(
+    f.prefix + "/http",
+    "POST",
+    {
+      host: new URL(httpOrigin).host,
+      origin: httpOrigin,
+      "x-forwarded-proto": "http",
+      cookie: `kiteline_session_http=${f.login.token}; kiteline_session=other; project=two`,
+    },
+    "HTTP body",
+  );
+  expect(http.status).toBe(200);
+  expect(JSON.parse(http.text)).toMatchObject({
+    body: "HTTP body",
+    headers: {
+      host: new URL(httpOrigin).host,
+      "x-forwarded-host": new URL(httpOrigin).host,
+      "x-forwarded-proto": "http",
+      cookie: "project=two",
+    },
+  });
   expect((await f.call(f.prefix + "/bad-status")).status).toBe(502);
   const hop = await f.call(f.prefix + "/hop");
   expect(hop.headers).not.toHaveProperty("set-cookie");
@@ -275,7 +315,9 @@ test("real WebSocket messages exceed transport blocks and upgrade rejection is d
   const f = await fixture((_req, res) => res.end("HTTP"));
   const ws = new WebSocketServer({ noServer: true });
   const peers = new Set<WebSocket>();
+  let receivedHeaders: IncomingMessage["headers"] | undefined;
   f.upstream.on("upgrade", (req, socket, head) => {
+    receivedHeaders = req.headers;
     if (req.url === "/reject")
       return socket.end(
         "HTTP/1.1 403 Forbidden\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n",
@@ -291,13 +333,21 @@ test("real WebSocket messages exceed transport blocks and upgrade rejection is d
     ws.close();
   });
   const client = new WebSocket(`ws://127.0.0.1:${f.port}${f.prefix}/`, ["echo"], {
-    headers: { cookie: f.cookie, origin: f.config.publicUrl },
+    headers: {
+      ...f.browserHeaders,
+      cookie: f.cookie + "; kiteline_session_http=other; project=one",
+    },
   });
   cleanup.push(async () => {
     client.terminate();
   });
   await once(client, "open");
   expect(client.protocol).toBe("echo");
+  expect(receivedHeaders).toMatchObject({
+    host: new URL(f.entryOrigin).host,
+    "x-forwarded-proto": "https",
+    cookie: "project=one",
+  });
   const body = Buffer.alloc(2 * 1024 * 1024, 65);
   const reply = once(client, "message");
   client.send(body);
@@ -305,7 +355,7 @@ test("real WebSocket messages exceed transport blocks and upgrade rejection is d
   client.close();
   await once(client, "close");
   const rejected = new WebSocket(`ws://127.0.0.1:${f.port}${f.prefix}/reject`, {
-    headers: { cookie: f.cookie, origin: f.config.publicUrl },
+    headers: f.browserHeaders,
   });
   const result = await new Promise<{ status?: number; text: string }>((resolve, reject) => {
     rejected.on("error", reject);

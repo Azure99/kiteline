@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import type { Device } from "@kiteline/shared/protocol";
 import { api, post } from "../lib/api";
+import { copyText } from "../lib/clipboard";
 import {
   DialogContent,
   DialogFooter,
@@ -95,8 +96,7 @@ export function BindingDialog({
   const copy = (text: string) => {
     setCopyError(undefined);
     setCopied("");
-    void navigator.clipboard
-      .writeText(text)
+    void copyText(text)
       .then(() => setCopied(text))
       .catch((error: unknown) => setCopyError(error));
   };
@@ -177,6 +177,7 @@ export function BindingDialog({
                       : t(($) => $.devices.copyInstall)
                   }
                   disabled={result?.status !== "pending"}
+                  onPointerDown={(event) => event.preventDefault()}
                   onClick={() => copy(command!)}
                 >
                   {copied === command ? <Check /> : <Copy />}
@@ -201,6 +202,7 @@ export function BindingDialog({
                       : t(($) => $.devices.copyBind)
                   }
                   disabled={result?.status !== "pending"}
+                  onPointerDown={(event) => event.preventDefault()}
                   onClick={() => copy(binding.commands.bind)}
                 >
                   {copied === binding.commands.bind ? <Check /> : <Copy />}

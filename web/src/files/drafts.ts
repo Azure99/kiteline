@@ -1,3 +1,4 @@
+import { newId } from "../lib/id";
 import { useSyncExternalStore } from "react";
 import { Compartment, type EditorState } from "@codemirror/state";
 import type { KitelineError, Device, TextFormat } from "@kiteline/shared/protocol";
@@ -132,7 +133,7 @@ export class DraftStore {
     if (existing) return existing;
     const draft: Draft = {
       ...target,
-      id: crypto.randomUUID(),
+      id: newId(),
       language: new Compartment(),
       phrases: new Compartment(),
       format: { bom: false, lineEnding: "lf" },

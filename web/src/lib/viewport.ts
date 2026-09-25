@@ -66,7 +66,10 @@ export function trackViewport() {
     width = nextWidth;
     scale = nextScale;
     fullscreen = nextFullscreen;
-    document.documentElement.style.setProperty("--app-height", `${height}px`);
+    document.documentElement.style.setProperty(
+      "--app-height",
+      nextScale === 1 && top === 0 && !occluded ? "100dvh" : `${height}px`,
+    );
     document.documentElement.style.setProperty("--app-top", `${top}px`);
     window.dispatchEvent(new Event("kiteline:viewport"));
   };

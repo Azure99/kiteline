@@ -4,7 +4,7 @@ import { AppError, integer, record } from "@kiteline/shared/protocol";
 
 export interface ServerConfig {
   dataDir: string;
-  publicUrl: string;
+  trustProxyProto: boolean;
   hostname: string;
   port: number;
   webDir: string;
@@ -19,9 +19,9 @@ export interface ServerConfig {
 }
 export function serverConfig(): ServerConfig {
   const dataDir = resolve(process.env.KITELINE_DATA_DIR ?? "/var/lib/kiteline");
-  const publicUrl = new URL(process.env.KITELINE_PUBLIC_URL ?? "https://localhost:8443");
-  if (publicUrl.protocol !== "https:")
-    throw new AppError("invalid_argument", "KITELINE_PUBLIC_URL must use HTTPS");
+  const trustProxyProto = process.env.KITELINE_TRUST_PROXY_PROTO ?? "0";
+  if (trustProxyProto !== "0" && trustProxyProto !== "1")
+    throw new AppError("invalid_argument", "KITELINE_TRUST_PROXY_PROTO must be 0 or 1");
   const address = new URL(`http://${process.env.KITELINE_LISTEN_ADDR ?? "127.0.0.1:8080"}`);
   const defaults = {
     sessionLifetime: 30 * 86400_000,
@@ -44,7 +44,7 @@ export function serverConfig(): ServerConfig {
   }
   return {
     dataDir,
-    publicUrl: publicUrl.origin,
+    trustProxyProto: trustProxyProto === "1",
     hostname: address.hostname.replace(/^\[|\]$/g, ""),
     port: Number(address.port || 80),
     webDir: resolve(import.meta.dirname, "../../web/dist"),

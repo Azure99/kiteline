@@ -344,13 +344,15 @@ export function TerminalView({
             );
           })}
         </div>
-        <IconButton
-          label={t(($) => $.terminal.paste)}
-          disabled={state.status !== "ready"}
-          onClick={() => void paste()}
-        >
-          <ClipboardPaste />
-        </IconButton>
+        {typeof navigator.clipboard?.readText === "function" && (
+          <IconButton
+            label={t(($) => $.terminal.paste)}
+            disabled={state.status !== "ready"}
+            onClick={() => void paste()}
+          >
+            <ClipboardPaste />
+          </IconButton>
+        )}
         <IconButton
           label={t(($) => $.terminal.keyboard)}
           disabled={state.status !== "ready"}

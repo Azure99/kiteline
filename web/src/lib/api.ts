@@ -1,3 +1,4 @@
+import { newId } from "./id";
 import {
   rpcMutates,
   type KitelineError,
@@ -65,7 +66,7 @@ export async function rpc<A extends RpcArguments>(
   deviceId: string,
   ...args: A
 ): Promise<RpcResult<A[0]>> {
-  const reply = await rpcReply(deviceId, crypto.randomUUID(), args);
+  const reply = await rpcReply(deviceId, newId(), args);
   if (reply.outcome !== "succeeded")
     throw new ApiError(
       reply.error.code,

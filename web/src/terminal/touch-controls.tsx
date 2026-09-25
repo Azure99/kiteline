@@ -6,6 +6,7 @@ import { TouchSelection, type SelectionHandles } from "./touch-selection";
 import { IconButton } from "../components/icon-button";
 import { deviceServiceLink } from "../lib/device-service";
 import { ErrorNotice } from "../components/error-notice";
+import { copyText } from "../lib/clipboard";
 
 export function TouchControls({
   terminal,
@@ -49,7 +50,7 @@ export function TouchControls({
     const revision = current.revision;
     setCopying(true);
     try {
-      await navigator.clipboard.writeText(text);
+      await copyText(text);
       if (selection.current !== current) return;
       if (current.revision === revision) current.cancel();
       setNotice({ kind: "copied" });

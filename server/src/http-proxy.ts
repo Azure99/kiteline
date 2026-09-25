@@ -12,7 +12,7 @@ import type { ServerConfig } from "./config.js";
 import type { Store, Login } from "./store.js";
 import type { Connections } from "./connections.js";
 import type { Channels } from "./channels.js";
-import { cookie, origin } from "./http.js";
+import { cookie, origin, requestOrigin } from "./http.js";
 import { requestHeaders, responseHeaders } from "./proxy-headers.js";
 
 interface Target {
@@ -147,10 +147,11 @@ export class HttpProxy {
       if (request.method === "CONNECT")
         throw new AppError("unsupported", "CONNECT is not supported");
       target = proxyTarget(request.url ?? "");
-      const login = this.store.session(cookie(request));
+      const entryOrigin = requestOrigin(request, this.config.trustProxyProto);
+      const login = this.store.session(cookie(request, entryOrigin));
       if (!login) throw new AppError("unauthenticated", "Please sign in");
       if (head !== undefined || !["GET", "HEAD"].includes(request.method ?? "GET"))
-        origin(request, this.config.publicUrl);
+        origin(request, entryOrigin);
       const device = this.connections.devices().find((value) => value.id === target!.deviceId);
       if (!device || device.status === "revoked")
         throw new AppError("not_found", "Device not found or revoked");
@@ -169,7 +170,7 @@ export class HttpProxy {
       }
       if (head !== undefined && request.headers.upgrade?.toLowerCase() !== "websocket")
         throw new AppError("unsupported", "Only WebSocket upgrades are supported");
-      await this.forward(request, destination, target, login, head);
+      await this.forward(request, destination, target, login, entryOrigin, head);
     } catch (error) {
       failure(request, destination, error, target);
     }
@@ -179,6 +180,7 @@ export class HttpProxy {
     destination: ServerResponse | Duplex,
     target: Target,
     login: Login,
+    entryOrigin: string,
     head?: Buffer,
   ) {
     const response = destination instanceof ServerResponse ? destination : undefined;
@@ -232,7 +234,7 @@ export class HttpProxy {
       port: target.port,
       method: request.method,
       path: target.path,
-      headers: requestHeaders(request.headers, this.config.publicUrl, head !== undefined),
+      headers: requestHeaders(request.headers, entryOrigin, head !== undefined),
     });
     upstream.on("error", fail);
     upstream.on("response", (result) => {

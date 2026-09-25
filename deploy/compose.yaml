@@ -6,7 +6,7 @@ services:
     init: true
     stop_grace_period: 45s
     environment:
-      KITELINE_PUBLIC_URL: ${KITELINE_PUBLIC_URL:?Set KITELINE_PUBLIC_URL to your final HTTPS origin}
+      KITELINE_TRUST_PROXY_PROTO: "${KITELINE_TRUST_PROXY_PROTO:-0}"
     ports:
       - "${KITELINE_HTTP_BIND:-127.0.0.1}:${KITELINE_HTTP_PORT:-8080}:8080"
     volumes:

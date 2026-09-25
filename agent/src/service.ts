@@ -239,7 +239,7 @@ async function installProgram(user: string, service: boolean) {
     throw error;
   }
   console.log(
-    `Installed but not started. As ${installation.user}, run kiteline-agent bind --server <https-origin>, then ${service ? "sudo kiteline-agent service start" : "kiteline-agent run"}.
+    `Installed but not started. As ${installation.user}, run kiteline-agent bind --server <http-or-https-origin>, then ${service ? "sudo kiteline-agent service start" : "kiteline-agent run"}.
 Environment configuration: ${environmentFile}`,
   );
 }

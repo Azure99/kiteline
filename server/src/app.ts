@@ -21,7 +21,9 @@ import {
   failure,
   json,
   origin,
+  requestOrigin,
   requireVersion,
+  sessionCookie,
 } from "./http.js";
 import { bearer, Connections } from "./connections.js";
 import { Channels } from "./channels.js";
@@ -37,28 +39,24 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
   const channels = new Channels(connections, config);
   const proxy = new HttpProxy(config, store, connections, channels);
   const limiter = new AttemptLimiter();
-  function login(request: IncomingMessage) {
-    const session = store.session(cookie(request));
+  function login(request: IncomingMessage, entryOrigin: string) {
+    const session = store.session(cookie(request, entryOrigin));
     if (!session) throw new AppError("unauthenticated", "Please sign in");
     return session;
   }
-  function newSession(response: ServerResponse) {
+  function newSession(response: ServerResponse, entryOrigin: string) {
     const session = store.createSession(config.limits.sessionLifetime);
-    response.setHeader(
-      "set-cookie",
-      `kiteline_session=${session.token}; Path=/; HttpOnly; Secure; SameSite=Strict; Expires=${new Date(session.expiresAt).toUTCString()}`,
-    );
+    response.setHeader("set-cookie", sessionCookie(entryOrigin, session.token, session.expiresAt));
     json(response, 200, { expiresAt: session.expiresAt });
   }
   async function route(request: IncomingMessage, response: ServerResponse) {
     if (isProxyPath(request.url ?? "")) return proxy.handle(request, response);
-    const url = new URL(request.url ?? "/", config.publicUrl);
+    const entryOrigin = requestOrigin(request, config.trustProxyProto);
+    const url = new URL(request.url ?? "/", entryOrigin);
     const path = url.pathname;
     const method = request.method ?? "GET";
     if (path.startsWith("/api/")) response.setHeader("x-kiteline-version", appVersion);
-    if (
-      await serveAgentInstallation(path, config.downloadsDir, config.publicUrl, request, response)
-    )
+    if (await serveAgentInstallation(path, config.downloadsDir, entryOrigin, request, response))
       return;
     if (path === "/healthz" && method === "GET")
       return json(response, 200, { status: "ok", version: appVersion });
@@ -73,7 +71,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       return json(response, 200, result);
     }
     if (path.startsWith("/api/")) {
-      if (!["GET", "HEAD"].includes(method)) origin(request, config.publicUrl);
+      if (!["GET", "HEAD"].includes(method)) origin(request, entryOrigin);
       if (path === "/api/bootstrap" && method === "GET")
         return json(response, 200, { initialized: store.initialized() });
       if ((path === "/api/setup" || path === "/api/login") && method === "POST") {
@@ -84,9 +82,9 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
           await store.setup(string(input.setupToken, "setup token", 256), value);
         else if (!(await store.verifyPassword(value)))
           throw new AppError("unauthenticated", "Incorrect password");
-        return newSession(response);
+        return newSession(response, entryOrigin);
       }
-      const session = login(request);
+      const session = login(request, entryOrigin);
       if (path === "/api/session" && method === "GET")
         return json(response, 200, {
           expiresAt: session.expiresAt,
@@ -95,22 +93,19 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       if (path === "/api/logout" && method === "POST") {
         store.logout(session.id);
         connections.closeLogin(session.id);
-        response.setHeader(
-          "set-cookie",
-          "kiteline_session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0",
-        );
+        response.setHeader("set-cookie", sessionCookie(entryOrigin, "", ""));
         return json(response, 200, {});
       }
       if (path === "/api/devices" && method === "GET")
         return json(response, 200, { devices: connections.devices() });
       if (path === "/api/agent/upgrade-command" && method === "GET")
-        return json(response, 200, upgradeCommand(config.publicUrl));
+        return json(response, 200, upgradeCommand(entryOrigin));
       requireVersion(url.searchParams.get("appVersion"), "web");
       if (path === "/api/bindings" && method === "POST") {
         const binding = store.newBinding();
         return json(response, 200, {
           ...binding,
-          commands: installationCommands(config.publicUrl, binding.code),
+          commands: installationCommands(entryOrigin, binding.code),
         });
       }
       const binding = /^\/api\/bindings\/([^/]+)$/.exec(path);
@@ -149,7 +144,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
         }
         if (suffix === "/channels" && method === "POST") {
           const input = record(await body(request));
-          login(request);
+          login(request, entryOrigin);
           const pending = channels.create(id, session, string(input.kind), record(input.params));
           response.on("close", () => {
             if (!response.writableFinished)
@@ -159,7 +154,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
         }
         if (!suffix && method === "PATCH") {
           const input = record(await body(request));
-          login(request);
+          login(request, entryOrigin);
           store.renameDevice(id, string(input.name, "device name", 256));
           connections.broadcastDevices();
           return json(response, 200, {});
@@ -170,7 +165,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
         }
         if (suffix === "/rpc" && method === "POST") {
           const input = record(await body(request));
-          login(request);
+          login(request, entryOrigin);
           const requestId = string(input.id, "request id", 128);
           const pending = connections.rpc(
             id,
@@ -242,7 +237,8 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
         void proxy.handle(request, socket, head);
         return;
       }
-      const url = new URL(request.url ?? "/", config.publicUrl);
+      const entryOrigin = requestOrigin(request, config.trustProxyProto);
+      const url = new URL(request.url ?? "/", entryOrigin);
       const agentChannel = /^\/api\/agent\/channels\/([^/]+)$/.exec(url.pathname);
       const browserChannel = /^\/api\/channels\/([^/]+)\/terminal$/.exec(url.pathname);
       if (agentChannel) {
@@ -258,8 +254,8 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
           channels.acceptAgent(id, ws),
         );
       } else if (browserChannel) {
-        origin(request, config.publicUrl);
-        const session = login(request);
+        origin(request, entryOrigin);
+        const session = login(request, entryOrigin);
         requireVersion(url.searchParams.get("appVersion"), "web");
         const id = decodeURIComponent(browserChannel[1]!);
         channels.checkBrowser(id, session.id);
@@ -274,8 +270,8 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
           connections.acceptAgent(device.id, ws),
         );
       } else if (url.pathname === "/api/events") {
-        origin(request, config.publicUrl);
-        const session = login(request);
+        origin(request, entryOrigin);
+        const session = login(request, entryOrigin);
         requireVersion(url.searchParams.get("appVersion"), "web");
         sockets.handleUpgrade(request, socket, head, (ws) =>
           connections.acceptBrowser(ws, session),

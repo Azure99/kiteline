@@ -1,4 +1,7 @@
 import type { IncomingHttpHeaders } from "node:http";
+import { sessionCookieNames } from "./http.js";
+
+const loginCookies = new Set<string>(sessionCookieNames);
 
 function endToEnd(headers: IncomingHttpHeaders): IncomingHttpHeaders {
   const excluded = new Set([
@@ -18,18 +21,22 @@ function endToEnd(headers: IncomingHttpHeaders): IncomingHttpHeaders {
   ]);
   return Object.fromEntries(Object.entries(headers).filter(([name]) => !excluded.has(name)));
 }
-export function requestHeaders(headers: IncomingHttpHeaders, publicUrl: string, upgrade: boolean) {
+export function requestHeaders(
+  headers: IncomingHttpHeaders,
+  entryOrigin: string,
+  upgrade: boolean,
+) {
   const result = endToEnd(headers);
   for (const name of Object.keys(result))
     if (name === "forwarded" || name.startsWith("x-forwarded-")) delete result[name];
-  const url = new URL(publicUrl);
+  const url = new URL(entryOrigin);
   result.host = url.host;
   result["x-forwarded-host"] = url.host;
-  result["x-forwarded-proto"] = "https";
+  result["x-forwarded-proto"] = url.protocol.slice(0, -1);
   if (result.cookie) {
     const cookie = result.cookie
       .split(";")
-      .filter((part) => part.trim().split("=", 1)[0] !== "kiteline_session")
+      .filter((part) => !loginCookies.has(part.trim().split("=", 1)[0]!))
       .join(";");
     if (cookie.trim()) result.cookie = cookie;
     else delete result.cookie;
@@ -51,7 +58,7 @@ export function responseHeaders(
   const result = endToEnd(headers);
   if (result["set-cookie"]) {
     const cookies = result["set-cookie"].filter(
-      (value) => value.split("=", 1)[0]!.trim() !== "kiteline_session",
+      (value) => !loginCookies.has(value.split("=", 1)[0]!.trim()),
     );
     if (cookies.length) result["set-cookie"] = cookies;
     else delete result["set-cookie"];

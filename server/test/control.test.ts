@@ -24,7 +24,7 @@ async function fixture() {
   const store = new Store(dataDir);
   const config: ServerConfig = {
     dataDir,
-    publicUrl: "https://kiteline.test",
+    trustProxyProto: false,
     hostname: "127.0.0.1",
     port: 0,
     webDir: dataDir,
@@ -48,13 +48,7 @@ async function fixture() {
       await rm(dataDir, { recursive: true, force: true });
     })());
   cleanups.push(close);
-  function call(
-    path: string,
-    method = "GET",
-    body?: unknown,
-    cookie?: string,
-    source = config.publicUrl,
-  ) {
+  function call(path: string, method = "GET", body?: unknown, cookie?: string, source = origin) {
     return fetch(origin + webPath(path), {
       method,
       headers: {
@@ -142,7 +136,7 @@ test("WebSocket handshake distinguishes protocol, authentication, origin and mis
     ["/api/events", { origin: "https://other.test" }, 403],
     [
       webPath("/api/channels/missing/terminal"),
-      { origin: f.config.publicUrl, cookie: `kiteline_session=${login.token}` },
+      { origin: f.origin, cookie: `kiteline_session_http=${login.token}` },
       404,
     ],
   ] as const) {
@@ -170,7 +164,7 @@ test("malformed static URL encoding returns a client error", async () => {
 test("stale Web releases cannot use business endpoints but can read recovery information", async () => {
   const f = await fixture();
   const login = f.store.createSession(60_000);
-  const headers = { cookie: `kiteline_session=${login.token}`, origin: f.config.publicUrl };
+  const headers = { cookie: `kiteline_session_http=${login.token}`, origin: f.origin };
   for (const version of [undefined, "0.1.9-test"]) {
     const suffix = version ? `?appVersion=${version}` : "";
     for (const [path, method] of [
@@ -219,7 +213,7 @@ test("version refusal is visible, blocks all device tools, and does not replace 
   const f = await fixture();
   const identity = f.store.bind(f.store.newBinding().code, "Mismatched device");
   const login = f.store.createSession(60_000);
-  const cookie = `kiteline_session=${login.token}`;
+  const cookie = `kiteline_session_http=${login.token}`;
   async function rejectVersion(token: string) {
     const socket = new WebSocket(
       f.origin.replace("http:", "ws:") +
@@ -352,25 +346,31 @@ test("paired installer resources stream without login and never fall back to the
   expect(await (await f.call("/install.sh")).text()).toBe("#!/bin/sh\nexit 0\n");
 });
 
-test("binding returns versioned installation commands from the configured public origin", async () => {
+test("binding returns versioned installation commands from the current request origin", async () => {
   const f = await fixture();
   const session = f.store.createSession(60_000);
-  const response = await f.call("/api/bindings", "POST", {}, `kiteline_session=${session.token}`);
+  const response = await f.call(
+    "/api/bindings",
+    "POST",
+    {},
+    `kiteline_session_http=${session.token}`,
+  );
   expect(response.status).toBe(200);
   const value = await response.json();
   expect(value.commands.foreground).toBe(
-    `curl -fsSL '${f.config.publicUrl}/connect.sh' | sh -s -- '${value.code}'`,
+    `curl -fsSL --proto '=http,https' --proto-redir '=http,https' '${f.origin}/connect.sh' | sh -s -- '${value.code}'`,
   );
   expect(value.commands.foreground).not.toContain("--service");
   expect(value.commands.service).toContain("--service");
-  expect(value.commands.bind).toContain("--if-unbound");
-  expect(value.commands.bind).toContain("kiteline-agent check &&");
+  expect(value.commands.bind).toBe(
+    `kiteline-agent check && printf '%s\\n' '${value.code}' | kiteline-agent bind --server '${f.origin}' --if-unbound`,
+  );
   expect(f.store.binding(value.bindingId).status).toBe("pending");
   const entry = await f.call("/connect.sh");
   expect(entry.status).toBe(200);
   const script = await entry.text();
-  expect(script).toContain(`${f.config.publicUrl}/install.sh`);
-  expect(script).toContain(`--server '${f.config.publicUrl}' --version '${appVersion}'`);
+  expect(script).toContain(`${f.origin}/install.sh`);
+  expect(script).toContain(`--server '${f.origin}' --version '${appVersion}'`);
   expect(script).not.toContain(value.code);
   const head = await f.call("/connect.sh", "HEAD");
   expect(head.status).toBe(200);
@@ -386,12 +386,12 @@ test("the matching upgrade command is available to an authenticated stale Web re
   expect((await fetch(f.origin + path)).status).toBe(401);
   const login = f.store.createSession(60_000);
   const response = await fetch(f.origin + path, {
-    headers: { cookie: `kiteline_session=${login.token}` },
+    headers: { cookie: `kiteline_session_http=${login.token}` },
   });
   expect(response.status).toBe(200);
   const value = await response.json();
   expect(value.version).toBe(appVersion);
-  expect(value.command).toContain(`${f.config.publicUrl}/downloads/agent/${appVersion}/`);
+  expect(value.command).toContain(`${f.origin}/downloads/agent/${appVersion}/`);
   expect(value.command).toContain("service upgrade --archive");
   expect(value.command).not.toContain("--yes");
   expect(value.command).not.toContain("kiteline-agent bind");
@@ -404,8 +404,8 @@ test("server stop closes a request whose JSON body has not finished", async () =
   const client = request(f.origin + webPath("/api/devices/test/rpc"), {
     method: "POST",
     headers: {
-      origin: f.config.publicUrl,
-      cookie: `kiteline_session=${login.token}`,
+      origin: f.origin,
+      cookie: `kiteline_session_http=${login.token}`,
       "content-type": "application/json",
       "content-length": 1024,
     },
@@ -428,7 +428,8 @@ test("owner setup, cookie, binding consumption, revocation and password recovery
   const setup = await f.call("/api/setup", "POST", { setupToken, password: "test-password" });
   expect(setup.status).toBe(200);
   const setCookie = setup.headers.get("set-cookie")!;
-  expect(setCookie).toContain("HttpOnly; Secure; SameSite=Strict");
+  expect(setCookie).toContain("HttpOnly; SameSite=Strict");
+  expect(setCookie).not.toContain("Secure");
   const cookie = setCookie.split(";")[0]!;
   expect(
     (await f.call("/api/setup", "POST", { setupToken, password: "test-password" })).status,
@@ -458,7 +459,7 @@ test("absolute expiry cancels RPC without an event socket and connection replace
   const f = await fixture();
   const peer = await f.device();
   const login = f.store.createSession(150);
-  const cookie = `kiteline_session=${login.token}`;
+  const cookie = `kiteline_session_http=${login.token}`;
   const reply = f.call(
     `/api/devices/${peer.deviceId}/rpc`,
     "POST",
@@ -486,7 +487,7 @@ test("absolute expiry cancels RPC without an event socket and connection replace
     `/api/devices/${peer.deviceId}/rpc`,
     "POST",
     { id: "old", method: "directories.mkdir", params: { absolutePath: "/test" } },
-    `kiteline_session=${session.token}`,
+    `kiteline_session_http=${session.token}`,
   );
   await expect.poll(() => peer.messages.some((m) => m.id === "old")).toBe(true);
   const replacement = new WebSocket(f.origin.replace("http:", "ws:") + agentPath, {
@@ -508,7 +509,7 @@ test("logout before a streamed RPC body finishes prevents dispatch", async () =>
   const f = await fixture();
   const peer = await f.device();
   const login = f.store.createSession(60_000);
-  const cookie = `kiteline_session=${login.token}`;
+  const cookie = `kiteline_session_http=${login.token}`;
   const payload = JSON.stringify({
     id: "late",
     method: "directories.mkdir",
@@ -517,7 +518,7 @@ test("logout before a streamed RPC body finishes prevents dispatch", async () =>
   const req = request(f.origin + webPath(`/api/devices/${peer.deviceId}/rpc`), {
     method: "POST",
     headers: {
-      origin: f.config.publicUrl,
+      origin: f.origin,
       cookie,
       "content-type": "application/json",
       "content-length": Buffer.byteLength(payload),
@@ -544,7 +545,7 @@ test("terminal channel has separate pairing deadlines, stays with its login, and
   const peer = await f.device();
   const login = f.store.createSession(60000);
   const other = f.store.createSession(60000);
-  const cookie = `kiteline_session=${login.token}`;
+  const cookie = `kiteline_session_http=${login.token}`;
   const pending = f.call(
     `/api/devices/${peer.deviceId}/channels`,
     "POST",
@@ -583,12 +584,12 @@ test("terminal channel has separate pairing deadlines, stays with its login, and
         `/api/channels/${created.channelId}`,
         "DELETE",
         undefined,
-        `kiteline_session=${other.token}`,
+        `kiteline_session_http=${other.token}`,
       )
     ).json(),
   ).toEqual({ found: false });
   const refused = new WebSocket(endpoint + webPath(`/api/channels/${created.channelId}/terminal`), {
-    headers: { cookie: `kiteline_session=${other.token}`, origin: f.config.publicUrl },
+    headers: { cookie: `kiteline_session_http=${other.token}`, origin: f.origin },
   });
   const rejected = await new Promise<number>((resolve, reject) => {
     refused.on("error", reject);
@@ -601,7 +602,7 @@ test("terminal channel has separate pairing deadlines, stays with its login, and
   expect(rejected).toBe(404);
   await delay(420);
   const browser = new WebSocket(endpoint + webPath(`/api/channels/${created.channelId}/terminal`), {
-    headers: { cookie, origin: f.config.publicUrl },
+    headers: { cookie, origin: f.origin },
   });
   const frames: unknown[] = [];
   browser.on("message", (data) => frames.push(JSON.parse(data.toString()) as unknown));

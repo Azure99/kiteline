@@ -1,3 +1,4 @@
+import { newId } from "../lib/id";
 import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
@@ -144,7 +145,7 @@ export function FileOperationDialog({
       return;
     }
     const submitted = pending.map((row) => ({ ...row }));
-    const request = { id: crypto.randomUUID(), controller: new AbortController() };
+    const request = { id: newId(), controller: new AbortController() };
     current.current = request;
     setBusy(true);
     setCancelling(false);

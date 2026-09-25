@@ -1,3 +1,4 @@
+import { newId } from "../lib/id";
 import { useSyncExternalStore } from "react";
 import type {
   BrowserEvent,
@@ -68,7 +69,7 @@ export class GitActions {
     const value = this.get(target);
     if (value.request) return;
     const request = {
-      id: crypto.randomUUID(),
+      id: newId(),
       method,
       phase: "queued" as FileProgress["phase"],
       cancelling: false,

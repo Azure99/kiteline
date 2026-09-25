@@ -12,10 +12,18 @@
 pnpm install
 pnpm native:build
 pnpm build
-KITELINE_DATA_DIR=/var/tmp/kiteline-dev/server KITELINE_PUBLIC_URL=https://localhost:8443 pnpm dev
+KITELINE_DATA_DIR=/var/tmp/kiteline-dev/server pnpm dev
 ```
 
-`dev` 编译并监听 TypeScript，启动 server 与 Vite，退出时关闭启动的进程。浏览器登录要求同源 HTTPS，可接已有反代；下面是可选的本地 Caddy 开发 fixture，不属于产品部署：
+`dev` 编译并监听 TypeScript，启动 server 与 Vite，退出时关闭启动的进程。打开 http://localhost:5173，使用 server 控制台的初始化凭据设置密码。源码 dev 不含发布下载资源；在网页生成接入命令，从“已安装，仅绑定”命令中取得绑定码，在下方 bind 提示时输入：
+
+```sh
+export KITELINE_AGENT_HOME=/var/tmp/kiteline-dev/agent
+pnpm agent bind --server http://localhost:5173
+pnpm agent run
+```
+
+可选 HTTPS 开发：启动 `pnpm dev` 时增加 `KITELINE_TRUST_PROXY_PROTO=1`，再运行以下本地 Caddy fixture（不属于产品部署）：
 
 ```sh
 docker run --rm --name kiteline-dev-caddy --network host \
@@ -23,22 +31,19 @@ docker run --rm --name kiteline-dev-caddy --network host \
   -v /var/tmp/kiteline-dev/caddy:/data caddy:2.10.2
 ```
 
-打开 https://localhost:8443，信任本地开发证书，使用 server 控制台的初始化凭据设置密码。源码 dev 不含发布下载资源；在网页生成接入命令，从“已安装，仅绑定”命令中取得绑定码，在下方 bind 提示时输入。设备端使用相同的测试根证书和独立状态目录：
+打开 https://localhost:8443 并信任本地开发证书。使用该入口绑定 agent 时，绑定地址改为 `https://localhost:8443`，并在运行 bind/run 的 Shell 中设置相同的测试根证书：
 
 ```sh
 export NODE_EXTRA_CA_CERTS=/var/tmp/kiteline-dev/caddy/caddy/pki/authorities/local/root.crt
-export KITELINE_AGENT_HOME=/var/tmp/kiteline-dev/agent
-pnpm agent bind --server https://localhost:8443
-pnpm agent run
 ```
 
-正式部署的 server 直接提供 HTTP，由用户反代提供最终 HTTPS，见[安装与运行](deploy/README.md#server-与已有-https-反代)。密码恢复需先停止 server，再以相同 `KITELINE_DATA_DIR` 运行 `pnpm server reset-password`，完成后重新启动。原生组件及构建身份位于 `dist/native/`；临时编译目录和包缓存使用 `/var/tmp`。
+正式部署支持 HTTP 直连及已有 HTTPS 反代，见[安装与运行](deploy/README.md#server-部署)。密码恢复需先停止 server，再以相同 `KITELINE_DATA_DIR` 运行 `pnpm server reset-password`，完成后重新启动。原生组件及构建身份位于 `dist/native/`；临时编译目录和包缓存使用 `/var/tmp`。
 
 ## 访问设备上的开发服务
 
 选定设备后，顶栏地球图标可输入端口，打开时读取一次监听端口建议。终端中的 `http://localhost:端口/` 链接可直接打开；手机选中完整链接后也有访问动作。服务需监听 agent 所在环境的 loopback 或 wildcard 地址。
 
-默认入口剥离代理前缀。Vite 项目使用“保留路径”，将项目 `base` 设置为复制地址中的 `/absproxy/<deviceId>/<port>/`，`server.allowedHosts` 加入工作台实际域名；默认 HMR 沿此地址使用 WSS。根相对 API、应用登录回调等仍需项目自身配置。
+默认入口剥离代理前缀。Vite 项目使用“保留路径”，将项目 `base` 设置为复制地址中的 `/absproxy/<deviceId>/<port>/`，`server.allowedHosts` 加入工作台实际域名；默认 HMR 沿当前入口使用 WS/WSS。根相对 API、应用登录回调等仍需项目自身配置。
 
 ## 检查
 

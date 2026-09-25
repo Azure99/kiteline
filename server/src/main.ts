@@ -48,7 +48,8 @@ async function main() {
         app.server.once("error", reject);
         app.server.listen(config.port, config.hostname, resolve);
       });
-      console.log(`Kiteline: ${config.publicUrl} (${config.hostname}:${config.port})`);
+      const host = config.hostname.includes(":") ? `[${config.hostname}]` : config.hostname;
+      console.log(`Kiteline listening on http://${host}:${config.port}`);
       await new Promise<void>((resolve) => {
         process.once("SIGINT", resolve);
         process.once("SIGTERM", resolve);

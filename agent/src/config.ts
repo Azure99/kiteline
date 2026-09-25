@@ -82,7 +82,8 @@ export async function readIdentity(config: AgentConfig): Promise<Identity> {
     throw error;
   }
   const server = new URL(string(value.server, "server"));
-  if (server.protocol !== "https:") throw new AppError("invalid_argument", "server must use HTTPS");
+  if (server.protocol !== "http:" && server.protocol !== "https:")
+    throw new AppError("invalid_argument", "server must use HTTP or HTTPS");
   return {
     server: server.origin,
     deviceId: string(value.deviceId),
