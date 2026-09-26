@@ -135,6 +135,65 @@ test("recovery respects the ACK window before tail, ready, live output, resize a
   }
 });
 
+test("periodic checkpoints retain a bounded incomplete OSC after total output crosses the tail budget", async () => {
+  const faults: Error[] = [];
+  const model = new Model(80, 24, 100, (error) => faults.push(error));
+  const restored = screen();
+  let snapshot!: Snapshot;
+  const live: TerminalEvent[] = [];
+  try {
+    const chunk = "ground line\r\n".repeat(4000);
+    let groundBytes = 0;
+    while (groundBytes <= limits.terminalCheckpointIntervalBytes) {
+      model.output(Buffer.from(chunk));
+      await model.ordered(() => {});
+      groundBytes += Buffer.byteLength(chunk);
+    }
+    // No explicit checkpoint or attach may mask a delayed automatic rotation.
+    const unfinished = "\x1b]0;" + "x".repeat(limits.terminalCheckpointIntervalBytes);
+    for (let offset = 0; offset < unfinished.length; offset += limits.dataChunkBytes) {
+      model.output(Buffer.from(unfinished.slice(offset, offset + limits.dataChunkBytes)));
+      await model.ordered(() => {});
+    }
+    expect(groundBytes + Buffer.byteLength(unfinished)).toBeGreaterThan(
+      limits.terminalRecoveryTailBytes,
+    );
+    await model.attach(
+      "retained",
+      1000,
+      (value) => {
+        snapshot = value;
+      },
+      (event) => live.push(event),
+      new AbortController().signal,
+    );
+    expect(snapshot.data.toString()).toContain("ground line");
+    expect(snapshot.tail.map((event) => (event.type === "output" ? event.data : "")).join("")).toBe(
+      unfinished,
+    );
+    expect(
+      snapshot.tail.reduce(
+        (bytes, event) => bytes + (event.type === "output" ? Buffer.byteLength(event.data) : 32),
+        0,
+      ),
+    ).toBeLessThan(limits.terminalRecoveryTailBytes);
+    await restored.write(snapshot.data);
+    for (const event of snapshot.tail) await apply(restored, event);
+    model.output(Buffer.from("\x07\x1b[31mAFTER\x1b[0m\r\n"));
+    await model.ordered(() => {});
+    for (const event of live) await apply(restored, event);
+    const expected = new serialize.SerializeAddon();
+    model.terminal.loadAddon(expected);
+    expect(restored.text()).toBe(expected.serialize() + mouseEncodingVT(model.terminal));
+    expect(restored.terminal.buffer.active.cursorX).toBe(model.terminal.buffer.active.cursorX);
+    expect(restored.terminal.buffer.active.cursorY).toBe(model.terminal.buffer.active.cursorY);
+    expect(faults).toEqual([]);
+  } finally {
+    await model.dispose();
+    restored.terminal.dispose();
+  }
+});
+
 test("reattaching preserves snapshots across unchanged, mode-only and resized states", async () => {
   const model = new Model(40, 10, 100, (error) => {
     throw error;
@@ -214,19 +273,19 @@ test.each([
   { history: 5, region: "", count: 3 },
   { history: 0, region: "", count: 1000000 },
   { history: 5, region: "", count: 1000000 },
-  { history: 5, region: "\x1b[1;4r", count: 1000000 },
+  { history: 5, region: "\x1b[1;4r", count: 1000000, height: 4 },
   { history: 5, region: "\x1b[2;4r", count: 20, fallback: true },
   { history: 5, region: "\x1b[?1049h", count: 20, fallback: true },
 ])(
   "scrolling retains the finite screen and saved cursor: $history / $region",
-  async ({ history, region, count, fallback = false }) => {
+  async ({ history, region, count, fallback = false, height = 6 }) => {
     const actual = screen(20, 6, history);
     const expected = screen(20, 6, history, !fallback);
     try {
       const prefix =
         "\x1b[31mone\r\ntwo\r\nthree\r\nfour\r\nfive\r\nsix\x1b[0m" + region + "\x1b[2;2H\x1b7";
       await actual.write(prefix + `\x1b[${count}S` + "\x1b8END");
-      const scrolls = fallback ? `\x1b[${count}S` : "\x1b[S".repeat(Math.min(count, 20));
+      const scrolls = fallback ? `\x1b[${count}S` : "\x1b[S".repeat(Math.min(count, height));
       await expected.write(prefix + scrolls + "\x1b8END");
       expect(actual.text()).toBe(expected.text());
       expect(actual.terminal.buffer.active.cursorY).toBe(expected.terminal.buffer.active.cursorY);
@@ -270,19 +329,105 @@ test.each([
   }
 });
 
-test("scroll adaptation preserves REP history and can be disposed", async () => {
+test.each(["", "0", "1", "8", "9", "10", "2147483647"])(
+  "REP bounds ASCII repetition at the right edge: %s",
+  async (count) => {
+    const actual = screen(10, 3, 20);
+    const expected = screen(10, 3, 20, false);
+    try {
+      await actual.write(`a\x1b[${count}b`);
+      await expected.write("a".repeat(1 + Math.min(Number(count) || 1, 9)));
+      expect(actual.text()).toBe(expected.text());
+      expect(actual.terminal.buffer.active.cursorX).toBe(expected.terminal.buffer.active.cursorX);
+      expect(actual.terminal.buffer.normal.baseY).toBe(0);
+    } finally {
+      actual.terminal.dispose();
+      expected.terminal.dispose();
+    }
+  },
+);
+
+test.each(["", "0", "2147483647"])("REP preserves pending wrap: %s", async (count) => {
+  const actual = screen(10, 3, 20);
+  const expected = screen(10, 3, 20, false);
+  try {
+    await actual.write(`xxxxxxxxxx\x1b[${count}b`);
+    expect(actual.terminal.buffer.active.cursorX).toBe(10);
+    expect(actual.terminal.buffer.active.cursorY).toBe(0);
+    await actual.write("Z");
+    await expected.write("xxxxxxxxxxZ");
+    expect(actual.text()).toBe(expected.text());
+    expect(actual.terminal.buffer.active.cursorX).toBe(1);
+    expect(actual.terminal.buffer.active.cursorY).toBe(1);
+  } finally {
+    actual.terminal.dispose();
+    expected.terminal.dispose();
+  }
+});
+
+test.each([
+  { name: "ASCII", prefix: "A" },
+  { name: "DEC", prefix: "\x1b(0q" },
+  { name: "wide", prefix: "界" },
+  { name: "pending wrap", prefix: "x".repeat(20) },
+])("REP after a $name checkpoint matches continuous output", async ({ prefix }) => {
+  const faults: Error[] = [];
+  const model = new Model(20, 6, 100, (error) => faults.push(error));
+  const restored = screen(20, 6, 100);
+  const serialized = new serialize.SerializeAddon();
+  model.terminal.loadAddon(serialized);
+  let snapshot!: Snapshot;
+  const live: TerminalEvent[] = [];
+  try {
+    model.output(Buffer.from("\x1b[31mold\r\n".repeat(8) + "\x1b[0m" + prefix));
+    await model.attach(
+      "retained",
+      1000,
+      (value) => (snapshot = value),
+      (event) => live.push(event),
+      new AbortController().signal,
+    );
+    expect(snapshot.tail).toEqual([]);
+    expect(snapshot.data.toString()).toContain("old");
+    await restored.write(snapshot.data);
+    for (const suffix of ["\x1b[2147483647b", "Z\r\nAFTER"]) {
+      model.output(Buffer.from(suffix));
+      await model.ordered(() => {});
+      for (const event of live.splice(0)) await apply(restored, event);
+      expect(restored.text()).toBe(serialized.serialize() + mouseEncodingVT(model.terminal));
+      const actual = restored.terminal.buffer.active;
+      const expected = model.terminal.buffer.active;
+      expect([actual.cursorX, actual.cursorY, actual.baseY, actual.length]).toEqual([
+        expected.cursorX,
+        expected.cursorY,
+        expected.baseY,
+        expected.length,
+      ]);
+      for (let row = 0; row < expected.length; row++)
+        expect(actual.getLine(row)?.isWrapped).toBe(expected.getLine(row)?.isWrapped);
+      expect(restored.terminal.modes).toEqual(model.terminal.modes);
+    }
+    expect(faults).toEqual([]);
+  } finally {
+    await model.dispose();
+    restored.terminal.dispose();
+  }
+});
+
+test("disposing adaptation restores the original scroll and REP behavior", async () => {
   const actual = screen(10, 3, 20, false);
   const expected = screen(10, 3, 20, false);
   const adaptation = adaptTerminalScrolling(actual.terminal);
   try {
     await actual.write("a\x1b[95b");
-    await expected.write("a\x1b[95b");
+    await expected.write("a".repeat(10));
+    expect(actual.text()).toBe(expected.text());
+    expect(actual.terminal.buffer.normal.baseY).toBe(0);
+    adaptation.dispose();
+    await actual.write("\r\nb\x1b[95b\x1b[2S\x1b[20T");
+    await expected.write("\r\nb\x1b[95b\x1b[2S\x1b[20T");
     expect(actual.text()).toBe(expected.text());
     expect(actual.terminal.buffer.normal.baseY).toBeGreaterThan(3);
-    adaptation.dispose();
-    await actual.write("\x1b[2S\x1b[20T");
-    await expected.write("\x1b[2S\x1b[20T");
-    expect(actual.text()).toBe(expected.text());
   } finally {
     actual.terminal.dispose();
     expected.terminal.dispose();

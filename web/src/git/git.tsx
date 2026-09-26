@@ -24,7 +24,8 @@ import { IconButton } from "../components/icon-button";
 import { ToolHeader, ToolSidebar } from "../components/tool-layout";
 import { Button } from "../components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
-import { ApiError, rpc } from "../lib/api";
+import { ApiError } from "../lib/api";
+import { cursorRpc, releaseCursor } from "../lib/cursors";
 import { useMobile } from "../lib/use-mobile";
 import type { DraftStore } from "../files/drafts";
 import { showFile } from "../files/navigation";
@@ -92,7 +93,7 @@ export function GitTool({
     setError(undefined);
     try {
       const read = (scanCursor?: string) =>
-        rpc(
+        cursorRpc(
           device.id,
           "repos.discover",
           { workspaceId: workspace.id, scanCursor },
@@ -113,7 +114,10 @@ export function GitTool({
         scanned.current.clear();
         found = await read();
       }
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) {
+        void releaseCursor(device.id, "repo", found.scanCursor);
+        return;
+      }
       scanCursor.current = found.scanCursor;
       for (const repo of found.repos) scanned.current.set(repo.id, repo);
       setRepos((old) => {
@@ -139,9 +143,10 @@ export function GitTool({
     return () => {
       request.current?.abort();
       request.current = undefined;
+      void releaseCursor(device.id, "repo", scanCursor.current);
       scanCursor.current = undefined;
     };
-  }, [enabled, discover]);
+  }, [enabled, discover, device.id]);
   useWorkspaceRefresh(device.id, workspace.id, enabled, "repos", discover);
   const selectedRepoId = requestedRepo ?? repos.find((item) => item.available)?.id ?? repos[0]?.id;
   const repo = repos.find((item) => item.id === selectedRepoId);
@@ -368,6 +373,7 @@ function Changes({
     />
   );
   const select = (entry: GitEntry, side: ChangeSide) => {
+    if (entry.path === undefined) return;
     const item = selectionOf(entry, side);
     setSelected((old) =>
       old.some((x) => x.path === item.path && x.side === side)
@@ -484,8 +490,10 @@ function Changes({
               ).map(([side, label]) => {
                 if (!value) return null;
                 const entries = value.entries.filter((entry) => inSide(entry, side));
-                const chosen = entries.filter((entry) =>
-                  selected.some((item) => item.path === entry.path && item.side === side),
+                const chosen = entries.filter(
+                  (entry): entry is GitEntry & { path: string } =>
+                    entry.path !== undefined &&
+                    selected.some((item) => item.path === entry.path && item.side === side),
                 );
                 if (side === "conflict" && !entries.length) return null;
                 return (
@@ -542,66 +550,80 @@ function Changes({
                         </>
                       )}
                     </div>
-                    {entries.map((entry) => (
-                      <div
-                        key={entry.path}
-                        className={`flex min-h-8 items-center gap-1 border-b border-border/50 px-2 max-[959px]:min-h-11 ${target?.path === entry.path && (target.side === side || side === "conflict") ? "bg-primary-soft" : ""}`}
-                      >
-                        <label className="flex min-h-8 items-center justify-center max-[959px]:min-h-11 max-[959px]:min-w-11">
-                          <input
-                            type="checkbox"
-                            aria-label={t(($) => $.git.selectNamed, {
-                              area: label,
-                              path: entry.path,
-                            })}
-                            checked={selected.some(
-                              (item) => item.side === side && item.path === entry.path,
-                            )}
-                            onChange={() => select(entry, side)}
-                          />
-                        </label>
-                        <span
-                          className={`w-3 shrink-0 font-mono text-xs ${side === "staged" ? "text-green-700" : "text-amber-700"}`}
+                    {entries.map((entry) =>
+                      entry.path === undefined ? (
+                        <div
+                          key={`invalid:${entry.pathError}`}
+                          className="border-b border-border/50 px-3 py-2 text-xs break-all text-muted-foreground"
                         >
-                          {side === "staged" ? entry.indexStatus : entry.worktreeStatus}
-                        </span>
-                        <button
-                          title={entry.path}
-                          onClick={() =>
-                            side === "conflict"
-                              ? onFile(entry.path)
-                              : selectTarget({
-                                  path: entry.path,
-                                  side: side === "staged" ? "staged" : "worktree",
-                                })
-                          }
-                          className="flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left text-xs max-[959px]:min-h-11"
+                          <span className="mr-2 font-mono">
+                            {side === "staged" ? entry.indexStatus : entry.worktreeStatus}
+                          </span>
+                          {t(($) => $.git.invalidPath, { path: entry.pathError })}
+                        </div>
+                      ) : (
+                        <div
+                          key={`path:${entry.path}`}
+                          className={`flex min-h-8 items-center gap-1 border-b border-border/50 px-2 max-[959px]:min-h-11 ${target?.path === entry.path && (target.side === side || side === "conflict") ? "bg-primary-soft" : ""}`}
                         >
-                          <GitFilePath path={entry.path} />
-                          {entry.submodule && (
-                            <span className="shrink-0 text-[10px] text-muted-foreground">
-                              {t(($) =>
-                                entry.submodule!.commitChanged
-                                  ? entry.submodule!.trackedDirty || entry.submodule!.untrackedDirty
-                                    ? $.git.submodulePointerDirty
-                                    : $.git.submodulePointer
-                                  : entry.submodule!.trackedDirty || entry.submodule!.untrackedDirty
-                                    ? $.git.submoduleDirty
-                                    : $.git.submodule,
+                          <label className="flex min-h-8 items-center justify-center max-[959px]:min-h-11 max-[959px]:min-w-11">
+                            <input
+                              type="checkbox"
+                              aria-label={t(($) => $.git.selectNamed, {
+                                area: label,
+                                path: entry.path,
+                              })}
+                              checked={selected.some(
+                                (item) => item.side === side && item.path === entry.path,
                               )}
-                            </span>
-                          )}
-                        </button>
-                        <RowActions
-                          entry={entry}
-                          side={side}
-                          disabled={disabled}
-                          onIndex={indexAction}
-                          onDiscard={(paths, scope) => setDiscarding({ paths, scope })}
-                          onFile={() => onFile(entry.path)}
-                        />
-                      </div>
-                    ))}
+                              onChange={() => select(entry, side)}
+                            />
+                          </label>
+                          <span
+                            className={`w-3 shrink-0 font-mono text-xs ${side === "staged" ? "text-green-700" : "text-amber-700"}`}
+                          >
+                            {side === "staged" ? entry.indexStatus : entry.worktreeStatus}
+                          </span>
+                          <button
+                            title={entry.path}
+                            onClick={() =>
+                              side === "conflict"
+                                ? onFile(entry.path)
+                                : selectTarget({
+                                    path: entry.path,
+                                    side: side === "staged" ? "staged" : "worktree",
+                                  })
+                            }
+                            className="flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left text-xs max-[959px]:min-h-11"
+                          >
+                            <GitFilePath path={entry.path} />
+                            {entry.submodule && (
+                              <span className="shrink-0 text-[10px] text-muted-foreground">
+                                {t(($) =>
+                                  entry.submodule!.commitChanged
+                                    ? entry.submodule!.trackedDirty ||
+                                      entry.submodule!.untrackedDirty
+                                      ? $.git.submodulePointerDirty
+                                      : $.git.submodulePointer
+                                    : entry.submodule!.trackedDirty ||
+                                        entry.submodule!.untrackedDirty
+                                      ? $.git.submoduleDirty
+                                      : $.git.submodule,
+                                )}
+                              </span>
+                            )}
+                          </button>
+                          <RowActions
+                            entry={entry}
+                            side={side}
+                            disabled={disabled}
+                            onIndex={indexAction}
+                            onDiscard={(paths, scope) => setDiscarding({ paths, scope })}
+                            onFile={() => onFile(entry.path)}
+                          />
+                        </div>
+                      ),
+                    )}
                     {!entries.length && (
                       <p className="px-8 py-3 text-xs text-muted-foreground">
                         {t(($) => $.git.noChanges)}

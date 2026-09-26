@@ -13,7 +13,7 @@ import {
   type Repo,
 } from "@kiteline/shared/protocol";
 import { relativePath } from "../files/paths.js";
-import { git, NulRecords, utf8 } from "./process.js";
+import { git, gitPath, NulRecords } from "./process.js";
 import { headIdentity, modeType, observeIndex, readStatus } from "./status.js";
 
 interface Leaf {
@@ -44,25 +44,30 @@ export function discardScope(value: unknown): DiscardScope {
 }
 class Blockers {
   paths = new Set<string>();
+  invalid = new Set<string>();
   truncated = false;
   private bytes = 0;
-  add(path: string) {
-    if (this.paths.has(path)) return;
+  add(value: string | Buffer) {
+    const item = typeof value === "string" ? { path: value } : gitPath(value);
+    const path = item.path ?? item.pathError!;
+    const target = item.path === undefined ? this.invalid : this.paths;
+    if (target.has(path)) return;
     const size = Buffer.byteLength(JSON.stringify(path)) + 1;
     if (
-      this.paths.size >= limits.listPageEntries ||
+      this.paths.size + this.invalid.size >= limits.listPageEntries ||
       this.bytes + size > limits.resultBytes - 4096
     ) {
       this.truncated = true;
       return;
     }
-    this.paths.add(path);
+    target.add(path);
     this.bytes += size;
   }
   check(message: string) {
-    if (this.paths.size || this.truncated)
+    if (this.paths.size || this.invalid.size || this.truncated)
       throw new AppError("conflict", message, {
         blockedPaths: [...this.paths],
+        ...(this.invalid.size ? { invalidPaths: [...this.invalid] } : {}),
         truncated: this.truncated,
       });
   }
@@ -70,29 +75,30 @@ class Blockers {
 async function indexRecords(
   repo: Repo,
   signal: AbortSignal,
-  each: (path: string, entry: Leaf) => void,
+  each: (path: Buffer, entry: Leaf) => void,
 ) {
   const reader = new NulRecords((record) => {
     const tab = record.indexOf(9);
     const [mode, oid, stage] = record.subarray(0, tab).toString("ascii").split(" ");
-    each(utf8(record.subarray(tab + 1)), { mode: mode!, oid: oid!, stage: Number(stage) });
+    each(record.subarray(tab + 1), { mode: mode!, oid: oid!, stage: Number(stage) });
   });
   await git(repo.rootPath, ["ls-files", "--stage", "-z"], signal, { onData: reader.data });
   reader.end();
 }
 async function leaves(repo: Repo, paths: string[], source: "HEAD" | "index", signal: AbortSignal) {
-  const wanted = new Set(paths);
+  const wanted = new Map(paths.map((path) => [Buffer.from(path).toString("hex"), path]));
   const found = new Map<string, Leaf>();
   if (source === "index") {
     await indexRecords(repo, signal, (path, entry) => {
-      if (wanted.has(path) && entry.stage === 0) found.set(path, entry);
+      const selected = wanted.get(path.toString("hex"));
+      if (selected !== undefined && entry.stage === 0) found.set(selected, entry);
     });
   } else if ((await headIdentity(repo.rootPath, signal)).oid) {
     const reader = new NulRecords((record) => {
       const tab = record.indexOf(9);
-      const path = utf8(record.subarray(tab + 1));
+      const path = wanted.get(record.subarray(tab + 1).toString("hex"));
       const [mode, , oid] = record.subarray(0, tab).toString("ascii").split(" ");
-      if (wanted.has(path)) found.set(path, { mode: mode!, oid: oid!, stage: 0 });
+      if (path !== undefined) found.set(path, { mode: mode!, oid: oid!, stage: 0 });
     });
     await git(
       repo.rootPath,
@@ -121,6 +127,7 @@ async function selectedStatus(
   const found = new Map<string, GitEntry>();
   const renamed = new Map<string, GitEntry>();
   await readStatus(repo, signal, (entry) => {
+    if (entry.path === undefined) return;
     if (wanted.has(entry.path)) found.set(entry.path, entry);
     if (
       aliases &&
@@ -136,21 +143,23 @@ async function selectedStatus(
   return found;
 }
 async function checkIndex(repo: Repo, add: string[], remove: string[], signal: AbortSignal) {
-  const removed = new Set(remove);
-  const targets = new Set(add);
+  const key = (path: string) => Buffer.from(path).toString("hex");
+  const removed = new Set(remove.map(key));
+  const targets = new Set(add.map(key));
   const ancestors = new Set<string>();
   for (const path of add)
     for (let slash = path.indexOf("/"); slash !== -1; slash = path.indexOf("/", slash + 1))
-      ancestors.add(path.slice(0, slash));
+      ancestors.add(key(path.slice(0, slash)));
   const blocked = new Blockers();
   await indexRecords(repo, signal, (path) => {
-    if (removed.has(path)) return;
-    if (ancestors.has(path)) {
+    const identity = path.toString("hex");
+    if (removed.has(identity)) return;
+    if (ancestors.has(identity)) {
       blocked.add(path);
       return;
     }
-    for (let slash = path.indexOf("/"); slash !== -1; slash = path.indexOf("/", slash + 1))
-      if (targets.has(path.slice(0, slash))) {
+    for (let slash = path.indexOf(47); slash !== -1; slash = path.indexOf(47, slash + 1))
+      if (targets.has(path.subarray(0, slash).toString("hex"))) {
         blocked.add(path);
         return;
       }
@@ -183,7 +192,10 @@ async function diskTarget(repo: Repo, path: string, blocked?: Blockers) {
       try {
         for await (const entry of directory) {
           blocked.add(
-            path + "/" + utf8(Buffer.isBuffer(entry.name) ? entry.name : Buffer.from(entry.name)),
+            Buffer.concat([
+              Buffer.from(path + "/"),
+              Buffer.isBuffer(entry.name) ? entry.name : Buffer.from(entry.name),
+            ]),
           );
           if (blocked.truncated) break;
         }

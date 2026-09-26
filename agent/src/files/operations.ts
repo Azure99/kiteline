@@ -45,14 +45,33 @@ interface ResultState {
   budget: number;
   truncated: boolean;
   unknown: boolean;
+  finished: boolean;
+  changing: boolean;
   error?: KitelineError;
 }
 
 export class FileOperations {
+  private executions = new Map<
+    Promise<void>,
+    { controller: AbortController; signal: AbortSignal }
+  >();
+  private closing = false;
   constructor(
     private metadata: MetadataStore,
     private temporary: TemporaryFiles,
+    private changed: (workspaceId: string) => void = () => {},
   ) {}
+
+  get cleanupPending() {
+    return [...this.executions.values()].some(({ signal }) => signal.aborted);
+  }
+
+  async close() {
+    this.closing = true;
+    for (const { controller } of this.executions.values())
+      controller.abort(new AppError("cancelled", "Agent is stopping"));
+    await Promise.allSettled([...this.executions.keys()]);
+  }
 
   async run(
     kind: "copy" | "move" | "delete",
@@ -61,6 +80,9 @@ export class FileOperations {
     signal: AbortSignal,
     progress?: (value: FileProgress) => void,
   ) {
+    if (this.closing) throw new AppError("cancelled", "Agent is stopping");
+    if (this.executions.size >= limits.pendingRequestsPerDevice)
+      throw new AppError("busy", "File operations are still finishing; try again later");
     if (!Array.isArray(inputs) || !inputs.length || inputs.length > limits.listPageEntries)
       throw new AppError("invalid_argument", "Select a limited number of files");
     const items: CopyItem[] = inputs.map((input: unknown) => {
@@ -88,81 +110,131 @@ export class FileOperations {
         "Selected paths exceed the operation limit; process them in batches",
       );
     const root = this.metadata.workspace(workspaceId).path;
-    const results: FileItemResult[] = [];
+    const controller = new AbortController();
+    signal = AbortSignal.any([signal, controller.signal]);
+    const states: ResultState[] = items.map(() => ({
+      completed: 0,
+      failed: 0,
+      failures: [],
+      detailBytes: 0,
+      budget: Math.floor(limits.resultBytes / (items.length * 4)),
+      truncated: false,
+      unknown: false,
+      finished: false,
+      changing: false,
+    }));
+    let resolve!: (result: { items: FileItemResult[] }) => void;
+    let reject!: (error: unknown) => void;
+    let settled = false;
+    const response = new Promise<{ items: FileItemResult[] }>((yes, no) => {
+      resolve = yes;
+      reject = no;
+    });
     let totalCompleted = 0,
       bytes = 0,
       lastProgress = 0;
     const report = (path: string, count = 0, written = 0, force = false) => {
       totalCompleted += count;
       bytes += written;
-      if (force || Date.now() - lastProgress >= 200) {
+      if (!settled && (force || Date.now() - lastProgress >= 200)) {
         lastProgress = Date.now();
         progress?.({ phase: "running", currentPath: path, completedItems: totalCompleted, bytes });
       }
     };
     progress?.({ phase: "queued", completedItems: 0, bytes: 0 });
-    for (const item of items) {
-      const state: ResultState = {
-        completed: 0,
-        failed: 0,
-        failures: [],
-        detailBytes: 0,
-        budget: Math.floor(limits.resultBytes / (items.length * 4)),
-        truncated: false,
-        unknown: false,
-      };
-      const done = (path: string) => {
-        state.completed++;
-        report(path, 1);
-      };
-      try {
-        signal.throwIfAborted();
-        const source = await publish(async () => {
-          const source = await capture(root, item.path);
-          if (kind !== "copy") await protectRoot(root, source.path, source.info);
-          return source;
-        }, signal);
-        if (kind === "delete") await this.remove(root, source, signal, state, done);
-        else
-          await this.copyMove(root, source, item, kind === "move", signal, state, done, (count) =>
-            report(source.path, 0, count),
-          );
-      } catch (error) {
-        fail(state, item.path, error);
-      }
-      const error = state.error;
-      results.push({
-        path: item.path,
-        ...(kind !== "delete" ? { targetPath: item.targetPath } : {}),
-        outcome: state.unknown
-          ? "unknown"
-          : state.failed
-            ? state.completed
-              ? "partial"
-              : "failed"
-            : "succeeded",
-        completedItems: state.completed,
-        ...(error ? { error } : {}),
-        ...(state.failed ? { failures: state.failures, truncated: state.truncated } : {}),
+    const settle = (cancellation?: unknown) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", cancel);
+      const results = items.map((item, index): FileItemResult => {
+        const state = { ...states[index]!, failures: [...states[index]!.failures] };
+        if (!state.finished && cancellation) {
+          if (state.changing) state.unknown = true;
+          fail(state, item.path, cancellation);
+        }
+        return {
+          path: item.path,
+          ...(kind !== "delete" ? { targetPath: item.targetPath } : {}),
+          outcome: state.unknown
+            ? "unknown"
+            : state.failed
+              ? state.completed
+                ? "partial"
+                : "failed"
+              : "succeeded",
+          completedItems: state.completed,
+          ...(state.error ? { error: state.error } : {}),
+          ...(state.failed ? { failures: state.failures, truncated: state.truncated } : {}),
+        };
       });
-      report(item.path, 0, 0, true);
-    }
-    const result = { items: results };
-    if (results.some((item) => item.outcome !== "succeeded")) {
+      const result = { items: results };
+      if (results.every((item) => item.outcome === "succeeded")) return resolve(result);
       const outcome = results.some((item) => item.outcome === "unknown")
         ? "unknown"
-        : totalCompleted
+        : results.some((item) => item.completedItems)
           ? "partial"
           : "failed";
       const error = results.find((item) => item.error)?.error;
-      throw new OperationError(
-        error?.code ?? "io_error",
-        error?.message ?? "Some items were not completed",
-        outcome,
-        result,
+      reject(
+        new OperationError(
+          error?.code ?? "io_error",
+          error?.message ?? "Some items were not completed",
+          outcome,
+          result,
+        ),
       );
-    }
-    return result;
+    };
+    const cancel = () => settle(signal.reason);
+    signal.addEventListener("abort", cancel, { once: true });
+    if (signal.aborted) cancel();
+    const execution = (async () => {
+      for (const [index, item] of items.entries()) {
+        const state = states[index]!;
+        const complete = () => {
+          state.finished = true;
+        };
+        const done = (path: string) => {
+          state.completed++;
+          report(path, 1);
+        };
+        try {
+          signal.throwIfAborted();
+          const source = await publish(async () => {
+            const source = await capture(root, item.path);
+            if (kind !== "copy") await protectRoot(root, source.path, source.info);
+            return source;
+          }, signal);
+          if (kind === "delete") await this.remove(root, source, signal, state, done, complete);
+          else
+            await this.copyMove(
+              root,
+              source,
+              item,
+              kind === "move",
+              signal,
+              state,
+              done,
+              (count) => report(source.path, 0, count),
+              undefined,
+              complete,
+            );
+        } catch (error) {
+          fail(state, item.path, error);
+        }
+        state.finished = true;
+        report(item.path, 0, 0, true);
+      }
+    })();
+    this.executions.set(execution, { controller, signal });
+    void execution
+      .then(() => settle(), reject)
+      .finally(() => {
+        signal.removeEventListener("abort", cancel);
+        this.executions.delete(execution);
+        this.changed(workspaceId);
+      })
+      .catch((error: unknown) => console.error("File operation completion:", error));
+    return response;
   }
 
   private async remove(
@@ -171,6 +243,7 @@ export class FileOperations {
     signal: AbortSignal,
     result: ResultState,
     done: (path: string) => void,
+    complete: () => void = () => {},
   ) {
     signal.throwIfAborted();
     if (source.info.isDirectory()) {
@@ -182,10 +255,18 @@ export class FileOperations {
     }
     await publish(async () => {
       const current = await verify(root, source);
-      signal.throwIfAborted();
-      if (current.info.isDirectory()) await rmdir(current.location.absolute);
-      else await unlink(current.location.absolute);
-      done(source.path);
+      await change(
+        result,
+        signal,
+        () =>
+          current.info.isDirectory()
+            ? rmdir(current.location.absolute)
+            : unlink(current.location.absolute),
+        () => {
+          complete();
+          done(source.path);
+        },
+      );
     }, signal);
   }
 
@@ -199,6 +280,7 @@ export class FileOperations {
     done: (path: string) => void,
     bytes: (count: number) => void,
     expectedParent?: ObjectRef,
+    complete: () => void = () => {},
   ) {
     if (!source.info.isDirectory() && !source.info.isFile() && !source.info.isSymbolicLink())
       throw new AppError("unsupported", "Device nodes, sockets, and FIFOs cannot be copied");
@@ -226,11 +308,18 @@ export class FileOperations {
               "invalid_argument",
               "Source and target refer to the same directory entry object",
             );
-          signal.throwIfAborted();
-          if (item.collision === "replace")
-            await rename(source.location.absolute, current.absolute);
-          else await renameNoReplace(source.location.absolute, current.absolute);
-          done(source.path);
+          await change(
+            result,
+            signal,
+            () =>
+              item.collision === "replace"
+                ? rename(source.location.absolute, current.absolute)
+                : renameNoReplace(source.location.absolute, current.absolute),
+            () => {
+              complete();
+              done(source.path);
+            },
+          );
         }, signal);
         return;
       } catch (error) {
@@ -240,9 +329,12 @@ export class FileOperations {
     if (source.info.isDirectory()) {
       const created = await publish(async () => {
         const current = await targetAgain(root, item.targetPath, target);
-        signal.throwIfAborted();
-        await mkdir(current.absolute, { mode: Number(source.info.mode & 0o777n) | 0o700 });
-        done(item.targetPath);
+        await change(
+          result,
+          signal,
+          () => mkdir(current.absolute, { mode: Number(source.info.mode & 0o777n) | 0o700 }),
+          () => done(item.targetPath),
+        );
         return capture(root, item.targetPath);
       }, signal);
       await this.children(
@@ -268,15 +360,20 @@ export class FileOperations {
       );
       await publish(async () => {
         await verify(root, created);
-        signal.throwIfAborted();
-        await chmod(created.location.absolute, Number(source.info.mode & 0o777n));
+        await change(
+          result,
+          signal,
+          () => chmod(created.location.absolute, Number(source.info.mode & 0o777n)),
+          () => {
+            if (!move) complete();
+          },
+        );
       }, signal);
       if (move)
         await publish(async () => {
           await verify(root, source);
           await this.temporary.assertRelocatableLocked(source.location, source.info);
-          signal.throwIfAborted();
-          await rmdir(source.location.absolute);
+          await change(result, signal, () => rmdir(source.location.absolute), complete);
         }, signal);
       return;
     }
@@ -342,19 +439,26 @@ export class FileOperations {
           if (destination)
             await this.temporary.assertRelocatableLocked(current, destination, temporary);
         }
-        signal.throwIfAborted();
-        if (item.collision === "replace") await rename(temporary!.path, current.absolute);
-        else await renameNoReplace(temporary!.path, current.absolute);
-        published = true;
-        done(item.targetPath);
-        await this.temporary.forgetLocked(temporary!);
+        await change(
+          result,
+          signal,
+          () =>
+            item.collision === "replace"
+              ? rename(temporary!.path, current.absolute)
+              : renameNoReplace(temporary!.path, current.absolute),
+          () => {
+            published = true;
+            if (!move) complete();
+            done(item.targetPath);
+          },
+        );
+        await this.temporary.publishedLocked(temporary!);
       }, signal);
       if (move)
         await publish(async () => {
           await verify(root, copied, true);
           await this.temporary.assertRelocatableLocked(copied.location, copied.info);
-          signal.throwIfAborted();
-          await unlink(copied.location.absolute);
+          await change(result, signal, () => unlink(copied.location.absolute), complete);
         }, signal);
     } catch (error) {
       if (error instanceof OperationError && error.outcome === "unknown") uncertain = true;
@@ -403,6 +507,27 @@ export class FileOperations {
       await directory.close();
     }
   }
+}
+
+async function change<T>(
+  state: ResultState,
+  signal: AbortSignal,
+  action: () => Promise<T>,
+  confirmed: () => void,
+) {
+  signal.throwIfAborted();
+  state.changing = true;
+  let value: T;
+  try {
+    value = await action();
+  } catch (error) {
+    if (error instanceof OperationError && error.outcome === "unknown") state.unknown = true;
+    throw error;
+  } finally {
+    state.changing = false;
+  }
+  confirmed();
+  return value;
 }
 
 async function capture(root: string, path: string): Promise<ObjectRef> {

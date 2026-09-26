@@ -8,11 +8,12 @@ import {
   type CommitFiles,
   type DiffSummary,
   type GitHistory,
+  type GitPath,
   type Repo,
 } from "@kiteline/shared/protocol";
 import { relativePath } from "../files/paths.js";
 import { boundedDiff, numstatReader, selectedPatch, rawReader, type RawChange } from "./diff.js";
-import { commandLine, git, NulRecords, utf8 } from "./process.js";
+import { commandLine, git, gitPathKey, NulRecords, utf8 } from "./process.js";
 import { diffOptions, headIdentity } from "./status.js";
 
 export async function commitOid(repo: Repo, oid: string, signal: AbortSignal) {
@@ -136,13 +137,14 @@ async function binary(
   repo: Repo,
   base: string,
   commit: string,
-  paths: string[],
+  paths: GitPath[],
   signal: AbortSignal,
 ) {
   const result = new Set<string>();
-  const wanted = new Set(paths);
+  const wanted = new Set(paths.map(gitPathKey));
   const reader = numstatReader((path, isBinary) => {
-    if (isBinary && wanted.has(path)) result.add(path);
+    const key = gitPathKey(path);
+    if (isBinary && wanted.has(key)) result.add(key);
   });
   await git(
     repo.rootPath,
@@ -166,9 +168,10 @@ export async function commitFiles(
     bytes = 512,
     full = false;
   await changes(repo, base, commit, signal, (change) => {
-    const item = {
-      path: change.path,
-      oldPath: change.oldPath,
+    const item: CommitFile = {
+      ...(change.path === undefined
+        ? { pathError: change.pathError }
+        : { path: change.path, oldPath: change.oldPath }),
       status: change.status,
       binary: false,
     };
@@ -183,14 +186,8 @@ export async function commitFiles(
     bytes += size;
     files.push(item);
   });
-  const binaries = await binary(
-    repo,
-    base,
-    commit,
-    files.map((item) => item.path),
-    signal,
-  );
-  for (const item of files) item.binary = binaries.has(item.path);
+  const binaries = await binary(repo, base, commit, files, signal);
+  for (const item of files) item.binary = binaries.has(gitPathKey(item));
   signal.throwIfAborted();
   const nextOffset = offset + files.length;
   return { parentOid, files, ...(nextOffset < count ? { nextOffset } : {}) };
@@ -208,14 +205,14 @@ export async function commitDiff(
   await changes(repo, base, commit, signal, (item) => {
     if (item.path === path) change = item;
   });
-  if (!change)
+  if (change?.path === undefined)
     throw new AppError("not_found", "Selected file change is not present in this commit");
-  const binaries = await binary(repo, base, commit, [path], signal);
+  const binaries = await binary(repo, base, commit, [change], signal);
   const summary: DiffSummary = {
     path,
     oldPath: change.oldPath,
     status: change.status,
-    binary: binaries.has(path),
+    binary: binaries.has(gitPathKey(change)),
     ...(change.oldMode !== "000000" ? { oldMode: change.oldMode } : {}),
     ...(change.newMode !== "000000" ? { newMode: change.newMode } : {}),
   };

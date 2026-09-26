@@ -5,7 +5,7 @@ import type { BrowserEvent } from "@kiteline/shared/protocol";
 import { ErrorNotice } from "../components/error-notice";
 import { IconButton } from "../components/icon-button";
 import { ApiError } from "../lib/api";
-import { downloadFile, readContent, type DiskImage, type FileTarget } from "./content";
+import { downloadFile, type DiskImage, type FileTarget } from "./content";
 import type { DraftStore } from "./drafts";
 import { ImagePreview } from "./image-preview";
 
@@ -45,12 +45,15 @@ export function FileContent({
     window.addEventListener("kiteline:event", failed);
     setBusy(true);
     setError(undefined);
-    void readContent(target, controller.signal, (id) => {
-      channelId = id;
-    })
-      .then((content) => {
-        if (controller.signal.aborted || store.find(target)) return;
-        if (content.kind === "text") store.open(target, content.value);
+    void store
+      .readInitial(target, controller.signal, (id) => {
+        channelId = id;
+        failure = undefined;
+        setError(undefined);
+      })
+      .then(({ content, target: current }) => {
+        if (controller.signal.aborted || store.find(current)) return;
+        if (content.kind === "text") store.open({ ...target, ...current }, content.value);
         else setImage(content.value);
       })
       .catch((reason: unknown) => {

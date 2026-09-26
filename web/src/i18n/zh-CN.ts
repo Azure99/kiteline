@@ -98,6 +98,7 @@ export const zhCN = {
   release: {
     webMismatch: "Web {{web}} / Server {{server}}：远程操作已暂停。刷新前请复制未保存的内容。",
     reload: "刷新页面",
+    reloadDrafts: "刷新不会恢复本页内存草稿。未保存的修改将丢失。",
   },
   common: {
     language: "语言",
@@ -268,7 +269,6 @@ export const zhCN = {
     partialPorts: "仅显示部分端口",
     portRange: "端口需在 1 至 65535 之间",
     copyLink: "复制链接",
-    linkCopied: "链接已复制",
     expiresAt: "{{time}} 到期",
     lastSeen: "最近连接 {{time}}",
     versionMismatch: "版本不匹配",
@@ -380,6 +380,11 @@ export const zhCN = {
     tooMuchOutput: "输出过多，无法全部朗读；请按行浏览。",
   },
   files: {
+    cleaning: "清理进行中",
+    cleanupUnknown: "清理状态尚未确认",
+    cleanupFailed: "部分临时文件清理失败",
+    cleanupRetained: "临时项：{{count}}",
+    cleanupFailures: "清理失败：{{count}}",
     searchTitle: "文件搜索",
     backFiles: "返回文件",
     searchType: "搜索类型",
@@ -561,6 +566,7 @@ export const zhCN = {
     stageDiskConfirm: "所选文件有未保存修改。暂存设备上的磁盘版本？",
     changedPaths: "已变更路径",
     moreBlockedPaths: "更多阻挡项未显示",
+    invalidPath: "非 UTF-8 路径：{{path}}",
     output: "Git 输出",
     outputTruncated: "输出仅保留前段",
     discardStagedWorktree: "丢弃暂存与未暂存更改",

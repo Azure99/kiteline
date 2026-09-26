@@ -110,8 +110,11 @@ export class FileTransfer {
   private async receive(data: Buffer, binary: boolean) {
     if (!binary) {
       const message = record(JSON.parse(data.toString()));
-      if (message.type === "error")
-        throw new AppError(string(message.code), string(message.message), message.details);
+      if (message.type === "error") {
+        if (typeof message.message !== "string")
+          throw new AppError("invalid_argument", "Expected a diagnostic string");
+        throw new AppError(string(message.code), message.message, message.details);
+      }
       if (this.kind !== "file.write" || !this.ended || message.type !== "result")
         throw new AppError("invalid_argument", "Invalid file result frame");
       const reply = record(message.reply) as unknown as Reply;

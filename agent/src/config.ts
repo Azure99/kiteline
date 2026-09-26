@@ -17,7 +17,6 @@ export const defaultAgentLimits = {
   imageBytes: 20 * 1024 * 1024,
   imagePixels: 20_000_000,
   transfersPerDevice: 4,
-  fileOperationTimeout: 30 * 60_000,
   searchTimeout: 10_000,
   gitWriteTimeout: 10 * 60_000,
   channelIdleTimeout: 120_000,
@@ -32,6 +31,14 @@ export const defaultAgentLimits = {
   taskHistoryRuns: 20,
   taskOutputBytes: 1024 * 1024,
   taskOutputTotalBytes: 128 * 1024 * 1024,
+};
+const timerMaximums: Partial<Record<keyof typeof defaultAgentLimits, number>> = {
+  rpcTimeout: 2147482647,
+  searchTimeout: 2147483647,
+  gitWriteTimeout: 2147483647,
+  channelIdleTimeout: 2147483647,
+  channelPairTimeout: 2147483647,
+  terminalStallTimeout: 2147483647,
 };
 export interface Identity {
   deviceId: string;
@@ -74,7 +81,7 @@ export async function agentConfig(): Promise<AgentConfig> {
   const defaults = { ...defaultAgentLimits };
   for (const key of Object.keys(defaults) as (keyof typeof defaults)[])
     if (settings[key] !== undefined)
-      defaults[key] = integer(settings[key], key, 1, Number.MAX_SAFE_INTEGER);
+      defaults[key] = integer(settings[key], key, 1, timerMaximums[key] ?? Number.MAX_SAFE_INTEGER);
   const shell =
     input.shell === undefined ? userInfo().shell || "/bin/sh" : string(input.shell, "shell");
   if (!isAbsolute(shell)) throw new AppError("invalid_argument", "Shell must be an absolute path");

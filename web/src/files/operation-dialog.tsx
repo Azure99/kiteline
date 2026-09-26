@@ -24,7 +24,9 @@ import {
 } from "../components/ui/dialog";
 import { childPath, formatBytes } from "./use-browser";
 import { FileConflictDialog } from "./conflict-dialog";
+import { FileCleanupNotice } from "./cleanup-notice";
 import type { WorkspaceTarget } from "../lib/navigation";
+import type { DraftStore } from "./drafts";
 
 export interface FileAction {
   kind: "copy" | "move" | "delete";
@@ -49,6 +51,7 @@ export function FileOperationDialog({
   workspaceName,
   action,
   folder,
+  store,
   onClose,
   onResult,
 }: {
@@ -58,6 +61,7 @@ export function FileOperationDialog({
   workspaceName: string;
   action: FileAction;
   folder: string;
+  store: DraftStore;
   onClose: () => void;
   onResult: (items: FileItemResult[]) => void;
 }) {
@@ -73,6 +77,7 @@ export function FileOperationDialog({
   const [directory, setDirectory] = useState(folder);
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [cleanupRefresh, setCleanupRefresh] = useState(0);
   const [progress, setProgress] = useState<FileProgress>();
   const [error, setError] = useState<unknown>();
   const [invalid, setInvalid] = useState(false);
@@ -154,6 +159,26 @@ export function FileOperationDialog({
       return;
     }
     const submitted = pending.map((row) => ({ ...row }));
+    const changes = new Map(
+      action.kind === "copy"
+        ? []
+        : submitted.map((row) => [
+            row.entry.path!,
+            store.capture(deviceId, workspaceId, row.entry.path!),
+          ]),
+    );
+    const settle = (items: FileItemResult[]) => {
+      for (const item of items) {
+        const change = changes.get(item.path);
+        if (!change) continue;
+        if (item.outcome === "succeeded") {
+          if (action.kind === "move")
+            void store.rename(deviceId, workspaceId, item.path, item.targetPath!, change);
+          else store.deleted(deviceId, workspaceId, item.path, "deletedDraft", change);
+        } else if (item.outcome === "partial" || item.outcome === "unknown")
+          void store.checkMissing(deviceId, workspaceId, item.path, change);
+      }
+    };
     const request = { id: newId(), controller: new AbortController() };
     current.current = request;
     setBusy(true);
@@ -182,7 +207,6 @@ export function FileOperationDialog({
             ? ["files.copy", params, request.controller.signal]
             : ["files.move", params, request.controller.signal];
       const reply = await rpcReply(deviceId, request.id, operation);
-      if (!alive.current) return;
       const result =
         reply.result?.items ??
         submitted.map((row) => ({
@@ -191,6 +215,8 @@ export function FileOperationDialog({
           outcome: reply.outcome,
           ...(reply.outcome !== "succeeded" ? { error: reply.error } : {}),
         }));
+      settle(result);
+      if (!alive.current) return;
       setRows((old) =>
         old.map((row) => {
           const item = result.find((item) => item.path === row.entry.path);
@@ -209,13 +235,14 @@ export function FileOperationDialog({
           ),
         );
     } catch (reason) {
-      if (!alive.current) return;
-      setError(reason);
       const result: FileItemResult[] = submitted.map((row) => ({
         path: row.entry.path!,
         targetPath: row.targetPath,
         outcome: reason instanceof ApiError && reason.outcome !== "unknown" ? "failed" : "unknown",
       }));
+      settle(result);
+      if (!alive.current) return;
+      setError(reason);
       setRows((old) =>
         old.map((row) => ({
           ...row,
@@ -224,10 +251,12 @@ export function FileOperationDialog({
       );
       onResult(result);
     } finally {
+      for (const change of changes.values()) store.release(change);
       if (current.current === request) current.current = undefined;
       if (alive.current) {
         setBusy(false);
         setCancelling(false);
+        setCleanupRefresh((value) => value + 1);
       }
     }
   }
@@ -279,6 +308,7 @@ export function FileOperationDialog({
               {deviceName} / {workspaceName} / {folder}
             </p>
           </DialogHeader>
+          <FileCleanupNotice deviceId={deviceId} refresh={cleanupRefresh} />
           <div className="scroll-area min-h-0 space-y-3 overflow-auto p-4">
             {action.kind === "delete" ? (
               <p className="text-sm">

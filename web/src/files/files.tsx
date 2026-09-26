@@ -32,6 +32,7 @@ import {
 } from "../lib/navigation";
 import { FileExplorer } from "./explorer";
 import { FileDetails } from "./file-details";
+import { FileCleanupNotice } from "./cleanup-notice";
 import { FileNameDialog, type NameAction } from "./name-dialog";
 import { isWithin, movedPath, parentPath, useFileBrowser } from "./use-browser";
 import { DraftView } from "./draft-view";
@@ -411,6 +412,7 @@ export function Files({
               : t(($) => $.common.deviceOffline)}
           </p>
         )}
+        <FileCleanupNotice deviceId={device.id} active={visible} />
       </ToolHeader>
       <div className={searching ? "hidden" : "flex min-h-0 flex-1"}>
         {(mobile ? !queryFile : listOpen) && (

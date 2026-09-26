@@ -1,10 +1,11 @@
 import { useTranslation } from "react-i18next";
-import { useCallback, useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
+import { useCallback, useLayoutEffect, useRef, type ReactNode } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { Maximize2, SquareTerminal, X } from "lucide-react";
 import type { Session } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
-import { TerminalView, type TerminalActions } from "./terminal-view";
+import type { TerminalActions } from "./terminal-view";
+import { TerminalView } from "./lazy-terminal-view";
 import { members, parentSplit, type TerminalGroup, type TerminalNode } from "./groups";
 import { memberTarget, type useTerminalDrag } from "./group-tabs";
 
@@ -203,10 +204,13 @@ function TerminalPane({
   if (session) name.current = session.name;
   const actions = useRef<TerminalActions>(null);
   const register = events.actions;
-  useEffect(() => {
-    register(id, actions.current);
-    return () => register(id, null);
-  }, [id, register]);
+  const setActions = useCallback(
+    (value: TerminalActions | null) => {
+      actions.current = value;
+      register(id, value);
+    },
+    [id, register],
+  );
   return (
     <div
       className={hidden ? "hidden" : "terminal-pane flex min-h-0 min-w-0 flex-1 flex-col"}
@@ -256,7 +260,7 @@ function TerminalPane({
           </IconButton>
         </header>
       )}
-      <TerminalView ref={actions} deviceId={deviceId} workspaceId={workspaceId} sessionId={id} />
+      <TerminalView ref={setActions} deviceId={deviceId} workspaceId={workspaceId} sessionId={id} />
     </div>
   );
 }

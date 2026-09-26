@@ -1,10 +1,10 @@
 import { newId } from "../lib/id";
-import { useSyncExternalStore } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import { Compartment, type EditorState } from "@codemirror/state";
 import type { KitelineError, Device, TextFormat } from "@kiteline/shared/protocol";
 import { encodeText } from "@kiteline/shared/text";
 import { ApiError, errorMessage, rpc } from "../lib/api";
-import { readText, writeText, type DiskText, type FileTarget } from "./content";
+import { readContent, readText, writeText, type DiskText, type FileTarget } from "./content";
 import { textState } from "./editor-state";
 import { isWithin, movedPath } from "./use-browser";
 
@@ -23,6 +23,7 @@ export type DraftNotice =
 interface SaveSnapshot {
   target: FileTarget;
   raw: string;
+  replacesSource: boolean;
 }
 
 interface PendingSave extends SaveSnapshot {
@@ -56,21 +57,58 @@ export interface Draft extends FileTarget {
   diskChanged?: boolean;
   request?: AbortController;
   diskActivity: number;
+  sourceVersion: number;
   readChannel?: string;
   readError?: ApiError;
 }
 
-export const isDirty = (draft: Draft) =>
-  !!draft.state &&
-  (draft.state.doc.toString() !== draft.baseText ||
-    draft.unknownSave !== undefined ||
-    draft.missing === true);
+interface InitialRead {
+  target: FileTarget;
+  version: number;
+  request?: AbortController;
+  pauses: Set<Promise<void>>;
+  reset: () => void;
+}
+
+interface CapturedDraft {
+  draft: Draft;
+  source?: { path: string; version: number };
+  saves: { snapshot: SaveSnapshot; path: string }[];
+}
+
+interface FileChange {
+  drafts: CapturedDraft[];
+  reads: { owner: InitialRead; path: string; version: number; resume: () => void }[];
+  path: string;
+  released?: boolean;
+}
+
+const dirtyCache = new WeakMap<
+  Draft,
+  { doc: EditorState["doc"]; baseText: string; dirty: boolean }
+>();
+export function isDirty(draft: Draft) {
+  if (!draft.state) return false;
+  let cached = dirtyCache.get(draft);
+  if (cached?.doc !== draft.state.doc || cached.baseText !== draft.baseText) {
+    cached = {
+      doc: draft.state.doc,
+      baseText: draft.baseText,
+      dirty: draft.state.doc.toString() !== draft.baseText,
+    };
+    dirtyCache.set(draft, cached);
+  }
+  return cached.dirty || draft.unknownSave !== undefined || draft.missing === true;
+}
 
 export class DraftStore {
   private items: Draft[] = [];
   private listeners = new Set<() => void>();
+  private draftListeners = new WeakMap<Draft, Set<() => void>>();
+  private draftVersions = new WeakMap<Draft, number>();
   private editorLimits = new Map<string, number>();
   private totalLimit?: number;
+  private initialReads = new Set<InitialRead>();
   closing?: string;
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -79,12 +117,145 @@ export class DraftStore {
     };
   };
   snapshot = () => this.items;
-  changed() {
-    this.items = [...this.items];
-    for (const listener of this.listeners) listener();
+  subscribeDraft(draft: Draft, listener: () => void) {
+    let listeners = this.draftListeners.get(draft);
+    if (!listeners) this.draftListeners.set(draft, (listeners = new Set()));
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  }
+  draftSnapshot(draft: Draft) {
+    return this.draftVersions.get(draft) ?? 0;
+  }
+  changed(draft?: Draft, list = true) {
+    for (const item of draft ? [draft] : this.items) {
+      this.draftVersions.set(item, this.draftSnapshot(item) + 1);
+      for (const listener of this.draftListeners.get(item) ?? []) listener();
+    }
+    if (list) {
+      this.items = [...this.items];
+      for (const listener of this.listeners) listener();
+    }
   }
   has(draft: Draft) {
     return this.items.includes(draft);
+  }
+  async readInitial(
+    target: FileTarget,
+    signal: AbortSignal,
+    onChannel: (id: string | undefined) => void,
+  ) {
+    const owner: InitialRead = {
+      target: { ...target },
+      version: 0,
+      pauses: new Set(),
+      reset: () => onChannel(undefined),
+    };
+    let stop!: () => void;
+    const stopped = new Promise<void>((resolve) => {
+      stop = resolve;
+    });
+    const abort = () => {
+      owner.request?.abort();
+      stop();
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    this.initialReads.add(owner);
+    try {
+      for (;;) {
+        await Promise.race([Promise.all(owner.pauses), stopped]);
+        if (signal.aborted) throw new DOMException("The operation was aborted", "AbortError");
+        if (owner.pauses.size) continue;
+        owner.reset();
+        const request = new AbortController();
+        owner.request = request;
+        const currentTarget = { ...owner.target };
+        try {
+          const content = await readContent(currentTarget, request.signal, (id) => {
+            if (!request.signal.aborted) onChannel(id);
+          });
+          if (!request.signal.aborted) return { target: currentTarget, content };
+        } catch (error) {
+          if (!request.signal.aborted) throw error;
+        }
+      }
+    } finally {
+      owner.request?.abort();
+      signal.removeEventListener("abort", abort);
+      this.initialReads.delete(owner);
+    }
+  }
+  capture(deviceId: string, workspaceId: string, path: string): FileChange {
+    const matches = (target: FileTarget) =>
+      target.deviceId === deviceId &&
+      target.workspaceId === workspaceId &&
+      isWithin(target.path, path);
+    const drafts: CapturedDraft[] = [];
+    for (const draft of this.items) {
+      const source = matches(draft)
+        ? { path: draft.path, version: draft.sourceVersion }
+        : undefined;
+      const saves = [draft.pendingSave, draft.unknownSave]
+        .filter((snapshot): snapshot is SaveSnapshot => !!snapshot && matches(snapshot.target))
+        .map((snapshot) => ({ snapshot, path: snapshot.target.path }));
+      if (source || saves.length) drafts.push({ draft, source, saves });
+    }
+    const reads: FileChange["reads"] = [];
+    for (const owner of this.initialReads) {
+      if (!matches(owner.target)) continue;
+      let resolve!: () => void;
+      const pause = new Promise<void>((done) => {
+        resolve = done;
+      });
+      owner.pauses.add(pause);
+      owner.reset();
+      owner.request?.abort();
+      reads.push({
+        owner,
+        path: owner.target.path,
+        version: owner.version,
+        resume: () => {
+          owner.pauses.delete(pause);
+          resolve();
+        },
+      });
+    }
+    return { drafts, reads, path };
+  }
+  release(change: FileChange, to?: string) {
+    if (change.released) return;
+    change.released = true;
+    for (const read of change.reads) {
+      if (
+        to !== undefined &&
+        read.owner.version === read.version &&
+        read.owner.target.path === read.path
+      ) {
+        read.owner.target.path = movedPath(read.path, change.path, to);
+        read.owner.version++;
+      }
+      read.resume();
+    }
+  }
+  private sourceCurrent({ draft, source }: CapturedDraft) {
+    return (
+      !!source &&
+      this.has(draft) &&
+      draft.path === source.path &&
+      draft.sourceVersion === source.version
+    );
+  }
+  private saveCurrent(owner: CapturedDraft, snapshot: SaveSnapshot | undefined) {
+    return (
+      !!snapshot &&
+      (owner.saves.some(
+        (save) => save.snapshot === snapshot && save.path === snapshot.target.path,
+      ) ||
+        (this.sourceCurrent(owner) &&
+          snapshot.replacesSource &&
+          snapshot.target.path === owner.draft.path))
+    );
   }
   fileFailed(channelId: string, error: KitelineError) {
     const draft = this.items.find((item) => item.readChannel === channelId);
@@ -154,6 +325,7 @@ export class DraftStore {
       scrollTop: 0,
       scrollLeft: 0,
       diskActivity: 0,
+      sourceVersion: 0,
     };
     this.items.push(draft);
     if (disk) {
@@ -166,13 +338,27 @@ export class DraftStore {
     } else void this.load(draft);
     return draft;
   }
-  update(draft: Draft, state: EditorState) {
+  update(draft: Draft, state: EditorState, measured?: { text: string; bytes: number }) {
     if (!this.has(draft)) return;
     const changed = draft.state?.doc !== state.doc;
+    const dirty = isDirty(draft),
+      canSave = this.canSave(draft),
+      overLimit = this.overLimit(draft);
     draft.state = state;
     if (!changed) return;
-    draft.bytes = encodeText(state.doc.toString(), draft.format).length;
-    this.changed();
+    const text = measured?.text ?? state.doc.toString();
+    draft.bytes = measured?.bytes ?? encodeText(text, draft.format).length;
+    dirtyCache.set(draft, {
+      doc: state.doc,
+      baseText: draft.baseText,
+      dirty: text !== draft.baseText,
+    });
+    this.changed(
+      draft,
+      dirty !== isDirty(draft) ||
+        canSave !== this.canSave(draft) ||
+        overLimit !== this.overLimit(draft),
+    );
   }
   adopt(draft: Draft, disk: DiskText) {
     const size = encodeText(disk.text, disk.meta as TextFormat).length;
@@ -181,6 +367,7 @@ export class DraftStore {
       draft.notice = error;
       throw new ApiError("limit_exceeded", "The text exceeds the available editor capacity");
     }
+    draft.sourceVersion++;
     draft.path = disk.target.path;
     draft.format = disk.meta as TextFormat;
     draft.state = textState(
@@ -240,6 +427,7 @@ export class DraftStore {
       target: { deviceId: draft.deviceId, workspaceId: draft.workspaceId, path },
       raw,
       sourcePath: draft.path,
+      replacesSource: path === draft.path && revision !== null,
     };
     draft.pendingSave = pending;
     draft.error = undefined;
@@ -268,6 +456,7 @@ export class DraftStore {
           item.workspaceId === draft.workspaceId &&
           item.path === path,
       );
+      if (!pending.replacesSource || draft.path !== path) draft.sourceVersion++;
       draft.path = path;
       draft.baseText = text;
       draft.baseRaw = raw;
@@ -287,8 +476,7 @@ export class DraftStore {
       }
       if (this.has(draft) && draft.request === request && draft.path === pending.sourcePath) {
         draft.error = error;
-        if (error instanceof ApiError && error.outcome === "unknown")
-          draft.unknownSave = { target: pending.target, raw: pending.raw };
+        if (error instanceof ApiError && error.outcome === "unknown") draft.unknownSave = pending;
       }
       return false;
     } finally {
@@ -314,7 +502,7 @@ export class DraftStore {
       const disk = await this.read(draft, unknown?.target ?? { ...draft }, request);
       if (!this.has(draft) || draft.request !== request || draft.path !== path) return;
       if (unknown && disk.raw === unknown.raw) {
-        this.confirmSave(draft, disk);
+        this.confirmSave(draft, disk, unknown);
       }
       return disk;
     } catch (error) {
@@ -359,23 +547,21 @@ export class DraftStore {
     }
   }
   async renameFile(target: FileTarget, newName: string) {
-    const drafts = this.items.filter(
-      (draft) =>
-        draft.deviceId === target.deviceId &&
-        draft.workspaceId === target.workspaceId &&
-        (isWithin(draft.path, target.path) ||
-          (draft.pendingSave && isWithin(draft.pendingSave.target.path, target.path)) ||
-          (draft.unknownSave && isWithin(draft.unknownSave.target.path, target.path))),
-    );
-    const result = await rpc(target.deviceId, "files.rename", {
-      workspaceId: target.workspaceId,
-      path: target.path,
-      newName,
-    });
-    void this.rename(target.deviceId, target.workspaceId, result.from, result.to, drafts);
-    return result;
+    const change = this.capture(target.deviceId, target.workspaceId, target.path);
+    try {
+      const result = await rpc(target.deviceId, "files.rename", {
+        workspaceId: target.workspaceId,
+        path: target.path,
+        newName,
+      });
+      void this.rename(target.deviceId, target.workspaceId, result.from, result.to, change);
+      return result;
+    } finally {
+      this.release(change);
+    }
   }
-  private confirmSave(draft: Draft, disk: DiskText) {
+  private confirmSave(draft: Draft, disk: DiskText, snapshot: SaveSnapshot) {
+    if (!snapshot.replacesSource || draft.path !== disk.target.path) draft.sourceVersion++;
     draft.path = disk.target.path;
     draft.baseRaw = disk.raw;
     draft.baseText = disk.text;
@@ -426,7 +612,9 @@ export class DraftStore {
         if (!current()) return;
         draft.missing = false;
         draft.observationError = undefined;
-        if (sourceDisk.raw === draft.baseRaw) {
+        if (!draft.state) {
+          this.adopt(draft, sourceDisk);
+        } else if (sourceDisk.raw === draft.baseRaw) {
           draft.revision = sourceDisk.meta.revision;
           draft.resolvedPath = sourceDisk.meta.resolvedPath;
           draft.diskChanged = false;
@@ -438,7 +626,8 @@ export class DraftStore {
       } catch (error) {
         if (!current()) return;
         draft.observationError = error;
-        draft.notice = undefined;
+        if (!draft.state) draft.error = error;
+        else draft.notice = undefined;
         if (error instanceof ApiError && error.code === "not_found") draft.missing = true;
       }
       if (snapshot) {
@@ -449,7 +638,7 @@ export class DraftStore {
               : await readText(snapshot.target, request.signal);
           if (!current()) return;
           if (disk?.raw === snapshot.raw) {
-            this.confirmSave(draft, disk);
+            this.confirmSave(draft, disk, snapshot);
             if (pending) {
               draft.diskActivity++;
               draft.pendingSave = undefined;
@@ -488,28 +677,27 @@ export class DraftStore {
     workspaceId: string,
     from: string,
     to: string,
-    candidates = this.items,
+    change = this.capture(deviceId, workspaceId, from),
   ) {
-    const moved = candidates.filter(
-      (item) =>
-        this.has(item) &&
-        item.deviceId === deviceId &&
-        item.workspaceId === workspaceId &&
-        (movedPath(item.path, from, to) !== item.path ||
-          (item.pendingSave &&
-            movedPath(item.pendingSave.target.path, from, to) !== item.pendingSave.target.path) ||
-          (item.unknownSave &&
-            movedPath(item.unknownSave.target.path, from, to) !== item.unknownSave.target.path)),
-    );
+    this.release(change, to);
     let checking = Promise.resolve();
-    for (const draft of moved) {
-      draft.diskActivity++;
+    for (const owner of change.drafts) {
+      const { draft } = owner;
+      if (!this.has(draft)) continue;
+      const source = this.sourceCurrent(owner);
       const pending = draft.pendingSave;
-      draft.path = movedPath(draft.path, from, to);
-      if (draft.unknownSave)
+      const pendingTarget = this.saveCurrent(owner, pending);
+      const unknownTarget = this.saveCurrent(owner, draft.unknownSave);
+      if (!source && !pendingTarget && !unknownTarget) continue;
+      draft.diskActivity++;
+      if (source) {
+        draft.path = movedPath(draft.path, from, to);
+        draft.sourceVersion++;
+      }
+      if (unknownTarget && draft.unknownSave)
         draft.unknownSave.target.path = movedPath(draft.unknownSave.target.path, from, to);
       draft.notice = "checkingMoved";
-      if (pending && movedPath(pending.target.path, from, to) === pending.target.path) {
+      if (pending && !pendingTarget) {
         pending.sourcePath = draft.path;
         pending.reconciliation = this.checkMoved(draft, pending, checking);
         checking = pending.reconciliation;
@@ -519,10 +707,8 @@ export class DraftStore {
       draft.request = undefined;
       draft.busy = undefined;
       if (pending) {
-        draft.unknownSave = {
-          target: { ...pending.target, path: movedPath(pending.target.path, from, to) },
-          raw: pending.raw,
-        };
+        pending.target.path = movedPath(pending.target.path, from, to);
+        draft.unknownSave = pending;
         draft.pendingSave = undefined;
       }
       checking = this.checkMoved(draft, undefined, checking);
@@ -530,52 +716,74 @@ export class DraftStore {
     this.changed();
     await checking;
   }
-  private markMissing(draft: Draft, notice: DraftNotice) {
+  private markMissing(owner: CapturedDraft, notice: DraftNotice) {
+    const { draft } = owner;
+    const source = this.sourceCurrent(owner);
+    const pending = draft.pendingSave;
+    const pendingTarget = this.saveCurrent(owner, pending);
+    const unknownTarget = this.saveCurrent(owner, draft.unknownSave);
+    if (!source && !pendingTarget && !unknownTarget) return;
     draft.diskActivity++;
-    draft.request?.abort();
-    draft.request = undefined;
-    draft.busy = undefined;
-    draft.pendingSave = undefined;
-    draft.missing = true;
-    draft.notice = notice;
+    if (!pending || pendingTarget) {
+      draft.request?.abort();
+      draft.request = undefined;
+      draft.busy = undefined;
+      if (pendingTarget && pending) draft.unknownSave = pending;
+      draft.pendingSave = undefined;
+    }
+    if (source) {
+      draft.missing = true;
+      draft.notice = notice;
+    }
   }
   deleted(
     deviceId: string,
     workspaceId: string,
     path: string,
     notice: DraftNotice = "deletedDraft",
+    change = this.capture(deviceId, workspaceId, path),
   ) {
-    for (const draft of this.items)
-      if (
-        draft.deviceId === deviceId &&
-        draft.workspaceId === workspaceId &&
-        (draft.path === path || draft.path.startsWith(path + "/"))
-      )
-        this.markMissing(draft, notice);
+    this.release(change);
+    for (const owner of change.drafts) if (this.has(owner.draft)) this.markMissing(owner, notice);
     this.changed();
   }
-  async checkMissing(deviceId: string, workspaceId: string, path: string) {
-    const affected = this.items.filter(
-      (draft) =>
-        draft.deviceId === deviceId &&
-        draft.workspaceId === workspaceId &&
-        (draft.path === path || draft.path.startsWith(path + "/")),
-    );
-    for (const draft of affected) {
-      const originalPath = draft.path;
-      const activity = draft.diskActivity;
-      try {
-        await rpc(deviceId, "files.inspect", { workspaceId, path: originalPath });
-      } catch (error) {
+  async checkMissing(
+    deviceId: string,
+    workspaceId: string,
+    path: string,
+    change = this.capture(deviceId, workspaceId, path),
+  ) {
+    this.release(change);
+    for (const owner of change.drafts) {
+      const { draft } = owner;
+      if (!this.has(draft)) continue;
+      const paths = new Set<string>();
+      if (this.sourceCurrent(owner)) paths.add(draft.path);
+      for (const save of owner.saves)
         if (
-          this.has(draft) &&
-          draft.path === originalPath &&
-          draft.diskActivity === activity &&
-          error instanceof ApiError &&
-          error.code === "not_found"
-        ) {
-          this.markMissing(draft, "missingDraft");
-          this.changed();
+          (draft.pendingSave === save.snapshot || draft.unknownSave === save.snapshot) &&
+          this.saveCurrent(owner, save.snapshot)
+        )
+          paths.add(save.path);
+      for (const originalPath of paths) {
+        const activity = draft.diskActivity;
+        try {
+          await rpc(deviceId, "files.inspect", { workspaceId, path: originalPath });
+        } catch (error) {
+          if (
+            this.has(draft) &&
+            draft.diskActivity === activity &&
+            error instanceof ApiError &&
+            error.code === "not_found"
+          ) {
+            const missing: CapturedDraft = {
+              draft,
+              source: owner.source?.path === originalPath ? owner.source : undefined,
+              saves: owner.saves.filter((save) => save.path === originalPath),
+            };
+            this.markMissing(missing, "missingDraft");
+            this.changed();
+          }
         }
       }
     }
@@ -595,6 +803,12 @@ export class DraftStore {
 }
 export function useDrafts(store: DraftStore) {
   return useSyncExternalStore(store.subscribe, store.snapshot);
+}
+export function useDraftVersion(store: DraftStore, draft: Draft) {
+  return useSyncExternalStore(
+    useCallback((listener) => store.subscribeDraft(draft, listener), [store, draft]),
+    useCallback(() => store.draftSnapshot(draft), [store, draft]),
+  );
 }
 export function draftError(draft: Draft) {
   const error = draft.error ?? draft.observationError;

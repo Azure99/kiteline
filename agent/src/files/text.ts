@@ -148,25 +148,13 @@ export class TextFiles {
         if (error instanceof OperationError && error.outcome === "unknown") item.uncertain = true;
         throw error;
       }
-      try {
-        const result = {
-          path: item.path,
-          size: item.size,
-          revision: revisionOf(target, BigInt(item.temporary.dev), content),
-        };
-        await this.temporary.forgetLocked(item.temporary);
-        return result;
-      } catch (error) {
-        throw new OperationError(
-          "io_error",
-          `Published, but the result is unconfirmed: ${String(error)}`,
-          "unknown",
-          {
-            path: item.path,
-            size: item.size,
-          },
-        );
-      }
+      const result = {
+        path: item.path,
+        size: item.size,
+        revision: revisionOf(target, BigInt(item.temporary.dev), content),
+      };
+      await this.temporary.publishedLocked(item.temporary);
+      return result;
     }, signal);
   }
 

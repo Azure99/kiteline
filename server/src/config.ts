@@ -40,7 +40,14 @@ export function serverConfig(): ServerConfig {
   }
   for (const key of Object.keys(defaults) as (keyof typeof defaults)[]) {
     if (input[key] !== undefined)
-      defaults[key] = integer(input[key], key, 1, Number.MAX_SAFE_INTEGER);
+      defaults[key] = integer(
+        input[key],
+        key,
+        1,
+        key === "channelPairTimeout" || key === "channelIdleTimeout"
+          ? 2147483647
+          : Number.MAX_SAFE_INTEGER,
+      );
   }
   return {
     dataDir,

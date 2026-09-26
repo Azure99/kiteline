@@ -186,6 +186,61 @@ test("channel envelope budget is checked before reserving a channel", async () =
   expect(f.app.connections.devices()[0]!.status).toBe("online");
 });
 
+test("channel preparation and transfer preserve empty and long diagnostics without disconnecting the device", async () => {
+  const f = await fixture();
+  const peer = await f.device();
+  const login = f.store.createSession(60_000);
+  const connection = f.app.connections.agents.get(peer.deviceId)!;
+  for (const stage of ["prepare", "transfer"]) {
+    for (const message of ["", "x".repeat(5000), null]) {
+      const pending = f.app.channels.create(peer.deviceId, login, "file.read", {
+        workspaceId: "workspace",
+        path: "file",
+        purpose: "text",
+      });
+      const ready = pending.ready.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      const socket = new WebSocket(
+        f.origin.replace("http:", "ws:") +
+          `/api/agent/channels/${pending.id}?connectionId=${connection.connectionId}`,
+        { headers: { authorization: `Bearer ${peer.deviceToken}` } },
+      );
+      socket.on("error", () => {});
+      try {
+        await once(socket, "open");
+        let request: Promise<Response> | undefined;
+        if (stage === "transfer") {
+          socket.send(
+            JSON.stringify({
+              type: "ready",
+              meta: { size: 1, filename: "file", contentType: "text/plain; charset=utf-8" },
+            }),
+          );
+          expect(await ready).toBeUndefined();
+          const start = once(socket, "message");
+          request = f.call(
+            `/api/channels/${pending.id}/content`,
+            "GET",
+            undefined,
+            `kiteline_session_http=${login.token}`,
+          );
+          await start;
+        }
+        socket.send(JSON.stringify({ type: "error", code: "io_error", message }));
+        const error = stage === "prepare" ? await ready : (await (await request!).json()).error;
+        expect(error).toMatchObject(
+          message === null ? { code: "invalid_argument" } : { code: "io_error", message },
+        );
+        expect(f.app.connections.devices()[0]!.status).toBe("online");
+      } finally {
+        socket.terminate();
+      }
+    }
+  }
+});
+
 test("WebSocket handshake distinguishes protocol, authentication, origin and missing channel", async () => {
   const f = await fixture();
   const login = f.store.createSession(60_000);

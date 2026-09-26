@@ -290,26 +290,37 @@ function CommitView({
             className={`${mobile && target ? "hidden" : ""} scroll-area w-full overflow-auto border-border min-[960px]:w-72 min-[960px]:shrink-0 min-[960px]:border-r`}
             aria-label={t(($) => $.git.commitFiles)}
           >
-            {value?.files.map((file) => (
-              <button
-                key={file.path}
-                onClick={() =>
-                  setTarget({
-                    path: file.path,
-                    side: "commit",
-                    commitOid: commit.oid,
-                    parentOid: parent,
-                  })
-                }
-                className="flex min-h-8 w-full items-center gap-2 border-b border-border px-3 text-left text-xs hover:bg-primary-soft max-[959px]:min-h-11"
-              >
-                <span className="font-mono text-muted-foreground">{file.status}</span>
-                <GitFilePath path={file.path} />
-                {file.binary && (
-                  <span className="text-muted-foreground">{t(($) => $.git.binary)}</span>
-                )}
-              </button>
-            ))}
+            {value?.files.map((file) =>
+              file.path === undefined ? (
+                <div
+                  key={`invalid:${file.pathError}`}
+                  className="border-b border-border px-3 py-2 text-xs break-all text-muted-foreground"
+                >
+                  <span className="mr-2 font-mono">{file.status}</span>
+                  {t(($) => $.git.invalidPath, { path: file.pathError })}
+                  {file.binary && <span className="ml-2">{t(($) => $.git.binary)}</span>}
+                </div>
+              ) : (
+                <button
+                  key={`path:${file.path}`}
+                  onClick={() =>
+                    setTarget({
+                      path: file.path,
+                      side: "commit",
+                      commitOid: commit.oid,
+                      parentOid: parent,
+                    })
+                  }
+                  className="flex min-h-8 w-full items-center gap-2 border-b border-border px-3 text-left text-xs hover:bg-primary-soft max-[959px]:min-h-11"
+                >
+                  <span className="font-mono text-muted-foreground">{file.status}</span>
+                  <GitFilePath path={file.path} />
+                  {file.binary && (
+                    <span className="text-muted-foreground">{t(($) => $.git.binary)}</span>
+                  )}
+                </button>
+              ),
+            )}
             {busy && (
               <p className="p-4 text-xs text-muted-foreground">{t(($) => $.common.reading)}</p>
             )}

@@ -124,11 +124,16 @@ export function Patch({ value }: { value: GitDiff }) {
     } catch {
       return { reason: "diffParseFailed" as const };
     }
-  }, [value]);
-  const bytes = new TextEncoder().encode(value.patch);
-  const raw = new TextDecoder().decode(bytes.subarray(0, limits.diffRawBytes), {
-    stream: bytes.length > limits.diffRawBytes,
-  });
+  }, [value.patch, value.truncated]);
+  const fallback = useMemo(() => {
+    if (!parsed.reason) return;
+    const bytes = new TextEncoder().encode(value.patch);
+    const truncated = bytes.length > limits.diffRawBytes;
+    return {
+      text: new TextDecoder().decode(bytes.subarray(0, limits.diffRawBytes), { stream: truncated }),
+      truncated,
+    };
+  }, [parsed.reason, value.patch]);
   const summary = value.summary;
   return (
     <>
@@ -154,10 +159,10 @@ export function Patch({ value }: { value: GitDiff }) {
           <p role="status" className="px-4 py-2 text-xs">
             {t(($) => $.git[parsed.reason!])}
           </p>
-          {bytes.length > limits.diffRawBytes && (
+          {fallback?.truncated && (
             <p className="px-4 py-2 text-xs">{t(($) => $.git.rawPatchLimited)}</p>
           )}
-          <pre className="w-max min-w-full px-4 py-3 font-mono text-xs">{raw}</pre>
+          <pre className="w-max min-w-full px-4 py-3 font-mono text-xs">{fallback?.text}</pre>
         </>
       ) : (
         parsed.files?.map((file, index) => <DiffBlock key={index} file={file} />)

@@ -25,6 +25,8 @@ interface Scan {
   timer: NodeJS.Timeout;
   controller: AbortController;
   found: Set<string>;
+  reading?: Promise<void>;
+  closing?: Promise<void>;
 }
 async function exists(path: string) {
   try {
@@ -80,6 +82,7 @@ export class Repositories {
       path: relative(workspaceRoot, rootPath) || ".",
       linked: gitDir !== commonDir,
     };
+    signal.throwIfAborted();
     this.known.set(repo.id, repo);
     return repo;
   }
@@ -116,7 +119,7 @@ export class Repositories {
     const root = this.metadata.workspace(workspaceId).path;
     const id = token ?? randomUUID();
     let scan = this.scans.get(id);
-    if (token && (!scan || scan.workspaceId !== workspaceId || scan.root !== root))
+    if (token && (!scan || scan.closing || scan.workspaceId !== workspaceId || scan.root !== root))
       throw new AppError("conflict", "Repository scan has expired; scan again");
     if (!scan) {
       const release = this.budget.reserve();
@@ -129,7 +132,7 @@ export class Repositories {
         controller: new AbortController(),
         found: new Set(),
         timer: setTimeout(() => {
-          void this.closeScan(id);
+          void this.release(id);
         }, limits.cursorLifetime),
       };
       this.scans.set(id, scan);
@@ -137,6 +140,11 @@ export class Repositories {
     if (scan.busy) throw new AppError("busy", "Repository scan is running");
     scan.busy = true;
     signal = AbortSignal.any([signal, scan.controller.signal]);
+    let finishRead!: () => void;
+    scan.reading = new Promise<void>((resolve) => {
+      finishRead = resolve;
+    });
+    let keep = false;
     const result: RepoDiscovery = { repos: [], issues: [], complete: false };
     let bytes = 256,
       visited = 0;
@@ -175,6 +183,7 @@ export class Repositories {
                 (await exists(join(frame.path, "objects")))?.isDirectory())
             ) {
               const repo = await this.inspect(frame.path, root, signal);
+              signal.throwIfAborted();
               scan.found.add(repo.id);
               this.remember(workspaceId, repo);
               if (!repo.available) {
@@ -204,6 +213,7 @@ export class Repositories {
             scan.stack.pop();
             continue;
           }
+          if (!entry.isDirectory()) continue;
           const name = Buffer.isBuffer(entry.name) ? entry.name : Buffer.from(entry.name);
           if (!isUtf8(name)) {
             if (
@@ -216,7 +226,7 @@ export class Repositories {
               })
             )
               break;
-          } else if (entry.isDirectory() && name.toString() !== ".git")
+          } else if (name.toString() !== ".git")
             scan.stack.push({ path: join(frame.path, name.toString()), checked: false });
         } catch (error) {
           signal.throwIfAborted();
@@ -232,35 +242,39 @@ export class Repositories {
         this.owners.set(workspaceId, scan.found);
         this.prune();
         this.onComplete?.(workspaceId, scan.found);
-        await this.closeScan(id);
       } else result.scanCursor = id;
+      keep = !result.complete;
       return result;
-    } catch (error) {
-      await this.closeScan(id);
-      throw error;
     } finally {
       scan.busy = false;
+      finishRead();
+      if (!keep || signal.aborted) await this.release(id);
     }
   }
-  private async closeScan(id: string) {
+  async release(id: string) {
     const scan = this.scans.get(id);
     if (!scan) return;
-    this.scans.delete(id);
     scan.controller.abort(new AppError("cancelled", "Repository scan has ended"));
     clearTimeout(scan.timer);
-    scan.release();
-    await Promise.all(scan.stack.map((frame) => frame.directory?.close().catch(() => {})));
+    scan.closing ??= (async () => {
+      await scan.reading;
+      await Promise.all(scan.stack.map((frame) => frame.directory?.close().catch(() => {})));
+      this.scans.delete(id);
+      scan.release();
+    })();
+    await scan.closing;
   }
   async retain(workspaceIds: Set<string>) {
     for (const id of this.owners.keys()) if (!workspaceIds.has(id)) this.owners.delete(id);
     this.prune();
     for (const [id, scan] of this.scans)
-      if (!workspaceIds.has(scan.workspaceId)) await this.closeScan(id);
+      if (!workspaceIds.has(scan.workspaceId)) await this.release(id);
   }
   async close() {
-    await Promise.all([...this.scans.keys()].map((id) => this.closeScan(id)));
+    const closing = [...this.scans.keys()].map((id) => this.release(id));
     this.known.clear();
     this.owners.clear();
+    await Promise.all(closing);
   }
   private remember(workspaceId: string, repo: Repo) {
     let owned = this.owners.get(workspaceId);

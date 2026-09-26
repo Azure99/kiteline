@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowUp, Folder, FolderPlus, RefreshCw } from "lucide-react";
 import type { DirectoryListing, Workspace } from "@kiteline/shared/protocol";
 import { rpc } from "../lib/api";
+import { cursorRpc, releaseCursor } from "../lib/cursors";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import {
@@ -39,20 +40,38 @@ export function DirectoryDialog({
   const [newName, setNewName] = useState<string>();
   const [cursor, setCursor] = useState<string>();
   const mounted = useRef(false);
+  const ownedCursor = useRef<string>(undefined);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      void releaseCursor(deviceId, "directory", ownedCursor.current);
     };
-  }, []);
+  }, [deviceId]);
   useEffect(() => {
     const controller = new AbortController();
     setReading(true);
     setError(undefined);
     setInvalid(false);
-    void rpc(deviceId, "directories.list", { absolutePath: path, cursor }, controller.signal)
+    void (async () => {
+      if (!cursor) {
+        await releaseCursor(deviceId, "directory", ownedCursor.current);
+        ownedCursor.current = undefined;
+      }
+      return cursorRpc(
+        deviceId,
+        "directories.list",
+        { absolutePath: path, cursor },
+        controller.signal,
+      );
+    })()
       .then(
         (result) => {
+          if (controller.signal.aborted) {
+            void releaseCursor(deviceId, "directory", result.entries.nextCursor);
+            return;
+          }
+          ownedCursor.current = result.entries.nextCursor;
           setListing(result);
           setInput(result.path);
         },

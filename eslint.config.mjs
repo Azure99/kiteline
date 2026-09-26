@@ -19,4 +19,26 @@ export default tseslint.config(
       "react-hooks/exhaustive-deps": "warn",
     },
   },
+  {
+    files: ["web/src/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-properties": [
+        "error",
+        ...["toSorted", "toReversed", "toSpliced", "throwIfAborted"].map((property) => ({
+          property,
+          message: "Not available in the supported Chromium 97 runtime.",
+        })),
+        ...[
+          ["Promise", "withResolvers"],
+          ["AbortSignal", "timeout"],
+          ["AbortSignal", "any"],
+          ["Intl", "supportedValuesOf"],
+        ].map(([object, property]) => ({
+          object,
+          property,
+          message: "Not available in the supported Chromium 97 runtime.",
+        })),
+      ],
+    },
+  },
 );

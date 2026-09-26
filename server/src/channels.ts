@@ -194,8 +194,11 @@ export class Channels {
         if (binary || item.meta)
           throw new AppError("invalid_argument", "Channel has not been paired");
         const message = record(JSON.parse(raw.toString()));
-        if (message.type === "error")
-          throw new AppError(string(message.code), string(message.message), message.details);
+        if (message.type === "error") {
+          if (typeof message.message !== "string")
+            throw new AppError("invalid_argument", "Expected a diagnostic string");
+          throw new AppError(string(message.code), message.message, message.details);
+        }
         if (message.type !== "ready")
           throw new AppError("invalid_argument", "Expected a channel ready message");
         if (item.http) {

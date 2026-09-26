@@ -14,7 +14,14 @@ import {
 import { IconButton } from "../components/icon-button";
 import { ApiError } from "../lib/api";
 import { copyText } from "../lib/clipboard";
-import { draftError, isDirty, useDrafts, type Draft, type DraftStore } from "./drafts";
+import {
+  draftError,
+  isDirty,
+  useDrafts,
+  useDraftVersion,
+  type Draft,
+  type DraftStore,
+} from "./drafts";
 import { requestCloseDraft, showDraft } from "./navigation";
 import { TextEditor } from "./text-editor";
 import { formatBytes } from "./use-browser";
@@ -32,6 +39,7 @@ export function DraftView({
   const { t } = useTranslation();
 
   const all = useDrafts(store);
+  useDraftVersion(store, draft);
   const [disk, setDisk] = useState<DiskText>();
   const [saveAs, setSaveAs] = useState(false);
   const [path, setPath] = useState(draft.path);

@@ -444,7 +444,7 @@ test("quiet SSE occupies the shared budget and logout closes only its original l
   const response = await result;
   const first = await once(response, "data");
   expect(first[0].toString()).toBe("data: first\n\n");
-  await new Promise((resolve) => setTimeout(resolve, 250));
+  await new Promise((resolve) => setTimeout(resolve, 1200));
   expect(open).toBe(1);
   const other = f.store.createSession(60_000);
   const additional = f.open(undefined, "GET", { cookie: `kiteline_session=${other.token}` });
@@ -462,3 +462,37 @@ test("quiet SSE occupies the shared budget and logout closes only its original l
   otherResponse.destroy();
   await expect.poll(() => open).toBe(0);
 }, 15_000);
+
+test("a slow HTTP request body outlives channel preparation and can be cancelled", async () => {
+  let received = "";
+  let closed = false;
+  const f = await fixture((req, res) => {
+    req.on("data", (chunk) => {
+      received += chunk.toString();
+    });
+    req.on("end", () => res.end(received));
+    req.on("close", () => {
+      closed = true;
+    });
+  }, 1);
+  expect(f.kiteline.server.requestTimeout).toBe(0);
+  const first = f.open(undefined, "POST");
+  first.req.write("before");
+  await expect.poll(() => received).toBe("before");
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+  first.req.end("after");
+  const response = await first.result;
+  const chunks: Buffer[] = [];
+  for await (const chunk of response) chunks.push(chunk);
+  expect(Buffer.concat(chunks).toString()).toBe("beforeafter");
+  received = "";
+  closed = false;
+  const second = f.open(undefined, "POST");
+  const rejected = second.result.catch(() => undefined);
+  second.req.write("cancel");
+  await expect.poll(() => received).toBe("cancel");
+  second.req.destroy();
+  await rejected;
+  await expect.poll(() => closed).toBe(true);
+  expect((await f.call()).status).toBe(200);
+});

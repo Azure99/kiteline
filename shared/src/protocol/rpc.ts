@@ -5,6 +5,7 @@ import type {
   DirectoryListing,
   DiscardScope,
   Entry,
+  FileCleanup,
   FileInspection,
   FileItemResult,
   FileListing,
@@ -77,6 +78,7 @@ export interface RpcMethods {
   "runs.stop": Contract<{ runId: string }, TaskRun>;
   "ports.list": Contract<Record<string, never>, ListeningPorts>;
   "directories.list": Contract<{ absolutePath: string; cursor?: string }, DirectoryListing>;
+  "cursors.release": Contract<{ kind: "directory" | "repo"; id: string }, { released: true }>;
   "directories.mkdir": Contract<{ absolutePath: string }, { path: string }>;
   "workspaces.add": Contract<{ absolutePath: string; name?: string }, Workspace>;
   "workspaces.rename": Contract<WorkspaceParams & { name: string }, Workspace>;
@@ -91,6 +93,7 @@ export interface RpcMethods {
   "shortcuts.put": Contract<Omit<Shortcut, "id"> & { id?: string }, Shortcut>;
   "shortcuts.remove": Contract<{ id: string }, { removed: boolean }>;
   "files.list": Contract<FileParams & { cursor?: string }, FileListing>;
+  "files.cleanup": Contract<Record<string, never>, FileCleanup>;
   "files.inspect": Contract<FileParams & { suggestCopyName?: boolean }, FileInspection>;
   "files.create": Contract<FileParams & { kind: "file" | "directory" }, Entry>;
   "files.rename": Contract<FileParams & { newName: string }, { from: string; to: string }>;
@@ -165,6 +168,7 @@ export const rpcMutates: Record<RpcMethod, boolean> = {
   "runs.stop": true,
   "ports.list": false,
   "directories.list": false,
+  "cursors.release": false,
   "directories.mkdir": true,
   "workspaces.add": true,
   "workspaces.rename": true,
@@ -179,6 +183,7 @@ export const rpcMutates: Record<RpcMethod, boolean> = {
   "shortcuts.put": true,
   "shortcuts.remove": true,
   "files.list": false,
+  "files.cleanup": false,
   "files.inspect": false,
   "files.create": true,
   "files.rename": true,

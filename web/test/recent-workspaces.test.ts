@@ -11,7 +11,6 @@ const visit = (workspaceId: string) => ({
   deviceId: "device",
   workspaceId,
   lastTool: "terminal" as const,
-  visitedAt: 1,
 });
 
 test("recent visits retain eight distinct targets and replace the last tool on return", () => {
@@ -27,8 +26,8 @@ test("recent visits retain eight distinct targets and replace the last tool on r
     "5",
     "6",
   ]);
-  const returned = visitWorkspace(recents, { ...visit("2"), lastTool: "files", visitedAt: 2 });
-  expect(returned[0]).toMatchObject({ workspaceId: "2", lastTool: "files", visitedAt: 2 });
+  const returned = visitWorkspace(recents, { ...visit("2"), lastTool: "files" });
+  expect(returned[0]).toMatchObject({ workspaceId: "2", lastTool: "files" });
   expect(returned).toHaveLength(8);
   expect(
     readRecents([null, {}, { ...visit("bad"), lastTool: "other" }, ...returned, ...returned]),

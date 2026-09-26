@@ -2,7 +2,13 @@ import { randomUUID } from "node:crypto";
 import type { BigIntStats } from "node:fs";
 import { lstat, open, readlink, stat, symlink, unlink, type FileHandle } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
-import { AppError } from "@kiteline/shared/protocol";
+import {
+  AppError,
+  asError,
+  limits,
+  type FileCleanup,
+  type PathError,
+} from "@kiteline/shared/protocol";
 import { atomicJson, readJson } from "../config.js";
 import { publish } from "../mutations.js";
 import { sameObject } from "./paths.js";
@@ -21,7 +27,15 @@ export interface TrackedTemporary extends TemporaryRecord {
 export interface Temporary extends TrackedTemporary {
   path: string;
   handle: FileHandle;
-  closed: boolean;
+  closing?: Promise<void>;
+}
+
+interface Cleanup {
+  record: TemporaryRecord;
+  published: boolean;
+  running?: Promise<void>;
+  error?: unknown;
+  retry: boolean;
 }
 
 interface WriteAccess {
@@ -66,23 +80,121 @@ export class TemporaryFiles {
   private records: TemporaryRecord[] = [];
   private active = new Map<string, { record: TemporaryRecord; dependencies: BigIntStats[] }>();
   private path: string;
+  private cleanup = new Map<string, Cleanup>();
+  private cleanupAbort = new AbortController();
+  private retryTimer?: NodeJS.Timeout;
+  private closeTimer?: NodeJS.Timeout;
+  private stopping = false;
   constructor(dataDir: string) {
     this.path = join(dataDir, "temporary-files.json");
   }
 
-  async cleanStartup() {
+  async load() {
     try {
       this.records = (await readJson(this.path)) as TemporaryRecord[];
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
-    for (const record of [...this.records]) {
-      try {
-        await publish(() => this.removeLocked(record));
-      } catch (error) {
-        console.error("Temporary file cleanup:", join(record.parent, record.name), error);
+    for (const record of this.records) void this.clean(record);
+  }
+
+  status(): FileCleanup {
+    const failures: PathError[] = [];
+    let failed = 0,
+      bytes = 0;
+    for (const [path, item] of this.cleanup) {
+      if (!item.error) continue;
+      failed++;
+      const error = asError(item.error);
+      const failure = { path, error: { code: error.code, message: error.message.slice(0, 4096) } };
+      const size = Buffer.byteLength(JSON.stringify(failure));
+      if (bytes + size <= limits.resultBytes / 2 && failures.length < limits.listPageEntries) {
+        failures.push(failure);
+        bytes += size;
       }
     }
+    return {
+      pending: [...this.cleanup.values()].some((item) => !!item.running || item.retry),
+      retained: this.records.length,
+      failed,
+      failures,
+      truncated: failures.length < failed,
+    };
+  }
+
+  beginClose() {
+    if (this.stopping) return;
+    this.stopping = true;
+    clearTimeout(this.retryTimer);
+    this.closeTimer = setTimeout(() => {
+      this.cleanupAbort.abort(new AppError("cancelled", "Cleanup retained for the next start"));
+    }, 5000).unref();
+  }
+
+  async drain() {
+    for (;;) {
+      const running = [...this.cleanup.values()].flatMap((item) =>
+        item.running ? [item.running] : [],
+      );
+      if (!running.length) return;
+      await Promise.all(running);
+    }
+  }
+
+  async close() {
+    this.beginClose();
+    await this.drain();
+    clearTimeout(this.closeTimer);
+  }
+
+  private clean(record: TemporaryRecord, published = false): Promise<void> {
+    const path = join(record.parent, record.name);
+    let item = this.cleanup.get(path);
+    if (!item) {
+      item = { record, published, retry: false };
+      this.cleanup.set(path, item);
+    }
+    item.published ||= published;
+    if (item.running) return item.running;
+    item.retry = false;
+    if (this.cleanupAbort.signal.aborted) return Promise.resolve();
+    const current = item;
+    const operation = publish(
+      () => (current.published ? this.forgetLocked(record) : this.removeLocked(record)),
+      this.cleanupAbort.signal,
+    );
+    const running = operation
+      .then(
+        () => {
+          this.cleanup.delete(path);
+        },
+        (error: unknown) => {
+          if (!this.cleanupAbort.signal.aborted) this.failedCleanup(current, error);
+        },
+      )
+      .finally(() => {
+        current.running = undefined;
+        this.active.delete(path);
+        this.retryLater();
+      });
+    current.running = running;
+    return running;
+  }
+
+  private failedCleanup(item: Cleanup, error: unknown) {
+    item.error = error;
+    item.retry = !(error instanceof AppError && error.code === "conflict");
+    console.error("Temporary file cleanup:", join(item.record.parent, item.record.name), error);
+  }
+
+  private retryLater() {
+    if (this.stopping || this.retryTimer || ![...this.cleanup.values()].some((item) => item.retry))
+      return;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = undefined;
+      for (const item of this.cleanup.values())
+        if (item.retry) void this.clean(item.record, item.published);
+    }, 30_000).unref();
   }
 
   create(
@@ -101,9 +213,10 @@ export class TemporaryFiles {
       const name = `.kiteline-${randomUUID()}.tmp`;
       const path = join(parent, name);
       const handle = await open(path, "wx+", 0o600);
+      let record: TemporaryRecord | undefined;
       try {
         const file = await handle.stat({ bigint: true });
-        const record = {
+        record = {
           parent,
           name,
           parentDev: String(info.dev),
@@ -114,11 +227,13 @@ export class TemporaryFiles {
         this.records.push(record);
         await this.persist();
         this.active.set(path, { record, dependencies: route.items });
-        return { ...record, path, handle, closed: false };
+        return { ...record, path, handle };
       } catch (error) {
-        await handle.close().catch(() => {});
-        await unlink(path).catch(() => {});
-        this.records = this.records.filter((item) => item.name !== name);
+        await handle
+          .close()
+          .catch((closeError: unknown) => console.error("Temporary file close:", path, closeError));
+        if (record) await this.rollbackLocked(record);
+        else console.error("Temporary file identity could not be recorded:", path, error);
         throw error;
       }
     }, signal);
@@ -141,9 +256,10 @@ export class TemporaryFiles {
       const name = `.kiteline-${randomUUID()}.tmp`;
       const path = join(parent, name);
       await symlink(target, path);
+      let record: TemporaryRecord | undefined;
       try {
         const file = await lstat(path, { bigint: true });
-        const record = {
+        record = {
           parent,
           name,
           parentDev: String(info.dev),
@@ -156,17 +272,15 @@ export class TemporaryFiles {
         this.active.set(path, { record, dependencies: route.items });
         return { ...record, path };
       } catch (error) {
-        await unlink(path).catch(() => {});
-        this.records = this.records.filter((item) => item.name !== name);
+        if (record) await this.rollbackLocked(record);
+        else console.error("Temporary link identity could not be recorded:", path, error);
         throw error;
       }
     }, signal);
   }
 
-  async closeFile(temporary: Temporary) {
-    if (temporary.closed) return;
-    temporary.closed = true;
-    await temporary.handle.close();
+  closeFile(temporary: Temporary) {
+    return (temporary.closing ??= temporary.handle.close());
   }
 
   async write(temporary: Temporary, bytes: Buffer, position: number, signal: AbortSignal) {
@@ -188,22 +302,46 @@ export class TemporaryFiles {
 
   async release(
     temporary: TrackedTemporary,
-    { published, uncertain }: { published: boolean; uncertain: boolean },
+    { published }: { published: boolean; uncertain: boolean },
   ) {
     try {
       if ("handle" in temporary) await this.closeFile(temporary as Temporary);
-      if (!published && !uncertain) await this.discard(temporary);
     } finally {
+      if (
+        this.records.some(
+          (item) => item.parent === temporary.parent && item.name === temporary.name,
+        )
+      )
+        await this.clean(temporary, published);
       this.active.delete(temporary.path);
     }
   }
 
-  async discard(temporary: TrackedTemporary) {
+  discard(temporary: TrackedTemporary) {
+    return this.release(temporary, { published: false, uncertain: false });
+  }
+
+  private async rollbackLocked(record: TemporaryRecord) {
+    if (this.cleanupAbort.signal.aborted) return this.clean(record);
     try {
-      if ("handle" in temporary) await this.closeFile(temporary as Temporary);
-      await publish(() => this.removeLocked(temporary));
-    } finally {
-      this.active.delete(temporary.path);
+      await this.removeLocked(record);
+    } catch (error) {
+      const item: Cleanup = { record, published: false, retry: false };
+      this.cleanup.set(join(record.parent, record.name), item);
+      this.failedCleanup(item, error);
+      this.retryLater();
+    }
+  }
+
+  async publishedLocked(temporary: TrackedTemporary) {
+    if (this.cleanupAbort.signal.aborted) return this.clean(temporary, true);
+    try {
+      await this.forgetLocked(temporary);
+    } catch (error) {
+      const item: Cleanup = { record: temporary, published: true, retry: false };
+      this.cleanup.set(temporary.path, item);
+      this.failedCleanup(item, error);
+      this.retryLater();
     }
   }
 

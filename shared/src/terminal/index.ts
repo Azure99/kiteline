@@ -2,6 +2,7 @@ interface Disposable {
   dispose(): void;
 }
 interface BufferState {
+  x: number;
   scrollTop: number;
   scrollBottom: number;
   ybase: number;
@@ -24,11 +25,13 @@ interface TerminalCore {
     scrollDown(params: CsiParameters): boolean;
     insertLines(params: CsiParameters): boolean;
     deleteLines(params: CsiParameters): boolean;
+    repeatPrecedingCharacter(params: CsiParameters): boolean;
   };
   coreService: { triggerDataEvent(data: string, wasUserInput?: boolean): void };
   mouseStateService: { activeEncoding: string; activeProtocol: string };
 }
 interface AdaptableTerminal {
+  cols: number;
   rows: number;
   parser: {
     registerCsiHandler(
@@ -53,32 +56,36 @@ export function terminalOptions(historyLines: number) {
 export function adaptTerminalScrolling(terminal: AdaptableTerminal): Disposable {
   const internal = core(terminal);
   const input = internal._inputHandler;
-  const restore = (["scrollUp", "scrollDown", "insertLines", "deleteLines"] as const).map(
-    (name) => {
-      const original = input[name];
-      input[name] = function (params) {
-        const buffer = internal._bufferService.buffer;
-        const count = params.params[0]!;
-        // Further iterations only replace blank rows with blank rows.
-        params.params[0] = Math.min(count || 1, buffer.scrollBottom - buffer.scrollTop + 1);
-        try {
-          return original.call(this, params);
-        } finally {
-          params.params[0] = count;
-        }
-      };
-      return () => {
-        input[name] = original;
-      };
-    },
-  );
+  const restore = (
+    ["scrollUp", "scrollDown", "insertLines", "deleteLines", "repeatPrecedingCharacter"] as const
+  ).map((name) => {
+    const original = input[name];
+    input[name] = function (params) {
+      const buffer = internal._bufferService.buffer;
+      const maximum =
+        name === "repeatPrecedingCharacter"
+          ? terminal.cols - buffer.x
+          : buffer.scrollBottom - buffer.scrollTop + 1;
+      // tmux 3.4 bounds counts by the remaining columns or scroll region height.
+      if (maximum <= 0) return true;
+      const count = params.params[0]!;
+      params.params[0] = Math.min(count || 1, maximum);
+      try {
+        return original.call(this, params);
+      } finally {
+        params.params[0] = count;
+      }
+    };
+    return () => {
+      input[name] = original;
+    };
+  });
   const history = terminal.parser.registerCsiHandler({ final: "S" }, (params) => {
     const buffer = internal._bufferService.buffer;
     if (buffer !== internal._bufferService.buffers.normal || buffer.scrollTop !== 0) return false;
-    // Once retained history and the scroll region are blank, further scrolls add no content.
     const count = Math.min(
       typeof params[0] === "number" ? params[0] || 1 : 1,
-      terminal.rows + (terminal.options.scrollback ?? 0),
+      buffer.scrollBottom - buffer.scrollTop + 1,
     );
     for (let index = 0; index < count; index++) {
       const before = buffer.ybase;

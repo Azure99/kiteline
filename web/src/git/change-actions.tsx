@@ -35,7 +35,7 @@ export function RowActions({
   onDiscard,
   onFile,
 }: {
-  entry: GitEntry;
+  entry: GitEntry & { path: string };
   side: ChangeSide;
   disabled: boolean;
   onIndex: (paths: string[], kind: "stage" | "unstage") => void;
@@ -147,7 +147,9 @@ export function GitFeedback({
   const value = useGitActivity(actions, target);
   const details =
     value.error instanceof ApiError
-      ? (value.error.details as { blockedPaths?: string[]; truncated?: boolean } | undefined)
+      ? (value.error.details as
+          | { blockedPaths?: string[]; invalidPaths?: string[]; truncated?: boolean }
+          | undefined)
       : undefined;
   const result = (value.error instanceof ApiError ? value.error.result : value.result) as
     | { changedPaths?: string[]; stdout?: string; stderr?: string; truncated?: boolean }
@@ -232,6 +234,11 @@ export function GitFeedback({
           {path}
         </button>
       ))}
+      {details?.invalidPaths?.map((path) => (
+        <p key={path} className="break-all">
+          {t(($) => $.git.invalidPath, { path })}
+        </p>
+      ))}
       {details?.truncated && <p>{t(($) => $.git.moreBlockedPaths)}</p>}
       {(result?.stdout || result?.stderr) && (
         <details className="mt-1">
@@ -281,7 +288,9 @@ export function DiscardDialog({
   }, [target.deviceId, target.workspaceId, target.repoId, paths, scope]);
   const details =
     error instanceof ApiError
-      ? (error.details as { blockedPaths?: string[]; truncated?: boolean } | undefined)
+      ? (error.details as
+          | { blockedPaths?: string[]; invalidPaths?: string[]; truncated?: boolean }
+          | undefined)
       : undefined;
   return (
     <Dialog
@@ -325,6 +334,11 @@ export function DiscardDialog({
               <FolderOpen />
               {path}
             </Button>
+          ))}
+          {details?.invalidPaths?.map((path) => (
+            <p key={path} className="break-all">
+              {t(($) => $.git.invalidPath, { path })}
+            </p>
           ))}
           {details?.truncated && <p>{t(($) => $.git.moreBlockedPaths)}</p>}
         </div>

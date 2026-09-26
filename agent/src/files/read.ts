@@ -26,12 +26,10 @@ export async function readFile(
 ): Promise<FileRead> {
   const resolvedPath = await realpath(path);
   const handle = await open(resolvedPath, constants.O_RDONLY | constants.O_NONBLOCK);
-  let closed = false;
+  let closing: Promise<void> | undefined;
   const close = async () => {
-    if (!closed) {
-      closed = true;
-      await handle.close();
-    }
+    closing ??= handle.close();
+    await closing;
   };
   try {
     signal.throwIfAborted();
@@ -99,17 +97,15 @@ export async function readFile(
         throw new AppError("limit_exceeded", "Image dimensions exceed the preview limit");
       Object.assign(meta, { contentType: mime, width, height });
     }
-    const check = async () => {
-      if (purpose === "download") return;
+    if (bytes) {
       const after = await handle.stat({ bigint: true });
       if (after.size !== info.size || after.mtimeNs !== info.mtimeNs)
         throw new AppError("conflict", "File changed while being read; try again");
-    };
-    await check();
+      await close();
+    }
     const finish = async () => {
       try {
         signal.throwIfAborted();
-        await check();
       } finally {
         await close();
       }

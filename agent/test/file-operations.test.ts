@@ -9,6 +9,7 @@ import {
   readlink,
   lstat,
   rm,
+  rmdir,
   symlink,
   chmod,
   stat,
@@ -17,7 +18,8 @@ import {
   unlink,
 } from "node:fs/promises";
 import { join } from "node:path";
-import { OperationError } from "@kiteline/shared/protocol";
+import { AppError, OperationError } from "@kiteline/shared/protocol";
+import { publish } from "../src/mutations.js";
 import { FileOperations } from "../src/files/operations.js";
 import { TemporaryFiles } from "../src/files/temporary.js";
 import { Files } from "../src/files/index.js";
@@ -47,9 +49,11 @@ async function setup() {
   const metadata = new MetadataStore(config);
   const workspace = await metadata.add(root);
   const temporary = new TemporaryFiles(data);
+  cleanups.push(() => temporary.close());
   const directories = new Directories();
   cleanups.push(() => directories.close());
   const operations = new FileOperations(metadata, temporary);
+  cleanups.push(() => operations.close());
   return {
     root,
     data,
@@ -67,6 +71,93 @@ async function setup() {
   };
 }
 const copy = (path: string, targetPath: string) => [{ path, targetPath, collision: "error" }];
+
+test("cancel settles while cleanup waits for a real publication owner and later removes its record", async () => {
+  const { root, data, id, operations, temporary } = await setup();
+  await writeFile(join(root, "source"), Buffer.alloc(150000, 97));
+  const controller = new AbortController();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let owner: Promise<void> | undefined;
+  const write = temporary.write.bind(temporary);
+  vi.spyOn(temporary, "write").mockImplementationOnce(async (...args) => {
+    const bytes = await write(...args);
+    let entered!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    owner = publish(async () => {
+      entered();
+      await gate;
+    });
+    await ready;
+    controller.abort(new AppError("cancelled", "Cancel copying"));
+    return bytes;
+  });
+  try {
+    await expect(
+      operations.run("copy", id, copy("source", "target"), controller.signal),
+    ).rejects.toMatchObject({ outcome: "failed", code: "cancelled" });
+    expect(operations.cleanupPending).toBe(true);
+    const records = JSON.parse(await readFile(join(data, "temporary-files.json"), "utf8"));
+    expect(records).toHaveLength(1);
+    expect((await stat(join(root, records[0].name))).size).toBeGreaterThan(0);
+    await expect(lstat(join(root, "target"))).rejects.toMatchObject({ code: "ENOENT" });
+  } finally {
+    release();
+    await owner;
+    await operations.close();
+  }
+  expect(JSON.parse(await readFile(join(data, "temporary-files.json"), "utf8"))).toEqual([]);
+  expect(temporary.status()).toMatchObject({ pending: false, retained: 0, failed: 0 });
+});
+
+test.each([1, 2])(
+  "cancellation after confirmed publication uses business facts for %i selected items",
+  async (count) => {
+    const { root, id, operations, temporary } = await setup();
+    await writeFile(join(root, "source"), "confirmed");
+    const controller = new AbortController();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const published = temporary.publishedLocked.bind(temporary);
+    vi.spyOn(temporary, "publishedLocked").mockImplementationOnce(async (item) => {
+      await published(item);
+      controller.abort(new AppError("cancelled", "Late cancellation"));
+      await gate;
+    });
+    try {
+      const result = operations.run(
+        "copy",
+        id,
+        Array.from({ length: count }, (_, i) => ({
+          path: "source",
+          targetPath: `target${i}`,
+          collision: "error",
+        })),
+        controller.signal,
+      );
+      if (count === 1)
+        await expect(result).resolves.toMatchObject({ items: [{ outcome: "succeeded" }] });
+      else
+        await expect(result).rejects.toMatchObject({
+          outcome: "partial",
+          result: {
+            items: [{ outcome: "succeeded" }, { outcome: "failed", error: { code: "cancelled" } }],
+          },
+        });
+      expect(await readFile(join(root, "target0"), "utf8")).toBe("confirmed");
+      expect(operations.cleanupPending).toBe(true);
+    } finally {
+      release();
+      await operations.close();
+    }
+  },
+);
 
 test("active upload blocks relocating its directory and recursive copy omits only its owned temporary", async () => {
   const { root, id, files, binary, temporary, run } = await setup();
@@ -148,9 +239,19 @@ test("a published write is not busy when forgetting its cleanup record fails", a
   await unlink(join(data, "temporary-files.json"));
   await mkdir(join(data, "temporary-files.json"));
   try {
-    await expect(binary.save(upload, signal)).rejects.toMatchObject({ outcome: "unknown" });
+    await expect(binary.save(upload, signal)).resolves.toMatchObject({
+      path: "source/result",
+      size: 0,
+    });
+    expect(temporary.status()).toMatchObject({ retained: 1, failed: 1 });
     await files.rename(id, "source", "renamed", signal);
     expect(await readFile(join(root, "renamed/result"), "utf8")).toBe("");
+    await mkdir(join(root, "source"));
+    await writeFile(upload.temporary.path, "unrelated replacement");
+    await rmdir(join(data, "temporary-files.json"));
+    await temporary.release(upload.temporary, upload);
+    expect(await readFile(upload.temporary.path, "utf8")).toBe("unrelated replacement");
+    expect(temporary.status().retained).toBe(0);
   } finally {
     await temporary.release(upload.temporary, upload);
   }

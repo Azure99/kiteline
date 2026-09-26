@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Entry, FileListing } from "@kiteline/shared/protocol";
-import { rpc } from "../lib/api";
+import { cursorRpc, releaseCursor } from "../lib/cursors";
 import { i18n } from "../i18n";
 
 export interface DirectoryPage {
@@ -29,7 +29,8 @@ export function useFileBrowser(deviceId: string, workspaceId: string, active: bo
       const previous = pagesRef.current[path]?.listing;
       setPages((old) => ({ ...old, [path]: { ...old[path], busy: true, error: undefined } }));
       try {
-        let result = await rpc(
+        if (!more) await releaseCursor(deviceId, "directory", previous?.entries.nextCursor);
+        let result = await cursorRpc(
           deviceId,
           "files.list",
           {
@@ -39,14 +40,17 @@ export function useFileBrowser(deviceId: string, workspaceId: string, active: bo
           },
           controller.signal,
         );
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted) {
+          void releaseCursor(deviceId, "directory", result.entries.nextCursor);
+          return;
+        }
         const refreshed = [...result.entries.items];
         while (
           !more &&
           refreshed.length < (previous?.entries.items.length ?? 0) &&
           result.entries.nextCursor
         ) {
-          result = await rpc(
+          result = await cursorRpc(
             deviceId,
             "files.list",
             {
@@ -56,7 +60,10 @@ export function useFileBrowser(deviceId: string, workspaceId: string, active: bo
             },
             controller.signal,
           );
-          if (controller.signal.aborted) return;
+          if (controller.signal.aborted) {
+            void releaseCursor(deviceId, "directory", result.entries.nextCursor);
+            return;
+          }
           refreshed.push(...result.entries.items);
         }
         const items =
@@ -90,19 +97,27 @@ export function useFileBrowser(deviceId: string, workspaceId: string, active: bo
     return () => {
       enabled.current = false;
       for (const request of pending.values()) request.abort();
+      for (const page of Object.values(pagesRef.current))
+        void releaseCursor(deviceId, "directory", page.listing?.entries.nextCursor);
       pending.clear();
       waiting.clear();
     };
-  }, [active]);
+  }, [active, deviceId]);
   function forget(path: string) {
     for (const [key, request] of requests.current)
       if (isWithin(key, path)) {
         request.abort();
         requests.current.delete(key);
       }
-    setPages((old) =>
-      Object.fromEntries(Object.entries(old).filter(([key]) => !isWithin(key, path))),
+    for (const [key, page] of Object.entries(pagesRef.current))
+      if (isWithin(key, path)) {
+        queued.current.delete(key);
+        void releaseCursor(deviceId, "directory", page.listing?.entries.nextCursor);
+      }
+    pagesRef.current = Object.fromEntries(
+      Object.entries(pagesRef.current).filter(([key]) => !isWithin(key, path)),
     );
+    setPages(pagesRef.current);
   }
   return { pages, load, forget };
 }

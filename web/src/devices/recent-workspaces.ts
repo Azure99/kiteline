@@ -6,7 +6,6 @@ export interface RecentWorkspace {
   deviceId: string;
   workspaceId: string;
   lastTool: WorkspaceTool;
-  visitedAt: number;
 }
 
 const storageKey = "kiteline.recentWorkspaces";
@@ -21,8 +20,6 @@ export function readRecents(value: unknown): RecentWorkspace[] {
       typeof entry.deviceId !== "string" ||
       typeof entry.workspaceId !== "string" ||
       !["terminal", "files", "git"].includes(entry.lastTool) ||
-      typeof entry.visitedAt !== "number" ||
-      !Number.isFinite(entry.visitedAt) ||
       entries.some(
         (saved) => saved.deviceId === entry.deviceId && saved.workspaceId === entry.workspaceId,
       )
@@ -32,7 +29,6 @@ export function readRecents(value: unknown): RecentWorkspace[] {
       deviceId: entry.deviceId,
       workspaceId: entry.workspaceId,
       lastTool: entry.lastTool,
-      visitedAt: entry.visitedAt,
     });
     if (entries.length === recentLimit) break;
   }
@@ -98,7 +94,6 @@ export function useRecentWorkspaces(
         deviceId: device.id,
         workspaceId: workspace.id,
         lastTool: tool,
-        visitedAt: Date.now(),
       };
       visit.current.recorded = true;
     }

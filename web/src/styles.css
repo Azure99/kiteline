@@ -2,30 +2,30 @@
 @import "react-diff-view/style/index.css";
 @import "tailwindcss";
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-primary: var(--primary);
-  --color-primary-soft: var(--primary-soft);
-  --color-border: var(--border);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-destructive: var(--destructive);
-  --color-ring: var(--primary);
+@theme {
+  --color-background: #fff;
+  --color-foreground: #323946;
+  --color-primary: #426aad;
+  --color-primary-soft: #edf2fb;
+  --color-border: #e2e6ed;
+  --color-muted: #f6f7f9;
+  --color-muted-foreground: #707986;
+  --color-destructive: #bb3a43;
+  --color-ring: var(--color-primary);
 }
 
 :root {
   --viewport-height: 100vh;
   --viewport-large-height: 100vh;
   color-scheme: light;
-  --background: #fff;
-  --foreground: #323946;
-  --primary: #426aad;
-  --primary-soft: #edf2fb;
-  --border: #e2e6ed;
-  --muted: #f6f7f9;
-  --muted-foreground: #707986;
-  --destructive: #bb3a43;
+  --background: var(--color-background);
+  --foreground: var(--color-foreground);
+  --primary: var(--color-primary);
+  --primary-soft: var(--color-primary-soft);
+  --border: var(--color-border);
+  --muted: var(--color-muted);
+  --muted-foreground: var(--color-muted-foreground);
+  --destructive: var(--color-destructive);
   --terminal: #20242b;
   --terminal-foreground: #d6dce5;
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
@@ -104,30 +104,6 @@ body {
   :where(input, textarea):not([data-slot="input"])::placeholder {
     color: currentColor;
     opacity: 0.5;
-  }
-  .border-border\/50 {
-    border-color: rgb(226 230 237 / 50%);
-  }
-  .bg-amber-200\/70 {
-    background-color: #fee685b3;
-  }
-  .bg-black\/25 {
-    background-color: rgb(0 0 0 / 25%);
-  }
-  .bg-muted\/25 {
-    background-color: rgb(246 247 249 / 25%);
-  }
-  .bg-muted\/40 {
-    background-color: rgb(246 247 249 / 40%);
-  }
-  .bg-muted\/50 {
-    background-color: rgb(246 247 249 / 50%);
-  }
-  .bg-muted\/60 {
-    background-color: rgb(246 247 249 / 60%);
-  }
-  .bg-muted\/65 {
-    background-color: rgb(246 247 249 / 65%);
   }
 }
 .focus-visible\:ring-2:focus-visible {

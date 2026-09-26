@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { ErrorNotice } from "../components/error-notice";
-import { Circle, X } from "lucide-react";
+import { Circle, Copy, X } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { IconButton } from "../components/icon-button";
 import {
@@ -14,6 +14,7 @@ import {
 import { draftError, isDirty, useDrafts, type DraftStore } from "./drafts";
 import { closeDraft, requestCloseDraft, showDraft, syncDraftPath } from "./navigation";
 import { useRoute } from "../lib/navigation";
+import { copyText } from "../lib/clipboard";
 
 export function OpenFiles({
   store,
@@ -25,6 +26,10 @@ export function OpenFiles({
   onOpenChange(open: boolean): void;
 }) {
   const { t } = useTranslation();
+  const [copyError, setCopyError] = useState<unknown>();
+  useEffect(() => {
+    if (!open) setCopyError(undefined);
+  }, [open]);
 
   const drafts = useDrafts(store);
   const closing = drafts.find((item) => item.id === store.closing);
@@ -46,6 +51,11 @@ export function OpenFiles({
           <DialogHeader>
             <DialogTitle>{t(($) => $.files.openCount, { count: drafts.length })}</DialogTitle>
           </DialogHeader>
+          {!!copyError && (
+            <div role="alert" className="px-4 text-sm text-destructive">
+              <ErrorNotice error={copyError} />
+            </div>
+          )}
           <div className="scroll-area overflow-auto p-2">
             {drafts.map((draft) => (
               <div key={draft.id} className="flex items-center">
@@ -77,6 +87,16 @@ export function OpenFiles({
                   </span>
                   {isDirty(draft) && <Circle size={7} fill="currentColor" />}
                 </Button>
+                <IconButton
+                  label={t(($) => $.files.copyText)}
+                  disabled={!draft.state}
+                  onClick={() => {
+                    setCopyError(undefined);
+                    void copyText(draft.state!.doc.toString()).catch(setCopyError);
+                  }}
+                >
+                  <Copy size={13} />
+                </IconButton>
                 <IconButton
                   label={t(($) => $.common.closeNamed, { name: draft.path })}
                   onClick={() => requestCloseDraft(store, draft)}

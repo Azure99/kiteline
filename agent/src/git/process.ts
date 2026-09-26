@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { isUtf8 } from "node:buffer";
 import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { AppError, asError, OperationError, limits } from "@kiteline/shared/protocol";
+import { AppError, asError, OperationError, limits, type GitPath } from "@kiteline/shared/protocol";
 import { BytePrefix } from "../buffers.js";
 import { groupRunning } from "../process-group.js";
 
@@ -206,6 +206,16 @@ export function utf8(bytes: Buffer) {
   if (!isUtf8(bytes))
     throw new AppError("unsupported", "Git path is not valid UTF-8; handle it in the terminal");
   return bytes.toString();
+}
+export function gitPath(bytes: Buffer, old?: Buffer): GitPath {
+  if (isUtf8(bytes) && (!old || isUtf8(old)))
+    return { path: bytes.toString(), ...(old ? { oldPath: old.toString() } : {}) };
+  const escaped = (value: Buffer) =>
+    Array.from(value, (byte) => `\\x${byte.toString(16).padStart(2, "0")}`).join("");
+  return { pathError: old ? `${escaped(old)} -> ${escaped(bytes)}` : escaped(bytes) };
+}
+export function gitPathKey(path: GitPath) {
+  return JSON.stringify([path.path, path.oldPath, path.pathError]);
 }
 export function commandLine(bytes: Buffer) {
   return utf8(bytes.at(-1) === 10 ? bytes.subarray(0, -1) : bytes);

@@ -35,6 +35,7 @@ async function setup() {
   const metadata = new MetadataStore(config);
   const workspace = await metadata.add(root);
   const temporary = new TemporaryFiles(data);
+  cleanups.push(() => temporary.close());
   const files = new TextFiles(config, metadata, temporary);
   const signal = new AbortController().signal;
   return { root, data, id: workspace.id, files, temporary, signal, config };
@@ -93,12 +94,13 @@ test("late saves conflict after content changes or rename and never recreate the
   expect(JSON.parse(await readFile(join(data, "temporary-files.json"), "utf8"))).toEqual([]);
 });
 
-test("read completion detects changed content, rejects non-text and enforces encoded capacity", async () => {
+test("buffered text survives later disk changes, rejects non-text and enforces encoded capacity", async () => {
   const { files, id, root, signal, config } = await setup();
   await writeFile(join(root, "a"), "first");
   const read = await files.read(id, "a", signal);
   await writeFile(join(root, "a"), "later content");
-  await expect(read.finish()).rejects.toMatchObject({ code: "conflict" });
+  expect((await read.read(0, read.meta.size)).toString()).toBe("first");
+  await read.finish();
   await writeFile(join(root, "binary"), Buffer.from([1, 0, 3]));
   await expect(files.read(id, "binary", signal)).rejects.toMatchObject({ code: "unsupported" });
   await writeFile(join(root, "invalid"), Buffer.from([0xff]));
@@ -136,7 +138,8 @@ test("automatic open uses content and independent limits while preserving text s
   });
   expect(text.meta.revision).toBeTruthy();
   await writeFile(join(root, "text.png"), "changed");
-  await expect(text.finish()).rejects.toMatchObject({ code: "conflict" });
+  expect((await text.read(0, text.meta.size)).toString()).toBe("\uFEFFtext\r\n");
+  await text.finish();
   await writeFile(join(root, "large"), "x".repeat(33));
   await expect(files.read(id, "large", signal, "open")).rejects.toMatchObject({
     code: "limit_exceeded",
@@ -158,7 +161,8 @@ test("startup cleans only the registered temporary identity and exclusive saves 
   await temporary.closeFile(pending.temporary);
   await writeFile(join(root, ".kiteline-unregistered.tmp"), "keep");
   const restored = new TemporaryFiles(data);
-  await restored.cleanStartup();
+  await restored.load();
+  await restored.drain();
   await expect(stat(pending.temporary.path)).rejects.toMatchObject({ code: "ENOENT" });
   expect(await readFile(join(root, ".kiteline-unregistered.tmp"), "utf8")).toBe("keep");
   const race = await files.prepare(id, "new", 3, true, undefined, signal);
@@ -182,7 +186,7 @@ test("lowering the editor limit still allows saving a reduced draft against its 
   expect(await readFile(join(root, "a"), "utf8")).toBe("new");
 });
 
-test("cancelled temporary writes are removed while uncertain publication retains its record", async () => {
+test("ended temporary writers are cleaned without inferring an uncertain business result", async () => {
   const { files, temporary, id, data, signal } = await setup();
   const cancelled = await files.prepare(id, "cancelled", 6, true, undefined, signal);
   cancelled.received = await temporary.write(cancelled.temporary, Buffer.from("one"), 0, signal);
@@ -199,8 +203,7 @@ test("cancelled temporary writes are removed while uncertain publication retains
   uncertain.received = await temporary.write(uncertain.temporary, Buffer.from("new"), 0, signal);
   uncertain.uncertain = true;
   await temporary.release(uncertain.temporary, uncertain);
-  expect(await readFile(uncertain.temporary.path, "utf8")).toBe("new");
-  expect(JSON.parse(await readFile(join(data, "temporary-files.json"), "utf8"))).toMatchObject([
-    { name: uncertain.temporary.name },
-  ]);
+  await expect(stat(uncertain.temporary.path)).rejects.toMatchObject({ code: "ENOENT" });
+  expect(JSON.parse(await readFile(join(data, "temporary-files.json"), "utf8"))).toEqual([]);
+  expect(uncertain.uncertain).toBe(true);
 });

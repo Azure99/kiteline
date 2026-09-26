@@ -4,12 +4,21 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { AppError, terminalProfile } from "@kiteline/shared/protocol";
 import { tmux } from "@kiteline/shared/terminal/node";
+import type { RecorderCall } from "@kiteline/shared/ipc";
 import { Agent } from "../src/control.js";
 import { defaultAgentLimits } from "../src/config.js";
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
-  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+  const failures: unknown[] = [];
+  for (const cleanup of cleanups.splice(0).reverse()) {
+    try {
+      await cleanup();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length) throw new AggregateError(failures, "Terminal test cleanup failed");
 });
 async function until(check: () => boolean | Promise<boolean>, timeout = 5000) {
   const deadline = Date.now() + timeout;
@@ -314,6 +323,38 @@ test("a failed tmux kill marks the session unavailable and can recover the same 
   const { agent, workspace, dataDir, signal } = await fixture();
   const session = await agent.sessions.create(workspace.id, undefined, undefined, signal);
   const identity = agent.sessions.get(session.id).identity;
+  const serverPid = Number(
+    (await tmux(identity.socket, ["display-message", "-p", "#{pid}"])).trim(),
+  );
+  const processStart = async () => {
+    const value = await readFile(`/proc/${serverPid}/stat`, "utf8").catch(() => "");
+    return value.slice(value.lastIndexOf(")") + 2).split(" ")[19];
+  };
+  const started = await processStart();
+  let held = false;
+  const restoreSocket = async () => {
+    if (held) {
+      await rename(identity.socket + ".held", identity.socket);
+      held = false;
+    }
+  };
+  const stopOwned = async () => {
+    if (started && (await processStart()) === started) {
+      try {
+        process.kill(serverPid, "SIGKILL");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+      }
+    }
+  };
+  cleanups.push(async () => {
+    try {
+      await restoreSocket();
+      await tmux(identity.socket, ["kill-server"]).catch(() => {});
+    } finally {
+      await stopOwned();
+    }
+  });
   const pane = () => tmux(identity.socket, ["display-message", "-p", "#{pane_pid} #{pane_dead}"]);
   const before = await pane();
   let ended = false;
@@ -321,12 +362,24 @@ test("a failed tmux kill marks the session unavailable and can recover the same 
     if (message.type === "ended") ended = true;
   };
   await rename(identity.socket, identity.socket + ".held");
+  held = true;
+  const recorder = agent.sessions.recorder;
+  const original = recorder.request.bind(recorder);
+  recorder.request = async <T>(message: RecorderCall): Promise<T> => {
+    try {
+      return await original<T>(message);
+    } catch (error) {
+      if (message.type === "end") await restoreSocket();
+      throw error;
+    }
+  };
   try {
     await expect(agent.sessions.end(workspace.id, session.id)).rejects.toMatchObject({
       code: "command_failed",
     });
   } finally {
-    await rename(identity.socket + ".held", identity.socket);
+    recorder.request = original;
+    await restoreSocket();
   }
   expect(ended).toBe(false);
   expect(agent.sessions.get(session.id).session).toMatchObject({

@@ -9,24 +9,32 @@ import { CursorBudget } from "./cursor-budget.js";
 
 interface Cursor {
   path: string;
-  entryParent: string;
-  directory: Dir;
+  entryParent?: string;
+  directory?: Dir;
   carry: Dirent | null;
   timer: NodeJS.Timeout;
   busy: boolean;
-  info: BigIntStats;
+  info?: BigIntStats;
   release: () => void;
+  controller: AbortController;
+  reading?: Promise<void>;
+  closing?: Promise<void>;
 }
 export class Directories {
   private cursors = new Map<string, Cursor>();
   constructor(private budget = new CursorBudget()) {}
-  private async closeCursor(id: string) {
+  async release(id: string) {
     const cursor = this.cursors.get(id);
     if (!cursor) return;
     clearTimeout(cursor.timer);
-    this.cursors.delete(id);
-    cursor.release();
-    await cursor.directory.close().catch(() => {});
+    cursor.controller.abort(new AppError("cancelled", "Directory listing has ended"));
+    cursor.closing ??= (async () => {
+      await cursor.reading;
+      await cursor.directory?.close().catch(() => {});
+      this.cursors.delete(id);
+      cursor.release();
+    })();
+    await cursor.closing;
   }
   async list(
     path: string,
@@ -36,67 +44,65 @@ export class Directories {
   ): Promise<DirectoryListing> {
     if (!isAbsolute(path))
       throw new AppError("invalid_argument", "An absolute directory path is required");
-    path = await realpath(path);
-    entryParent ??= path;
     signal?.throwIfAborted();
     const id = token ?? randomUUID();
     let cursor = this.cursors.get(id);
-    const info = await stat(path, { bigint: true });
-    if (
-      token &&
-      (!cursor ||
-        cursor.path !== path ||
-        cursor.entryParent !== entryParent ||
-        !sameObject(cursor.info, info) ||
-        cursor.info.mtimeNs !== info.mtimeNs)
-    ) {
-      if (cursor) await this.closeCursor(id);
+    if (token && (!cursor || cursor.closing))
       throw new AppError("conflict", "Directory listing has changed or expired; refresh");
-    }
     if (!cursor) {
       const release = this.budget.reserve();
-      // Node 24 supports raw names here; its current typings omit this encoding.
-      try {
-        const directory = await opendir(path, { encoding: "buffer" as BufferEncoding });
-        if (signal?.aborted) {
-          await directory.close();
-          signal.throwIfAborted();
-        }
-        cursor = {
-          path,
-          entryParent,
-          directory,
-          carry: null,
-          busy: false,
-          info,
-          release,
-          timer: setTimeout(() => {
-            void this.closeCursor(id);
-          }, limits.cursorLifetime),
-        };
-        this.cursors.set(id, cursor);
-      } catch (error) {
-        release();
-        throw error;
-      }
+      cursor = {
+        path,
+        entryParent,
+        carry: null,
+        busy: false,
+        release,
+        controller: new AbortController(),
+        timer: setTimeout(() => void this.release(id), limits.cursorLifetime),
+      };
+      this.cursors.set(id, cursor);
     }
     if (cursor.busy) throw new AppError("busy", "This directory page is being read");
     cursor.busy = true;
     cursor.timer.refresh();
+    signal = AbortSignal.any([cursor.controller.signal, ...(signal ? [signal] : [])]);
+    let finishRead!: () => void;
+    cursor.reading = new Promise<void>((resolve) => {
+      finishRead = resolve;
+    });
+    let more = false;
     const items: Entry[] = [];
-    let bytes =
-      512 +
-      Buffer.byteLength(JSON.stringify(path)) * 2 +
-      Buffer.byteLength(JSON.stringify(entryParent));
     try {
+      path = await realpath(path);
+      entryParent ??= path;
+      signal.throwIfAborted();
+      const info = await stat(path, { bigint: true });
+      signal.throwIfAborted();
+      if (
+        cursor.info &&
+        (cursor.path !== path ||
+          cursor.entryParent !== entryParent ||
+          !sameObject(cursor.info, info) ||
+          cursor.info.mtimeNs !== info.mtimeNs)
+      )
+        throw new AppError("conflict", "Directory listing has changed or expired; refresh");
+      if (!cursor.directory) {
+        cursor.path = path;
+        cursor.entryParent = entryParent;
+        cursor.info = info;
+        // Node 24 supports raw names here; its current typings omit this encoding.
+        cursor.directory = await opendir(path, { encoding: "buffer" as BufferEncoding });
+      }
+      let bytes =
+        512 +
+        Buffer.byteLength(JSON.stringify(path)) * 2 +
+        Buffer.byteLength(JSON.stringify(entryParent));
       while (items.length < limits.listPageEntries) {
-        signal?.throwIfAborted();
+        signal.throwIfAborted();
         const item = cursor.carry ?? (await cursor.directory.read());
         cursor.carry = null;
-        if (!item) {
-          await this.closeCursor(id);
-          break;
-        }
+        signal.throwIfAborted();
+        if (!item) break;
         const rawName: Buffer = Buffer.isBuffer(item.name) ? item.name : Buffer.from(item.name);
         let entry: Entry;
         try {
@@ -115,17 +121,17 @@ export class Directories {
         bytes += size + 1;
         items.push(entry);
       }
-      if (this.cursors.has(id)) {
+      if (items.length === limits.listPageEntries) {
+        signal.throwIfAborted();
         cursor.carry ??= await cursor.directory.read();
-        if (!cursor.carry) await this.closeCursor(id);
       }
-    } catch (error) {
-      await this.closeCursor(id);
-      throw error;
+      signal.throwIfAborted();
+      more = !!cursor.carry;
     } finally {
       cursor.busy = false;
+      finishRead();
+      if (!more || signal.aborted) await this.release(id);
     }
-    const more = this.cursors.has(id);
     items.sort(
       (a, b) =>
         Number(b.kind === "directory") - Number(a.kind === "directory") ||
@@ -148,6 +154,6 @@ export class Directories {
     }, signal);
   }
   async close() {
-    await Promise.all([...this.cursors.keys()].map((id) => this.closeCursor(id)));
+    await Promise.all([...this.cursors.keys()].map((id) => this.release(id)));
   }
 }

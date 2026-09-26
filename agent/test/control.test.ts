@@ -11,8 +11,15 @@ import { WebSocket, WebSocketServer } from "ws";
 import { Agent } from "../src/control.js";
 import { defaultAgentLimits } from "../src/config.js";
 import { localRequest } from "../src/local.js";
-import { appVersion, limits, OperationError, type Session } from "@kiteline/shared/protocol";
+import {
+  appVersion,
+  limits,
+  OperationError,
+  type Reply,
+  type Session,
+} from "@kiteline/shared/protocol";
 import type { DoctorReport } from "../src/doctor.js";
+import { publish } from "../src/mutations.js";
 
 test("control reconnects after handshake rejection, retains valid watches and scopes remote session end", async () => {
   const root = await mkdtemp("/var/tmp/kiteline-agent-control-");
@@ -203,6 +210,107 @@ test("control reconnects after handshake rejection, retains valid watches and sc
     log.mockRestore();
   }
 }, 20000);
+
+test("bulk file requests outlive the RPC timeout and still cancel while publication is blocked", async () => {
+  const root = await mkdtemp("/var/tmp/kiteline-bulk-control-");
+  const server = createHttpServer();
+  const sockets = new WebSocketServer({ server });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const agent = new Agent(
+    {
+      dataDir: root,
+      runDir: join(root, "run"),
+      shell: "/bin/sh",
+      limits: { ...defaultAgentLimits, rpcTimeout: 50 },
+    },
+    {
+      deviceId: "test",
+      deviceToken: "test",
+      server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    },
+  );
+  let release: (() => void) | undefined;
+  let held: Promise<void> | undefined;
+  const hold = async () => {
+    let started = false;
+    held = publish(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+          started = true;
+        }),
+    );
+    await expect.poll(() => started).toBe(true);
+  };
+  try {
+    await mkdir(join(root, "workspace"));
+    await writeFile(join(root, "workspace/source"), "actual copy");
+    const workspace = await agent.metadata.add(join(root, "workspace"));
+    const connected = once(sockets, "connection");
+    await agent.start();
+    const [peer] = (await connected) as [WebSocket];
+    const replies: Reply[] = [];
+    peer.on("message", (data) => {
+      const message = JSON.parse(data.toString());
+      if (message.type === "rpc.result") replies.push(message.reply);
+    });
+    peer.send(JSON.stringify({ type: "welcome", connectionId: "test", serverVersion: appVersion }));
+    const copy = (id: string) =>
+      peer.send(
+        JSON.stringify({
+          type: "rpc.request",
+          id,
+          method: "files.copy",
+          params: {
+            workspaceId: workspace.id,
+            items: [{ path: "source", targetPath: id, collision: "error" }],
+          },
+        }),
+      );
+    await hold();
+    copy("waited");
+    await expect.poll(() => agent.requests.has("waited")).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(replies).toEqual([]);
+    expect(agent.requests.get("waited")!.signal.aborted).toBe(false);
+    release!();
+    await held;
+    await expect
+      .poll(() => replies.find((reply) => reply.id === "waited"))
+      .toMatchObject({ outcome: "succeeded" });
+    expect(await readFile(join(root, "workspace/waited"), "utf8")).toBe("actual copy");
+
+    await hold();
+    copy("cancelled");
+    await expect.poll(() => agent.requests.has("cancelled")).toBe(true);
+    peer.send(JSON.stringify({ type: "rpc.cancel", id: "cancelled" }));
+    await expect
+      .poll(() => replies.find((reply) => reply.id === "cancelled"))
+      .toMatchObject({ outcome: "failed", error: { code: "cancelled" } });
+    await expect(readFile(join(root, "workspace/cancelled"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+
+    copy("disconnected");
+    await expect.poll(() => agent.requests.has("disconnected")).toBe(true);
+    peer.close();
+    await expect.poll(() => agent.requests.has("disconnected")).toBe(false);
+    release!();
+    await held;
+    await expect(readFile(join(root, "workspace/disconnected"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  } finally {
+    release?.();
+    await held;
+    await agent.close();
+    for (const peer of sockets.clients) peer.terminate();
+    await new Promise<void>((resolve) => sockets.close(() => resolve()));
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("control bounds replies without losing outcomes and ignores buffered requests after rejection", async () => {
   const root = await mkdtemp("/var/tmp/kiteline-control-budget-");

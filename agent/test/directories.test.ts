@@ -44,6 +44,14 @@ test("directory pages keep raw names non-actionable and enforce the concurrent c
     size: 0,
     mtime: expect.any(String),
   });
+  const peer = await directories.list(path);
+  for (let index = 0; index < 20; index++) {
+    const page = await directories.list(path);
+    await directories.release(page.entries.nextCursor!);
+    await directories.release(page.entries.nextCursor!);
+  }
+  const peerMore = await directories.list(path, peer.entries.nextCursor);
+  expect(peer.entries.items.length + peerMore.entries.items.length).toBe(502);
   const concurrent = await Promise.allSettled(
     Array.from({ length: 32 }, () => directories.list(path)),
   );
@@ -55,6 +63,19 @@ test("directory pages keep raw names non-actionable and enforce the concurrent c
     await expect(directories.list(path, saved.value.entries.nextCursor)).rejects.toMatchObject({
       code: "conflict",
     });
+});
+
+test("closing a first directory read waits for it and prevents a late live cursor", async () => {
+  const path = await directory();
+  const directories = new Directories();
+  cleanups.push(() => directories.close());
+  const pending = directories.list(path);
+  const cancelled = expect(pending).rejects.toMatchObject({ code: "cancelled" });
+  await Promise.all([directories.close(), directories.close()]);
+  await cancelled;
+  await expect(directories.list(path)).resolves.toMatchObject({
+    entries: { items: [], truncated: false },
+  });
 });
 
 test("workspace registration deduplicates canonical paths and failed budgets do not publish", async () => {

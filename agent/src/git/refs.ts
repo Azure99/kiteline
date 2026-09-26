@@ -7,7 +7,7 @@ import {
 } from "@kiteline/shared/protocol";
 import { commandLine, git } from "./process.js";
 import { commitOid } from "./history.js";
-import { headIdentity, observeIndex, readStatus } from "./status.js";
+import { headIdentity, observeIndex } from "./status.js";
 
 async function headAfter(repo: Repo, signal: AbortSignal, known: object) {
   try {
@@ -24,16 +24,12 @@ async function headAfter(repo: Repo, signal: AbortSignal, known: object) {
 }
 export async function commit(repo: Repo, message: string, indexToken: string, signal: AbortSignal) {
   if (!message.trim()) throw new AppError("invalid_argument", "Enter a commit message");
-  if ((await observeIndex(repo, signal)).token !== indexToken)
+  const observation = await observeIndex(repo, signal);
+  if (observation.token !== indexToken)
     throw new AppError("conflict", "HEAD/index has changed; refresh before committing");
-  let staged = false,
-    conflicted = false;
-  await readStatus(repo, signal, (entry) => {
-    conflicted ||= entry.conflict;
-    staged ||= ![".", "?"].includes(entry.indexStatus);
-  });
-  if (conflicted) throw new AppError("conflict", "Repository still has unresolved conflicts");
-  if (!staged) throw new AppError("conflict", "No staged changes");
+  if (observation.hasConflicts)
+    throw new AppError("conflict", "Repository still has unresolved conflicts");
+  if (!observation.hasStagedChanges) throw new AppError("conflict", "No staged changes");
   await git(repo.rootPath, ["commit", "-F", "-"], signal, { input: message, write: true });
   const head = await headAfter(repo, signal, { committed: true });
   if (!head.oid)

@@ -5,35 +5,32 @@ import {
   limits,
   type DiffSummary,
   type GitDiff,
+  type GitPath,
   type Repo,
 } from "@kiteline/shared/protocol";
 import { relativePath } from "../files/paths.js";
-import { git, NulRecords, utf8 } from "./process.js";
+import { git, gitPath, gitPathKey, NulRecords } from "./process.js";
 import { diffOptions, readStatus } from "./status.js";
 
-export interface RawChange {
-  path: string;
-  oldPath?: string;
+export type RawChange = GitPath & {
   status: string;
   oldMode: string;
   newMode: string;
-}
+};
 export function rawReader(each: (change: RawChange) => void) {
-  let header: string[] | undefined, from: string | undefined;
+  let header: string[] | undefined, from: Buffer | undefined;
   const reader = new NulRecords((record) => {
     if (!header) {
       header = record.toString("ascii").replace(/^:/, "").split(" ");
       return;
     }
-    const path = utf8(record);
     const status = header[4]!;
     if (/^[RC]/.test(status) && from === undefined) {
-      from = path;
+      from = record;
       return;
     }
     each({
-      path,
-      ...(from === undefined ? {} : { oldPath: from }),
+      ...gitPath(record, from),
       status: status[0]!,
       oldMode: header[0]!,
       newMode: header[1]!,
@@ -49,12 +46,17 @@ export function rawReader(each: (change: RawChange) => void) {
     },
   };
 }
-export function numstatReader(each: (path: string, binary: boolean) => void) {
+export function numstatReader(each: (path: GitPath, binary: boolean) => void) {
   let renamed = 0,
     binary = false;
+  let from: Buffer | undefined;
   const reader = new NulRecords((record) => {
     if (renamed) {
-      each(utf8(record), binary);
+      if (renamed === 2) from = record;
+      else {
+        each(gitPath(record, from), binary);
+        from = undefined;
+      }
       renamed--;
       return;
     }
@@ -63,7 +65,7 @@ export function numstatReader(each: (path: string, binary: boolean) => void) {
     if (first < 0 || second < 0) throw new AppError("io_error", "Git numstat is incomplete");
     binary = record[0] === 45;
     if (second === record.length - 1) renamed = 2;
-    else each(utf8(record.subarray(second + 1)), binary);
+    else each(gitPath(record.subarray(second + 1)), binary);
   });
   return {
     data: reader.data,
@@ -76,7 +78,7 @@ export function numstatReader(each: (path: string, binary: boolean) => void) {
 export function binaryPaths(bytes: Buffer) {
   const paths = new Set<string>();
   const reader = numstatReader((path, binary) => {
-    if (binary) paths.add(path);
+    if (binary) paths.add(gitPathKey(path));
   });
   reader.data(bytes);
   reader.end();
@@ -198,13 +200,13 @@ export async function workingDiff(
     onData: raw.data,
   });
   raw.end();
-  if (!change)
+  if (change?.path === undefined)
     throw new AppError("conflict", "Selected change no longer applies; refresh", {
       reason: "change_unavailable",
     });
   let binary = false;
-  const nums = numstatReader((itemPath, isBinary) => {
-    if (itemPath === path) binary = isBinary;
+  const nums = numstatReader((item, isBinary) => {
+    if (item.path === path) binary = isBinary;
   });
   await git(repo.rootPath, [...args, "--numstat", "-z", "--", ...pathspecs], signal, {
     onData: nums.data,

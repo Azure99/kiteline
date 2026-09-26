@@ -11,7 +11,7 @@ export function inSide(entry: GitEntry, side: ChangeSide) {
   if (entry.conflict) return false;
   return side === "staged" ? ![".", "?"].includes(entry.indexStatus) : entry.worktreeStatus !== ".";
 }
-export function selectionOf(entry: GitEntry, side: ChangeSide): ChangeSelection {
+export function selectionOf(entry: GitEntry & { path: string }, side: ChangeSide): ChangeSelection {
   const status = side === "staged" ? entry.indexStatus : entry.worktreeStatus;
   const types =
     side === "staged"
@@ -45,6 +45,6 @@ export function reconcileSelection(
     const entry = next.entries.find(
       (entry) => entry.path === item.path && inSide(entry, item.side),
     );
-    return entry && selectionOf(entry, item.side).signature === item.signature;
+    return entry?.path !== undefined && selectionOf(entry, item.side).signature === item.signature;
   });
 }

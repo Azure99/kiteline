@@ -102,20 +102,8 @@ export class BinaryFiles {
         if (error instanceof OperationError && error.outcome === "unknown") item.uncertain = true;
         throw error;
       }
-      try {
-        await this.temporary.forgetLocked(item.temporary);
-        return { path: item.path, size: item.size };
-      } catch (error) {
-        throw new OperationError(
-          "io_error",
-          `Published, but the result is unconfirmed: ${String(error)}`,
-          "unknown",
-          {
-            path: item.path,
-            size: item.size,
-          },
-        );
-      }
+      await this.temporary.publishedLocked(item.temporary);
+      return { path: item.path, size: item.size };
     }, signal);
   }
 }

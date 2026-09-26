@@ -152,7 +152,7 @@ test("download retains the initial handle and length while append, replace or la
   await empty.finish();
 });
 
-test("image metadata uses actual bytes and enforces pixel and final file checks", async () => {
+test("image metadata and buffered bytes stay consistent after later disk changes", async () => {
   const { root, id, files, signal, config } = await setup();
   const png = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=",
@@ -163,7 +163,8 @@ test("image metadata uses actual bytes and enforces pixel and final file checks"
   expect(image.meta).toMatchObject({ contentType: "image/png", width: 1, height: 1 });
   expect(await image.read(0, png.length)).toEqual(png);
   await appendFile(join(root, "image.wrong-extension"), "changed");
-  await expect(image.finish()).rejects.toMatchObject({ code: "conflict" });
+  expect(await image.read(0, image.meta.size)).toEqual(png);
+  await image.finish();
   config.limits.imagePixels = 0;
   await expect(files.read(id, "image.wrong-extension", "image", signal)).rejects.toMatchObject({
     code: "limit_exceeded",

@@ -100,6 +100,7 @@ export const en = {
     webMismatch:
       "Web {{web}} / Server {{server}}: remote operations are paused. Copy any unsaved content before reloading.",
     reload: "Reload page",
+    reloadDrafts: "Reloading does not restore this page's drafts. Unsaved changes will be lost.",
   },
   common: {
     language: "Language",
@@ -273,7 +274,6 @@ export const en = {
     partialPorts: "Only some ports are shown",
     portRange: "Enter a port from 1 to 65535",
     copyLink: "Copy link",
-    linkCopied: "Link copied",
     expiresAt: "Expires at {{time}}",
     lastSeen: "Last connected {{time}}",
     versionMismatch: "Version mismatch",
@@ -386,6 +386,11 @@ export const en = {
     tooMuchOutput: "Too much output to announce. Navigate through the lines to read it.",
   },
   files: {
+    cleaning: "Cleanup in progress",
+    cleanupUnknown: "Cleanup status is unconfirmed",
+    cleanupFailed: "Some temporary files could not be cleaned up",
+    cleanupRetained: "Temporary items: {{count}}",
+    cleanupFailures: "Cleanup failures: {{count}}",
     searchTitle: "File search",
     backFiles: "Back to files",
     searchType: "Search type",
@@ -567,6 +572,7 @@ export const en = {
     stageDiskConfirm: "Selected files have unsaved changes. Stage the disk versions on the device?",
     changedPaths: "Changed paths",
     moreBlockedPaths: "Additional blocking paths are not shown",
+    invalidPath: "Non-UTF-8 path: {{path}}",
     output: "Git output",
     outputTruncated: "Only the beginning of the output was retained",
     discardStagedWorktree: "Discard staged and unstaged changes",

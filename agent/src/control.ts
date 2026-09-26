@@ -117,7 +117,9 @@ export class Agent {
     this.metadata.onChange = (snapshot) => this.send({ type: "metadata.snapshot", snapshot });
     this.sessions = new Sessions(config, this.metadata);
     this.textFiles = new TextFiles(config, this.metadata, this.temporaryFiles);
-    this.fileOperations = new FileOperations(this.metadata, this.temporaryFiles);
+    this.fileOperations = new FileOperations(this.metadata, this.temporaryFiles, (workspaceId) =>
+      this.watches.changed(workspaceId, true),
+    );
     this.channels = new TerminalChannels(
       this.sessions,
       config,
@@ -168,16 +170,22 @@ export class Agent {
     });
   }
   async start() {
-    await mkdir(this.config.dataDir, { recursive: true, mode: 0o700 });
-    await mkdir(this.config.runDir, { recursive: true, mode: 0o700 });
-    await this.metadata.load();
-    await this.temporaryFiles.cleanStartup();
-    await this.schedules.load();
     try {
+      await mkdir(this.config.dataDir, { recursive: true, mode: 0o700 });
+      await mkdir(this.config.runDir, { recursive: true, mode: 0o700 });
+      await this.metadata.load();
+      await this.temporaryFiles.load();
+      await this.schedules.load();
       await this.local.start();
       this.connect();
     } catch (error) {
-      await this.schedules.close();
+      try {
+        await this.close();
+      } catch (closeError) {
+        throw new AggregateError([error, closeError], "Agent startup and cleanup failed", {
+          cause: closeError,
+        });
+      }
       throw error;
     }
   }
@@ -295,16 +303,16 @@ export class Agent {
           const method = string(message.method);
           const params = record(message.params);
           this.requests.set(id, controller);
-          const timeout = setTimeout(
-            () => controller.abort(new AppError("timeout", "Operation timed out")),
-            ["files.copy", "files.move", "files.delete"].includes(method)
-              ? this.config.limits.fileOperationTimeout
-              : method === "files.search"
-                ? this.config.limits.searchTimeout
-                : gitWriteMethods.has(method)
-                  ? this.config.limits.gitWriteTimeout
-                  : this.config.limits.rpcTimeout,
-          );
+          const timeout = ["files.copy", "files.move", "files.delete"].includes(method)
+            ? undefined
+            : setTimeout(
+                () => controller.abort(new AppError("timeout", "Operation timed out")),
+                method === "files.search"
+                  ? this.config.limits.searchTimeout
+                  : gitWriteMethods.has(method)
+                    ? this.config.limits.gitWriteTimeout
+                    : this.config.limits.rpcTimeout,
+              );
           void this.dispatch(method, params, controller.signal, (progress) => {
             if (this.socket === socket)
               this.send({ type: "request.progress", id, ...progress } satisfies AgentEvent);
@@ -392,10 +400,7 @@ export class Agent {
   ): Promise<unknown> {
     const operation = this.perform(method, params, signal, progress).finally(() => {
       if (
-        (["files.create", "files.rename", "files.copy", "files.move", "files.delete"].includes(
-          method,
-        ) ||
-          gitWriteMethods.has(method)) &&
+        (["files.create", "files.rename"].includes(method) || gitWriteMethods.has(method)) &&
         typeof params.workspaceId === "string"
       )
         this.watches.changed(params.workspaceId, true);
@@ -637,6 +642,11 @@ export class Agent {
           signal,
           progress,
         ) satisfies Promise<RpcResult<typeof method>>;
+      case "files.cleanup": {
+        const state = this.temporaryFiles.status();
+        state.pending ||= this.fileOperations.cleanupPending || this.fileChannels.cleaning;
+        return state satisfies RpcResult<typeof method>;
+      }
       case "files.list": {
         const result = await this.files.list(
           string(params.workspaceId),
@@ -673,6 +683,14 @@ export class Agent {
           params.cursor === undefined ? undefined : string(params.cursor),
           signal,
         ) satisfies Promise<RpcResult<typeof method>>;
+      case "cursors.release": {
+        if (params.kind !== "directory" && params.kind !== "repo")
+          throw new AppError("invalid_argument", "Invalid cursor kind");
+        await (params.kind === "directory" ? this.directories : this.repos).release(
+          string(params.id),
+        );
+        return { released: true } satisfies RpcResult<typeof method>;
+      }
       case "directories.mkdir":
         return this.directories.mkdir(string(params.absolutePath), signal) satisfies Promise<
           RpcResult<typeof method>
@@ -774,30 +792,35 @@ export class Agent {
   }
   async close() {
     this.stopped = true;
-    const schedulesClosed = this.schedules.close().then(
-      () => undefined,
-      (error: unknown) => error,
-    );
-    let cleanupError: unknown;
-    try {
-      clearTimeout(this.reconnect);
-      this.socket?.terminate();
-      this.channels.close();
-      await this.fileChannels.close();
-      this.httpChannels.close();
-      for (const controller of this.requests.values())
-        controller.abort(new AppError("cancelled", "Agent is stopping"));
-      await this.local.close();
-      await Promise.allSettled([...this.tasks]);
-      await this.directories.close();
-      await this.repos.close();
-      await this.watches.close();
-      await this.sessions.close();
-    } catch (error) {
-      cleanupError = error;
-    }
-    const scheduleError = await schedulesClosed;
-    if (cleanupError) throw cleanupError;
-    if (scheduleError) throw scheduleError;
+    const errors: unknown[] = [];
+    const finish = async (action: () => unknown) => {
+      try {
+        await action();
+      } catch (error) {
+        errors.push(error);
+      }
+    };
+    clearTimeout(this.reconnect);
+    this.temporaryFiles.beginClose();
+    for (const controller of this.requests.values())
+      controller.abort(new AppError("cancelled", "Agent is stopping"));
+    this.socket?.terminate();
+    await Promise.all([
+      finish(() => this.channels.close()),
+      finish(() => this.httpChannels.close()),
+      finish(() => this.local.close()),
+      finish(() => this.schedules.close()),
+      finish(() => this.fileChannels.close()),
+      finish(() => this.fileOperations.close()),
+      Promise.allSettled([...this.tasks]),
+    ]);
+    await finish(() => this.temporaryFiles.close());
+    await Promise.all([
+      finish(() => this.directories.close()),
+      finish(() => this.repos.close()),
+      finish(() => this.watches.close()),
+      finish(() => this.sessions.close()),
+    ]);
+    if (errors.length) throw new AggregateError(errors, "Agent cleanup failed");
   }
 }

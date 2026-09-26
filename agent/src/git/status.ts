@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { lstat } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import {
   AppError,
   limits,
@@ -10,7 +10,7 @@ import {
   type HeadIdentity,
   type Repo,
 } from "@kiteline/shared/protocol";
-import { commandLine, git, gitHash, NulRecords, utf8 } from "./process.js";
+import { commandLine, git, gitHash, gitPath, NulRecords, utf8 } from "./process.js";
 import { readOperation } from "./operation.js";
 
 export const diffOptions = [
@@ -34,27 +34,46 @@ export async function headIdentity(root: string, signal: AbortSignal): Promise<H
 }
 export async function observeIndex(repo: Repo, signal: AbortSignal) {
   const head = await headIdentity(repo.rootPath, signal);
-  const path = resolve(
+  const base =
+    head.oid ??
+    commandLine(
+      (await git(repo.rootPath, ["hash-object", "-t", "tree", "--stdin"], signal, { input: "" }))
+        .bytes,
+    );
+  const changed = createHash("sha256");
+  let header = true,
+    hasConflicts = false,
+    hasStagedChanges = false;
+  const reader = new NulRecords((record) => {
+    // --no-renames yields one header and one raw pathname per change.
+    if (header) {
+      if (record.at(-1) === 85) hasConflicts = true;
+      else hasStagedChanges = true;
+    }
+    header = !header;
+  });
+  await git(
     repo.rootPath,
-    commandLine((await git(repo.rootPath, ["rev-parse", "--git-path", "index"], signal)).bytes),
-  );
-  let present = true;
-  try {
-    await lstat(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") present = false;
-    else throw error;
-  }
-  const staged = await gitHash(repo.rootPath, ["ls-files", "--stage", "-z"], signal);
-  const changed = await gitHash(
-    repo.rootPath,
-    ["diff", "--cached", "--raw", "-z", "--no-abbrev", "--no-renames", ...diffOptions],
+    ["diff", "--cached", "--raw", "-z", "--no-abbrev", "--no-renames", ...diffOptions, base, "--"],
     signal,
+    {
+      onData: (chunk) => {
+        changed.update(chunk);
+        reader.data(chunk);
+      },
+    },
   );
+  reader.end();
+  if (!header) throw new AppError("io_error", "Git index diff is incomplete");
+  const unmerged = hasConflicts
+    ? await gitHash(repo.rootPath, ["ls-files", "--unmerged", "-z"], signal)
+    : null;
   return {
     head,
+    hasConflicts,
+    hasStagedChanges,
     token: createHash("sha256")
-      .update(JSON.stringify([repo.id, head, present, staged, changed]))
+      .update(JSON.stringify([repo.id, head, changed.digest("hex"), unmerged]))
       .digest("hex"),
   };
 }
@@ -75,7 +94,7 @@ function fields(record: Buffer, count: number) {
     parts.push(record.subarray(start, end).toString("ascii"));
     start = end + 1;
   }
-  return { parts, path: utf8(record.subarray(start)) };
+  return { parts, path: record.subarray(start) };
 }
 export async function readStatus(
   repo: Repo,
@@ -84,11 +103,10 @@ export async function readStatus(
   onHeader?: (header: string) => void,
   onRaw?: (data: Buffer) => void,
 ) {
-  let rename: GitEntry | undefined;
+  let rename: { entry: Omit<GitEntry, "path" | "oldPath" | "pathError">; path: Buffer } | undefined;
   const reader = new NulRecords((record) => {
     if (rename) {
-      rename.oldPath = utf8(record);
-      each(rename);
+      each({ ...rename.entry, ...gitPath(rename.path, record) });
       rename = undefined;
       return;
     }
@@ -98,7 +116,7 @@ export async function readStatus(
     }
     if (record[0] === 63) {
       each({
-        path: utf8(record.subarray(2)),
+        ...gitPath(record.subarray(2)),
         types: { worktree: "other" },
         indexStatus: "?",
         worktreeStatus: "?",
@@ -112,8 +130,7 @@ export async function readStatus(
     const { parts, path } = fields(record, type === "1" ? 8 : type === "2" ? 9 : 10);
     const xy = parts[1]!,
       sub = parts[2]!;
-    const entry: GitEntry = {
-      path,
+    const entry: Omit<GitEntry, "path" | "oldPath" | "pathError"> = {
       indexStatus: xy[0]!,
       worktreeStatus: xy[1]!,
       conflict: type === "u",
@@ -140,8 +157,8 @@ export async function readStatus(
           }
         : {}),
     };
-    if (type === "2") rename = entry;
-    else each(entry);
+    if (type === "2") rename = { entry, path };
+    else each({ ...entry, ...gitPath(path) });
   });
   await git(
     repo.rootPath,
@@ -215,7 +232,7 @@ export async function status(
     },
   );
   for (const entry of entries)
-    if (entry.indexStatus === "?") {
+    if (entry.indexStatus === "?" && entry.path !== undefined) {
       const info = await lstat(join(repo.rootPath, entry.path));
       entry.types.worktree = info.isFile()
         ? "file"

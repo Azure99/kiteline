@@ -28,10 +28,12 @@ export function TextEditor({
       parent: host.current,
       state: draft.state,
       dispatchTransactions(transactions, current) {
+        let measured: { text: string; bytes: number } | undefined;
         for (const tr of transactions) {
           if (!tr.docChanged) continue;
-          const size = encodeText(tr.newDoc.toString(), draft.format).length;
-          const error = store.limitError(draft, size);
+          const text = tr.newDoc.toString();
+          measured = { text, bytes: encodeText(text, draft.format).length };
+          const error = store.limitError(draft, measured.bytes);
           if (error) {
             draft.notice = error;
             store.changed();
@@ -39,7 +41,7 @@ export function TextEditor({
           }
         }
         current.update(transactions);
-        store.update(draft, current.state);
+        store.update(draft, current.state, measured);
       },
     });
     view.current = editor;

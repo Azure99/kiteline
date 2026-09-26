@@ -55,6 +55,10 @@ export const limits = {
   setupTokenLifetime: 30 * 60_000,
   bindingLifetime: 10 * 60_000,
 } as const;
+if (limits.dataChunkBytes > limits.terminalOutstandingBytes)
+  throw new Error("Terminal output window must hold a complete data chunk");
+if (limits.terminalCheckpointIntervalBytes > limits.terminalRecoveryTailBytes / 2)
+  throw new Error("Terminal checkpoint trigger must not exceed half the recovery tail budget");
 
 export type Outcome = "succeeded" | "failed" | "partial" | "unknown";
 export interface KitelineError {
@@ -186,9 +190,10 @@ export interface HeadIdentity {
   oid: string | null;
 }
 export type GitType = "file" | "symlink" | "gitlink" | "absent" | "directory" | "other";
-export interface GitEntry {
-  path: string;
-  oldPath?: string;
+export type GitPath =
+  | { path: string; oldPath?: string; pathError?: never }
+  | { path?: never; oldPath?: never; pathError: string };
+export type GitEntry = GitPath & {
   types: {
     head?: GitType;
     index?: GitType;
@@ -201,7 +206,7 @@ export interface GitEntry {
   worktreeStatus: string;
   conflict: boolean;
   submodule?: { commitChanged: boolean; trackedDirty: boolean; untrackedDirty: boolean };
-}
+};
 export interface GitStatus {
   head: HeadIdentity;
   branch?: string;
@@ -268,12 +273,10 @@ export interface GitHistory {
   anchorOid?: string;
   nextOffset?: number;
 }
-export interface CommitFile {
-  path: string;
-  oldPath?: string;
+export type CommitFile = GitPath & {
   status: string;
   binary: boolean;
-}
+};
 export interface CommitFiles {
   files: CommitFile[];
   parentOid?: string;
@@ -305,6 +308,13 @@ export interface FileProgress {
   currentPath?: string;
   completedItems?: number;
   bytes?: number;
+}
+export interface FileCleanup {
+  pending: boolean;
+  retained: number;
+  failed: number;
+  failures: PathError[];
+  truncated: boolean;
 }
 export type WorkspaceEvent =
   | { type: "workspace.changed"; workspaceId: string; scopes: ("files" | "git" | "repos")[] }

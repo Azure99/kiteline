@@ -87,6 +87,67 @@ test("stage and unstage exact names on unborn HEAD, keeping other staged data", 
   await expect(readFile(join(root, name))).rejects.toMatchObject({ code: "ENOENT" });
   expect(await cli("ls-files", "-z")).toBe("third\0");
 });
+test.each(["stage", "unstage", "discard"])(
+  "%s blocks an unselected non-UTF-8 index descendant before writing",
+  async (kind) => {
+    const { root, cli, repo, write, stage, unstage } = await setup();
+    await cli("config", "status.renames", "false");
+    await write("a", "original parent\n");
+    await write("third", "unselected\n");
+    await cli("add", ".");
+    await cli("commit", "-m", "base");
+    await rm(join(root, "a"));
+    await mkdir(join(root, "a"));
+    const bad = Buffer.concat([Buffer.from(root + "/a/"), Buffer.from([0xff])]);
+    await writeFile(bad, "unselected child\n");
+    await cli("add", "-A");
+    await rm(join(root, "a"), { recursive: true });
+    if (kind === "stage") await write("a", "replacement parent\n");
+    const before = (
+      await exec("git", ["ls-files", "--stage", "-z"], { cwd: root, encoding: "buffer" })
+    ).stdout;
+    await expect(
+      kind === "stage"
+        ? stage(["a"])
+        : kind === "unstage"
+          ? unstage(["a"])
+          : reviewDiscard(repo, ["a"], "all", signal()),
+    ).rejects.toMatchObject({
+      code: "conflict",
+      details: { blockedPaths: [], invalidPaths: ["\\x61\\x2f\\xff"] },
+    });
+    expect(
+      (await exec("git", ["ls-files", "--stage", "-z"], { cwd: root, encoding: "buffer" })).stdout,
+    ).toEqual(before);
+    expect(await readFile(join(root, "third"), "utf8")).toBe("unselected\n");
+    if (kind === "stage")
+      expect(await readFile(join(root, "a"), "utf8")).toBe("replacement parent\n");
+  },
+);
+test("legal replacement-character names can be staged and discarded beside invalid names", async () => {
+  const { root, cli, repo, write, stage, unstage } = await setup();
+  await write("\uFFFD", "valid\n");
+  const bad = Buffer.concat([Buffer.from(root + "/"), Buffer.from([0xff])]);
+  await writeFile(bad, "invalid\n");
+  await cli("add", ".");
+  await commit(repo, "base", (await observeIndex(repo, signal())).token, signal());
+  expect((await status(repo, 0, undefined, signal())).stagedCount).toBe(0);
+  await write("\uFFFD", "changed\n");
+  await stage(["\uFFFD"]);
+  expect(await cli("show", ":\uFFFD")).toBe("changed\n");
+  await unstage(["\uFFFD"]);
+  const review = await reviewDiscard(repo, ["\uFFFD"], "worktree", signal());
+  await discard(repo, review.paths, "worktree", review.reviewToken, signal());
+  expect(await readFile(join(root, "\uFFFD"), "utf8")).toBe("valid\n");
+  expect(await readFile(bad, "utf8")).toBe("invalid\n");
+  await rm(join(root, "\uFFFD"));
+  await mkdir(join(root, "\uFFFD"));
+  await writeFile(Buffer.concat([Buffer.from(root + "/\uFFFD/"), Buffer.from([0xe9])]), "child");
+  await expect(reviewDiscard(repo, ["\uFFFD"], "worktree", signal())).rejects.toMatchObject({
+    code: "conflict",
+    details: { blockedPaths: ["\uFFFD"], invalidPaths: ["\\xef\\xbf\\xbd\\x2f\\xe9"] },
+  });
+});
 test.each([
   "GIT_LITERAL_PATHSPECS",
   "GIT_GLOB_PATHSPECS",
@@ -440,6 +501,89 @@ test("commit observes semantic index identity and commits every staged file", as
   ).rejects.toThrow("hook-rejected");
   expect((await headIdentity(root, signal())).oid).toBe(result.commitOid);
   expect(await cli("diff", "--cached", "--name-only")).toBe("one\n");
+});
+test.each(["commit", "status"])(
+  "%s rejects an external branch change during its observation",
+  async (kind) => {
+    const { root, repo, cli, write } = await setup();
+    await write("x", "base x\n");
+    await write("y", "main\n");
+    await cli("add", ".");
+    await cli("commit", "-m", "main");
+    await cli("checkout", "-b", "other");
+    await write("y", "other\n");
+    await cli("commit", "-am", "other");
+    const other = (await cli("rev-parse", "HEAD")).trim();
+    await cli("checkout", "main");
+    await write("x", "staged x\n");
+    await cli("add", "x");
+    const token = (await observeIndex(repo, signal())).token;
+    const actual = (await exec("/bin/sh", ["-c", "command -v git"])).stdout.trim();
+    const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
+    const release = join(root, ".git/release"),
+      ready = join(root, ".git/ready");
+    const bin = await mkdtemp("/var/tmp/kiteline-git-gate-");
+    roots.push(bin);
+    await writeFile(
+      join(bin, "git"),
+      `#!/bin/sh\ncase " $* " in\n  *" ${kind === "commit" ? "diff --cached" : "status --porcelain=v2"} "*)\n    : > ${quote(ready)}\n    while [ ! -e ${quote(release)} ]; do sleep 0.01; done\n    ;;\nesac\nexec ${quote(actual)} "$@"\n`,
+    );
+    await chmod(join(bin, "git"), 0o755);
+    vi.stubEnv("PATH", bin + ":" + process.env.PATH);
+    const controller = new AbortController();
+    const pending =
+      kind === "commit"
+        ? commit(repo, "must not commit", token, controller.signal)
+        : status(repo, 0, undefined, controller.signal);
+    const rejected = expect(pending).rejects.toMatchObject({ code: "conflict" });
+    try {
+      for (let i = 0; ; i++) {
+        try {
+          await readFile(ready);
+          break;
+        } catch (error) {
+          if (i === 100) throw error;
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+      }
+      await cli("checkout", "other");
+      await writeFile(release, "");
+      await rejected;
+      expect((await cli("rev-parse", "HEAD")).trim()).toBe(other);
+      expect(await cli("show", ":y")).toBe("other\n");
+      expect(await cli("show", ":x")).toBe("staged x\n");
+    } finally {
+      await writeFile(release, "");
+      controller.abort();
+      await pending.catch(() => {});
+    }
+  },
+);
+test("index observations retain unmerged stage identities and commit refuses them", async () => {
+  const { repo, cli, write } = await setup();
+  await write("a", "base\n");
+  await write("b", "other\n");
+  await cli("add", ".");
+  await cli("commit", "-m", "base");
+  const one = (await cli("rev-parse", "HEAD:a")).trim(),
+    two = (await cli("rev-parse", "HEAD:b")).trim();
+  const conflict = async (ours: string) =>
+    git(repo.rootPath, ["update-index", "--index-info"], signal(), {
+      input: `0 ${"0".repeat(40)}\ta\n100644 ${one} 1\ta\n100644 ${ours} 2\ta\n100644 ${two} 3\ta\n`,
+    });
+  await conflict(one);
+  const before = await observeIndex(repo, signal());
+  expect(before.hasConflicts).toBe(true);
+  await write("a", "unstaged conflict resolution\n");
+  expect((await observeIndex(repo, signal())).token).toBe(before.token);
+  await conflict(two);
+  const after = await observeIndex(repo, signal());
+  expect(after.hasConflicts).toBe(true);
+  expect(after.token).not.toBe(before.token);
+  expect((await status(repo, 0, undefined, signal())).indexToken).toBeUndefined();
+  await expect(commit(repo, "unresolved", after.token, signal())).rejects.toThrow(
+    "unresolved conflicts",
+  );
 });
 test("branch mutations check target OID and preserve native occupancy and unmerged refusals", async () => {
   const { root, repo, cli, write } = await setup();

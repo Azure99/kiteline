@@ -44,6 +44,9 @@ export class FileChannels {
   get count() {
     return this.cleaningCount + [...this.entries.values()].filter((item) => item.admitted).length;
   }
+  get cleaning() {
+    return this.cleaningCount > 0;
+  }
   open(id: string, connectionId: string, kind: string, params: Record<string, unknown>) {
     const admitted =
       this.count < this.config.limits.transfersPerDevice &&
@@ -253,12 +256,21 @@ export class FileChannels {
       channel.socket.close(1000);
     } else channel.socket.terminate();
     const cleanup = (async () => {
-      await channel.prepare;
-      await channel.dispose();
-      await channel.read?.close();
-      if (channel.write)
-        await this.temporary.release(channel.write.value.temporary, channel.write.value);
-    })().catch((error: unknown) => console.error("File cleanup:", error));
+      const finish = async (action: () => unknown) => {
+        try {
+          await action();
+        } catch (error) {
+          console.error("File cleanup:", error);
+        }
+      };
+      await finish(() => channel.prepare);
+      await finish(() => channel.dispose());
+      await finish(() => channel.read?.close());
+      if (channel.write) {
+        const item = channel.write.value;
+        await finish(() => this.temporary.release(item.temporary, item));
+      }
+    })();
     this.cleanup.add(cleanup);
     void cleanup.finally(() => {
       this.cleanup.delete(cleanup);

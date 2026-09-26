@@ -9,7 +9,7 @@ import { CursorBudget } from "../src/cursor-budget.js";
 import { defaultAgentLimits } from "../src/config.js";
 import { Repositories } from "../src/git/repos.js";
 import { observeIndex, status } from "../src/git/status.js";
-import { workingDiff } from "../src/git/diff.js";
+import { workingDiff, rawReader, numstatReader, type RawChange } from "../src/git/diff.js";
 import { branches, commitDiff, commitFiles, history } from "../src/git/history.js";
 
 const run = promisify(execFile);
@@ -118,6 +118,114 @@ test("untracked dash previews the file rather than standard input", async () => 
   expect(result.patch).toContain("+actual file");
   await repos.close();
 });
+test("non-UTF-8 paths stay local to their rows while valid names and history remain usable", async () => {
+  const { root, cli, repo, repos, workspace } = await setup();
+  const bad = (byte: number) => Buffer.concat([Buffer.from(root + "/"), Buffer.from([byte])]);
+  for (const name of ["good", "\uFFFD", "\\xff"]) await writeFile(join(root, name), "valid\n");
+  await writeFile(bad(0xe9), "invalid text\n");
+  await writeFile(bad(0xff), Buffer.from([0, 1, 2]));
+  expect((await repos.discover(workspace.id, undefined, signals())).issues).toEqual([]);
+  await mkdir(bad(0xfe));
+  expect((await repos.discover(workspace.id, undefined, signals())).issues).toMatchObject([
+    { path: ".", error: { code: "unsupported" } },
+  ]);
+  await rm(bad(0xfe), { recursive: true });
+  const untracked = await status(repo, 0, undefined, signals());
+  expect(untracked.totalCount).toBe(5);
+  expect(untracked.entries.filter((entry) => entry.path === undefined)).toHaveLength(2);
+  await cli("add", ".");
+  const staged = await status(repo, 0, undefined, signals());
+  expect(staged.stagedCount).toBe(5);
+  expect(
+    staged.entries
+      .filter((entry) => entry.path === undefined)
+      .map((entry) => entry.pathError)
+      .sort(),
+  ).toEqual(["\\xe9", "\\xff"]);
+  for (const path of ["good", "\uFFFD", "\\xff"])
+    expect((await workingDiff(repo, path, "staged", signals())).patch).toContain("+valid");
+  await cli("commit", "-m", "mixed names");
+  const oid = (await cli("rev-parse", "HEAD")).stdout.trim();
+  const files = await commitFiles(repo, oid, undefined, 0, signals());
+  expect(files.files).toHaveLength(5);
+  expect(files.files.find((item) => item.pathError === "\\xff")?.binary).toBe(true);
+  expect(files.files.find((item) => item.path === "\\xff")?.binary).toBe(false);
+  for (const path of ["good", "\uFFFD"])
+    expect((await commitDiff(repo, oid, undefined, path, signals())).patch).toContain("+valid");
+  const before = await observeIndex(repo, signals());
+  await writeFile(bad(0xe9), "invalid changed\n");
+  await writeFile(join(root, "good"), "valid changed\n");
+  expect((await workingDiff(repo, "good", "worktree", signals())).patch).toContain(
+    "+valid changed",
+  );
+  await cli("add", ".");
+  expect((await observeIndex(repo, signals())).token).not.toBe(before.token);
+  await repos.close();
+});
+test.each(["old", "new"])(
+  "a non-UTF-8 rename %s end makes the whole row non-operable",
+  async (end) => {
+    const { root, cli, repo, repos } = await setup();
+    const bad = Buffer.concat([Buffer.from(root + "/"), Buffer.from([0xff])]);
+    const good = join(root, "good");
+    const from = end === "old" ? bad : good;
+    const to = end === "old" ? good : bad;
+    await writeFile(from, end === "old" ? Buffer.from([0, 1, 2]) : "rename content\n");
+    await cli("add", ".");
+    await cli("commit", "-m", "base");
+    await rename(from, to);
+    await cli("add", "-A");
+    const value = await status(repo, 0, undefined, signals());
+    expect(value.entries).toHaveLength(1);
+    expect(value.entries[0]).toMatchObject({
+      indexStatus: "R",
+      pathError: expect.stringContaining("\\xff"),
+    });
+    expect(value.entries[0]?.path).toBeUndefined();
+    expect(value.entries[0]?.oldPath).toBeUndefined();
+    await expect(workingDiff(repo, "good", "staged", signals())).rejects.toMatchObject({
+      code: "conflict",
+    });
+    await cli("commit", "-m", "rename");
+    const oid = (await cli("rev-parse", "HEAD")).stdout.trim();
+    const files = await commitFiles(repo, oid, undefined, 0, signals());
+    expect(files.files).toHaveLength(1);
+    expect(files.files[0]?.path).toBeUndefined();
+    expect(files.files[0]?.pathError).toBe(value.entries[0]?.pathError);
+    expect(files.files[0]?.binary).toBe(end === "old");
+    await expect(commitDiff(repo, oid, undefined, "good", signals())).rejects.toMatchObject({
+      code: "not_found",
+    });
+    await repos.close();
+  },
+);
+test("binary copy records retain both raw path identities", async () => {
+  const { root, cli, repos } = await setup();
+  const content = Buffer.from([0, 1, 2]);
+  await writeFile(Buffer.concat([Buffer.from(root + "/"), Buffer.from([0xff])]), content);
+  await cli("add", ".");
+  await cli("commit", "-m", "base");
+  await writeFile(join(root, "copy"), content);
+  await cli("add", ".");
+  const args = ["diff", "--cached", "--find-copies", "--find-copies-harder", "-z"];
+  const changes: RawChange[] = [];
+  const raw = rawReader((item) => changes.push(item));
+  raw.data(
+    (await run("git", [...args, "--raw", "--no-abbrev"], { cwd: root, encoding: "buffer" })).stdout,
+  );
+  raw.end();
+  const binaries: { pathError?: string; binary: boolean }[] = [];
+  const nums = numstatReader((item, binary) =>
+    binaries.push({ pathError: item.pathError, binary }),
+  );
+  nums.data((await run("git", [...args, "--numstat"], { cwd: root, encoding: "buffer" })).stdout);
+  nums.end();
+  expect(changes).toHaveLength(1);
+  expect(changes[0]).toMatchObject({ status: "C", pathError: "\\xff -> \\x63\\x6f\\x70\\x79" });
+  expect(changes[0]?.path).toBeUndefined();
+  expect(binaries).toEqual([{ pathError: changes[0]?.pathError, binary: true }]);
+  await repos.close();
+});
 test("discovery keeps nested and linked worktrees distinct and excludes external parents and directory links", async () => {
   const { root, home, cli, metadata, workspace, repos, repo } = await setup();
   await writeFile(join(root, "base"), "base");
@@ -152,11 +260,15 @@ test("status pages count the whole repo, reject stale pages, and use semantic in
   const { root, cli, repo, repos } = await setup();
   const unborn = await status(repo, 0, undefined, signals());
   expect(unborn.head).toEqual({ symbolicRef: "refs/heads/main", oid: null });
+  await cli("read-tree", "--empty");
+  expect((await observeIndex(repo, signals())).token).toBe(unborn.indexToken);
   await writeFile(join(root, "empty"), "");
   await cli("add", "-N", "empty");
   const intent = await observeIndex(repo, signals());
+  expect(intent.hasStagedChanges).toBe(false);
   await cli("add", "empty");
   expect((await observeIndex(repo, signals())).token).not.toBe(intent.token);
+  expect((await observeIndex(repo, signals())).hasStagedChanges).toBe(true);
   await cli("commit", "-m", "base");
   await Promise.all(
     Array.from({ length: 503 }, (_, i) =>

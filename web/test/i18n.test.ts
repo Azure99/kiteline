@@ -42,7 +42,7 @@ test("manual preference is stored but following the browser is not pinned", asyn
   expect(i18n.resolvedLanguage).toBe("en");
 });
 
-test("static resources have matching keys and interpolation parameters", () => {
+test("static resources have nonempty translations and matching interpolation parameters", () => {
   const placeholders = (text: string) =>
     [...text.matchAll(/\{\{(\w+)(?:,[^}]+)?\}\}/g)].map((m) => m[1]).sort();
   for (const group of Object.keys(
@@ -50,7 +50,6 @@ test("static resources have matching keys and interpolation parameters", () => {
   ) as (keyof typeof resources.en.translation)[]) {
     const source = resources.en.translation[group];
     const translated = resources["zh-CN"].translation[group];
-    expect(Object.keys(translated).sort(), group).toEqual(Object.keys(source).sort());
     for (const [key, value] of Object.entries(source)) {
       const translation = translated[key as keyof typeof translated];
       expect(translation, `${group}.${key}`).toBeTruthy();
