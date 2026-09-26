@@ -9,7 +9,7 @@
   --color-primary-soft: #edf2fb;
   --color-border: #e2e6ed;
   --color-muted: #f6f7f9;
-  --color-muted-foreground: #707986;
+  --color-muted-foreground: #596574;
   --color-destructive: #bb3a43;
   --color-ring: var(--color-primary);
 }
@@ -275,6 +275,10 @@ body {
 .terminal-notice {
   background: #313944;
   color: #e2e8f0;
+}
+.terminal-notice[data-compact="true"] {
+  height: 32px;
+  align-items: center;
 }
 .terminal-aux {
   border-color: #39414c;

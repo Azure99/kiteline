@@ -10,6 +10,7 @@ export function DeviceNavigation({
   deviceId,
   workspaceId,
   tool,
+  showPaths = false,
   onNavigate,
   onBind,
 }: {
@@ -17,6 +18,7 @@ export function DeviceNavigation({
   deviceId?: string;
   workspaceId?: string;
   tool?: WorkspaceTool;
+  showPaths?: boolean;
   onNavigate: (path: string) => void;
   onBind: () => void;
 }) {
@@ -88,11 +90,21 @@ export function DeviceNavigation({
                 }
               >
                 <Folder size={14} className="shrink-0" />
-                <span
-                  className="min-w-0 truncate max-[959px]:whitespace-normal max-[959px]:break-all"
-                  title={w.path}
-                >
-                  {w.name}
+                <span className="min-w-0 flex-1" title={w.path}>
+                  <span
+                    className={
+                      showPaths
+                        ? "block break-words"
+                        : "block truncate max-[959px]:whitespace-normal max-[959px]:break-all"
+                    }
+                  >
+                    {w.name}
+                  </span>
+                  {showPaths && (
+                    <span className="block break-all text-xs font-normal text-muted-foreground">
+                      {w.path}
+                    </span>
+                  )}
                 </span>
               </button>
             ))}

@@ -1,4 +1,3 @@
-import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
 import {
   ChevronRight,
@@ -22,21 +21,26 @@ import { Button } from "../components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
 import { devicePath, workspacePath, schedulePath } from "../lib/navigation";
 import type { DeviceAction } from "./device-actions";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { TerminalSettings } from "../terminal/settings";
 import { rpc } from "../lib/api";
 import { UpgradeDialog } from "./upgrade-dialog";
 import type { RecentWorkspace } from "./recent-workspaces";
+import { SessionFinder, type SessionObservation } from "./session-finder";
 
 const toolIcons = { terminal: Terminal, files: FileText, git: GitBranch };
 
 export function Home({
   devices,
+  loaded,
+  connectionError,
   recents,
   onNavigate,
   onBind,
 }: {
   devices: Device[];
+  loaded: boolean;
+  connectionError?: unknown;
   recents: RecentWorkspace[];
   onNavigate: (path: string) => void;
   onBind: () => void;
@@ -105,7 +109,11 @@ export function Home({
         </section>
       )}
       <h2 className="mb-3 text-sm font-semibold">{t(($) => $.common.devices)}</h2>
-      {devices.length === 0 ? (
+      {!loaded ? (
+        <p className="py-8 text-center text-muted-foreground">
+          {connectionError ? t(($) => $.common.disconnected) : t(($) => $.common.loading)}
+        </p>
+      ) : devices.length === 0 ? (
         <div className="py-16 text-center text-muted-foreground">
           <Monitor size={30} className="mx-auto mb-3" />
           <p>{t(($) => $.devices.noDevices)}</p>
@@ -154,44 +162,61 @@ export function DeviceDetail({
 
   const [settings, setSettings] = useState(false);
   const [upgrade, setUpgrade] = useState(false);
-  const [counts, setCounts] = useState<Record<string, number>>({});
-  const [countError, setCountError] = useState<unknown>();
+  const actionsTrigger = useRef<HTMLButtonElement>(null);
+  const [observation, setObservation] = useState<SessionObservation>();
+  const [sessionsBusy, setSessionsBusy] = useState(false);
+  const [sessionsError, setSessionsError] = useState<unknown>();
+  const refreshSessions = useRef<() => void>(() => {});
+  const counts: Record<string, number> = {};
+  for (const session of observation?.sessions ?? [])
+    counts[session.workspaceId] = (counts[session.workspaceId] ?? 0) + 1;
+  const oldObservation = device.status !== "online" || sessionsBusy || !!sessionsError;
   useEffect(() => {
     if (device.status !== "online") return;
     let stopped = false;
-    let revision = 0;
+    let pending = false;
     const abort = new AbortController();
     async function refresh() {
-      const current = ++revision;
+      if (pending || stopped) return;
+      pending = true;
+      setSessionsBusy(true);
       try {
         const result = await rpc(device.id, "sessions.list", {}, abort.signal);
-        if (stopped || current !== revision) return;
-        const next: Record<string, number> = {};
-        for (const session of result.sessions)
-          next[session.workspaceId] = (next[session.workspaceId] ?? 0) + 1;
-        setCounts(next);
-        setCountError("");
+        if (stopped) return;
+        setObservation({ sessions: result.sessions, observedAt: new Date().toISOString() });
+        setSessionsError(undefined);
       } catch (error) {
-        if (!stopped && current === revision) setCountError(error);
+        if (!stopped) setSessionsError(error);
+      } finally {
+        pending = false;
+        if (!stopped) setSessionsBusy(false);
       }
     }
+    refreshSessions.current = () => void refresh();
     void refresh();
     const timer = setInterval(() => void refresh(), 15000);
     return () => {
       stopped = true;
       abort.abort();
       clearInterval(timer);
+      refreshSessions.current = () => {};
+      setSessionsBusy(false);
     };
   }, [device.id, device.status]);
   return (
     <section className="scroll-area overflow-auto p-5">
       <div className="mb-2 flex items-center gap-3">
         <Server size={23} className="text-muted-foreground" />
-        <h1 className="min-w-0 flex-1 break-all text-lg font-semibold">{device.name}</h1>
+        <h1 className="min-w-0 flex-1 break-words text-lg font-semibold">{device.name}</h1>
         <Menu>
           <MenuTrigger
             render={
-              <Button variant="ghost" size="icon" aria-label={t(($) => $.devices.deviceActions)} />
+              <Button
+                ref={actionsTrigger}
+                variant="ghost"
+                size="icon"
+                aria-label={t(($) => $.devices.deviceActions)}
+              />
             }
           >
             <MoreHorizontal />
@@ -283,6 +308,14 @@ export function DeviceDetail({
         <CalendarClock />
         {t(($) => $.schedules.title)}
       </Button>
+      <SessionFinder
+        device={device}
+        observation={observation}
+        error={sessionsError}
+        busy={sessionsBusy}
+        onRefresh={() => refreshSessions.current()}
+        onNavigate={onNavigate}
+      />
       <div className="divide-y divide-border border-y border-border">
         {device.snapshot?.workspaces.map((w) => (
           <div key={w.id} className="flex items-center gap-2">
@@ -297,12 +330,15 @@ export function DeviceDetail({
                   {w.path}
                 </span>
               </span>
-              {device.status === "online" && !!counts[w.id] && (
+              {observation && (
                 <span
-                  className="ml-auto shrink-0 text-xs text-muted-foreground"
+                  className="ml-auto shrink-0 text-right text-xs text-muted-foreground"
                   title={t(($) => $.devices.runningTerminals)}
                 >
-                  {t(($) => $.devices.terminals, { count: counts[w.id]! })}
+                  {t(($) => $.devices.terminals, { count: counts[w.id] ?? 0 })}
+                  {oldObservation && (
+                    <span className="block">{t(($) => $.devices.previousObservation)}</span>
+                  )}
                 </span>
               )}
             </button>
@@ -338,13 +374,14 @@ export function DeviceDetail({
           </div>
         ))}
       </div>
-      {!!countError && (
-        <div role="alert" className="mt-2 text-sm text-destructive">
-          <ErrorNotice error={countError} />
-        </div>
-      )}
       {settings && <TerminalSettings device={device} onClose={() => setSettings(false)} />}
-      {upgrade && <UpgradeDialog onClose={() => setUpgrade(false)} />}
+      {upgrade && (
+        <UpgradeDialog
+          deviceName={device.name}
+          trigger={actionsTrigger}
+          onClose={() => setUpgrade(false)}
+        />
+      )}
     </section>
   );
 }

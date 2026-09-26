@@ -1,18 +1,40 @@
 import { ArrowLeft, FilePenLine, MoreHorizontal, Plus, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { IconButton } from "../components/icon-button";
-import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
+import {
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuTrigger,
+} from "../components/ui/menu";
 import { useMobile } from "../lib/use-mobile";
 import type { DiffTarget } from "./diff-view";
 
 export type GitView = "changes" | "history" | "branches";
 
-export function GitFilePath({ path }: { path: string }) {
+export function GitFilePath({ path, stacked = false }: { path: string; stacked?: boolean }) {
   const split = path.lastIndexOf("/");
   return (
-    <span className="flex min-w-0 flex-1 items-center gap-2" title={path}>
-      <span className="truncate">{path.slice(split + 1)}</span>
-      {split >= 0 && <span className="truncate text-muted-foreground">{path.slice(0, split)}</span>}
+    <span
+      className={stacked ? "min-w-0 flex-1 py-px" : "flex min-w-0 flex-1 items-center gap-2"}
+      title={path}
+    >
+      <span className={stacked ? "block truncate leading-4" : "truncate"}>
+        {path.slice(split + 1)}
+      </span>
+      {split >= 0 && (
+        <span
+          className={
+            stacked
+              ? "block truncate text-[11px] leading-[14px] text-muted-foreground"
+              : "truncate text-muted-foreground"
+          }
+        >
+          {path.slice(0, split)}
+        </span>
+      )}
     </span>
   );
 }
@@ -98,6 +120,15 @@ export function GitViewHeader({
                 <FilePenLine />
                 {t(($) => $.git.openFiles)}
               </MenuItem>
+              {mobile && target.side === "commit" && (
+                <MenuRadioGroup value={view} onValueChange={(value) => onView(value as GitView)}>
+                  {(["changes", "history", "branches"] as const).map((id) => (
+                    <MenuRadioItem key={id} value={id} closeOnClick>
+                      {t(($) => $.git[id])}
+                    </MenuRadioItem>
+                  ))}
+                </MenuRadioGroup>
+              )}
             </MenuContent>
           </Menu>
         </>

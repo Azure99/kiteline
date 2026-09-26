@@ -202,6 +202,12 @@ export function TerminalView({
       ) && (
         <div
           className="terminal-notice flex flex-wrap items-start gap-2 px-3 py-1 text-xs"
+          data-compact={
+            !notice &&
+            !state.error &&
+            !state.notice &&
+            (state.status === "ended" || state.status === "connecting")
+          }
           role="status"
         >
           <div className="min-w-0 flex-1 break-words">

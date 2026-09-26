@@ -1,5 +1,4 @@
 import { useTranslation } from "react-i18next";
-import { ApiError } from "../lib/api";
 import { ErrorNotice } from "../components/error-notice";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Group, Panel, Separator, type GroupImperativeHandle } from "react-resizable-panels";
@@ -92,7 +91,6 @@ export function WorkspaceTerminal({
   const group = currentGroup(layout);
   const selected = group?.active;
   const sessions = remote.sessions;
-  const { setError } = remote;
   const find = (id?: string) => sessions.find((session) => session.id === id);
   const groups = retainSessions(
     layout,
@@ -100,12 +98,21 @@ export function WorkspaceTerminal({
   ).groups;
   const shownGroup = groups.find((item) => item.id === group?.id);
   const members = shownGroup ? groupMembers(shownGroup) : [];
+  const targetKnown = !!routeSession && (!!find(routeSession) || opened.main.has(routeSession));
+  const targetPending = !!routeSession && (!targetKnown || selected !== routeSession);
+  const targetMissing =
+    !targetKnown &&
+    remote.loaded &&
+    !remote.listError &&
+    !remote.refreshing &&
+    device.status === "online";
   const dockId =
     layout.dock && (find(layout.dock) || opened.dock.has(layout.dock)) ? layout.dock : undefined;
   const dockExpanded = layout.dockOpen && !mobile;
-  const visibleMembers = visible
-    ? members.filter((id) => (!mobile && !group?.maximized) || id === selected).join(",")
-    : "";
+  const visibleMembers =
+    visible && !targetPending
+      ? members.filter((id) => (!mobile && !group?.maximized) || id === selected).join(",")
+      : "";
   useLayoutEffect(() => {
     const main = visibleMembers ? visibleMembers.split(",") : [];
     const dock = !visible && dockExpanded && dockId ? [dockId] : [];
@@ -152,7 +159,7 @@ export function WorkspaceTerminal({
     setLayout((old) => retainSessions(old, kept, dockKept));
   }, [sessions, remote.loaded, opened]);
   useEffect(() => {
-    if (!remote.loaded) return;
+    if (!remote.loaded && !targetKnown) return;
     const returning = route.tool === "terminal" && lastTool.current !== "terminal";
     lastTool.current = route.tool;
     if (returning && !routeSession && selected) {
@@ -166,20 +173,22 @@ export function WorkspaceTerminal({
     }
     if (lastRouteSession.current === routeSession) return;
     const previous = lastRouteSession.current;
-    lastRouteSession.current = routeSession;
     if (routeSession) {
-      if (sessions.some((session) => session.id === routeSession) || opened.main.has(routeSession))
-        setLayout((old) => selectSession(old, routeSession));
-      else setError(new ApiError("not_found", "The terminal does not exist or has ended"));
-    } else if (route.tool === "terminal" && previous !== undefined)
-      setLayout((old) => ({ ...old, current: undefined }));
+      if (!targetKnown) return;
+      lastRouteSession.current = routeSession;
+      setLayout((old) => selectSession(old, routeSession));
+    } else {
+      lastRouteSession.current = routeSession;
+      if (route.tool === "terminal" && previous !== undefined)
+        setLayout((old) => ({ ...old, current: undefined }));
+    }
   }, [
     routeSession,
     route.tool,
     selected,
     remote.loaded,
     sessions,
-    setError,
+    targetKnown,
     device.id,
     workspace.id,
     opened.main,
@@ -294,7 +303,7 @@ export function WorkspaceTerminal({
     return (
       <SessionPicker
         sessions={sessions}
-        selected={dock ? dockId : selected}
+        selected={dock ? dockId : targetPending ? undefined : selected}
         dock={dock}
         groups={dock ? [] : layout.groups}
         retained={[...(dock ? opened.dock : opened.main)]}
@@ -304,7 +313,7 @@ export function WorkspaceTerminal({
         refreshDisabled={device.status !== "online"}
         onRefresh={() => void remote.refresh()}
         onDragStart={
-          !dock && !mobile && selected && !multipleGroups && !split
+          !dock && !targetPending && !mobile && selected && !multipleGroups && !split
             ? (event) => drag.start(event, selected)
             : undefined
         }
@@ -442,18 +451,37 @@ export function WorkspaceTerminal({
           >
             {focusMode ? <Minimize /> : <Fullscreen />}
           </IconButton>
-          {menu(split ? undefined : selected)}
+          {menu(split || targetPending ? undefined : selected)}
         </div>
+        {targetPending && (
+          <div className="flex min-h-0 flex-1 flex-col items-start gap-3 overflow-auto p-4 text-sm">
+            <p role="status">
+              {targetMissing
+                ? t(($) => $.terminal.missing)
+                : remote.refreshing
+                  ? t(($) => $.terminal.checkingTarget)
+                  : t(($) => $.terminal.targetUnknown)}
+            </p>
+            <p className="break-all font-mono text-xs">{routeSession}</p>
+            <Button
+              variant="outline"
+              disabled={device.status !== "online" || remote.refreshing}
+              onClick={() => void remote.refresh()}
+            >
+              {t(($) => $.common.retry)}
+            </Button>
+          </div>
+        )}
         {groups.length > 0 && (
           <SplitPanes
             deviceId={device.id}
             workspaceId={workspace.id}
             groups={groups}
-            current={group?.id}
+            current={targetPending ? undefined : group?.id}
             opened={opened.main}
             sessions={sessions}
             mobile={mobile}
-            visible={visible}
+            visible={visible && !targetPending}
             onSizes={(groupId, splitId, sizes) =>
               setLayout((old) => resizeSplit(old, groupId, splitId, sizes))
             }
@@ -475,7 +503,7 @@ export function WorkspaceTerminal({
             }}
           />
         )}
-        {!members.length && (
+        {!members.length && !targetPending && (
           <div className="flex min-h-0 flex-1 items-center justify-center">
             {newButtons(false, true)}
           </div>

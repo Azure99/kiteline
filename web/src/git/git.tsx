@@ -307,6 +307,7 @@ function Changes({
   const state = useGitStatus(device.id, workspace.id, repo.id, visible && enabled);
   const [target, setTarget] = useState<DiffTarget>();
   const [view, setView] = useState<GitView>("changes");
+  const [historyVisited, setHistoryVisited] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const selectionVersion = useRef(0);
   const selectTarget = (next?: DiffTarget) => {
@@ -315,6 +316,7 @@ function Changes({
   };
   const selectView = (next: GitView) => {
     selectionVersion.current++;
+    if (next === "history") setHistoryVisited(true);
     setView(next);
   };
   useEffect(() => {
@@ -445,19 +447,21 @@ function Changes({
           />
         )}
       </ToolHeader>
-      {view === "history" && (
-        <HistoryView
-          deviceId={device.id}
-          workspaceId={workspace.id}
-          repoId={repo.id}
-          active={visible && enabled}
-          visible={visible}
-          refreshKey={refresh}
-          renderHeader={renderHeader}
-          onBranch={(oid) => {
-            if (!disabled) setBranchStart(oid);
-          }}
-        />
+      {historyVisited && (
+        <div className={view === "history" ? "flex min-h-0 min-w-0 flex-1 flex-col" : "hidden"}>
+          <HistoryView
+            deviceId={device.id}
+            workspaceId={workspace.id}
+            repoId={repo.id}
+            active={visible && enabled && view === "history"}
+            visible={visible && view === "history"}
+            refreshKey={refresh}
+            renderHeader={renderHeader}
+            onBranch={(oid) => {
+              if (!disabled) setBranchStart(oid);
+            }}
+          />
+        </div>
       )}
       {view === "branches" && (
         <BranchesView
@@ -596,7 +600,7 @@ function Changes({
                             }
                             className="flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left text-xs max-[959px]:min-h-11"
                           >
-                            <GitFilePath path={entry.path} />
+                            <GitFilePath path={entry.path} stacked />
                             {entry.submodule && (
                               <span className="shrink-0 text-[10px] text-muted-foreground">
                                 {t(($) =>

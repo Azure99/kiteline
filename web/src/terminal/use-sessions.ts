@@ -7,13 +7,19 @@ export function useSessions(device: Device, workspaceId: string) {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<unknown>();
   const [listError, setListError] = useState<unknown>();
+  const [listErrorDismissed, setListErrorDismissed] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [uncertainCreate, setUncertainCreate] = useState(false);
   const [busy, setBusy] = useState(false);
   const alive = useRef(true);
   const revision = useRef(0);
   const refresh = useCallback(async () => {
     const read = ++revision.current;
-    if (device.status !== "online") return;
+    if (device.status !== "online") {
+      setRefreshing(false);
+      return;
+    }
+    setRefreshing(true);
     try {
       const result = await rpc(device.id, "sessions.list", {
         workspaceId,
@@ -25,7 +31,12 @@ export function useSessions(device: Device, workspaceId: string) {
       }
       return result.sessions;
     } catch (error) {
-      if (alive.current && read === revision.current) setListError(error);
+      if (alive.current && read === revision.current) {
+        setListError(error);
+        setListErrorDismissed(false);
+      }
+    } finally {
+      if (alive.current && read === revision.current) setRefreshing(false);
     }
   }, [device.id, device.status, workspaceId]);
   useEffect(() => {
@@ -59,6 +70,7 @@ export function useSessions(device: Device, workspaceId: string) {
       const session = await rpc(device.id, "sessions.create", { workspaceId, shortcutId });
       if (alive.current) {
         revision.current++;
+        setRefreshing(false);
         setSessions((old) => [...old.filter((item) => item.id !== session.id), session]);
         return session;
       }
@@ -101,7 +113,9 @@ export function useSessions(device: Device, workspaceId: string) {
   return {
     sessions,
     loaded,
-    error: error || listError,
+    error: error || (!listErrorDismissed && listError),
+    listError,
+    refreshing,
     setError,
     busy,
     uncertainCreate,
@@ -110,7 +124,7 @@ export function useSessions(device: Device, workspaceId: string) {
     change,
     clearError: () => {
       setError(undefined);
-      setListError(undefined);
+      setListErrorDismissed(true);
     },
   };
 }

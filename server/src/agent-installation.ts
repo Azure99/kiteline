@@ -46,8 +46,15 @@ connect "$@"
 export function upgradeCommand(entryOrigin: string) {
   return {
     version: appVersion,
-    command: `(
-set -e
+    command: `(kiteline_script=$(${curlCommand(entryOrigin)} ${quote(entryOrigin + "/upgrade.sh")}) && sh -c "$kiteline_script" -- --version ${quote(appVersion)})`,
+  };
+}
+
+function upgradeScript(entryOrigin: string) {
+  return `#!/bin/sh
+set -eu
+[ "$#" -eq 2 ] && [ "$1" = --version ] && [ "$2" = ${quote(appVersion)} ] || { echo 'The server release changed; obtain a new upgrade command from the web app' >&2; exit 1; }
+[ -t 0 ] || { echo 'Run this command in an interactive terminal or SSH session on the target device' >&2; exit 1; }
 for kiteline_tool in curl mktemp uname id; do
   command -v "$kiteline_tool" >/dev/null || { echo "Missing $kiteline_tool; install curl, CA certificates and core utilities using your system package manager, then run this command again" >&2; exit 1; }
 done
@@ -72,8 +79,7 @@ if [ "$(id -u)" -eq 0 ]; then
 else
   sudo -- /usr/local/bin/kiteline-agent service upgrade --archive "$kiteline_upgrade/$kiteline_name"
 fi
-)`,
-  };
+`;
 }
 
 export async function serveAgentInstallation(
@@ -83,19 +89,25 @@ export async function serveAgentInstallation(
   request: IncomingMessage,
   response: ServerResponse,
 ) {
-  if (path !== "/connect.sh" && path !== "/install.sh" && !path.startsWith("/downloads/"))
+  if (
+    path !== "/connect.sh" &&
+    path !== "/upgrade.sh" &&
+    path !== "/install.sh" &&
+    !path.startsWith("/downloads/")
+  )
     return false;
   if (request.method !== "GET" && request.method !== "HEAD") {
     response.writeHead(405, { allow: "GET, HEAD" }).end();
     return true;
   }
-  if (path === "/connect.sh") {
-    const script = connectionScript(entryOrigin);
+  if (path === "/connect.sh" || path === "/upgrade.sh") {
+    const script =
+      path === "/connect.sh" ? connectionScript(entryOrigin) : upgradeScript(entryOrigin);
     response.writeHead(200, {
       "content-type": "text/plain; charset=utf-8",
       "content-length": Buffer.byteLength(script),
       "cache-control": "no-cache",
-      "content-disposition": 'attachment; filename="connect.sh"',
+      "content-disposition": `attachment; filename="${path.slice(1)}"`,
     });
     response.end(request.method === "HEAD" ? undefined : script);
     return true;

@@ -511,8 +511,12 @@ test("the matching upgrade command is available to an authenticated stale Web re
   expect(response.status).toBe(200);
   const value = await response.json();
   expect(value.version).toBe(appVersion);
-  expect(value.command).toContain(`${f.origin}/downloads/agent/${appVersion}/`);
-  expect(value.command).toContain("service upgrade --archive");
+  expect(value.command).toContain(`${f.origin}/upgrade.sh`);
+  const script = await (await fetch(f.origin + "/upgrade.sh")).text();
+  expect(script).toContain(`${f.origin}/downloads/agent/${appVersion}/`);
+  expect(script).toContain("service upgrade --archive");
+  expect(script).not.toContain("--yes");
+  expect(script).not.toContain("kiteline-agent bind");
   expect(value.command).not.toContain("--yes");
   expect(value.command).not.toContain("kiteline-agent bind");
 });

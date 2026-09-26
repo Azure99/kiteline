@@ -139,6 +139,38 @@ test("a reset during a raw rejection leaves the server available", async () => {
   expect((await f.call("/healthz", { host: `127.0.0.1:${f.port}` })).status).toBe(200);
 });
 
+test("upgrade scripts are public while command recovery retains login and origin rules", async () => {
+  const f = await fixture(true);
+  const origin = `http://127.0.0.1:${f.port}`;
+  const response = await fetch(origin + "/upgrade.sh");
+  const script = await response.text();
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-cache");
+  expect(Number(response.headers.get("content-length"))).toBe(Buffer.byteLength(script));
+  expect(response.headers.get("content-disposition")).toContain('filename="upgrade.sh"');
+  expect(script).toContain(`${origin}/downloads/agent/${appVersion}/`);
+  const head = await fetch(origin + "/upgrade.sh", { method: "HEAD" });
+  expect(head.status).toBe(200);
+  expect(head.headers.get("content-length")).toBe(response.headers.get("content-length"));
+  expect(await head.text()).toBe("");
+  const post = await fetch(origin + "/upgrade.sh", { method: "POST" });
+  expect(post.status).toBe(405);
+  expect(post.headers.get("allow")).toBe("GET, HEAD");
+  expect((await fetch(origin + "/api/agent/upgrade-command")).status).toBe(401);
+
+  const session = f.store.createSession(60_000);
+  const command = await f.call("/api/agent/upgrade-command?appVersion=old", {
+    host: "kiteline.test:9443",
+    "x-forwarded-proto": "https",
+    cookie: `kiteline_session=${session.token}`,
+  });
+  expect(command.status).toBe(200);
+  const upgrade = JSON.parse(command.text) as { version: string; command: string };
+  expect(upgrade.version).toBe(appVersion);
+  expect(upgrade.command).toContain("https://kiteline.test:9443/upgrade.sh");
+  expect(upgrade.command).toContain("--proto '=https' --proto-redir '=https'");
+});
+
 test("request authority and explicit proxy trust determine HTTP and Upgrade origins", async () => {
   const direct = await fixture(false);
   expect(

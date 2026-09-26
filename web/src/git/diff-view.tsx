@@ -22,12 +22,14 @@ export function DiffView({
   repoId,
   target,
   refreshKey,
+  active = true,
 }: {
   deviceId: string;
   workspaceId: string;
   repoId: string;
   target: DiffTarget;
   refreshKey?: unknown;
+  active?: boolean;
 }) {
   const { t } = useTranslation();
 
@@ -36,6 +38,10 @@ export function DiffView({
   const [busy, setBusy] = useState(false);
   const unavailable = comparisonUnavailable(error);
   useEffect(() => {
+    if (!active) {
+      setBusy(false);
+      return;
+    }
     const controller = new AbortController();
     setBusy(true);
     setError(undefined);
@@ -62,20 +68,44 @@ export function DiffView({
         if (!controller.signal.aborted) setBusy(false);
       });
     return () => controller.abort();
-  }, [deviceId, workspaceId, repoId, target, refreshKey]);
+  }, [deviceId, workspaceId, repoId, target, refreshKey, active]);
+  const historyFeedback = target.side === "commit";
   return (
     <section
       className="flex min-h-0 min-w-0 flex-1 flex-col"
       aria-label="Git diff"
       aria-busy={busy}
     >
+      {historyFeedback && busy && value && (
+        <p
+          role="status"
+          className="shrink-0 border-b border-border px-4 py-2 text-xs text-muted-foreground"
+        >
+          {t(($) => $.git.diffRefreshing)}
+        </p>
+      )}
+      {historyFeedback && !!error && !unavailable && (
+        <div
+          role="alert"
+          className="max-h-24 shrink-0 overflow-auto break-words border-b border-border px-4 py-2 text-xs text-destructive"
+        >
+          {value ? (
+            <>
+              {t(($) => $.git.staleDiff, { error: errorMessage(error) })}
+              <ErrorDetails error={error} />
+            </>
+          ) : (
+            <ErrorNotice error={error} />
+          )}
+        </div>
+      )}
       <div className="scroll-area min-h-0 min-w-0 flex-1 overflow-auto">
         {unavailable && (
           <p role="status" className="p-4 text-sm text-muted-foreground">
             {t(($) => $.git.changeUnavailable)}
           </p>
         )}
-        {!!error && !unavailable && (
+        {!!error && !unavailable && !historyFeedback && (
           <div role="alert" className="break-words p-4 text-sm text-destructive">
             {value ? (
               <>

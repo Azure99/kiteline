@@ -1,6 +1,13 @@
 export const en = {
   schedules: {
     title: "Scheduled Tasks",
+    agentPrompt: "Agent prompt",
+    promptLanguage: "Template language",
+    promptText: "Prompt template",
+    copyPrompt: "Copy prompt",
+    promptCopyFailed: "Copy failed. Select the text above to copy manually.",
+    promptTemplate:
+      "Please use kiteline-agent schedule to manage scheduled tasks. Read kiteline-agent schedule --help first. My request:",
     newTask: "New task",
     editTask: "Edit task",
     device: "Device",
@@ -217,7 +224,26 @@ export const en = {
     partial: "The operation was only partially completed.",
   },
   devices: {
+    existingSessions: "Existing sessions",
+    deviceIdentity: "Device ID: {{id}}",
+    filterSessions: "Filter sessions",
+    filterSessionsHint: "Session, workspace or path",
+    sessionsLoading: "Loading sessions",
+    sessionsUnknown: "No session list obtained yet",
+    sessionsObserved: "Last successful observation: {{time}}",
+    sessionsRefreshing: "Refreshing; showing the previous observation.",
+    sessionsStale: "Refresh failed; showing the previous observation.",
+    sessionsOffline: "Device offline; showing the previous observation.",
+    previousObservation: "Previous observation",
+    previousReadFailed: "Previous read failed:",
+    noObservedSessions: "No sessions in this observation",
+    noMatchingSessions: "No matching sessions",
+    sessionWorkspaceUnavailable: "Workspace unavailable",
     upgradeAgent: "Upgrade agent",
+    viewUpgrade: "View update command",
+    upgradeDevice: "Target device: {{device}}",
+    upgradeCopyFailed: "Copy failed. Select the command above to copy it manually.",
+    lastReportedVersions: "Last reported: Agent {{agent}} / Server {{server}}",
     copyUpgrade: "Copy upgrade command",
     upgradeTarget: "Matching release: {{version}}",
     upgradeHint:
@@ -300,6 +326,8 @@ export const en = {
     play: "Run",
   },
   terminal: {
+    checkingTarget: "Checking the requested session",
+    targetUnknown: "The requested session could not be confirmed",
     shortcutIcon: "Icon",
     missing: "Terminal not found or already ended",
     refreshSessions: "Refresh sessions",
@@ -527,6 +555,13 @@ export const en = {
     imageDecodeFailed: "The image could not be decoded. You can download the original file.",
   },
   git: {
+    historyUnavailable: "Device unavailable. Previously read history is retained.",
+    historyRefreshing: "Refreshing history; showing the previous list.",
+    historyStale: "History could not be refreshed. Showing the previous list.",
+    commitFilesRefreshing: "Refreshing the selected commit's files; showing the previous list.",
+    commitFilesStale:
+      "The selected commit or parent could not be read. Showing the previous file list.",
+    diffRefreshing: "Refreshing the selected comparison; showing the previous diff.",
     createBranch: "Create branch",
     current: "Current",
     switchBranch: "Switch branch",

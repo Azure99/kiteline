@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, CalendarClock, Plus, RefreshCw } from "lucide-react";
+import { ArrowLeft, Bot, CalendarClock, Plus, RefreshCw } from "lucide-react";
 import type {
   BrowserEvent,
   Device,
@@ -17,6 +17,7 @@ import { scheduleSelectClass, TaskEditor } from "./task-editor";
 import { TaskDetail } from "./task-detail";
 import { RunDetail } from "./run-detail";
 import { taskTime } from "./form";
+import { SchedulePrompt } from "./schedule-prompt";
 
 export function ScheduledTasksPage({
   devices,
@@ -28,6 +29,8 @@ export function ScheduledTasksPage({
   route: ScheduleRoute;
 }) {
   const { t, i18n } = useTranslation();
+  const [prompt, setPrompt] = useState(false);
+  const promptTrigger = useRef<HTMLButtonElement>(null);
   const serverVersion = useServerVersion();
   const [summaries, setSummaries] = useState<DeviceTaskSummary[]>();
   const [error, setError] = useState<unknown>();
@@ -126,9 +129,9 @@ export function ScheduledTasksPage({
         <div
           className={`flex min-h-0 w-80 shrink-0 flex-col border-r border-border max-[959px]:w-full ${hasDetail ? "max-[959px]:hidden" : ""}`}
         >
-          <div className="shrink-0 border-b border-border p-3">
+          <div className="flex shrink-0 items-center gap-2 border-b border-border p-3">
             <select
-              className={scheduleSelectClass}
+              className={`${scheduleSelectClass} min-w-0 flex-1`}
               aria-label={t(($) => $.schedules.device)}
               value={route.filter ?? ""}
               onChange={(e) => select({ filter: e.target.value || undefined })}
@@ -140,6 +143,13 @@ export function ScheduledTasksPage({
                 </option>
               ))}
             </select>
+            <IconButton
+              ref={promptTrigger}
+              label={t(($) => $.schedules.agentPrompt)}
+              onClick={() => setPrompt(true)}
+            >
+              <Bot />
+            </IconButton>
           </div>
           <div className="scroll-area min-h-0 flex-1 overflow-auto">
             {!summaries && !error && (
@@ -156,7 +166,7 @@ export function ScheduledTasksPage({
                   <div key={device.id} className="border-b border-border">
                     <div className="space-y-1 bg-muted/50 px-3 py-2">
                       <p className="break-words text-xs font-medium">{device.name}</p>
-                      {!current && (
+                      {!current && group?.snapshot && (
                         <p className="text-xs text-muted-foreground">
                           {group?.observedAt
                             ? t(($) => $.schedules.stale, {
@@ -180,7 +190,7 @@ export function ScheduledTasksPage({
                         return (
                           <button
                             key={task.id}
-                            className={`block min-h-16 w-full space-y-1 border-t border-border px-3 py-2 text-left hover:bg-muted ${route.deviceId === device.id && route.taskId === task.id ? "bg-muted" : ""}`}
+                            className={`block min-h-16 w-full space-y-1 border-t border-border px-3 py-2 text-left ${route.deviceId === device.id && route.taskId === task.id ? "bg-primary-soft shadow-[inset_3px_0_var(--primary)]" : "hover:bg-muted"}`}
                             aria-current={
                               route.deviceId === device.id && route.taskId === task.id
                                 ? "true"
@@ -197,7 +207,22 @@ export function ScheduledTasksPage({
                               {task.reviewRunId
                                 ? t(($) => $.schedules.reviewRequired)
                                 : t(($) => $.schedules[`state_${task.state}`])}
-                              {result && ` · ${t(($) => $.schedules[`state_${result.state}`])}`}
+                              {result && (
+                                <>
+                                  {" · "}
+                                  <span
+                                    className={
+                                      result.state === "failed"
+                                        ? "text-destructive"
+                                        : result.state === "unknown"
+                                          ? "text-[#8c6515]"
+                                          : undefined
+                                    }
+                                  >
+                                    {t(($) => $.schedules[`state_${result.state}`])}
+                                  </span>
+                                </>
+                              )}
                             </span>
                             <span className="block text-xs text-muted-foreground">
                               {task.nextRunAt
@@ -273,6 +298,7 @@ export function ScheduledTasksPage({
           )}
         </div>
       </div>
+      {prompt && <SchedulePrompt trigger={promptTrigger} onClose={() => setPrompt(false)} />}
       {editor && (
         <TaskEditor
           devices={devices}

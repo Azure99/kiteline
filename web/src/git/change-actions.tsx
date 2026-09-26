@@ -69,15 +69,6 @@ export function RowActions({
       >
         {staged ? <Minus /> : <Plus />}
       </IconButton>
-      {side === "worktree" && (
-        <IconButton
-          label={t(($) => $.git.discardNamed, { path: entry.path })}
-          disabled={disabled || !discardable(entry)}
-          onClick={() => onDiscard([entry.path], "worktree")}
-        >
-          <Undo2 />
-        </IconButton>
-      )}
       <Menu>
         <MenuTrigger
           render={
@@ -100,6 +91,16 @@ export function RowActions({
             <MenuItem disabled={disabled} onClick={() => onIndex([entry.path], "unstage")}>
               <Minus />
               {t(($) => $.git.unstageNewPath)}
+            </MenuItem>
+          )}
+          {side === "worktree" && (
+            <MenuItem
+              aria-label={t(($) => $.git.discardNamed, { path: entry.path })}
+              disabled={disabled || !discardable(entry)}
+              onClick={() => onDiscard([entry.path], "worktree")}
+            >
+              <Undo2 />
+              {t(($) => $.git.discardWorktree)}
             </MenuItem>
           )}
           <MenuItem

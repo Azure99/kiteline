@@ -15,12 +15,20 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Files as FilesIcon,
+  CalendarClock,
 } from "lucide-react";
 import type { BrowserEvent, Device } from "@kiteline/shared/protocol";
 import type { Session } from "./auth";
 import { ApiError, errorMessage, post } from "./lib/api";
 import { ErrorDetails } from "./components/error-notice";
-import { currentPath, devicePath, navigate, useRoute, workspacePath } from "./lib/navigation";
+import {
+  currentPath,
+  devicePath,
+  navigate,
+  useRoute,
+  workspacePath,
+  schedulePath,
+} from "./lib/navigation";
 import { useDevices } from "./use-devices";
 import { Button } from "./components/ui/button";
 import {
@@ -53,6 +61,7 @@ import {
 } from "./files/operation-dialog";
 import { PortDialog } from "./devices/port-dialog";
 import { ReleaseNotice } from "./components/release-notice";
+import { AgentReleaseNotice } from "./devices/agent-release-notice";
 import { useTerminalFocus } from "./terminal/use-terminal-focus";
 import { deferredView, ViewBoundary } from "./components/deferred-view";
 
@@ -217,19 +226,17 @@ export function Workbench({
     setPicker(false);
     setError(undefined);
   }
-  const navigation = (
-    <DeviceNavigation
-      devices={devices}
-      deviceId={device?.id}
-      workspaceId={workspace?.id}
-      tool={route.tool}
-      onNavigate={choose}
-      onBind={() => {
-        setPicker(false);
-        setBinding(true);
-      }}
-    />
-  );
+  const navigationProps = {
+    devices,
+    deviceId: device?.id,
+    workspaceId: workspace?.id,
+    tool: route.tool,
+    onNavigate: choose,
+    onBind: () => {
+      setPicker(false);
+      setBinding(true);
+    },
+  };
   if (!session) return authentication;
   return (
     <>
@@ -275,7 +282,7 @@ export function Workbench({
                 />
               }
             >
-              <Server />
+              <Server className="max-[360px]:hidden" />
               <span className="flex min-w-0 flex-col min-[960px]:flex-row min-[960px]:items-center min-[960px]:gap-2">
                 <span className="truncate">
                   {workspace?.name ?? device?.name ?? t(($) => $.common.devices)}
@@ -292,7 +299,9 @@ export function Workbench({
               <DialogHeader>
                 <DialogTitle>{t(($) => $.shell.deviceWorkspaces)}</DialogTitle>
               </DialogHeader>
-              <div className="scroll-area overflow-auto">{navigation}</div>
+              <div className="scroll-area overflow-auto">
+                <DeviceNavigation {...navigationProps} showPaths />
+              </div>
             </DialogContent>
           </Dialog>
           <span
@@ -301,6 +310,16 @@ export function Workbench({
             title={connected ? t(($) => $.common.connected) : t(($) => $.common.disconnected)}
             aria-label={connected ? t(($) => $.common.connected) : t(($) => $.common.disconnected)}
           />
+          <IconButton
+            label={t(($) => $.schedules.title)}
+            aria-current={route.schedule ? "page" : undefined}
+            className={route.schedule ? "bg-muted text-primary" : undefined}
+            onClick={() => {
+              if (!route.schedule) choose(schedulePath({ filter: device?.id }));
+            }}
+          >
+            <CalendarClock />
+          </IconButton>
           {device && device.status !== "revoked" && (
             <IconButton label={t(($) => $.shell.openPort)} onClick={() => setPortDevice(device.id)}>
               <Globe />
@@ -383,9 +402,12 @@ export function Workbench({
             hidden={!sidebarOpen || terminalFocus.active}
             className="desktop-rail scroll-area shrink-0 overflow-auto border-r border-border bg-muted/60"
           >
-            {navigation}
+            <DeviceNavigation {...navigationProps} />
           </aside>
           <main className="flex min-w-0 flex-1 flex-col">
+            {route.valid && !route.schedule && device && (!route.workspaceId || workspace) && (
+              <AgentReleaseNotice key={`agent-release:${device.id}`} device={device} />
+            )}
             {!!(error || connectionError) && (
               <div
                 role="alert"
@@ -422,6 +444,8 @@ export function Workbench({
             ) : !route.deviceId ? (
               <Home
                 devices={devices}
+                loaded={devicesLoaded}
+                connectionError={connectionError}
                 recents={recents}
                 onNavigate={choose}
                 onBind={() => setBinding(true)}

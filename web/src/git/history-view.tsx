@@ -1,6 +1,6 @@
 import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
   ChevronDown,
@@ -44,6 +44,7 @@ export function HistoryView(props: Props) {
   const lastRefresh = useRef(refreshKey);
   const load = useCallback(
     async (nextPosition = position.current, visited = pages.current) => {
+      if (!active) return;
       const { anchor, offset } = nextPosition;
       request.current?.abort();
       const controller = new AbortController();
@@ -71,18 +72,31 @@ export function HistoryView(props: Props) {
         }
       }
     },
-    [deviceId, workspaceId, repoId],
+    [deviceId, workspaceId, repoId, active],
   );
   useEffect(() => {
-    if (active) {
-      if (lastRefresh.current !== refreshKey) void load({ offset: 0 }, []);
-      else void load();
-      lastRefresh.current = refreshKey;
-    }
+    const changed = lastRefresh.current !== refreshKey;
+    // A refresh in another view must not reset this reader when it becomes active again.
+    lastRefresh.current = refreshKey;
+    if (active) void load(changed ? { offset: 0 } : undefined, changed ? [] : undefined);
     return () => request.current?.abort();
   }, [active, load, refreshKey]);
   return (
     <>
+      {!active && props.visible && (
+        <ToolHeader visible order={3}>
+          <p role="status" className="px-4 py-2 text-xs text-muted-foreground">
+            {value ? t(($) => $.git.historyUnavailable) : t(($) => $.common.deviceOffline)}
+          </p>
+        </ToolHeader>
+      )}
+      {active && busy && value && (
+        <ToolHeader visible={props.visible} order={3}>
+          <p role="status" className="px-4 py-2 text-xs text-muted-foreground">
+            {t(($) => $.git.historyRefreshing)}
+          </p>
+        </ToolHeader>
+      )}
       {!selected && (
         <ToolHeader visible={props.visible} order={2}>
           {renderHeader()}
@@ -90,7 +104,11 @@ export function HistoryView(props: Props) {
       )}
       {!!error && (
         <ToolHeader visible={props.visible} order={3}>
-          <div role="alert" className="px-4 py-2 text-xs text-destructive">
+          <div
+            role="alert"
+            className="max-h-24 overflow-auto px-4 py-2 text-xs break-words text-destructive"
+          >
+            {value && <p>{t(($) => $.git.historyStale)}</p>}
             <ErrorNotice error={error} />
           </div>
         </ToolHeader>
@@ -119,7 +137,11 @@ export function HistoryView(props: Props) {
           ))}
           {!value?.commits.length && (
             <p role="status" className="p-4 text-sm text-muted-foreground">
-              {busy ? t(($) => $.common.reading) : error ? "" : t(($) => $.git.noCommits)}
+              {error || !active
+                ? ""
+                : busy || !value
+                  ? t(($) => $.common.reading)
+                  : t(($) => $.git.noCommits)}
             </p>
           )}
         </div>
@@ -131,7 +153,7 @@ export function HistoryView(props: Props) {
           </span>
           <IconButton
             label={t(($) => $.git.previousHistory)}
-            disabled={busy || offset === 0}
+            disabled={!active || busy || offset === 0}
             onClick={() =>
               void load(
                 { anchor: position.current.anchor, offset: pages.current.at(-1) ?? 0 },
@@ -143,7 +165,7 @@ export function HistoryView(props: Props) {
           </IconButton>
           <IconButton
             label={t(($) => $.git.nextHistory)}
-            disabled={busy || value?.nextOffset === undefined}
+            disabled={!active || busy || value?.nextOffset === undefined}
             onClick={() => {
               if (value?.nextOffset !== undefined)
                 void load({ anchor: position.current.anchor, offset: value.nextOffset }, [
@@ -187,27 +209,54 @@ function CommitView({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
   const request = useRef<AbortController>(undefined);
-  const loaded = useRef(false);
-  const lastRefresh = useRef(refreshKey);
+  const offsets = useRef<number[]>([0]);
   const mobile = useMobile();
+  const hasTarget = !!target;
+  const list = useRef<HTMLElement>(null);
+  const listScroll = useRef<{ top: number; left: number; path?: string; offset?: number }>({
+    top: 0,
+    left: 0,
+  });
+  useLayoutEffect(() => {
+    const element = list.current;
+    if (!element?.clientHeight) return;
+    const kept = listScroll.current;
+    const row = Array.from(element.querySelectorAll<HTMLElement>("[data-history-file]")).find(
+      (row) => row.dataset.historyFile === kept.path,
+    );
+    element.scrollTop = row
+      ? row.getBoundingClientRect().top -
+        element.getBoundingClientRect().top +
+        element.scrollTop -
+        (kept.offset ?? 0)
+      : kept.top;
+    element.scrollLeft = kept.left;
+  }, [mobile, value, visible, hasTarget]);
   const load = useCallback(
     async (offset = 0) => {
+      if (!active) return;
       request.current?.abort();
       const controller = new AbortController();
       request.current = controller;
       setBusy(true);
       setError(undefined);
       try {
-        const next = await rpc(
-          deviceId,
-          "git.commitFiles",
-          { workspaceId, repoId, commitOid: commit.oid, parentOid: parent, offset },
-          controller.signal,
-        );
-        if (controller.signal.aborted) return;
-        loaded.current = true;
+        let next: CommitFiles | undefined;
+        for (const pageOffset of offset === 0 ? offsets.current : [offset]) {
+          const page = await rpc(
+            deviceId,
+            "git.commitFiles",
+            { workspaceId, repoId, commitOid: commit.oid, parentOid: parent, offset: pageOffset },
+            controller.signal,
+          );
+          if (controller.signal.aborted) return;
+          next = next ? { ...page, files: [...next.files, ...page.files] } : page;
+        }
+        if (!next) return;
+        if (offset > 0 && !offsets.current.includes(offset)) offsets.current.push(offset);
+        const result = next;
         setValue((old) =>
-          offset > 0 && old ? { ...next, files: [...old.files, ...next.files] } : next,
+          offset > 0 && old ? { ...result, files: [...old.files, ...result.files] } : result,
         );
       } catch (error) {
         if (!controller.signal.aborted) setError(error);
@@ -218,18 +267,16 @@ function CommitView({
         }
       }
     },
-    [deviceId, workspaceId, repoId, commit.oid, parent],
+    [deviceId, workspaceId, repoId, commit.oid, parent, active],
   );
   useEffect(() => {
     setValue(undefined);
     setTarget(undefined);
-    loaded.current = false;
-  }, [load]);
+    offsets.current = [0];
+    listScroll.current = { top: 0, left: 0 };
+  }, [deviceId, workspaceId, repoId, commit.oid, parent]);
   useEffect(() => {
-    if (active && (!loaded.current || lastRefresh.current !== refreshKey)) {
-      void load();
-      lastRefresh.current = refreshKey;
-    }
+    if (active) void load();
     return () => request.current?.abort();
   }, [active, load, refreshKey]);
   return (
@@ -278,8 +325,17 @@ function CommitView({
             </Menu>
           </div>
         )}
+        {active && busy && value && (
+          <p role="status" className="px-4 py-2 text-xs text-muted-foreground">
+            {t(($) => $.git.commitFilesRefreshing)}
+          </p>
+        )}
         {!!error && (
-          <div role="alert" className="px-4 py-2 text-xs text-destructive">
+          <div
+            role="alert"
+            className="max-h-24 overflow-auto px-4 py-2 text-xs break-words text-destructive"
+          >
+            {value && <p>{t(($) => $.git.commitFilesStale)}</p>}
             <ErrorNotice error={error} />
           </div>
         )}
@@ -287,6 +343,21 @@ function CommitView({
       <div className="flex min-h-0 flex-1">
         <ToolSidebar visible={visible}>
           <aside
+            ref={list}
+            onScroll={(event) => {
+              const element = event.currentTarget;
+              if (!element.clientHeight) return;
+              const top = element.getBoundingClientRect().top;
+              const row = Array.from(
+                element.querySelectorAll<HTMLElement>("[data-history-file]"),
+              ).find((row) => row.getBoundingClientRect().bottom > top);
+              listScroll.current = {
+                top: element.scrollTop,
+                left: element.scrollLeft,
+                path: row?.dataset.historyFile,
+                offset: row ? row.getBoundingClientRect().top - top : undefined,
+              };
+            }}
             className={`${mobile && target ? "hidden" : ""} scroll-area w-full overflow-auto border-border min-[960px]:w-72 min-[960px]:shrink-0 min-[960px]:border-r`}
             aria-label={t(($) => $.git.commitFiles)}
           >
@@ -303,6 +374,7 @@ function CommitView({
               ) : (
                 <button
                   key={`path:${file.path}`}
+                  data-history-file={file.path}
                   onClick={() =>
                     setTarget({
                       path: file.path,
@@ -311,7 +383,8 @@ function CommitView({
                       parentOid: parent,
                     })
                   }
-                  className="flex min-h-8 w-full items-center gap-2 border-b border-border px-3 text-left text-xs hover:bg-primary-soft max-[959px]:min-h-11"
+                  aria-current={target?.path === file.path ? "true" : undefined}
+                  className={`flex min-h-8 w-full items-center gap-2 border-b border-border px-3 text-left text-xs max-[959px]:min-h-11 ${target?.path === file.path ? "bg-primary-soft shadow-[inset_3px_0_var(--primary)]" : "hover:bg-primary-soft"}`}
                 >
                   <span className="font-mono text-muted-foreground">{file.status}</span>
                   <GitFilePath path={file.path} />
@@ -324,7 +397,7 @@ function CommitView({
             {busy && (
               <p className="p-4 text-xs text-muted-foreground">{t(($) => $.common.reading)}</p>
             )}
-            {!!(!busy && !error && !value?.files.length) && (
+            {!!(value && !busy && !error && !value.files.length) && (
               <p className="p-4 text-xs text-muted-foreground">{t(($) => $.git.noFileChanges)}</p>
             )}
             {value?.nextOffset !== undefined && (
@@ -344,6 +417,7 @@ function CommitView({
             key={JSON.stringify(target)}
             {...{ deviceId, workspaceId, repoId, target }}
             refreshKey={refreshKey}
+            active={active}
           />
         )}
       </div>
