@@ -47,7 +47,7 @@ export function visitWorkspace(entries: RecentWorkspace[], entry: RecentWorkspac
 export function pruneRecents(entries: RecentWorkspace[], devices: Device[]) {
   const next = entries.filter((entry) => {
     const device = devices.find((item) => item.id === entry.deviceId);
-    if (!device || device.status === "revoked") return false;
+    if (!device) return false;
     return (
       device.status !== "online" ||
       !device.snapshot ||
@@ -82,14 +82,7 @@ export function useRecentWorkspaces(
     const device = devices.find((item) => item.id === deviceId);
     const workspace = device?.snapshot?.workspaces.find((item) => item.id === workspaceId);
     let entry: RecentWorkspace | undefined;
-    if (
-      key &&
-      !visit.current.recorded &&
-      device &&
-      device.status !== "revoked" &&
-      workspace &&
-      tool
-    ) {
+    if (key && !visit.current.recorded && device && workspace && tool) {
       entry = {
         deviceId: device.id,
         workspaceId: workspace.id,

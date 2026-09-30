@@ -14,6 +14,10 @@ import {
   Fullscreen,
   X,
   Minimize,
+  ClipboardPaste,
+  Keyboard,
+  Scan,
+  Search,
 } from "lucide-react";
 import type { Device, Workspace } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
@@ -21,7 +25,7 @@ import { Button } from "../components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
 import { WatchStatus } from "../components/watch-status";
 import { ToolLayout } from "../components/tool-layout";
-import type { TerminalActions } from "./terminal-view";
+import type { TerminalActions, TerminalCapabilities } from "./terminal-view";
 import { TerminalView } from "./lazy-terminal-view";
 import { TerminalSettings } from "./settings";
 import { navigateWorkspace, updateWorkspaceQuery, useRoute } from "../lib/navigation";
@@ -48,6 +52,7 @@ import { SessionMenu, type SessionCommand } from "./session-menu";
 import { SessionPicker, NewSessionButtons } from "./session-controls";
 import { SessionDialog, type SessionAction } from "./session-dialog";
 import { GroupTabs, useTerminalDrag } from "./group-tabs";
+import type { useTerminalFocus } from "./use-terminal-focus";
 
 export function WorkspaceTerminal({
   device,
@@ -55,17 +60,13 @@ export function WorkspaceTerminal({
   visible,
   layouts,
   focusMode,
-  onEnterFocus,
-  onExitFocus,
   children,
 }: {
   device: Device;
   workspace: Workspace;
   visible: boolean;
   layouts: Map<string, TerminalLayout>;
-  focusMode: boolean;
-  onEnterFocus(): void;
-  onExitFocus(): void;
+  focusMode: ReturnType<typeof useTerminalFocus>;
   children: ReactNode;
 }) {
   const { t } = useTranslation();
@@ -79,6 +80,9 @@ export function WorkspaceTerminal({
   const lastRouteSession = useRef<string | null | undefined>(undefined);
   const lastTool = useRef<string | undefined>(undefined);
   const displays = useRef(new Map<string, TerminalActions>());
+  const [capabilities, setCapabilities] = useState<
+    Record<"main" | "dock", Record<string, TerminalCapabilities>>
+  >({ main: {}, dock: {} });
   const names = useRef(new Map<string, string>());
   const dockActions = useRef(new Map<string, TerminalActions>());
   const [opened, setOpened] = useState(() => ({
@@ -197,6 +201,28 @@ export function WorkspaceTerminal({
     if (value) displays.current.set(id, value);
     else displays.current.delete(id);
   }, []);
+  const reportCapabilities = useCallback(
+    (region: "main" | "dock", id: string, value: TerminalCapabilities | undefined) => {
+      setCapabilities((old) => {
+        const previous = old[region][id];
+        if (previous?.ready === value?.ready && previous?.hasTerminal === value?.hasTerminal)
+          return old;
+        const next = { ...old[region] };
+        if (value === undefined) delete next[id];
+        else next[id] = value;
+        return { ...old, [region]: next };
+      });
+    },
+    [],
+  );
+  const reportMain = useCallback(
+    (id: string, value: TerminalCapabilities | undefined) => reportCapabilities("main", id, value),
+    [reportCapabilities],
+  );
+  const reportDock = useCallback(
+    (id: string, value: TerminalCapabilities | undefined) => reportCapabilities("dock", id, value),
+    [reportCapabilities],
+  );
   function applyMain(next: TerminalLayout, tool = route.tool, replace = false) {
     setLayout(next);
     const id = currentGroup(next)?.active;
@@ -308,7 +334,7 @@ export function WorkspaceTerminal({
         groups={dock ? [] : layout.groups}
         retained={[...(dock ? opened.dock : opened.main)]}
         name={name}
-        iconOnly={!dock && (multipleGroups || split)}
+        iconOnly={!dock && (mobile || multipleGroups || split)}
         uncertain={remote.uncertainCreate}
         refreshDisabled={device.status !== "online"}
         onRefresh={() => void remote.refresh()}
@@ -336,7 +362,7 @@ export function WorkspaceTerminal({
   return (
     <>
       <div
-        hidden={focusMode}
+        hidden={focusMode.active}
         className="flex shrink-0 items-center border-b border-border bg-muted/60 px-4 max-[959px]:px-0"
       >
         <div
@@ -394,7 +420,15 @@ export function WorkspaceTerminal({
         </div>
       )}
       <div className={visible ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
-        <div className="flex min-h-10 shrink-0 items-center gap-1 border-b border-border bg-muted/50 px-2">
+        {focusMode.error && (
+          <div role="status" className="flex shrink-0 items-center gap-2 px-3 text-sm">
+            <span className="flex-1">{t(($) => $.terminal[focusMode.error!])}</span>
+            <IconButton label={t(($) => $.common.dismiss)} onClick={focusMode.dismiss}>
+              <X />
+            </IconButton>
+          </div>
+        )}
+        <div className="flex min-h-10 shrink-0 items-center gap-1 border-b border-border bg-muted/50 px-2 max-[959px]:gap-0 max-[959px]:px-1">
           {picker()}
           {!mobile && (multipleGroups || drag.dragging) ? (
             <GroupTabs
@@ -408,6 +442,32 @@ export function WorkspaceTerminal({
             <span className="flex-1" />
           )}
           {newButtons()}
+          {mobile && (
+            <>
+              {typeof navigator.clipboard?.readText === "function" && (
+                <IconButton
+                  label={t(($) => $.terminal.paste)}
+                  disabled={targetPending || !selected || !capabilities.main[selected]?.ready}
+                  onPointerDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    if (selected && !targetPending) void displays.current.get(selected)?.paste();
+                  }}
+                >
+                  <ClipboardPaste />
+                </IconButton>
+              )}
+              <IconButton
+                label={t(($) => $.terminal.keyboard)}
+                disabled={targetPending || !selected || !capabilities.main[selected]?.ready}
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  if (selected && !targetPending) displays.current.get(selected)?.keyboard();
+                }}
+              >
+                <Keyboard />
+              </IconButton>
+            </>
+          )}
           {!mobile && (
             <Menu>
               <MenuTrigger
@@ -443,13 +503,29 @@ export function WorkspaceTerminal({
             </IconButton>
           )}
           <IconButton
-            label={focusMode ? t(($) => $.terminal.exitFocus) : t(($) => $.terminal.enterFocus)}
+            label={t(($) => $.terminal.search)}
+            disabled={targetPending || !selected || !capabilities.main[selected]?.hasTerminal}
+            onClick={() => {
+              if (selected && !targetPending) displays.current.get(selected)?.search();
+            }}
+          >
+            <Search />
+          </IconButton>
+          <IconButton
+            label={t(($) => $.terminal[focusMode.next])}
+            aria-pressed={focusMode.active || focusMode.fullscreen}
             onPointerDown={(event) => {
               if (mobile) event.preventDefault();
             }}
-            onClick={focusMode ? onExitFocus : onEnterFocus}
+            onClick={focusMode.toggle}
           >
-            {focusMode ? <Minimize /> : <Fullscreen />}
+            {focusMode.next === "exitFocus" ? (
+              <Minimize />
+            ) : focusMode.next === "enterFullscreen" ? (
+              <Fullscreen />
+            ) : (
+              <Scan />
+            )}
           </IconButton>
           {menu(split || targetPending ? undefined : selected)}
         </div>
@@ -487,6 +563,7 @@ export function WorkspaceTerminal({
             events={{
               name,
               actions: register,
+              capabilities: reportMain,
               focus,
               close,
               maximize: () => patchGroup({ maximized: !group?.maximized }),
@@ -550,6 +627,15 @@ export function WorkspaceTerminal({
                 {picker(true)}
                 <span className="flex-1" />
                 {newButtons(true)}
+                <IconButton
+                  label={t(($) => $.terminal.search)}
+                  disabled={!dockExpanded || !dockId || !capabilities.dock[dockId]?.hasTerminal}
+                  onClick={() => {
+                    if (dockExpanded && dockId) dockActions.current.get(dockId)?.search();
+                  }}
+                >
+                  <Search />
+                </IconButton>
                 {dockId && (
                   <>
                     <IconButton
@@ -579,6 +665,7 @@ export function WorkspaceTerminal({
                     deviceId={device.id}
                     workspaceId={workspace.id}
                     sessionId={id}
+                    onCapabilities={reportDock}
                   />
                 </div>
               ))}

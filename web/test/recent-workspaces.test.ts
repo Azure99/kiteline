@@ -44,6 +44,6 @@ test("recent targets are removed only when the complete device facts prove them 
   expect(pruneRecents(recents, [{ ...device, status: "offline" }])).toBe(recents);
   expect(pruneRecents(recents, [{ ...device, snapshot: undefined }])).toBe(recents);
   expect(pruneRecents(recents, [device])).toEqual([visit("kept")]);
-  expect(pruneRecents(recents, [{ ...device, status: "revoked" }])).toEqual([]);
+  expect(pruneRecents(recents, [])).toEqual([]);
   expect(pruneRecents(recents, [])).toEqual([]);
 });

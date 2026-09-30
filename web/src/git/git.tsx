@@ -220,9 +220,7 @@ export function GitTool({
         )}
         {!enabled && (
           <p role="status" className="border-b border-border px-4 py-2 text-xs">
-            {device.status === "revoked"
-              ? t(($) => $.common.deviceRevoked)
-              : t(($) => $.common.deviceOffline)}
+            {t(($) => $.common.deviceOffline)}
           </p>
         )}
         {!!(!!error || !!scan?.issues.length) && (

@@ -17,6 +17,7 @@ import { retainReadonlyViewport } from "./readonly-viewport";
 import { versionedPath } from "../lib/release";
 import { isKeyboardOpen } from "../lib/viewport";
 import { KeyboardViewport } from "./keyboard-viewport";
+import { AuxiliaryInput, type Modifiers } from "./auxiliary-input";
 
 export interface DisplayState {
   status: "connecting" | "ready" | "ended" | "error";
@@ -45,6 +46,7 @@ export class TerminalDisplay {
   private proposed?: { cols: number; rows: number };
   private effective?: { cols: number; rows: number; width: number; font: number };
   private keyboardViewport?: KeyboardViewport;
+  private auxiliary?: AuxiliaryInput;
   private cleanups: (() => void)[] = [];
   state: DisplayState = { status: "connecting" };
   constructor(
@@ -57,7 +59,7 @@ export class TerminalDisplay {
     private interaction?: {
       opened: (terminal: Terminal) => void;
       reading: (value: boolean) => void;
-      control: () => boolean;
+      modifiers: (value: Modifiers) => void;
     },
   ) {
     this.observer = new ResizeObserver(() => this.resize());
@@ -208,20 +210,17 @@ export class TerminalDisplay {
         terminal.loadAddon(new WebLinksAddon(openLink, { hover: hoverLink, leave: leaveLink }));
         adaptTerminalScrolling(terminal);
         forwardUserInput(terminal, (text) => {
-          const control = this.interaction?.control();
-          if (control && text.length === 1 && text.charCodeAt(0) <= 127) {
-            if (/[ @-_a-z?]/.test(text))
-              text = String.fromCharCode(
-                text === "?" ? 127 : text.toUpperCase().charCodeAt(0) & 31,
-              );
-          }
-          this.bytes(new TextEncoder().encode(text));
+          const value = this.auxiliary ? this.auxiliary.forward(text) : text;
+          if (value !== undefined) this.bytes(new TextEncoder().encode(value));
         });
         const binary = terminal.onBinary((value) =>
           this.bytes(Uint8Array.from(value, (character) => character.charCodeAt(0))),
         );
         this.cleanups.push(() => binary.dispose());
         terminal.open(this.element);
+        this.auxiliary = new AuxiliaryInput(terminal, (value) =>
+          this.interaction?.modifiers(value),
+        );
         this.keyboardViewport = new KeyboardViewport(terminal, this.reportReading);
         const readingEvents = [
           terminal.onScroll(this.reportReading),
@@ -326,8 +325,14 @@ export class TerminalDisplay {
     }
     this.socket!.send(data);
   }
-  input(text: string) {
-    this.terminal?.input(text, true);
+  key(key: string) {
+    this.auxiliary?.key(key);
+  }
+  toggleModifier(key: keyof Modifiers) {
+    this.auxiliary?.toggle(key);
+  }
+  releaseModifiers() {
+    this.auxiliary?.release();
   }
   changeFontSize(delta: number) {
     if (!this.terminal) return;
@@ -343,6 +348,7 @@ export class TerminalDisplay {
   paste(text: string) {
     if (!this.ready || this.receivedEnd || this.terminal?.options.disableStdin || !this.meta)
       return;
+    this.releaseModifiers();
     const encoder = new TextEncoder();
     if (
       encoder.encode(normalizePaste(text)).length > this.meta.terminalInputBytes ||
@@ -459,6 +465,7 @@ export class TerminalDisplay {
     this.observer.disconnect();
     window.removeEventListener("kiteline:viewport", this.viewportChanged);
     this.keyboardViewport?.dispose();
+    this.auxiliary?.dispose();
     this.socket?.close();
     this.cancelChannel();
     this.element.removeEventListener("paste", this.onPaste, true);

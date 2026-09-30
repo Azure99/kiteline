@@ -3,13 +3,14 @@ import { useCallback, useLayoutEffect, useRef, type ReactNode } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { Maximize2, SquareTerminal, X } from "lucide-react";
 import { IconButton } from "../components/icon-button";
-import type { TerminalActions } from "./terminal-view";
+import type { TerminalActions, TerminalCapabilities } from "./terminal-view";
 import { TerminalView } from "./lazy-terminal-view";
 import { members, parentSplit, type TerminalGroup, type TerminalNode } from "./groups";
 import { memberTarget, type useTerminalDrag } from "./group-tabs";
 
 export interface PaneEvents {
   actions(id: string, value: TerminalActions | null): void;
+  capabilities(id: string, value: TerminalCapabilities | undefined): void;
   focus(id: string): void;
   close(id: string): void;
   maximize(): void;
@@ -257,7 +258,13 @@ function TerminalPane({
           </IconButton>
         </header>
       )}
-      <TerminalView ref={setActions} deviceId={deviceId} workspaceId={workspaceId} sessionId={id} />
+      <TerminalView
+        ref={setActions}
+        onCapabilities={events.capabilities}
+        deviceId={deviceId}
+        workspaceId={workspaceId}
+        sessionId={id}
+      />
     </div>
   );
 }

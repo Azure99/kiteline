@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import { localCommand } from "../src/terminal/local-command";
 import type { AgentEnvironment } from "@kiteline/shared/protocol";
 
-test("local attach uses the observed launcher and both instance paths", () => {
+test("local attach uses the observed launcher and explicit runtime directory", () => {
   const environment: AgentEnvironment = {
     os: "linux",
     homePath: "/home/project",
@@ -13,7 +13,7 @@ test("local attach uses the observed launcher and both instance paths", () => {
   };
   for (const os of ["linux", "macos"] as const)
     expect(localCommand({ ...environment, os }, "session")).toBe(
-      "KITELINE_AGENT_HOME='/var/tmp/data one' KITELINE_AGENT_RUN_DIR='/var/tmp/run'\\''s' '/opt/kiteline'\\''s/bin/kiteline-agent' terminal attach 'session'",
+      "'/opt/kiteline'\\''s/bin/kiteline-agent' attach session --run-dir '/var/tmp/run'\\''s'",
     );
   const windows = localCommand(
     {
@@ -25,14 +25,13 @@ test("local attach uses the observed launcher and both instance paths", () => {
     },
     "session",
   );
-  expect(windows).toContain("& 'C:\\Kiteline''s\\kiteline-agent.ps1' terminal attach 'session'");
-  expect(windows).toContain(
-    "$env:KITELINE_AGENT_HOME = 'C:\\data'; $env:KITELINE_AGENT_RUN_DIR = 'C:\\run'",
+  expect(windows).toBe(
+    "& 'C:\\Kiteline''s\\kiteline-agent.ps1' attach 'session' --run-dir 'C:\\run'",
   );
-  expect(windows).toContain(
-    "if ($null -eq $kitelineHome) { Remove-Item Env:KITELINE_AGENT_HOME -ErrorAction SilentlyContinue } else { $env:KITELINE_AGENT_HOME = $kitelineHome }",
-  );
-  expect(windows).toContain(
-    "if ($null -eq $kitelineRun) { Remove-Item Env:KITELINE_AGENT_RUN_DIR -ErrorAction SilentlyContinue } else { $env:KITELINE_AGENT_RUN_DIR = $kitelineRun }",
-  );
+  expect(
+    localCommand(
+      { ...environment, cliPath: "/usr/local/bin/kiteline-agent", runDir: "/actual/run" },
+      "0123456789abcdef",
+    ),
+  ).toBe("/usr/local/bin/kiteline-agent attach 0123456789abcdef --run-dir '/actual/run'");
 });

@@ -7,6 +7,9 @@ settings:
 overrides:
   gitdiff-parser: 0.3.1
 
+patchedDependencies:
+  '@xterm/xterm@6.1.0-beta.304': ee92a197d0f735972ed40e6d4f8827684a833c1e34716c52688e74529825f52b
+
 importers:
 
   .:
@@ -112,7 +115,7 @@ importers:
         version: link:../shared
       '@xterm/addon-serialize':
         specifier: 0.15.0-beta.301
-        version: 0.15.0-beta.301(@xterm/xterm@6.1.0-beta.304)
+        version: 0.15.0-beta.301(@xterm/xterm@6.1.0-beta.304(patch_hash=ee92a197d0f735972ed40e6d4f8827684a833c1e34716c52688e74529825f52b))
       '@xterm/headless':
         specifier: 6.1.0-beta.303
         version: 6.1.0-beta.303
@@ -152,12 +155,15 @@ importers:
       '@xterm/addon-fit':
         specifier: 0.11.0
         version: 0.11.0
+      '@xterm/addon-search':
+        specifier: 0.17.0-beta.301
+        version: 0.17.0-beta.301(@xterm/xterm@6.1.0-beta.304(patch_hash=ee92a197d0f735972ed40e6d4f8827684a833c1e34716c52688e74529825f52b))
       '@xterm/addon-web-links':
         specifier: 0.12.0
         version: 0.12.0
       '@xterm/xterm':
         specifier: 6.1.0-beta.304
-        version: 6.1.0-beta.304
+        version: 6.1.0-beta.304(patch_hash=ee92a197d0f735972ed40e6d4f8827684a833c1e34716c52688e74529825f52b)
       class-variance-authority:
         specifier: 0.7.1
         version: 0.7.1
@@ -909,6 +915,11 @@ packages:
 
   '@xterm/addon-fit@0.11.0':
     resolution: {integrity: sha512-jYcgT6xtVYhnhgxh3QgYDnnNMYTcf8ElbxxFzX0IZo+vabQqSPAjC3c1wJrKB5E19VwQei89QCiZZP86DCPF7g==}
+
+  '@xterm/addon-search@0.17.0-beta.301':
+    resolution: {integrity: sha512-Dj8q+p2/5c4fcS4hag6QaXngxstnc4DdzREN/IhpGxz5a1JpW/3FnF9/JE1P1wvNLp9fApgGmZqBMW4xCF6HKg==}
+    peerDependencies:
+      '@xterm/xterm': ^6.1.0-beta.304
 
   '@xterm/addon-serialize@0.15.0-beta.301':
     resolution: {integrity: sha512-zWT0Sy5GCSTnarAXRiicu3XYHgam8DPtpkWfSLPME+A3s7U1A6Jy+ZATt8vMkatyeVOPI0GICYRuQJLZVgnVow==}
@@ -2681,9 +2692,13 @@ snapshots:
 
   '@xterm/addon-fit@0.11.0': {}
 
-  '@xterm/addon-serialize@0.15.0-beta.301(@xterm/xterm@6.1.0-beta.304)':
+  '@xterm/addon-search@0.17.0-beta.301(@xterm/xterm@6.1.0-beta.304(patch_hash=ee92a197d0f735972ed40e6d4f8827684a833c1e34716c52688e74529825f52b))':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.304
+      '@xterm/xterm': 6.1.0-beta.304(patch_hash=ee92a197d0f735972ed40e6d4f8827684a833c1e34716c52688e74529825f52b)
+
+  '@xterm/addon-serialize@0.15.0-beta.301(@xterm/xterm@6.1.0-beta.304(patch_hash=ee92a197d0f735972ed40e6d4f8827684a833c1e34716c52688e74529825f52b))':
+    dependencies:
+      '@xterm/xterm': 6.1.0-beta.304(patch_hash=ee92a197d0f735972ed40e6d4f8827684a833c1e34716c52688e74529825f52b)
 
   '@xterm/addon-unicode11@0.9.0': {}
 
@@ -2691,7 +2706,7 @@ snapshots:
 
   '@xterm/headless@6.1.0-beta.303': {}
 
-  '@xterm/xterm@6.1.0-beta.304': {}
+  '@xterm/xterm@6.1.0-beta.304(patch_hash=ee92a197d0f735972ed40e6d4f8827684a833c1e34716c52688e74529825f52b)': {}
 
   acorn-jsx@5.3.2(acorn@8.18.0):
     dependencies:

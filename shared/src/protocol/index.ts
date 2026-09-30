@@ -113,7 +113,7 @@ export interface Metadata {
 export interface Device {
   id: string;
   name: string;
-  status: "online" | "offline" | "revoked";
+  status: "online" | "offline";
   lastSeenAt: string | null;
   snapshot?: Metadata;
   editorBytes?: number;

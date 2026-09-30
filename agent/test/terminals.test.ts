@@ -1,5 +1,5 @@
-import { afterEach, expect, test } from "vitest";
-import { mkdtemp, mkdir, readFile, rename, rm } from "node:fs/promises";
+import { afterEach, expect, test, vi } from "vitest";
+import { mkdtemp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { AppError } from "@kiteline/shared/protocol";
@@ -8,8 +8,19 @@ import type { RecorderCall } from "@kiteline/shared/ipc";
 import { Agent } from "../src/control.js";
 import { defaultAgentLimits } from "../src/config.js";
 
+const candidateIds = vi.hoisted(() => [] as string[]);
+vi.mock("node:crypto", async (original) => {
+  const crypto = await original<typeof import("node:crypto")>();
+  return {
+    ...crypto,
+    randomBytes: (size: number) =>
+      candidateIds.length ? Buffer.from(candidateIds.shift()!, "hex") : crypto.randomBytes(size),
+  };
+});
+
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
+  candidateIds.length = 0;
   const failures: unknown[] = [];
   for (const cleanup of cleanups.splice(0).reverse()) {
     try {
@@ -45,6 +56,30 @@ async function fixture() {
   const workspace = await agent.metadata.add(dataDir);
   return { agent, workspace, dataDir, signal: new AbortController().signal };
 }
+
+test("short session IDs match exactly and preserve occupied directories and active sessions", async () => {
+  const { agent, workspace, dataDir, signal } = await fixture();
+  const first = await agent.sessions.create(workspace.id, undefined, undefined, signal);
+  expect(first.id).toMatch(/^[a-f0-9]{16}$/);
+  expect(() => agent.sessions.get(first.id.slice(0, 8))).toThrow("does not exist");
+  const residue = join(dataDir, "run", "1111111111111111");
+  await mkdir(residue);
+  await writeFile(join(residue, "retained.txt"), "retain this directory");
+  candidateIds.push(first.id, "1111111111111111", "2222222222222222");
+  const second = await agent.sessions.create(workspace.id, undefined, undefined, signal);
+  expect(second.id).toBe("2222222222222222");
+  expect(agent.sessions.get(first.id).session).toMatchObject(first);
+  candidateIds.push(...Array<string>(8).fill(first.id));
+  await expect(
+    agent.sessions.create(workspace.id, undefined, undefined, signal),
+  ).rejects.toMatchObject({ code: "busy" });
+  expect(agent.sessions.list().sessions.map((session) => session.id)).toEqual([
+    first.id,
+    second.id,
+  ]);
+  await agent.close();
+  expect(await readFile(join(residue, "retained.txt"), "utf8")).toBe("retain this directory");
+}, 15000);
 
 test("real recorder captures Shell output, restores history and pastes while native copy-mode stays active", async () => {
   const { agent, workspace, dataDir, signal } = await fixture();

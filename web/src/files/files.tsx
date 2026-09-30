@@ -455,9 +455,7 @@ export function Files({
         )}
         {!enabled && (
           <p className="border-b border-border px-3 py-2 text-sm text-muted-foreground">
-            {device.status === "revoked"
-              ? t(($) => $.common.deviceRevoked)
-              : t(($) => $.common.deviceOffline)}
+            {t(($) => $.common.deviceOffline)}
           </p>
         )}
         <FileCleanupNotice deviceId={device.id} active={visible} />
@@ -508,13 +506,7 @@ export function Files({
                 key={draft.id}
                 store={store}
                 draft={draft}
-                unavailable={
-                  !enabled
-                    ? device.status === "revoked"
-                      ? t(($) => $.common.deviceRevoked)
-                      : t(($) => $.common.deviceOffline)
-                    : undefined
-                }
+                unavailable={!enabled ? t(($) => $.common.deviceOffline) : undefined}
               />
             ) : queryFile ? (
               <FileContent

@@ -137,20 +137,12 @@ export function Workbench({
     return () => document.documentElement.removeAttribute("data-terminal-active");
   }, [terminalPage]);
   const terminalFocus = useTerminalFocus(
-    session &&
-      route.valid &&
-      route.tool === "terminal" &&
-      device &&
-      device.status !== "revoked" &&
-      workspace
+    session && route.valid && route.tool === "terminal" && device && workspace
       ? `${device.id}:${workspace.id}`
       : undefined,
   );
   const orphan =
-    route.tool === "files" &&
-    route.deviceId &&
-    route.workspaceId &&
-    (!device || !workspace || device.status === "revoked")
+    route.tool === "files" && route.deviceId && route.workspaceId && (!device || !workspace)
       ? drafts.find(
           {
             deviceId: route.deviceId,
@@ -323,7 +315,7 @@ export function Workbench({
           >
             <CalendarClock />
           </IconButton>
-          {device && device.status !== "revoked" && (
+          {device && (
             <IconButton label={t(($) => $.shell.openPort)} onClick={() => setPortDevice(device.id)}>
               <Globe />
             </IconButton>
@@ -459,8 +451,8 @@ export function Workbench({
                   store={drafts}
                   draft={orphan}
                   unavailable={
-                    device?.status === "revoked"
-                      ? t(($) => $.shell.revokedDraft)
+                    !device
+                      ? t(($) => $.shell.missingDeviceDraft)
                       : t(($) => $.shell.missingWorkspaceDraft)
                   }
                 />
@@ -480,9 +472,7 @@ export function Workbench({
                     workspace={workspace}
                     visible={route.tool === "terminal"}
                     layouts={terminalLayouts.current}
-                    focusMode={terminalFocus.active}
-                    onEnterFocus={terminalFocus.enter}
-                    onExitFocus={terminalFocus.exit}
+                    focusMode={terminalFocus}
                   >
                     <Files
                       device={device}
@@ -538,7 +528,7 @@ export function Workbench({
         </div>
       </div>
       <OpenFiles store={drafts} open={openFiles} onOpenChange={setOpenFiles} />
-      {device && portDevice === device.id && device.status !== "revoked" && (
+      {device && portDevice === device.id && (
         <PortDialog key={device.id} device={device} onClose={() => setPortDevice(undefined)} />
       )}
       <Dialog open={binding} onOpenChange={setBinding}>
@@ -605,7 +595,6 @@ export function Workbench({
           action={action}
           onClose={() => setAction(undefined)}
           onDone={() => {
-            setAction(undefined);
             void refresh().catch((error: unknown) => setError({ cause: error }));
           }}
         />

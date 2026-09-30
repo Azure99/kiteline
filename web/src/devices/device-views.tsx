@@ -48,7 +48,7 @@ export function Home({
 }) {
   const { t } = useTranslation();
   const recentTargets = recents.flatMap((entry) => {
-    const device = devices.find((item) => item.id === entry.deviceId && item.status !== "revoked");
+    const device = devices.find((item) => item.id === entry.deviceId);
     const workspace = device?.snapshot?.workspaces.find((item) => item.id === entry.workspaceId);
     return device && workspace ? [{ entry, device, workspace }] : [];
   });
@@ -221,7 +221,7 @@ export function DeviceDetail({
             <MoreHorizontal />
           </MenuTrigger>
           <MenuContent>
-            <MenuItem disabled={device.status === "revoked"} onClick={() => setUpgrade(true)}>
+            <MenuItem onClick={() => setUpgrade(true)}>
               <Download />
               {t(($) => $.devices.upgradeAgent)}
             </MenuItem>
@@ -233,12 +233,9 @@ export function DeviceDetail({
               <Pencil />
               {t(($) => $.common.rename)}
             </MenuItem>
-            <MenuItem
-              disabled={device.status === "revoked"}
-              onClick={() => onAction({ type: "revoke", device })}
-            >
+            <MenuItem onClick={() => onAction({ type: "delete", device })}>
               <Trash2 />
-              {t(($) => $.devices.revokeDevice)}
+              {t(($) => $.devices.deleteDevice)}
             </MenuItem>
           </MenuContent>
         </Menu>
@@ -280,22 +277,6 @@ export function DeviceDetail({
           )}
         </div>
       )}
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-semibold">
-          Workspaces{" "}
-          <span className="ml-1 text-muted-foreground">
-            {(device.snapshot?.workspaces.length ?? 0).toLocaleString(i18n.resolvedLanguage)}
-          </span>
-        </h2>
-        <Button
-          variant="outline"
-          disabled={device.status !== "online"}
-          onClick={() => onAdd(device)}
-        >
-          <FolderPlus />
-          {t(($) => $.common.add)}
-        </Button>
-      </div>
       <Button
         variant="outline"
         className="mb-4"
@@ -312,6 +293,19 @@ export function DeviceDetail({
         onRefresh={() => refreshSessions.current()}
         onNavigate={onNavigate}
       />
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-sm font-semibold">
+          {t(($) => $.devices.workspaces, { count: device.snapshot?.workspaces.length ?? 0 })}
+        </h2>
+        <Button
+          variant="outline"
+          disabled={device.status !== "online"}
+          onClick={() => onAdd(device)}
+        >
+          <FolderPlus />
+          {t(($) => $.common.add)}
+        </Button>
+      </div>
       <div className="divide-y divide-border border-y border-border">
         {device.snapshot?.workspaces.map((w) => (
           <div key={w.id} className="flex items-center gap-2">

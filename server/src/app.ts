@@ -157,8 +157,8 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
           connections.broadcastDevices();
           return json(response, 200, {});
         }
-        if (suffix === "/revoke" && method === "POST") {
-          connections.revoke(id);
+        if (!suffix && method === "DELETE") {
+          connections.deleteDevice(id);
           return json(response, 200, {});
         }
         if (suffix === "/rpc" && method === "POST") {

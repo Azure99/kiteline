@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useMobile } from "../lib/use-mobile";
+
+type FocusIntent = { target: string; attempted: boolean; entered: boolean };
 
 export function useTerminalFocus(context: string | undefined) {
-  const [target, setTarget] = useState<string>();
-  const intent = useRef<{ target: string; entered: boolean }>(undefined);
+  const mobile = useMobile();
+  const [target, setTarget] = useState<FocusIntent>();
+  const [fullscreen, setFullscreen] = useState(false);
+  const [error, setError] = useState<"fullscreenFailed" | "fullscreenExitFailed">();
+  const intent = useRef<FocusIntent>(undefined);
+  const pending = useRef<FocusIntent>(undefined);
   const exiting = useRef(false);
 
   const leaveFullscreen = useCallback(() => {
@@ -11,19 +18,21 @@ export function useTerminalFocus(context: string | undefined) {
     void document.exitFullscreen().then(
       () => {
         exiting.current = false;
-        if (document.fullscreenElement === document.documentElement) {
-          if (intent.current) intent.current.entered = true;
-          else leaveFullscreen();
-        }
+        const remains = document.fullscreenElement === document.documentElement;
+        setFullscreen(remains);
+        if (remains) setError("fullscreenExitFailed");
       },
       () => {
         exiting.current = false;
+        setFullscreen(document.fullscreenElement === document.documentElement);
+        setError("fullscreenExitFailed");
       },
     );
   }, []);
   const exit = useCallback(() => {
     intent.current = undefined;
     setTarget(undefined);
+    setError(undefined);
     leaveFullscreen();
   }, [leaveFullscreen]);
 
@@ -33,38 +42,63 @@ export function useTerminalFocus(context: string | undefined) {
   useEffect(() => {
     const changed = () => {
       const current = intent.current;
-      if (document.fullscreenElement === document.documentElement) {
-        if (current && !exiting.current) current.entered = true;
-        else if (!current) leaveFullscreen();
-      } else if (current?.entered) exit();
+      const entered = document.fullscreenElement === document.documentElement;
+      setFullscreen(entered);
+      if (entered) {
+        if (!current || (pending.current && pending.current !== current)) leaveFullscreen();
+        else if (!exiting.current) current.entered = true;
+      } else if (current?.entered && !mobile) exit();
     };
     document.addEventListener("fullscreenchange", changed);
-    return () => {
+    return () => document.removeEventListener("fullscreenchange", changed);
+  }, [mobile, exit, leaveFullscreen]);
+  useEffect(
+    () => () => {
       intent.current = undefined;
-      document.removeEventListener("fullscreenchange", changed);
       leaveFullscreen();
-    };
-  }, [exit, leaveFullscreen]);
+    },
+    [leaveFullscreen],
+  );
 
-  function enter() {
-    if (!context) return;
+  function request(current: FocusIntent) {
     const root = document.documentElement;
-    // A new intent during a pending exit stays in app focus mode.
-    intent.current = { target: context, entered: false };
-    setTarget(context);
-    if (exiting.current || !root.requestFullscreen) return;
+    if (exiting.current || pending.current || !root.requestFullscreen) {
+      setError("fullscreenFailed");
+      return;
+    }
+    pending.current = current;
     try {
-      void root
-        .requestFullscreen()
-        .then(() => {
-          if (!intent.current) leaveFullscreen();
-          else if (!exiting.current && document.fullscreenElement === root)
-            intent.current.entered = true;
-        })
-        .catch(() => {});
+      void root.requestFullscreen().then(
+        () => {
+          if (pending.current === current) pending.current = undefined;
+          if (intent.current !== current) leaveFullscreen();
+          else if (!exiting.current && document.fullscreenElement === root) current.entered = true;
+        },
+        () => {
+          if (pending.current === current) pending.current = undefined;
+          if (intent.current === current) setError("fullscreenFailed");
+        },
+      );
     } catch {
-      // App focus mode also works when fullscreen is unavailable.
+      pending.current = undefined;
+      if (intent.current === current) setError("fullscreenFailed");
     }
   }
-  return { active: context !== undefined && target === context, enter, exit };
+  const active = context !== undefined && target?.target === context;
+  const next: "exitFocus" | "enterFullscreen" | "enterFocus" =
+    fullscreen || (active && (!mobile || target.attempted))
+      ? "exitFocus"
+      : active
+        ? "enterFullscreen"
+        : "enterFocus";
+  function toggle() {
+    if (next === "exitFocus") return exit();
+    if (!context) return;
+    setError(undefined);
+    const current = { target: context, attempted: !mobile || active, entered: false };
+    intent.current = current;
+    setTarget(current);
+    if (current.attempted) request(current);
+  }
+  return { active, fullscreen, next, toggle, error, dismiss: () => setError(undefined) };
 }

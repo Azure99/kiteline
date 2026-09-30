@@ -2,10 +2,18 @@ import { createInterface } from "node:readline/promises";
 import { hostname } from "node:os";
 import { resolve } from "node:path";
 import { lstat } from "node:fs/promises";
+import { parseArgs } from "node:util";
 import { AppError, appVersion, record, string } from "@kiteline/shared/protocol";
-import { agentConfig, atomicJson, privateDirectory, readIdentity } from "./config.js";
+import {
+  agentConfig,
+  agentPaths,
+  atomicJson,
+  defaultAgentLimits,
+  privateDirectory,
+  readIdentity,
+} from "./config.js";
 import { Agent } from "./control.js";
-import { terminalCli } from "./terminal-cli.js";
+import { attachTerminal, terminalCli } from "./terminal-cli.js";
 import { scheduleCli } from "./schedule-cli.js";
 import { doctorCli } from "./doctor.js";
 import { installCli } from "./install.js";
@@ -83,18 +91,35 @@ async function runAgent() {
   }
 }
 async function main() {
+  const command = process.argv[2];
+  if (command === "attach") {
+    const { positionals, values } = parseArgs({
+      args: process.argv.slice(3),
+      allowPositionals: true,
+      options: { "run-dir": { type: "string" } },
+    });
+    if (positionals.length !== 1)
+      throw new Error("Usage: kiteline-agent attach SESSION_ID [--run-dir DIR]");
+    const override =
+      values["run-dir"] === undefined ? undefined : string(values["run-dir"], "run-dir");
+    const { runDir } = await agentPaths(override);
+    await attachTerminal(
+      { runDir, limits: defaultAgentLimits },
+      string(positionals[0], "session id"),
+    );
+    return;
+  }
   if (process.argv.includes("--version")) {
     console.log(appVersion);
     return;
   }
-  const command = process.argv[2];
   if (command === "schedule") {
     await scheduleCli(process.argv.slice(3));
     return;
   }
   if (command === "--help" || command === "-h" || command === undefined) {
     console.log(
-      "Usage: kiteline-agent install | upgrade | uninstall | check | bind | run | doctor | terminal | workspace | schedule\nScheduled Tasks: kiteline-agent schedule --help",
+      "Usage: kiteline-agent install | upgrade | uninstall | check | bind | run | doctor | attach | terminal | workspace | schedule\nAttach: kiteline-agent attach SESSION_ID [--run-dir DIR]\nScheduled Tasks: kiteline-agent schedule --help",
     );
     return;
   }
@@ -120,7 +145,7 @@ async function main() {
   }
   if (command !== "bind")
     throw new Error(
-      "Usage: kiteline-agent install --user USER | upgrade --archive RELEASE.tar.gz | uninstall | check | bind --server HTTP_OR_HTTPS_ORIGIN [--if-unbound] | run | doctor | terminal | workspace | schedule",
+      "Usage: kiteline-agent install --user USER | upgrade --archive RELEASE.tar.gz | uninstall | check | bind --server HTTP_OR_HTTPS_ORIGIN [--if-unbound] | run | doctor | attach SESSION_ID [--run-dir DIR] | terminal | workspace | schedule",
     );
   const config = await agentConfig();
   let releaseState: (() => Promise<void>) | undefined;
@@ -159,7 +184,7 @@ async function main() {
     } catch (error) {
       if (error instanceof AppError) throw error;
       throw new Error(
-        "Binding result is unknown. Sign in to the web app and check this binding. If the code was consumed but no credentials were saved locally, revoke the device and bind again with a new code.",
+        "Binding result is unknown. Sign in to the web app and check this binding. If the code was consumed but no credentials were saved locally, delete the device and bind again with a new code.",
         { cause: error },
       );
     }
@@ -172,7 +197,7 @@ async function main() {
       await atomicJson(resolve(config.dataDir, "connection.json"), identity);
     } catch (error) {
       throw new Error(
-        `Device ${identity.deviceId} was registered but its credentials were not saved; revoke it in the web app and bind again.`,
+        `Device ${identity.deviceId} was registered but its credentials were not saved; delete it in the web app and bind again.`,
         {
           cause: error,
         },

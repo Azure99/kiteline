@@ -62,8 +62,9 @@ export async function atomicJson(path: string, value: unknown) {
     throw error;
   }
 }
-export async function agentPaths() {
-  const installed = await installedPaths();
+export async function agentPaths(runDirOverride?: string) {
+  const explicitRunDir = runDirOverride === undefined ? undefined : resolve(runDirOverride);
+  const installed = await installedPaths(explicitRunDir);
   if (installed) return installed;
   const dataDir = resolve(
     process.env.KITELINE_AGENT_HOME ??
@@ -71,7 +72,9 @@ export async function agentPaths() {
         ? resolve(windowsNative().identity().localAppData, "kiteline-agent")
         : resolve(homedir(), ".local/share/kiteline-agent")),
   );
-  const runDir = resolve(process.env.KITELINE_AGENT_RUN_DIR ?? resolve(dataDir, "run"));
+  const runDir = resolve(
+    explicitRunDir ?? process.env.KITELINE_AGENT_RUN_DIR ?? resolve(dataDir, "run"),
+  );
   return { dataDir, runDir };
 }
 export async function privateDirectory(path: string) {

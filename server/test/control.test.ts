@@ -481,7 +481,7 @@ test("stale Web releases cannot use business endpoints but can read recovery inf
     for (const [path, method] of [
       ["/api/bindings", "POST"],
       ["/api/devices/d", "PATCH"],
-      ["/api/devices/d/revoke", "POST"],
+      ["/api/devices/d", "DELETE"],
       ["/api/devices/d/rpc", "POST"],
       ["/api/devices/d/channels", "POST"],
       ["/api/devices/d/download", "GET"],
@@ -618,7 +618,7 @@ test("invalid current agent capabilities cannot replace a healthy connection", a
   }
 });
 
-test("pending device handshakes are owned by revocation and server shutdown", async () => {
+test("pending device handshakes are owned by deletion and server shutdown", async () => {
   const f = await fixture();
   const identity = f.store.bind(f.store.newBinding().code, "Pending");
   const socket = new WebSocket(f.origin.replace("http:", "ws:") + agentPath, {
@@ -627,7 +627,7 @@ test("pending device handshakes are owned by revocation and server shutdown", as
   await once(socket, "open");
   const messages: unknown[] = [];
   socket.on("message", (data) => messages.push(JSON.parse(data.toString())));
-  f.app.connections.revoke(identity.deviceId);
+  f.app.connections.deleteDevice(identity.deviceId);
   socket.send(
     JSON.stringify({
       type: "hello",
@@ -644,7 +644,7 @@ test("pending device handshakes are owned by revocation and server shutdown", as
   );
   await once(socket, "close");
   expect(messages).toEqual([]);
-  expect(f.app.connections.devices()[0]).toMatchObject({ status: "revoked", lastSeenAt: null });
+  expect(f.app.connections.devices()).toEqual([]);
   const second = f.store.bind(f.store.newBinding().code, "Shutdown");
   const pending = new WebSocket(f.origin.replace("http:", "ws:") + agentPath, {
     headers: { authorization: `Bearer ${second.deviceToken}` },
@@ -822,7 +822,7 @@ test("normal setup, login and binding accept JSON and retain the device across l
   });
 });
 
-test("owner setup, cookie, binding consumption, revocation and password recovery", async () => {
+test("owner setup, cookie, binding consumption, deletion and password recovery", async () => {
   const f = await fixture();
   const setupToken = f.store.newSetupToken();
   const setup = await f.call("/api/setup", "POST", { setupToken, password: "test-password" });
@@ -844,7 +844,7 @@ test("owner setup, cookie, binding consumption, revocation and password recovery
     deviceId: first.deviceId,
   });
   expect(() => f.store.bind(first.binding.code, "duplicate")).toThrow();
-  expect((await f.call(`/api/devices/${first.deviceId}/revoke`, "POST", {}, cookie)).status).toBe(
+  expect((await f.call(`/api/devices/${first.deviceId}`, "DELETE", undefined, cookie)).status).toBe(
     200,
   );
   await expect.poll(() => first.socket.readyState).toBe(WebSocket.CLOSED);

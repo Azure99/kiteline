@@ -8,7 +8,7 @@ const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const psQuote = (value: string) => `'${value.replaceAll("'", "''")}'`;
 const windowsLauncher = "(Join-Path $env:ProgramData 'kiteline-agent/kiteline-agent.ps1')";
 function powershellCommand(url: string, arguments_: string) {
-  return `& { $ErrorActionPreference = 'Stop'; $kitelinePolicy = Get-ExecutionPolicy -Scope Process; $kitelineScript = Join-Path ([IO.Path]::GetTempPath()) ('kiteline-connect-' + [Guid]::NewGuid().ToString('N') + '.ps1'); try { Set-ExecutionPolicy -Scope Process Bypass -Force; Invoke-WebRequest -Uri ${psQuote(url)} -OutFile $kitelineScript; & $kitelineScript ${arguments_} } finally { try { if ([IO.File]::Exists($kitelineScript)) { [IO.File]::Delete($kitelineScript) } } finally { Set-ExecutionPolicy -Scope Process $kitelinePolicy -Force } } }`;
+  return `& ([scriptblock]::Create((irm ${psQuote(url)} -ErrorAction Stop))) ${arguments_}`;
 }
 function curlCommand(entryOrigin: string) {
   const protocols = entryOrigin.startsWith("https:") ? "=https" : "=http,https";
@@ -78,10 +78,15 @@ $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSVersion.Major -lt 7 -or -not $IsWindows) { throw 'Use PowerShell 7 on Windows' }
 if ($Version -cne ${psQuote(appVersion)}) { throw 'The server release changed; obtain a new command from the web app' }
 $kitelineInstaller = Join-Path ([IO.Path]::GetTempPath()) ('kiteline-install-' + [Guid]::NewGuid().ToString('N') + '.ps1')
+$kitelinePolicy = Get-ExecutionPolicy -Scope Process
 try {
+    Set-ExecutionPolicy -Scope Process Bypass -Force
     Invoke-WebRequest -Uri ${psQuote(entryOrigin + "/install.ps1")} -OutFile $kitelineInstaller
     & $kitelineInstaller -Mode ${mode} -Server ${psQuote(entryOrigin)} -Version $Version -Code $Code
-} finally { if ([IO.File]::Exists($kitelineInstaller)) { [IO.File]::Delete($kitelineInstaller) } }
+} finally {
+    try { if ([IO.File]::Exists($kitelineInstaller)) { [IO.File]::Delete($kitelineInstaller) } }
+    finally { Set-ExecutionPolicy -Scope Process $kitelinePolicy -Force }
+}
 `;
 }
 

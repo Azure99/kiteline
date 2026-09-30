@@ -110,7 +110,7 @@ yum install -y curl ca-certificates tar gzip coreutils openssh-clients ncurses g
 
 Linux用`locale -a`确认已安装的UTF-8 locale，`locale charmap`应输出UTF-8。例如已安装`en_US.UTF-8`时，可在启动Shell中执行`export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8`。LC_ALL优先于LC_CTYPE和LANG。后台管理器需配置同样环境；应用目录配置文件只解析目录项。
 
-Node、recorder、固定 tmux、terminfo 和文件 helper 已随包提供，无需 npm/编译器。安装失败后先处理具体原因，再执行命令；绑定码已过期则在网页重新生成。程序已安装但绑定失败时不重复替换安装；已有身份或不同版本会停止，不自动重绑/升级。若已登记但未在线，先核对本地凭据和 `kiteline-agent run` 输出；凭据丢失在网页撤销残留身份并重新生成绑定码，不能把未知结果当成普通过期重试。
+Node、recorder、固定 tmux、terminfo 和文件 helper 已随包提供，无需 npm/编译器。安装失败后先处理具体原因，再执行命令；绑定码已过期则在网页重新生成。程序已安装但绑定失败时不重复替换安装；已有身份或不同版本会停止，不自动重绑/升级。若已登记但未在线，先核对本地凭据和 `kiteline-agent run` 输出；凭据丢失在网页删除残留身份并重新生成绑定码，不能把未知结果当成普通过期重试。
 
 也可手工取得完整包及 `.sha256`，校验、解压、安装，再用网页“已安装，仅绑定”命令绑定：
 
@@ -172,10 +172,10 @@ Windows更新和卸载在提升的独立PowerShell中执行，先由用户正常
 ```sh
 kiteline-agent workspace list
 kiteline-agent terminal new --workspace WORKSPACE_ID
-kiteline-agent terminal attach SESSION_ID
+kiteline-agent attach SESSION_ID
 ```
 
-Linux/macOS CLI与运行进程共用`/etc/kiteline-agent.env`的目录项。KITELINE_AGENT_HOME和KITELINE_AGENT_RUN_DIR使用单行双引号绝对路径，不使用转义或尾部注释；默认状态在项目用户的`~/.local/share/kiteline-agent`，socket在其run目录。该文件由应用仅解析目录项，不自动加载PATH、SSH_AUTH_SOCK、LANG或代理。Windows默认状态在目标用户LocalAppData；自定义目录须让后台run与本机CLI一致，Web复制的接续命令携带实际目录。doctor检查实际agent环境，认证以真实Git调用为准。
+Linux/macOS CLI与运行进程共用`/etc/kiteline-agent.env`的目录项。KITELINE_AGENT_HOME和KITELINE_AGENT_RUN_DIR使用单行双引号绝对路径，不使用转义或尾部注释；默认状态在项目用户的`~/.local/share/kiteline-agent`，socket在其run目录。该文件由应用仅解析目录项，不自动加载PATH、SSH_AUTH_SOCK、LANG或代理。Windows默认状态在目标用户LocalAppData；自定义目录须让后台run与本机CLI一致。Web复制的接续命令带实际launcher与`--run-dir`；需要手工指定时使用`kiteline-agent attach SESSION_ID --run-dir '/实际运行目录'`，见[接续规则](#原生-agent)。doctor检查实际agent环境，认证以真实Git调用为准。
 
 常驻、自启动、运行身份、凭据与维护停启由用户配置外部管理器。Linux可人工编辑[systemd示例](kiteline-agent.service)，Windows使用自行安装的WinSW 2.12及[XML示例](kiteline-agent.xml)，将wrapper、XML和日志放程序树外。用户自行安装管理器并在Windows服务属性中设置同一项目账户及凭据，不能使用默认LocalSystem；修改示例的实际PowerShell/Git、profile、data/run目录，保留console、parent-first及足够的停止宽限。项目不生成、安装或删除管理器配置，不保存密码。先以前台run/check/doctor验证项目用户环境，再自行接线；停止须给真实agent足够收尾时间。正确后台部署后用户注销任务继续，重登可接回；直接在交互会话运行不提供这项保证。切换部署方式先正常停止，身份/workspace/任务数据保留，但旧运行任务不迁移。
 
@@ -257,7 +257,7 @@ LaunchDaemon 停止宽限为 45 秒；维护前先 bootout，再确认 agent 和
 
 先创建自己的 Linux 容器并准备上述基础依赖、项目工具和挂载，再在容器内执行同一网页前台命令。没有 systemd 不影响前台运行，root 容器也可使用；容器的常驻和重建由你自行管理，工作台不提供容器创建入口。
 
-项目目录与 agent 状态要持久化，运行用户的 UID/GID、HOME 与挂载权限一致。在网页选择容器内项目路径；本机接续用 `docker exec -it CONTAINER kiteline-agent terminal attach SESSION_ID`，保持同一用户及状态目录。容器停止会结束任务，重建时须保留安装或重新安装；不要删除身份卷后误当原设备接续。
+项目目录与 agent 状态要持久化，运行用户的 UID/GID、HOME 与挂载权限一致。在网页选择容器内项目路径；本机接续用 `docker exec -it CONTAINER kiteline-agent attach SESSION_ID`，保持同一用户及运行目录。容器停止会结束任务，重建时须保留安装或重新安装；不要删除身份卷后误当原设备接续。
 
 SSH 挂载该用户的 key、config、known_hosts，或可达的 SSH agent socket 并设置 SSH_AUTH_SOCK。`.gitconfig` 引用的 credential helper 也须在容器安装；只读 known_hosts 不会自动记录新主机。先在工作台终端验证实际认证，再使用 Git 界面同步。
 

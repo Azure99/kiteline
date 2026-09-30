@@ -5,8 +5,8 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
-  ClipboardPaste,
-  Keyboard,
+  ChevronDown,
+  ChevronUp,
   RefreshCw,
   X,
 } from "lucide-react";
@@ -20,6 +20,8 @@ import { ErrorNotice } from "../components/error-notice";
 import { TouchControls } from "./touch-controls";
 import { useMobile } from "../lib/use-mobile";
 import { terminalKeyboard } from "./keyboard-input";
+import { releasedModifiers, type Modifiers } from "./auxiliary-input";
+import { TerminalSearch } from "./terminal-search";
 import {
   Dialog,
   DialogContent,
@@ -32,17 +34,26 @@ export interface TerminalActions {
   redraw(): void;
   fontSize(delta: number): void;
   focus(): void;
+  paste(): Promise<void>;
+  keyboard(): void;
+  search(): void;
+}
+export interface TerminalCapabilities {
+  ready: boolean;
+  hasTerminal: boolean;
 }
 export function TerminalView({
   deviceId,
   workspaceId,
   sessionId,
   ref,
+  onCapabilities,
 }: {
   deviceId: string;
   workspaceId: string;
   sessionId: string;
   ref?: Ref<TerminalActions>;
+  onCapabilities?(id: string, value: TerminalCapabilities | undefined): void;
 }) {
   const { t } = useTranslation();
   useServerVersion();
@@ -55,17 +66,24 @@ export function TerminalView({
   const [state, setState] = useState<DisplayState>({ status: "connecting" });
   const code = state.error instanceof ApiError ? state.error.code : undefined;
   const [notice, setNotice] = useState<unknown>();
-  const [ctrl, setCtrl] = useState(false);
+  const [modifiers, setModifiers] = useState<Modifiers>(releasedModifiers);
+  const [expanded, setExpanded] = useState(true);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchInput = useRef<HTMLInputElement>(null);
   const mobile = useMobile();
   const input = useRef<() => void>(() => {});
-  const control = useRef(false);
-  function setControl(value: boolean) {
-    control.current = value;
-    setCtrl(value);
-  }
   useEffect(() => {
-    if (!mobile) setControl(false);
+    if (!mobile) display.current?.releaseModifiers();
   }, [mobile]);
+  useEffect(
+    () =>
+      onCapabilities?.(sessionId, {
+        ready: state.status === "ready",
+        hasTerminal: !!terminal,
+      }),
+    [onCapabilities, sessionId, state.status, terminal],
+  );
+  useEffect(() => () => onCapabilities?.(sessionId, undefined), [onCapabilities, sessionId]);
   const [history, setHistory] = useState<"retained" | "screen">("retained");
   const [recovering, setRecovering] = useState(false);
   const [redrawDialog, setRedrawDialog] = useState(false);
@@ -94,6 +112,13 @@ export function TerminalView({
     redraw: () => setRedrawDialog(true),
     fontSize: (delta) => display.current?.changeFontSize(delta),
     focus: () => display.current?.focus(),
+    paste,
+    keyboard: () => input.current(),
+    search: () => {
+      if (!terminal) return;
+      setSearchOpen(true);
+      searchInput.current?.focus();
+    },
   }));
   async function recover() {
     const signal = operations.current.signal;
@@ -141,11 +166,7 @@ export function TerminalView({
       {
         opened: setTerminal,
         reading: setReading,
-        control: () => {
-          const value = control.current;
-          if (value) setControl(false);
-          return value;
-        },
+        modifiers: setModifiers,
       },
     );
     display.current = current;
@@ -175,18 +196,17 @@ export function TerminalView({
     };
   }, [terminal, mobile]);
   async function paste() {
+    const current = display.current;
     try {
-      display.current?.paste(await navigator.clipboard.readText());
-      setControl(false);
-      if (!mobile) display.current?.focus();
+      current?.paste(await navigator.clipboard.readText());
+      if (!mobile) current?.focus();
     } catch (error) {
       setNotice(error);
     }
   }
   const auxiliary = (value: string) => {
-    display.current?.input(value);
+    display.current?.key(value);
     if (!mobile) display.current?.focus();
-    setControl(false);
   };
   return (
     <section
@@ -266,6 +286,16 @@ export function TerminalView({
       )}
       <div className="terminal-viewport relative flex min-h-0 flex-1">
         <div ref={element} className="terminal-canvas min-h-0 min-w-0 flex-1" />
+        {searchOpen && (
+          <TerminalSearch
+            terminal={terminal}
+            inputRef={searchInput}
+            onClose={() => {
+              setSearchOpen(false);
+              terminal?.focus();
+            }}
+          />
+        )}
         {terminal && (
           <TouchControls
             terminal={terminal}
@@ -287,7 +317,7 @@ export function TerminalView({
         )}
       </div>
       <div
-        className="terminal-aux flex shrink-0 items-center gap-0.5 border-t px-1.5 py-0.5"
+        className="terminal-aux shrink-0 border-t"
         onPointerDown={(event) => event.preventDefault()}
         onClick={(event) => {
           if (
@@ -298,75 +328,78 @@ export function TerminalView({
             navigator.vibrate?.(10);
         }}
       >
-        <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
-          <button className="aux-key" onClick={() => auxiliary("\x1b")}>
-            Esc
-          </button>
-          <button className="aux-key" onClick={() => auxiliary("\t")}>
-            Tab
-          </button>
-          <button
-            className="aux-key"
-            aria-pressed={ctrl}
-            onClick={() => {
-              setControl(!ctrl);
-              if (!mobile) display.current?.focus();
-            }}
-          >
-            Ctrl
-          </button>
-          {ctrl && (
-            <>
-              {["C", "D", "B", "L"].map((key) => (
+        {expanded && (
+          <div className="terminal-aux-row">
+            {[
+              ["Tab", "TAB"],
+              ["/", "/"],
+              ["@", "@"],
+              ["PageUp", "PGUP"],
+              ["ArrowUp", ""],
+              ["PageDown", "PGDN"],
+              ["Escape", "ESC"],
+            ].map(([key, label]) =>
+              key === "ArrowUp" ? (
+                <IconButton
+                  key={key}
+                  className="aux-key"
+                  label={t(($) => $.terminal.up)}
+                  disabled={state.status !== "ready"}
+                  onClick={() => auxiliary(key!)}
+                >
+                  <ArrowUp />
+                </IconButton>
+              ) : (
                 <button
                   key={key}
                   className="aux-key"
-                  onClick={() => auxiliary(String.fromCharCode(key.charCodeAt(0) - 64))}
+                  disabled={state.status !== "ready"}
+                  onClick={() => auxiliary(key!)}
                 >
-                  {key}
+                  {label}
                 </button>
-              ))}
-            </>
-          )}
+              ),
+            )}
+          </div>
+        )}
+        <div className="terminal-aux-row">
+          {(["shiftKey", "ctrlKey", "altKey"] as const).map((key) => (
+            <button
+              key={key}
+              className="aux-key"
+              aria-pressed={modifiers[key]}
+              disabled={state.status !== "ready"}
+              onClick={() => display.current?.toggleModifier(key)}
+            >
+              {key.slice(0, -3).toUpperCase()}
+            </button>
+          ))}
           {[
-            { icon: ArrowLeft, value: "D", label: t(($) => $.terminal.left) },
-            { icon: ArrowDown, value: "B", label: t(($) => $.terminal.down) },
-            { icon: ArrowUp, value: "A", label: t(($) => $.terminal.up) },
-            { icon: ArrowRight, value: "C", label: t(($) => $.terminal.right) },
+            { icon: ArrowLeft, value: "ArrowLeft", label: t(($) => $.terminal.left) },
+            { icon: ArrowDown, value: "ArrowDown", label: t(($) => $.terminal.down) },
+            { icon: ArrowRight, value: "ArrowRight", label: t(($) => $.terminal.right) },
           ].map(({ icon: Glyph, value, label }) => {
             return (
               <IconButton
                 key={value}
+                className="aux-key"
                 label={label}
-                onClick={() =>
-                  auxiliary(
-                    ctrl
-                      ? `\x1b[1;5${value}`
-                      : `\x1b${display.current?.terminal?.modes.applicationCursorKeysMode ? "O" : "["}${value}`,
-                  )
-                }
+                disabled={state.status !== "ready"}
+                onClick={() => auxiliary(value)}
               >
                 <Glyph />
               </IconButton>
             );
           })}
-        </div>
-        {typeof navigator.clipboard?.readText === "function" && (
           <IconButton
-            label={t(($) => $.terminal.paste)}
-            disabled={state.status !== "ready"}
-            onClick={() => void paste()}
+            className="aux-key"
+            label={expanded ? t(($) => $.terminal.collapseKeys) : t(($) => $.terminal.expandKeys)}
+            aria-expanded={expanded}
+            onClick={() => setExpanded((value) => !value)}
           >
-            <ClipboardPaste />
+            {expanded ? <ChevronDown /> : <ChevronUp />}
           </IconButton>
-        )}
-        <IconButton
-          label={t(($) => $.terminal.keyboard)}
-          disabled={state.status !== "ready"}
-          onClick={() => input.current()}
-        >
-          <Keyboard />
-        </IconButton>
+        </div>
       </div>
       <Dialog
         open={redrawDialog}

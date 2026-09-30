@@ -13,3 +13,6 @@ onlyBuiltDependencies:
 
 overrides:
   gitdiff-parser: 0.3.1
+
+patchedDependencies:
+  "@xterm/xterm@6.1.0-beta.304": web/patches/@xterm__xterm@6.1.0-beta.304.patch

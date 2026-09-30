@@ -13,6 +13,7 @@ import { agentConfig, privateDirectory } from "./config.js";
 import { packageDirectory } from "./installation.js";
 import { checkWindowsComponents } from "./windows-components.js";
 import { checkMacosComponents } from "./macos-components.js";
+import { sessionIdBytes } from "./terminals/sessions.js";
 import {
   bundledRipgrep,
   checkBundledRipgrep,
@@ -80,7 +81,7 @@ export async function checkPrerequisites() {
       checkFileHelper(join(packageDirectory, "dist/native/bin/entry-name"), command),
     );
   await check("Runtime directory", async () => {
-    const socket = join(config.runDir, "0".repeat(36), "tmux.sock");
+    const socket = join(config.runDir, "0".repeat(sessionIdBytes * 2), "tmux.sock");
     if (Buffer.byteLength(windows ? msysPath(socket) : socket) > 103)
       throw new Error(
         "KITELINE_AGENT_RUN_DIR is too long; configure a shorter user-writable directory",

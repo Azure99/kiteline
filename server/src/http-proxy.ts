@@ -156,8 +156,7 @@ export class HttpProxy {
       if (head !== undefined || !["GET", "HEAD"].includes(request.method ?? "GET"))
         origin(request, entryOrigin);
       const device = this.connections.devices().find((value) => value.id === target!.deviceId);
-      if (!device || device.status === "revoked")
-        throw new AppError("not_found", "Device not found or revoked");
+      if (!device) throw new AppError("not_found", "Device not found");
       if (target.redirect) {
         if (destination instanceof ServerResponse)
           destination.writeHead(308, { location: target.redirect }).end();

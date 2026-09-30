@@ -180,7 +180,7 @@ test("real device CLI/RPC share tasks, snapshots persist only summaries, and rem
       )
       .toBe("succeeded");
     await localRequest(config, "tasks.create", {
-      taskId: "after-revoke",
+      taskId: "after-delete",
       input: {
         name: "Offline schedule",
         command: "printf offline",
@@ -189,10 +189,10 @@ test("real device CLI/RPC share tasks, snapshots persist only summaries, and rem
       },
     });
     await expect.poll(() => f.store.taskSummaries()[0]?.snapshot?.items.length).toBe(2);
-    f.app.connections.revoke(f.identity.deviceId);
-    await expect.poll(() => agent.schedules.runs("after-revoke").items[0]?.state).toBe("succeeded");
-    expect(f.app.connections.taskSummaries()[0]?.current).toBe(false);
-    expect(f.store.taskSummaries()[0]?.snapshot?.items).toHaveLength(2);
+    f.app.connections.deleteDevice(f.identity.deviceId);
+    await expect.poll(() => agent.schedules.runs("after-delete").items[0]?.state).toBe("succeeded");
+    expect(f.app.connections.taskSummaries()).toEqual([]);
+    expect(f.store.taskSummaries()).toEqual([]);
   } finally {
     events?.terminate();
     await agent.close();

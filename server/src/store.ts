@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { resolve } from "node:path";
 import bcrypt from "bcryptjs";
@@ -16,7 +17,6 @@ const secret = (bytes = 32) => randomBytes(bytes).toString("base64url");
 type DeviceRow = {
   id: string;
   name: string;
-  revoked: number;
   lastSeenAt: string | null;
   snapshot: string | null;
 };
@@ -33,14 +33,37 @@ export function password(value: unknown): string {
 export class Store {
   readonly db: DatabaseSync;
   constructor(directory: string) {
-    this.db = new DatabaseSync(resolve(directory, "kiteline.sqlite"));
-    this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
+    const path = resolve(directory, "kiteline.sqlite");
+    if (existsSync(path)) {
+      // A read-only connection also preserves an uncheckpointed WAL on rejection.
+      const existing = new DatabaseSync(path, { readOnly: true });
+      try {
+        if (
+          existing
+            .prepare("PRAGMA table_info(devices)")
+            .all()
+            .some((column) => column.name === "revoked")
+        )
+          throw new Error(
+            "Unsupported device database format; the original database has been retained",
+          );
+      } finally {
+        existing.close();
+      }
+    }
+    this.db = new DatabaseSync(path);
+    try {
+      this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
       CREATE TABLE IF NOT EXISTS owner (id INTEGER PRIMARY KEY CHECK(id=1), password TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS setup (id INTEGER PRIMARY KEY CHECK(id=1), hash TEXT NOT NULL, expiresAt TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, expiresAt TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS devices (id TEXT PRIMARY KEY, name TEXT NOT NULL, tokenHash TEXT UNIQUE NOT NULL, revoked INTEGER NOT NULL DEFAULT 0, lastSeenAt TEXT, snapshot TEXT);
+      CREATE TABLE IF NOT EXISTS devices (id TEXT PRIMARY KEY, name TEXT NOT NULL, tokenHash TEXT UNIQUE NOT NULL, lastSeenAt TEXT, snapshot TEXT);
       CREATE TABLE IF NOT EXISTS bindings (id TEXT PRIMARY KEY, hash TEXT UNIQUE NOT NULL, expiresAt TEXT NOT NULL, consumedDeviceId TEXT REFERENCES devices(id));
       CREATE TABLE IF NOT EXISTS taskSummaries (deviceId TEXT PRIMARY KEY REFERENCES devices(id), snapshot TEXT NOT NULL, observedAt TEXT NOT NULL);`);
+    } catch (error) {
+      this.db.close();
+      throw error;
+    }
   }
   initialized() {
     return !!this.db.prepare("SELECT id FROM owner WHERE id=1").get();
@@ -165,19 +188,19 @@ export class Store {
     }
   }
   authenticateAgent(token: string) {
-    return this.db
-      .prepare("SELECT id FROM devices WHERE tokenHash=? AND revoked=0")
-      .get(digest(token)) as { id: string } | undefined;
+    return this.db.prepare("SELECT id FROM devices WHERE tokenHash=?").get(digest(token)) as
+      | { id: string }
+      | undefined;
   }
   devices(): Device[] {
     return (
       this.db
-        .prepare("SELECT id,name,revoked,lastSeenAt,snapshot FROM devices ORDER BY rowid")
+        .prepare("SELECT id,name,lastSeenAt,snapshot FROM devices ORDER BY rowid")
         .all() as DeviceRow[]
     ).map((row) => ({
       id: row.id,
       name: row.name,
-      status: row.revoked ? "revoked" : "offline",
+      status: "offline",
       lastSeenAt: row.lastSeenAt,
       ...(row.snapshot ? { snapshot: JSON.parse(row.snapshot) as Metadata } : {}),
     }));
@@ -186,9 +209,18 @@ export class Store {
     if (!this.db.prepare("UPDATE devices SET name=? WHERE id=?").run(name, id).changes)
       throw new AppError("not_found", "Device not found");
   }
-  revokeDevice(id: string) {
-    if (!this.db.prepare("UPDATE devices SET revoked=1 WHERE id=?").run(id).changes)
-      throw new AppError("not_found", "Device not found");
+  deleteDevice(id: string) {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare("DELETE FROM bindings WHERE consumedDeviceId=?").run(id);
+      this.db.prepare("DELETE FROM taskSummaries WHERE deviceId=?").run(id);
+      if (!this.db.prepare("DELETE FROM devices WHERE id=?").run(id).changes)
+        throw new AppError("not_found", "Device not found");
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
   snapshot(id: string, snapshot: Metadata) {
     this.db.prepare("UPDATE devices SET snapshot=? WHERE id=?").run(JSON.stringify(snapshot), id);

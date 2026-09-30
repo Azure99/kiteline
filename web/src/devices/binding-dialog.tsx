@@ -47,6 +47,9 @@ export function BindingDialog({
   const [queryStopped, setQueryStopped] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [copied, setCopied] = useState("");
+  const boundDevicePresent = result?.deviceId
+    ? devices.some((device) => device.id === result.deviceId)
+    : undefined;
   const create = useCallback(async () => {
     setBinding(undefined);
     setResult(undefined);
@@ -100,7 +103,7 @@ export function BindingDialog({
       controller.abort();
       clearTimeout(timer);
     };
-  }, [binding, attempt]);
+  }, [binding, attempt, boundDevicePresent]);
   const unavailable = error instanceof ApiError && error.code === "not_found";
   const canCopy = result?.status === "pending" && !unavailable;
   const commands = binding?.commands[platform];
@@ -144,9 +147,7 @@ export function BindingDialog({
                       ? t(($) => $.devices.deviceOnline)
                       : !connected
                         ? t(($) => $.devices.registeredUnknown)
-                        : device?.status === "revoked"
-                          ? t(($) => $.common.deviceRevoked)
-                          : t(($) => $.devices.registeredOffline)
+                        : t(($) => $.devices.registeredOffline)
                     : result?.status === "expired"
                       ? t(($) => $.devices.bindingExpired)
                       : t(($) => $.devices.waitingDevice)}
@@ -201,7 +202,7 @@ export function BindingDialog({
                 </IconButton>
               </div>
             </details>
-            {result?.status === "consumed" && !online && (
+            {result?.status === "consumed" && !online && !unavailable && (
               <p className="text-sm text-muted-foreground">{t(($) => $.devices.lostCredentials)}</p>
             )}
           </>
@@ -214,7 +215,7 @@ export function BindingDialog({
       </div>
       <DialogFooter>
         <DialogClose render={<Button variant="outline" />}>{t(($) => $.common.close)}</DialogClose>
-        {result?.deviceId && (
+        {result?.deviceId && !unavailable && (
           <Button onClick={() => onDevice(result.deviceId!)}>
             {t(($) => $.devices.viewDevice)}
           </Button>

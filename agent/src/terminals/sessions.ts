@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
-import { access, mkdir, rm } from "node:fs/promises";
-import { constants } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { access, rm } from "node:fs/promises";
+import { constants, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { AppError, OperationError, limits, type Session } from "@kiteline/shared/protocol";
 import type { CreateTerminal, RecorderMessage, TerminalIdentity } from "@kiteline/shared/ipc";
@@ -9,6 +9,8 @@ import { startTerminalServer } from "@kiteline/shared/terminal/windows";
 import type { AgentConfig } from "../config.js";
 import type { MetadataStore } from "../metadata.js";
 import { Recorder, type Creation } from "./recorder.js";
+
+export const sessionIdBytes = 8;
 
 interface Managed {
   session: Session;
@@ -90,8 +92,7 @@ export class Sessions {
   ) {
     if (this.closing) throw new AppError("cancelled", "Agent is stopping");
     await access(this.config.shell, constants.X_OK);
-    const id = randomUUID();
-    const socket = join(this.config.runDir, id, "tmux.sock");
+    const socket = join(this.config.runDir, "0".repeat(sessionIdBytes * 2), "tmux.sock");
     if (Buffer.byteLength(process.platform === "win32" ? msysPath(socket) : socket) > 103)
       throw new AppError(
         "invalid_argument",
@@ -107,31 +108,43 @@ export class Sessions {
         ? metadata.shortcuts.find((item) => item.id === shortcutId)
         : undefined;
       if (shortcutId && !shortcut) throw new AppError("not_found", "Shortcut does not exist");
-      const item: Managed = {
-        session: {
-          id,
-          workspaceId,
-          name: name ?? shortcut?.name ?? "Shell",
-          createdAt: new Date().toISOString(),
-          historyLines: metadata.settings.historyLines,
-          state: "starting",
-          webStatus: "unavailable",
-          historyGap: false,
-        },
-        identity: { socket },
-      };
-      // Reserve before creation, in the same boundary as workspace removal.
-      this.records.set(id, item);
-      return { item, workspace, shortcut };
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const id = randomBytes(sessionIdBytes).toString("hex");
+        if (this.records.has(id)) continue;
+        const socket = join(this.config.runDir, id, "tmux.sock");
+        try {
+          // Directory ownership and registration share the synchronous workspace boundary.
+          mkdirSync(dirname(socket), { mode: 0o700 });
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "EEXIST") continue;
+          throw error;
+        }
+        const item: Managed = {
+          session: {
+            id,
+            workspaceId,
+            name: name ?? shortcut?.name ?? "Shell",
+            createdAt: new Date().toISOString(),
+            historyLines: metadata.settings.historyLines,
+            state: "starting",
+            webStatus: "unavailable",
+            historyGap: false,
+          },
+          identity: { socket },
+        };
+        this.records.set(id, item);
+        return { item, workspace, shortcut };
+      }
+      throw new AppError("busy", "Could not allocate an unused terminal session ID");
     });
+    const { id } = item.session;
     this.onChanged?.(workspaceId);
     const operation = this.track(
       (async () => {
         try {
-          await mkdir(dirname(socket), { recursive: true, mode: 0o700 });
           const options: CreateTerminal = {
             sessionId: id,
-            socket,
+            socket: item.identity.socket,
             workspacePath: workspace.path,
             shell: this.config.shell,
             command: shortcut?.command,

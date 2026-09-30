@@ -1,5 +1,29 @@
 import type { Terminal } from "@xterm/xterm";
 
+export function revealTerminalSelection(terminal: Terminal) {
+  const container = terminal.element!.parentElement!;
+  if (
+    !container.classList.contains("terminal-readonly") &&
+    !container.classList.contains("terminal-keyboard-clipped")
+  )
+    return;
+  const selection = terminal.getSelectionPosition();
+  if (!selection) return;
+  const clip = container.getBoundingClientRect();
+  const clipTop = clip.top + container.clientTop;
+  const clipLeft = clip.left + container.clientLeft;
+  const clipBottom = clipTop + container.clientHeight;
+  const clipRight = clipLeft + container.clientWidth;
+  const screen = terminal.screenElement!.getBoundingClientRect();
+  const cell = terminal.dimensions!.css.cell;
+  const top = screen.top + (selection.start.y - terminal.buffer.active.viewportY) * cell.height;
+  const left = screen.left + selection.start.x * cell.width;
+  if (top + cell.height > clipBottom) container.scrollTop += top + cell.height - clipBottom;
+  else if (top < clipTop) container.scrollTop -= clipTop - top;
+  if (left + cell.width > clipRight) container.scrollLeft += left + cell.width - clipRight;
+  else if (left < clipLeft) container.scrollLeft -= clipLeft - left;
+}
+
 export function scrollTerminalLines(terminal: Terminal, lines: number) {
   const container = terminal.element!.parentElement!;
   if (

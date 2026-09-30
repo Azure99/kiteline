@@ -308,19 +308,19 @@ export class Connections {
     for (const [id, pending] of this.pending)
       if (pending.loginId === loginId) this.cancel(pending.connection.id, id, loginId);
   }
-  revoke(deviceId: string) {
-    this.store.revokeDevice(deviceId);
+  deleteDevice(deviceId: string) {
+    this.store.deleteDevice(deviceId);
+    this.releases.delete(deviceId);
     for (const candidate of this.handshakes)
       if (candidate.id === deviceId) {
         this.handshakes.delete(candidate);
-        candidate.socket.close(4003, "device_revoked");
+        candidate.socket.close(4003, "device_deleted");
       }
     const connection = this.agents.get(deviceId);
     if (connection) {
       this.dropAgent(connection);
-      connection.socket.close(4003, "device_revoked");
-    }
-    this.broadcastDevices();
+      connection.socket.close(4003, "device_deleted");
+    } else this.broadcastDevices();
   }
   close() {
     clearInterval(this.expiry);

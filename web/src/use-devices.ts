@@ -15,12 +15,20 @@ export function useDevices(
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<unknown>();
   const socketRef = useRef<WebSocket | null>(null);
+  const readGeneration = useRef(0);
+  const invalidateReads = useCallback(() => ++readGeneration.current, []);
   const targets = useRef<{ deviceId: string; workspaceId: string }[]>([]);
   const refresh = useCallback(async () => {
-    const result = await api<{ devices: Device[] }>("/api/devices");
-    setDevices(result.devices);
-    setError(undefined);
-  }, []);
+    const generation = invalidateReads();
+    try {
+      const result = await api<{ devices: Device[] }>("/api/devices");
+      if (generation !== readGeneration.current) return;
+      setDevices(result.devices);
+      setError(undefined);
+    } catch (error) {
+      if (generation === readGeneration.current) throw error;
+    }
+  }, [invalidateReads]);
   useEffect(() => {
     targets.current = deviceId && workspaceId ? [{ deviceId, workspaceId }] : [];
     if (socketRef.current?.readyState === WebSocket.OPEN)
@@ -49,8 +57,12 @@ export function useDevices(
           window.dispatchEvent(new Event("kiteline:connected"));
         };
         socket.onmessage = (event) => {
+          if (stopped) return;
           const message = JSON.parse(String(event.data)) as BrowserEvent;
-          if (message.type === "devices.changed") setDevices(message.devices);
+          if (message.type === "devices.changed") {
+            invalidateReads();
+            setDevices(message.devices);
+          }
           window.dispatchEvent(new CustomEvent("kiteline:event", { detail: message }));
         };
         socket.onclose = () => {
@@ -68,11 +80,12 @@ export function useDevices(
     void connect();
     return () => {
       stopped = true;
+      invalidateReads();
       clearTimeout(retry);
       socket?.close();
       socketRef.current = null;
       setConnected(false);
     };
-  }, [active, refresh, onSession, serverVersion]);
+  }, [active, refresh, onSession, serverVersion, invalidateReads]);
   return { devices: devices ?? [], loaded: devices !== undefined, connected, error, refresh };
 }

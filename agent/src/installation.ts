@@ -167,15 +167,18 @@ export async function installationPaths(
   );
   return { dataDir, runDir };
 }
-export async function installedPaths() {
+export async function installedPaths(runDirOverride?: string) {
   if (!installedProgram) return;
   if (windows) {
     const installation = JSON.parse(await readFile(installationFile, "utf8"));
     if (windowsNative().identity().sid !== installation.sid)
       throw new Error(`Use project user ${installation.user} to run this command`);
     const values = {
-      dataDir: process.env.KITELINE_AGENT_HOME ?? installation.dataDir,
-      runDir: process.env.KITELINE_AGENT_RUN_DIR ?? installation.runDir,
+      dataDir:
+        runDirOverride === undefined
+          ? (process.env.KITELINE_AGENT_HOME ?? installation.dataDir)
+          : installation.dataDir,
+      runDir: runDirOverride ?? process.env.KITELINE_AGENT_RUN_DIR ?? installation.runDir,
     };
     for (const [name, value] of Object.entries(values))
       if (typeof value !== "string" || !isAbsolute(value))
@@ -188,6 +191,6 @@ export async function installedPaths() {
     throw new Error(`Use project user ${installation.user} to run this command`);
   return installationPaths(installation, {
     KITELINE_AGENT_HOME: process.env.KITELINE_AGENT_HOME,
-    KITELINE_AGENT_RUN_DIR: process.env.KITELINE_AGENT_RUN_DIR,
+    KITELINE_AGENT_RUN_DIR: runDirOverride ?? process.env.KITELINE_AGENT_RUN_DIR,
   });
 }
