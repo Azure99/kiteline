@@ -8,7 +8,15 @@ import { readFile, readExact, revisionOf, revisionDigest } from "./read.js";
 import type { AgentConfig } from "../config.js";
 import type { MetadataStore } from "../metadata.js";
 import { publish } from "../mutations.js";
-import { entryInfo, locate, readEntry, realPath, relativePath, versionOf } from "./paths.js";
+import {
+  entryInfo,
+  locate,
+  logicalPath,
+  readEntry,
+  realPath,
+  relativePath,
+  versionOf,
+} from "./paths.js";
 import { renameNoReplace, renameReplace } from "./rename.js";
 import type { TemporaryFiles, Temporary } from "./temporary.js";
 
@@ -34,8 +42,17 @@ export class TextFiles {
   private absolute(workspaceId: string, path: string) {
     return join(this.metadata.workspace(workspaceId).path, relativePath(path));
   }
-  read(workspaceId: string, path: string, signal: AbortSignal, purpose: "text" | "open" = "text") {
-    return readFile(this.absolute(workspaceId, path), purpose, this.config.limits, signal);
+  async read(
+    workspaceId: string,
+    path: string,
+    signal: AbortSignal,
+    purpose: "text" | "open" = "text",
+  ) {
+    const root = this.metadata.workspace(workspaceId).path;
+    path = await logicalPath(root, path, false, signal);
+    const result = await readFile(join(root, path), purpose, this.config.limits, signal);
+    result.meta.targetPath = path;
+    return result;
   }
 
   async prepare(
@@ -50,7 +67,13 @@ export class TextFiles {
       throw new AppError("limit_exceeded", "Content to save exceeds the editing size limit");
     if (createOnly ? expectedRevision !== undefined : !expectedRevision)
       throw new AppError("invalid_argument", "Saving requires the corresponding file revision");
-    path = relativePath(path);
+    try {
+      path = await logicalPath(this.metadata.workspace(workspaceId).path, path, createOnly, signal);
+    } catch (error) {
+      if (!createOnly && (error as NodeJS.ErrnoException).code === "ENOENT")
+        throw new AppError("conflict", "Original file no longer exists; save as a new file");
+      throw error;
+    }
     const absolute = this.absolute(workspaceId, path);
     let target: string;
     if (createOnly) {

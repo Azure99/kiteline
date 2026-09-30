@@ -6,6 +6,7 @@ import { parserStream } from "stream-json";
 import type { Token } from "stream-json/parser.js";
 import { AppError, limits, type SearchMatch, type SearchResult } from "@kiteline/shared/protocol";
 import { SearchJson } from "./search-json.js";
+import { gitMetadataPath } from "./paths.js";
 import { BytePrefix } from "../buffers.js";
 import { bundledRipgrep, ripgrepBinary } from "../tool-checks.js";
 import { JobChild, spawnJob } from "@kiteline/shared/windows/job";
@@ -86,7 +87,10 @@ export async function searchFiles(
         })
       : Promise.resolve();
   signal.addEventListener("abort", abort, { once: true });
-  const found = (match: SearchMatch) => {
+  const found = async (match: SearchMatch) => {
+    const metadata = await gitMetadataPath(root, match.path);
+    controller.signal.throwIfAborted();
+    if (metadata) return;
     const bytes = Buffer.byteLength(JSON.stringify(match)) + 1;
     if (resultBytes + bytes <= limits.resultBytes - 256) {
       result.matches.push(match);
@@ -118,8 +122,7 @@ export async function searchFiles(
           objectMode: true,
           write(token: Token, _encoding, callback) {
             try {
-              reader.token(token);
-              callback();
+              Promise.resolve(reader.token(token)).then(() => callback(), callback);
             } catch (error) {
               callback(error as Error);
             }
@@ -133,20 +136,22 @@ export async function searchFiles(
         child.stdout!,
         new Writable({
           write(data: Buffer, _encoding, callback) {
-            for (let start = 0; start < data.length; ) {
-              const end = data.indexOf(0, start);
-              name.append(data.subarray(start, end < 0 ? data.length : end));
-              if (end < 0) break;
-              if (name.truncated || !isUtf8(name.bytes)) result.truncated = true;
-              else {
-                const path = name.bytes.toString().replace(/^\.\//, "");
-                if (path.includes(query)) found({ path });
+            void (async () => {
+              for (let start = 0; start < data.length; ) {
+                controller.signal.throwIfAborted();
+                const end = data.indexOf(0, start);
+                name.append(data.subarray(start, end < 0 ? data.length : end));
+                if (end < 0) break;
+                if (name.truncated || !isUtf8(name.bytes)) result.truncated = true;
+                else {
+                  const path = name.bytes.toString().replace(/^\.\//, "");
+                  if (path.includes(query)) await found({ path });
+                }
+                name = new BytePrefix(limits.searchPathBytes);
+                if (limited) break;
+                start = end + 1;
               }
-              name = new BytePrefix(limits.searchPathBytes);
-              if (limited) break;
-              start = end + 1;
-            }
-            callback();
+            })().then(() => callback(), callback);
           },
         }),
         { signal: controller.signal },

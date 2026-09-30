@@ -54,10 +54,10 @@ async function cleanup(errors: unknown[], resource: string, action: () => Promis
     errors.push(new Error(`Could not clean up ${resource}: ${String(error)}`, { cause: error }));
   }
 }
-async function command(file: string, args: string[], cwd?: string) {
-  return (
-    await execute(file, args, { cwd, encoding: "utf8", maxBuffer: 128 * 1024 })
-  ).stdout.trim();
+async function command(file: string, args: string[], cwd?: string, input?: string) {
+  const result = execute(file, args, { cwd, encoding: "utf8", maxBuffer: 128 * 1024 });
+  result.child.stdin!.end(input);
+  return (await result).stdout.trim();
 }
 async function hash(path: string) {
   const digest = createHash("sha256");
@@ -68,11 +68,18 @@ async function verifyPackage(directory: string) {
   const release = JSON.parse(await readFile(join(directory, "release.json"), "utf8"));
   if (
     release.kind !== "agent" ||
-    release.platform !== "linux" ||
+    release.platform !== (process.platform === "darwin" ? "macos" : "linux") ||
     release.architecture !== process.arch
   )
-    throw new Error("A complete agent package matching this Linux architecture is required");
-  await command("sh", ["-c", "sha256sum -c SHA256SUMS >/dev/null"], directory);
+    throw new Error("A complete agent package matching this platform and architecture is required");
+  await command(
+    "sh",
+    [
+      "-c",
+      `${process.platform === "darwin" ? "/usr/bin/shasum -a 256" : "sha256sum"} -c SHA256SUMS >/dev/null`,
+    ],
+    directory,
+  );
   if ((await command(join(directory, "runtime/bin/node"), ["--version"])) !== `v${release.node}`)
     throw new Error("Bundled Node does not match the installation manifest");
   const identity = JSON.parse(await readFile(join(directory, "dist/native/identity.json"), "utf8"));
@@ -100,6 +107,34 @@ async function confirm(message: string, yes: boolean, signal: AbortSignal) {
   }
 }
 async function account(name: string): Promise<Installation> {
+  if (process.platform === "darwin") {
+    const plist = await command("/usr/bin/dscl", [
+      "-plist",
+      "/Search",
+      "-read",
+      `/Users/${name}`,
+      "RecordName",
+      "UniqueID",
+      "PrimaryGroupID",
+      "NFSHomeDirectory",
+    ]);
+    const record = JSON.parse(
+      await command("/usr/bin/plutil", ["-convert", "json", "-o", "-", "-"], undefined, plist),
+    );
+    const user = record["dsAttrTypeStandard:RecordName"]?.[0];
+    const uid = Number(record["dsAttrTypeStandard:UniqueID"]?.[0]);
+    const gid = Number(record["dsAttrTypeStandard:PrimaryGroupID"]?.[0]);
+    const home = record["dsAttrTypeStandard:NFSHomeDirectory"]?.[0];
+    if (
+      typeof user !== "string" ||
+      !Number.isInteger(uid) ||
+      !Number.isInteger(gid) ||
+      typeof home !== "string" ||
+      !home.startsWith("/")
+    )
+      throw new Error("Specify an existing project user");
+    return { user, uid, gid, home };
+  }
   const fields = (await command("getent", ["passwd", name])).split(":");
   const uid = Number(fields[2]),
     gid = Number(fields[3]),
@@ -197,7 +232,6 @@ async function installProgram(user: string, protectSignals: () => void) {
     if (await exists(path)) throw new Error(`${path} already exists; verify its purpose first`);
   await verifyPackage(packageDirectory);
   protectSignals();
-  await mkdir(dirname(installDirectory), { recursive: true });
   try {
     await writeFile(
       environmentFile,
@@ -216,9 +250,11 @@ async function installProgram(user: string, protectSignals: () => void) {
   const use = await lockInstallation("exclusive");
   const errors: unknown[] = [];
   try {
-    await cp(packageDirectory, installDirectory, { recursive: true, verbatimSymlinks: true });
-    await command("chown", ["-h", "-R", "-P", "0:0", "--", installDirectory]);
-    await mkdir(dirname(launcherFile), { recursive: true });
+    if (process.platform === "darwin")
+      await command("/bin/cp", ["-a", "--", packageDirectory, installDirectory]);
+    else await cp(packageDirectory, installDirectory, { recursive: true, verbatimSymlinks: true });
+    await command("chown", ["-h", "-R", "-P", "0:0", installDirectory]);
+    await command("sh", ["-c", 'umask 022; mkdir -p -- "$1"', "sh", dirname(launcherFile)]);
     await atomicJson(installationFile, installation);
     await chmod(installationFile, 0o644);
     await writeLauncher(
@@ -282,7 +318,7 @@ async function upgrade(
     );
     protectSignals();
     use = await stoppedInstallation(installation);
-    await command("chown", ["-h", "-R", "-P", "0:0", "--", replacement]);
+    await command("chown", ["-h", "-R", "-P", "0:0", replacement]);
     await replaceProgram(
       installDirectory,
       replacement,
@@ -373,7 +409,7 @@ export async function installCli(action: string, args: string[]) {
     throw new Error("Installation changes require sudo or root; run the agent as the project user");
   if (packageDirectory === installDirectory)
     throw new Error("Use the public kiteline-agent launcher for installation changes");
-  await mkdir(dirname(installDirectory), { recursive: true });
+  await command("sh", ["-c", 'umask 022; mkdir -p -- "$1"', "sh", dirname(installDirectory)]);
   const management = await lockInstallationManagement();
   const errors: unknown[] = [];
   let completion: string | undefined;

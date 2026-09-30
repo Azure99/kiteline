@@ -18,9 +18,11 @@ function curlCommand(entryOrigin: string) {
 export function installationCommands(entryOrigin: string, code: string) {
   const origin = quote(entryOrigin);
   const bind = `kiteline-agent check && printf '%s\\n' ${quote(code)} | kiteline-agent bind --server ${origin} --if-unbound`;
-  const install = `${curlCommand(entryOrigin)} ${quote(entryOrigin + "/connect.sh")} | sh -s -- ${quote(code)}`;
+  const install = (platform: "linux" | "macos") =>
+    `${curlCommand(entryOrigin)} ${quote(entryOrigin + "/connect.sh")} | sh -s -- ${platform} ${quote(code)}`;
   return {
-    linux: { install, bind },
+    linux: { install: install("linux"), bind },
+    macos: { install: install("macos"), bind },
     windows: {
       install: powershellCommand(
         entryOrigin + "/connect.ps1",
@@ -36,11 +38,11 @@ function connectionScript(entryOrigin: string) {
 set -eu
 
 connect() {
-    if [ "$#" -ne 1 ]; then
-        echo 'Usage: sh -s -- CODE' >&2
+    if [ "$#" -ne 2 ]; then
+        echo 'Usage: sh -s -- PLATFORM CODE' >&2
         exit 1
     fi
-    [ -n "$1" ] || { echo 'Missing binding code; generate a connection command in the web app' >&2; exit 1; }
+    [ -n "$2" ] || { echo 'Missing binding code; generate a connection command in the web app' >&2; exit 1; }
     for kiteline_tool in curl mktemp; do
         command -v "$kiteline_tool" >/dev/null || { echo "Missing $kiteline_tool; install curl, CA certificates and core utilities using your system package manager, then run this command again" >&2; exit 1; }
     done
@@ -50,9 +52,7 @@ connect() {
     trap 'exit 130' INT
     trap 'exit 143' TERM
     ${curlCommand(entryOrigin)} ${quote(entryOrigin + "/install.sh")} -o "$kiteline_install"
-    kiteline_code=$1
-    shift
-    sh "$kiteline_install" --server ${quote(entryOrigin)} --version ${quote(appVersion)} --code "$kiteline_code" "$@"
+    sh "$kiteline_install" --server ${quote(entryOrigin)} --version ${quote(appVersion)} --platform "$1" --code "$2"
 }
 
 connect "$@"
@@ -60,10 +60,13 @@ connect "$@"
 }
 
 export function upgradeCommand(entryOrigin: string) {
+  const unix = (platform: "linux" | "macos") =>
+    `(kiteline_script=$(${curlCommand(entryOrigin)} ${quote(entryOrigin + "/upgrade.sh")}) && sh -c "$kiteline_script" -- --version ${quote(appVersion)} --platform ${platform})`;
   return {
     version: appVersion,
     commands: {
-      linux: `(kiteline_script=$(${curlCommand(entryOrigin)} ${quote(entryOrigin + "/upgrade.sh")}) && sh -c "$kiteline_script" -- --version ${quote(appVersion)})`,
+      linux: unix("linux"),
+      macos: unix("macos"),
       windows: powershellCommand(entryOrigin + "/upgrade.ps1", `-Version ${psQuote(appVersion)}`),
     },
   };
@@ -85,16 +88,20 @@ try {
 function upgradeScript(entryOrigin: string) {
   return `#!/bin/sh
 set -eu
-[ "$#" -eq 2 ] && [ "$1" = --version ] && [ "$2" = ${quote(appVersion)} ] || { echo 'The server release changed; obtain a new upgrade command from the web app' >&2; exit 1; }
+[ "$#" -eq 4 ] && [ "$1" = --version ] && [ "$2" = ${quote(appVersion)} ] && [ "$3" = --platform ] || { echo 'The server release changed; obtain a new upgrade command from the web app' >&2; exit 1; }
+kiteline_platform=$4
 [ -t 0 ] || { echo 'Run this command in an interactive terminal or SSH session on the target device' >&2; exit 1; }
 for kiteline_tool in curl mktemp uname id; do
   command -v "$kiteline_tool" >/dev/null || { echo "Missing $kiteline_tool; install curl, CA certificates and core utilities using your system package manager, then run this command again" >&2; exit 1; }
 done
-[ "$(uname -s)" = Linux ] || { echo 'Only Linux is supported' >&2; exit 1; }
+case "$kiteline_platform:$(uname -s)" in
+  linux:Linux|macos:Darwin) ;;
+  *) echo 'Selected platform does not match this device' >&2; exit 1 ;;
+esac
 case "$(uname -m)" in
   x86_64) kiteline_arch=amd64 ;;
   aarch64|arm64) kiteline_arch=arm64 ;;
-  *) echo 'Only Linux amd64/arm64 is supported' >&2; exit 1 ;;
+  *) echo 'No agent archive is available for this architecture' >&2; exit 1 ;;
 esac
 [ -x /usr/local/bin/kiteline-agent ] || { echo 'Install and bind the agent before upgrading' >&2; exit 1; }
 if [ "$(id -u)" -ne 0 ]; then
@@ -106,7 +113,7 @@ kiteline_interrupted=0
 trap 'kiteline_interrupted=129' HUP
 trap 'kiteline_interrupted=130' INT
 trap 'kiteline_interrupted=143' TERM
-kiteline_name="kiteline-agent-${appVersion}-linux-$kiteline_arch.tar.gz"
+kiteline_name="kiteline-agent-${appVersion}-$kiteline_platform-$kiteline_arch.tar.gz"
 kiteline_base=${quote(entryOrigin + "/downloads/agent/" + appVersion + "/")}"$kiteline_name"
 ${curlCommand(entryOrigin)} "$kiteline_base" -o "$kiteline_upgrade/$kiteline_name"
 ${curlCommand(entryOrigin)} "$kiteline_base.sha256" -o "$kiteline_upgrade/$kiteline_name.sha256"
@@ -167,6 +174,10 @@ export async function serveAgentInstallation(
     }
   for (const suffix of [".zip", ".zip.sha256"]) {
     const name = `kiteline-agent-${appVersion}-windows-amd64${suffix}`;
+    if (path === `/downloads/agent/${appVersion}/${name}`) filename = name;
+  }
+  for (const suffix of [".tar.gz", ".tar.gz.sha256"]) {
+    const name = `kiteline-agent-${appVersion}-macos-amd64${suffix}`;
     if (path === `/downloads/agent/${appVersion}/${name}`) filename = name;
   }
   if (!filename) throw new AppError("not_found", "Installation resource not found");

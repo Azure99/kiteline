@@ -5,6 +5,9 @@ import type { BrowserEvent } from "@kiteline/shared/protocol";
 import { ErrorNotice } from "../components/error-notice";
 import { IconButton } from "../components/icon-button";
 import { ApiError } from "../lib/api";
+import { currentRoute, isWorkspaceRoute, updateWorkspaceQuery } from "../lib/navigation";
+import { showDraft } from "./navigation";
+import { parentPath } from "./use-browser";
 import { downloadFile, readContent, type DiskImage, type FileTarget } from "./content";
 import type { DraftStore } from "./drafts";
 import { ImagePreview } from "./image-preview";
@@ -49,9 +52,20 @@ export function FileContent({
       channelId = id;
     })
       .then((content) => {
-        if (controller.signal.aborted || store.find(target)) return;
-        if (content.kind === "text") store.open(target, content.value);
-        else setImage(content.value);
+        if (controller.signal.aborted) return;
+        const route = currentRoute();
+        if (!isWorkspaceRoute(route, target) || route.tool !== "files" || route.query.file !== path)
+          return;
+        if (content.kind === "text") {
+          const actual = { ...target, path: content.value.target.path };
+          const draft = store.open(actual, content.value);
+          showDraft(draft, true);
+        } else {
+          setImage(content.value);
+          const actual = content.value.meta.targetPath!;
+          if (actual !== path)
+            updateWorkspaceQuery(target, { file: actual, folder: parentPath(actual) }, true);
+        }
       })
       .catch((reason: unknown) => {
         if (!controller.signal.aborted) setError(failure ?? reason);

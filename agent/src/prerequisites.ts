@@ -12,6 +12,7 @@ import { windowsNative } from "@kiteline/shared/windows/native";
 import { agentConfig, privateDirectory } from "./config.js";
 import { packageDirectory } from "./installation.js";
 import { checkWindowsComponents } from "./windows-components.js";
+import { checkMacosComponents } from "./macos-components.js";
 import {
   bundledRipgrep,
   checkBundledRipgrep,
@@ -24,6 +25,7 @@ import {
 export async function checkPrerequisites() {
   const config = await agentConfig();
   const windows = process.platform === "win32";
+  const macos = process.platform === "darwin";
   const failures: string[] = [];
   async function check(name: string, action: () => Promise<unknown>) {
     try {
@@ -35,12 +37,15 @@ export async function checkPrerequisites() {
   const command = (file: string, args: string[], env = process.env) =>
     toolCommand(file, args, { env, timeout: 5000 });
   if (windows) await check("Windows component identity", () => checkWindowsComponents());
+  if (macos) await check("macOS component identity", () => checkMacosComponents());
   for (const tool of toolRequirements)
     await check(tool.file, () => checkToolVersion(tool, command));
   if (bundledRipgrep) await check("Bundled ripgrep", () => checkBundledRipgrep(command));
   if (!windows) {
     await check("SSH", () => command("ssh", ["-V"]));
-    await check("flock (util-linux)", () => command("flock", ["--version"]));
+    await check("flock", () =>
+      command(macos ? join(packageDirectory, "dist/native/bin/flock") : "flock", ["--version"]),
+    );
   }
   await check("Shell", () =>
     windows
@@ -70,6 +75,10 @@ export async function checkPrerequisites() {
       ? windowsNative().fileAttributes(join(packageDirectory, "dist/native"))
       : checkFileHelper(join(packageDirectory, "dist/native/bin/rename-noreplace"), command),
   );
+  if (macos)
+    await check("Bundled entry name helper", () =>
+      checkFileHelper(join(packageDirectory, "dist/native/bin/entry-name"), command),
+    );
   await check("Runtime directory", async () => {
     const socket = join(config.runDir, "0".repeat(36), "tmux.sock");
     if (Buffer.byteLength(windows ? msysPath(socket) : socket) > 103)
@@ -85,6 +94,10 @@ export async function checkPrerequisites() {
     if (windows)
       throw new Error(
         `Setup checks failed:\n${failures.join("\n")}\nProvide PowerShell 7 and native Git in the launching environment. Reinstall the matching complete package for bundled component failures.`,
+      );
+    if (macos)
+      throw new Error(
+        `Setup checks failed:\n${failures.join("\n")}\nProvide Git >= 2.23, an executable Shell and a UTF-8 locale in the launching environment. Reinstall the matching complete package for bundled component failures.`,
       );
     const system = parseEnv(await readFile("/etc/os-release", "utf8").catch(() => ""));
     const root = process.getuid?.() === 0 ? "" : "sudo ";

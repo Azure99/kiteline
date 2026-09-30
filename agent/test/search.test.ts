@@ -3,9 +3,11 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { AppError, limits } from "@kiteline/shared/protocol";
 import { searchFiles } from "../src/files/search.js";
+import * as paths from "../src/files/paths.js";
 
 const roots: string[] = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
@@ -15,6 +17,49 @@ async function setup() {
   return root;
 }
 const signal = () => new AbortController().signal;
+
+test.each(["name", "content"] as const)(
+  "a deadline during a metadata lookup freezes %s results and stops consumption",
+  async (mode) => {
+    const root = await setup();
+    await writeFile(join(root, "a.txt"), "needle");
+    await writeFile(join(root, "b.txt"), "needle");
+    let enter!: () => void, release!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const lookup = vi.spyOn(paths, "gitMetadataPath").mockImplementation(async () => {
+      enter();
+      await gate;
+      return false;
+    });
+    const controller = new AbortController();
+    const searching = searchFiles(
+      root,
+      mode,
+      mode === "name" ? "" : "needle",
+      false,
+      controller.signal,
+    );
+    try {
+      await entered;
+      controller.abort(new AppError("timeout", "timeout"));
+      const result = await searching;
+      expect(result).toEqual({ matches: [], truncated: true });
+      release();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(result).toEqual({ matches: [], truncated: true });
+      expect(lookup).toHaveBeenCalledTimes(1);
+    } finally {
+      release();
+      controller.abort();
+      await searching.catch(() => {});
+    }
+  },
+);
 
 test("real rg respects ignore rules, excludes metadata and directory links, and preserves literal paths", async () => {
   const root = await setup();

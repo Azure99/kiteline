@@ -4,7 +4,7 @@ import type { AgentConfig } from "../config.js";
 import type { MetadataStore } from "../metadata.js";
 import { publish } from "../mutations.js";
 import { checkTarget, targetAgain } from "./destination.js";
-import { locate, relativePath } from "./paths.js";
+import { locate, logicalPath } from "./paths.js";
 import { renameNoReplace, renameReplace } from "./rename.js";
 import { readFile } from "./read.js";
 import type { Temporary, TemporaryFiles } from "./temporary.js";
@@ -30,13 +30,17 @@ export class BinaryFiles {
     private temporary: TemporaryFiles,
   ) {}
 
-  read(workspaceId: string, path: string, purpose: "image" | "download", signal: AbortSignal) {
-    return readFile(
-      join(this.metadata.workspace(workspaceId).path, relativePath(path)),
-      purpose,
-      this.config.limits,
-      signal,
-    );
+  async read(
+    workspaceId: string,
+    path: string,
+    purpose: "image" | "download",
+    signal: AbortSignal,
+  ) {
+    const root = this.metadata.workspace(workspaceId).path;
+    path = await logicalPath(root, path, false, signal);
+    const result = await readFile(join(root, path), purpose, this.config.limits, signal);
+    result.meta.targetPath = path;
+    return result;
   }
 
   async prepare(
@@ -51,8 +55,8 @@ export class BinaryFiles {
       throw new AppError("limit_exceeded", "File exceeds the transfer size limit");
     if (createOnly ? expectedTargetVersion !== undefined : !expectedTargetVersion)
       throw new AppError("invalid_argument", "Replacement requires the confirmed target version");
-    path = relativePath(path);
     const root = this.metadata.workspace(workspaceId).path;
+    path = await logicalPath(root, path, createOnly, signal);
     const collision = createOnly ? "error" : "replace";
     const target = await publish(async () => {
       const location = await locate(root, path);

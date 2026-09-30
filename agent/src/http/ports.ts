@@ -1,5 +1,7 @@
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { AppError, limits, type ListeningPorts } from "@kiteline/shared/protocol";
 import { windowsNative } from "@kiteline/shared/windows/native";
 
@@ -20,6 +22,18 @@ export function listeningPort(line: string, ipv6: boolean): number | undefined {
   }
 }
 
+export function macosListeningPort(line: string): number | undefined {
+  if (!line.trim() || /^Active Internet connections|^Proto\s/.test(line)) return;
+  const fields = /^tcp(?:4|6|46)\s+\d+\s+\d+\s+(\S+)\s+\S+\s+(\S+)\s*$/.exec(line);
+  if (!fields) throw new AppError("io_error", "Cannot parse the device listening port");
+  if (fields[2] !== "LISTEN") return;
+  const address = /^(.*)\.(\d+)$/.exec(fields[1]!);
+  const port = Number(address?.[2]);
+  if (!address || !Number.isInteger(port) || port < 1 || port > 65535)
+    throw new AppError("io_error", "Cannot parse the device listening address");
+  if (["*", "127.0.0.1", "::1"].includes(address[1]!)) return port;
+}
+
 export async function listeningPorts(signal: AbortSignal): Promise<ListeningPorts> {
   signal.throwIfAborted();
   if (process.platform === "win32") {
@@ -31,6 +45,28 @@ export async function listeningPorts(signal: AbortSignal): Promise<ListeningPort
     };
   }
   const ports = new Set<number>();
+  if (process.platform === "darwin") {
+    const { stdout, stderr } = await promisify(execFile)(
+      "/usr/sbin/netstat",
+      ["-an", "-p", "tcp"],
+      {
+        env: { ...process.env, LC_ALL: "C" },
+        signal,
+        timeout: 3000,
+        killSignal: "SIGKILL",
+        maxBuffer: 4 * 1024 * 1024,
+      },
+    );
+    if (stderr.trim()) throw new AppError("io_error", stderr.trim());
+    for (const line of stdout.split("\n")) {
+      const port = macosListeningPort(line);
+      if (port !== undefined) ports.add(port);
+    }
+    return {
+      ports: [...ports].sort((a, b) => a - b).slice(0, limits.listPageEntries),
+      truncated: ports.size > limits.listPageEntries,
+    };
+  }
   let truncated = false;
   for (const ipv6 of [false, true]) {
     signal.throwIfAborted();

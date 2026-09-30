@@ -2,7 +2,7 @@ import type { AgentEnvironment } from "@kiteline/shared/protocol";
 
 export function localCommand(environment: AgentEnvironment, sessionId: string) {
   const { cliPath, dataDir, runDir } = environment;
-  if (environment.os === "linux") {
+  if (environment.os !== "windows") {
     const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
     return `KITELINE_AGENT_HOME=${quote(dataDir)} KITELINE_AGENT_RUN_DIR=${quote(runDir)} ${quote(cliPath)} terminal attach ${quote(sessionId)}`;
   }

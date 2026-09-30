@@ -6,7 +6,11 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { appVersion } from "@kiteline/shared/protocol";
-import { serveAgentInstallation, upgradeCommand } from "../src/agent-installation.js";
+import {
+  installationCommands,
+  serveAgentInstallation,
+  upgradeCommand,
+} from "../src/agent-installation.js";
 
 const execute = promisify(execFile);
 const cleanup: (() => Promise<void>)[] = [];
@@ -14,36 +18,41 @@ afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
 
-test("the one-line command executes only a fully downloaded script and preserves its arguments", async () => {
-  const root = await mkdtemp("/var/tmp/kiteline-upgrade-download-");
-  cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const output = root + "/executed";
-  const script = `printf '%s\\n' "$@" > '${output}'\n`;
-  let mode: "complete" | "truncated" | "failed" = "truncated";
-  const server = createServer((_request, response) => {
-    response.writeHead(mode === "failed" ? 503 : 200, {
-      connection: "close",
-      "content-length": Buffer.byteLength(script) + (mode === "truncated" ? 100 : 0),
+test.each(["linux", "macos"] as const)(
+  "the %s upgrade command executes only a fully downloaded script and preserves its arguments",
+  async (platform) => {
+    const root = await mkdtemp("/var/tmp/kiteline-upgrade-download-");
+    cleanup.push(() => rm(root, { recursive: true, force: true }));
+    const output = root + "/executed";
+    const script = `printf '%s\\n' "$@" > '${output}'\n`;
+    let mode: "complete" | "truncated" | "failed" = "truncated";
+    const server = createServer((_request, response) => {
+      response.writeHead(mode === "failed" ? 503 : 200, {
+        connection: "close",
+        "content-length": Buffer.byteLength(script) + (mode === "truncated" ? 100 : 0),
+      });
+      response.end(script);
     });
-    response.end(script);
-  });
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  cleanup.push(() => new Promise<void>((resolve) => server.close(() => resolve())));
-  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const command = upgradeCommand(origin).commands.linux;
-  expect(command.split("\n")).toHaveLength(1);
-  for (const failure of ["truncated", "failed"] as const) {
-    mode = failure;
-    await expect(execute("sh", ["-c", command], { timeout: 5000 })).rejects.toMatchObject({
-      code: failure === "truncated" ? 18 : 22,
-    });
-    await expect(readFile(output)).rejects.toMatchObject({ code: "ENOENT" });
-  }
-  mode = "complete";
-  await execute("sh", ["-c", command], { timeout: 5000 });
-  expect(await readFile(output, "utf8")).toBe(`--version\n${appVersion}\n`);
-});
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    cleanup.push(() => new Promise<void>((resolve) => server.close(() => resolve())));
+    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const command = upgradeCommand(origin).commands[platform];
+    expect(command.split("\n")).toHaveLength(1);
+    for (const failure of ["truncated", "failed"] as const) {
+      mode = failure;
+      await expect(execute("sh", ["-c", command], { timeout: 5000 })).rejects.toMatchObject({
+        code: failure === "truncated" ? 18 : 22,
+      });
+      await expect(readFile(output)).rejects.toMatchObject({ code: "ENOENT" });
+    }
+    mode = "complete";
+    await execute("sh", ["-c", command], { timeout: 5000 });
+    expect(await readFile(output, "utf8")).toBe(
+      `--version\n${appVersion}\n--platform\n${platform}\n`,
+    );
+  },
+);
 
 test("the real upgrade script refuses stale commands and noninteractive execution before downloads", async () => {
   let origin = "";
@@ -65,8 +74,46 @@ test("the real upgrade script refuses stale commands and noninteractive executio
     [appVersion, "interactive terminal"],
   ]) {
     await expect(
-      execute("sh", ["-c", script, "--", "--version", version!], { timeout: 5000 }),
+      execute("sh", ["-c", script, "--", "--version", version!, "--platform", "macos"], {
+        timeout: 5000,
+      }),
     ).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining(message!) });
   }
   expect(requests).toEqual(["/upgrade.sh"]);
 });
+
+test.each(["linux", "macos"] as const)(
+  "the %s connection command preserves the code and refuses an incomplete installer",
+  async (platform) => {
+    const root = await mkdtemp("/var/tmp/kiteline-connect-download-");
+    cleanup.push(() => rm(root, { recursive: true, force: true }));
+    const output = root + "/executed";
+    const script = `printf '%s\\n' "$@" > '${output}'\n`;
+    let origin = "";
+    let complete = false;
+    const server = createServer((request, response) => {
+      if (request.url === "/install.sh") {
+        response.writeHead(200, {
+          connection: "close",
+          "content-length": Buffer.byteLength(script) + (complete ? 0 : 100),
+        });
+        response.end(script);
+      } else void serveAgentInstallation(request.url!, root, origin, request, response);
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    cleanup.push(() => new Promise<void>((resolve) => server.close(() => resolve())));
+    origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const code = "binding'code";
+    const command = installationCommands(origin, code)[platform].install;
+    await expect(execute("sh", ["-c", command], { timeout: 5000 })).rejects.toMatchObject({
+      code: 18,
+    });
+    await expect(readFile(output)).rejects.toMatchObject({ code: "ENOENT" });
+    complete = true;
+    await execute("sh", ["-c", command], { timeout: 5000 });
+    expect(await readFile(output, "utf8")).toBe(
+      `--server\n${origin}\n--version\n${appVersion}\n--platform\n${platform}\n--code\n${code}\n`,
+    );
+  },
+);

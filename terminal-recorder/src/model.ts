@@ -7,6 +7,7 @@ import {
   mouseEncodingVT,
   adaptTerminalScrolling,
   terminalOptions,
+  initializeTerminalUnicode,
 } from "@kiteline/shared/terminal";
 import type { TerminalEvent } from "@kiteline/shared/ipc";
 
@@ -41,7 +42,7 @@ export class Model {
     private fault: (error: Error) => void,
   ) {
     this.terminal = new Terminal({ ...terminalOptions(historyLines), cols, rows });
-    this.terminal.unicode.activeVersion = "6";
+    initializeTerminalUnicode(this.terminal);
     adaptTerminalScrolling(this.terminal);
     this.terminal.loadAddon(this.serializer);
     this.rotate();

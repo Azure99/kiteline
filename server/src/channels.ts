@@ -198,6 +198,9 @@ export class Channels {
         if (item.kind !== "terminal.attach") {
           const meta = item.meta as FileMeta;
           integer(meta.size, "size", 0, Number.MAX_SAFE_INTEGER);
+          const path = string(meta.targetPath, "file target path");
+          if (path.startsWith("/") || path.split("/").includes(".."))
+            throw new AppError("invalid_argument", "A relative file target path is required");
           if (item.kind === "file.write" && meta.size !== item.params.size)
             throw new AppError("invalid_argument", "Declared file lengths do not match");
           if (

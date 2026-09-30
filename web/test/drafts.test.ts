@@ -99,6 +99,21 @@ test("closing a duplicate-path draft does not clear the file-only target of anot
   expect(browser.location.searchParams.get("repo")).toBe("r");
 });
 
+test("saving adopts the returned logical target while preserving later typing and undo", async () => {
+  const { store, draft } = await opened();
+  const pending = deferred<{ path: string; size: number; revision: string }>();
+  transport.write.mockReturnValueOnce(pending.promise);
+  const saving = store.save(draft, "PARENT/copy.txt");
+  const edited = draft.state!.update({ changes: { from: 4, insert: " later" } }).state;
+  store.update(draft, edited);
+  pending.resolve({ path: "Parent/copy.txt", size: 4, revision: "copy" });
+  expect(await saving).toBe(true);
+  expect(draft.path).toBe("Parent/copy.txt");
+  expect(draft.state).toBe(edited);
+  expect(draft.baseText).toBe("base");
+  expect(isDirty(draft)).toBe(true);
+});
+
 test("reloading a draft retains its loaded language support", async () => {
   const { store, draft } = await opened();
   const support = await LanguageDescription.matchFilename(languages, "a.js")!.load();
@@ -170,6 +185,14 @@ test.each([
   { original: "dir/a.txt", saved: "copy.txt", from: "dir", to: "moved", final: "copy.txt" },
   {
     original: "a.txt",
+    requested: "PARENT/copy.txt",
+    saved: "Parent/copy.txt",
+    from: "Parent/copy.txt",
+    to: "Parent/moved.txt",
+    final: "Parent/moved.txt",
+  },
+  {
+    original: "a.txt",
     saved: "copy.txt",
     from: "copy.txt",
     to: "renamed.txt",
@@ -192,6 +215,7 @@ test.each([
         );
       };
       await mkdir(dirname(join(root, paths.original)), { recursive: true });
+      await mkdir(dirname(join(root, paths.saved)), { recursive: true });
       await writeFile(join(root, paths.original), "base");
       transport.read.mockImplementation(read);
       const draft = store.open(
@@ -203,18 +227,28 @@ test.each([
         draft.state!.update({ changes: { from: 0, to: 4, insert: "sent" } }).state,
       );
       const published = deferred<void>();
-      transport.write.mockImplementationOnce(async (target: FileTarget, bytes: Uint8Array) => {
-        await writeFile(join(root, target.path), bytes);
-        const result = {
-          path: target.path,
-          revision: (await read(target)).meta.revision,
-          size: bytes.length,
-        };
-        published.resolve();
-        await release.promise;
-        return result;
-      });
-      const saving = store.save(draft, paths.saved, null);
+      transport.write.mockImplementationOnce(
+        async (
+          _target: FileTarget,
+          bytes: Uint8Array,
+          _revision,
+          _signal,
+          prepared?: (path: string) => void,
+        ) => {
+          const target = { ..._target, path: paths.saved };
+          prepared?.(target.path);
+          await writeFile(join(root, target.path), bytes);
+          const result = {
+            path: target.path,
+            revision: (await read(target)).meta.revision,
+            size: bytes.length,
+          };
+          published.resolve();
+          await release.promise;
+          return result;
+        },
+      );
+      const saving = store.save(draft, "requested" in paths ? paths.requested : paths.saved, null);
       await published.promise;
       store.update(
         draft,

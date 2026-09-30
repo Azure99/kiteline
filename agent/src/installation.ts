@@ -45,8 +45,10 @@ export class InstallationLockCloseError extends AggregateError {
   }
 }
 export async function lockFileDescriptor(fd: number, mode: "shared" | "exclusive") {
+  const flock =
+    process.platform === "darwin" ? resolve(packageDirectory, "dist/native/bin/flock") : "flock";
   await new Promise<void>((resolve, reject) => {
-    const child = spawn("flock", [`--${mode}`, "--nonblock", "3"], {
+    const child = spawn(flock, [`--${mode}`, "--nonblock", "3"], {
       stdio: ["ignore", "ignore", "ignore", fd],
     });
     child.once("error", reject);

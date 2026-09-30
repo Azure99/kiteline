@@ -70,7 +70,7 @@ async function readContentBytes(
 }
 function diskText(target: FileTarget, bytes: Uint8Array, meta: FileMeta): DiskText {
   return {
-    target,
+    target: { ...target, path: meta.targetPath! },
     meta,
     text: decodeText(bytes).text,
     raw: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes),
@@ -99,6 +99,7 @@ export async function writeText(
   bytes: Uint8Array,
   expectedRevision: string | undefined,
   signal: AbortSignal,
+  prepared: (path: string) => void,
 ): Promise<SavedFile> {
   const ready = await channel(
     target,
@@ -112,6 +113,7 @@ export async function writeText(
     signal,
   );
   try {
+    prepared(ready.meta.targetPath!);
     const response = await fetch(versionedPath(`/api/channels/${ready.channelId}/content`), {
       method: "PUT",
       body: new Blob([bytes as Uint8Array<ArrayBuffer>]),

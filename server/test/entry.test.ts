@@ -174,6 +174,9 @@ test("upgrade scripts are public while command recovery retains login and origin
   expect(upgrade.commands.linux).toContain("https://kiteline.test:9443/upgrade.sh");
   expect(upgrade.commands.linux).toContain("--proto '=https' --proto-redir '=https'");
   expect(upgrade.commands.windows).toContain("https://kiteline.test:9443/upgrade.ps1");
+  expect(upgrade.commands.macos).toContain("https://kiteline.test:9443/upgrade.sh");
+  expect(upgrade.commands.macos).toContain("--proto '=https' --proto-redir '=https'");
+  expect(upgrade.commands.macos).toContain("--platform macos");
   for (const command of Object.values(upgrade.commands)) {
     expect(command).not.toContain("--yes");
     expect(command).not.toContain("kiteline-agent bind");
@@ -214,6 +217,7 @@ test("request authority and explicit proxy trust determine HTTP and Upgrade orig
     expect(binding.status).toBe(200);
     expect(JSON.parse(binding.text).commands.linux.install).toContain(`${origin}/connect.sh`);
     expect(JSON.parse(binding.text).commands.windows.install).toContain(`${origin}/connect.ps1`);
+    expect(JSON.parse(binding.text).commands.macos.install).toContain(`${origin}/connect.sh`);
     const socket = await f.events(headers);
     socket.close();
     await once(socket, "close");

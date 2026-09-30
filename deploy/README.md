@@ -1,6 +1,6 @@
 # 安装与运行
 
-设备端面向 Linux amd64/arm64及Windows amd64，server仍为Linux。运行前提见[平台要求](#平台要求)。源码开发见[仓库入口](../README.md)。
+设备端面向Linux amd64/arm64、Windows amd64及macOS 11 x86_64，server仍为Linux。运行前提见[平台要求](#平台要求)。源码开发见[仓库入口](../README.md)。
 
 ## 生成交付物
 
@@ -13,9 +13,24 @@ pnpm package server amd64 --agent-target=linux-amd64
 pnpm images amd64
 ```
 
-上述单平台构建命令只打Linux amd64，并在server中提供该目标接入包。Windows先按[固定组件构建](windows-components.md)生成并验证组件，再执行`pnpm package agent windows-amd64 --windows-components=/var/tmp/kiteline-win-components`；组包需要zip，产物不含符号链接，不要求目标开启Developer Mode。完整交付先构建Linux两种agent及Windows agent，再省略server的`--agent-target`；也可明确逗号分隔的所携带目标。ARM64 server另执行`pnpm package server arm64`、`pnpm images arm64`，串行控制内存。包及对应`.sha256`在`dist/releases/`；产品版本来自[version.json](../shared/src/version.json)，镜像名为`kiteline-server:<版本>-<amd64|arm64>`。不构建Windows容器，也不自动发布镜像；跨机器可用`docker save/load`搬运。清单记录commit、dirty、平台、实际输入sourceDigest、组件及校验；组装server发现来源不一致时要求重建agent。
+上述单平台构建命令只打Linux amd64，并在server中提供该目标接入包。Windows先按[固定组件构建](windows-components.md)生成并验证组件，再执行`pnpm package agent windows-amd64 --windows-components=/var/tmp/kiteline-win-components`；组包需要zip，产物不含符号链接，不要求目标开启Developer Mode。完整交付先构建Linux两种agent、Windows和macOS agent，再省略server的`--agent-target`；也可明确逗号分隔的所携带目标，ARM64 server配方仍为`pnpm package server arm64`、`pnpm images arm64`，串行控制内存。包及对应`.sha256`在`dist/releases/`；产品版本来自[version.json](../shared/src/version.json)，镜像名为`kiteline-server:<版本>-<amd64|arm64>`。不构建Windows容器，也不自动发布镜像；跨机器可用`docker save/load`搬运。清单记录commit、dirty、平台、实际输入sourceDigest、组件及校验；组装server发现来源不一致时要求重建agent。
 
 `package agent amd64`自动构建/复用静态组件；也可单独用 `node scripts/build-agent-static.mjs` 预构建到`dist/agent-static-amd64/`。来源与SHA在[agent-static.json](agent-static.json)，工具链版本在[agent-static-packages.txt](agent-static-packages.txt)；固定官方Node源码，无Node补丁。首次构建需数GiB内存和较长编译时间，Node固定3个编译任务，8GiB构建机避免同时运行其他重负载。Docker分别缓存Node/native阶段，业务JS变更不触发Node重编；工具链清单变更会使两者重编，验证时不能用旧缓存命中替代冷构建。源下载缓存在`/var/tmp/kiteline-release-cache`并核验SHA。输出携带许可证、实际工具包清单、输入身份和文件校验，ELF检查拒绝动态加载器或库依赖。组件升级需同步来源/工具链和代表环境验收，不能只替换二进制。
+
+macOS原生组件使用[固定输入](agent-macos.json)及Darwin x64构建环境，需要匹配架构的 macOS 构建机、Command Line Tools 和 SDK，部署目标 11.0。先在源码目录准备输入，再将完整输入目录传至macOS构建机；使用固定Node运行其中同一脚本，输出目录须不存在：
+
+```sh
+node scripts/build-macos-components.mjs prepare /var/tmp/kiteline-mac-inputs
+# 在固定macOS构建环境中：
+node /var/tmp/kiteline-mac-inputs/scripts/build-macos-components.mjs build \
+  /var/tmp/kiteline-mac-inputs /var/tmp/kiteline-mac-components
+# 将完整组件带回源码侧，核对当前输入与实际文件：
+node scripts/build-macos-components.mjs verify /var/tmp/kiteline-mac-components
+# 在macOS构建源码目录安装开发依赖后组包：
+pnpm package agent macos-amd64 --macos-components=/var/tmp/kiteline-mac-components
+```
+
+macOS组包使用固定Node/pnpm、Git及系统tar，无需Linux Docker/readelf；server携带此包时将`macos-amd64`加入`--agent-target`。组件输入/文件摘要核验仍在组包入口执行，包名`kiteline-agent-<版本>-macos-amd64.tar.gz`中的amd64对应x86_64。
 
 ## Server 部署
 
@@ -58,9 +73,9 @@ systemctl start kiteline-server
 
 ## 原生 Agent
 
-在网页设备列表点击“绑定设备”，明确选择Linux或Windows并复制接入命令，在目标机器以日常项目用户执行。Windows先准备PowerShell 7及原生Git，rg和私有终端runtime随包；命令在PowerShell 7中执行，不在cmd或WSL中运行。程序安装需要系统提升，绑定与运行仍属于项目用户。默认前台run，Ctrl-C停止；以后执行公开launcher的`run`，无需重新绑定。项目没有系统服务管理或后台模式开关。
+在网页设备列表点击“绑定设备”，明确选择Linux、Windows或macOS并复制接入命令，在目标机器以日常项目用户执行。Windows先准备PowerShell 7及原生Git，rg和私有终端runtime随包；命令在PowerShell 7中执行，不在cmd或WSL中运行。程序安装需要系统提升，绑定与运行仍属于项目用户。默认前台run，Ctrl-C停止；以后执行公开launcher的`run`，无需重新绑定。项目没有系统服务管理或后台模式开关。
 
-网页生成当前访问地址的接入命令；Linux用connect.sh，Windows用connect.ps1，完整下载脚本后执行。HTTPS不降级，HTTP可用HTTP/HTTPS；绑定码保留为Shell参数，不进入下载URL。目标设备必须能访问该地址，不能从手机的localhost地址给另一台机器绑定。不改全局PowerShell执行策略，企业策略限制时按实际错误处理。失败诊断与Linux管道行为见[设备安装说明](#原生-agent)。
+网页生成当前访问地址的接入命令；Linux/macOS用connect.sh并传所选平台，Windows用connect.ps1，完整下载脚本后执行。HTTPS不降级，HTTP可用HTTP/HTTPS；绑定码保留为Shell参数，不进入下载URL。目标设备必须能访问该地址，不能从手机的localhost地址给另一台机器绑定。不改全局PowerShell执行策略，企业策略限制时按实际错误处理。失败诊断与POSIX管道行为见[设备安装说明](#原生-agent)。
 
 Linux amd64目标机需要 curl、Git 2.23.0+、SSH、flock（util-linux）、有效的 UTF-8 locale 和项目使用的 Shell/CLI，rg已随包提供。缺项时命令停止并给出安装建议，不自动修改系统依赖。Linux ARM工具要求见[运行基线](#平台要求)。下面的Linux基础依赖命令以 root 执行，普通用户加 sudo：
 
@@ -90,6 +105,23 @@ sudo "./$kiteline_package/bin/kiteline-agent" install --user YOUR_USER
 # 执行网页提供的绑定命令后：
 kiteline-agent run
 ```
+
+macOS手工取得完整包及校验文件后，在项目用户终端执行；先准备Git 2.23+、SSH、有效UTF-8 locale及项目Shell。Node、rg、tmux和flock随包，无需Homebrew。提升只用于程序安装，运行和绑定仍由项目用户执行：
+
+```sh
+kiteline_package="kiteline-agent-${KITELINE_VERSION}-macos-amd64"
+shasum -a 256 -c "$kiteline_package.tar.gz.sha256"
+tar -xpzf "$kiteline_package.tar.gz" --no-same-owner
+"./$kiteline_package/bin/kiteline-agent" check
+sudo "./$kiteline_package/bin/kiteline-agent" install --user "$(id -un)"
+kiteline-agent bind --server https://YOUR_SERVER
+kiteline-agent run
+# 先停止所有程序使用者及外部自动重启，再维护：
+sudo kiteline-agent upgrade --archive "/path/to/$kiteline_package.tar.gz"
+sudo kiteline-agent uninstall
+```
+
+升级归档与`.sha256`放在一起。Mac沿Linux的程序/目录配置布局和事务规则；不自动授权TCC、清quarantine或关闭Gatekeeper。
 
 Windows手工安装在PowerShell 7中校验ZIP后解压；`$version`设为下载的实际版本：
 
@@ -124,11 +156,27 @@ kiteline-agent terminal new --workspace WORKSPACE_ID
 kiteline-agent terminal attach SESSION_ID
 ```
 
-Linux CLI与运行进程共用`/etc/kiteline-agent.env`的目录项。KITELINE_AGENT_HOME和KITELINE_AGENT_RUN_DIR使用单行双引号绝对路径，不使用转义或尾部注释；默认状态在项目用户的`~/.local/share/kiteline-agent`，socket在其run目录。该文件由应用仅解析目录项，不自动加载PATH、SSH_AUTH_SOCK、LANG或代理。Windows默认状态在目标用户LocalAppData；自定义目录须让后台run与本机CLI一致，Web复制的接续命令携带实际目录。doctor检查实际agent环境，认证以真实Git调用为准。
+Linux/macOS CLI与运行进程共用`/etc/kiteline-agent.env`的目录项。KITELINE_AGENT_HOME和KITELINE_AGENT_RUN_DIR使用单行双引号绝对路径，不使用转义或尾部注释；默认状态在项目用户的`~/.local/share/kiteline-agent`，socket在其run目录。该文件由应用仅解析目录项，不自动加载PATH、SSH_AUTH_SOCK、LANG或代理。Windows默认状态在目标用户LocalAppData；自定义目录须让后台run与本机CLI一致，Web复制的接续命令携带实际目录。doctor检查实际agent环境，认证以真实Git调用为准。
 
 常驻、自启动、运行身份、凭据与维护停启由用户配置外部管理器。Linux可人工编辑[systemd示例](kiteline-agent.service)，Windows使用自行安装的WinSW 2.12及[XML示例](kiteline-agent.xml)，将wrapper、XML和日志放程序树外。用户自行安装管理器并在Windows服务属性中设置同一项目账户及凭据，不能使用默认LocalSystem；修改示例的实际PowerShell/Git、profile、data/run目录，保留console、parent-first及足够的停止宽限。项目不生成、安装或删除管理器配置，不保存密码。先以前台run/check/doctor验证项目用户环境，再自行接线；停止须给真实agent足够收尾时间。正确后台部署后用户注销任务继续，重登可接回；直接在交互会话运行不提供这项保证。切换部署方式先正常停止，身份/workspace/任务数据保留，但旧运行任务不迁移。
 
 WinSW 2.12的`stop`只提交停止请求；维护前使用wrapper的`stopwait`，或自行等待服务实际停止，再确认没有仍使用安装的本机attach或其他实例。停止超时不能当作正常收尾；升级仍会独立检查占用。
+
+macOS可将随包[LaunchDaemon示例](kiteline-agent.plist)复制到树外，按实际账户修改`YOUR_PROJECT_USER`及HOME、工作/数据/运行目录。先完成前台绑定和doctor，再正常停止前台实例；目录须与`/etc/kiteline-agent.env`一致。示例开机加载但不自动重启，日志位于项目用户状态目录：
+
+```sh
+sudo cp /opt/kiteline-agent/deploy/kiteline-agent.plist /Library/LaunchDaemons/com.kiteline.agent.plist
+sudo -e /Library/LaunchDaemons/com.kiteline.agent.plist
+sudo chown root:wheel /Library/LaunchDaemons/com.kiteline.agent.plist
+sudo chmod 644 /Library/LaunchDaemons/com.kiteline.agent.plist
+plutil -lint /Library/LaunchDaemons/com.kiteline.agent.plist
+sudo launchctl bootstrap system /Library/LaunchDaemons/com.kiteline.agent.plist
+kiteline-agent doctor
+# 维护前停止，由部署者确认实际进程和全部attach结束：
+sudo launchctl bootout system /Library/LaunchDaemons/com.kiteline.agent.plist
+```
+
+plist不随程序升级替换或卸载删除；维护后由用户再次bootstrap。
 
 ```sh
 kiteline-agent doctor
@@ -174,7 +222,7 @@ HTTP/WS使用HTTP代理变量，HTTPS/WSS使用HTTPS代理变量；上例HTTP选
 
 ### 运行与维护补充
 
-Linux 的 Unix socket 完整路径限 103 字节。显式使用 `/run` 等易失运行目录时，启动前及系统重启后需准备属于运行用户的可写目录。
+Linux/macOS 的 Unix socket 完整路径限 103 字节。显式使用 `/run` 等易失运行目录时，启动前及系统重启后需准备属于运行用户的可写目录。
 
 短接入命令的外层 curl 失败时，POSIX 管道退出状态未必非零；以实际绑定和设备在线状态确认完成。
 
@@ -183,6 +231,8 @@ Linux 的 Unix socket 完整路径限 103 字节。显式使用 `/run` 等易失
 定时任务停机错过不补跑，暂停仅停止后续调度，不停止在途运行。异常退出后的待核查结果需明确处理，历史为有限留存；实际参数见 `kiteline-agent schedule --help`。
 
 普通卸载保留状态。显式 `--purge-state` 只删除应用 JSON 和 tasks，不删除状态根、workspace、项目文件或外部管理器配置；稳定锁及未删除配置按命令输出处理。
+
+LaunchDaemon 停止宽限为 45 秒；维护前先 bootout，再确认 agent 和所有 attach 已退出。运行与认证使用项目用户的身份和凭据。
 
 ## 自行准备的容器
 
@@ -207,6 +257,9 @@ linked worktree 同时挂载工作目录、gitDir 和 commonDir；`.git` 指向�
 | Linux agent amd64            | Ubuntu 24.04、Debian 12、Alpine 3.23、CentOS 7.9；静态 musl，rg 随包 |
 | Linux agent arm64            | Ubuntu 24.04；另需 rg 14+                                            |
 | Windows agent amd64          | Windows 11 x64、本地 NTFS、原生 Git 和 PowerShell 7                  |
+| macOS agent amd64            | macOS 11、Intel x86_64                                               |
 | server 包及镜像 amd64、arm64 | Ubuntu 24.04                                                         |
 
 设备还需 Git 2.23+、SSH、有效 UTF-8 locale 和项目使用的 Shell/CLI。Linux 静态包不替代这些外部程序的系统依赖，也不加载 glibc NSS 插件或动态 Node addon。Linux 文件发布要求内核与文件系统支持 `renameat2(RENAME_NOREPLACE)`；CentOS 7.9 amd64 基线为含此回移植的 `3.10.0-1160.el7.x86_64`。
+
+macOS 组件在匹配架构的 macOS 构建机上编译，需要 Command Line Tools 和 SDK；部署目标为 11.0。

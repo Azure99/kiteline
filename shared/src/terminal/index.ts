@@ -1,3 +1,5 @@
+import { Unicode11Addon } from "@xterm/addon-unicode11";
+
 interface Disposable {
   dispose(): void;
 }
@@ -52,7 +54,14 @@ export function terminalOptions(historyLines: number) {
     vtExtensions: { win32InputMode: false, kittyKeyboard: false },
   };
 }
-// These private reads belong to the fixed xterm-c1 profile; upgrade both consumers together.
+export function initializeTerminalUnicode(terminal: {
+  loadAddon(addon: Unicode11Addon): void;
+  unicode: { activeVersion: string };
+}) {
+  terminal.loadAddon(new Unicode11Addon());
+  terminal.unicode.activeVersion = "11";
+}
+// These private reads belong to the fixed terminal profile; upgrade both consumers together.
 export function adaptTerminalScrolling(terminal: AdaptableTerminal) {
   const internal = core(terminal);
   const input = internal._inputHandler;

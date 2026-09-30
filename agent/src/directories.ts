@@ -90,7 +90,7 @@ export class Directories {
         cursor.path = path;
         cursor.entryParent = entryParent;
         cursor.info = info;
-        // Node 24 supports raw names here; its current typings omit this encoding.
+        // Node supports raw names here, but its typings omit this encoding.
         cursor.directory = await opendir(path, { encoding: "buffer" as BufferEncoding });
       }
       let bytes =

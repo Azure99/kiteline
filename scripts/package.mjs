@@ -20,6 +20,7 @@ import { isDeepStrictEqual, parseArgs } from "node:util";
 import { buildStaticAgent } from "./build-agent-static.mjs";
 import { prepareRipgrep } from "./prepare-ripgrep.mjs";
 import { verifyWindowsComponents } from "./build-windows-components.mjs";
+import { verifyMacosComponents } from "./build-macos-components.mjs";
 import {
   requiredWindowsComponents,
   windowsComponentFiles,
@@ -33,13 +34,16 @@ const { positionals, values } = parseArgs({
   options: {
     "agent-target": { type: "string" },
     "windows-components": { type: "string" },
+    "macos-components": { type: "string" },
   },
 });
 const [kind, target] = positionals;
 const windowsAgent = kind === "agent" && target === "windows-amd64";
-const arch = windowsAgent ? "amd64" : target;
+const macosAgent = kind === "agent" && target === "macos-amd64";
+const arch = windowsAgent || macosAgent ? "amd64" : target;
 const windowsComponents = values["windows-components"];
-const allAgentTargets = ["linux-amd64", "linux-arm64", "windows-amd64"];
+const macosComponents = values["macos-components"];
+const allAgentTargets = ["linux-amd64", "linux-arm64", "windows-amd64", "macos-amd64"];
 const agentTargets = values["agent-target"]?.split(",") ?? allAgentTargets;
 if (
   positionals.length !== 2 ||
@@ -48,17 +52,18 @@ if (
   (values["agent-target"] !== undefined && kind !== "server") ||
   agentTargets.some((target) => !allAgentTargets.includes(target)) ||
   new Set(agentTargets).size !== agentTargets.length ||
-  (windowsAgent ? !windowsComponents : windowsComponents !== undefined)
+  (windowsAgent ? !windowsComponents : windowsComponents !== undefined) ||
+  (macosAgent ? !macosComponents : macosComponents !== undefined)
 )
   throw new Error(
-    "Usage: pnpm package agent|server amd64|arm64 [--agent-target=linux-amd64,linux-arm64,windows-amd64 (server only)] | agent windows-amd64 --windows-components=PATH",
+    "Usage: pnpm package agent|server amd64|arm64 [--agent-target=linux-amd64,linux-arm64,windows-amd64,macos-amd64 (server only)] | agent windows-amd64 --windows-components=PATH | agent macos-amd64 --macos-components=PATH",
   );
 const node = release.nodeArchives[arch];
-const staticAgent = kind === "agent" && arch === "amd64" && !windowsAgent;
+const staticAgent = kind === "agent" && arch === "amd64" && !windowsAgent && !macosAgent;
 const { version } = JSON.parse(readFileSync(join(root, "shared/src/version.json"), "utf8"));
 const output = join(root, "dist/releases");
 const cache = "/var/tmp/kiteline-release-cache";
-const temporary = mkdtempSync("/var/tmp/kiteline-package-");
+const temporary = realpathSync(mkdtempSync("/var/tmp/kiteline-package-"));
 const digest = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { cwd: root, stdio: "inherit", ...options });
@@ -106,6 +111,7 @@ async function agentArchives(sourceHash) {
   for (const target of agentTargets) {
     const [platform, architecture] = target.split("-");
     const windows = platform === "windows";
+    const macos = platform === "macos";
     const name = `kiteline-agent-${version}-${target}`;
     const archive = join(output, `${name}.${windows ? "zip" : "tar.gz"}`);
     const checksum = archive + ".sha256";
@@ -180,10 +186,12 @@ async function agentArchives(sourceHash) {
       required.push(
         "dist/native/bin/tmux",
         "dist/native/bin/rename-noreplace",
-        "dist/native/share/terminfo/t/tmux-256color",
+        `dist/native/share/terminfo/${macos ? "74" : "t"}/tmux-256color`,
       );
     if (target === "linux-amd64")
       required.push("dist/native/bin/rg", "dist/native/share/terminfo-legacy/t/tmux-256color");
+    if (macos)
+      required.push("dist/native/bin/rg", "dist/native/bin/flock", "dist/native/bin/entry-name");
     for (const file of required)
       if (!actual.has(file)) throw new Error(`Missing required agent file: ${target}/${file}`);
     const identity = JSON.parse(readFileSync(join(directory, "dist/native/identity.json"), "utf8"));
@@ -226,6 +234,14 @@ async function agentArchives(sourceHash) {
       for (const [name, source] of Object.entries(sources))
         if (components["native/" + name] !== source.sha256)
           throw new Error(`Windows corresponding source checksum mismatch: ${name}`);
+    } else if (macos) {
+      if (
+        identity.linkage !== "macos-system" ||
+        identity.architecture !== manifest.architecture ||
+        identity.node !== `v${release.node}`
+      )
+        throw new Error(`Agent native platform identity mismatch: ${target}`);
+      verifyMacosComponents(directory, true);
     } else {
       if (
         identity.architecture !== manifest.architecture ||
@@ -321,7 +337,7 @@ function checksums(directory) {
         }
         entries.push(`${createHash("sha256").update(bytes).digest("hex")}  ${name}`);
       } else if (windowsAgent) throw new Error(`Windows packages cannot contain links: ${file}`);
-      else if (staticAgent && stat.isSymbolicLink()) {
+      else if ((staticAgent || macosAgent) && stat.isSymbolicLink()) {
         const target = realpathSync(file);
         if (target !== directory && !target.startsWith(directory + "/"))
           throw new Error(`Agent symlink escapes package: ${file}`);
@@ -341,10 +357,16 @@ try {
   let runtime;
   let staticBuild;
   let windowsBuild;
+  let macosBuild;
   const native = join(temporary, "native");
   if (windowsAgent) {
     const components = resolve(windowsComponents);
     windowsBuild = verifyWindowsComponents(components);
+    runtime = join(components, "runtime");
+    cpSync(join(components, "native"), native, { recursive: true });
+  } else if (macosAgent) {
+    const components = resolve(macosComponents);
+    macosBuild = verifyMacosComponents(components);
     runtime = join(components, "runtime");
     cpSync(join(components, "native"), native, { recursive: true });
   } else if (staticAgent) {
@@ -401,7 +423,7 @@ try {
         2,
       ) + "\n",
     );
-  } else if (kind === "agent" && !windowsAgent) {
+  } else if (kind === "agent" && !windowsAgent && !macosAgent) {
     mkdirSync(native);
     const builder = `kiteline-native-builder:${arch}`;
     run("docker", [
@@ -459,6 +481,7 @@ try {
       readFileSync(join(root, "terminal-recorder/package.json"), "utf8"),
     ).dependencies;
     const web = JSON.parse(readFileSync(join(root, "web/package.json"), "utf8")).dependencies;
+    const shared = JSON.parse(readFileSync(join(root, "shared/package.json"), "utf8")).dependencies;
     const { terminalProfile } = await import("../shared/dist/protocol/index.js");
     const identityPath = join(native, "identity.json");
     writeFileSync(
@@ -469,6 +492,7 @@ try {
           headless: recorder["@xterm/headless"],
           xterm: web["@xterm/xterm"],
           serialize: recorder["@xterm/addon-serialize"],
+          unicode11: shared["@xterm/addon-unicode11"],
           profile: terminalProfile,
         },
         null,
@@ -478,7 +502,7 @@ try {
   }
   const sourceCommit = text("git", ["rev-parse", "HEAD"]);
   const sourceDirty = text("git", ["status", "--porcelain"]) !== "";
-  const platform = windowsAgent ? "windows" : "linux";
+  const platform = windowsAgent ? "windows" : macosAgent ? "macos" : "linux";
   const name = `kiteline-${kind}-${version}-${platform}-${arch}`;
   const destination = join(temporary, name);
   mkdirSync(destination);
@@ -488,12 +512,10 @@ try {
     deploy("terminal-recorder", join(destination, "terminal-recorder"));
     cpSync(native, join(destination, "dist/native"), { recursive: true });
     mkdirSync(join(destination, "deploy"));
+    const manager = windowsAgent ? "xml" : macosAgent ? "plist" : "service";
     cpSync(
-      join(root, windowsAgent ? "deploy/kiteline-agent.xml" : "deploy/kiteline-agent.service"),
-      join(
-        destination,
-        windowsAgent ? "deploy/kiteline-agent.xml" : "deploy/kiteline-agent.service",
-      ),
+      join(root, `deploy/kiteline-agent.${manager}`),
+      join(destination, `deploy/kiteline-agent.${manager}`),
     );
   } else {
     cpSync(join(root, "web/dist"), join(destination, "web/dist"), { recursive: true });
@@ -504,7 +526,8 @@ try {
     cpSync(join(root, "deploy/install-agent.sh"), join(downloads, "install.sh"));
     cpSync(join(root, "deploy/install-agent.ps1"), join(downloads, "install.ps1"));
   }
-  if (windowsAgent) cpSync(runtime, join(destination, "runtime"), { recursive: true });
+  if (windowsAgent || macosAgent)
+    cpSync(runtime, join(destination, "runtime"), { recursive: true });
   else if (staticAgent) run("cp", ["-a", runtime, join(destination, "runtime")]);
   else {
     mkdirSync(join(destination, "runtime/bin"), { recursive: true });
@@ -553,10 +576,11 @@ try {
     );
   } else if (kind === "agent") {
     const { agentLauncher } = await import("../agent/dist/launcher.js");
-    writeFileSync(launcher, agentLauncher());
+    const platform = macosAgent ? "darwin" : "linux";
+    writeFileSync(launcher, agentLauncher(undefined, undefined, platform));
     writeFileSync(
       join(destination, "bin/kiteline-agent-installed"),
-      agentLauncher("/opt/kiteline-agent"),
+      agentLauncher("/opt/kiteline-agent", undefined, platform),
     );
     chmodSync(join(destination, "bin/kiteline-agent-installed"), 0o755);
   } else
@@ -580,14 +604,16 @@ try {
         lockfile: digest(join(root, "pnpm-lock.yaml")),
         ...(windowsBuild
           ? { nodeArchive: windowsBuild.inputs.downloads["node.zip"].sha256 }
-          : staticBuild
-            ? { staticBuild }
-            : {
-                nodeArchive: node.sha256,
-                ubuntu: release.ubuntu,
-                aptSources: digest(join(root, "deploy/ubuntu.sources")),
-                caCertificates: release.caCertificates,
-              }),
+          : macosBuild
+            ? { nodeArchive: macosBuild.inputs.downloads["node.tar.xz"].sha256 }
+            : staticBuild
+              ? { staticBuild }
+              : {
+                  nodeArchive: node.sha256,
+                  ubuntu: release.ubuntu,
+                  aptSources: digest(join(root, "deploy/ubuntu.sources")),
+                  caCertificates: release.caCertificates,
+                }),
       },
       null,
       2,

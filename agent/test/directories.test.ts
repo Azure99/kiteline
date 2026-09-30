@@ -46,7 +46,10 @@ test("device paths distinguish native absolute paths from Windows aliases", () =
     expect(() => absolutePath(path, "windows")).toThrow();
   for (const name of ["a\\b", "a:b", "CON .txt", "CONOUT$", "a.", "a "])
     expect(() => windowsName(name)).toThrow();
-  expect(absolutePath("/a:b/CON.txt/space ", "linux")).toBe("/a:b/CON.txt/space ");
+  for (const os of ["linux", "macos"] as const) {
+    expect(absolutePath("/a:b/CON.txt/space ", os)).toBe("/a:b/CON.txt/space ");
+    expect(() => absolutePath("relative", os)).toThrow();
+  }
 });
 
 test("directory pages keep raw names non-actionable and enforce the concurrent cursor limit", async () => {

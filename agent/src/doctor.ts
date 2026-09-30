@@ -10,6 +10,7 @@ import { agentConfig, agentPaths, defaultAgentLimits, type AgentConfig } from ".
 import { localRequest } from "./local.js";
 import { packageDirectory } from "./installation.js";
 import { checkWindowsComponents } from "./windows-components.js";
+import { checkMacosComponents } from "./macos-components.js";
 import type { ScheduledTasks } from "./tasks/index.js";
 import {
   bundledRipgrep,
@@ -59,6 +60,7 @@ export async function diagnose(
     }
   }
   const windows = process.platform === "win32";
+  const macos = process.platform === "darwin";
   const command = (file: string, args: string[], env = process.env) =>
     toolCommand(file, args, { env, signal });
   add(
@@ -74,12 +76,17 @@ export async function diagnose(
     return `${process.execPath}; ${process.version} ${process.arch}; release=${info.version}`;
   });
   const native = join(packageDirectory, "dist/native");
-  let nativeLinkage: "static-musl" | "dynamic" | "windows-msys" | undefined;
+  let nativeLinkage: "static-musl" | "dynamic" | "windows-msys" | "macos-system" | undefined;
   await check("Native build identity", async () => {
     if (windows) {
       const identity = await checkWindowsComponents(signal);
       nativeLinkage = identity.linkage;
       return `tmux=${identity.tmux}; linkage=${identity.linkage}; patch=${identity.patch}`;
+    }
+    if (macos) {
+      const identity = await checkMacosComponents(signal);
+      nativeLinkage = identity.linkage;
+      return `tmux=${identity.tmux}; linkage=${identity.linkage}`;
     }
     const identity = JSON.parse(await readFile(join(native, "identity.json"), "utf8"));
     const hash = async (file: string) =>
@@ -99,18 +106,20 @@ export async function diagnose(
   await check("Recorder build identity", async () => {
     const identity = JSON.parse(await readFile(join(native, "identity.json"), "utf8"));
     const recorderRequire = createRequire(join(packageDirectory, "terminal-recorder/package.json"));
+    const sharedRequire = createRequire(join(packageDirectory, "shared/package.json"));
     if (
       identity.profile !== terminalProfile ||
       recorderRequire("@xterm/headless/package.json").version !== identity.headless ||
-      recorderRequire("@xterm/addon-serialize/package.json").version !== identity.serialize
+      recorderRequire("@xterm/addon-serialize/package.json").version !== identity.serialize ||
+      sharedRequire("@xterm/addon-unicode11/package.json").version !== identity.unicode11
     )
       throw new Error("Recorder dependencies or terminalProfile do not match the build identity");
     await access(join(packageDirectory, "terminal-recorder/dist/main.js"), constants.R_OK);
-    return `profile=${identity.profile}; headless=${identity.headless}; serialize=${identity.serialize}; xterm=${identity.xterm}`;
+    return `profile=${identity.profile}; headless=${identity.headless}; serialize=${identity.serialize}; unicode11=${identity.unicode11}; xterm=${identity.xterm}`;
   });
   if (!nativeLinkage)
     add("Native linkage", "Unknown; shared library requirements could not be verified", "warn");
-  else if (!windows)
+  else if (!windows && !macos)
     for (const name of ["tmux", "rename-noreplace"]) {
       await check(`${name} shared libraries`, async () => {
         if (nativeLinkage === "static-musl")
@@ -126,6 +135,12 @@ export async function diagnose(
     await windowsNative().fileAttributes(native);
     return "Windows native filesystem API is loadable";
   });
+  if (macos) {
+    await check("Entry name helper execution", () =>
+      checkFileHelper(join(native, "bin/entry-name"), command),
+    );
+    await check("flock execution", () => command(join(native, "bin/flock"), ["--version"]));
+  }
   if (bundledRipgrep) await check("Bundled ripgrep", () => checkBundledRipgrep(command));
   if (!runtime) {
     add(

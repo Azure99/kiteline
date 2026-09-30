@@ -1,7 +1,7 @@
 import release from "../version.json" with { type: "json" };
 
 export const appVersion = release.version;
-export const terminalProfile = "xterm-c1";
+export const terminalProfile = "xterm-c2-unicode11";
 export { rpcMutates, gitWriteMethods } from "./rpc.js";
 export * from "./schedules.js";
 export type {
@@ -121,7 +121,7 @@ export interface Device {
   release?: { agentVersion: string | null; serverVersion: string; observedAt: string };
 }
 export interface AgentEnvironment {
-  os: "linux" | "windows";
+  os: "linux" | "windows" | "macos";
   homePath: string;
   rootPaths: string[];
   cliPath: string;
@@ -443,7 +443,7 @@ export function windowsName(value: string) {
 }
 export function absolutePath(value: unknown, os: AgentEnvironment["os"]) {
   const path = string(value, "absolute path");
-  if (os === "linux") {
+  if (os !== "windows") {
     if (!path.startsWith("/"))
       throw new AppError("invalid_argument", "An absolute directory path is required");
   } else {
@@ -462,7 +462,7 @@ export function absolutePath(value: unknown, os: AgentEnvironment["os"]) {
 }
 export function checkEnvironment(value: unknown): AgentEnvironment {
   const input = record(value);
-  if (input.os !== "linux" && input.os !== "windows")
+  if (input.os !== "linux" && input.os !== "windows" && input.os !== "macos")
     throw new AppError("invalid_argument", "Unsupported agent operating system");
   if (!Array.isArray(input.rootPaths) || !input.rootPaths.length)
     throw new AppError("invalid_argument", "Device root paths are required");

@@ -13,12 +13,30 @@ export function agentLauncher(
     management: installationManagementFile,
     use: installationUseFile,
   },
+  platform: NodeJS.Platform = process.platform,
 ) {
-  const root = source ? quote(source) : '$(dirname -- "$(dirname -- "$(readlink -f -- "$0")")")';
+  const macos = platform === "darwin";
+  const root = source
+    ? `kiteline_root=${quote(source)}`
+    : macos
+      ? `kiteline_entry=$0 kiteline_links=0
+  while [ -L "$kiteline_entry" ]; do
+    kiteline_links=$((kiteline_links + 1))
+    [ "$kiteline_links" -le 40 ] || { echo 'Launcher symbolic link loop' >&2; return 1; }
+    kiteline_parent=$(CDPATH= cd -P -- "$(dirname -- "$kiteline_entry")" && pwd) || return
+    kiteline_link=$(readlink "$kiteline_entry") || return
+    case "$kiteline_link" in
+      /*) kiteline_entry=$kiteline_link ;;
+      *) kiteline_entry=$kiteline_parent/$kiteline_link ;;
+    esac
+  done
+  kiteline_root=$(CDPATH= cd -P -- "$(dirname -- "$kiteline_entry")/.." && pwd) || return`
+      : 'kiteline_root=$(dirname -- "$(dirname -- "$(readlink -f -- "$0")")")';
   // The entire body is parsed before maintenance can replace or remove this launcher.
   return `#!/bin/sh
 kiteline_main() {
-  kiteline_root=${root}
+  ${root}
+  kiteline_flock=${macos ? '"$kiteline_root/dist/native/bin/flock"' : "flock"}
   kiteline_installed=${quote(paths.directory)}
   kiteline_management=${quote(paths.management)}
   kiteline_use=${quote(paths.use)}
@@ -26,12 +44,12 @@ kiteline_main() {
     install|upgrade|uninstall)
       [ "$(id -u)" -eq 0 ] || { echo 'Installation changes require sudo or root' >&2; return 1; }
       umask 077
-      mkdir -p -- "$(dirname -- "$kiteline_management")" || return
+      (umask 022; mkdir -p -- "$(dirname -- "$kiteline_management")") || return
       exec 9>>"$kiteline_management" || return
-      flock --exclusive --nonblock 9 || { echo 'Another installation operation is running' >&2; return 1; }
+      "$kiteline_flock" --exclusive --nonblock 9 || { echo 'Another installation operation is running' >&2; return 1; }
       if [ "$kiteline_root" = "$kiteline_installed" ]; then
         exec 8<"$kiteline_use" || return
-        flock --shared --nonblock 8 || { echo 'Agent installation is being changed' >&2; return 1; }
+        "$kiteline_flock" --shared --nonblock 8 || { echo 'Agent installation is being changed' >&2; return 1; }
       fi
       kiteline_temporary=$(mktemp -d /var/tmp/kiteline-agent-maintenance.XXXXXX) || return
       kiteline_child='' kiteline_interrupted=0
@@ -63,7 +81,7 @@ kiteline_main() {
     *)
       if [ "$kiteline_root" = "$kiteline_installed" ]; then
         exec 8<"$kiteline_use" || return
-        flock --shared --nonblock 8 || { echo 'Agent installation is being changed; try again after maintenance' >&2; return 1; }
+        "$kiteline_flock" --shared --nonblock 8 || { echo 'Agent installation is being changed; try again after maintenance' >&2; return 1; }
       fi
       exec "$kiteline_root/runtime/bin/node" "$kiteline_root/agent/dist/main.js" "$@"
       ;;

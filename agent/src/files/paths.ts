@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { isUtf8 } from "node:buffer";
+import { execFile } from "node:child_process";
+import { getSystemErrorName, promisify } from "node:util";
 import type { BigIntStats } from "node:fs";
 import { lstat, readlink, realpath, stat } from "node:fs/promises";
 import {
@@ -9,6 +11,7 @@ import {
   join,
   parse,
   posix,
+  resolve,
   sep,
   toNamespacedPath,
 } from "node:path";
@@ -32,8 +35,82 @@ export function entryName(value: unknown): string {
   return name;
 }
 
+const nameHelper = resolve(import.meta.dirname, "../../../dist/native/bin/entry-name");
+
+async function storedName(path: string, signal?: AbortSignal) {
+  let output: Buffer;
+  try {
+    ({ stdout: output } = await promisify(execFile)(nameHelper, [path], {
+      encoding: "buffer",
+      maxBuffer: 4096,
+      signal,
+    }));
+  } catch (error) {
+    const result = error as { code?: number; stderr?: Buffer };
+    if (result.code === 1 && /^\d+\n$/.test(String(result.stderr))) {
+      const code = getSystemErrorName(-Number(String(result.stderr).trim()));
+      throw Object.assign(new Error(`${code}: ${path}`), { code });
+    }
+    throw error;
+  }
+  if (!isUtf8(output)) throw new AppError("unsupported", "Name is not valid UTF-8");
+  return entryName(output.toString());
+}
+
+// Resolve spelling only at request boundaries; traversal already supplies stored names.
+export async function logicalPath(
+  root: string,
+  input: string,
+  newLeaf = false,
+  signal?: AbortSignal,
+) {
+  const path = relativePath(input);
+  if (process.platform !== "darwin" || path === ".") return path;
+  const parts = path.split("/");
+  let current = ".";
+  for (const [index, part] of parts.entries()) {
+    signal?.throwIfAborted();
+    let name = part;
+    if (!newLeaf || index < parts.length - 1) {
+      try {
+        name = await storedName(join(root, current, part), signal);
+      } catch (error) {
+        // The caller owns missing-leaf semantics (read, create, or confirmed replacement).
+        if (index < parts.length - 1 || (error as NodeJS.ErrnoException).code !== "ENOENT")
+          throw error;
+      }
+    }
+    current = posix.join(current, name);
+  }
+  return current;
+}
+
+export async function gitMetadataPath(root: string, path: string) {
+  if (process.platform !== "darwin") return false;
+  const parts = path.split("/");
+  for (const [index, part] of parts.entries()) {
+    if (part.toLowerCase() !== ".git") continue;
+    const parent = join(root, ...parts.slice(0, index));
+    try {
+      if (
+        sameObject(
+          await lstat(join(parent, part), { bigint: true }),
+          await lstat(join(parent, ".git"), { bigint: true }),
+        )
+      )
+        return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  return false;
+}
+
 export function devicePath(value: unknown) {
-  return absolutePath(value, process.platform === "win32" ? "windows" : "linux");
+  return absolutePath(
+    value,
+    process.platform === "win32" ? "windows" : process.platform === "darwin" ? "macos" : "linux",
+  );
 }
 
 export async function linkType(path: string | Buffer) {

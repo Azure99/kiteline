@@ -99,7 +99,11 @@ async function fixture() {
       .toBe("online");
     return { ...identity, socket, messages, binding };
   }
-  async function fileChannel(kind: "file.read" | "file.write", size: number) {
+  async function fileChannel(
+    kind: "file.read" | "file.write",
+    size: number,
+    targetPath: unknown = "file",
+  ) {
     const peer = await device();
     const login = store.createSession(60_000);
     const connection = app.connections.agents.get(peer.deviceId)!;
@@ -120,7 +124,12 @@ async function fixture() {
     socket.send(
       JSON.stringify({
         type: "ready",
-        meta: { size, filename: "file", contentType: "text/plain; charset=utf-8" },
+        meta: {
+          size,
+          filename: "file",
+          targetPath,
+          contentType: "text/plain; charset=utf-8",
+        },
       }),
     );
     await pending.ready;
@@ -133,6 +142,17 @@ async function fixture() {
   }
   return { app, store, config, call, device, fileChannel, origin, close };
 }
+
+test.each(["file.read", "file.write"] as const)(
+  "%s rejects invalid logical targets before browser pairing",
+  async (kind) => {
+    const f = await fixture();
+    for (const target of [null, "/outside", "../other"])
+      await expect(f.fileChannel(kind, 0, target)).rejects.toMatchObject({
+        code: "invalid_argument",
+      });
+  },
+);
 
 test("last connected records successful hello, not metadata updates or disconnect", async () => {
   const f = await fixture();
@@ -271,7 +291,12 @@ test("channel preparation and transfer preserve empty and long diagnostics witho
           socket.send(
             JSON.stringify({
               type: "ready",
-              meta: { size: 1, filename: "file", contentType: "text/plain; charset=utf-8" },
+              meta: {
+                size: 1,
+                filename: "file",
+                targetPath: "file",
+                contentType: "text/plain; charset=utf-8",
+              },
             }),
           );
           expect(await ready).toBeUndefined();
@@ -571,6 +596,8 @@ test("invalid current agent capabilities cannot replace a healthy connection", a
   for (const [value, editorBytes] of [
     [undefined, 2000],
     [{ ...environment, os: "windows", homePath: "C:relative" }, 2000],
+    [{ ...environment, os: "macos", homePath: "relative" }, 2000],
+    [{ ...environment, os: "unknown" }, 2000],
     [environment, 0],
   ]) {
     const socket = new WebSocket(f.origin.replace("http:", "ws:") + agentPath, {
@@ -663,14 +690,16 @@ test("binding returns versioned installation commands from the current request o
   expect(response.status).toBe(200);
   const value = await response.json();
   expect(value.commands.linux.install).toBe(
-    `curl -fsSL --proto '=http,https' --proto-redir '=http,https' '${f.origin}/connect.sh' | sh -s -- '${value.code}'`,
+    `curl -fsSL --proto '=http,https' --proto-redir '=http,https' '${f.origin}/connect.sh' | sh -s -- linux '${value.code}'`,
   );
-  expect(Object.keys(value.commands).sort()).toEqual(["linux", "windows"]);
+  expect(value.commands.macos.install).toContain(`| sh -s -- macos '${value.code}'`);
+  expect(Object.keys(value.commands).sort()).toEqual(["linux", "macos", "windows"]);
   expect(Object.keys(value.commands.linux).sort()).toEqual(["bind", "install"]);
   expect(Object.keys(value.commands.windows).sort()).toEqual(["bind", "install"]);
   expect(value.commands.linux.bind).toBe(
     `kiteline-agent check && printf '%s\\n' '${value.code}' | kiteline-agent bind --server '${f.origin}' --if-unbound`,
   );
+  expect(value.commands.macos.bind).toBe(value.commands.linux.bind);
   expect(f.store.binding(value.bindingId).status).toBe("pending");
   expect(value.commands.windows.install).toContain(`${f.origin}/connect.ps1`);
   expect(value.commands.windows.install).toContain(`-Code '${value.code}'`);
@@ -690,13 +719,20 @@ test("binding returns versioned installation commands from the current request o
   expect((await f.call("/connect.sh", "POST")).status).toBe(405);
 });
 
-test("Windows scripts and exact ZIP resources support GET and HEAD without SPA fallback", async () => {
+test("platform scripts and exact archives support GET and HEAD without SPA fallback", async () => {
   const f = await fixture();
   const zip = `kiteline-agent-${appVersion}-windows-amd64.zip`;
+  const macos = `kiteline-agent-${appVersion}-macos-amd64.tar.gz`;
   for (const [path, file, type] of [
     [`/downloads/agent/${appVersion}/${zip}`, zip, "application/zip"],
     [`/downloads/agent/${appVersion}/${zip}.sha256`, `${zip}.sha256`, "text/plain; charset=utf-8"],
     ["/install.ps1", "install.ps1", "text/plain; charset=utf-8"],
+    [`/downloads/agent/${appVersion}/${macos}`, macos, "application/gzip"],
+    [
+      `/downloads/agent/${appVersion}/${macos}.sha256`,
+      `${macos}.sha256`,
+      "text/plain; charset=utf-8",
+    ],
   ]) {
     expect((await f.call(path!)).status).toBe(404);
     const bytes = Buffer.from(`resource ${file}`);
@@ -726,6 +762,8 @@ test("Windows scripts and exact ZIP resources support GET and HEAD without SPA f
     `/downloads/agent/old/${zip}`,
     `/downloads/agent/${appVersion}/kiteline-agent-${appVersion}-windows-arm64.zip`,
     `/downloads/agent/${appVersion}/${zip}/extra`,
+    `/downloads/agent/old/${macos}`,
+    `/downloads/agent/${appVersion}/${macos}/extra`,
   ])
     expect((await f.call(path)).status).toBe(404);
 });

@@ -21,6 +21,7 @@ import {
   entryInfo,
   linkType,
   locate,
+  logicalPath,
   protectRoot,
   relativePath,
   sameObject,
@@ -197,7 +198,15 @@ export class FileOperations {
         try {
           signal.throwIfAborted();
           const source = await publish(async () => {
-            const source = await capture(root, item.path);
+            const path = await logicalPath(root, item.path, false, signal);
+            if (kind !== "delete")
+              item.targetPath = await logicalPath(
+                root,
+                item.targetPath,
+                item.collision !== "replace",
+                signal,
+              );
+            const source = await capture(root, path);
             if (kind !== "copy") await protectRoot(root, source.path, source.info);
             return source;
           }, signal);

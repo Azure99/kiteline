@@ -14,6 +14,7 @@ import {
   entryInfo,
   entryName,
   locate,
+  logicalPath,
   protectRoot,
   readEntry,
   relativePath,
@@ -36,7 +37,7 @@ export class Files {
     signal?: AbortSignal,
   ): Promise<FileListing> {
     const root = this.metadata.workspace(workspaceId).path;
-    const path = relativePath(input);
+    const path = await logicalPath(root, input, false, signal);
     const result = await this.directories.list(join(root, path), cursor, signal, path);
     return {
       path,
@@ -52,7 +53,7 @@ export class Files {
     signal?: AbortSignal,
   ): Promise<FileInspection> {
     const root = this.metadata.workspace(workspaceId).path;
-    const path = relativePath(input);
+    const path = await logicalPath(root, input, false, signal);
     const target = await locate(root, path);
     const info = await entryInfo(target.absolute);
     const entry = await readEntry(target.parent, Buffer.from(target.name), path);
@@ -80,9 +81,10 @@ export class Files {
     if (kind !== "file" && kind !== "directory")
       throw new AppError("invalid_argument", "Invalid file type");
     const root = this.metadata.workspace(workspaceId).path;
-    const path = relativePath(input);
+    let path = relativePath(input);
     if (path === ".") throw new AppError("conflict", "Workspace root directory already exists");
     return publish(async () => {
+      path = await logicalPath(root, path, true, signal);
       const target = await locate(root, path);
       signal?.throwIfAborted();
       if (kind === "directory") await mkdir(target.absolute);
@@ -114,11 +116,12 @@ export class Files {
     const path = relativePath(input);
     const name = entryName(newName);
     return publish(async () => {
-      const source = await locate(root, path);
+      const actual = await logicalPath(root, path, false, signal);
+      const source = await locate(root, actual);
       const info = await entryInfo(source.absolute);
       await protectRoot(root, path, info);
-      const to = posix.join(posix.dirname(path), name);
-      if (path === to)
+      const to = posix.join(posix.dirname(actual), name);
+      if (actual === to)
         throw new AppError("invalid_argument", "New name is the same as the original name");
       await this.temporary.assertRelocatableLocked(source, info);
       signal?.throwIfAborted();

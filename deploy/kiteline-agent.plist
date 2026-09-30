@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.kiteline.agent</string>
+    <key>ProgramArguments</key>
+    <array><string>/usr/local/bin/kiteline-agent</string><string>run</string></array>
+    <key>UserName</key><string>YOUR_PROJECT_USER</string>
+    <key>WorkingDirectory</key><string>/Users/YOUR_PROJECT_USER</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key><string>/Users/YOUR_PROJECT_USER</string>
+        <key>PATH</key><string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>LANG</key><string>en_US.UTF-8</string>
+        <key>KITELINE_AGENT_HOME</key><string>/Users/YOUR_PROJECT_USER/.local/share/kiteline-agent</string>
+        <key>KITELINE_AGENT_RUN_DIR</key><string>/Users/YOUR_PROJECT_USER/.local/share/kiteline-agent/run</string>
+    </dict>
+    <key>StandardOutPath</key><string>/Users/YOUR_PROJECT_USER/.local/share/kiteline-agent/launchd.log</string>
+    <key>StandardErrorPath</key><string>/Users/YOUR_PROJECT_USER/.local/share/kiteline-agent/launchd-error.log</string>
+    <key>RunAtLoad</key><true/>
+    <key>ExitTimeOut</key><integer>45</integer>
+</dict>
+</plist>

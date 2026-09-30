@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 
-export type AgentPlatform = "linux" | "windows";
+export type AgentPlatform = "linux" | "windows" | "macos";
 
 export function AgentPlatformChoice({
   value,
@@ -13,7 +13,7 @@ export function AgentPlatformChoice({
   return (
     <fieldset className="flex flex-wrap items-center gap-3 text-sm">
       <legend className="mb-2 text-xs text-muted-foreground">{t(($) => $.devices.platform)}</legend>
-      {(["linux", "windows"] as const).map((platform) => (
+      {(["linux", "windows", "macos"] as const).map((platform) => (
         <label key={platform} className="flex cursor-pointer items-center gap-2">
           <input
             type="radio"
@@ -23,7 +23,11 @@ export function AgentPlatformChoice({
             onChange={() => onChange(platform)}
             className="size-4 accent-primary"
           />
-          {platform === "linux" ? "Linux" : "Windows (PowerShell 7)"}
+          {platform === "linux"
+            ? "Linux"
+            : platform === "macos"
+              ? "macOS"
+              : "Windows (PowerShell 7)"}
         </label>
       ))}
     </fieldset>

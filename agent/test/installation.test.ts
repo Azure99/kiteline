@@ -4,6 +4,7 @@ import { once } from "node:events";
 import {
   access,
   chmod,
+  lstat,
   mkdir,
   mkdtemp,
   open,
@@ -47,7 +48,7 @@ async function launcher(root: string, main: string) {
   const paths = {
     directory: join(root, "program"),
     use: join(root, "use.lock"),
-    management: join(root, "management.lock"),
+    management: join(root, "public/management.lock"),
   };
   await mkdir(join(paths.directory, "runtime/bin"), { recursive: true });
   await mkdir(join(paths.directory, "agent/dist"), { recursive: true });
@@ -117,6 +118,7 @@ test.runIf(process.getuid?.() === 0).each([false, true])(
     );
     const input = join(root, "input");
     const gate = join(root, "continue");
+    if (interrupt) await mkdir(join(root, "public"), { mode: 0o710 });
     await writeFile(input, "input retained");
     const running = child(entry.path, ["upgrade"], {
       ...process.env,
@@ -128,6 +130,10 @@ test.runIf(process.getuid?.() === 0).each([false, true])(
     // Ensure a failed assertion cannot leave the transaction waiting for test input.
     cleanups.push(() => writeFile(gate, "go"));
     await expect.poll(running.output).toContain("ready ");
+    expect((await lstat(join(root, "public"))).mode & 0o777).toBe(interrupt ? 0o710 : 0o755);
+    expect((await lstat(entry.management)).mode & 0o777).toBe(0o600);
+    const copied = running.output().match(/ready (.+)\/package\/agent\/dist/)!;
+    expect((await lstat(copied[1]!)).mode & 0o777).toBe(0o700);
     expect(spawnSync("flock", ["--exclusive", "--nonblock", entry.management, "true"]).status).toBe(
       1,
     );
@@ -136,7 +142,6 @@ test.runIf(process.getuid?.() === 0).each([false, true])(
     expect((await running.closed)[0]).toBe(interrupt ? 143 : 37);
     expect(running.output()).toContain("input retained");
     expect(running.output()).toContain("stdin=stdin retained");
-    const copied = running.output().match(/ready (.+)\/package\/agent\/dist/)!;
     await expect(access(copied[1]!)).rejects.toMatchObject({ code: "ENOENT" });
     expect(spawnSync("flock", ["--exclusive", "--nonblock", entry.management, "true"]).status).toBe(
       0,

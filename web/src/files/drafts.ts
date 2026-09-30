@@ -346,10 +346,14 @@ export class DraftStore {
         bytes,
         revision ?? undefined,
         request.signal,
+        (path) => {
+          pending.target.path = path;
+        },
       );
+      const savedPath = saved.path;
       window.dispatchEvent(
         new CustomEvent("kiteline:file-written", {
-          detail: { deviceId: draft.deviceId, workspaceId: draft.workspaceId, path },
+          detail: { deviceId: draft.deviceId, workspaceId: draft.workspaceId, path: savedPath },
         }),
       );
       if (!this.has(draft) || draft.request !== request) return false;
@@ -362,10 +366,10 @@ export class DraftStore {
           item !== draft &&
           item.deviceId === draft.deviceId &&
           item.workspaceId === draft.workspaceId &&
-          item.path === path,
+          item.path === savedPath,
       );
-      if (!pending.replacesSource || draft.path !== path) draft.sourceVersion++;
-      draft.path = path;
+      if (!pending.replacesSource || draft.path !== savedPath) draft.sourceVersion++;
+      draft.path = savedPath;
       draft.baseText = text;
       draft.baseRaw = raw;
       draft.revision = saved.revision;

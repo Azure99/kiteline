@@ -38,7 +38,7 @@ import { workingDiff } from "./git/diff.js";
 import { branches, commitDiff, commitFiles, history } from "./git/history.js";
 import { WorkspaceWatches } from "./watches.js";
 import { GitWriteQueue } from "./git/queue.js";
-import { changeIndex, discard, discardScope, gitPaths, reviewDiscard } from "./git/paths.js";
+import { changeIndex, checkedGitPaths, discard, discardScope, reviewDiscard } from "./git/paths.js";
 import { changeBranch, commit, createBranch } from "./git/refs.js";
 import { expectedHead, remotes, syncRemote } from "./git/remotes.js";
 import { finishOperation } from "./git/operation.js";
@@ -504,30 +504,36 @@ export class Agent {
           string(params.workspaceId),
           string(params.repoId),
           signal,
-          (repo) =>
+          async (repo) =>
             method === "git.discard"
               ? discard(
                   repo,
-                  gitPaths(params.paths),
+                  await checkedGitPaths(repo, params.paths, signal),
                   discardScope(params.scope),
                   string(params.reviewToken),
                   signal,
                 )
               : changeIndex(
                   repo,
-                  gitPaths(params.paths),
+                  await checkedGitPaths(repo, params.paths, signal),
                   method === "git.stage" ? "stage" : "unstage",
                   signal,
                 ),
           progress,
         ) satisfies Promise<RpcResult<typeof method>>;
-      case "git.review":
+      case "git.review": {
+        const repo = await this.repos.resolve(
+          string(params.workspaceId),
+          string(params.repoId),
+          signal,
+        );
         return reviewDiscard(
-          await this.repos.resolve(string(params.workspaceId), string(params.repoId), signal),
-          gitPaths(params.paths),
+          repo,
+          await checkedGitPaths(repo, params.paths, signal),
           discardScope(params.scope),
           signal,
         ) satisfies Promise<RpcResult<typeof method>>;
+      }
       case "repos.discover":
         return this.repos.discover(
           string(params.workspaceId),

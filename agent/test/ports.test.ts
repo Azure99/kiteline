@@ -3,7 +3,7 @@ import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { createServer, type AddressInfo } from "node:net";
 import { once } from "node:events";
-import { listeningPort, listeningPorts } from "../src/http/ports.js";
+import { listeningPort, listeningPorts, macosListeningPort } from "../src/http/ports.js";
 
 test("only loopback and wildcard TCP LISTEN addresses become suggestions", () => {
   const row = (address: string, state = "0A") => `  0: ${address}:14B3 00000000:0000 ${state} `;
@@ -14,7 +14,18 @@ test("only loopback and wildcard TCP LISTEN addresses become suggestions", () =>
   expect(listeningPort(row("00000000000000000000000001000000"), true)).toBe(5299);
   expect(() => listeningPort("unexpected data", false)).toThrow("Cannot parse");
 });
-test("real proc snapshots deduplicate IPv4/IPv6 listeners and respect cancellation", async () => {
+test("macOS netstat suggestions retain only loopback and wildcard TCP listeners", () => {
+  const row = (address: string, state = "LISTEN") => `tcp4 0 0 ${address} *.* ${state}`;
+  expect(macosListeningPort(row("127.0.0.1.5299"))).toBe(5299);
+  expect(macosListeningPort(row("*.5299"))).toBe(5299);
+  expect(macosListeningPort("tcp6 0 0 ::1.5299 *.* LISTEN")).toBe(5299);
+  expect(macosListeningPort("tcp46 0 0 *.5299 *.* LISTEN")).toBe(5299);
+  expect(macosListeningPort(row("192.168.1.2.5299"))).toBeUndefined();
+  expect(macosListeningPort(row("127.0.0.1.5299", "ESTABLISHED"))).toBeUndefined();
+  expect(() => macosListeningPort("unexpected data")).toThrow("Cannot parse");
+  expect(() => macosListeningPort(row("*.99999"))).toThrow("Cannot parse");
+});
+test("real snapshots deduplicate IPv4/IPv6 listeners and respect cancellation", async () => {
   const v4 = createServer(),
     v6 = createServer();
   v4.listen(0, "127.0.0.1");
@@ -35,26 +46,29 @@ test("real proc snapshots deduplicate IPv4/IPv6 listeners and respect cancellati
   }
 });
 
-test("missing IPv6 proc table still returns the real IPv4 listeners", async () => {
-  const createReadStream = fs.createReadStream;
-  const redirected = vi
-    .spyOn(fs, "createReadStream")
-    .mockImplementation((path, options) =>
-      createReadStream(
-        path === "/proc/net/tcp6" ? "/proc/net/kiteline-missing-tcp6" : path,
-        options,
-      ),
-    );
-  syncBuiltinESMExports();
-  const listener = createServer();
-  listener.listen(0, "127.0.0.1");
-  await once(listener, "listening");
-  try {
-    const result = await listeningPorts(new AbortController().signal);
-    expect(result.ports).toContain((listener.address() as AddressInfo).port);
-  } finally {
-    redirected.mockRestore();
+test.runIf(process.platform === "linux")(
+  "missing IPv6 proc table still returns the real IPv4 listeners",
+  async () => {
+    const createReadStream = fs.createReadStream;
+    const redirected = vi
+      .spyOn(fs, "createReadStream")
+      .mockImplementation((path, options) =>
+        createReadStream(
+          path === "/proc/net/tcp6" ? "/proc/net/kiteline-missing-tcp6" : path,
+          options,
+        ),
+      );
     syncBuiltinESMExports();
-    await new Promise<void>((resolve) => listener.close(() => resolve()));
-  }
-});
+    const listener = createServer();
+    listener.listen(0, "127.0.0.1");
+    await once(listener, "listening");
+    try {
+      const result = await listeningPorts(new AbortController().signal);
+      expect(result.ports).toContain((listener.address() as AddressInfo).port);
+    } finally {
+      redirected.mockRestore();
+      syncBuiltinESMExports();
+      await new Promise<void>((resolve) => listener.close(() => resolve()));
+    }
+  },
+);

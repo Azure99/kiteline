@@ -33,7 +33,7 @@ export class MetadataStore {
   constructor(private config: AgentConfig) {
     const windows = process.platform === "win32" ? windowsNative().identity() : undefined;
     this.environment = checkEnvironment({
-      os: windows ? "windows" : "linux",
+      os: windows ? "windows" : process.platform === "darwin" ? "macos" : "linux",
       homePath: windows?.home ?? homedir(),
       rootPaths: windows?.roots ?? ["/"],
       cliPath: publicCliPath,

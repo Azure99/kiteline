@@ -7,12 +7,14 @@ import {
   mouseEncodingVT,
   adaptTerminalScrolling,
   terminalOptions,
+  initializeTerminalUnicode,
 } from "@kiteline/shared/terminal";
 import { Model, type Snapshot } from "../src/model.js";
 import { Attachment } from "../src/attachment.js";
 
 function screen(cols = 80, rows = 24, history = 100, adapt = true) {
   const terminal = new headless.Terminal({ ...terminalOptions(history), cols, rows });
+  initializeTerminalUnicode(terminal);
   const addon = new serialize.SerializeAddon();
   terminal.loadAddon(addon);
   if (adapt) adaptTerminalScrolling(terminal);
@@ -50,9 +52,17 @@ test("batched output preserves UTF-8, non-ground recovery, resize and live order
     }
     model.resize(60, 20);
     reference.terminal.resize(60, 20);
-    const unicode = Buffer.from("你好\x1b[3");
+    const unicode = Buffer.from("你好\u{1f642}\x1b[3");
     for (const byte of unicode) model.output(Buffer.from([byte]));
     await reference.write(unicode);
+    await model.ordered(() => {});
+    expect(model.terminal.buffer.active.cursorX).toBe(6);
+    expect(
+      model.terminal.buffer.active
+        .getLine(model.terminal.buffer.active.baseY + model.terminal.buffer.active.cursorY)
+        ?.getCell(4)
+        ?.getWidth(),
+    ).toBe(2);
     await model.attach(
       "retained",
       3000,
@@ -61,6 +71,9 @@ test("batched output preserves UTF-8, non-ground recovery, resize and live order
       new AbortController().signal,
     );
     expect(snapshot.data.toString()).toContain("checkpoint line");
+    expect(
+      snapshot.tail.some((event) => event.type === "output" && event.data.includes("\x1b[3")),
+    ).toBe(true);
     model.output(Buffer.from("1mred"));
     await Promise.resolve();
     model.output(Buffer.from("\x1b[0m\r\n"));

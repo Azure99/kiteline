@@ -9,6 +9,7 @@ import {
   normalizePaste,
   adaptTerminalScrolling,
   terminalOptions,
+  initializeTerminalUnicode,
 } from "@kiteline/shared/terminal";
 import { ApiError, api, post } from "../lib/api";
 import { i18n } from "../i18n";
@@ -200,7 +201,7 @@ export class TerminalDisplay {
           linkHandler: { activate: openLink, hover: hoverLink, leave: leaveLink },
         });
         this.terminal = terminal;
-        terminal.unicode.activeVersion = "6";
+        initializeTerminalUnicode(terminal);
         terminal.loadAddon(this.fitAddon);
         terminal.loadAddon(new WebLinksAddon(openLink, { hover: hoverLink, leave: leaveLink }));
         adaptTerminalScrolling(terminal);

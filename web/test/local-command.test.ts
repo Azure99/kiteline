@@ -11,9 +11,10 @@ test("local attach uses the observed launcher and both instance paths", () => {
     dataDir: "/var/tmp/data one",
     runDir: "/var/tmp/run's",
   };
-  expect(localCommand(environment, "session")).toBe(
-    "KITELINE_AGENT_HOME='/var/tmp/data one' KITELINE_AGENT_RUN_DIR='/var/tmp/run'\\''s' '/opt/kiteline'\\''s/bin/kiteline-agent' terminal attach 'session'",
-  );
+  for (const os of ["linux", "macos"] as const)
+    expect(localCommand({ ...environment, os }, "session")).toBe(
+      "KITELINE_AGENT_HOME='/var/tmp/data one' KITELINE_AGENT_RUN_DIR='/var/tmp/run'\\''s' '/opt/kiteline'\\''s/bin/kiteline-agent' terminal attach 'session'",
+    );
   const windows = localCommand(
     {
       ...environment,

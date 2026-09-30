@@ -18,6 +18,8 @@ import {
 } from "lucide-react";
 import type { Device, Entry, Workspace } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
+import { ErrorNotice } from "../components/error-notice";
+import { rpc } from "../lib/api";
 import { ToolHeader, ToolSidebar } from "../components/tool-layout";
 import { Button } from "../components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
@@ -65,6 +67,7 @@ export function Files({
   const mobile = useMobile();
   const folder = route.query.folder ?? ".";
   const reveal = route.query.reveal;
+  const [revealError, setRevealError] = useState<unknown>();
   const [expanded, setExpanded] = useState(new Set(["."]));
   const [selected, setSelected] = useState(new Set<string>());
   const [selecting, setSelecting] = useState(false);
@@ -104,8 +107,53 @@ export function Files({
     if (queryDraft !== draft.id) showDraft(draft, true);
   }, [visible, searching, draft, queryFile, queryDraft, location, store]);
   useEffect(() => {
-    if (visible && enabled && folder !== ".") void load(folder);
-  }, [visible, enabled, folder, load]);
+    if (!visible || !enabled || folder === ".") return;
+    const deviceTarget = { deviceId: device.id, workspaceId: workspace.id };
+    let active = true;
+    void load(folder).then((listing) => {
+      if (!active || !listing || listing.path === folder) return;
+      setExpanded((old) => new Set([...old].map((path) => movedPath(path, folder, listing.path))));
+      const current = currentRoute();
+      if (
+        current.tool === "files" &&
+        isWorkspaceRoute(current, deviceTarget) &&
+        current.query.folder === folder
+      )
+        updateWorkspaceQuery(deviceTarget, { folder: listing.path }, true);
+    });
+    return () => {
+      active = false;
+    };
+  }, [visible, enabled, folder, load, device.id, workspace.id]);
+  useEffect(() => {
+    setRevealError(undefined);
+    if (!visible || !enabled || !reveal || device.environment?.os !== "macos") return;
+    const controller = new AbortController();
+    const target = { deviceId: device.id, workspaceId: workspace.id };
+    void rpc(
+      device.id,
+      "files.inspect",
+      { workspaceId: workspace.id, path: reveal },
+      controller.signal,
+    )
+      .then(({ entry }) => {
+        const current = currentRoute();
+        if (
+          controller.signal.aborted ||
+          !entry.path ||
+          entry.path === reveal ||
+          !isWorkspaceRoute(current, target) ||
+          current.tool !== "files" ||
+          current.query.reveal !== reveal
+        )
+          return;
+        updateWorkspaceQuery(target, { reveal: entry.path, folder: parentPath(entry.path) }, true);
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) setRevealError(error);
+      });
+    return () => controller.abort();
+  }, [visible, enabled, reveal, device.id, device.environment?.os, workspace.id]);
   useEffect(() => {
     if (visible && reveal) setListOpen(true);
   }, [visible, reveal]);
@@ -413,6 +461,11 @@ export function Files({
           </p>
         )}
         <FileCleanupNotice deviceId={device.id} active={visible} />
+        {!!revealError && (
+          <div role="alert" className="break-words px-3 py-2 text-sm text-destructive">
+            <ErrorNotice error={revealError} />
+          </div>
+        )}
       </ToolHeader>
       <div className={searching ? "hidden" : "flex min-h-0 flex-1"}>
         {(mobile ? !queryFile : listOpen) && (

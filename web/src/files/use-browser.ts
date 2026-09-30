@@ -26,8 +26,13 @@ export function useFileBrowser(deviceId: string, workspaceId: string, active: bo
       requests.current.get(path)?.abort();
       const controller = new AbortController();
       requests.current.set(path, controller);
-      const previous = pagesRef.current[path]?.listing;
-      setPages((old) => ({ ...old, [path]: { ...old[path], busy: true, error: undefined } }));
+      const initialPages = pagesRef.current;
+      const previous = initialPages[path]?.listing;
+      pagesRef.current = {
+        ...initialPages,
+        [path]: { ...initialPages[path], busy: true, error: undefined },
+      };
+      setPages(pagesRef.current);
       try {
         if (!more) await releaseCursor(deviceId, "directory", previous?.entries.nextCursor);
         let result = await cursorRpc(
@@ -70,7 +75,21 @@ export function useFileBrowser(deviceId: string, workspaceId: string, active: bo
           more && previous ? [...previous.entries.items, ...result.entries.items] : refreshed;
         items.sort(compareEntries);
         const listing = { ...result, entries: { ...result.entries, items } };
-        pagesRef.current = { ...pagesRef.current, [path]: { listing, busy: false } };
+        if (result.path !== path) {
+          const current = pagesRef.current[result.path];
+          if (current !== initialPages[result.path]) {
+            void releaseCursor(deviceId, "directory", result.entries.nextCursor);
+            const next = { ...pagesRef.current };
+            delete next[path];
+            pagesRef.current = next;
+            setPages(next);
+            return { ...listing, entries: { ...listing.entries, nextCursor: undefined } };
+          }
+          void releaseCursor(deviceId, "directory", current?.listing?.entries.nextCursor);
+        }
+        const next = { ...pagesRef.current };
+        delete next[path];
+        pagesRef.current = { ...next, [result.path]: { listing, busy: false } };
         setPages(pagesRef.current);
         return listing;
       } catch (error) {

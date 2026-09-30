@@ -12,7 +12,7 @@ import {
   type GitReview,
   type Repo,
 } from "@kiteline/shared/protocol";
-import { entryInfo, relativePath } from "../files/paths.js";
+import { entryInfo, gitMetadataPath, relativePath } from "../files/paths.js";
 import { git, gitPath, NulRecords } from "./process.js";
 import { headIdentity, modeType, observeIndex, readStatus } from "./status.js";
 
@@ -44,6 +44,15 @@ export function gitPaths(value: unknown) {
   )
     throw new AppError("invalid_argument", "Cannot operate on the repository root or Git metadata");
   return paths.sort();
+}
+export async function checkedGitPaths(repo: Repo, value: unknown, signal: AbortSignal) {
+  const paths = gitPaths(value);
+  for (const path of paths) {
+    signal.throwIfAborted();
+    if (await gitMetadataPath(repo.rootPath, path))
+      throw new AppError("invalid_argument", "Cannot operate on Git metadata");
+  }
+  return paths;
 }
 export function discardScope(value: unknown): DiscardScope {
   if (value !== "worktree" && value !== "all")

@@ -1,6 +1,6 @@
 {
-  "nodeArchiveSha256": "6cac9ffbca8f6a47091e4b5c772e0606049c3871cb67d900c0cedde630e545ba",
-  "nodeHeadersSha256": "7b2141e77e66ab23ead6b200c546afc5837136e3075d8a3ac5a67e540dcc59c1",
+  "nodeArchiveSha256": "2b0ff57b049cda1bbcea2240eec20467018713c1efe1f7360c2681859b90ed71",
+  "nodeHeadersSha256": "eff1a7e67736bdf25db421ddaa613ed605f751a7b9fe07fb473ea880d1348987",
   "ripgrep": {
     "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-pc-windows-msvc.zip",
     "sha256": "71b2fef860abe467217a538ff31de02f5258807c0129f771846f87bd029aafc5"

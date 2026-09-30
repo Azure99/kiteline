@@ -22,7 +22,7 @@ export class SearchJson {
   private carry = "";
   private range?: { start?: number; end?: number };
   constructor(
-    private found: (match: SearchMatch) => void,
+    private found: (match: SearchMatch) => void | Promise<void>,
     private skipped: () => void,
   ) {}
   private path() {
@@ -59,7 +59,7 @@ export class SearchJson {
       this.finishScalar();
     } else if (token.name === "endObject" || token.name === "endArray") {
       this.stack.pop();
-      if (!this.stack.length) this.finishRecord();
+      if (!this.stack.length) return this.finishRecord();
     }
   }
   private chunk(value: string) {
@@ -126,7 +126,7 @@ export class SearchJson {
         ? [[prefixLength(start), prefixLength(end)]]
         : [],
     );
-    this.found({
+    return this.found({
       path,
       line: item.line,
       text,
