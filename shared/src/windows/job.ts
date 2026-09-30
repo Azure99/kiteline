@@ -1,4 +1,5 @@
 import { Socket } from "node:net";
+import { writeSync } from "node:fs";
 import { windowsNative, type NativeHandle } from "./native.js";
 
 export type JobStdio = "pipe" | "inherit" | "ignore";
@@ -30,33 +31,21 @@ function environmentBlock(environment: NodeJS.ProcessEnv) {
 
 export class JobChild {
   private resolveExit!: (result: { code: number }) => void;
-  private rejectExit!: (error: unknown) => void;
   private resolveEmpty!: () => void;
-  readonly exited = new Promise<{ code: number }>((resolve, reject) => {
+  readonly exited = new Promise<{ code: number }>((resolve) => {
     this.resolveExit = resolve;
-    this.rejectExit = reject;
   });
   readonly empty = new Promise<void>((resolve) => {
     this.resolveEmpty = resolve;
   });
   private released = false;
-  private stopping = false;
   private terminating = false;
-  private observedCode?: number;
-  private cleanupFailure?: unknown;
-
-  get exitCode() {
-    return this.observedCode;
-  }
-  get cleanupError() {
-    return this.cleanupFailure;
-  }
-
-  private report(error: unknown) {
-    if (this.cleanupFailure !== undefined) return;
-    this.cleanupFailure = error;
-    this.rejectExit(error);
-    console.error("Windows Job cleanup failed; retaining process ownership:", error);
+  private fail(error: unknown): never {
+    try {
+      writeSync(2, `Windows Job ownership failed: ${String(error)}\n`);
+    } finally {
+      process.exit(1);
+    }
   }
 
   constructor(
@@ -67,49 +56,37 @@ export class JobChild {
     readonly stderr: Socket | undefined,
   ) {
     const native = windowsNative();
-    // A failed observation never relinquishes the process set or resolves empty.
-    void this.exited.catch(() => {});
-    let observedEmpty = false;
     const timer = setInterval(() => {
-      if (!observedEmpty && this.stopping) {
-        try {
-          this.terminate();
-        } catch (error) {
-          this.report(error);
-        }
-      }
       try {
-        if (!observedEmpty) {
-          const status = native.jobInspect(handle);
-          if (status.code !== undefined) {
-            this.observedCode = status.code;
-            this.resolveExit({ code: status.code });
-          }
-          observedEmpty = status.active === 0 && status.code !== undefined;
+        const status = native.jobInspect(handle);
+        if (status.code !== undefined) {
+          this.resolveExit({ code: status.code });
         }
-        if (observedEmpty) {
+        if (status.active === 0 && status.code !== undefined) {
           native.jobRelease(handle);
           clearInterval(timer);
           this.released = true;
           this.resolveEmpty();
         }
       } catch (error) {
-        if (!observedEmpty) this.stopping = true;
-        this.report(error);
+        this.fail(error);
       }
     }, 10);
   }
 
   terminate() {
     if (this.released || this.terminating) return;
-    this.stopping = true;
     try {
       windowsNative().jobTerminate(this.handle);
     } catch (error) {
-      this.report(error);
-      throw error;
+      this.fail(error);
     }
     this.terminating = true;
+  }
+
+  stop() {
+    this.terminate();
+    return this.empty;
   }
 }
 
@@ -148,12 +125,7 @@ export async function spawnJob(executable: string, args: string[], options: JobO
         errors.push(cleanupError);
       }
     }
-    try {
-      job.terminate();
-    } catch (cleanupError) {
-      errors.push(cleanupError);
-    }
-    await job.empty;
+    await job.stop();
     if (errors.length > 1)
       throw new AggregateError(errors, "Job startup and cleanup failed", { cause: error });
     throw error;

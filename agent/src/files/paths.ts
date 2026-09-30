@@ -50,14 +50,10 @@ export async function entryInfo(path: string | Buffer) {
   return lstat(path, { bigint: true });
 }
 
-// Preserve the directory and link objects traversed by an active write, not just its spelling.
-export async function pathDependencies(path: string, followFinalLink: boolean) {
-  const native = (value: string) =>
-    process.platform === "win32" ? value.replaceAll("/", "\\") : value;
-  path = native(path);
+async function windowsRealPath(path: string) {
+  path = path.replaceAll("/", "\\");
   let current = parse(path).root;
   const remaining = path.slice(current.length).split(sep).filter(Boolean);
-  const items: BigIntStats[] = [];
   let links = 0;
   while (remaining.length) {
     const part = remaining.shift()!;
@@ -67,39 +63,37 @@ export async function pathDependencies(path: string, followFinalLink: boolean) {
       continue;
     }
     const next = join(current, part);
-    if (!remaining.length && !followFinalLink) {
-      current = next;
-      break;
-    }
     const info = await entryInfo(next);
     if (info.isSymbolicLink()) {
       if (++links > 40) throw new AppError("conflict", "Too many symbolic links in the write path");
-      items.push(info);
-      let target = native(await readlink(next));
+      let target = (await readlink(next)).replaceAll("/", "\\");
       if (isAbsolute(target)) {
         current = parse(target).root;
         target = target.slice(current.length);
       }
       remaining.unshift(...target.split(sep).filter(Boolean));
     } else {
-      if (info.isDirectory()) items.push(info);
       current = next;
     }
   }
-  return {
-    path: followFinalLink
-      ? await realpath(current)
-      : join(await realpath(dirname(current)), basename(current)),
-    items,
-  };
+  return realpath(current);
 }
 
 export async function realPath(path: string) {
-  return process.platform === "win32" ? (await pathDependencies(path, true)).path : realpath(path);
+  return process.platform === "win32" ? windowsRealPath(path) : realpath(path);
 }
 
 export function sameObject(a: BigIntStats, b: BigIntStats) {
   return a.dev === b.dev && a.ino === b.ino;
+}
+
+export async function containsDirectory(info: BigIntStats, parent: string) {
+  for (;;) {
+    if (sameObject(info, await stat(parent, { bigint: true }))) return true;
+    const next = dirname(parent);
+    if (next === parent) return false;
+    parent = next;
+  }
 }
 
 export function versionOf(parent: string, name: string, info: BigIntStats) {

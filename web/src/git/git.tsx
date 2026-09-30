@@ -129,7 +129,6 @@ export function GitTool({
       setScan(found);
     } catch (error) {
       if (!controller.signal.aborted) {
-        if (error instanceof ApiError && error.code === "conflict") scanCursor.current = undefined;
         setError(error);
       }
     } finally {

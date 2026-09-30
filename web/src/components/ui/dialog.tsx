@@ -8,7 +8,6 @@ export const Dialog = Primitive.Root;
 export const DialogTrigger = Primitive.Trigger;
 export const DialogClose = Primitive.Close;
 export const DialogTitle = Primitive.Title;
-export const DialogDescription = Primitive.Description;
 
 export function DialogContent({ className, children, ...props }: Primitive.Popup.Props) {
   const { t } = useTranslation();

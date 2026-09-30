@@ -19,7 +19,7 @@ import {
 import { atomicJson, readJson, type AgentConfig } from "../config.js";
 import { checkTaskInput, nextOccurrence, previewSchedule } from "./schedule.js";
 import { TaskProcess } from "./process.js";
-import { taskOwnership, taskRecord, type TaskRecord } from "./record.js";
+import { taskRecord, type TaskRecord } from "./record.js";
 
 export class ScheduledTasks {
   private readonly directory: string;
@@ -32,10 +32,6 @@ export class ScheduledTasks {
   private queue: Promise<unknown> = Promise.resolve();
   private closing = false;
   private loadError?: string;
-  private admissionError?: string;
-  private readonly isolated = new Map<string, string>();
-  private readonly isolatedSlots = new Set<string>();
-  private readonly isolatedRuns = new Set<string>();
   private readonly reservedRuns = new Set<string>();
   private readonly pending = new Map<string, string>();
   private readonly residuals = new Set<string>();
@@ -65,20 +61,16 @@ export class ScheduledTasks {
     return result;
   }
 
+  assertAvailable() {
+    if (this.loadError) throw new AppError("io_error", "Scheduled task storage is unavailable");
+  }
+
   private async writable(id?: string) {
     if (this.closing) throw new AppError("cancelled", "Agent is stopping");
-    if (this.loadError)
-      throw new AppError("io_error", "Scheduled task storage is unavailable", {
-        diagnostic: this.loadError,
-      });
     if (id && this.pending.has(id)) await this.save(this.record(id));
   }
 
   private record(id: string) {
-    if (this.isolated.has(id))
-      throw new AppError("io_error", "Scheduled task data is isolated; inspect the original file", {
-        diagnostic: this.isolated.get(id),
-      });
     const record = this.records.get(id);
     if (!record) throw new AppError("not_found", "Scheduled task does not exist");
     return record;
@@ -121,7 +113,6 @@ export class ScheduledTasks {
   private occupiedRuns() {
     return new Set([
       ...this.executions.keys(),
-      ...this.isolatedSlots,
       ...[...this.records.values()].flatMap(({ task, runs }) => [
         ...(task.reviewRunId ? [task.reviewRunId] : []),
         ...runs.filter((run) => taskRunActive(run.state)).map((run) => run.id),
@@ -155,7 +146,7 @@ export class ScheduledTasks {
       startedAt: "9999-12-31T23:59:59.999Z",
       endedAt: "9999-12-31T23:59:59.999Z",
       state: "succeeded",
-      exitCode: -2147483648,
+      exitCode: 0xffffffff,
       signal: "SIG".repeat(16),
       reasonCode: "requested_stop",
     };
@@ -182,95 +173,53 @@ export class ScheduledTasks {
 
   async load() {
     let files: string[];
+    const candidates = new Map<string, TaskRecord>();
+    const outputSizes = new Map<string, number>();
+    let source = this.directory;
     try {
       await mkdir(this.directory, { recursive: true, mode: 0o700 });
       files = await readdir(this.directory);
+      const runs = new Set<string>();
+      for (const file of files.filter((name) => name.endsWith(".json"))) {
+        source = join(this.directory, file);
+        if (!(await lstat(source)).isFile()) throw new Error("Task state is not a regular file");
+        const candidate = taskRecord(await readJson(source), file);
+        for (const run of candidate.runs) {
+          if (runs.has(run.id)) throw new Error(`Run ${run.id} belongs to multiple task files`);
+          runs.add(run.id);
+        }
+        candidates.set(candidate.task.id, candidate);
+      }
+      for (const file of files.filter((name) => /\.(stdout|stderr)$/.test(name))) {
+        source = join(this.directory, file);
+        if (!(await lstat(source)).isFile()) throw new Error("Output is not a regular file");
+        const output = await open(source, "r");
+        try {
+          outputSizes.set(file, (await output.stat()).size);
+        } finally {
+          await output.close();
+        }
+      }
+      source = this.directory;
+      this.checkSummaryBudget([...candidates.values()].map((item) => item.task));
     } catch (error) {
-      this.loadError = asError(error).message;
+      this.loadError = `${source}: ${asError(error).message}`;
       console.error("Scheduled task storage:", this.loadError);
       return;
     }
-    const candidates = new Map<string, TaskRecord>();
-    const ownership = new Map<string, ReturnType<typeof taskOwnership>>();
-    const owners = new Map<string, string>();
-    const isolate = (id: string, error: unknown) => {
-      this.isolated.set(id, asError(error).message);
-      console.error("Scheduled task isolated:", this.statePath(id), asError(error).message);
-    };
-    for (const file of files.filter((name) => name.endsWith(".json"))) {
-      const id = file.slice(0, -5);
-      let value: unknown;
-      try {
-        if (!(await lstat(join(this.directory, file))).isFile())
-          throw new Error("Task state is not a regular file");
-        value = await readJson(join(this.directory, file));
-        const identity = taskOwnership(value, file);
-        ownership.set(id, identity);
-        for (const run of identity.runs) {
-          const previous = owners.get(run.id);
-          if (previous) {
-            const error = new Error(`Run ${run.id} belongs to multiple task files`);
-            isolate(previous, error);
-            isolate(id, error);
-            this.admissionError = error.message;
-          }
-          owners.set(run.id, id);
-        }
-      } catch (error) {
-        this.admissionError = "Task data prevents determining execution or output ownership";
-        isolate(id, error);
-        continue;
-      }
-      try {
-        candidates.set(id, taskRecord(value, file));
-      } catch (error) {
-        isolate(id, error);
-      }
-    }
-    const outputSizes = new Map<string, number | undefined>();
-    for (const file of files) {
-      const match = /^(.*)\.(stdout|stderr)$/.exec(file);
-      if (!match) continue;
-      const id = match[1]!;
+    for (const [file, bytes] of outputSizes) {
+      const id = file.replace(/\.(stdout|stderr)$/, "");
       this.reservedRuns.add(id);
-      outputSizes.set(file, undefined);
-      try {
-        const info = await lstat(join(this.directory, file));
-        if (!info.isFile()) throw new Error(`Output is not a regular file: ${file}`);
-        this.outputSize(id, info.size);
-        outputSizes.set(file, info.size);
-      } catch (error) {
-        this.admissionError = `Cannot determine task output capacity: ${asError(error).message}`;
-        console.error("Scheduled task output:", this.admissionError);
-      }
+      this.outputSize(id, bytes);
     }
-    for (const [id, candidate] of candidates) {
-      if (this.isolated.has(id)) continue;
-      try {
-        this.checkSummaryBudget(
-          [...this.records.values()].map((item) => item.task).concat(candidate.task),
-        );
-        this.records.set(id, candidate);
-      } catch (error) {
-        isolate(id, error);
-      }
-    }
-    for (const [id, identity] of ownership) {
-      if (!this.isolated.has(id)) continue;
-      for (const run of identity.runs) {
-        this.isolatedRuns.add(run.id);
-        this.reservedRuns.add(run.id);
-      }
-      for (const run of identity.occupied) this.isolatedSlots.add(run);
-    }
+    for (const [id, candidate] of candidates) this.records.set(id, candidate);
     for (const current of this.records.values()) {
       const record = structuredClone(current);
       for (const run of record.runs) {
         for (const stream of ["stdout", "stderr"] as const) {
           const key = stream === "stdout" ? "stdoutBytes" : "stderrBytes";
           const path = `${run.id}.${stream}`;
-          const bytes = outputSizes.has(path) ? outputSizes.get(path) : 0;
-          if (bytes === undefined) continue;
+          const bytes = outputSizes.get(path) ?? 0;
           if (bytes < run.output[key]) run.output.truncated = true;
           run.output[key] = bytes;
         }
@@ -288,16 +237,14 @@ export class ScheduledTasks {
       await this.saveKnown(record);
       await this.cleanup(() => this.prune(record.task.id));
     }
-    await this.cleanup(() => this.trimStoredOutput());
     // A crash can leave an unpublished atomic file or output whose record was already removed.
-    const retained = new Set([
-      ...this.isolatedRuns,
-      ...[...this.records.values()].flatMap((item) => item.runs.map((run) => run.id)),
-    ]);
+    const retained = new Set(
+      [...this.records.values()].flatMap((item) => item.runs.map((run) => run.id)),
+    );
     for (const file of files) {
       if (file.endsWith(".tmp"))
         await this.cleanup(() => rm(join(this.directory, file), { force: true }));
-      if (!this.admissionError && /\.(stdout|stderr)$/.test(file)) {
+      if (/\.(stdout|stderr)$/.test(file)) {
         const id = file.replace(/\.(stdout|stderr)$/, "");
         if (!retained.has(id)) this.residuals.add(id);
       }
@@ -310,8 +257,6 @@ export class ScheduledTasks {
     const storageError =
       [
         this.loadError,
-        this.admissionError,
-        ...[...this.isolated].map(([id, error]) => `${id}: ${error}`),
         ...[...this.pending].map(([id, error]) => `${id} not persisted: ${error}`),
         this.cleanupError,
       ]
@@ -343,6 +288,7 @@ export class ScheduledTasks {
   }
 
   snapshot(): TaskSnapshot {
+    if (this.loadError) return { revision: this.revision, storageError: true, items: [] };
     return {
       revision: this.revision,
       items: [...this.records.values()].map((item) => this.summary(item)),
@@ -378,9 +324,8 @@ export class ScheduledTasks {
   create(id: string, input: unknown, signal: AbortSignal) {
     return this.serial(async () => {
       await this.writable();
-      if (this.records.has(id) || this.isolated.has(id))
-        throw new AppError("conflict", "Scheduled task ID already exists");
-      if (this.records.size + this.isolated.size >= this.config.limits.tasksPerDevice)
+      if (this.records.has(id)) throw new AppError("conflict", "Scheduled task ID already exists");
+      if (this.records.size >= this.config.limits.tasksPerDevice)
         throw new AppError("limit_exceeded", "Scheduled task count exceeds the device limit");
       const parameters = await checkTaskInput(input);
       previewSchedule(parameters.schedule, parameters.timezone);
@@ -516,11 +461,6 @@ export class ScheduledTasks {
       }
       try {
         for (const run of record.runs) this.residuals.add(run.id);
-        if (this.admissionError)
-          throw new AppError(
-            "io_error",
-            "Output cleanup is deferred while task ownership is unknown",
-          );
         for (const run of record.runs) await this.removeOutput(run.id);
       } catch (error) {
         const detail = asError(error);
@@ -551,7 +491,7 @@ export class ScheduledTasks {
     const { id, revision, nextRunAt } = record.task;
     clearTimeout(this.timers.get(id));
     this.timers.delete(id);
-    if (this.closing || this.loadError || this.admissionError || !nextRunAt) return;
+    if (this.closing || !nextRunAt) return;
     const milliseconds = Math.max(0, Date.parse(nextRunAt) - Date.now());
     const timer = setTimeout(
       () => {
@@ -561,9 +501,7 @@ export class ScheduledTasks {
             !latest ||
             latest.task.revision !== revision ||
             latest.task.nextRunAt !== nextRunAt ||
-            this.closing ||
-            this.loadError ||
-            this.admissionError
+            this.closing
           )
             return;
           if (Date.now() < Date.parse(nextRunAt)) {
@@ -627,10 +565,6 @@ export class ScheduledTasks {
 
   private async admit(id: string, runId: string, scheduledAt?: string): Promise<TaskRun> {
     await this.writable(id);
-    if (this.admissionError)
-      throw new AppError("io_error", "Task admission is unavailable", {
-        diagnostic: this.admissionError,
-      });
     let record = structuredClone(this.record(id));
     if (record.task.reviewRunId)
       throw new AppError("busy", "Review the unfinished run before starting another", {
@@ -870,7 +804,6 @@ export class ScheduledTasks {
   }
 
   private async cleanResiduals() {
-    if (this.admissionError) return;
     for (const id of this.residuals) await this.cleanup(() => this.removeOutput(id));
     if (!this.residuals.size) this.cleanupError = undefined;
   }
@@ -882,19 +815,17 @@ export class ScheduledTasks {
     await this.removeOutput(id);
   }
 
-  private prune(id: string) {
-    return (async () => {
-      if (this.admissionError || this.pending.has(id)) return;
-      const record = this.record(id);
-      const ended = record.runs.filter(
-        (run) => !taskRunActive(run.state) && run.id !== record.task.reviewRunId,
-      );
-      for (const run of ended.slice(
-        0,
-        Math.max(0, ended.length - this.config.limits.taskHistoryRuns),
-      ))
-        await this.removeRun(id, run.id);
-    })();
+  private async prune(id: string) {
+    if (this.pending.has(id)) return;
+    const record = this.record(id);
+    const ended = record.runs.filter(
+      (run) => !taskRunActive(run.state) && run.id !== record.task.reviewRunId,
+    );
+    for (const run of ended.slice(
+      0,
+      Math.max(0, ended.length - this.config.limits.taskHistoryRuns),
+    ))
+      await this.removeRun(id, run.id);
   }
 
   private async makeOutputRoom() {
@@ -905,63 +836,20 @@ export class ScheduledTasks {
           (run) => !taskRunActive(run.state) && run.id !== record.task.reviewRunId,
         ),
       );
-    ended.sort((a, b) => a.acceptedAt.localeCompare(b.acceptedAt));
-    for (const run of ended) {
-      if (
-        this.outputBytes +
-          Math.min(this.config.limits.taskOutputBytes, this.config.limits.taskOutputTotalBytes) <=
-        this.config.limits.taskOutputTotalBytes
-      )
-        break;
-      await this.removeRun(run.taskId, run.id);
-    }
-  }
-
-  private async trimStoredOutput() {
-    if (this.admissionError) return;
-    const ended = [...this.records.values()]
-      .filter((record) => !this.pending.has(record.task.id))
-      .flatMap((record) => record.runs.filter((run) => run.id !== record.task.reviewRunId));
-    ended.sort((a, b) => a.acceptedAt.localeCompare(b.acceptedAt));
-    for (const run of ended) {
-      if (this.outputBytes <= this.config.limits.taskOutputTotalBytes) break;
-      await this.removeRun(run.taskId, run.id);
-    }
-    // Lowered limits take effect at restart without discarding unresolved run identities.
-    const mutableBytes = [...this.records.values()]
-      .filter((record) => !this.pending.has(record.task.id))
-      .flatMap((record) => record.runs)
-      .reduce((sum, run) => sum + run.output.stdoutBytes + run.output.stderrBytes, 0);
-    let remaining = Math.max(
-      0,
-      this.config.limits.taskOutputTotalBytes - (this.outputBytes - mutableBytes),
+    const target = Math.min(
+      this.config.limits.taskOutputBytes,
+      this.config.limits.taskOutputTotalBytes,
     );
-    for (const current of this.records.values()) {
-      if (this.pending.has(current.task.id)) continue;
-      const record = structuredClone(current);
-      let changed = false;
-      for (const run of record.runs) {
-        let runRemaining = Math.min(this.config.limits.taskOutputBytes, remaining);
-        for (const stream of ["stdout", "stderr"] as const) {
-          const key = stream === "stdout" ? "stdoutBytes" : "stderrBytes";
-          const bytes = Math.min(run.output[key], runRemaining);
-          if (bytes < run.output[key]) {
-            const file = await open(this.outputPath(run.id, stream), "r+");
-            try {
-              await file.truncate(bytes);
-            } finally {
-              await file.close();
-            }
-            this.outputSize(run.id, bytes - run.output[key]);
-            run.output[key] = bytes;
-            run.output.truncated = true;
-            changed = true;
-          }
-          runRemaining -= bytes;
-          remaining -= bytes;
-        }
-      }
-      if (changed) await this.saveKnown(record);
+    const reclaimable = ended.reduce(
+      (bytes, run) => bytes + (this.outputSizes.get(run.id) ?? 0),
+      0,
+    );
+    if (this.outputBytes - reclaimable + target > this.config.limits.taskOutputTotalBytes) return;
+    ended.sort((a, b) => a.acceptedAt.localeCompare(b.acceptedAt));
+    for (const run of ended) {
+      if (this.outputBytes + target <= this.config.limits.taskOutputTotalBytes) break;
+      if (!this.outputSizes.get(run.id)) continue;
+      await this.removeRun(run.taskId, run.id);
     }
   }
 

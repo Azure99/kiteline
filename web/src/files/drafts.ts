@@ -4,7 +4,7 @@ import { Compartment, type EditorState } from "@codemirror/state";
 import type { KitelineError, Device, TextFormat } from "@kiteline/shared/protocol";
 import { encodeText } from "@kiteline/shared/text";
 import { ApiError, errorMessage, rpc } from "../lib/api";
-import { readContent, readText, writeText, type DiskText, type FileTarget } from "./content";
+import { readText, writeText, type DiskText, type FileTarget } from "./content";
 import { textState } from "./editor-state";
 import { isWithin, movedPath } from "./use-browser";
 
@@ -62,14 +62,6 @@ export interface Draft extends FileTarget {
   readError?: ApiError;
 }
 
-interface InitialRead {
-  target: FileTarget;
-  version: number;
-  request?: AbortController;
-  pauses: Set<Promise<void>>;
-  reset: () => void;
-}
-
 interface CapturedDraft {
   draft: Draft;
   source?: { path: string; version: number };
@@ -78,9 +70,6 @@ interface CapturedDraft {
 
 interface FileChange {
   drafts: CapturedDraft[];
-  reads: { owner: InitialRead; path: string; version: number; resume: () => void }[];
-  path: string;
-  released?: boolean;
 }
 
 const dirtyCache = new WeakMap<
@@ -108,7 +97,6 @@ export class DraftStore {
   private draftVersions = new WeakMap<Draft, number>();
   private editorLimits = new Map<string, number>();
   private totalLimit?: number;
-  private initialReads = new Set<InitialRead>();
   closing?: string;
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -141,51 +129,6 @@ export class DraftStore {
   has(draft: Draft) {
     return this.items.includes(draft);
   }
-  async readInitial(
-    target: FileTarget,
-    signal: AbortSignal,
-    onChannel: (id: string | undefined) => void,
-  ) {
-    const owner: InitialRead = {
-      target: { ...target },
-      version: 0,
-      pauses: new Set(),
-      reset: () => onChannel(undefined),
-    };
-    let stop!: () => void;
-    const stopped = new Promise<void>((resolve) => {
-      stop = resolve;
-    });
-    const abort = () => {
-      owner.request?.abort();
-      stop();
-    };
-    signal.addEventListener("abort", abort, { once: true });
-    this.initialReads.add(owner);
-    try {
-      for (;;) {
-        await Promise.race([Promise.all(owner.pauses), stopped]);
-        if (signal.aborted) throw new DOMException("The operation was aborted", "AbortError");
-        if (owner.pauses.size) continue;
-        owner.reset();
-        const request = new AbortController();
-        owner.request = request;
-        const currentTarget = { ...owner.target };
-        try {
-          const content = await readContent(currentTarget, request.signal, (id) => {
-            if (!request.signal.aborted) onChannel(id);
-          });
-          if (!request.signal.aborted) return { target: currentTarget, content };
-        } catch (error) {
-          if (!request.signal.aborted) throw error;
-        }
-      }
-    } finally {
-      owner.request?.abort();
-      signal.removeEventListener("abort", abort);
-      this.initialReads.delete(owner);
-    }
-  }
   capture(deviceId: string, workspaceId: string, path: string): FileChange {
     const matches = (target: FileTarget) =>
       target.deviceId === deviceId &&
@@ -201,42 +144,7 @@ export class DraftStore {
         .map((snapshot) => ({ snapshot, path: snapshot.target.path }));
       if (source || saves.length) drafts.push({ draft, source, saves });
     }
-    const reads: FileChange["reads"] = [];
-    for (const owner of this.initialReads) {
-      if (!matches(owner.target)) continue;
-      let resolve!: () => void;
-      const pause = new Promise<void>((done) => {
-        resolve = done;
-      });
-      owner.pauses.add(pause);
-      owner.reset();
-      owner.request?.abort();
-      reads.push({
-        owner,
-        path: owner.target.path,
-        version: owner.version,
-        resume: () => {
-          owner.pauses.delete(pause);
-          resolve();
-        },
-      });
-    }
-    return { drafts, reads, path };
-  }
-  release(change: FileChange, to?: string) {
-    if (change.released) return;
-    change.released = true;
-    for (const read of change.reads) {
-      if (
-        to !== undefined &&
-        read.owner.version === read.version &&
-        read.owner.target.path === read.path
-      ) {
-        read.owner.target.path = movedPath(read.path, change.path, to);
-        read.owner.version++;
-      }
-      read.resume();
-    }
+    return { drafts };
   }
   private sourceCurrent({ draft, source }: CapturedDraft) {
     return (
@@ -548,17 +456,13 @@ export class DraftStore {
   }
   async renameFile(target: FileTarget, newName: string) {
     const change = this.capture(target.deviceId, target.workspaceId, target.path);
-    try {
-      const result = await rpc(target.deviceId, "files.rename", {
-        workspaceId: target.workspaceId,
-        path: target.path,
-        newName,
-      });
-      void this.rename(target.deviceId, target.workspaceId, result.from, result.to, change);
-      return result;
-    } finally {
-      this.release(change);
-    }
+    const result = await rpc(target.deviceId, "files.rename", {
+      workspaceId: target.workspaceId,
+      path: target.path,
+      newName,
+    });
+    void this.rename(target.deviceId, target.workspaceId, result.from, result.to, change);
+    return result;
   }
   private confirmSave(draft: Draft, disk: DiskText, snapshot: SaveSnapshot) {
     if (!snapshot.replacesSource || draft.path !== disk.target.path) draft.sourceVersion++;
@@ -679,7 +583,6 @@ export class DraftStore {
     to: string,
     change = this.capture(deviceId, workspaceId, from),
   ) {
-    this.release(change, to);
     let checking = Promise.resolve();
     for (const owner of change.drafts) {
       const { draft } = owner;
@@ -743,7 +646,6 @@ export class DraftStore {
     notice: DraftNotice = "deletedDraft",
     change = this.capture(deviceId, workspaceId, path),
   ) {
-    this.release(change);
     for (const owner of change.drafts) if (this.has(owner.draft)) this.markMissing(owner, notice);
     this.changed();
   }
@@ -753,7 +655,6 @@ export class DraftStore {
     path: string,
     change = this.capture(deviceId, workspaceId, path),
   ) {
-    this.release(change);
     for (const owner of change.drafts) {
       const { draft } = owner;
       if (!this.has(draft)) continue;

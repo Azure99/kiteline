@@ -1,4 +1,4 @@
-import { AppError, asError, terminalProfile } from "@kiteline/shared/protocol";
+import { AppError, asError } from "@kiteline/shared/protocol";
 import { setTimeout as delay } from "node:timers/promises";
 import type {
   TerminalSource,
@@ -113,12 +113,7 @@ export class RecordedSession {
       frame.type === "error" || frame.type === "ended" ? undefined : id,
     );
   }
-  async attach(id: string, profile: string, history: "retained" | "screen", historyGap: boolean) {
-    if (profile !== terminalProfile)
-      throw new AppError(
-        "unsupported",
-        "Terminal component versions differ; upgrade all components together",
-      );
+  async attach(id: string, history: "retained" | "screen", historyGap: boolean) {
     if (this.ended || this.failed)
       throw new AppError("recording_unavailable", "Terminal recording is unavailable");
     if (this.displays.has(id)) throw new AppError("conflict", "Display is already attached");

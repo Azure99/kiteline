@@ -23,9 +23,12 @@ $management = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 
 $public = Join-Path $management 'kiteline-agent.ps1'
 $recordFile = Join-Path $management 'installation.json'
 $temporary = Join-Path ([IO.Path]::GetTempPath()) ('kiteline-agent-download-' + [Guid]::NewGuid().ToString('N'))
+$script:retainTemporary = $false
 
 function Quote-Kiteline([string]$Value) { return "'" + $Value.Replace("'", "''") + "'" }
 function Assert-KitelineExit([string]$Operation) {
+    # Only managed product commands reach this boundary; terminal DWORD results do not.
+    if ($LASTEXITCODE -eq 125) { $script:retainTemporary = $true }
     if ($LASTEXITCODE -ne 0) { throw "$Operation failed (exit $LASTEXITCODE); no automatic retry was made" }
 }
 function Invoke-KitelineElevated([string]$Script, [string[]]$Arguments) {
@@ -37,9 +40,13 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
 public static class __KITELINE_DOWNLOAD_WAIT__ {
+    // Matches the launcher ownership failure defined in native/windows/launcher.cs.
+    const int FatalExitCode=125;
+    public static bool RetainInput { get; private set; }
     delegate bool Handler(uint signal);
     [DllImport("kernel32.dll", SetLastError=true)] static extern bool SetConsoleCtrlHandler(Handler handler,bool add);
     public static int Run(string executable,string command) {
+        RetainInput=false;
         int interrupted=0;
         Handler handler=signal => {
             if(signal>1) return false;
@@ -49,25 +56,29 @@ public static class __KITELINE_DOWNLOAD_WAIT__ {
         if(!SetConsoleCtrlHandler(handler,true)) throw new Win32Exception(Marshal.GetLastWin32Error());
         Process child=null;
         Exception failure=null;
+        int result=1;
         try {
             child=Process.Start(new ProcessStartInfo(executable,"-NoProfile -ExecutionPolicy Bypass -EncodedCommand "+command) { UseShellExecute=true, Verb="runas" });
+            RetainInput=true;
             child.WaitForExit();
-            return interrupted==0 ? child.ExitCode : interrupted;
+            result=child.ExitCode;
+            RetainInput=result==FatalExitCode;
+            if(result!=FatalExitCode && interrupted!=0) result=interrupted;
+        } catch(Exception error) {
+            failure=error;
         } finally {
-            if(child!=null) {
-                for(;;) {
-                    try { child.WaitForExit(); break; }
-                    catch(Exception error) {
-                        if(failure==null) { failure=error; Console.Error.WriteLine("Waiting for elevated maintenance to finish: "+error.Message); }
-                        Thread.Sleep(50);
-                    }
-                }
-                child.Dispose();
+            try { if(child!=null) child.Dispose(); }
+            catch(Exception error) {
+                failure=failure==null ? error : new AggregateException(failure,error);
             }
-            if(!SetConsoleCtrlHandler(handler,false)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            if(!SetConsoleCtrlHandler(handler,false)) {
+                Exception error=new Win32Exception(Marshal.GetLastWin32Error(),"remove download console handler");
+                failure=failure==null ? error : new AggregateException(failure,error);
+            }
             GC.KeepAlive(handler);
-            if(failure!=null) throw failure;
         }
+        if(failure!=null) throw failure;
+        return result;
     }
 }
 '@
@@ -77,8 +88,12 @@ public static class __KITELINE_DOWNLOAD_WAIT__ {
     if (-not ($typeName -as [type])) { Add-Type -TypeDefinition $source.Replace('__KITELINE_DOWNLOAD_WAIT__', $typeName) }
     $command = '$ErrorActionPreference = ''Stop''; & ' + (Quote-Kiteline $Script) + ' ' + (($Arguments | ForEach-Object { Quote-Kiteline $_ }) -join ' ') + '; exit $LASTEXITCODE'
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
-    $result = ($typeName -as [type])::Run($pwsh, $encoded)
-    if ($result -ne 0) { throw "Elevated maintenance failed or was cancelled (exit $result); the process has finished" }
+    try {
+        $result = ($typeName -as [type])::Run($pwsh, $encoded)
+        if ($result -ne 0) { throw "Elevated maintenance failed or was cancelled (exit $result); the process has finished" }
+    } finally {
+        if (($typeName -as [type])::RetainInput) { $script:retainTemporary = $true }
+    }
 }
 function Get-KitelineArchive {
     $null = [IO.Directory]::CreateDirectory($temporary)
@@ -150,7 +165,10 @@ try {
         Assert-KitelineExit 'Binding'
     }
 } finally {
-    if ([IO.Directory]::Exists($temporary)) { [IO.Directory]::Delete($temporary, $true) }
+    if ([IO.Directory]::Exists($temporary)) {
+        if ($script:retainTemporary) { [Console]::Error.WriteLine("Download files retained at $temporary; process cleanup could not be confirmed") }
+        else { [IO.Directory]::Delete($temporary, $true) }
+    }
 }
 if ($Mode -eq 'Connect') {
     Write-Host 'The agent runs here in the foreground. Ctrl-C stops it and ends managed terminal tasks. Background deployment belongs to your external process manager.'

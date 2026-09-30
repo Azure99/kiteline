@@ -12,7 +12,7 @@ import type {
   FileProgress,
   RpcArguments,
 } from "@kiteline/shared/protocol";
-import { api, ApiError, rpc, rpcReply } from "../lib/api";
+import { api, apiError, ApiError, rpc, rpcReply } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
 import {
@@ -225,15 +225,7 @@ export function FileOperationDialog({
       );
       onResult(result);
       if (reply.outcome !== "succeeded")
-        setError(
-          new ApiError(
-            reply.error.code,
-            reply.error.message,
-            reply.outcome,
-            reply.error.details,
-            reply.result,
-          ),
-        );
+        setError(apiError(reply.error, reply.outcome, reply.result));
     } catch (reason) {
       const result: FileItemResult[] = submitted.map((row) => ({
         path: row.entry.path!,
@@ -251,7 +243,6 @@ export function FileOperationDialog({
       );
       onResult(result);
     } finally {
-      for (const change of changes.values()) store.release(change);
       if (current.current === request) current.current = undefined;
       if (alive.current) {
         setBusy(false);

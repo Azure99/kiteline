@@ -4,7 +4,14 @@ import { setTimeout as delay } from "node:timers/promises";
 import { finished } from "node:stream/promises";
 import type { CreateTerminal } from "../protocol/ipc.js";
 import { spawnJob } from "../windows/job.js";
-import { msysPath, terminalPreset, tmux, tmuxBinary, tmuxEnvironment } from "./native.js";
+import {
+  msysPath,
+  terminalPreset,
+  tmux,
+  tmuxBinary,
+  tmuxEnvironment,
+  tmuxServerMissing,
+} from "./native.js";
 
 export interface PaneLaunch {
   shell: string;
@@ -47,10 +54,7 @@ export async function startTerminalServer(options: CreateTerminal, timeout: numb
   ]);
   void drained.catch(() => {});
   let exited = false;
-  void server.exited.then(
-    () => (exited = true),
-    () => (exited = true),
-  );
+  void server.exited.then(() => (exited = true));
   try {
     const signal = AbortSignal.timeout(timeout);
     while (true) {
@@ -71,22 +75,14 @@ export async function startTerminalServer(options: CreateTerminal, timeout: numb
           break;
       } catch (error) {
         signal.throwIfAborted();
-        if (
-          !(error instanceof Error) ||
-          !/No such file or directory|Connection refused|no server running/.test(error.message)
-        )
-          throw error;
+        if (!tmuxServerMissing(error)) throw error;
       }
       await delay(20, undefined, { signal });
     }
     return { job: server, drained };
   } catch (error) {
-    try {
-      server.terminate();
-    } finally {
-      await server.empty;
-      await drained;
-    }
+    await server.stop();
+    await drained;
     throw error;
   }
 }

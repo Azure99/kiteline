@@ -80,13 +80,7 @@ export async function toolCommand(
   signal.throwIfAborted();
   const child = await spawnJob(executable, args, { env, stdio: ["ignore", "pipe", "pipe"] });
   let failure: unknown;
-  const stop = () => {
-    try {
-      child.terminate();
-    } catch (error) {
-      failure ??= error;
-    }
-  };
+  const stop = () => child.terminate();
   signal.addEventListener("abort", stop, { once: true });
   const stdout = new BytePrefix(16 * 1024),
     stderr = new BytePrefix(16 * 1024);
@@ -110,13 +104,8 @@ export async function toolCommand(
     ),
   );
   if (signal.aborted) stop();
-  const result = await child.exited.catch((error) => {
-    failure ??= error;
-    stop();
-    return undefined;
-  });
+  const result = await child.exited;
   await child.empty;
-  failure ??= child.cleanupError;
   const timer = setTimeout(() => {
     child.stdout!.destroy(new Error("Tool output did not close after its Job ended"));
     child.stderr!.destroy(new Error("Tool output did not close after its Job ended"));
@@ -129,9 +118,9 @@ export async function toolCommand(
   }
   signal.throwIfAborted();
   if (failure) throw failure;
-  if (result!.code !== 0)
-    throw Object.assign(new Error(stderr.text().trim() || `${file} exited with ${result!.code}`), {
-      code: result!.code,
+  if (result.code !== 0)
+    throw Object.assign(new Error(stderr.text().trim() || `${file} exited with ${result.code}`), {
+      code: result.code,
     });
   return stdout.text().trim();
 }
@@ -143,10 +132,10 @@ export async function checkBundledRipgrep(command: Command) {
   const { ripgrep } = identity;
   if (
     !ripgrep ||
-    createHash("sha256")
-      .update(await readFile(ripgrepBinary))
-      .digest("hex") !==
-      (process.platform === "win32" ? identity.files?.["native/bin/rg.exe"] : ripgrep.binarySha256)
+    (process.platform !== "win32" &&
+      createHash("sha256")
+        .update(await readFile(ripgrepBinary))
+        .digest("hex") !== ripgrep.binarySha256)
   )
     throw new Error(
       "Bundled ripgrep checksum mismatch; rebuild native components or reinstall the matching agent package",

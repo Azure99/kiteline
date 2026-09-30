@@ -2,7 +2,6 @@ import { useTranslation } from "react-i18next";
 import { useCallback, useLayoutEffect, useRef, type ReactNode } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { Maximize2, SquareTerminal, X } from "lucide-react";
-import type { Session } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
 import type { TerminalActions } from "./terminal-view";
 import { TerminalView } from "./lazy-terminal-view";
@@ -15,6 +14,7 @@ export interface PaneEvents {
   close(id: string): void;
   maximize(): void;
   menu(id: string): ReactNode;
+  name(id: string, fallback?: string): string;
   drag: ReturnType<typeof useTerminalDrag>;
 }
 export function SplitPanes({
@@ -23,7 +23,6 @@ export function SplitPanes({
   groups,
   current,
   opened,
-  sessions,
   mobile,
   visible,
   events,
@@ -34,7 +33,6 @@ export function SplitPanes({
   groups: TerminalGroup[];
   current?: string;
   opened: ReadonlySet<string>;
-  sessions: Session[];
   mobile: boolean;
   visible: boolean;
   events: PaneEvents;
@@ -150,7 +148,6 @@ export function SplitPanes({
                   id={id}
                   deviceId={deviceId}
                   workspaceId={workspaceId}
-                  session={sessions.find((session) => session.id === id)}
                   active={id === owner.active}
                   group={owner}
                   showHeader={!mobile && !owner.maximized && members(owner).length > 1}
@@ -181,7 +178,6 @@ function TerminalPane({
   id,
   deviceId,
   workspaceId,
-  session,
   active,
   group,
   showHeader,
@@ -191,7 +187,6 @@ function TerminalPane({
   id: string;
   deviceId: string;
   workspaceId: string;
-  session?: Session;
   active: boolean;
   group: TerminalGroup;
   showHeader: boolean;
@@ -200,8 +195,10 @@ function TerminalPane({
 }) {
   const { t } = useTranslation();
   const direction = parentSplit(group.root, id)?.direction ?? "horizontal";
-  const name = useRef(session?.name);
-  if (session) name.current = session.name;
+  const name = events.name(
+    id,
+    t(($) => $.common.terminal),
+  );
   const actions = useRef<TerminalActions>(null);
   const register = events.actions;
   const setActions = useCallback(
@@ -241,10 +238,10 @@ function TerminalPane({
               actions.current?.focus();
             }}
             className="flex min-w-0 flex-1 items-center gap-2 text-left text-xs"
-            title={name.current ?? t(($) => $.common.terminal)}
+            title={name}
           >
             <SquareTerminal size={13} className="shrink-0" />
-            <span className="truncate">{name.current ?? t(($) => $.common.terminal)}</span>
+            <span className="truncate">{name}</span>
           </button>
           <IconButton label={t(($) => $.terminal.maximize)} onClick={events.maximize}>
             <Maximize2 />
@@ -252,7 +249,7 @@ function TerminalPane({
           {events.menu(id)}
           <IconButton
             label={t(($) => $.terminal.closeNamed, {
-              name: name.current ?? t(($) => $.common.terminal),
+              name,
             })}
             onClick={() => events.close(id)}
           >

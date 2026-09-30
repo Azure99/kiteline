@@ -14,6 +14,15 @@ export function heartbeat(socket: WebSocket) {
   socket.on("error", () => {});
 }
 
+export function controlWritable(socket: WebSocket) {
+  if (socket.readyState !== WebSocket.OPEN) return false;
+  if (socket.bufferedAmount > limits.controlMessageBytes * 2) {
+    socket.close(1013, "control_backpressure");
+    return false;
+  }
+  return true;
+}
+
 export function sendFrame(
   socket: WebSocket,
   data: string | Buffer,

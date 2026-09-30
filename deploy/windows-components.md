@@ -4,8 +4,8 @@ Build inputs are fixed in `agent-windows.json`, `release.json` and the existing
 `agent-static.json` tmux source entry. No installed MSYS2 or rolling package
 update is used. PowerShell 7 and native Git remain user-provided dependencies.
 
-From the repository on Linux x64 (Node 24.20.0, Docker, curl, tar with zstd,
-unzip, git and GNU objdump):
+From the repository on Linux x64 (the Node version in [release.json](release.json),
+Docker, curl, tar with zstd, unzip, git and GNU objdump):
 
 ```sh
 node scripts/build-windows-components.mjs prepare /var/tmp/kiteline-win-inputs
@@ -13,22 +13,23 @@ node scripts/build-windows-components.mjs addon /var/tmp/kiteline-win-inputs /va
 ```
 
 Copy the complete prepared input directory to a Windows x64 build host. Use a
-fresh local build path, not a network share. Run with native Node 24.20.0:
+fresh local build path, not a network share. Run with the same native Node version:
 
 ```powershell
 node.exe C:\kiteline-build\inputs\scripts\build-windows-components.mjs tmux C:\kiteline-build\inputs C:\kiteline-build\tmux
 ```
 
-Return the complete `tmux` output to Linux, then assemble and verify:
+Return the complete `tmux` output to Linux, then assemble:
 
 ```sh
 node scripts/build-windows-components.mjs assemble /var/tmp/kiteline-win-inputs /var/tmp/kiteline-win-tmux /var/tmp/kiteline-win-addon /var/tmp/kiteline-win-components
-node scripts/build-windows-components.mjs verify /var/tmp/kiteline-win-components
 ```
 
 Output directories must be new. Input downloads can be reused only after their
 SHA256 matches. Build outputs include input and file identities; assembly rejects
-changed recipes, missing files and mismatched hashes. Packaging must verify the
+changed recipes, missing files and mismatched hashes. Assembly records the verified
+file hashes in the component identity. Use `verify OUTPUT` for an independent
+check of an existing component tree. Packaging must verify the
 component output again against the current source. A successful cross-build is
 not Windows runtime acceptance.
 

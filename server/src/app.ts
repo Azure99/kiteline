@@ -2,15 +2,7 @@ import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse }
 import { readFile } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import { WebSocketServer } from "ws";
-import {
-  AppError,
-  appVersion,
-  asError,
-  limits,
-  protocolVersion,
-  record,
-  string,
-} from "@kiteline/shared/protocol";
+import { AppError, appVersion, asError, limits, record, string } from "@kiteline/shared/protocol";
 import type { ServerConfig } from "./config.js";
 import { Store, password } from "./store.js";
 import {
@@ -272,8 +264,6 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
         const device = store.authenticateAgent(bearer(request));
         if (!device) throw new AppError("unauthenticated", "Invalid device credentials");
         connections.checkAgentVersion(device.id, url.searchParams.get("appVersion"));
-        if (url.searchParams.get("protocolVersion") !== String(protocolVersion))
-          throw new AppError("unsupported", "Protocol version mismatch");
         sockets.handleUpgrade(request, socket, head, (ws) =>
           connections.acceptAgent(device.id, ws),
         );
@@ -287,8 +277,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       } else
         socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n", () => socket.destroy());
     } catch (error) {
-      const status =
-        error instanceof AppError && error.code === "unsupported" ? 426 : errorStatus(error);
+      const status = errorStatus(error);
       const payload = JSON.stringify({ error: asError(error) });
       socket.end(
         `HTTP/1.1 ${status} ${STATUS_CODES[status]}\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nContent-Length: ${Buffer.byteLength(payload)}\r\nConnection: close\r\n\r\n${payload}`,

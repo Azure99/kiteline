@@ -37,7 +37,7 @@ export function FileCleanupNotice({
         if (disposed) return;
         setState(result);
         setUnknown(false);
-        repeat = result.pending || result.failed > 0;
+        repeat = result.pending;
       } catch {
         if (disposed) return;
         setUnknown(true);

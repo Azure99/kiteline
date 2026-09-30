@@ -13,6 +13,7 @@ import {
   terminalPreset,
   tmuxBinary,
   tmuxEnvironment,
+  tmuxSession,
 } from "@kiteline/shared/terminal/node";
 import { paneCommand } from "@kiteline/shared/terminal/windows";
 import { spawnJob, type JobChild } from "@kiteline/shared/windows/job";
@@ -48,7 +49,6 @@ export class Control {
   private stdin?: Writable;
   private starting?: Promise<TerminalIdentity>;
   private stopped?: Promise<void>;
-  private cleanupError?: unknown;
   private pending: Pending[] = [];
   private block?: { guard: string; lines: string[]; bytes: number; pending: Pending };
   private disposed = false;
@@ -84,7 +84,7 @@ export class Control {
           "-F",
           "#{pane_id} #{window_id} #{pane_width} #{pane_height}",
           "-s",
-          o.tmuxSession,
+          tmuxSession,
           "-x",
           String(o.cols),
           "-y",
@@ -97,7 +97,7 @@ export class Control {
               : [o.shell, "-lc", o.command]
           ).map((value) => value.replace(/;$/, "\\;")),
         ]
-      : ["attach-session", "-E", "-t", o.tmuxSession];
+      : ["attach-session", "-E", "-t", tmuxSession];
     if (!creating) this.identity = o;
     let stdout;
     let stderr;
@@ -125,15 +125,9 @@ export class Control {
       ]);
       void drained.catch(() => {});
       this.stopped = (async () => {
-        try {
-          await job.exited;
-        } catch (error) {
-          this.fail(error instanceof Error ? error : new Error(String(error)));
-        } finally {
-          this.terminate();
-          await job.empty;
-          await drained;
-        }
+        await job.exited;
+        await job.stop();
+        await drained;
       })().then(
         () => this.fail(new Error(this.stderr.trim() || "tmux control connection closed")),
         (error: unknown) => this.fail(error instanceof Error ? error : new Error(String(error))),
@@ -173,13 +167,12 @@ export class Control {
     const identity = creating
       ? output
       : await this.command(
-          `display-message -p -t ${o.tmuxSession} '#{pane_id} #{window_id} #{pane_width} #{pane_height}'`,
+          `display-message -p -t ${tmuxSession} '#{pane_id} #{window_id} #{pane_width} #{pane_height}'`,
         );
     const match = /^(%\d+) (@\d+) (\d+) (\d+)$/.exec(identity[0] ?? "");
     if (!match) throw new Error("tmux did not return the terminal identity");
     this.identity = {
       socket: o.socket,
-      tmuxSession: o.tmuxSession,
       paneId: match[1]!,
       windowId: match[2]!,
     };
@@ -324,17 +317,12 @@ export class Control {
     this.terminate();
   }
   private terminate() {
-    try {
-      this.job?.terminate();
-      this.child?.kill("SIGTERM");
-    } catch (error) {
-      this.cleanupError = error;
-    }
+    this.job?.terminate();
+    this.child?.kill("SIGTERM");
   }
   async close() {
     this.dispose();
     await this.starting?.catch(() => {});
     await this.stopped;
-    if (this.cleanupError) throw this.cleanupError;
   }
 }

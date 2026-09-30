@@ -42,37 +42,23 @@ public sealed class __KITELINE_LAUNCHER_TYPE__ : IDisposable {
     [DllImport("kernel32.dll", SetLastError=true)] static extern bool CloseHandle(IntPtr handle);
     static void Check(bool ok,string operation) { if(!ok) throw new Win32Exception(Marshal.GetLastWin32Error(),operation); }
     static bool Valid(IntPtr handle) { return handle!=IntPtr.Zero && handle!=new IntPtr(-1); }
+    // Reserved for launcher ownership failure in the download script's managed command boundary.
+    const int FatalExitCode=125;
+    static void CheckJob(bool ok,string operation) {
+        if(ok) return;
+        var error=new Win32Exception(Marshal.GetLastWin32Error(),operation);
+        try { Console.Error.WriteLine("Launcher Job ownership failed: "+error); }
+        catch {}
+        finally { Environment.Exit(FatalExitCode); }
+    }
     static bool Empty(IntPtr job) {
         Accounting members;
-        Check(QueryInformationJobObject(job,1,out members,(uint)Marshal.SizeOf<Accounting>(),IntPtr.Zero),"query launcher process set");
+        CheckJob(QueryInformationJobObject(job,1,out members,(uint)Marshal.SizeOf<Accounting>(),IntPtr.Zero),"query launcher process set");
         return members.active==0;
     }
     static void StopJob(IntPtr job) {
-        Exception failure=null;
-        bool terminated=false;
-        for(;;) {
-            if(!terminated) {
-                try {
-                    Check(TerminateJobObject(job,1),"clean remaining launcher processes");
-                    terminated=true;
-                } catch(Exception error) {
-                    if(failure==null) {
-                        failure=error;
-                        Console.Error.WriteLine("Launcher cleanup failed; retaining process ownership: "+error.Message);
-                    }
-                }
-            }
-            try {
-                if(Empty(job)) break;
-            } catch(Exception error) {
-                if(failure==null) {
-                    failure=error;
-                    Console.Error.WriteLine("Launcher cleanup failed; retaining process ownership: "+error.Message);
-                }
-            }
-            Thread.Sleep(10);
-        }
-        if(failure!=null) throw new InvalidOperationException("Launcher process set is now empty; cleanup encountered an error",failure);
+        CheckJob(TerminateJobObject(job,1),"clean remaining launcher processes");
+        while(!Empty(job)) Thread.Sleep(10);
     }
     static string Quote(string value) {
         if(value.IndexOf('\0')>=0) throw new ArgumentException("Process argument contains NUL");
@@ -187,13 +173,13 @@ public sealed class __KITELINE_LAUNCHER_TYPE__ : IDisposable {
                 if(failure!=null) throw new AggregateException("Launcher execution and cleanup failed",failure,cleanup);
                 throw;
             } finally {
-                if(Valid(process.thread)) CloseHandle(process.thread);
-                if(Valid(process.process)) CloseHandle(process.process);
+                if(Valid(process.thread)) CheckJob(CloseHandle(process.thread),"close launcher thread");
+                if(Valid(process.process)) CheckJob(CloseHandle(process.process),"close launcher process");
                 if(initialized) DeleteProcThreadAttributeList(attrs);
                 if(attrs!=IntPtr.Zero) Marshal.FreeHGlobal(attrs);
                 if(handleList!=IntPtr.Zero) Marshal.FreeHGlobal(handleList);
                 if(jobList!=IntPtr.Zero) Marshal.FreeHGlobal(jobList);
-                if(Valid(job)) CloseHandle(job);
+                if(Valid(job)) CheckJob(CloseHandle(job),"close launcher Job");
                 foreach(var stream in streams) if(Valid(stream)) CloseHandle(stream);
                 CloseHandle(pin);
             }

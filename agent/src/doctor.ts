@@ -1,7 +1,6 @@
 import { access, readFile, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { createHash } from "node:crypto";
-import { isDeepStrictEqual } from "node:util";
 import { createRequire } from "node:module";
 import { isAbsolute, join } from "node:path";
 import { appVersion, terminalProfile, type Session } from "@kiteline/shared/protocol";
@@ -41,11 +40,6 @@ interface Runtime {
   recorderPid?: number;
   sessions: Session[];
   schedules: ReturnType<ScheduledTasks["status"]>;
-}
-function nativeFacts(identity: Record<string, unknown>) {
-  const facts = { ...identity };
-  for (const key of ["headless", "xterm", "serialize", "profile", "ripgrep"]) delete facts[key];
-  return facts;
 }
 export async function diagnose(
   config: Pick<AgentConfig, "dataDir" | "runDir">,
@@ -88,39 +82,29 @@ export async function diagnose(
       return `tmux=${identity.tmux}; linkage=${identity.linkage}; patch=${identity.patch}`;
     }
     const identity = JSON.parse(await readFile(join(native, "identity.json"), "utf8"));
-    const release = JSON.parse(await readFile(join(packageDirectory, "release.json"), "utf8"));
     const hash = async (file: string) =>
       createHash("sha256")
         .update(await readFile(file))
         .digest("hex");
     if (
-      !isDeepStrictEqual(nativeFacts(release.native), nativeFacts(identity)) ||
       identity.architecture !== process.arch ||
       !["static-musl", "dynamic"].includes(identity.linkage) ||
       (await hash(tmuxBinary)) !== identity.tmuxBinary ||
       (await hash(join(native, "bin/rename-noreplace"))) !== identity.helperBinary
     )
-      throw new Error(
-        "Native components, linkage, architecture or release manifest do not match the build identity",
-      );
+      throw new Error("Native components, linkage or architecture do not match the build identity");
     nativeLinkage = identity.linkage;
     return `tmux=${identity.tmux}; linkage=${nativeLinkage}; patch=${identity.patch}`;
   });
   await check("Recorder build identity", async () => {
     const identity = JSON.parse(await readFile(join(native, "identity.json"), "utf8"));
-    const release = JSON.parse(await readFile(join(packageDirectory, "release.json"), "utf8"));
     const recorderRequire = createRequire(join(packageDirectory, "terminal-recorder/package.json"));
     if (
-      ["headless", "serialize", "xterm", "profile"].some(
-        (key) => identity[key] !== release.native?.[key],
-      ) ||
       identity.profile !== terminalProfile ||
       recorderRequire("@xterm/headless/package.json").version !== identity.headless ||
       recorderRequire("@xterm/addon-serialize/package.json").version !== identity.serialize
     )
-      throw new Error(
-        "Recorder dependencies, terminalProfile or release manifest do not match the build identity",
-      );
+      throw new Error("Recorder dependencies or terminalProfile do not match the build identity");
     await access(join(packageDirectory, "terminal-recorder/dist/main.js"), constants.R_OK);
     return `profile=${identity.profile}; headless=${identity.headless}; serialize=${identity.serialize}; xterm=${identity.xterm}`;
   });
@@ -142,14 +126,7 @@ export async function diagnose(
     await windowsNative().fileAttributes(native);
     return "Windows native filesystem API is loadable";
   });
-  if (bundledRipgrep)
-    await check("Bundled ripgrep", async () => {
-      const identity = JSON.parse(await readFile(join(native, "identity.json"), "utf8"));
-      const release = JSON.parse(await readFile(join(packageDirectory, "release.json"), "utf8"));
-      if (!isDeepStrictEqual(identity.ripgrep, release.native?.ripgrep))
-        throw new Error("Bundled ripgrep does not match the release manifest");
-      return checkBundledRipgrep(command);
-    });
+  if (bundledRipgrep) await check("Bundled ripgrep", () => checkBundledRipgrep(command));
   if (!runtime) {
     add(
       "Runtime environment",

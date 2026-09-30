@@ -4,15 +4,16 @@ import { Download } from "lucide-react";
 import type { Device } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
 import { UpgradeDialog } from "./upgrade-dialog";
+import { agentVersionMismatch } from "../lib/release";
 
 export function AgentReleaseNotice({ device }: { device: Device }) {
   const { t, i18n } = useTranslation();
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
-  const release = device.release;
+  const release = agentVersionMismatch(device) ? device.release : undefined;
   return (
     <>
-      {device.status === "offline" && release && release.agentVersion !== release.serverVersion && (
+      {release && (
         <div
           role="alert"
           className="flex h-28 shrink-0 flex-col items-start justify-center gap-2 border-b border-border bg-amber-50 px-4 py-2 text-sm sm:h-16 sm:flex-row sm:items-center"

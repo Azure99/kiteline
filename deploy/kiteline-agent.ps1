@@ -96,8 +96,7 @@ __KITELINE_NATIVE_SOURCE__
         if ($release.kind -cne 'agent' -or $release.platform -cne 'windows' -or $release.architecture -cne 'x64' -or
             $release.version -cne $application.version -or $release.version -notmatch '^[0-9A-Za-z.+-]+$' -or
             $release.sourceDigest -notmatch '^[a-f0-9]{64}$' -or $release.lockfile -notmatch '^[a-f0-9]{64}$' -or
-            $identity.linkage -cne 'windows-msys' -or $identity.architecture -cne 'x64' -or $identity.node -cne "v$($release.node)" -or
-            ($identity | ConvertTo-Json -Depth 100 -Compress) -cne ($release.native | ConvertTo-Json -Depth 100 -Compress)) {
+            $identity.linkage -cne 'windows-msys' -or $identity.architecture -cne 'x64' -or $identity.node -cne "v$($release.node)") {
             throw 'A complete Windows x64 agent package with matching current identity is required'
         }
         foreach ($name in $componentRequired) {
@@ -193,12 +192,12 @@ __KITELINE_NATIVE_SOURCE__
     function New-KitelinePrivateDirectory([string]$Path) {
         Assert-KitelineNoReparse ([IO.Path]::GetDirectoryName($Path))
         if (Test-KitelineExists $Path) { throw "Preparation directory already exists: $Path" }
-        $null = [IO.FileSystemAclExtensions]::CreateDirectory((New-KitelineAcl $true ''), $Path)
+        [IO.FileSystemAclExtensions]::Create([IO.DirectoryInfo]::new($Path), (New-KitelineAcl $true ''))
     }
     function Assert-KitelineManagement {
         Assert-KitelineNoReparse $management
         if (-not (Test-KitelineExists $management)) {
-            $null = [IO.FileSystemAclExtensions]::CreateDirectory((New-KitelineAcl $true ''), $management)
+            [IO.FileSystemAclExtensions]::Create([IO.DirectoryInfo]::new($management), (New-KitelineAcl $true ''))
         }
         $acl = Get-Acl -LiteralPath $management
         if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin @('S-1-5-18', 'S-1-5-32-544')) { throw "Untrusted installation directory owner: $management" }
@@ -271,17 +270,8 @@ __KITELINE_NATIVE_SOURCE__
     }
     function Close-KitelineLease($Lease) {
         if ($null -eq $Lease) { return }
-        $failure = $null
-        for (;;) {
-            try { $Lease.Dispose(); break }
-            catch {
-                if ($null -eq $failure) {
-                    $failure = $_.Exception; $errors.Add($failure)
-                    [Console]::Error.WriteLine("Cleanup failed; retaining ownership: $($failure.Message)")
-                }
-                [Threading.Thread]::Sleep(10)
-            }
-        }
+        try { $Lease.Dispose() }
+        catch { $errors.Add($_.Exception) }
     }
     function Test-KitelineCancellation {
         if ($guard.Interrupted) { throw "Installation preparation cancelled (console status $($guard.Interrupted))" }
@@ -364,7 +354,7 @@ import(url.pathToFileURL(process.argv[1]).href).catch(error=>{console.error(erro
                 if ($action -eq 'install') {
                     foreach ($path in @($program, $public, $recordFile)) { if (Test-KitelineExists $path) { throw "$path already exists; inspect it before installing" } }
                     $installation = $requested
-                    $null = Test-KitelinePackage $root
+                    Assert-KitelineNoReparse $root
                 }
                 # All maintenance code is already resident in this system PowerShell process.
                 Set-Location ([IO.Path]::GetPathRoot($program))

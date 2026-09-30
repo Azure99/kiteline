@@ -44,11 +44,6 @@ export function App() {
   useEffect(() => {
     void loadSession();
   }, [loadSession]);
-  useEffect(() => {
-    const expire = () => setSession(undefined);
-    window.addEventListener("kiteline:unauthenticated", expire);
-    return () => window.removeEventListener("kiteline:unauthenticated", expire);
-  }, [setSession]);
   const authentication =
     loading || error ? (
       <div className="flex h-[var(--viewport-height)] flex-col items-center justify-center gap-4 bg-muted p-5">

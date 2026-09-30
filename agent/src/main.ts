@@ -127,61 +127,58 @@ async function main() {
   try {
     await privateDirectory(config.dataDir);
     releaseState = await lockAgentState(config.dataDir);
-    if (command === "bind") {
-      const index = process.argv.indexOf("--server");
-      const server = new URL(string(index < 0 ? undefined : process.argv[index + 1], "server"));
-      if (server.protocol !== "http:" && server.protocol !== "https:")
-        throw new AppError("invalid_argument", "server must use HTTP or HTTPS");
-      if (process.argv.includes("--if-unbound")) {
-        const exists = await lstat(resolve(config.dataDir, "connection.json")).then(
-          () => true,
-          (error: NodeJS.ErrnoException) => {
-            if (error.code === "ENOENT") return false;
-            throw error;
-          },
-        );
-        if (exists)
-          throw new Error(
-            "This installation is already bound; the existing device identity is retained. Use kiteline-agent run. To bind again, stop the existing instance first, then explicitly run kiteline-agent bind.",
-          );
-      }
-      const code = await input("Binding code: ");
-      let value: Record<string, unknown>;
-      try {
-        const response = await fetchServerJson(new URL("/api/agent/bind", server), {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ code, name: hostname() }),
-          signal: AbortSignal.timeout(config.limits.channelPairTimeout),
-        });
-        value = record(response.body);
-        if (!response.ok)
-          throw new AppError(String(record(value.error).code), String(record(value.error).message));
-      } catch (error) {
-        if (error instanceof AppError) throw error;
+    const index = process.argv.indexOf("--server");
+    const server = new URL(string(index < 0 ? undefined : process.argv[index + 1], "server"));
+    if (server.protocol !== "http:" && server.protocol !== "https:")
+      throw new AppError("invalid_argument", "server must use HTTP or HTTPS");
+    if (process.argv.includes("--if-unbound")) {
+      const exists = await lstat(resolve(config.dataDir, "connection.json")).then(
+        () => true,
+        (error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") return false;
+          throw error;
+        },
+      );
+      if (exists)
         throw new Error(
-          "Binding result is unknown. Sign in to the web app and check this binding. If the code was consumed but no credentials were saved locally, revoke the device and bind again with a new code.",
-          { cause: error },
+          "This installation is already bound; the existing device identity is retained. Use kiteline-agent run. To bind again, stop the existing instance first, then explicitly run kiteline-agent bind.",
         );
-      }
-      const identity = {
-        deviceId: string(value.deviceId),
-        deviceToken: string(value.deviceToken),
-        server: server.origin,
-      };
-      try {
-        await atomicJson(resolve(config.dataDir, "connection.json"), identity);
-      } catch (error) {
-        throw new Error(
-          `Device ${identity.deviceId} was registered but its credentials were not saved; revoke it in the web app and bind again.`,
-          {
-            cause: error,
-          },
-        );
-      }
-      console.log(`Device bound: ${identity.deviceId}`);
-      return;
     }
+    const code = await input("Binding code: ");
+    let value: Record<string, unknown>;
+    try {
+      const response = await fetchServerJson(new URL("/api/agent/bind", server), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code, name: hostname() }),
+        signal: AbortSignal.timeout(config.limits.channelPairTimeout),
+      });
+      value = record(response.body);
+      if (!response.ok)
+        throw new AppError(String(record(value.error).code), String(record(value.error).message));
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      throw new Error(
+        "Binding result is unknown. Sign in to the web app and check this binding. If the code was consumed but no credentials were saved locally, revoke the device and bind again with a new code.",
+        { cause: error },
+      );
+    }
+    const identity = {
+      deviceId: string(value.deviceId),
+      deviceToken: string(value.deviceToken),
+      server: server.origin,
+    };
+    try {
+      await atomicJson(resolve(config.dataDir, "connection.json"), identity);
+    } catch (error) {
+      throw new Error(
+        `Device ${identity.deviceId} was registered but its credentials were not saved; revoke it in the web app and bind again.`,
+        {
+          cause: error,
+        },
+      );
+    }
+    console.log(`Device bound: ${identity.deviceId}`);
   } finally {
     await releaseState?.();
   }

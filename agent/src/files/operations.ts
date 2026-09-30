@@ -1,7 +1,7 @@
 import { isUtf8 } from "node:buffer";
 import { constants, type BigIntStats } from "node:fs";
-import { chmod, mkdir, open, opendir, readlink, rmdir, stat, unlink } from "node:fs/promises";
-import { dirname, join, posix } from "node:path";
+import { chmod, mkdir, open, opendir, readlink, rmdir, unlink } from "node:fs/promises";
+import { posix } from "node:path";
 import {
   AppError,
   OperationError,
@@ -16,7 +16,15 @@ import {
 } from "@kiteline/shared/protocol";
 import type { MetadataStore } from "../metadata.js";
 import { publish } from "../mutations.js";
-import { entryInfo, linkType, locate, protectRoot, relativePath, sameObject } from "./paths.js";
+import {
+  containsDirectory,
+  entryInfo,
+  linkType,
+  locate,
+  protectRoot,
+  relativePath,
+  sameObject,
+} from "./paths.js";
 import { checkTarget, targetAgain } from "./destination.js";
 import { renameNoReplace, renameReplace } from "./rename.js";
 import { TemporaryFiles, type TrackedTemporary } from "./temporary.js";
@@ -280,7 +288,11 @@ export class FileOperations {
         throw new AppError("conflict", "Target directory has changed");
       if (source.location.absolute === target.absolute)
         throw new AppError("invalid_argument", "Source and target are the same");
-      if (source.info.isDirectory()) await outsideDirectory(source, target.parent);
+      if (source.info.isDirectory() && (await containsDirectory(source.info, target.parent)))
+        throw new AppError(
+          "invalid_argument",
+          "Cannot copy or move an item into itself or a subdirectory",
+        );
       await checkTarget(target, item, source.info.isDirectory());
       return target;
     }, signal);
@@ -368,8 +380,7 @@ export class FileOperations {
     }
 
     let temporary: TrackedTemporary | undefined;
-    let published = false,
-      uncertain = false;
+    let published = false;
     let copied = source;
     try {
       if (source.info.isSymbolicLink()) {
@@ -379,7 +390,6 @@ export class FileOperations {
           target.parentInfo,
           text,
           signal,
-          { path: join(root, item.targetPath) },
           await linkType(source.location.absolute),
         );
       } else {
@@ -392,9 +402,7 @@ export class FileOperations {
           if (!info.isFile() || !sameObject(info, source.info))
             throw new AppError("conflict", "Source file has changed");
           copied = { ...source, info };
-          const output = await this.temporary.create(target.parent, target.parentInfo, signal, {
-            path: join(root, item.targetPath),
-          });
+          const output = await this.temporary.create(target.parent, target.parentInfo, signal);
           temporary = output;
           const block = Buffer.alloc(limits.dataChunkBytes);
           let position = 0;
@@ -450,11 +458,8 @@ export class FileOperations {
           await this.temporary.assertRelocatableLocked(copied.location, copied.info);
           await change(result, signal, () => unlink(copied.location.absolute), complete);
         }, signal);
-    } catch (error) {
-      if (error instanceof OperationError && error.outcome === "unknown") uncertain = true;
-      throw error;
     } finally {
-      if (temporary) await this.temporary.release(temporary, { published, uncertain });
+      if (temporary) await this.temporary.release(temporary, { published });
     }
   }
 
@@ -540,18 +545,6 @@ async function verify(root: string, original: ObjectRef, content = false) {
 }
 function sameContentStat(a: BigIntStats, b: BigIntStats) {
   return a.size === b.size && a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs;
-}
-async function outsideDirectory(source: ObjectRef, parent: string) {
-  for (;;) {
-    if (sameObject(source.info, await stat(parent, { bigint: true })))
-      throw new AppError(
-        "invalid_argument",
-        "Cannot copy or move an item into itself or a subdirectory",
-      );
-    const next = dirname(parent);
-    if (next === parent) return;
-    parent = next;
-  }
 }
 function fail(state: ResultState, path: string, error: unknown) {
   state.failed++;

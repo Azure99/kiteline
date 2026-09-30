@@ -25,7 +25,7 @@ export function rawReader(each: (change: RawChange) => void) {
       return;
     }
     const status = header[4]!;
-    if (/^[RC]/.test(status) && from === undefined) {
+    if (status.startsWith("R") && from === undefined) {
       from = record;
       return;
     }

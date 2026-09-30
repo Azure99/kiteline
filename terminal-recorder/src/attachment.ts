@@ -1,4 +1,4 @@
-import { AppError, limits, terminalProfile } from "@kiteline/shared/protocol";
+import { AppError, limits } from "@kiteline/shared/protocol";
 import type { TerminalEvent, TerminalFrame } from "@kiteline/shared/ipc";
 import type { Snapshot } from "./model.js";
 
@@ -14,7 +14,6 @@ function* eventPieces(event: TerminalEvent): Generator<Piece> {
 function* restore(snapshot: Snapshot, historyLines: number, historyGap: boolean): Generator<Piece> {
   yield {
     type: "restore.begin",
-    terminalProfile,
     cols: snapshot.cols,
     rows: snapshot.rows,
     historyLines,
@@ -68,7 +67,7 @@ export class Attachment {
     }
   }
   acknowledge(bytes: number) {
-    if (!Number.isSafeInteger(bytes) || bytes < this.consumed || bytes > this.sent) {
+    if (bytes < this.consumed || bytes > this.sent) {
       this.fail(
         new AppError("invalid_argument", "Invalid terminal output consumption acknowledgement"),
       );

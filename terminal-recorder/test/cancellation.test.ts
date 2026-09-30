@@ -46,7 +46,6 @@ test("create cancellation fences both same-chunk admission and a retiring record
       type: "create",
       sessionId: "one",
       socket: join(directory, "tmux.sock"),
-      tmuxSession: "kiteline",
       workspacePath: directory,
       shell: "/bin/bash",
       command,

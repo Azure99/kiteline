@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { BigIntStats } from "node:fs";
 import { open, stat, symlink, unlink, type FileHandle } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import {
   AppError,
   asError,
@@ -11,7 +11,7 @@ import {
 } from "@kiteline/shared/protocol";
 import { atomicJson, readJson } from "../config.js";
 import { publish } from "../mutations.js";
-import { entryInfo, pathDependencies, realPath, sameObject } from "./paths.js";
+import { containsDirectory, entryInfo, realPath, sameObject } from "./paths.js";
 
 interface TemporaryRecord {
   name: string;
@@ -36,16 +36,12 @@ interface Cleanup {
   running?: Promise<void>;
   error?: unknown;
   retry: boolean;
-}
-
-interface WriteAccess {
-  path: string;
-  followFinalLink?: boolean;
+  failures: number;
 }
 
 export class TemporaryFiles {
   private records: TemporaryRecord[] = [];
-  private active = new Map<string, { record: TemporaryRecord; dependencies: BigIntStats[] }>();
+  private active = new Map<string, TemporaryRecord>();
   private path: string;
   private cleanup = new Map<string, Cleanup>();
   private cleanupAbort = new AbortController();
@@ -114,15 +110,22 @@ export class TemporaryFiles {
     clearTimeout(this.closeTimer);
   }
 
-  private clean(record: TemporaryRecord, published = false): Promise<void> {
+  private cleanupItem(record: TemporaryRecord, published = false) {
     const path = join(record.parent, record.name);
     let item = this.cleanup.get(path);
     if (!item) {
-      item = { record, published, retry: false };
+      item = { record, published, retry: false, failures: 0 };
       this.cleanup.set(path, item);
     }
     item.published ||= published;
+    return item;
+  }
+
+  private clean(record: TemporaryRecord, published = false): Promise<void> {
+    const path = join(record.parent, record.name);
+    const item = this.cleanupItem(record, published);
     if (item.running) return item.running;
+    if (item.failures && !item.retry) return Promise.resolve();
     item.retry = false;
     if (this.cleanupAbort.signal.aborted) return Promise.resolve();
     const current = item;
@@ -150,7 +153,8 @@ export class TemporaryFiles {
 
   private failedCleanup(item: Cleanup, error: unknown) {
     item.error = error;
-    item.retry = !(error instanceof AppError && error.code === "conflict");
+    item.failures++;
+    item.retry = item.failures < 3 && (error as NodeJS.ErrnoException).code === "EBUSY";
     console.error("Temporary file cleanup:", join(item.record.parent, item.record.name), error);
   }
 
@@ -164,22 +168,11 @@ export class TemporaryFiles {
     }, 30_000).unref();
   }
 
-  create(
-    parent: string,
-    expected: BigIntStats,
-    signal: AbortSignal,
-    access?: WriteAccess,
-  ): Promise<Temporary> {
+  create(parent: string, expected: BigIntStats, signal: AbortSignal): Promise<Temporary> {
     return publish(async () => {
       const info = await stat(await realPath(parent), { bigint: true });
       if (!sameObject(info, expected))
         throw new AppError("conflict", "Target parent directory has changed");
-      const route = await pathDependencies(
-        access?.path ?? parent,
-        access ? !!access.followFinalLink : true,
-      );
-      if ((access ? dirname(route.path) : route.path) !== parent)
-        throw new AppError("conflict", "Write path no longer reaches the prepared parent");
       const name = `.kiteline-${randomUUID()}.tmp`;
       const path = join(parent, name);
       const handle = await open(path, "wx+", 0o600);
@@ -196,7 +189,7 @@ export class TemporaryFiles {
         };
         this.records.push(record);
         await this.persist();
-        this.active.set(path, { record, dependencies: route.items });
+        this.active.set(path, record);
         return { ...record, path, handle };
       } catch (error) {
         await handle
@@ -214,19 +207,12 @@ export class TemporaryFiles {
     expected: BigIntStats,
     target: string | Buffer,
     signal: AbortSignal,
-    access?: WriteAccess,
     type?: "file" | "dir" | "junction",
   ): Promise<TrackedTemporary> {
     return publish(async () => {
       const info = await stat(await realPath(parent), { bigint: true });
       if (!sameObject(info, expected))
         throw new AppError("conflict", "Target parent directory has changed");
-      const route = await pathDependencies(
-        access?.path ?? parent,
-        access ? !!access.followFinalLink : true,
-      );
-      if ((access ? dirname(route.path) : route.path) !== parent)
-        throw new AppError("conflict", "Write path no longer reaches the prepared parent");
       const name = `.kiteline-${randomUUID()}.tmp`;
       const path = join(parent, name);
       await symlink(target, path, type);
@@ -243,7 +229,7 @@ export class TemporaryFiles {
         };
         this.records.push(record);
         await this.persist();
-        this.active.set(path, { record, dependencies: route.items });
+        this.active.set(path, record);
         return { ...record, path };
       } catch (error) {
         if (record) await this.rollbackLocked(record);
@@ -274,10 +260,7 @@ export class TemporaryFiles {
     return offset;
   }
 
-  async release(
-    temporary: TrackedTemporary,
-    { published }: { published: boolean; uncertain: boolean },
-  ) {
+  async release(temporary: TrackedTemporary, { published }: { published: boolean }) {
     try {
       if ("handle" in temporary) await this.closeFile(temporary as Temporary);
     } finally {
@@ -291,18 +274,12 @@ export class TemporaryFiles {
     }
   }
 
-  discard(temporary: TrackedTemporary) {
-    return this.release(temporary, { published: false, uncertain: false });
-  }
-
   private async rollbackLocked(record: TemporaryRecord) {
     if (this.cleanupAbort.signal.aborted) return this.clean(record);
     try {
       await this.removeLocked(record);
     } catch (error) {
-      const item: Cleanup = { record, published: false, retry: false };
-      this.cleanup.set(join(record.parent, record.name), item);
-      this.failedCleanup(item, error);
+      this.failedCleanup(this.cleanupItem(record), error);
       this.retryLater();
     }
   }
@@ -312,9 +289,7 @@ export class TemporaryFiles {
     try {
       await this.forgetLocked(temporary);
     } catch (error) {
-      const item: Cleanup = { record: temporary, published: true, retry: false };
-      this.cleanup.set(temporary.path, item);
-      this.failedCleanup(item, error);
+      this.failedCleanup(this.cleanupItem(temporary, true), error);
       this.retryLater();
     }
   }
@@ -342,7 +317,7 @@ export class TemporaryFiles {
 
   ownsLocked(location: { name: string; parentInfo: BigIntStats }, info: BigIntStats) {
     return [...this.active.values()].some(
-      ({ record }) =>
+      (record) =>
         (process.platform === "win32" || record.name === location.name) &&
         record.parentDev === String(location.parentInfo.dev) &&
         record.parentIno === String(location.parentInfo.ino) &&
@@ -359,12 +334,12 @@ export class TemporaryFiles {
     const busy = () =>
       new AppError("busy", "A file write is using this location; retry after it finishes");
     if (this.ownsLocked(location, info)) throw busy();
-    if (!info.isDirectory() && !info.isSymbolicLink()) return;
-    for (const [path, { record, dependencies }] of this.active) {
+    if (!info.isDirectory()) return;
+    for (const [path, record] of this.active) {
       // This same publication releases its own temporary before changing the source.
       if (path === publishing?.path) continue;
-      if (!dependencies.some((dependency) => sameObject(info, dependency))) continue;
       try {
+        if (!(await containsDirectory(info, record.parent))) continue;
         await this.checkLocked({ ...record, path: join(record.parent, record.name) });
       } catch (error) {
         if (

@@ -1,5 +1,5 @@
 import type { Terminal } from "@xterm/xterm";
-import { scrollClippedScreen } from "./readonly-viewport";
+import { listenTerminalScroll, scrollClippedScreen } from "./readonly-viewport";
 
 // The xterm grid stays intact; only the visible slice moves while the keyboard is open.
 export class KeyboardViewport {
@@ -9,6 +9,7 @@ export class KeyboardViewport {
   private reading = false;
   private shortHistory?: number;
   private subscriptions: { dispose(): void }[];
+  private stopScroll: () => void;
   constructor(
     private terminal: Terminal,
     private onReading: () => void,
@@ -33,11 +34,7 @@ export class KeyboardViewport {
         this.schedule();
       }),
     ];
-    terminal.screenElement!.addEventListener("wheel", this.wheel, {
-      capture: true,
-      passive: false,
-    });
-    terminal.screenElement!.addEventListener("-xterm-gesturechange", this.gesture, true);
+    this.stopScroll = listenTerminalScroll(terminal, (x, y) => this.scroll(x, y));
   }
   update(active: boolean) {
     if (active !== this.active) {
@@ -75,24 +72,6 @@ export class KeyboardViewport {
     if (moved) this.startReading();
     return moved;
   }
-  private wheel = (event: WheelEvent) => {
-    if (event.ctrlKey) return;
-    const unit =
-      event.deltaMode === 1
-        ? this.terminal.dimensions!.css.cell.height
-        : event.deltaMode === 2
-          ? this.container.clientHeight
-          : 1;
-    if (!this.scroll(event.deltaX * unit, event.deltaY * unit)) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-  };
-  private gesture = (event: Event) => {
-    const change = event as Event & { translationX: number; translationY: number };
-    if (!this.scroll(-change.translationX, -change.translationY)) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-  };
   private schedule = () => {
     cancelAnimationFrame(this.frame);
     this.frame = requestAnimationFrame(() => {
@@ -111,8 +90,7 @@ export class KeyboardViewport {
   dispose() {
     cancelAnimationFrame(this.frame);
     this.subscriptions.forEach((subscription) => subscription.dispose());
-    this.terminal.screenElement!.removeEventListener("wheel", this.wheel, true);
-    this.terminal.screenElement!.removeEventListener("-xterm-gesturechange", this.gesture, true);
+    this.stopScroll();
     this.container.classList.remove("terminal-keyboard-clipped");
   }
 }

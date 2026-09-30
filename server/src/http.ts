@@ -1,5 +1,31 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { AppError, appVersion, asError, limits } from "@kiteline/shared/protocol";
+import {
+  AppError,
+  appVersion,
+  asError,
+  limits,
+  record,
+  string,
+  type Reply,
+} from "@kiteline/shared/protocol";
+
+export function replyError(value: unknown) {
+  const error = record(value);
+  const code = string(error.code);
+  if (typeof error.message !== "string")
+    throw new AppError("invalid_argument", "Expected a diagnostic string");
+  return new AppError(code, error.message, error.details);
+}
+
+export function checkReply(reply: Record<string, unknown>): Reply {
+  if (
+    typeof reply.outcome !== "string" ||
+    !["succeeded", "failed", "partial", "unknown"].includes(reply.outcome)
+  )
+    throw new AppError("invalid_argument", "Invalid reply");
+  if (reply.outcome !== "succeeded") replyError(reply.error);
+  return reply as unknown as Reply;
+}
 
 export function requireVersion(clientVersion: string | null, component: "agent" | "web") {
   if (clientVersion !== appVersion) throw versionMismatch(clientVersion, component);

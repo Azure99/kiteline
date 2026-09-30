@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { agentVersionMismatch } from "../lib/release";
 import {
   ChevronRight,
   Folder,
@@ -130,9 +131,7 @@ export function Home({
               <span className="min-w-0 flex-1 basis-32 truncate font-medium">{d.name}</span>
               <span className="flex items-center gap-2 text-xs text-muted-foreground">
                 <span className="status-dot" data-status={d.status} />
-                {d.status === "offline" &&
-                d.release &&
-                d.release.agentVersion !== d.release.serverVersion
+                {agentVersionMismatch(d)
                   ? t(($) => $.devices.versionMismatch)
                   : t(($) => $.common[d.status])}
               </span>
@@ -247,9 +246,7 @@ export function DeviceDetail({
       <div className="mb-7 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
         <span className="flex items-center gap-2">
           <span className="status-dot" data-status={device.status} />
-          {device.status === "offline" &&
-          device.release &&
-          device.release.agentVersion !== device.release.serverVersion
+          {agentVersionMismatch(device)
             ? t(($) => $.devices.versionMismatch)
             : t(($) => $.common[device.status])}
         </span>
@@ -276,12 +273,11 @@ export function DeviceDetail({
               time: new Date(device.release.observedAt).toLocaleString(i18n.resolvedLanguage),
             })}
           </p>
-          {device.status === "offline" &&
-            device.release.agentVersion !== device.release.serverVersion && (
-              <p role="status" className="text-destructive">
-                {t(($) => $.devices.matchingReleaseRequired)}
-              </p>
-            )}
+          {agentVersionMismatch(device) && (
+            <p role="status" className="text-destructive">
+              {t(($) => $.devices.matchingReleaseRequired)}
+            </p>
+          )}
         </div>
       )}
       <div className="mb-3 flex items-center justify-between">

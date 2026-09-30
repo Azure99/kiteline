@@ -1,3 +1,45 @@
+import { AppError, integer } from "./index.js";
+
+const taskValues = {
+  state: ["active", "paused"],
+  runState: [
+    "starting",
+    "running",
+    "stopping",
+    "succeeded",
+    "failed",
+    "stopped",
+    "skipped",
+    "unknown",
+  ],
+  trigger: ["scheduled", "manual"],
+  onceStatus: ["pending", "consumed", "missed"],
+  reasonCode: [
+    "missed",
+    "overlap",
+    "capacity",
+    "start_failed",
+    "exit_nonzero",
+    "requested_stop",
+    "agent_stop",
+    "unconfirmed",
+  ],
+} as const;
+type TaskValue<K extends keyof typeof taskValues> = (typeof taskValues)[K][number];
+
+export function taskValue<K extends keyof typeof taskValues>(
+  value: unknown,
+  kind: K,
+): TaskValue<K> {
+  const found = taskValues[kind].find((item) => item === value);
+  if (!found) throw new AppError("invalid_argument", `Invalid task ${kind}`);
+  return found as TaskValue<K>;
+}
+
+export function taskExitCode(value: unknown) {
+  return integer(value, "exitCode", 0, 0xffffffff);
+}
+
 export type TaskSchedule = { kind: "cron"; expression: string } | { kind: "once"; at: string };
 
 export interface ScheduledTaskInput {
@@ -11,40 +53,24 @@ export interface ScheduledTaskInput {
 export interface ScheduledTask extends Required<ScheduledTaskInput> {
   id: string;
   revision: number;
-  state: "active" | "paused";
+  state: TaskValue<"state">;
   reviewRunId?: string;
   nextRunAt: string | null;
-  onceStatus?: "pending" | "consumed" | "missed";
+  onceStatus?: TaskValue<"onceStatus">;
 }
 
 export interface TaskRunSummary {
   id: string;
   taskId: string;
-  trigger: "scheduled" | "manual";
+  trigger: TaskValue<"trigger">;
   scheduledAt?: string;
   acceptedAt: string;
   startedAt?: string;
   endedAt?: string;
-  state:
-    | "starting"
-    | "running"
-    | "stopping"
-    | "succeeded"
-    | "failed"
-    | "stopped"
-    | "skipped"
-    | "unknown";
+  state: TaskValue<"runState">;
   exitCode?: number | null;
   signal?: string | null;
-  reasonCode?:
-    | "missed"
-    | "overlap"
-    | "capacity"
-    | "start_failed"
-    | "exit_nonzero"
-    | "requested_stop"
-    | "agent_stop"
-    | "unconfirmed";
+  reasonCode?: TaskValue<"reasonCode">;
 }
 
 export interface TaskRun extends TaskRunSummary {
@@ -67,6 +93,7 @@ export interface ScheduledTaskSummary {
 
 export interface TaskSnapshot {
   revision: number;
+  storageError?: true;
   items: ScheduledTaskSummary[];
 }
 

@@ -9,7 +9,7 @@ import { CursorBudget } from "../src/cursor-budget.js";
 import { defaultAgentLimits } from "../src/config.js";
 import { Repositories } from "../src/git/repos.js";
 import { observeIndex, status } from "../src/git/status.js";
-import { workingDiff, rawReader, numstatReader, type RawChange } from "../src/git/diff.js";
+import { workingDiff } from "../src/git/diff.js";
 import { branches, commitDiff, commitFiles, history } from "../src/git/history.js";
 
 const run = promisify(execFile);
@@ -54,6 +54,16 @@ test("leaving a workspace cancels its active discovery without returning a dead 
   const cancelled = expect(pending).rejects.toMatchObject({ code: "cancelled" });
   await repos.retain(new Set());
   await cancelled;
+  await repos.close();
+});
+test("returning to a workspace keeps discovery started after leaving", async () => {
+  const { workspace, repos } = await setup();
+  const old = repos.discover(workspace.id, undefined, signals());
+  const cancelled = expect(old).rejects.toMatchObject({ code: "cancelled" });
+  const leaving = repos.retain(new Set());
+  const returned = repos.discover(workspace.id, undefined, signals());
+  const completed = expect(returned).resolves.toMatchObject({ complete: true });
+  await Promise.all([leaving, cancelled, completed]);
   await repos.close();
 });
 test.each(["mod", "module[*]\n\\link", "[prefix]module", "-mod", "项目"])(
@@ -199,33 +209,6 @@ test.each(["old", "new"])(
     await repos.close();
   },
 );
-test("binary copy records retain both raw path identities", async () => {
-  const { root, cli, repos } = await setup();
-  const content = Buffer.from([0, 1, 2]);
-  await writeFile(Buffer.concat([Buffer.from(root + "/"), Buffer.from([0xff])]), content);
-  await cli("add", ".");
-  await cli("commit", "-m", "base");
-  await writeFile(join(root, "copy"), content);
-  await cli("add", ".");
-  const args = ["diff", "--cached", "--find-copies", "--find-copies-harder", "-z"];
-  const changes: RawChange[] = [];
-  const raw = rawReader((item) => changes.push(item));
-  raw.data(
-    (await run("git", [...args, "--raw", "--no-abbrev"], { cwd: root, encoding: "buffer" })).stdout,
-  );
-  raw.end();
-  const binaries: { pathError?: string; binary: boolean }[] = [];
-  const nums = numstatReader((item, binary) =>
-    binaries.push({ pathError: item.pathError, binary }),
-  );
-  nums.data((await run("git", [...args, "--numstat"], { cwd: root, encoding: "buffer" })).stdout);
-  nums.end();
-  expect(changes).toHaveLength(1);
-  expect(changes[0]).toMatchObject({ status: "C", pathError: "\\xff -> \\x63\\x6f\\x70\\x79" });
-  expect(changes[0]?.path).toBeUndefined();
-  expect(binaries).toEqual([{ pathError: changes[0]?.pathError, binary: true }]);
-  await repos.close();
-});
 test("discovery keeps nested and linked worktrees distinct and excludes external parents and directory links", async () => {
   const { root, home, cli, metadata, workspace, repos, repo } = await setup();
   await writeFile(join(root, "base"), "base");

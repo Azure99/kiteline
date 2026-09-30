@@ -46,14 +46,7 @@ export async function searchFiles(
     });
   const exited =
     child instanceof JobChild
-      ? child.exited.then(
-          (result) => result.code,
-          (error) => {
-            spawnError = error;
-            stop();
-            return null;
-          },
-        )
+      ? child.exited.then((result) => result.code)
       : new Promise<number | null>((resolve) => child.once("close", resolve));
   const errorOutput =
     child instanceof JobChild
@@ -69,12 +62,8 @@ export async function searchFiles(
   let resultBytes = 64,
     limited = false;
   const stop = () => {
-    try {
-      if (child instanceof JobChild) child.terminate();
-      else child.kill("SIGTERM");
-    } catch (error) {
-      spawnError ??= error as NodeJS.ErrnoException;
-    }
+    if (child instanceof JobChild) child.terminate();
+    else child.kill("SIGTERM");
     controller.abort();
   };
   const abort = () => {
@@ -169,8 +158,6 @@ export async function searchFiles(
   }
   const code = await exited;
   await groupDone;
-  if (child instanceof JobChild)
-    spawnError ??= child.cleanupError as NodeJS.ErrnoException | undefined;
   await errorOutput;
   clearTimeout(drainTimer);
   signal.removeEventListener("abort", abort);

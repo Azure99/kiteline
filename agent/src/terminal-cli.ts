@@ -8,6 +8,7 @@ import {
   shellWords,
   tmuxBinary,
   tmuxEnvironment,
+  tmuxSession,
 } from "@kiteline/shared/terminal/node";
 import { spawnJob, type JobChild } from "@kiteline/shared/windows/job";
 import type { AgentConfig } from "./config.js";
@@ -40,7 +41,7 @@ export async function terminalCli(config: AgentConfig, args: string[]) {
             "attach-session",
             "-E",
             "-t",
-            identity.tmuxSession,
+            tmuxSession,
           ]);
         child = await spawnJob(
           join(msysDirectory, "usr/bin/bash.exe"),
@@ -54,20 +55,16 @@ export async function terminalCli(config: AgentConfig, args: string[]) {
         );
         process.exitCode = (await child.exited).code;
       } finally {
-        try {
-          child?.terminate();
-        } finally {
-          await child?.empty;
-          process.off("SIGINT", interrupted);
-          process.off("SIGBREAK", interrupted);
-        }
+        await child?.stop();
+        process.off("SIGINT", interrupted);
+        process.off("SIGBREAK", interrupted);
       }
       return;
     }
     await new Promise<void>((resolve, reject) => {
       const child = spawn(
         tmuxBinary,
-        ["-S", identity.socket, "attach-session", "-E", "-t", identity.tmuxSession],
+        ["-S", identity.socket, "attach-session", "-E", "-t", tmuxSession],
         { env: tmuxEnvironment(), stdio: "inherit" },
       );
       child.on("error", reject);

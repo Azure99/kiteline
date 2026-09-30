@@ -22,6 +22,7 @@ export const scheduleSelectClass =
 
 export function TaskEditor({
   devices,
+  unavailableDevices,
   connected,
   initialDeviceId,
   task,
@@ -29,6 +30,7 @@ export function TaskEditor({
   onSaved,
 }: {
   devices: Device[];
+  unavailableDevices: string[];
   connected: boolean;
   initialDeviceId?: string;
   task?: ScheduledTask;
@@ -37,9 +39,13 @@ export function TaskEditor({
 }) {
   const { t, i18n } = useTranslation();
   const [deviceId, setDeviceId] = useState(
-    initialDeviceId ?? devices.find((d) => d.status === "online")?.id ?? "",
+    initialDeviceId ??
+      devices.find((d) => d.status === "online" && !unavailableDevices.includes(d.id))?.id ??
+      "",
   );
   const device = devices.find((d) => d.id === deviceId);
+  const enabled =
+    connected && device?.status === "online" && !unavailableDevices.includes(deviceId);
   const [taskId] = useState(() => task?.id ?? newId());
   const [baseline, setBaseline] = useState(task);
   const [name, setName] = useState(task?.name ?? "");
@@ -72,7 +78,7 @@ export function TaskEditor({
     const abort = new AbortController();
     setPreview(undefined);
     setPreviewError(undefined);
-    if (!parsed.schedule || !connected || device?.status !== "online") return;
+    if (!parsed.schedule || !enabled) return;
     const schedule = parsed.schedule;
     if (
       baseline?.schedule &&
@@ -101,17 +107,8 @@ export function TaskEditor({
       clearTimeout(timer);
       abort.abort();
     };
-  }, [
-    deviceId,
-    device?.status,
-    connected,
-    parsed.schedule,
-    timezone,
-    baseline?.schedule,
-    baseline?.timezone,
-  ]);
+  }, [deviceId, enabled, parsed.schedule, timezone, baseline?.schedule, baseline?.timezone]);
   const unknown = uncertain;
-  const enabled = connected && device?.status === "online";
   async function save() {
     if (!parsed.schedule || !enabled || busy || unknown) return;
     setBusy(true);
@@ -202,7 +199,11 @@ export function TaskEditor({
                     {t(($) => $.schedules.device)}
                   </option>
                   {devices.map((d) => (
-                    <option key={d.id} value={d.id} disabled={d.status !== "online"}>
+                    <option
+                      key={d.id}
+                      value={d.id}
+                      disabled={d.status !== "online" || unavailableDevices.includes(d.id)}
+                    >
                       {d.name}
                     </option>
                   ))}

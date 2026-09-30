@@ -1,13 +1,5 @@
 import { WebSocket } from "ws";
-import {
-  AppError,
-  asError,
-  integer,
-  limits,
-  record,
-  string,
-  terminalProfile,
-} from "@kiteline/shared/protocol";
+import { AppError, asError, integer, limits, record, string } from "@kiteline/shared/protocol";
 import type { RecorderMessage, RecorderRequest } from "@kiteline/shared/ipc";
 import { heartbeat, sendFrame } from "@kiteline/shared/ws";
 import type { AgentConfig, Identity } from "../config.js";
@@ -17,7 +9,6 @@ import { connectServerSocket } from "../network.js";
 interface Channel {
   id: string;
   sessionId: string;
-  params: Record<string, unknown>;
   socket: WebSocket;
   timer: NodeJS.Timeout;
   started: boolean;
@@ -50,7 +41,6 @@ export class TerminalChannels {
     const channel: Channel = {
       id,
       sessionId: typeof params.sessionId === "string" ? params.sessionId : "",
-      params,
       socket,
       started: false,
       admitted,
@@ -70,11 +60,6 @@ export class TerminalChannels {
         if (kind !== "terminal.attach")
           throw new AppError("unsupported", "Unsupported data channel");
         const item = this.sessions.get(string(params.sessionId), string(params.workspaceId));
-        if (params.terminalProfile !== terminalProfile)
-          throw new AppError(
-            "unsupported",
-            "Terminal component versions differ; upgrade them together",
-          );
         if (
           params.history !== undefined &&
           params.history !== "retained" &&
@@ -90,11 +75,7 @@ export class TerminalChannels {
           JSON.stringify({
             type: "ready",
             meta: {
-              sessionId: item.session.id,
-              historyLines: item.session.historyLines,
-              terminalProfile,
               terminalInputBytes: this.config.limits.terminalInputBytes,
-              controlMessageBytes: limits.controlMessageBytes,
             },
           }),
         );
@@ -124,7 +105,6 @@ export class TerminalChannels {
               type: "attach",
               sessionId: channel.sessionId,
               attachmentId: id,
-              terminalProfile,
               history: params.history === "screen" ? "screen" : "retained",
               historyGap: item.session.historyGap,
             })

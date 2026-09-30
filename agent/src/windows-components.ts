@@ -4,31 +4,24 @@ import { lstat, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { packageDirectory } from "./installation.js";
-import { requiredWindowsComponents } from "@kiteline/shared/windows/components";
-
-export const windowsComponentPath = (file: string) =>
-  file.startsWith("native/") ? "dist/" + file : file;
+import {
+  isWindowsRuntimeComponent,
+  windowsComponentPath,
+  windowsRuntimeFiles,
+} from "@kiteline/shared/windows/components";
 
 export async function checkWindowsComponents(signal?: AbortSignal) {
-  return verifyWindowsPackageComponents(packageDirectory, process.arch, process.version, signal);
-}
-
-export async function verifyWindowsPackageComponents(
-  directory: string,
-  architecture: string,
-  nodeVersion: string,
-  signal?: AbortSignal,
-) {
-  const identity = JSON.parse(await readFile(join(directory, "dist/native/identity.json"), "utf8"));
-  const release = JSON.parse(await readFile(join(directory, "release.json"), "utf8"));
+  const identity = JSON.parse(
+    await readFile(join(packageDirectory, "dist/native/identity.json"), "utf8"),
+  );
+  const release = JSON.parse(await readFile(join(packageDirectory, "release.json"), "utf8"));
   if (
     release.kind !== "agent" ||
     release.platform !== "windows" ||
-    release.architecture !== architecture ||
+    release.architecture !== process.arch ||
     identity.linkage !== "windows-msys" ||
-    identity.architecture !== architecture ||
-    identity.node !== nodeVersion ||
-    !isDeepStrictEqual(release.native, identity)
+    identity.architecture !== process.arch ||
+    identity.node !== process.version
   )
     throw new Error("Windows components do not match the current release identity");
   const actual = new Set<string>();
@@ -37,6 +30,7 @@ export async function verifyWindowsPackageComponents(
       signal?.throwIfAborted();
       const file = join(directory, entry),
         key = prefix + entry;
+      if (!isWindowsRuntimeComponent(key)) continue;
       const stat = await lstat(file);
       if (stat.isSymbolicLink()) throw new Error(`Windows component cannot be a link: ${key}`);
       if (stat.isDirectory()) await visit(file, key + "/");
@@ -44,32 +38,22 @@ export async function verifyWindowsPackageComponents(
       else throw new Error(`Unsupported Windows component: ${key}`);
     }
   }
-  await visit(join(directory, "runtime"), "runtime/");
-  await visit(join(directory, "dist/native"), "native/");
-  actual.delete("native/identity.json");
-  const recipe = JSON.parse(
-    await readFile(join(directory, "dist/native/sources/recipe/deploy/agent-windows.json"), "utf8"),
-  ) as { sources: Record<string, { url: string; sha256: string }> };
-  const sources = Object.fromEntries(
-    Object.entries(recipe.sources).map(([name, value]) => ["sources/" + name, value]),
-  );
-  const catalog = Object.fromEntries(
-    Object.entries(identity.inputs.downloads).filter(([name]) => name.startsWith("sources/")),
-  );
-  if (!isDeepStrictEqual(sources, catalog))
-    throw new Error("Windows corresponding source catalog does not match its build recipe");
-  for (const [name, source] of Object.entries(sources))
-    if (identity.files["native/" + name] !== source.sha256)
-      throw new Error(`Windows corresponding source checksum mismatch: ${name}`);
-  for (const file of requiredWindowsComponents(identity.inputs.downloads))
+  await visit(join(packageDirectory, "runtime"), "runtime/");
+  await visit(join(packageDirectory, "dist/native"), "native/");
+  for (const file of windowsRuntimeFiles)
     if (!actual.has(file) || !identity.files?.[file])
       throw new Error(`Missing required Windows component: ${file}`);
-  if (!isDeepStrictEqual([...actual].sort(), Object.keys(identity.files).sort()))
+  if (
+    !isDeepStrictEqual(
+      [...actual].sort(),
+      Object.keys(identity.files).filter(isWindowsRuntimeComponent).sort(),
+    )
+  )
     throw new Error("Windows component file set does not match its identity");
   for (const file of actual) {
     signal?.throwIfAborted();
     const digest = createHash("sha256");
-    for await (const chunk of createReadStream(join(directory, windowsComponentPath(file)), {
+    for await (const chunk of createReadStream(join(packageDirectory, windowsComponentPath(file)), {
       signal,
     }))
       digest.update(chunk);

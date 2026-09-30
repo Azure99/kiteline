@@ -1,16 +1,14 @@
 import release from "../version.json" with { type: "json" };
 
-export const protocolVersion = 1;
 export const appVersion = release.version;
 export const terminalProfile = "xterm-c1";
-export { rpcMutates } from "./rpc.js";
+export { rpcMutates, gitWriteMethods } from "./rpc.js";
 export * from "./schedules.js";
 export type {
   RpcMethods,
   RpcMethod,
   RpcParams,
   RpcResult,
-  RpcRequest,
   RpcReply,
   RpcArguments,
   GitWriteMethod,
@@ -81,17 +79,12 @@ export interface Session {
   createdAt: string;
   historyLines: number;
   state: "starting" | "running";
-  terminalProfile: string;
   webStatus: "available" | "recovering" | "unavailable";
   historyGap: boolean;
   webReason?: string;
 }
 export interface TerminalMeta {
-  sessionId: string;
-  historyLines: number;
-  terminalProfile: string;
   terminalInputBytes: number;
-  controlMessageBytes: number;
 }
 export const shortcutIcons = [
   "terminal",

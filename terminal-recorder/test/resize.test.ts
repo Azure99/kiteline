@@ -11,7 +11,6 @@ test("redraw keeps preceding Web and actual tmux sizes while the model parses ou
       type: "create",
       sessionId: "resize",
       socket,
-      tmuxSession: "kiteline",
       workspacePath: directory,
       shell: "/bin/bash",
       cols: 100,

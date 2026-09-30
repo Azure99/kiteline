@@ -45,7 +45,6 @@ export class LocalServer {
     ) => Promise<unknown>,
   ) {}
   async start() {
-    if (process.platform === "win32") windowsNative().privateDirectory(this.config.runDir);
     this.socketPath = await localEndpoint(this.config.runDir);
     if (process.platform !== "win32") {
       if (Buffer.byteLength(this.socketPath) > 103)

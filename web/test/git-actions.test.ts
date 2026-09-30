@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { GitActions } from "../src/git/actions";
 
 test("message subscriptions stay with their repository and do not refresh operation consumers", () => {
@@ -22,4 +22,40 @@ test("message subscriptions stay with their repository and do not refresh operat
   expect([activity, firstChanges, secondChanges]).toEqual([1, 1, 2]);
   expect(actions.get(first).message).toBe("");
   expect(actions.get(second).message).toBe("");
+});
+
+test("an unconfirmed Git write keeps its request identity, message and diagnostics", async () => {
+  vi.stubGlobal("window", new EventTarget());
+  let finish!: (response: Response) => void;
+  const fetch = vi.spyOn(globalThis, "fetch").mockReturnValue(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  try {
+    const actions = new GitActions();
+    const target = { deviceId: "device", workspaceId: "work", repoId: "repo" };
+    actions.message(target, "keep this message");
+    const pending = actions.run(target, "git.commit", {
+      message: "keep this message",
+      indexToken: "index",
+    });
+    const id = actions.get(target).request!.id;
+    expect(JSON.parse(fetch.mock.calls[0]![1]!.body as string)).toMatchObject({
+      id,
+      method: "git.commit",
+      params: { workspaceId: "work", repoId: "repo", message: "keep this message" },
+    });
+    const error = { code: "io_error", message: "confirmation lost", details: { phase: "commit" } };
+    finish(Response.json({ id, outcome: "unknown", error, result: { head: "observed" } }));
+    await pending;
+    expect(actions.get(target)).toMatchObject({
+      message: "keep this message",
+      request: undefined,
+      error: { ...error, outcome: "unknown", result: { head: "observed" } },
+    });
+  } finally {
+    fetch.mockRestore();
+    vi.unstubAllGlobals();
+  }
 });

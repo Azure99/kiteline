@@ -10,7 +10,7 @@ import {
   type Repo,
 } from "@kiteline/shared/protocol";
 import { commandLine, git } from "./process.js";
-import { headIdentity, readStatus } from "./status.js";
+import { observeIndex } from "./status.js";
 
 export async function readOperation(
   repo: Repo,
@@ -208,12 +208,8 @@ export async function readOperation(
   }
 }
 async function currentOperation(repo: Repo, signal: AbortSignal) {
-  const head = await headIdentity(repo.rootPath, signal);
-  let conflicts = false;
-  await readStatus(repo, signal, (entry) => {
-    conflicts ||= entry.conflict;
-  });
-  return { head, operation: await readOperation(repo, head, conflicts, signal) };
+  const { head, hasConflicts } = await observeIndex(repo, signal);
+  return { head, operation: await readOperation(repo, head, hasConflicts, signal) };
 }
 export async function finishOperation(
   repo: Repo,

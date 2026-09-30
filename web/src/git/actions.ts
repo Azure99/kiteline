@@ -5,10 +5,10 @@ import type {
   FileProgress,
   GitWriteArguments,
   GitWriteMethod,
-  RpcReply,
+  RpcArguments,
   RpcResult,
 } from "@kiteline/shared/protocol";
-import { api, ApiError, post } from "../lib/api";
+import { api, apiError, ApiError, rpcReply } from "../lib/api";
 
 export interface GitTarget {
   deviceId: string;
@@ -109,19 +109,11 @@ export class GitActions {
     };
     window.addEventListener("kiteline:event", progress);
     try {
-      const reply = await post<RpcReply<A[0]>>(`/api/devices/${target.deviceId}/rpc`, {
-        id: request.id,
+      const reply = await rpcReply(target.deviceId, request.id, [
         method,
-        params: { ...params, workspaceId: target.workspaceId, repoId: target.repoId },
-      });
-      if (reply.outcome !== "succeeded")
-        throw new ApiError(
-          reply.error.code,
-          reply.error.message,
-          reply.outcome,
-          reply.error.details,
-          reply.result,
-        );
+        { ...params, workspaceId: target.workspaceId, repoId: target.repoId },
+      ] as RpcArguments<GitWriteMethod>);
+      if (reply.outcome !== "succeeded") throw apiError(reply.error, reply.outcome, reply.result);
       value.error = undefined;
       value.result = reply.result;
       if (method === "git.commit" && messageVersion === value.messageVersion) {
@@ -130,7 +122,7 @@ export class GitActions {
         this.notifyMessage(target);
       }
       value.completed = method;
-      return reply.result;
+      return reply.result as RpcResult<A[0]>;
     } catch (error) {
       value.error = error instanceof Error ? error : new Error(String(error));
     } finally {

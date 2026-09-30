@@ -309,6 +309,8 @@ export function assembleWindowsComponents(directory, tmuxDirectory, addonDirecto
       copy(join(from, file), join(native, "sources", file));
 
     const componentFiles = files(destination);
+    for (const file of requiredFiles)
+      if (!componentFiles[file]) throw new Error(`Missing Windows component: ${file}`);
     const binaries = new Set(
       Object.keys(componentFiles).map((name) => basename(name).toLowerCase()),
     );
@@ -340,7 +342,6 @@ export function assembleWindowsComponents(directory, tmuxDirectory, addonDirecto
       inputs: expected,
       files: componentFiles,
     });
-    verifyWindowsComponents(destination);
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }

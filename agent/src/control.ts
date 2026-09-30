@@ -1,4 +1,5 @@
 import { WebSocket } from "ws";
+import { controlWritable, heartbeat } from "@kiteline/shared/ws";
 import { randomUUID } from "node:crypto";
 import {
   AppError,
@@ -6,9 +7,9 @@ import {
   asError,
   checkShortcutIcon,
   errorReply,
+  gitWriteMethods,
   integer,
   limits,
-  protocolVersion,
   record,
   rpcMutates,
   string,
@@ -49,20 +50,7 @@ import { connectServerSocket } from "./network.js";
 import { ScheduledTasks } from "./tasks/index.js";
 import { scheduleMethods, scheduleRpc } from "./tasks/rpc.js";
 
-const gitWriteMethods = new Set([
-  "git.stage",
-  "git.unstage",
-  "git.discard",
-  "git.commit",
-  "git.branch.create",
-  "git.branch.switch",
-  "git.branch.delete",
-  "git.fetch",
-  "git.pull",
-  "git.push",
-  "git.continue",
-  "git.abort",
-]);
+const gitWrites = new Set<string>(gitWriteMethods);
 
 function knownRpcMethod(method: string): RpcMethod {
   if (!Object.hasOwn(rpcMutates, method))
@@ -88,7 +76,6 @@ export class Agent {
   private readonly fileChannels: FileChannels;
   private readonly httpChannels: HttpChannels;
   readonly requests = new Map<string, AbortController>();
-  readonly watched = new Set<string>();
   private readonly tasks = new Set<Promise<unknown>>();
   socket?: WebSocket;
   connectionId?: string;
@@ -174,18 +161,7 @@ export class Agent {
   async start() {
     if (this.stopped) return;
     this.starting ??= this.initialize();
-    try {
-      await this.starting;
-    } catch (error) {
-      try {
-        await this.close();
-      } catch (closeError) {
-        throw new AggregateError([error, closeError], "Agent startup and cleanup failed", {
-          cause: closeError,
-        });
-      }
-      throw error;
-    }
+    await this.starting;
   }
   private async initialize() {
     await privateDirectory(this.config.dataDir);
@@ -205,17 +181,11 @@ export class Agent {
     const text = JSON.stringify(message);
     if (Buffer.byteLength(text) > limits.controlMessageBytes)
       throw new AppError("limit_exceeded", "Control message exceeds the size limit");
-    if (this.socket?.readyState !== WebSocket.OPEN) return;
-    if (this.socket.bufferedAmount > limits.controlMessageBytes * 2) {
-      this.socket.close(1013, "control_backpressure");
-      return;
-    }
-    this.socket.send(text);
+    if (this.socket && controlWritable(this.socket)) this.socket.send(text);
   }
   private connect() {
     if (this.stopped) return;
     const url = new URL("/api/agent/control", this.identity.server);
-    url.searchParams.set("protocolVersion", String(protocolVersion));
     url.searchParams.set("appVersion", appVersion);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     let socket: WebSocket;
@@ -233,14 +203,7 @@ export class Agent {
     }
     let failure: string | undefined;
     this.socket = socket;
-    let lastPong = Date.now();
-    const ping = setInterval(() => {
-      if (Date.now() - lastPong > limits.heartbeatTimeout) socket.terminate();
-      else if (socket.readyState === WebSocket.OPEN) socket.ping();
-    }, limits.heartbeatInterval);
-    socket.on("pong", () => {
-      lastPong = Date.now();
-    });
+    heartbeat(socket);
     socket.on("open", () => this.send(this.metadata.hello()));
     socket.on("error", (error) => {
       this.connectionError = failure ??= error.message;
@@ -283,8 +246,6 @@ export class Agent {
         const message = record(JSON.parse(raw.toString()));
         if (message.type === "welcome") {
           this.serverVersion = string(message.serverVersion);
-          if (this.serverVersion !== appVersion)
-            throw new AppError("version_mismatch", "Server returned a different release version");
           this.connectionId = string(message.connectionId);
           this.connectionError = undefined;
           this.delay = 1000;
@@ -321,7 +282,7 @@ export class Agent {
                 () => controller.abort(new AppError("timeout", "Operation timed out")),
                 method === "files.search"
                   ? this.config.limits.searchTimeout
-                  : gitWriteMethods.has(method)
+                  : gitWrites.has(method)
                     ? this.config.limits.gitWriteTimeout
                     : this.config.limits.rpcTimeout,
               );
@@ -367,9 +328,7 @@ export class Agent {
             throw new AppError("invalid_argument", "Invalid watches");
           const ids = new Set(message.workspaceIds.map((id) => string(id)));
           const workspaces = this.metadata.value.workspaces.filter((item) => ids.has(item.id));
-          this.watched.clear();
-          for (const workspace of workspaces) this.watched.add(workspace.id);
-          void this.repos.retain(this.watched);
+          void this.repos.retain(new Set(workspaces.map((workspace) => workspace.id)));
           this.watches.set(workspaces);
         }
       } catch (error) {
@@ -378,14 +337,12 @@ export class Agent {
       }
     });
     socket.on("close", (code, reason) => {
-      clearInterval(ping);
       this.connectionError =
         failure ??
         `Control connection closed (${code}${reason.length ? ": " + reason.toString() : ""})`;
       this.connectionId = undefined;
       for (const controller of this.requests.values())
         controller.abort(new AppError("cancelled", "Control connection interrupted"));
-      this.watched.clear();
       void this.watches.close();
       void this.repos.close();
       this.channels.close();
@@ -412,7 +369,7 @@ export class Agent {
   ): Promise<unknown> {
     const operation = this.perform(method, params, signal, progress).finally(() => {
       if (
-        (["files.create", "files.rename"].includes(method) || gitWriteMethods.has(method)) &&
+        (["files.create", "files.rename"].includes(method) || gitWrites.has(method)) &&
         typeof params.workspaceId === "string"
       )
         this.watches.changed(params.workspaceId, true);

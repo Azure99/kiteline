@@ -24,19 +24,19 @@ export function useSessions(device: Device, workspaceId: string) {
       const result = await rpc(device.id, "sessions.list", {
         workspaceId,
       });
-      if (alive.current && read === revision.current) {
+      if (read === revision.current) {
         setSessions(result.sessions);
         setLoaded(true);
         setListError(undefined);
       }
       return result.sessions;
     } catch (error) {
-      if (alive.current && read === revision.current) {
+      if (read === revision.current) {
         setListError(error);
         setListErrorDismissed(false);
       }
     } finally {
-      if (alive.current && read === revision.current) setRefreshing(false);
+      if (read === revision.current) setRefreshing(false);
     }
   }, [device.id, device.status, workspaceId]);
   useEffect(() => {
@@ -116,7 +116,6 @@ export function useSessions(device: Device, workspaceId: string) {
     error: error || (!listErrorDismissed && listError),
     listError,
     refreshing,
-    setError,
     busy,
     uncertainCreate,
     refresh,

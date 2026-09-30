@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "vitest";
 import { mkdtemp, mkdir, readFile, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { AppError, terminalProfile } from "@kiteline/shared/protocol";
+import { AppError } from "@kiteline/shared/protocol";
 import { tmux } from "@kiteline/shared/terminal/node";
 import type { RecorderCall } from "@kiteline/shared/ipc";
 import { Agent } from "../src/control.js";
@@ -75,7 +75,6 @@ test("real recorder captures Shell output, restores history and pastes while nat
     type: "attach",
     sessionId: session.id,
     attachmentId: "first",
-    terminalProfile,
     historyGap: false,
     history: "retained",
   });
@@ -119,7 +118,6 @@ test("real recorder captures Shell output, restores history and pastes while nat
     type: "attach",
     sessionId: session.id,
     attachmentId: "second",
-    terminalProfile,
     historyGap: false,
     history: "retained",
   });
@@ -253,7 +251,6 @@ test("recovery restores the same task and pending Shell input, then redraw and e
     type: "attach",
     sessionId: session.id,
     attachmentId: "recovered",
-    terminalProfile,
     historyGap: true,
     history: "retained",
   });
@@ -412,7 +409,6 @@ test("a failed tmux kill marks the session unavailable and can recover the same 
     type: "attach",
     sessionId: session.id,
     attachmentId: "after-kill",
-    terminalProfile,
     historyGap: true,
     history: "retained",
   });

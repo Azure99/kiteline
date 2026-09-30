@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { WebSocket } from "ws";
-import { heartbeat } from "@kiteline/shared/ws";
+import { controlWritable, heartbeat } from "@kiteline/shared/ws";
 import {
   AppError,
   appVersion,
@@ -19,7 +19,7 @@ import {
   type Reply,
 } from "@kiteline/shared/protocol";
 import type { Login, Store } from "./store.js";
-import { requireVersion, versionMismatch } from "./http.js";
+import { checkReply, requireVersion, versionMismatch } from "./http.js";
 import { taskSnapshot } from "./task-summary.js";
 
 export interface AgentConnection {
@@ -43,12 +43,7 @@ interface Browser {
 }
 
 export function send(socket: WebSocket, value: unknown) {
-  if (socket.readyState !== WebSocket.OPEN) return;
-  if (socket.bufferedAmount > limits.controlMessageBytes * 2) {
-    socket.close(1013, "control_backpressure");
-    return;
-  }
-  socket.send(JSON.stringify(value));
+  if (controlWritable(socket)) socket.send(JSON.stringify(value));
 }
 export class Connections {
   readonly agents = new Map<string, AgentConnection>();
@@ -185,16 +180,9 @@ export class Connections {
           const requestId = string(reply.id, "request id", 128);
           const pending = this.pending.get(requestId);
           if (pending?.connection === connection) {
-            if (!["succeeded", "failed", "partial", "unknown"].includes(String(reply.outcome)))
-              throw new AppError("invalid_argument", "Invalid reply");
-            if (reply.outcome !== "succeeded") {
-              const error = record(reply.error);
-              string(error.code);
-              if (typeof error.message !== "string")
-                throw new AppError("invalid_argument", "Invalid diagnostic message");
-            }
+            const checked = checkReply(reply);
             this.pending.delete(requestId);
-            pending.resolve(reply as unknown as Reply);
+            pending.resolve(checked);
           }
         } else if (message.type === "request.progress") {
           const pending = this.pending.get(string(message.id));

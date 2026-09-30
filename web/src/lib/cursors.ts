@@ -1,5 +1,5 @@
 import type { RpcArguments, RpcResult } from "@kiteline/shared/protocol";
-import { api, ApiError, rpc, rpcReply } from "./api";
+import { api, apiError, rpc, rpcReply } from "./api";
 import { newId } from "./id";
 
 type CursorArguments = RpcArguments<"directories.list" | "files.list" | "repos.discover">;
@@ -25,8 +25,7 @@ export async function cursorRpc<A extends CursorArguments>(
     // Keep the response alive so an abandoned first page can return its cursor.
     args[2] = undefined;
     const reply = await rpcReply(deviceId, id, args);
-    if (reply.outcome !== "succeeded")
-      throw new ApiError(reply.error.code, reply.error.message, reply.outcome);
+    if (reply.outcome !== "succeeded") throw apiError(reply.error, reply.outcome, reply.result);
     if (signal?.aborted) {
       const result = reply.result;
       await releaseCursor(

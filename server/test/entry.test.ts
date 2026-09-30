@@ -149,6 +149,9 @@ test("upgrade scripts are public while command recovery retains login and origin
   expect(Number(response.headers.get("content-length"))).toBe(Buffer.byteLength(script));
   expect(response.headers.get("content-disposition")).toContain('filename="upgrade.sh"');
   expect(script).toContain(`${origin}/downloads/agent/${appVersion}/`);
+  expect(script).toContain("kiteline-agent upgrade --archive");
+  expect(script).not.toContain("--yes");
+  expect(script).not.toContain("kiteline-agent bind");
   const head = await fetch(origin + "/upgrade.sh", { method: "HEAD" });
   expect(head.status).toBe(200);
   expect(head.headers.get("content-length")).toBe(response.headers.get("content-length"));
@@ -167,9 +170,14 @@ test("upgrade scripts are public while command recovery retains login and origin
   expect(command.status).toBe(200);
   const upgrade = JSON.parse(command.text) as { version: string; commands: Record<string, string> };
   expect(upgrade.version).toBe(appVersion);
+  expect(Object.keys(upgrade).sort()).toEqual(["commands", "version"]);
   expect(upgrade.commands.linux).toContain("https://kiteline.test:9443/upgrade.sh");
   expect(upgrade.commands.linux).toContain("--proto '=https' --proto-redir '=https'");
   expect(upgrade.commands.windows).toContain("https://kiteline.test:9443/upgrade.ps1");
+  for (const command of Object.values(upgrade.commands)) {
+    expect(command).not.toContain("--yes");
+    expect(command).not.toContain("kiteline-agent bind");
+  }
 });
 
 test("request authority and explicit proxy trust determine HTTP and Upgrade origins", async () => {

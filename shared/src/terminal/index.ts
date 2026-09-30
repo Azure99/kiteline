@@ -53,12 +53,16 @@ export function terminalOptions(historyLines: number) {
   };
 }
 // These private reads belong to the fixed xterm-c1 profile; upgrade both consumers together.
-export function adaptTerminalScrolling(terminal: AdaptableTerminal): Disposable {
+export function adaptTerminalScrolling(terminal: AdaptableTerminal) {
   const internal = core(terminal);
   const input = internal._inputHandler;
-  const restore = (
-    ["scrollUp", "scrollDown", "insertLines", "deleteLines", "repeatPrecedingCharacter"] as const
-  ).map((name) => {
+  for (const name of [
+    "scrollUp",
+    "scrollDown",
+    "insertLines",
+    "deleteLines",
+    "repeatPrecedingCharacter",
+  ] as const) {
     const original = input[name];
     input[name] = function (params) {
       const buffer = internal._bufferService.buffer;
@@ -76,11 +80,8 @@ export function adaptTerminalScrolling(terminal: AdaptableTerminal): Disposable 
         params.params[0] = count;
       }
     };
-    return () => {
-      input[name] = original;
-    };
-  });
-  const history = terminal.parser.registerCsiHandler({ final: "S" }, (params) => {
+  }
+  terminal.parser.registerCsiHandler({ final: "S" }, (params) => {
     const buffer = internal._bufferService.buffer;
     if (buffer !== internal._bufferService.buffers.normal || buffer.scrollTop !== 0) return false;
     const count = Math.min(
@@ -95,12 +96,6 @@ export function adaptTerminalScrolling(terminal: AdaptableTerminal): Disposable 
     internal._inputHandler.markRangeDirty(buffer.scrollTop, buffer.scrollBottom);
     return true;
   });
-  return {
-    dispose: () => {
-      history.dispose();
-      for (const reset of restore) reset();
-    },
-  };
 }
 export function atGround(terminal: object) {
   return core(terminal)._inputHandler._parser.currentState === 0;
@@ -109,20 +104,12 @@ export function mouseEncodingVT(terminal: object) {
   const encoding = core(terminal).mouseStateService.activeEncoding;
   return encoding === "SGR" ? "\x1b[?1006h" : encoding === "SGR_PIXELS" ? "\x1b[?1016h" : "";
 }
-export function forwardUserInput(
-  terminal: AdaptableTerminal,
-  send: (data: string) => void,
-): Disposable {
+export function forwardUserInput(terminal: AdaptableTerminal, send: (data: string) => void) {
   const service = core(terminal).coreService;
   const original = service.triggerDataEvent;
   service.triggerDataEvent = function (data, wasUserInput) {
     if (wasUserInput === true && !terminal.options.disableStdin) send(data);
     original.call(this, data, wasUserInput);
-  };
-  return {
-    dispose: () => {
-      service.triggerDataEvent = original;
-    },
   };
 }
 export function freezeMouse(terminal: object) {

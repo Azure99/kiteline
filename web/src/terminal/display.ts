@@ -2,13 +2,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { deviceServiceLink } from "../lib/device-service";
-import {
-  integer,
-  limits,
-  record,
-  terminalProfile,
-  type TerminalMeta,
-} from "@kiteline/shared/protocol";
+import { integer, limits, record, type TerminalMeta } from "@kiteline/shared/protocol";
 import {
   forwardUserInput,
   freezeMouse,
@@ -28,7 +22,6 @@ export interface DisplayState {
   error?: unknown;
   notice?: "connectionLost" | "inputLimit" | "pasteLimit";
   exitCode?: number | null;
-  code?: string;
   historyLimited?: boolean;
   historyGap?: boolean;
 }
@@ -85,7 +78,6 @@ export class TerminalDisplay {
           params: {
             workspaceId: this.workspaceId,
             sessionId: this.sessionId,
-            terminalProfile,
             history,
           },
         },
@@ -98,8 +90,6 @@ export class TerminalDisplay {
         return;
       }
       this.meta = channel.meta;
-      if (channel.meta.terminalProfile !== terminalProfile)
-        throw new Error("Terminal component versions differ; upgrade them together");
       const url = new URL(
         versionedPath(`/api/channels/${encodeURIComponent(channel.channelId)}/terminal`),
         location.href,
@@ -108,7 +98,7 @@ export class TerminalDisplay {
       const socket = new WebSocket(url);
       this.socket = socket;
       socket.binaryType = "arraybuffer";
-      socket.onmessage = (event: MessageEvent<unknown>) => {
+      socket.onmessage = (event: MessageEvent<ArrayBuffer | string>) => {
         if (this.disposed || this.finalFrame) return;
         try {
           if (event.data instanceof ArrayBuffer) {
@@ -119,10 +109,7 @@ export class TerminalDisplay {
               .then(() => this.output(data))
               .catch((error: unknown) => this.fail(error));
           } else {
-            if (
-              typeof event.data !== "string" ||
-              new TextEncoder().encode(event.data).length > limits.controlMessageBytes
-            )
+            if (new TextEncoder().encode(event.data).length > limits.controlMessageBytes)
               throw new Error("Invalid terminal control frame");
             const frame = record(JSON.parse(event.data));
             if (frame.type === "ended" || frame.type === "error") {
@@ -165,8 +152,7 @@ export class TerminalDisplay {
     if (this.disposed) return;
     switch (frame.type) {
       case "restore.begin": {
-        if (this.terminal || frame.terminalProfile !== terminalProfile)
-          throw new Error("Invalid terminal restoration boundary");
+        if (this.terminal) throw new Error("Invalid terminal restoration boundary");
         this.snapshotRemaining = integer(
           frame.snapshotBytes,
           "snapshotBytes",
@@ -217,8 +203,8 @@ export class TerminalDisplay {
         terminal.unicode.activeVersion = "6";
         terminal.loadAddon(this.fitAddon);
         terminal.loadAddon(new WebLinksAddon(openLink, { hover: hoverLink, leave: leaveLink }));
-        const scroll = adaptTerminalScrolling(terminal);
-        const source = forwardUserInput(terminal, (text) => {
+        adaptTerminalScrolling(terminal);
+        forwardUserInput(terminal, (text) => {
           const control = this.interaction?.control();
           if (control && text.length === 1 && text.charCodeAt(0) <= 127) {
             if (/[ @-_a-z?]/.test(text))
@@ -231,11 +217,7 @@ export class TerminalDisplay {
         const binary = terminal.onBinary((value) =>
           this.bytes(Uint8Array.from(value, (character) => character.charCodeAt(0))),
         );
-        this.cleanups.push(
-          () => scroll.dispose(),
-          () => source.dispose(),
-          () => binary.dispose(),
-        );
+        this.cleanups.push(() => binary.dispose());
         terminal.open(this.element);
         this.keyboardViewport = new KeyboardViewport(terminal, this.reportReading);
         const readingEvents = [
@@ -330,23 +312,16 @@ export class TerminalDisplay {
     this.socket.send(text);
   }
   private bytes(data: Uint8Array) {
-    if (
-      !this.ready ||
-      this.receivedEnd ||
-      this.terminal?.options.disableStdin ||
-      this.socket?.readyState !== WebSocket.OPEN
-    )
-      return;
     if (!this.resize()) return;
     this.keyboardViewport?.followInput();
     if (
       data.length > limits.dataChunkBytes ||
-      this.socket.bufferedAmount + data.length > limits.terminalPendingBytes
+      this.socket!.bufferedAmount + data.length > limits.terminalPendingBytes
     ) {
       this.change({ ...this.state, notice: "inputLimit", error: undefined });
       return;
     }
-    this.socket.send(data);
+    this.socket!.send(data);
   }
   input(text: string) {
     this.terminal?.input(text, true);
@@ -364,7 +339,7 @@ export class TerminalDisplay {
     const encoder = new TextEncoder();
     if (
       encoder.encode(normalizePaste(text)).length > this.meta.terminalInputBytes ||
-      encoder.encode(JSON.stringify({ type: "paste", text })).length > this.meta.controlMessageBytes
+      encoder.encode(JSON.stringify({ type: "paste", text })).length > limits.controlMessageBytes
     ) {
       this.change({ ...this.state, notice: "pasteLimit", error: undefined });
       return;
@@ -458,7 +433,6 @@ export class TerminalDisplay {
     this.change({
       ...this.state,
       status: "error",
-      code: error instanceof ApiError ? error.code : undefined,
       error,
       notice: undefined,
     });

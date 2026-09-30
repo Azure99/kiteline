@@ -289,8 +289,10 @@ export class Repositories {
   async retain(workspaceIds: Set<string>) {
     for (const id of this.owners.keys()) if (!workspaceIds.has(id)) this.owners.delete(id);
     this.prune();
-    for (const [id, scan] of this.scans)
-      if (!workspaceIds.has(scan.workspaceId)) await this.release(id);
+    const closing = [...this.scans]
+      .filter(([, scan]) => !workspaceIds.has(scan.workspaceId))
+      .map(([id]) => this.release(id));
+    await Promise.all(closing);
   }
   async close() {
     const closing = [...this.scans.keys()].map((id) => this.release(id));

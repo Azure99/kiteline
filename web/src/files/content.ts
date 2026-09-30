@@ -7,7 +7,7 @@ import type {
   UploadedFile,
 } from "@kiteline/shared/protocol";
 import { decodeText } from "@kiteline/shared/text";
-import { ApiError, api, post } from "../lib/api";
+import { ApiError, api, apiError, post } from "../lib/api";
 import { observeServerVersion, versionedPath, webCompatible } from "../lib/release";
 
 export interface FileTarget {
@@ -46,7 +46,7 @@ async function check(response: Response) {
   if (response.ok) return;
   if (response.status === 401) window.dispatchEvent(new Event("kiteline:unauthenticated"));
   const data = (await response.json()) as { error: KitelineError };
-  throw new ApiError(data.error.code, data.error.message, undefined, data.error.details);
+  throw apiError(data.error);
 }
 async function readContentBytes(
   target: FileTarget,
@@ -119,14 +119,7 @@ export async function writeText(
     });
     await check(response);
     const reply = (await response.json()) as Reply<SavedFile>;
-    if (reply.outcome !== "succeeded")
-      throw new ApiError(
-        reply.error.code,
-        reply.error.message,
-        reply.outcome,
-        reply.error.details,
-        reply.result,
-      );
+    if (reply.outcome !== "succeeded") throw apiError(reply.error, reply.outcome, reply.result);
     return reply.result;
   } catch (error) {
     if (error instanceof ApiError) throw error;
@@ -186,11 +179,9 @@ export async function uploadFile(
         if (reply && "outcome" in reply && reply.outcome === "succeeded") resolve(reply.result);
         else if (reply && "error" in reply)
           reject(
-            new ApiError(
-              reply.error.code,
-              reply.error.message,
+            apiError(
+              reply.error,
               "outcome" in reply ? reply.outcome : undefined,
-              reply.error.details,
               "result" in reply ? reply.result : undefined,
             ),
           );

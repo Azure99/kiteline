@@ -4,21 +4,19 @@ import {
   record,
   string,
   taskRunActive,
+  taskValue,
+  taskExitCode,
+  taskLimits,
   type ScheduledTask,
   type TaskRun,
+  type TaskSchedule,
 } from "@kiteline/shared/protocol";
-import { nextOccurrence, taskFields, taskId } from "./schedule.js";
+import { checkTimezone, nextOccurrence, taskFields, taskId } from "./schedule.js";
 
 export interface TaskRecord {
   task: ScheduledTask;
   lastScheduledAt?: string;
   runs: TaskRun[];
-}
-
-function choice<const T extends string>(value: unknown, values: readonly T[], name: string): T {
-  const found = values.find((item) => value === item);
-  if (!found) throw new AppError("invalid_argument", `Invalid ${name}`);
-  return found;
 }
 
 function timestamp(value: unknown, name: string) {
@@ -37,16 +35,40 @@ function diagnostic(value: unknown) {
   return value;
 }
 
-// A damaged definition can be isolated locally only when all execution identities are known.
-export function taskOwnership(value: unknown, filename: string) {
+function historicalFields(input: Record<string, unknown>): TaskRun["parameters"] {
+  const schedule = record(input.schedule);
+  let plan: TaskSchedule;
+  if (schedule.kind === "cron")
+    plan = { kind: "cron", expression: string(schedule.expression, "cron expression", 256) };
+  else if (schedule.kind === "once") plan = { kind: "once", at: string(schedule.at, "at", 64) };
+  else throw new AppError("invalid_argument", "Unknown schedule kind");
+  return {
+    name: string(input.name, "name", taskLimits.nameBytes),
+    command: string(input.command, "command", taskLimits.commandBytes),
+    cwd: string(input.cwd, "cwd"),
+    timezone: checkTimezone(string(input.timezone, "timezone", 128)),
+    schedule: plan,
+    taskRevision: integer(input.taskRevision, "taskRevision", 1, Number.MAX_SAFE_INTEGER),
+  };
+}
+
+export function taskRecord(value: unknown, filename: string): TaskRecord {
   const input = record(value),
     task = record(input.task);
   const id = taskId(task.id);
   if (filename !== `${id}.json` || !Array.isArray(input.runs))
     throw new AppError("invalid_argument", "Invalid scheduled task identity or runs");
-  const state = choice(task.state, ["active", "paused"], "task state");
+  const state = taskValue(task.state, "state");
+  string(task.cwd, "cwd");
+  string(task.timezone, "timezone", 128);
+  const fields = taskFields(task);
+  nextOccurrence(fields.schedule, fields.timezone, new Date());
+  const onceStatus =
+    fields.schedule.kind === "once" ? taskValue(task.onceStatus, "onceStatus") : undefined;
+  if (fields.schedule.kind === "cron" && task.onceStatus !== undefined)
+    throw new AppError("invalid_argument", "Cron task has a one-shot status");
   const seen = new Set<string>();
-  const runs = input.runs.map((value) => {
+  const runs = input.runs.map((value): TaskRun => {
     const run = record(value),
       runId = taskId(run.id, "runId");
     if (taskId(run.taskId) !== id || seen.has(runId))
@@ -55,13 +77,39 @@ export function taskOwnership(value: unknown, filename: string) {
         "Run identity is duplicated or belongs to another task",
       );
     seen.add(runId);
+    const state = taskValue(run.state, "runState");
+    const endedAt = optionalTime(run.endedAt, "endedAt");
+    const output = record(run.output);
+    if ((!taskRunActive(state) && !endedAt) || typeof output.truncated !== "boolean")
+      throw new AppError("invalid_argument", "Invalid run result or output");
     return {
       id: runId,
-      state: choice(
-        run.state,
-        ["starting", "running", "stopping", "succeeded", "failed", "stopped", "skipped", "unknown"],
-        "run state",
-      ),
+      taskId: id,
+      state,
+      trigger: taskValue(run.trigger, "trigger"),
+      acceptedAt: timestamp(run.acceptedAt, "acceptedAt"),
+      scheduledAt: optionalTime(run.scheduledAt, "scheduledAt"),
+      startedAt: optionalTime(run.startedAt, "startedAt"),
+      endedAt,
+      parameters: historicalFields(record(run.parameters)),
+      pid: run.pid === undefined ? undefined : integer(run.pid, "pid", 1, 0xffffffff),
+      exitCode:
+        run.exitCode === undefined || run.exitCode === null
+          ? run.exitCode
+          : taskExitCode(run.exitCode),
+      signal:
+        run.signal === undefined || run.signal === null
+          ? run.signal
+          : string(run.signal, "signal", 128),
+      reasonCode:
+        run.reasonCode === undefined ? undefined : taskValue(run.reasonCode, "reasonCode"),
+      diagnostic: diagnostic(run.diagnostic),
+      output: {
+        stdoutBytes: integer(output.stdoutBytes, "stdoutBytes", 0, Number.MAX_SAFE_INTEGER),
+        stderrBytes: integer(output.stderrBytes, "stderrBytes", 0, Number.MAX_SAFE_INTEGER),
+        truncated: output.truncated,
+        error: diagnostic(output.error),
+      },
     };
   });
   const reviewRunId =
@@ -77,91 +125,13 @@ export function taskOwnership(value: unknown, filename: string) {
   if (reviewRunId) occupied.push(reviewRunId);
   if (occupied.length > 1)
     throw new AppError("invalid_argument", "Multiple unfinished runs belong to one task");
-  return { id, state, reviewRunId, runs, occupied };
-}
-
-function storedFields(value: unknown) {
-  const input = record(value);
-  string(input.cwd, "cwd");
-  string(input.timezone, "timezone", 128);
-  const fields = taskFields(input);
-  nextOccurrence(fields.schedule, fields.timezone, new Date());
-  return fields;
-}
-
-export function taskRecord(value: unknown, filename: string): TaskRecord {
-  const input = record(value),
-    task = record(input.task);
-  const ownership = taskOwnership(value, filename);
-  const fields = storedFields(task);
-  const onceStatus =
-    fields.schedule.kind === "once"
-      ? choice(task.onceStatus, ["pending", "consumed", "missed"], "onceStatus")
-      : undefined;
-  if (fields.schedule.kind === "cron" && task.onceStatus !== undefined)
-    throw new AppError("invalid_argument", "Cron task has a one-shot status");
-  const runs = (input.runs as unknown[]).map((value, index): TaskRun => {
-    const run = record(value),
-      parameters = record(run.parameters),
-      output = record(run.output);
-    const state = ownership.runs[index]!.state;
-    const endedAt = optionalTime(run.endedAt, "endedAt");
-    if ((!taskRunActive(state) && !endedAt) || typeof output.truncated !== "boolean")
-      throw new AppError("invalid_argument", "Invalid run result or output");
-    return {
-      ...ownership.runs[index]!,
-      taskId: ownership.id,
-      trigger: choice(run.trigger, ["manual", "scheduled"], "trigger"),
-      acceptedAt: timestamp(run.acceptedAt, "acceptedAt"),
-      scheduledAt: optionalTime(run.scheduledAt, "scheduledAt"),
-      startedAt: optionalTime(run.startedAt, "startedAt"),
-      endedAt,
-      parameters: {
-        ...storedFields(parameters),
-        taskRevision: integer(parameters.taskRevision, "taskRevision", 1, Number.MAX_SAFE_INTEGER),
-      },
-      pid: run.pid === undefined ? undefined : integer(run.pid, "pid", 1, 0xffffffff),
-      exitCode:
-        run.exitCode === undefined || run.exitCode === null
-          ? run.exitCode
-          : integer(run.exitCode, "exitCode", 0, 0xffffffff),
-      signal:
-        run.signal === undefined || run.signal === null
-          ? run.signal
-          : string(run.signal, "signal", 128),
-      reasonCode:
-        run.reasonCode === undefined
-          ? undefined
-          : choice(
-              run.reasonCode,
-              [
-                "missed",
-                "overlap",
-                "capacity",
-                "start_failed",
-                "exit_nonzero",
-                "requested_stop",
-                "agent_stop",
-                "unconfirmed",
-              ],
-              "reasonCode",
-            ),
-      diagnostic: diagnostic(run.diagnostic),
-      output: {
-        stdoutBytes: integer(output.stdoutBytes, "stdoutBytes", 0, Number.MAX_SAFE_INTEGER),
-        stderrBytes: integer(output.stderrBytes, "stderrBytes", 0, Number.MAX_SAFE_INTEGER),
-        truncated: output.truncated,
-        error: diagnostic(output.error),
-      },
-    };
-  });
   return {
     task: {
       ...fields,
-      id: ownership.id,
+      id,
       revision: integer(task.revision, "revision", 1, Number.MAX_SAFE_INTEGER),
-      state: ownership.state,
-      reviewRunId: ownership.reviewRunId,
+      state,
+      reviewRunId,
       nextRunAt: task.nextRunAt === null ? null : timestamp(task.nextRunAt, "nextRunAt"),
       onceStatus,
     },

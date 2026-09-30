@@ -1,13 +1,12 @@
 import { expect, test } from "vitest";
 import { once } from "node:events";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { WebSocket } from "ws";
 import {
   appVersion,
-  protocolVersion,
   type Reply,
   type ScheduledTask,
   type DeviceTaskSummary,
@@ -201,12 +200,75 @@ test("real device CLI/RPC share tasks, snapshots persist only summaries, and rem
   }
 }, 15000);
 
-test("summary ownership, first revision, stale cache and nested whitelist are independent of metadata", async () => {
+test("startup storage faults replace active summaries without exposing local diagnostics or disabling the device", async () => {
+  const f = await fixture();
+  const config = {
+    dataDir: join(f.root, "agent"),
+    runDir: join(f.root, "run"),
+    shell: "/bin/bash",
+    limits: defaultAgentLimits,
+  };
+  let agent = new Agent(config, { ...f.identity, server: f.origin });
+  try {
+    await agent.start();
+    await localRequest(config, "tasks.create", {
+      taskId: "good",
+      input: {
+        name: "Active",
+        command: "printf DEVICE_ONLY_SENTINEL",
+        cwd: f.root,
+        schedule: { kind: "cron", expression: "0 9 * * *" },
+      },
+    });
+    await expect
+      .poll(async () => (await f.summaries())[0]?.snapshot?.items[0]?.state)
+      .toBe("active");
+    await agent.close();
+    const path = join(config.dataDir, "tasks", "LOCAL_ONLY_SENTINEL.json");
+    await writeFile(path, "invalid JSON with LOCAL_ONLY_SENTINEL");
+    agent = new Agent(config, { ...f.identity, server: f.origin });
+    await agent.start();
+    await expect
+      .poll(async () => (await f.summaries())[0])
+      .toMatchObject({ current: true, snapshot: { revision: 0, storageError: true, items: [] } });
+    const reply = await f.rpc("tasks.get", { taskId: "good" });
+    expect(reply).toEqual({
+      id: expect.any(String),
+      outcome: "failed",
+      error: { code: "io_error", message: "Scheduled task storage is unavailable" },
+    });
+    expect(await f.rpc("files.cleanup")).toMatchObject({
+      outcome: "succeeded",
+      result: { pending: false, retained: 0, failed: 0 },
+    });
+    expect(
+      JSON.stringify([
+        await f.summaries(),
+        f.store.db.prepare("SELECT snapshot FROM taskSummaries").all(),
+        reply,
+      ]),
+    ).not.toMatch(/LOCAL_ONLY_SENTINEL|DEVICE_ONLY_SENTINEL|diagnostic|parameters/);
+    expect(f.app.connections.agents.has(f.identity.deviceId)).toBe(true);
+    await agent.close();
+    await rm(path);
+    agent = new Agent(config, { ...f.identity, server: f.origin });
+    await agent.start();
+    await expect
+      .poll(async () => (await f.summaries())[0]?.snapshot?.items[0]?.state)
+      .toBe("active");
+    expect((await f.summaries())[0]?.snapshot?.storageError).toBeUndefined();
+  } finally {
+    await agent.close();
+    await f.close();
+  }
+});
+
+test("summary DWORD results, ownership, revision and nested whitelist are independent of metadata", async () => {
   const f = await fixture();
   const sockets: WebSocket[] = [];
   const connect = async () => {
     const socket = new WebSocket(
-      `${f.origin.replace("http:", "ws:")}/api/agent/control?protocolVersion=${protocolVersion}&appVersion=${appVersion}`,
+      `${f.origin.replace("http:", "ws:")}/api/agent/control?appVersion=${appVersion}`,
       { headers: { authorization: `Bearer ${f.identity.deviceToken}` } },
     );
     sockets.push(socket);
@@ -258,7 +320,7 @@ test("summary ownership, first revision, stale cache and nested whitelist are in
             acceptedAt: at,
             endedAt: at,
             state: "succeeded",
-            exitCode: 0,
+            exitCode: 0xffffffff,
             parameters: { command: "NO_CACHE" },
             diagnostic: "NO_CACHE",
             output: { text: "NO_CACHE" },
@@ -269,6 +331,7 @@ test("summary ownership, first revision, stale cache and nested whitelist are in
     first.send(JSON.stringify(snapshot));
     await expect.poll(async () => (await f.summaries())[0]?.snapshot?.revision).toBe(9);
     expect(JSON.stringify(f.store.taskSummaries())).not.toContain("NO_CACHE");
+    expect(f.store.taskSummaries()[0]?.snapshot?.items[0]?.latestRun?.exitCode).toBe(0xffffffff);
     const observedAt = (await f.summaries())[0]!.observedAt;
     first.send(JSON.stringify({ ...snapshot, revision: 8, items: [] }));
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -294,6 +357,49 @@ test("summary ownership, first revision, stale cache and nested whitelist are in
     } finally {
       reopened.close();
     }
+    for (const exitCode of [-1, 0x100000000, 1.5, 0xc0000005]) {
+      const socket = await connect();
+      const closed = once(socket, "close");
+      socket.send(
+        JSON.stringify({
+          ...snapshot,
+          items: snapshot.items.map((item) => ({
+            ...item,
+            latestRun: { ...item.latestRun, exitCode },
+          })),
+        }),
+      );
+      if (exitCode === 0xc0000005) {
+        await expect
+          .poll(async () => (await f.summaries())[0]?.snapshot?.items[0]?.latestRun?.exitCode)
+          .toBe(exitCode);
+        expect((await f.summaries())[0]?.current).toBe(true);
+        socket.close();
+        await closed;
+      } else expect((await closed)[0]).toBe(1008);
+    }
+    for (const fault of [
+      { storageError: false, items: [] },
+      { storageError: true, items: snapshot.items },
+    ]) {
+      const socket = await connect();
+      const closed = once(socket, "close");
+      socket.send(JSON.stringify({ ...snapshot, ...fault }));
+      expect((await closed)[0]).toBe(1008);
+    }
+    const fault = await connect();
+    fault.send(
+      JSON.stringify({
+        type: "tasks.snapshot",
+        revision: 0,
+        storageError: true,
+        items: [],
+        diagnostic: "LOCAL_ONLY_SENTINEL",
+      }),
+    );
+    await expect
+      .poll(async () => (await f.summaries())[0]?.snapshot)
+      .toEqual({ revision: 0, storageError: true, items: [] });
   } finally {
     for (const socket of sockets) socket.terminate();
     await f.close();

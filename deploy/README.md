@@ -44,7 +44,17 @@ docker compose -f deploy/compose.yaml up -d server
 
 已初始化后的密码恢复将中间命令换成 `reset-password`，按提示输入新密码。不要换空卷；原登录会话会失效。备份可停止 server 后备份整个 `server-data` 卷，agent 登记和凭据单独备份，项目文件沿原方式备份。
 
-原生 server：校验并解压完整 server 包到 `/opt/kiteline-server`，创建专用 `kiteline` 用户及其可写的 `/var/lib/kiteline`，将 [unit](kiteline-server.service) 安装为 `/etc/systemd/system/kiteline-server.service`。创建 `/etc/kiteline-server.env`，默认可只写 `KITELINE_TRUST_PROXY_PROTO=0`；接 HTTPS 反代时改为1，需要局域网直连或自定义端口时设置 `KITELINE_LISTEN_ADDR=0.0.0.0:8443`。执行 `systemctl daemon-reload`、`systemctl enable --now kiteline-server`，查看 `journalctl -u kiteline-server` 取得初始化 token。恢复时停止 unit，用 `sudo -u kiteline env KITELINE_DATA_DIR=/var/lib/kiteline /opt/kiteline-server/bin/kiteline-server reset-password`，再启动 unit。
+原生 server：校验并解压完整 server 包到 `/opt/kiteline-server`，创建专用 `kiteline` 用户及其可写的 `/var/lib/kiteline`，将 [unit](kiteline-server.service) 安装为 `/etc/systemd/system/kiteline-server.service`。创建 `/etc/kiteline-server.env`，默认可只写 `KITELINE_TRUST_PROXY_PROTO=0`；接 HTTPS 反代时改为1，需要局域网直连或自定义端口时设置 `KITELINE_LISTEN_ADDR=0.0.0.0:8443`。执行 `systemctl daemon-reload`、`systemctl enable --now kiteline-server`，查看 `journalctl -u kiteline-server` 取得初始化 token。
+
+未初始化而 token 过期或遗失时，以同一专用用户和原管理目录重新生成：
+
+```sh
+systemctl stop kiteline-server
+sudo -u kiteline /opt/kiteline-server/bin/kiteline-server setup-token --data-dir /var/lib/kiteline
+systemctl start kiteline-server
+```
+
+已初始化后的密码恢复，将中间命令的 `setup-token` 换为 `reset-password`，按提示输入新密码；原登录会话会失效。两种恢复均须保持原管理目录，不能指向另一空目录。
 
 ## 原生 Agent
 
@@ -104,7 +114,7 @@ Windows更新和卸载在提升的独立PowerShell中执行，先由用户正常
 & "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" uninstall
 ```
 
-升级的ZIP与`.sha256`放在一起；确认后不自动启动。默认卸载保留状态；仅明确指定`--purge-state`删除应用JSON与tasks，不删除状态根或workspace。稳定锁文件保留以维持对象身份。同身份同版本安装重跑只核完整性，不替树或重绑。
+升级的ZIP与`.sha256`放在一起；确认后不自动启动。默认卸载保留状态；`--purge-state`范围和稳定锁规则见[卸载规则](#原生-agent)。同身份同版本安装重跑只核完整性，不替树或重绑。
 
 设备上线后，先在网页为该设备添加 workspace，选择项目目录；再获取 `WORKSPACE_ID` 创建终端：
 
@@ -127,7 +137,7 @@ sudo kiteline-agent upgrade --archive "/path/to/kiteline-agent-${KITELINE_VERSIO
 sudo kiteline-agent uninstall
 ```
 
-更新server后刷新网页；设备版本不匹配时，在设备详情选“升级agent”，明确目标平台后复制到独立终端执行。命令从当前入口下载配套包及校验，无需重绑，不改变保存的连接地址。所有安装使用者须先停止，包括其他dataDir实例和本机attach；占用时明确拒绝，不由项目停服务。成功后仍停止，由用户run或外部管理器启动。失败只尝试回退程序树，不恢复服务状态。卸载默认保留应用状态，显式purge仅移除本应用状态JSON和tasks，保留状态根、项目、命令报告及用户管理器配置。
+更新server后刷新网页；设备版本不匹配时，在设备详情选“升级agent”，明确目标平台后复制到独立终端执行。命令从当前入口下载配套包及校验，无需重绑，不改变保存的连接地址。所有安装使用者须先停止，包括其他dataDir实例和本机attach；占用时明确拒绝，不由项目停服务。成功后仍停止，由用户run或外部管理器启动。失败只尝试回退程序树，不恢复服务状态。卸载及显式purge范围沿上述规则。
 
 ### 定时任务
 
@@ -172,6 +182,8 @@ Linux 的 Unix socket 完整路径限 103 字节。显式使用 `/run` 等易失
 
 定时任务停机错过不补跑，暂停仅停止后续调度，不停止在途运行。异常退出后的待核查结果需明确处理，历史为有限留存；实际参数见 `kiteline-agent schedule --help`。
 
+普通卸载保留状态。显式 `--purge-state` 只删除应用 JSON 和 tasks，不删除状态根、workspace、项目文件或外部管理器配置；稳定锁及未删除配置按命令输出处理。
+
 ## 自行准备的容器
 
 先创建自己的 Linux 容器并准备上述基础依赖、项目工具和挂载，再在容器内执行同一网页前台命令。没有 systemd 不影响前台运行，root 容器也可使用；容器的常驻和重建由你自行管理，工作台不提供容器创建入口。
@@ -186,7 +198,7 @@ linked worktree 同时挂载工作目录、gitDir 和 commonDir；`.git` 指向�
 
 同容器终端启动的服务可直接从端口入口访问，无需发布宿主端口。独立服务容器可使用 `network_mode: service:agent` 明确共享网络；普通 bridge 的其他容器和宿主 localhost 不属于 agent 的 localhost。原生 agent 则能访问已发布到宿主本地端口的容器服务。
 
-普通路径代理尽力兼容相对地址；Vite 使用“保留路径”并设置对应 `base`、实际域名 `server.allowedHosts`，HMR 沿相同入口使用 WS/WSS。应用写死的根相对 API/登录回调仍需项目配置。
+普通路径代理剥离前缀。Vite 使用“保留路径”，将 base 设置为复制地址中的 `/absproxy/<deviceId>/<port>/`，server.allowedHosts 加入工作台实际域名，默认 HMR 沿同一入口使用 WS/WSS；根相对 API 和登录回调仍需项目配置。
 
 ## 平台要求
 

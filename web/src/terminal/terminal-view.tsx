@@ -13,7 +13,7 @@ import {
 import { TerminalDisplay, type DisplayState } from "./display";
 import { IconButton } from "../components/icon-button";
 import { Button } from "../components/ui/button";
-import { api, rpc } from "../lib/api";
+import { api, ApiError, rpc } from "../lib/api";
 import { useServerVersion, webCompatible } from "../lib/release";
 import { Terminal } from "@xterm/xterm";
 import { ErrorNotice } from "../components/error-notice";
@@ -53,6 +53,7 @@ export function TerminalView({
   const [reading, setReading] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [state, setState] = useState<DisplayState>({ status: "connecting" });
+  const code = state.error instanceof ApiError ? state.error.code : undefined;
   const [notice, setNotice] = useState<unknown>();
   const [ctrl, setCtrl] = useState(false);
   const mobile = useMobile();
@@ -236,18 +237,16 @@ export function TerminalView({
               <Button
                 variant="ghost"
                 disabled={recovering || !webCompatible()}
-                onClick={() =>
-                  state.code === "recording_unavailable" ? void recover() : redisplay()
-                }
+                onClick={() => (code === "recording_unavailable" ? void recover() : redisplay())}
               >
                 <RefreshCw />
                 {recovering
                   ? t(($) => $.terminal.recovering)
-                  : state.code === "recording_unavailable"
+                  : code === "recording_unavailable"
                     ? t(($) => $.terminal.recover)
                     : t(($) => $.terminal.reconnect)}
               </Button>
-              {["limit_exceeded", "timeout", "busy"].includes(state.code ?? "") && (
+              {["limit_exceeded", "timeout", "busy"].includes(code ?? "") && (
                 <Button
                   variant="ghost"
                   onClick={() => redisplay("screen")}

@@ -6,7 +6,7 @@
 
 ## 从源码开发
 
-开发环境使用 Node 24.20.0 和 pnpm 11.25.0。Ubuntu 原生组件构建需要 `build-essential pkg-config libevent-dev libncurses-dev ncurses-term bison curl patch`，运行设备工具还需要 Git 2.23.0+ 和 Shell。amd64组件准备会取得固定rg到内部路径，不要求系统rg；Linux arm64 需要外部 rg 14+，运行基线为 Ubuntu 24.04。
+开发环境使用 [package.json](package.json) 指定的 Node 和 pnpm。Ubuntu 原生组件构建需要 `build-essential pkg-config libevent-dev libncurses-dev ncurses-term bison curl patch`，运行设备工具还需要 Git 2.23.0+ 和 Shell。amd64组件准备会取得固定rg到内部路径，不要求系统rg；Linux arm64 需要外部 rg 14+，运行基线为 Ubuntu 24.04。
 
 ```sh
 pnpm install
@@ -43,7 +43,7 @@ export NODE_EXTRA_CA_CERTS=/var/tmp/kiteline-dev/caddy/caddy/pki/authorities/loc
 
 选定设备后，顶栏地球图标可输入端口，打开时读取一次监听端口建议。终端中的 `http://localhost:端口/` 链接可直接打开；手机选中完整链接后也有访问动作。服务需监听 agent 所在环境的 loopback 或 wildcard 地址。
 
-默认入口剥离代理前缀。Vite 项目使用“保留路径”，将项目 `base` 设置为复制地址中的 `/absproxy/<deviceId>/<port>/`，`server.allowedHosts` 加入工作台实际域名；默认 HMR 沿当前入口使用 WS/WSS。根相对 API、应用登录回调等仍需项目自身配置。
+默认入口剥离代理前缀。Vite 项目使用“保留路径”，具体 `base`、Host 和 HMR 配置见 [开发服务](deploy/README.md#开发服务)。
 
 ## 检查
 

@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { appVersion } from "@kiteline/shared/protocol";
+import { appVersion, type Device } from "@kiteline/shared/protocol";
 
 let serverVersion: string | undefined;
 const listeners = new Set<() => void>();
@@ -14,6 +14,13 @@ export function observeServerVersion(version: string | null) {
 }
 export function webCompatible() {
   return serverVersion === undefined || serverVersion === appVersion;
+}
+export function agentVersionMismatch(device: Device) {
+  return (
+    device.status === "offline" &&
+    !!device.release &&
+    device.release.agentVersion !== device.release.serverVersion
+  );
 }
 export function useServerVersion() {
   return useSyncExternalStore(subscribe, () => serverVersion);

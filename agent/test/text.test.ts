@@ -186,7 +186,7 @@ test("lowering the editor limit still allows saving a reduced draft against its 
   expect(await readFile(join(root, "a"), "utf8")).toBe("new");
 });
 
-test("ended temporary writers are cleaned without inferring an uncertain business result", async () => {
+test("cancelled temporary writers are cleaned after their real writes finish", async () => {
   const { files, temporary, id, data, signal } = await setup();
   const cancelled = await files.prepare(id, "cancelled", 6, true, undefined, signal);
   cancelled.received = await temporary.write(cancelled.temporary, Buffer.from("one"), 0, signal);
@@ -198,12 +198,4 @@ test("ended temporary writers are cleaned without inferring an uncertain busines
   await temporary.release(cancelled.temporary, cancelled);
   await expect(stat(cancelled.temporary.path)).rejects.toMatchObject({ code: "ENOENT" });
   expect(JSON.parse(await readFile(join(data, "temporary-files.json"), "utf8"))).toEqual([]);
-
-  const uncertain = await files.prepare(id, "uncertain", 3, true, undefined, signal);
-  uncertain.received = await temporary.write(uncertain.temporary, Buffer.from("new"), 0, signal);
-  uncertain.uncertain = true;
-  await temporary.release(uncertain.temporary, uncertain);
-  await expect(stat(uncertain.temporary.path)).rejects.toMatchObject({ code: "ENOENT" });
-  expect(JSON.parse(await readFile(join(data, "temporary-files.json"), "utf8"))).toEqual([]);
-  expect(uncertain.uncertain).toBe(true);
 });

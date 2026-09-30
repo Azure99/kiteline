@@ -87,7 +87,15 @@ export function ScheduledTasksPage({
   const selected = devices.find((d) => d.id === route.deviceId);
   const summary = summaries?.find((s) => s.deviceId === route.deviceId);
   const available = connected && fresh && webCompatible();
-  const online = available && selected?.status === "online" && summary?.current === true;
+  const storageError = summary?.snapshot?.storageError;
+  const unavailableDevices = devices
+    .filter((device) => {
+      const group = summaries?.find((item) => item.deviceId === device.id);
+      return !group?.current || group.snapshot?.storageError;
+    })
+    .map((device) => device.id);
+  const online =
+    available && selected?.status === "online" && summary?.current === true && !storageError;
   const hasDetail = !!route.deviceId && !!route.taskId;
   const origin = currentPath();
   function select(next: ScheduleRoute) {
@@ -110,7 +118,10 @@ export function ScheduledTasksPage({
           <RefreshCw />
         </IconButton>
         <Button
-          disabled={!available || !devices.some((d) => d.status === "online")}
+          disabled={
+            !available ||
+            !devices.some((d) => d.status === "online" && !unavailableDevices.includes(d.id))
+          }
           onClick={() => setEditor({ deviceId: route.filter, origin, filter: route.filter })}
         >
           <Plus />
@@ -179,6 +190,10 @@ export function ScheduledTasksPage({
                     {!group?.snapshot ? (
                       <p className="p-3 text-sm text-muted-foreground">
                         {t(($) => $.schedules.unobserved)}
+                      </p>
+                    ) : group.snapshot.storageError ? (
+                      <p role="status" className="p-3 text-sm text-destructive">
+                        {t(($) => $.schedules.storageError)}
                       </p>
                     ) : !group.snapshot.items.length ? (
                       <p className="p-3 text-sm text-muted-foreground">
@@ -258,7 +273,7 @@ export function ScheduledTasksPage({
                 </IconButton>
                 <span className="min-w-0 truncate text-sm">{selected?.name ?? route.deviceId}</span>
               </div>
-              {!online && (
+              {!online && !storageError && (
                 <p
                   role="status"
                   className="shrink-0 border-b border-border px-4 py-2 text-xs text-muted-foreground"
@@ -266,7 +281,11 @@ export function ScheduledTasksPage({
                   {t(($) => $.schedules.disconnected)}
                 </p>
               )}
-              {route.runId ? (
+              {storageError ? (
+                <p role="status" className="p-4 text-sm text-destructive">
+                  {t(($) => $.schedules.storageError)}
+                </p>
+              ) : route.runId ? (
                 <RunDetail
                   key={`${route.deviceId}:${route.taskId}:${route.runId}`}
                   deviceId={route.deviceId!}
@@ -302,6 +321,7 @@ export function ScheduledTasksPage({
       {editor && (
         <TaskEditor
           devices={devices}
+          unavailableDevices={unavailableDevices}
           connected={available}
           initialDeviceId={editor.deviceId}
           task={editor.task}

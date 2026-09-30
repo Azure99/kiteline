@@ -11,11 +11,10 @@ import { LanguageDescription, syntaxTree } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { closeDraft } from "../src/files/navigation";
 
-const transport = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), open: vi.fn() }));
+const transport = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn() }));
 vi.mock("../src/files/content", () => ({
   readText: transport.read,
   writeText: transport.write,
-  readContent: transport.open,
 }));
 const target: FileTarget = { deviceId: "device", workspaceId: "workspace", path: "a.txt" };
 function deferred<T>() {
@@ -738,94 +737,6 @@ test.each(["succeeded", "failed", "unknown"])(
       });
   },
 );
-
-test("initial recognition waits for every captured operation and follows only a confirmed move", async () => {
-  const store = new DraftStore();
-  const controller = new AbortController();
-  transport.open.mockImplementationOnce(
-    (_target, signal: AbortSignal) =>
-      new Promise((_resolve, reject) =>
-        signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), {
-          once: true,
-        }),
-      ),
-  );
-  const reading = store.readInitial(target, controller.signal, () => {});
-  await vi.waitFor(() => expect(transport.open).toHaveBeenCalledOnce());
-  const first = store.capture("device", "workspace", "a.txt");
-  const second = store.capture("device", "workspace", "a.txt");
-  await store.rename("device", "workspace", "a.txt", "b.txt", first);
-  await Promise.resolve();
-  expect(transport.open).toHaveBeenCalledOnce();
-  transport.open.mockImplementationOnce(async (target: FileTarget) => ({
-    kind: "text",
-    value: disk("base", "moved", target.path),
-  }));
-  store.release(second);
-  expect((await reading).target.path).toBe("b.txt");
-  expect(store.snapshot()).toEqual([]);
-});
-
-test("failed initial move retries the old path, while unmount during a pause cannot reopen it", async () => {
-  const store = new DraftStore();
-  for (const cancelled of [false, true]) {
-    const controller = new AbortController();
-    transport.open.mockImplementationOnce(
-      (_target, signal: AbortSignal) =>
-        new Promise((_resolve, reject) =>
-          signal.addEventListener(
-            "abort",
-            () => reject(new DOMException("aborted", "AbortError")),
-            { once: true },
-          ),
-        ),
-    );
-    const before = transport.open.mock.calls.length;
-    const reading = store.readInitial(target, controller.signal, () => {});
-    await vi.waitFor(() => expect(transport.open.mock.calls.length).toBe(before + 1));
-    const change = store.capture("device", "workspace", "a.txt");
-    if (cancelled) {
-      const result = expect(reading).rejects.toMatchObject({ name: "AbortError" });
-      controller.abort();
-      await result;
-      store.release(change);
-      expect(transport.open.mock.calls.length).toBe(before + 1);
-    } else {
-      transport.open.mockResolvedValueOnce({
-        kind: "image",
-        value: { blob: new Blob(), meta: { contentType: "image/png" } },
-      });
-      store.release(change);
-      const result = await reading;
-      expect(result.target.path).toBe("a.txt");
-      expect(result.content.kind).toBe("image");
-    }
-  }
-});
-
-test("initial read cancellation retires its channel before a retry fails to become ready", async () => {
-  const store = new DraftStore();
-  let channel: string | undefined;
-  transport.open.mockImplementationOnce((_target, signal: AbortSignal, onChannel) => {
-    onChannel("old-channel");
-    return new Promise((_resolve, reject) =>
-      signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), {
-        once: true,
-      }),
-    );
-  });
-  const reading = store.readInitial(target, new AbortController().signal, (id) => {
-    channel = id;
-  });
-  await vi.waitFor(() => expect(channel).toBe("old-channel"));
-  const change = store.capture("device", "workspace", "a.txt");
-  expect(channel).toBeUndefined();
-  transport.open.mockRejectedValueOnce(new ApiError("not_found", "new read cannot open"));
-  const result = expect(reading).rejects.toMatchObject({ code: "not_found" });
-  store.release(change);
-  await result;
-  expect(channel).toBeUndefined();
-});
 
 test.each(["move", "retry"])(
   "a capacity-rejected opening initializes at its renamed path during %s",

@@ -16,7 +16,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { parseArgs, promisify, type ParseArgsOptionsConfig } from "node:util";
-import lockfile from "proper-lockfile";
+import { lockAgentState } from "./state-lock.js";
 import { atomicJson } from "./config.js";
 import {
   environmentFile,
@@ -75,11 +75,9 @@ async function verifyPackage(directory: string) {
   await command("sh", ["-c", "sha256sum -c SHA256SUMS >/dev/null"], directory);
   if ((await command(join(directory, "runtime/bin/node"), ["--version"])) !== `v${release.node}`)
     throw new Error("Bundled Node does not match the installation manifest");
-  if (
-    (await command(join(directory, "dist/native/bin/tmux"), ["-V"])) !==
-    `tmux ${release.native.tmux}`
-  )
-    throw new Error("Bundled tmux does not match the installation manifest");
+  const identity = JSON.parse(await readFile(join(directory, "dist/native/identity.json"), "utf8"));
+  if ((await command(join(directory, "dist/native/bin/tmux"), ["-V"])) !== `tmux ${identity.tmux}`)
+    throw new Error("Bundled tmux does not match the native identity");
   if ((await command(join(directory, "bin/kiteline-agent"), ["--version"])) !== release.version)
     throw new Error("Agent does not match the installation manifest");
   return release.version as string;
@@ -120,17 +118,14 @@ async function stoppedInstallation(installation: Installation) {
   let state: (() => Promise<void>) | undefined;
   try {
     const { dataDir } = await installationPaths(installation);
-    if (await exists(dataDir))
-      state = await lockfile.lock(dataDir, {
-        lockfilePath: join(dataDir, "process.lock"),
-        realpath: false,
-      });
+    if (await exists(dataDir)) state = await lockAgentState(dataDir);
   } catch (error) {
     const errors = [error];
     await cleanup(errors, installationUseFile, () => use.close());
     throw failures("Agent state is busy or unavailable; no running tasks were stopped", errors);
   }
   return {
+    stateLocked: state !== undefined,
     async close() {
       const errors: unknown[] = [];
       if (state) await cleanup(errors, "agent state lock", state);
@@ -328,11 +323,6 @@ async function uninstall(
 ) {
   await (await stoppedInstallation(installation)).close();
   const { dataDir } = await installationPaths(installation);
-  const purgePaths = purge
-    ? ["agent.json", "connection.json", "config.json", "temporary-files.json", "tasks"].map(
-        (name) => join(dataDir, name),
-      )
-    : [];
   await confirm(
     `Remove the agent program? ${purge ? `Delete its state JSON and tasks at ${dataDir}.` : `Retain state and tasks at ${dataDir}.`} Workspaces and external manager configuration are not removed.`,
     yes,
@@ -340,6 +330,12 @@ async function uninstall(
   );
   protectSignals();
   const use = await stoppedInstallation(installation);
+  const purgePaths =
+    purge && use.stateLocked
+      ? ["agent.json", "connection.json", "config.json", "temporary-files.json", "tasks"].map(
+          (name) => join(dataDir, name),
+        )
+      : [];
   const errors: unknown[] = [];
   try {
     await rm(launcherFile, { force: true });
@@ -356,7 +352,7 @@ async function uninstall(
     await cleanup(errors, installationUseFile, () => use.close());
   }
   if (errors.length) throw failures("Uninstall did not complete", errors);
-  return `Uninstalled; ${purge ? "application state removed" : "state retained"}. External manager configuration was not changed.`;
+  return `Uninstalled; ${purge && use.stateLocked ? "application state removed" : "state retained"}. External manager configuration was not changed.`;
 }
 
 export async function installCli(action: string, args: string[]) {

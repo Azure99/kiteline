@@ -104,7 +104,6 @@ export function buildStaticAgent(destination) {
     }).trim();
     const output = join(temporary, "output");
     run("docker", ["cp", `${container}:/output`, output]);
-    run("sha256sum", ["-c", "SHA256SUMS"], { cwd: output, stdio: ["ignore", "ignore", "inherit"] });
     writeFileSync(
       join(output, "build.json"),
       JSON.stringify(

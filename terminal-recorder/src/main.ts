@@ -1,4 +1,4 @@
-import { appVersion, asError, errorReply, AppError } from "@kiteline/shared/protocol";
+import { asError, errorReply, AppError } from "@kiteline/shared/protocol";
 import type { RecorderConfig, RecorderMessage, RecorderRequest } from "@kiteline/shared/ipc";
 import { JsonWriter, readLines } from "@kiteline/shared/stdio";
 import { RecordedSession } from "./session.js";
@@ -12,10 +12,6 @@ interface Creation {
 }
 
 async function main() {
-  if (process.argv.includes("--version")) {
-    console.log(appVersion);
-    return;
-  }
   if (process.argv[2] !== "--agent" || !process.argv[3])
     throw new Error("The terminal recorder is started by kiteline-agent.");
   const config = JSON.parse(process.argv[3]) as RecorderConfig;
@@ -100,12 +96,7 @@ async function main() {
         }
         switch (message.type) {
           case "attach":
-            await session.attach(
-              message.attachmentId,
-              message.terminalProfile,
-              message.history,
-              message.historyGap,
-            );
+            await session.attach(message.attachmentId, message.history, message.historyGap);
             result = {};
             break;
           case "end":

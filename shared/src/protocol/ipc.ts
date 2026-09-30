@@ -7,14 +7,12 @@ export interface RecorderConfig {
 }
 export interface TerminalIdentity {
   socket: string;
-  tmuxSession: string;
   paneId: string;
   windowId: string;
 }
 export interface CreateTerminal {
   sessionId: string;
   socket: string;
-  tmuxSession: string;
   workspacePath: string;
   shell: string;
   command?: string;
@@ -37,7 +35,6 @@ export type TerminalEvent =
 export type TerminalFrame =
   | {
       type: "restore.begin";
-      terminalProfile: string;
       cols: number;
       rows: number;
       historyLines: number;
@@ -59,7 +56,6 @@ export type RecorderRequest =
       id: string;
       sessionId: string;
       attachmentId: string;
-      terminalProfile: string;
       historyGap: boolean;
       history: "retained" | "screen";
     }

@@ -34,6 +34,7 @@ export function scheduleRpc(
   params: Record<string, unknown>,
   signal: AbortSignal,
 ) {
+  tasks.assertAvailable();
   const offset = () =>
     params.offset === undefined ? 0 : integer(params.offset, "offset", 0, Number.MAX_SAFE_INTEGER);
   const acknowledge = () =>

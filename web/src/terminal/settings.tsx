@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { ErrorNotice } from "../components/error-notice";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import { shortcutIcons, type Device, type RpcParams } from "@kiteline/shared/protocol";
 import { rpc } from "../lib/api";
@@ -25,24 +25,17 @@ export function TerminalSettings({ device, onClose }: { device: Device; onClose:
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
   const [saved, setSaved] = useState(false);
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
   async function operation(action: () => Promise<void>) {
     setBusy(true);
     setError(undefined);
     setSaved(false);
     try {
       await action();
-      if (mounted.current) setSaved(true);
+      setSaved(true);
     } catch (error) {
-      if (mounted.current) setError(error);
+      setError(error);
     } finally {
-      if (mounted.current) setBusy(false);
+      setBusy(false);
     }
   }
   const disabled = busy || device.status !== "online";
@@ -129,10 +122,8 @@ export function TerminalSettings({ device, onClose }: { device: Device; onClose:
                     onClick={() =>
                       void operation(async () => {
                         await rpc(device.id, "shortcuts.remove", { id: shortcut.id });
-                        if (mounted.current) {
-                          setShortcuts((items) => items.filter((item) => item.id !== shortcut.id));
-                          if (editing?.id === shortcut.id) setEditing(undefined);
-                        }
+                        setShortcuts((items) => items.filter((item) => item.id !== shortcut.id));
+                        if (editing?.id === shortcut.id) setEditing(undefined);
                       })
                     }
                   >
@@ -148,13 +139,11 @@ export function TerminalSettings({ device, onClose }: { device: Device; onClose:
                   event.preventDefault();
                   void operation(async () => {
                     const result = await rpc(device.id, "shortcuts.put", editing);
-                    if (mounted.current) {
-                      setShortcuts((items) => [
-                        ...items.filter((item) => item.id !== result.id),
-                        result,
-                      ]);
-                      setEditing(undefined);
-                    }
+                    setShortcuts((items) => [
+                      ...items.filter((item) => item.id !== result.id),
+                      result,
+                    ]);
+                    setEditing(undefined);
                   });
                 }}
               >

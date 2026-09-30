@@ -21,7 +21,6 @@ export function memberTarget(
   };
 }
 export function useTerminalDrag(
-  enabled: boolean,
   move: (id: string, groupId?: string, position?: MemberPosition) => void,
 ) {
   const id = useRef<string | undefined>(undefined);
@@ -33,7 +32,6 @@ export function useTerminalDrag(
     setTarget(undefined);
   }
   function start(event: DragEvent, sessionId: string) {
-    if (!enabled) return;
     id.current = sessionId;
     event.dataTransfer.setData("text/plain", sessionId);
     event.dataTransfer.effectAllowed = "move";

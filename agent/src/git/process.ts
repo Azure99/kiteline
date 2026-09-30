@@ -1,10 +1,9 @@
 import { spawn } from "node:child_process";
 import { isUtf8 } from "node:buffer";
 import { createHash } from "node:crypto";
-import { setTimeout as delay } from "node:timers/promises";
 import { AppError, asError, OperationError, limits, type GitPath } from "@kiteline/shared/protocol";
 import { BytePrefix } from "../buffers.js";
-import { groupRunning } from "../process-group.js";
+import { stopGroup, waitForGroup } from "../process-group.js";
 import { JobChild, spawnJob } from "@kiteline/shared/windows/job";
 import { windowsExecutable } from "../tool-checks.js";
 
@@ -59,7 +58,7 @@ export async function git(
   const stderr = new BytePrefix(32 * 1024);
   let error: unknown;
   let clipped = false;
-  let killTimer: NodeJS.Timeout | undefined;
+  let stopping: Promise<void> | undefined;
   let groupEnded = false;
   let groupFailure = false;
   const groupError = (reason: unknown) => {
@@ -69,40 +68,17 @@ export async function git(
   };
   const stop = () => {
     if (child instanceof JobChild) {
-      try {
-        child.terminate();
-      } catch (reason) {
-        groupError(reason);
-      }
+      child.terminate();
       return;
     }
-    if (child.pid && !groupEnded && !killTimer) {
-      try {
-        process.kill(-child.pid, "SIGTERM");
-      } catch (reason) {
-        if ((reason as NodeJS.ErrnoException).code !== "ESRCH") groupError(reason);
-      }
-      killTimer = setTimeout(() => {
-        try {
-          process.kill(-child.pid!, "SIGKILL");
-        } catch (reason) {
-          if ((reason as NodeJS.ErrnoException).code !== "ESRCH") groupError(reason);
-        }
-      }, 1000);
-    }
+    if (child.pid && !groupEnded && !stopping)
+      stopping = stopGroup(child.pid, groupDone, 1000, groupError);
   };
   const abort = () => stop();
   signal.addEventListener("abort", abort, { once: true });
   const exited =
     child instanceof JobChild
-      ? child.exited.then(
-          (result) => result.code,
-          (reason) => {
-            groupError(reason);
-            stop();
-            return null;
-          },
-        )
+      ? child.exited.then((result) => result.code)
       : new Promise<number | null>((resolve) => {
           child.on("error", (reason) => {
             error ??= reason;
@@ -110,6 +86,12 @@ export async function git(
           });
           child.once("exit", resolve);
         });
+  const groupDone = (async () => {
+    await exited;
+    if (child instanceof JobChild) await child.empty;
+    else if (child.pid) await waitForGroup(child.pid, groupError);
+    groupEnded = true;
+  })();
   child.stdin!.on("error", (reason: NodeJS.ErrnoException) => {
     if (reason.code !== "EPIPE") {
       error = reason;
@@ -157,24 +139,9 @@ export async function git(
   if (options.input === undefined) child.stdin!.end();
   else child.stdin!.end(options.input);
   if (signal.aborted) stop();
-  let code = await exited;
-  let interval = 50;
-  if (child instanceof JobChild) {
-    await child.empty;
-    code = child.exitCode ?? null;
-    if (child.cleanupError !== undefined) groupError(child.cleanupError);
-  } else
-    while (child.pid) {
-      try {
-        if (!(await groupRunning(child.pid))) break;
-      } catch (reason) {
-        groupError(reason);
-      }
-      await delay(interval);
-      interval = Math.min(interval * 2, 500);
-    }
-  groupEnded = true;
-  clearTimeout(killTimer);
+  const code = await exited;
+  await groupDone;
+  await stopping;
   const drainTimer = setTimeout(() => {
     if (!child.stdout!.readableEnded || !child.stderr!.readableEnded) {
       error ??= new AppError(

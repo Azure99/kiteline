@@ -1,7 +1,11 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import {
+import { once } from "node:events";
+import { syncBuiltinESMExports } from "node:module";
+import type { AddressInfo } from "node:net";
+import { WebSocketServer } from "ws";
+import fs, {
   mkdtemp,
   mkdir,
   writeFile,
@@ -16,6 +20,7 @@ import {
   link,
   readdir,
   unlink,
+  rename,
 } from "node:fs/promises";
 import { join } from "node:path";
 import { AppError, OperationError } from "@kiteline/shared/protocol";
@@ -28,11 +33,14 @@ import { Directories } from "../src/directories.js";
 import { defaultAgentLimits } from "../src/config.js";
 import { BinaryFiles } from "../src/files/binary.js";
 import { TextFiles } from "../src/files/text.js";
+import { FileChannels } from "../src/files/channels.js";
 
 const exec = promisify(execFile);
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
   vi.restoreAllMocks();
+  syncBuiltinESMExports();
+  vi.useRealTimers();
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 async function setup() {
@@ -55,6 +63,7 @@ async function setup() {
   const operations = new FileOperations(metadata, temporary);
   cleanups.push(() => operations.close());
   return {
+    config,
     root,
     data,
     temporary,
@@ -71,6 +80,61 @@ async function setup() {
   };
 }
 const copy = (path: string, targetPath: string) => [{ path, targetPath, collision: "error" }];
+
+test("file channel sizes use the write owner's byte limit before creating temporary files", async () => {
+  const f = await setup();
+  f.config.limits.editorBytes = 4;
+  f.config.limits.transferBytes = 8;
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  await once(server, "listening");
+  const channels = new FileChannels(
+    f.text,
+    f.binary,
+    f.temporary,
+    f.config,
+    {
+      deviceId: "test",
+      deviceToken: "test",
+      server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    },
+    () => 0,
+  );
+  cleanups.push(async () => {
+    await channels.close();
+    for (const socket of server.clients) socket.terminate();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+  for (const purpose of ["save", "upload"]) {
+    const limit = purpose === "save" ? 4 : 8;
+    for (const size of [limit, limit + 1, -1]) {
+      const incoming = once(server, "connection");
+      channels.open(`${purpose}-${size}`, "test", "file.write", {
+        workspaceId: f.id,
+        path: "new-file",
+        purpose,
+        size,
+        createOnly: true,
+      });
+      const [socket] = await incoming;
+      const [raw] = await once(socket, "message");
+      const message = JSON.parse(raw.toString());
+      if (size === limit) {
+        expect(message.type).toBe("ready");
+        expect(f.temporary.status().retained).toBe(1);
+      } else {
+        expect(message).toMatchObject({
+          type: "error",
+          code: size < 0 ? "invalid_argument" : "limit_exceeded",
+        });
+        expect(f.temporary.status().retained).toBe(0);
+      }
+      socket.close(1000);
+      await expect.poll(() => channels.count).toBe(0);
+      expect(f.temporary.status().retained).toBe(0);
+      expect(await readdir(f.root)).toEqual([]);
+    }
+  }
+});
 
 test("cancel settles while cleanup waits for a real publication owner and later removes its record", async () => {
   const { root, data, id, operations, temporary } = await setup();
@@ -186,35 +250,61 @@ test("active upload blocks relocating its directory and recursive copy omits onl
   }
 });
 
-test("save guards the physical directory and the links traversed by its original path", async () => {
+test("save protects its temporary and physical ancestors while route changes remain subject to publication checks", async () => {
   const { root, id, files, text, temporary, run } = await setup();
   const signal = new AbortController().signal;
-  await mkdir(join(root, "physical"));
+  await mkdir(join(root, "physical/inner"), { recursive: true });
   await mkdir(join(root, "bridge"));
-  await writeFile(join(root, "physical/file"), "base");
-  await symlink("../physical", join(root, "bridge/next"));
+  await writeFile(join(root, "physical/inner/file"), "base");
+  await symlink("../physical/inner", join(root, "bridge/next"));
   await symlink("bridge/next", join(root, "entry"));
   await symlink("entry/file", join(root, "file-link"));
-  const save = await text.prepare(id, "file-link", 4, false, "revision", signal);
+  const before = await text.read(id, "file-link", signal);
+  await before.finish();
+  const save = await text.prepare(id, "file-link", 4, false, before.meta.revision, signal);
   try {
-    for (const path of ["physical", "bridge", "bridge/next", "entry", "file-link"])
+    save.received = await temporary.write(save.temporary, Buffer.from("edit"), 0, signal);
+    for (const path of ["physical", "physical/inner", `physical/inner/${save.temporary.name}`])
       await expect(files.rename(id, path, "moved", signal)).rejects.toMatchObject({ code: "busy" });
-    await symlink("physical", join(root, "replacement"));
+    await symlink("physical/inner", join(root, "replacement"));
     const target = await files.inspect(id, "entry");
-    await expect(
-      run("move", [
-        {
-          path: "replacement",
-          targetPath: "entry",
-          collision: "replace",
-          expectedTargetVersion: target.targetVersion,
-        },
-      ]),
-    ).rejects.toMatchObject({ code: "busy", outcome: "failed" });
+    await run("move", [
+      {
+        path: "replacement",
+        targetPath: "entry",
+        collision: "replace",
+        expectedTargetVersion: target.targetVersion,
+      },
+    ]);
+    await files.rename(id, "bridge/next", "renamed-next", signal);
+    for (const path of ["bridge", "entry", "file-link"])
+      await files.rename(id, path, `renamed-${path}`, signal);
+    await expect(text.save(save, signal)).rejects.toMatchObject({ code: "conflict" });
+    expect(await readFile(join(root, "physical/inner/file"), "utf8")).toBe("base");
   } finally {
     await temporary.release(save.temporary, save);
   }
-  await files.rename(id, "entry", "released", signal);
+  expect(temporary.status()).toMatchObject({ pending: false, retained: 0, failed: 0 });
+  await files.rename(id, "physical", "released", signal);
+});
+
+test("upload can lose its access route without writing to a different target", async () => {
+  const { root, id, files, binary, temporary } = await setup();
+  const signal = new AbortController().signal;
+  await mkdir(join(root, "physical"));
+  await symlink("physical", join(root, "route"));
+  const upload = await binary.prepare(id, "route/result", 4, true, undefined, signal);
+  try {
+    upload.received = await temporary.write(upload.temporary, Buffer.from("data"), 0, signal);
+    await files.rename(id, "route", "moved", signal);
+    await expect(binary.save(upload, signal)).rejects.toMatchObject({ code: "ENOENT" });
+    await mkdir(join(root, "route"));
+    await expect(binary.save(upload, signal)).rejects.toMatchObject({ code: "conflict" });
+    expect(await readdir(join(root, "route"))).toEqual([]);
+  } finally {
+    await temporary.release(upload.temporary, upload);
+  }
+  expect(await readdir(join(root, "physical"))).toEqual([]);
 });
 
 test("replaced temporary objects and retained cleanup records do not create active ownership", async () => {
@@ -226,7 +316,7 @@ test("replaced temporary objects and retained cleanup records do not create acti
   await writeFile(upload.temporary.path, "replacement");
   await run("copy", copy("source", "copied"));
   expect(await readFile(join(root, "copied", upload.temporary.name), "utf8")).toBe("replacement");
-  await temporary.release(upload.temporary, { published: false, uncertain: true });
+  await temporary.release(upload.temporary, { published: false });
   expect(JSON.parse(await readFile(join(data, "temporary-files.json"), "utf8"))).toHaveLength(1);
   await files.rename(id, "source", "renamed", signal);
 });
@@ -236,6 +326,7 @@ test("a published write is not busy when forgetting its cleanup record fails", a
   const signal = new AbortController().signal;
   await mkdir(join(root, "source"));
   const upload = await binary.prepare(id, "source/result", 0, true, undefined, signal);
+  const registry = await readFile(join(data, "temporary-files.json"));
   await unlink(join(data, "temporary-files.json"));
   await mkdir(join(data, "temporary-files.json"));
   try {
@@ -249,13 +340,114 @@ test("a published write is not busy when forgetting its cleanup record fails", a
     await mkdir(join(root, "source"));
     await writeFile(upload.temporary.path, "unrelated replacement");
     await rmdir(join(data, "temporary-files.json"));
+    await writeFile(join(data, "temporary-files.json"), registry);
     await temporary.release(upload.temporary, upload);
     expect(await readFile(upload.temporary.path, "utf8")).toBe("unrelated replacement");
-    expect(temporary.status().retained).toBe(0);
+    expect(temporary.status()).toMatchObject({ pending: false, retained: 1, failed: 1 });
+    await temporary.close();
+    const restored = new TemporaryFiles(data);
+    cleanups.push(() => restored.close());
+    await restored.load();
+    await restored.drain();
+    expect(restored.status()).toMatchObject({ pending: false, retained: 1, failed: 1 });
+    expect(await readFile(upload.temporary.path, "utf8")).toBe("unrelated replacement");
+    expect(await readFile(join(root, "renamed/result"), "utf8")).toBe("");
   } finally {
     await temporary.release(upload.temporary, upload);
   }
 });
+
+test.each([false, true])(
+  "unreachable temporary parent ends cleanup until a new owner loads it (replacement=%s)",
+  async (replacement) => {
+    const { root, data, id, binary, temporary } = await setup();
+    const signal = new AbortController().signal;
+    await mkdir(join(root, "source"));
+    const upload = await binary.prepare(id, "source/result", 4, true, undefined, signal);
+    await temporary.write(upload.temporary, Buffer.from("data"), 0, signal);
+    await rename(join(root, "source"), join(root, "moved"));
+    if (replacement) await writeFile(join(root, "source"), "user file");
+    await temporary.release(upload.temporary, upload);
+    expect(temporary.status()).toMatchObject({ pending: false, retained: 1, failed: 1 });
+    expect(await readFile(join(root, "moved", upload.temporary.name), "utf8")).toBe("data");
+    if (replacement) {
+      expect(await readFile(join(root, "source"), "utf8")).toBe("user file");
+      await unlink(join(root, "source"));
+    }
+    await rename(join(root, "moved"), join(root, "source"));
+    await temporary.release(upload.temporary, upload);
+    expect(temporary.status()).toMatchObject({ pending: false, retained: 1, failed: 1 });
+    expect(await readFile(upload.temporary.path, "utf8")).toBe("data");
+    await temporary.close();
+    const restored = new TemporaryFiles(data);
+    cleanups.push(() => restored.close());
+    await restored.load();
+    await restored.drain();
+    expect(restored.status()).toMatchObject({ pending: false, retained: 0, failed: 0 });
+    expect(await readdir(join(root, "source"))).toEqual([]);
+  },
+);
+
+test.each([
+  { code: "EBUSY", failures: 1 },
+  { code: "EBUSY", failures: 3 },
+  { code: "EAGAIN", failures: 1 },
+])(
+  "temporary cleanup only retries busy files finitely ($code, failures=$failures)",
+  async ({ code, failures }) => {
+    const { data, id, binary, temporary } = await setup();
+    const upload = await binary.prepare(
+      id,
+      "result",
+      0,
+      true,
+      undefined,
+      new AbortController().signal,
+    );
+    const realUnlink = fs.unlink;
+    let attempts = 0;
+    vi.spyOn(fs, "unlink").mockImplementation(async (path) => {
+      if (path === upload.temporary.path && ++attempts <= failures)
+        throw Object.assign(new Error("Temporary cleanup failure"), { code });
+      return realUnlink(path);
+    });
+    syncBuiltinESMExports();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await temporary.release(upload.temporary, upload);
+      expect(temporary.status()).toMatchObject({
+        pending: code === "EBUSY",
+        failed: 1,
+        retained: 1,
+      });
+      for (let i = 0; i < 2; i++) {
+        await vi.advanceTimersByTimeAsync(30_000);
+        await temporary.drain();
+      }
+      const recovered = code === "EBUSY" && failures === 1;
+      const expectedAttempts = code === "EBUSY" ? (recovered ? 2 : 3) : 1;
+      expect(attempts).toBe(expectedAttempts);
+      expect(temporary.status()).toMatchObject({
+        pending: false,
+        retained: recovered ? 0 : 1,
+        failed: recovered ? 0 : 1,
+      });
+      await temporary.release(upload.temporary, upload);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(attempts).toBe(expectedAttempts);
+    } finally {
+      vi.restoreAllMocks();
+      syncBuiltinESMExports();
+      vi.useRealTimers();
+    }
+    await temporary.close();
+    const restored = new TemporaryFiles(data);
+    cleanups.push(() => restored.close());
+    await restored.load();
+    await restored.drain();
+    expect(restored.status()).toMatchObject({ pending: false, retained: 0, failed: 0 });
+  },
+);
 
 test("copy preserves regular permissions and links; explicit replacement changes the link entry only", async () => {
   const { root, files, id, run } = await setup();

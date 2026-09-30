@@ -76,7 +76,6 @@ export class TextFiles {
       parent,
       await stat(parent, { bigint: true }),
       signal,
-      { path: absolute, followFinalLink: !createOnly },
     );
     return {
       workspaceId,

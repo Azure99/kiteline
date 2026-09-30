@@ -214,9 +214,6 @@ export const rpcMutates: Record<RpcMethod, boolean> = {
 };
 export type RpcParams<M extends RpcMethod> = RpcMethods[M]["params"];
 export type RpcResult<M extends RpcMethod> = RpcMethods[M]["result"];
-export type RpcRequest<M extends RpcMethod = RpcMethod> = {
-  [K in M]: { method: K; params: RpcParams<K> };
-}[M];
 export type RpcReply<M extends RpcMethod> = Reply<
   RpcResult<M>,
   M extends "files.copy" | "files.move" | "files.delete" ? FileResults : unknown
@@ -226,19 +223,21 @@ export type RpcArguments<M extends RpcMethod = RpcMethod> = {
   [K in M]: [method: K, params: RpcParams<K>, signal?: AbortSignal];
 }[M];
 
-export type GitWriteMethod =
-  | "git.stage"
-  | "git.unstage"
-  | "git.discard"
-  | "git.commit"
-  | "git.branch.create"
-  | "git.branch.switch"
-  | "git.branch.delete"
-  | "git.fetch"
-  | "git.pull"
-  | "git.push"
-  | "git.continue"
-  | "git.abort";
+export const gitWriteMethods = [
+  "git.stage",
+  "git.unstage",
+  "git.discard",
+  "git.commit",
+  "git.branch.create",
+  "git.branch.switch",
+  "git.branch.delete",
+  "git.fetch",
+  "git.pull",
+  "git.push",
+  "git.continue",
+  "git.abort",
+] as const satisfies readonly RpcMethod[];
+export type GitWriteMethod = (typeof gitWriteMethods)[number];
 type GitParams<M extends GitWriteMethod> = Omit<RpcParams<M>, keyof RepoParams>;
 export type GitWriteArguments = {
   [M in GitWriteMethod]: [method: M, params: GitParams<M>];

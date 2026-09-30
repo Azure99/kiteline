@@ -100,17 +100,11 @@ export class Recorder {
       ]);
       void drained.catch(() => {});
       void (async () => {
-        try {
-          await job.exited;
-        } catch (error) {
-          instance.stderr = String(error);
-        } finally {
-          instance.stopping = true;
-          this.terminate(instance);
-          await job.empty;
-          // A final reply can already be buffered when the leader exits.
-          await drained;
-        }
+        await job.exited;
+        instance.stopping = true;
+        await job.stop();
+        // A final reply can already be buffered when the leader exits.
+        await drained;
       })()
         .catch((error: unknown) => {
           instance.stderr = String(error);
@@ -239,12 +233,8 @@ export class Recorder {
     if (this.available) this.send({ type: "detach", sessionId, attachmentId });
   }
   private terminate(instance: Instance) {
-    try {
-      if (instance.job) instance.job.terminate();
-      else instance.child?.kill("SIGKILL");
-    } catch (error) {
-      instance.stderr = String(error);
-    }
+    if (instance.job) instance.job.terminate();
+    else instance.child?.kill("SIGKILL");
   }
   private stop(instance: Instance, force = false) {
     instance.stopping = true;

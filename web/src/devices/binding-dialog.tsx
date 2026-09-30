@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import type { Device } from "@kiteline/shared/protocol";
-import { api, post } from "../lib/api";
+import { api, ApiError, post } from "../lib/api";
 import { copyText } from "../lib/clipboard";
 import {
   DialogContent,
@@ -44,8 +44,12 @@ export function BindingDialog({
   const [copyError, setCopyError] = useState<{ text: string; error: unknown }>();
   const [platform, setPlatform] = useState<AgentPlatform>("linux");
   const [busy, setBusy] = useState(true);
+  const [queryStopped, setQueryStopped] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [copied, setCopied] = useState("");
   const create = useCallback(async () => {
+    setBinding(undefined);
+    setResult(undefined);
     setError(undefined);
     setCopyError(undefined);
     setBusy(true);
@@ -69,6 +73,9 @@ export function BindingDialog({
     if (!binding) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
+    let failures = 0;
+    setQueryStopped(false);
+    setError(undefined);
     async function poll() {
       try {
         const status = await api<Result>(`/api/bindings/${binding!.bindingId}`, {
@@ -77,11 +84,14 @@ export function BindingDialog({
         if (controller.signal.aborted) return;
         setResult(status);
         setError(undefined);
+        failures = 0;
         if (status.status === "pending") timer = setTimeout(() => void poll(), 2000);
       } catch (error) {
         if (!controller.signal.aborted) {
           setError(error);
-          timer = setTimeout(() => void poll(), 3000);
+          const temporary = error instanceof ApiError && error.retryable;
+          if (temporary && failures++ < 3) timer = setTimeout(() => void poll(), 3000);
+          else setQueryStopped(true);
         }
       }
     }
@@ -90,7 +100,9 @@ export function BindingDialog({
       controller.abort();
       clearTimeout(timer);
     };
-  }, [binding]);
+  }, [binding, attempt]);
+  const unavailable = error instanceof ApiError && error.code === "not_found";
+  const canCopy = result?.status === "pending" && !unavailable;
   const commands = binding?.commands[platform];
   const command = commands?.install;
   const visibleCopyError =
@@ -125,17 +137,19 @@ export function BindingDialog({
             <AgentPlatformChoice value={platform} onChange={setPlatform} />
             <div className="flex flex-wrap items-center justify-between gap-2 text-muted-foreground">
               <span role="status" className="text-sm">
-                {result?.status === "consumed"
-                  ? online
-                    ? t(($) => $.devices.deviceOnline)
-                    : !connected
-                      ? t(($) => $.devices.registeredUnknown)
-                      : device?.status === "revoked"
-                        ? t(($) => $.common.deviceRevoked)
-                        : t(($) => $.devices.registeredOffline)
-                  : result?.status === "expired"
-                    ? t(($) => $.devices.bindingExpired)
-                    : t(($) => $.devices.waitingDevice)}
+                {unavailable
+                  ? t(($) => $.devices.bindingUnavailable)
+                  : result?.status === "consumed"
+                    ? online
+                      ? t(($) => $.devices.deviceOnline)
+                      : !connected
+                        ? t(($) => $.devices.registeredUnknown)
+                        : device?.status === "revoked"
+                          ? t(($) => $.common.deviceRevoked)
+                          : t(($) => $.devices.registeredOffline)
+                    : result?.status === "expired"
+                      ? t(($) => $.devices.bindingExpired)
+                      : t(($) => $.devices.waitingDevice)}
               </span>
               <span className="text-xs">
                 {t(($) => $.devices.expiresAt, {
@@ -154,7 +168,7 @@ export function BindingDialog({
                       ? t(($) => $.devices.copiedInstall)
                       : t(($) => $.devices.copyInstall)
                   }
-                  disabled={result?.status !== "pending"}
+                  disabled={!canCopy}
                   onPointerDown={(event) => event.preventDefault()}
                   onClick={() => copy(command!)}
                 >
@@ -179,7 +193,7 @@ export function BindingDialog({
                       ? t(($) => $.devices.copiedBind)
                       : t(($) => $.devices.copyBind)
                   }
-                  disabled={result?.status !== "pending"}
+                  disabled={!canCopy}
                   onPointerDown={(event) => event.preventDefault()}
                   onClick={() => copy(commands!.bind)}
                 >
@@ -205,9 +219,14 @@ export function BindingDialog({
             {t(($) => $.devices.viewDevice)}
           </Button>
         )}
-        {result?.status === "expired" && (
+        {(result?.status === "expired" || unavailable) && (
           <Button onClick={() => void create()} disabled={busy}>
             {t(($) => $.devices.regenerate)}
+          </Button>
+        )}
+        {binding && queryStopped && !unavailable && result?.status !== "expired" && (
+          <Button onClick={() => setAttempt((value) => value + 1)}>
+            {t(($) => $.common.retry)}
           </Button>
         )}
       </DialogFooter>

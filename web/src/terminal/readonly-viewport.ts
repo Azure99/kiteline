@@ -26,12 +26,12 @@ export function scrollClippedScreen(terminal: Terminal, x: number, y: number) {
   return container.scrollTop !== top || (y === 0 && container.scrollLeft !== left);
 }
 
-// A finished screen keeps its original grid. Scroll the clipped rows locally,
-// then use xterm's own viewport for older history, without resizing its buffer.
-export function retainReadonlyViewport(terminal: Terminal) {
+export function listenTerminalScroll(
+  terminal: Terminal,
+  scroll: (x: number, y: number) => boolean,
+) {
   const container = terminal.element!.parentElement!;
   const screen = terminal.screenElement!;
-  container.classList.add("terminal-readonly");
   const wheel = (event: WheelEvent) => {
     if (event.ctrlKey) return;
     const unit =
@@ -40,13 +40,13 @@ export function retainReadonlyViewport(terminal: Terminal) {
         : event.deltaMode === 2
           ? container.clientHeight
           : 1;
-    if (!scrollClippedScreen(terminal, event.deltaX * unit, event.deltaY * unit)) return;
+    if (!scroll(event.deltaX * unit, event.deltaY * unit)) return;
     event.preventDefault();
     event.stopImmediatePropagation();
   };
   const gesture = (event: Event) => {
     const change = event as Event & { translationX: number; translationY: number };
-    if (!scrollClippedScreen(terminal, -change.translationX, -change.translationY)) return;
+    if (!scroll(-change.translationX, -change.translationY)) return;
     event.preventDefault();
     event.stopImmediatePropagation();
   };
@@ -55,6 +55,17 @@ export function retainReadonlyViewport(terminal: Terminal) {
   return () => {
     screen.removeEventListener("wheel", wheel, true);
     screen.removeEventListener("-xterm-gesturechange", gesture, true);
+  };
+}
+
+// A finished screen keeps its original grid. Scroll the clipped rows locally,
+// then use xterm's own viewport for older history, without resizing its buffer.
+export function retainReadonlyViewport(terminal: Terminal) {
+  const container = terminal.element!.parentElement!;
+  container.classList.add("terminal-readonly");
+  const stop = listenTerminalScroll(terminal, (x, y) => scrollClippedScreen(terminal, x, y));
+  return () => {
+    stop();
     container.classList.remove("terminal-readonly");
   };
 }

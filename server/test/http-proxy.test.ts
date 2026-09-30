@@ -105,7 +105,6 @@ async function fixture(handler: RequestListener, channels = 128) {
     },
     { ...identity, server: entryOrigin },
   );
-  await agent.start();
   cleanup.push(async () => {
     await agent.close();
     if (kiteline.server.listening) await kiteline.close();
@@ -117,6 +116,7 @@ async function fixture(handler: RequestListener, channels = 128) {
     setDefaultCACertificates(originalCA);
     await rm(root, { recursive: true, force: true });
   });
+  await agent.start();
   await expect.poll(() => kiteline.connections.devices()[0]?.status).toBe("online");
   const login = store.createSession(60_000);
   const cookie = `kiteline_session=${login.token}`;

@@ -1,9 +1,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { open, type FileHandle } from "node:fs/promises";
 import type { Readable } from "node:stream";
-import { setTimeout as delay } from "node:timers/promises";
 import { taskLimits, type TaskRun } from "@kiteline/shared/protocol";
-import { groupRunning } from "../process-group.js";
+import { stopGroup, waitForGroup } from "../process-group.js";
 import { JobChild, spawnJob } from "@kiteline/shared/windows/job";
 
 function diagnostic(error: unknown) {
@@ -63,18 +62,7 @@ export class TaskProcess {
     let failure: string | undefined;
     const exited =
       child instanceof JobChild
-        ? child.exited.then(
-            (result) => ({ exitCode: result.code, signal: null }),
-            (error) => {
-              failure = diagnostic(error);
-              try {
-                child.terminate();
-              } catch (cleanup) {
-                this.reportLifecycleError(cleanup);
-              }
-              return { exitCode: null, signal: null };
-            },
-          )
+        ? child.exited.then((result) => ({ exitCode: result.code, signal: null }))
         : new Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }>((resolve) => {
             child.on("error", (error) => {
               failure = diagnostic(error);
@@ -88,18 +76,8 @@ export class TaskProcess {
     ]);
     const groupDone = (async () => {
       await exited;
-      let interval = 50;
       if (child instanceof JobChild) await child.empty;
-      else
-        while (this.pid) {
-          try {
-            if (!(await groupRunning(this.pid))) break;
-          } catch (error) {
-            this.reportLifecycleError(error);
-          }
-          await delay(interval);
-          interval = Math.min(interval * 2, 500);
-        }
+      else if (this.pid) await waitForGroup(this.pid, (error) => this.reportLifecycleError(error));
       this.groupEnded = true;
     })();
     this.groupDone = groupDone;
@@ -119,10 +97,6 @@ export class TaskProcess {
       } finally {
         clearTimeout(timer);
       }
-      if (child instanceof JobChild) {
-        result.exitCode = child.exitCode ?? null;
-        if (child.cleanupError !== undefined) this.reportLifecycleError(child.cleanupError);
-      }
       return { ...result, diagnostic: failure ?? this.lifecycleDiagnostic };
     })();
   }
@@ -137,28 +111,13 @@ export class TaskProcess {
   private async stopGroup() {
     if (!this.pid) return;
     if (this.child instanceof JobChild) {
-      try {
-        this.child.terminate();
-      } catch (error) {
-        this.reportLifecycleError(error);
-      }
+      this.child.terminate();
       await this.groupDone;
       return;
     }
-    const signal = (name: NodeJS.Signals) => {
-      try {
-        process.kill(-this.pid!, name);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ESRCH") this.reportLifecycleError(error);
-      }
-    };
-    signal("SIGTERM");
-    const timer = setTimeout(() => signal("SIGKILL"), taskLimits.stopGraceMs);
-    try {
-      await this.groupDone;
-    } finally {
-      clearTimeout(timer);
-    }
+    await stopGroup(this.pid, this.groupDone, taskLimits.stopGraceMs, (error) =>
+      this.reportLifecycleError(error),
+    );
   }
 
   private reportLifecycleError(error: unknown) {
@@ -171,13 +130,17 @@ export class TaskProcess {
   private async drain(stream: Readable, name: "stdout" | "stderr", path: string) {
     let file: FileHandle | undefined;
     const key = name === "stdout" ? "stdoutBytes" : "stderrBytes";
-    try {
+    const opening = (async () => {
       try {
         file = await open(path, "wx", 0o600);
       } catch (error) {
         this.output.error ??= diagnostic(error);
       }
+    })();
+    // Subscribe before awaiting disk I/O: Node resumes unread pipes when a child exits.
+    try {
       for await (const bytes of stream) {
+        await opening;
         const chunk = Buffer.from(bytes as Uint8Array);
         if (!file || this.output.error) continue;
         const remaining = Math.max(
@@ -207,6 +170,7 @@ export class TaskProcess {
       stream.resume();
     } finally {
       try {
+        await opening;
         await file?.close();
       } catch (error) {
         this.output.error ??= diagnostic(error);

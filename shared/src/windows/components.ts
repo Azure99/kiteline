@@ -1,6 +1,5 @@
-export const windowsComponentFiles = [
+export const windowsRuntimeFiles = [
   "runtime/bin/node.exe",
-  "runtime/LICENSE",
   "native/kiteline-windows.node",
   "native/bin/rg.exe",
   ...[
@@ -18,6 +17,11 @@ export const windowsComponentFiles = [
   ].map((name) => `native/msys/usr/bin/${name}`),
   "native/msys/usr/share/terminfo/74/tmux-256color",
   "native/msys/usr/share/terminfo/78/xterm-256color",
+];
+
+export const windowsComponentFiles = [
+  ...windowsRuntimeFiles,
+  "runtime/LICENSE",
   "native/licenses/tmux.txt",
   "native/licenses/gcc-mingw-w64.txt",
   "native/licenses/mingw-w64.txt",
@@ -35,6 +39,18 @@ export const windowsComponentFiles = [
   "native/sources/tmux.tar.gz",
   "native/sources/recipe/deploy/agent-windows.json",
 ];
+
+export const windowsComponentPath = (file: string) =>
+  file.startsWith("native/") ? "dist/" + file : file;
+
+export function isWindowsRuntimeComponent(file: string) {
+  return (
+    (file.startsWith("runtime/") || file.startsWith("native/")) &&
+    file !== "runtime/LICENSE" &&
+    file !== "native/identity.json" &&
+    !/^native\/(licenses|sources)(\/|$)/.test(file)
+  );
+}
 
 export function requiredWindowsComponents(downloads: Record<string, unknown>) {
   const sources = Object.keys(downloads).filter((file) => file.startsWith("sources/"));

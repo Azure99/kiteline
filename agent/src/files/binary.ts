@@ -59,9 +59,7 @@ export class BinaryFiles {
       await checkTarget(location, { targetPath: path, collision, expectedTargetVersion }, false);
       return location;
     }, signal);
-    const temporary = await this.temporary.create(target.parent, target.parentInfo, signal, {
-      path: join(root, path),
-    });
+    const temporary = await this.temporary.create(target.parent, target.parentInfo, signal);
     return {
       workspaceId,
       path,

@@ -169,14 +169,7 @@ export class FileChannels {
         ) {
           if (typeof params.createOnly !== "boolean")
             throw new AppError("invalid_argument", "Invalid save parameters");
-          const size = integer(
-            params.size,
-            "size",
-            0,
-            params.purpose === "save"
-              ? this.config.limits.editorBytes
-              : this.config.limits.transferBytes,
-          );
+          const size = integer(params.size, "size", 0, Number.MAX_SAFE_INTEGER);
           if (params.purpose === "save") {
             if (params.expectedTargetVersion !== undefined)
               throw new AppError(

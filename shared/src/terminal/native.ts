@@ -3,9 +3,10 @@ import { resolve } from "node:path";
 import { finished } from "node:stream/promises";
 import { AppError, limits } from "../protocol/index.js";
 import type { CreateTerminal } from "../protocol/ipc.js";
-import { spawnJob } from "../windows/job.js";
+import { JobChild, spawnJob } from "../windows/job.js";
 
 const root = resolve(import.meta.dirname, "../../..");
+export const tmuxSession = "kiteline";
 export const msysDirectory = resolve(root, "dist/native/msys");
 export const tmuxBinary =
   process.platform === "win32"
@@ -89,60 +90,31 @@ export function terminalPreset(options: CreateTerminal) {
     "",
   ].join("\n");
 }
-export function tmux(
+export function tmuxServerMissing(error: unknown) {
+  return (
+    error instanceof Error &&
+    /no server running|No such file or directory|Connection refused/.test(error.message)
+  );
+}
+
+export async function tmux(
   socket: string,
   args: string[],
   input?: Uint8Array,
   signal?: AbortSignal,
 ): Promise<string> {
-  if (process.platform === "win32") return windowsTmux(socket, args, input, signal);
-  return new Promise((resolve, reject) => {
-    const child = spawn(tmuxBinary, ["-S", socket, ...args], {
+  let child;
+  if (process.platform === "win32") {
+    signal?.throwIfAborted();
+    child = await spawnJob(tmuxBinary, ["-N", "-S", msysPath(socket), ...args], {
+      env: tmuxEnvironment(),
+    });
+  } else
+    child = spawn(tmuxBinary, ["-S", socket, ...args], {
       env: { ...tmuxEnvironment(), LC_ALL: "C.UTF-8" },
       stdio: "pipe",
       signal,
     });
-    const stdout: Buffer[] = [];
-    const stderr: Buffer[] = [];
-    let outputBytes = 0;
-    let errorBytes = 0;
-    let overflow = false;
-    child.stdout.on("data", (data: Buffer) => {
-      outputBytes += data.length;
-      if (outputBytes <= limits.controlMessageBytes) stdout.push(data);
-      else overflow = true;
-    });
-    child.stderr.on("data", (data: Buffer) => {
-      errorBytes += data.length;
-      if (errorBytes <= 8192) stderr.push(data);
-    });
-    child.stdin.on("error", () => {});
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (overflow) reject(new AppError("limit_exceeded", "tmux output exceeds the size limit"));
-      else if (code !== 0)
-        reject(
-          new AppError(
-            "command_failed",
-            Buffer.concat(stderr).toString().trim() || `tmux exited ${code}`,
-          ),
-        );
-      else resolve(Buffer.concat(stdout).toString());
-    });
-    child.stdin.end(input);
-  });
-}
-
-async function windowsTmux(
-  socket: string,
-  args: string[],
-  input?: Uint8Array,
-  signal?: AbortSignal,
-) {
-  signal?.throwIfAborted();
-  const child = await spawnJob(tmuxBinary, ["-N", "-S", msysPath(socket), ...args], {
-    env: tmuxEnvironment(),
-  });
   const stdout: Buffer[] = [];
   const stderr: Buffer[] = [];
   let outputBytes = 0;
@@ -155,33 +127,35 @@ async function windowsTmux(
     errorBytes += data.length;
     if (errorBytes <= 8192) stderr.push(data);
   });
-  const drained = Promise.all([
-    finished(child.stdout!, { writable: false, cleanup: true }),
-    finished(child.stderr!, { writable: false, cleanup: true }),
-  ]);
-  void drained.catch(() => {});
-  let cleanupError: unknown;
-  const stop = () => {
+  child.stdin!.on("error", () => {});
+  let code: number | null;
+  if (child instanceof JobChild) {
+    const job = child;
+    const drained = Promise.all([
+      finished(job.stdout!, { writable: false, cleanup: true }),
+      finished(job.stderr!, { writable: false, cleanup: true }),
+    ]);
+    void drained.catch(() => {});
+    const stop = () => job.terminate();
+    signal?.addEventListener("abort", stop, { once: true });
+    if (signal?.aborted) stop();
+    job.stdin!.end(input ?? Buffer.alloc(0));
     try {
-      child.terminate();
-    } catch (error) {
-      cleanupError = error;
+      ({ code } = await job.exited);
+    } finally {
+      await job.stop();
+      signal?.removeEventListener("abort", stop);
+      await drained;
     }
-  };
-  signal?.addEventListener("abort", stop, { once: true });
-  if (signal?.aborted) stop();
-  child.stdin!.end(input ?? Buffer.alloc(0));
-  let code: number;
-  try {
-    ({ code } = await child.exited);
-  } finally {
-    stop();
-    await child.empty;
-    signal?.removeEventListener("abort", stop);
-    await drained;
+    signal?.throwIfAborted();
+  } else {
+    const exited = new Promise<number | null>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", resolve);
+    });
+    child.stdin!.end(input);
+    code = await exited;
   }
-  if (cleanupError) throw cleanupError;
-  signal?.throwIfAborted();
   if (outputBytes > limits.controlMessageBytes)
     throw new AppError("limit_exceeded", "tmux output exceeds the size limit");
   if (code !== 0)

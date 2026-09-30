@@ -136,8 +136,8 @@ export function WorkspaceTerminal({
   const enabled = device.status === "online" && !remote.busy;
   const split = !mobile && members.length > 1 && !group?.maximized;
   const multipleGroups = !mobile && layout.groups.length > 1;
-  function name(id: string) {
-    return find(id)?.name ?? names.current.get(id) ?? t(($) => $.terminal.ended);
+  function name(id: string, fallback = t(($) => $.terminal.ended)) {
+    return find(id)?.name ?? names.current.get(id) ?? fallback;
   }
   useEffect(() => {
     for (const session of sessions) names.current.set(session.id, session.name);
@@ -229,7 +229,7 @@ export function WorkspaceTerminal({
   function move(id: string, target?: string, position?: MemberPosition) {
     applyMain(moveSession(layout, id, target, position));
   }
-  const drag = useTerminalDrag(!mobile, move);
+  const drag = useTerminalDrag(move);
   function patchGroup(change: Partial<NonNullable<typeof group>>) {
     if (!group) return;
     setLayout((old) => ({
@@ -479,13 +479,13 @@ export function WorkspaceTerminal({
             groups={groups}
             current={targetPending ? undefined : group?.id}
             opened={opened.main}
-            sessions={sessions}
             mobile={mobile}
             visible={visible && !targetPending}
             onSizes={(groupId, splitId, sizes) =>
               setLayout((old) => resizeSplit(old, groupId, splitId, sizes))
             }
             events={{
+              name,
               actions: register,
               focus,
               close,

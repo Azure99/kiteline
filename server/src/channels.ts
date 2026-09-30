@@ -19,6 +19,7 @@ import type { ServerConfig } from "./config.js";
 import type { Login } from "./store.js";
 import { send, type AgentConnection, type Connections } from "./connections.js";
 import { FileTransfer } from "./file-transfer.js";
+import { replyError } from "./http.js";
 
 interface Channel {
   id: string;
@@ -64,16 +65,7 @@ export class Channels {
     if (kind !== "terminal.attach" && kind !== "file.read" && kind !== "file.write")
       throw new AppError("unsupported", "Unsupported data channel");
     string(params.workspaceId);
-    if (kind === "terminal.attach") {
-      string(params.sessionId);
-      string(params.terminalProfile);
-      if (
-        params.history !== undefined &&
-        params.history !== "retained" &&
-        params.history !== "screen"
-      )
-        throw new AppError("invalid_argument", "Invalid history range");
-    } else {
+    if (kind !== "terminal.attach") {
       string(params.path);
       if (
         !(
@@ -83,11 +75,7 @@ export class Channels {
         ).includes(String(params.purpose))
       )
         throw new AppError("unsupported", "Unsupported file purpose");
-      if (kind === "file.write") {
-        integer(params.size, "size", 0, Number.MAX_SAFE_INTEGER);
-        if (typeof params.createOnly !== "boolean")
-          throw new AppError("invalid_argument", "Specify whether to create or save the file");
-      }
+      if (kind === "file.write") integer(params.size, "size", 0, Number.MAX_SAFE_INTEGER);
     }
     const pending = this.reserve(deviceId, login, kind, params);
     if (download) {
@@ -194,11 +182,7 @@ export class Channels {
         if (binary || item.meta)
           throw new AppError("invalid_argument", "Channel has not been paired");
         const message = record(JSON.parse(raw.toString()));
-        if (message.type === "error") {
-          if (typeof message.message !== "string")
-            throw new AppError("invalid_argument", "Expected a diagnostic string");
-          throw new AppError(string(message.code), message.message, message.details);
-        }
+        if (message.type === "error") throw replyError(message);
         if (message.type !== "ready")
           throw new AppError("invalid_argument", "Expected a channel ready message");
         if (item.http) {

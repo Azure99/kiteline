@@ -3,14 +3,27 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { createServer } from "node:http";
 import { mkdirSync, renameSync } from "node:fs";
-import { mkdtemp, mkdir, readFile, rename, rm, truncate, writeFile } from "node:fs/promises";
+import fs from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
+import { setTimeout as delay } from "node:timers/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  readdir,
+  lstat,
+  rename,
+  rm,
+  truncate,
+  writeFile,
+} from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { taskRunActive, type ScheduledTask, type TaskRun } from "@kiteline/shared/protocol";
 import { defaultAgentLimits } from "../src/config.js";
 import { ScheduledTasks } from "../src/tasks/index.js";
 import { checkSchedule, checkTimezone, nextOccurrence } from "../src/tasks/schedule.js";
-import { scheduleRpc, type ScheduleMethod } from "../src/tasks/rpc.js";
+import { scheduleMethods, scheduleRpc, type ScheduleMethod } from "../src/tasks/rpc.js";
 import { LocalServer } from "../src/local.js";
 import { Agent } from "../src/control.js";
 import { localRequest } from "../src/local.js";
@@ -93,6 +106,14 @@ test("scheduled command admission, pause, immutable parameters, revision and bou
     expect(f.tasks.runs(task.id).total).toBe(2);
     expect(() => f.tasks.run("first")).toThrow("does not exist or has been cleaned up");
     expect(f.tasks.get(task.id).state).toBe("paused");
+    await f.tasks.update(task.id, f.tasks.get(task.id).revision, { command: "true" }, signal);
+    for (const id of ["empty-first", "empty-second", "empty-third"]) {
+      await f.tasks.start(task.id, id, signal);
+      await finished(f.tasks, id);
+    }
+    expect(f.tasks.runs(task.id).total).toBe(2);
+    expect(() => f.tasks.run("empty-first")).toThrow("does not exist or has been cleaned up");
+    expect(f.tasks.run("empty-second").output.stdoutBytes).toBe(0);
     await f.tasks.delete(task.id, undefined, signal);
     expect(f.tasks.list().total).toBe(0);
   } finally {
@@ -433,7 +454,7 @@ test("stop queued by the terminal notification cannot change a completed run bac
   }
 });
 
-test("lowered output limits clean ended results and shorten retained prefixes on restart", async () => {
+test("lowered byte limits preserve old output until new admission needs room; actual shortening resets reads", async () => {
   const f = await fixture({ taskOutputBytes: 64, taskOutputTotalBytes: 128 });
   try {
     await f.tasks.create("limits", input(f.root, "head -c 64 /dev/zero"), signal);
@@ -468,7 +489,8 @@ test("lowered output limits clean ended results and shorten retained prefixes on
     });
     try {
       await smaller.load();
-      expect(smaller.run("one").output).toMatchObject({ stdoutBytes: 16, truncated: true });
+      expect(smaller.run("one").output).toMatchObject({ stdoutBytes: 32, truncated: true });
+      expect((await readFile(join(f.root, "tasks", "one.stdout"))).length).toBe(32);
     } finally {
       await smaller.close();
     }
@@ -478,7 +500,14 @@ test("lowered output limits clean ended results and shorten retained prefixes on
     });
     try {
       await tiny.load();
-      expect(tiny.runs("limits").total).toBe(0);
+      expect(tiny.runs("limits").total).toBe(1);
+      expect((await readFile(join(f.root, "tasks", "one.stdout"))).length).toBe(32);
+      await tiny.start("limits", "new", signal);
+      expect(await finished(tiny, "new")).toMatchObject({
+        state: "succeeded",
+        output: { stdoutBytes: 8, truncated: true },
+      });
+      expect(() => tiny.run("one")).toThrow("does not exist or has been cleaned up");
     } finally {
       await tiny.close();
     }
@@ -487,28 +516,21 @@ test("lowered output limits clean ended results and shorten retained prefixes on
   }
 });
 
-test("lowered task count and a damaged definition preserve existing management and isolated output", async () => {
+test("lowered task count preserves existing management and prevents new definitions", async () => {
   const f = await fixture();
   let restored: ScheduledTasks | undefined;
-  const log = vi.spyOn(console, "error").mockImplementation(() => {});
   try {
     await f.tasks.create("good", input(f.root), signal);
-    await f.tasks.create("damaged", input(f.root, "printf retained"), signal);
-    await f.tasks.start("damaged", "retained", signal);
+    await f.tasks.create("existing", input(f.root, "printf retained"), signal);
+    await f.tasks.start("existing", "retained", signal);
     await finished(f.tasks, "retained");
     await f.tasks.close();
-    const path = join(f.root, "tasks", "damaged.json");
-    const value = JSON.parse(await readFile(path, "utf8"));
-    value.task.name = null;
-    const original = JSON.stringify(value);
-    await writeFile(path, original);
     restored = new ScheduledTasks({
       ...f.config,
       limits: { ...f.config.limits, tasksPerDevice: 1 },
     });
     await restored.load();
-    expect(restored.list().total).toBe(1);
-    expect(() => restored!.get("damaged")).toThrow("isolated");
+    expect(restored.list().total).toBe(2);
     await restored.update(
       "good",
       restored.get("good").revision,
@@ -518,7 +540,7 @@ test("lowered task count and a damaged definition preserve existing management a
     await expect(restored.create("new", input(f.root), signal)).rejects.toMatchObject({
       code: "limit_exceeded",
     });
-    await expect(restored.create("damaged", input(f.root), signal)).rejects.toMatchObject({
+    await expect(restored.create("existing", input(f.root), signal)).rejects.toMatchObject({
       code: "conflict",
     });
     await expect(restored.start("good", "retained", signal)).rejects.toMatchObject({
@@ -526,17 +548,118 @@ test("lowered task count and a damaged definition preserve existing management a
     });
     await restored.start("good", "allowed", signal);
     expect((await finished(restored, "allowed")).state).toBe("succeeded");
-    expect(await readFile(path, "utf8")).toBe(original);
     expect(await readFile(join(f.root, "tasks", "retained.stdout"), "utf8")).toBe("retained");
   } finally {
     await restored?.close();
-    log.mockRestore();
     await f.close();
   }
 });
 
-test.each(["broken JSON", "unknown state"])(
-  "%s disables task admission without preventing the real agent from starting",
+test.each([32, 80])(
+  "total budget %i preserves history when eviction cannot fit the new output target",
+  async (total) => {
+    const f = await fixture({ taskOutputBytes: 64, taskOutputTotalBytes: 256 });
+    let restored: ScheduledTasks | undefined;
+    const open = fs.open;
+    const slowOpen = vi.spyOn(fs, "open").mockImplementation(async (...args) => {
+      if (args[1] === "wx") await delay(80);
+      return open(...args);
+    });
+    syncBuiltinESMExports();
+    try {
+      await f.tasks.create("review", input(f.root, "head -c 64 /dev/zero"), signal);
+      await f.tasks.create("empty", input(f.root, "true"), signal);
+      await f.tasks.create("history", input(f.root, "head -c 16 /dev/zero"), signal);
+      await f.tasks.create(
+        "next",
+        input(f.root, "head -c 64 /dev/zero; printf finished > marker"),
+        signal,
+      );
+      await f.tasks.start("review", "retained", signal);
+      await finished(f.tasks, "retained");
+      await f.tasks.start("empty", "zero", signal);
+      await finished(f.tasks, "zero");
+      await f.tasks.start("history", "old", signal);
+      const old = await finished(f.tasks, "old");
+      await f.tasks.close();
+      const path = join(f.root, "tasks", "review.json");
+      const value = JSON.parse(await readFile(path, "utf8"));
+      Object.assign(value.task, { state: "paused", nextRunAt: null, reviewRunId: "retained" });
+      value.runs[0].state = "unknown";
+      await writeFile(path, JSON.stringify(value));
+      const output = await readFile(join(f.root, "tasks", "retained.stdout"));
+      restored = new ScheduledTasks({
+        ...f.config,
+        limits: { ...f.config.limits, taskOutputBytes: 32, taskOutputTotalBytes: total },
+      });
+      await restored.load();
+      expect(restored.run("retained").output).toMatchObject({ stdoutBytes: 64, truncated: false });
+      for (const id of ["new", "again"]) {
+        await restored.start("next", id, signal);
+        expect(await finished(restored, id)).toMatchObject({
+          state: "succeeded",
+          output: { stdoutBytes: 0, truncated: true },
+        });
+        expect(restored.run("old")).toEqual(old);
+        expect((await readFile(join(f.root, "tasks", "old.stdout"))).length).toBe(16);
+        expect(restored.run("zero").state).toBe("succeeded");
+      }
+      expect(restored.run("new").state).toBe("succeeded");
+      expect(await readFile(join(f.root, "marker"), "utf8")).toBe("finished");
+      expect((await readFile(join(f.root, "tasks", "retained.stdout"))).equals(output)).toBe(true);
+      expect(restored.get("review").reviewRunId).toBe("retained");
+      await restored.acknowledge("review", "retained", signal);
+      await restored.start("next", "after-review", signal);
+      expect(await finished(restored, "after-review")).toMatchObject({
+        state: "succeeded",
+        output: { stdoutBytes: 32, truncated: true },
+      });
+      expect(() => restored!.run("retained")).toThrow("does not exist or has been cleaned up");
+      expect(restored.run("zero").state).toBe("succeeded");
+      expect(restored.run("new").state).toBe("succeeded");
+    } finally {
+      await restored?.close();
+      slowOpen.mockRestore();
+      syncBuiltinESMExports();
+      await f.close();
+    }
+  },
+);
+
+test("active output prevents eviction that cannot reclaim a full run budget", async () => {
+  const f = await fixture({ taskOutputBytes: 64, taskOutputTotalBytes: 100 });
+  try {
+    await f.tasks.create("history", input(f.root, "head -c 20 /dev/zero"), signal);
+    await f.tasks.create("active", input(f.root, "head -c 64 /dev/zero; sleep 30"), signal);
+    await f.tasks.create("next", input(f.root, "head -c 64 /dev/zero"), signal);
+    await f.tasks.start("history", "old", signal);
+    const old = await finished(f.tasks, "old");
+    await f.tasks.start("active", "running", signal);
+    await expect
+      .poll(async () => (await f.tasks.output("running", "stdout", 0, 64, signal)).storedBytes)
+      .toBe(64);
+    await f.tasks.start("next", "new", signal);
+    expect(await finished(f.tasks, "new")).toMatchObject({
+      state: "succeeded",
+      output: { stdoutBytes: 16, truncated: true },
+    });
+    expect(f.tasks.run("old")).toEqual(old);
+    expect((await readFile(join(f.root, "tasks", "old.stdout"))).length).toBe(20);
+    expect(f.tasks.run("running").state).toBe("running");
+  } finally {
+    await f.close();
+  }
+});
+
+test.each([
+  "broken JSON",
+  "unknown state",
+  "invalid definition",
+  "non-file output",
+  "duplicate run",
+  "summary budget",
+])(
+  "%s disables every task RPC before any startup write while the real agent stays usable",
   async (kind) => {
     const f = await fixture();
     let agent: Agent | undefined;
@@ -544,14 +667,64 @@ test.each(["broken JSON", "unknown state"])(
     try {
       await f.tasks.create("good", input(f.root), signal);
       await f.tasks.create("bad", input(f.root), signal);
+      await f.tasks.start("good", "before", signal);
+      await finished(f.tasks, "before");
       await f.tasks.close();
+      const directory = join(f.root, "tasks");
+      const goodPath = join(directory, "good.json");
+      const good = JSON.parse(await readFile(goodPath, "utf8"));
+      Object.assign(good.task, {
+        schedule: { kind: "once", at: "2000-01-01T00:00:00.000Z" },
+        onceStatus: "pending",
+        nextRunAt: "2000-01-01T00:00:00.000Z",
+      });
+      good.runs[0].state = "running";
+      delete good.runs[0].endedAt;
+      await writeFile(goodPath, JSON.stringify(good));
       const path = join(f.root, "tasks", "bad.json");
       const data = JSON.parse(await readFile(path, "utf8"));
-      data.task.state = "unrecognized";
-      const original = kind === "broken JSON" ? "{" : JSON.stringify(data);
-      await writeFile(path, original);
+      if (kind === "broken JSON") await writeFile(path, "{");
+      if (kind === "unknown state") {
+        data.task.state = "unrecognized";
+        await writeFile(path, JSON.stringify(data));
+      }
+      if (kind === "invalid definition") {
+        data.task.name = null;
+        await writeFile(path, JSON.stringify(data));
+      }
+      if (kind === "non-file output") {
+        await mkdir(join(directory, "bad.stdout"));
+        await writeFile(join(directory, "bad.stdout/keep"), "user content");
+      }
+      if (kind === "duplicate run") {
+        data.runs = [{ ...good.runs[0], taskId: "bad" }];
+        await writeFile(path, JSON.stringify(data));
+      }
+      if (kind === "summary budget") {
+        for (let i = 0; i < 800; i++) {
+          const id = `extra-${i}`;
+          await writeFile(
+            join(directory, `${id}.json`),
+            JSON.stringify({ ...data, task: { ...data.task, id, name: "x".repeat(256) } }),
+          );
+        }
+      }
       await writeFile(join(f.root, "tasks", "unclaimed.stdout"), "Do not delete");
-      for (let attempt = 0; attempt < 2; attempt++) {
+      await writeFile(join(directory, "unfinished.tmp"), "Unpublished record");
+      const original = new Map(
+        await Promise.all(
+          (await readdir(directory, { recursive: true })).map(
+            async (file) =>
+              [
+                file,
+                (await lstat(join(directory, file))).isFile()
+                  ? await readFile(join(directory, file))
+                  : null,
+              ] as const,
+          ),
+        ),
+      );
+      for (let attempt = 0; attempt < (kind === "broken JSON" ? 2 : 1); attempt++) {
         agent = new Agent(f.config, {
           deviceId: "test",
           deviceToken: "test",
@@ -559,17 +732,35 @@ test.each(["broken JSON", "unknown state"])(
         });
         await agent.start();
         expect(await localRequest(f.config, "workspaces.list")).toEqual({ workspaces: [] });
-        await localRequest(f.config, "tasks.pause", { taskId: "good" });
-        await expect(
-          localRequest(f.config, "tasks.run", { taskId: "good", runId: "blocked" }),
-        ).rejects.toMatchObject({ code: "io_error" });
-        expect(agent.schedules.status().storageError).toContain("bad");
+        for (const method of scheduleMethods)
+          await expect(localRequest(f.config, method)).rejects.toMatchObject({
+            code: "io_error",
+            message: "Scheduled task storage is unavailable",
+            details: undefined,
+          });
+        expect(agent.schedules.snapshot()).toEqual({ revision: 0, storageError: true, items: [] });
+        expect(agent.schedules.status().storageError).toBeTruthy();
+        if (kind === "broken JSON" && attempt === 0)
+          for (const args of [
+            ["list"],
+            ["show", "good"],
+            ["output", "before"],
+            ["preview", "--cron", "0 9 * * *"],
+          ]) {
+            const result = await cli(f.root, [...args, "--json"]);
+            expect(result.code).toBe(1);
+            expect(result.json()).toMatchObject({
+              error: { code: "io_error", message: "Scheduled task storage is unavailable" },
+            });
+            expect(result.stdout).not.toContain(f.root);
+          }
         await agent.close();
         agent = undefined;
-        expect(await readFile(path, "utf8")).toBe(original);
-        expect(await readFile(join(f.root, "tasks", "unclaimed.stdout"), "utf8")).toBe(
-          "Do not delete",
+        expect((await readdir(directory, { recursive: true })).sort()).toEqual(
+          [...original.keys()].sort(),
         );
+        for (const [file, bytes] of original)
+          if (bytes) expect((await readFile(join(directory, file))).equals(bytes)).toBe(true);
       }
     } finally {
       await agent?.close();
@@ -577,9 +768,10 @@ test.each(["broken JSON", "unknown state"])(
       await f.close();
     }
   },
+  15000,
 );
 
-test("duplicate run ownership isolates both task files before scheduling", async () => {
+test("historical parameters retain display constraints without revalidating execution", async () => {
   const f = await fixture();
   let restored: ScheduledTasks | undefined;
   const log = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -589,18 +781,41 @@ test("duplicate run ownership isolates both task files before scheduling", async
     await finished(f.tasks, "shared");
     await f.tasks.close();
     const value = JSON.parse(await readFile(join(f.root, "tasks", "one.json"), "utf8"));
-    value.task.id = "two";
-    value.runs[0].taskId = "two";
-    await writeFile(join(f.root, "tasks", "two.json"), JSON.stringify(value));
+    value.runs[0].parameters.cwd = "historical display only";
+    value.runs[0].parameters.schedule.expression = "not an executable cron";
+    const path = join(f.root, "tasks", "one.json");
+    await writeFile(path, JSON.stringify(value));
     restored = new ScheduledTasks(f.config);
     await restored.load();
-    expect(restored.list().total).toBe(0);
-    for (const id of ["one", "two"])
-      await expect(restored.create(id, input(f.root), signal)).rejects.toMatchObject({
-        code: "conflict",
-      });
-    expect(restored.status().storageError).toContain("multiple task files");
+    expect(restored.status().ready).toBe(true);
+    expect(restored.run("shared").parameters).toMatchObject({
+      cwd: "historical display only",
+      schedule: { expression: "not an executable cron" },
+    });
     expect(await readFile(join(f.root, "tasks", "shared.stdout"), "utf8")).toBe("你好");
+    await restored.close();
+    value.runs[0].parameters.schedule = { kind: "once", at: "not an executable date" };
+    await writeFile(path, JSON.stringify(value));
+    restored = new ScheduledTasks(f.config);
+    await restored.load();
+    expect(restored.run("shared").parameters.schedule).toEqual(value.runs[0].parameters.schedule);
+    await expect(
+      restored.update(
+        "one",
+        restored.get("one").revision,
+        {
+          schedule: value.runs[0].parameters.schedule,
+        },
+        signal,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
+    await restored.close();
+    value.runs[0].parameters.timezone = "invalid/display-zone";
+    await writeFile(path, JSON.stringify(value));
+    restored = new ScheduledTasks(f.config);
+    await restored.load();
+    expect(restored.snapshot()).toMatchObject({ storageError: true, items: [] });
+    expect(await readFile(path, "utf8")).toBe(JSON.stringify(value));
   } finally {
     await restored?.close();
     log.mockRestore();

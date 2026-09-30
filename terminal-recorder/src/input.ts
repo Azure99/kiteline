@@ -1,4 +1,4 @@
-import { AppError, limits, asError } from "@kiteline/shared/protocol";
+import { AppError, asError } from "@kiteline/shared/protocol";
 import { normalizePaste } from "@kiteline/shared/terminal";
 import { tmux } from "@kiteline/shared/terminal/node";
 import type { RecorderConfig, TerminalFrame } from "@kiteline/shared/ipc";
@@ -50,21 +50,6 @@ export class InputQueue {
   }
   resize(attachmentId: string, cols: number, rows: number) {
     if (this.closed) return;
-    if (
-      !Number.isSafeInteger(cols) ||
-      !Number.isSafeInteger(rows) ||
-      cols < 1 ||
-      rows < 1 ||
-      cols > limits.terminalMaxCols ||
-      rows > limits.terminalMaxRows
-    ) {
-      this.reject(
-        attachmentId,
-        new AppError("invalid_argument", "Invalid terminal dimensions"),
-        "failed",
-      );
-      return;
-    }
     const last = this.queue.at(-1);
     if (last?.type === "resize" && last.attachmentId === attachmentId) {
       last.cols = cols;

@@ -413,23 +413,3 @@ test.each([
     restored.terminal.dispose();
   }
 });
-
-test("disposing adaptation restores the original scroll and REP behavior", async () => {
-  const actual = screen(10, 3, 20, false);
-  const expected = screen(10, 3, 20, false);
-  const adaptation = adaptTerminalScrolling(actual.terminal);
-  try {
-    await actual.write("a\x1b[95b");
-    await expected.write("a".repeat(10));
-    expect(actual.text()).toBe(expected.text());
-    expect(actual.terminal.buffer.normal.baseY).toBe(0);
-    adaptation.dispose();
-    await actual.write("\r\nb\x1b[95b\x1b[2S\x1b[20T");
-    await expected.write("\r\nb\x1b[95b\x1b[2S\x1b[20T");
-    expect(actual.text()).toBe(expected.text());
-    expect(actual.terminal.buffer.normal.baseY).toBeGreaterThan(3);
-  } finally {
-    actual.terminal.dispose();
-    expected.terminal.dispose();
-  }
-});

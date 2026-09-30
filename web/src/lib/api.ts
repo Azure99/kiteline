@@ -11,6 +11,7 @@ import { en } from "../i18n/en";
 import { observeServerVersion, versionedPath } from "./release";
 
 export class ApiError extends Error {
+  retryable = false;
   constructor(
     public code: string,
     message: string,
@@ -21,13 +22,18 @@ export class ApiError extends Error {
     super(message);
   }
 }
+export function apiError(error: KitelineError, outcome?: string, result?: unknown) {
+  return new ApiError(error.code, error.message, outcome, error.details, result);
+}
+const gatewayStatuses = new Set([502, 503, 504]);
 export async function api<T>(
   path: string,
   options: RequestInit = {},
   mutation = !!options.method && !["GET", "HEAD"].includes(options.method),
 ): Promise<T> {
+  let response: Response | undefined;
   try {
-    const response = await fetch(versionedPath(path), {
+    response = await fetch(versionedPath(path), {
       ...options,
       headers: {
         ...(options.body ? { "content-type": "application/json" } : {}),
@@ -37,14 +43,28 @@ export async function api<T>(
     observeServerVersion(response.headers.get("x-kiteline-version"));
     const data: unknown = await response.json();
     if (!response.ok) {
-      const error = (data as { error: KitelineError }).error;
+      const error = (data as { error?: KitelineError } | null)?.error;
+      if (typeof error?.code !== "string" || typeof error.message !== "string")
+        throw new Error(`Invalid HTTP ${response.status} error response`);
       if (response.status === 401) window.dispatchEvent(new Event("kiteline:unauthenticated"));
-      throw new ApiError(error.code, error.message, undefined, error.details);
+      const failure = apiError(error);
+      failure.retryable = gatewayStatuses.has(response.status);
+      throw failure;
     }
     return data as T;
   } catch (error) {
-    if (!mutation || error instanceof ApiError) throw error;
-    throw new ApiError("io_error", "No operation result was received", "unknown");
+    if (error instanceof ApiError) throw error;
+    if (mutation) throw new ApiError("io_error", "No operation result was received", "unknown");
+    if (options.signal?.aborted) throw error;
+    if (response ? gatewayStatuses.has(response.status) : error instanceof TypeError) {
+      const failure = new ApiError(
+        "io_error",
+        response ? `HTTP ${response.status} ${response.statusText}` : (error as Error).message,
+      );
+      failure.retryable = true;
+      throw failure;
+    }
+    throw error;
   }
 }
 export function post<T>(path: string, value: unknown = {}, signal?: AbortSignal, mutation = true) {
@@ -67,14 +87,7 @@ export async function rpc<A extends RpcArguments>(
   ...args: A
 ): Promise<RpcResult<A[0]>> {
   const reply = await rpcReply(deviceId, newId(), args);
-  if (reply.outcome !== "succeeded")
-    throw new ApiError(
-      reply.error.code,
-      reply.error.message,
-      reply.outcome,
-      reply.error.details,
-      reply.result,
-    );
+  if (reply.outcome !== "succeeded") throw apiError(reply.error, reply.outcome, reply.result);
   return reply.result;
 }
 export function errorMessage(error: unknown, context?: "login") {

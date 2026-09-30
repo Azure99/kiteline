@@ -20,6 +20,11 @@ import { isDeepStrictEqual, parseArgs } from "node:util";
 import { buildStaticAgent } from "./build-agent-static.mjs";
 import { prepareRipgrep } from "./prepare-ripgrep.mjs";
 import { verifyWindowsComponents } from "./build-windows-components.mjs";
+import {
+  requiredWindowsComponents,
+  windowsComponentFiles,
+  windowsComponentPath,
+} from "../shared/src/windows/components.ts";
 
 const root = resolve(import.meta.dirname, "..");
 const release = JSON.parse(readFileSync(join(root, "deploy/release.json"), "utf8"));
@@ -133,7 +138,7 @@ async function agentArchives(sourceHash) {
         throw new Error(`Invalid agent checksum record: ${target}`);
       expected.set(match[2], match[1]);
     }
-    const actual = new Set();
+    const actual = new Map();
     function walk(path) {
       for (const name of readdirSync(path)) {
         const file = join(path, name);
@@ -142,9 +147,10 @@ async function agentArchives(sourceHash) {
         if (stat.isDirectory()) walk(file);
         else if (stat.isFile()) {
           if (key === "SHA256SUMS") continue;
-          if (expected.get(key) !== digest(file))
+          const hash = digest(file);
+          if (expected.get(key) !== hash)
             throw new Error(`Agent file checksum mismatch: ${target}/${key}`);
-          actual.add(key);
+          actual.set(key, hash);
         } else if (
           !windows &&
           stat.isSymbolicLink() &&
@@ -181,13 +187,45 @@ async function agentArchives(sourceHash) {
     for (const file of required)
       if (!actual.has(file)) throw new Error(`Missing required agent file: ${target}/${file}`);
     const identity = JSON.parse(readFileSync(join(directory, "dist/native/identity.json"), "utf8"));
-    if (!isDeepStrictEqual(manifest.native, identity))
-      throw new Error(`Agent component identity mismatch: ${target}`);
     if (windows) {
-      const { verifyWindowsPackageComponents } = await import(
-        "../agent/dist/windows-components.js"
+      if (
+        identity.linkage !== "windows-msys" ||
+        identity.architecture !== manifest.architecture ||
+        identity.node !== `v${release.node}`
+      )
+        throw new Error(`Agent native platform identity mismatch: ${target}`);
+      const components = Object.fromEntries(
+        [...actual].flatMap(([file, hash]) =>
+          file === "dist/native/identity.json"
+            ? []
+            : file.startsWith("dist/native/")
+              ? [[file.slice(5), hash]]
+              : file.startsWith("runtime/")
+                ? [[file, hash]]
+                : [],
+        ),
       );
-      await verifyWindowsPackageComponents(directory, "x64", `v${release.node}`);
+      for (const file of requiredWindowsComponents(identity.inputs.downloads))
+        if (!components[file]) throw new Error(`Missing required Windows component: ${file}`);
+      if (!isDeepStrictEqual(components, identity.files))
+        throw new Error("Windows component files do not match their identity");
+      const recipe = JSON.parse(
+        readFileSync(
+          join(directory, "dist/native/sources/recipe/deploy/agent-windows.json"),
+          "utf8",
+        ),
+      );
+      const sources = Object.fromEntries(
+        Object.entries(recipe.sources).map(([name, value]) => ["sources/" + name, value]),
+      );
+      const catalog = Object.fromEntries(
+        Object.entries(identity.inputs.downloads).filter(([name]) => name.startsWith("sources/")),
+      );
+      if (!isDeepStrictEqual(sources, catalog))
+        throw new Error("Windows corresponding source catalog does not match its build recipe");
+      for (const [name, source] of Object.entries(sources))
+        if (components["native/" + name] !== source.sha256)
+          throw new Error(`Windows corresponding source checksum mismatch: ${name}`);
     } else {
       if (
         identity.architecture !== manifest.architecture ||
@@ -209,7 +247,7 @@ async function agentArchives(sourceHash) {
             )),
       };
       for (const [file, hash] of Object.entries(components))
-        if (!actual.has(`dist/native/${file}`) || expected.get(`dist/native/${file}`) !== hash)
+        if (!actual.has(`dist/native/${file}`) || actual.get(`dist/native/${file}`) !== hash)
           throw new Error(`Agent native component mismatch: ${target}/${file}`);
     }
     agents.push({ archive, checksum });
@@ -476,8 +514,6 @@ try {
   mkdirSync(join(destination, "bin"));
   const launcher = join(destination, "bin", `kiteline-${kind}${windowsAgent ? ".ps1" : ""}`);
   if (windowsAgent) {
-    const { windowsComponentPath } = await import("../agent/dist/windows-components.js");
-    const { windowsComponentFiles } = await import("../shared/dist/windows/components.js");
     const nativeSource = readFileSync(join(root, "native/windows/launcher.cs"), "utf8");
     const type = `KitelineLauncher_${createHash("sha256").update(nativeSource).digest("hex").slice(0, 16)}`;
     const list = (values) =>
@@ -552,10 +588,6 @@ try {
                 aptSources: digest(join(root, "deploy/ubuntu.sources")),
                 caCertificates: release.caCertificates,
               }),
-        native:
-          kind === "agent"
-            ? JSON.parse(readFileSync(join(native, "identity.json"), "utf8"))
-            : undefined,
       },
       null,
       2,

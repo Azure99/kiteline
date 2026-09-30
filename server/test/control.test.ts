@@ -1,20 +1,16 @@
 import { afterEach, expect, test } from "vitest";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { once } from "node:events";
 import { request } from "node:http";
+import { getDefaultHighWaterMark, setDefaultHighWaterMark } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import type { AddressInfo } from "node:net";
 import { WebSocket } from "ws";
 import { createKitelineServer } from "../src/app.js";
 import { Store } from "../src/store.js";
 import type { ServerConfig } from "../src/config.js";
-import {
-  appVersion,
-  limits,
-  protocolVersion,
-  type AgentEnvironment,
-} from "@kiteline/shared/protocol";
+import { appVersion, limits, type AgentEnvironment } from "@kiteline/shared/protocol";
 
 const environment: AgentEnvironment = {
   os: "linux",
@@ -25,7 +21,7 @@ const environment: AgentEnvironment = {
   runDir: "/var/tmp/kiteline-run",
 };
 
-const agentPath = `/api/agent/control?protocolVersion=${protocolVersion}&appVersion=${appVersion}`;
+const agentPath = `/api/agent/control?appVersion=${appVersion}`;
 const webPath = (path: string) =>
   `${path}${path.includes("?") ? "&" : "?"}appVersion=${appVersion}`;
 
@@ -103,7 +99,39 @@ async function fixture() {
       .toBe("online");
     return { ...identity, socket, messages, binding };
   }
-  return { app, store, config, call, device, origin, close };
+  async function fileChannel(kind: "file.read" | "file.write", size: number) {
+    const peer = await device();
+    const login = store.createSession(60_000);
+    const connection = app.connections.agents.get(peer.deviceId)!;
+    const pending = app.channels.create(peer.deviceId, login, kind, {
+      workspaceId: "workspace",
+      path: "file",
+      purpose: kind === "file.read" ? "text" : "save",
+      size,
+      createOnly: true,
+    });
+    const socket = new WebSocket(
+      origin.replace("http:", "ws:") +
+        `/api/agent/channels/${pending.id}?connectionId=${connection.connectionId}`,
+      { headers: { authorization: `Bearer ${peer.deviceToken}` } },
+    );
+    cleanups.push(() => socket.terminate());
+    await once(socket, "open");
+    socket.send(
+      JSON.stringify({
+        type: "ready",
+        meta: { size, filename: "file", contentType: "text/plain; charset=utf-8" },
+      }),
+    );
+    await pending.ready;
+    return {
+      socket,
+      id: pending.id,
+      url: origin + webPath(`/api/channels/${pending.id}/content`),
+      headers: { origin, cookie: `kiteline_session_http=${login.token}` },
+    };
+  }
+  return { app, store, config, call, device, fileChannel, origin, close };
 }
 
 test("last connected records successful hello, not metadata updates or disconnect", async () => {
@@ -194,7 +222,6 @@ test("channel envelope budget is checked before reserving a channel", async () =
     params: {
       workspaceId: "work",
       sessionId: "session",
-      terminalProfile: "xterm-c1",
       padding: "",
     },
   };
@@ -270,17 +297,127 @@ test("channel preparation and transfer preserve empty and long diagnostics witho
   }
 });
 
-test("WebSocket handshake distinguishes protocol, authentication, origin and missing channel", async () => {
+test.each(["bulk", "queued"])(
+  "normal source close drains %s read frames through HTTP backpressure",
+  async (mode) => {
+    const highWaterMark = getDefaultHighWaterMark(false);
+    if (mode === "queued") setDefaultHighWaterMark(false, 1);
+    let f: Awaited<ReturnType<typeof fixture>>;
+    try {
+      f = await fixture();
+    } finally {
+      setDefaultHighWaterMark(false, highWaterMark);
+    }
+    const bytes = Buffer.alloc(mode === "queued" ? 16 * 1024 : 1024 * 1024);
+    for (let i = 0; i < bytes.length; i++) bytes[i] = i % 251;
+    const channel = await f.fileChannel("file.read", bytes.length);
+    let held: import("node:http").ServerResponse | undefined;
+    if (mode === "queued")
+      f.app.server.prependOnceListener("request", (_request, response) => {
+        held = response;
+        response.cork();
+      });
+    const closed = once(channel.socket, "close");
+    channel.socket.once("message", () => {
+      for (let offset = 0; offset < bytes.length; offset += 8192)
+        channel.socket.send(bytes.subarray(offset, offset + 8192));
+      channel.socket.close(1000);
+    });
+    const pending = new Promise<import("node:http").IncomingMessage>((resolve, reject) => {
+      const req = request(channel.url, { headers: channel.headers }, resolve);
+      req.once("error", reject);
+      req.end();
+    });
+    void pending.catch(() => {});
+    try {
+      if (mode === "queued") {
+        expect((await closed)[0]).toBe(1000);
+        // Keep HTTP backpressure until the source close has reached the relay.
+        await delay(20);
+      }
+    } finally {
+      held?.uncork();
+    }
+    const response = await pending;
+    expect(response.statusCode).toBe(200);
+    response.pause();
+    await delay(50);
+    const chunks: Buffer[] = [];
+    for await (const chunk of response) chunks.push(chunk as Buffer);
+    expect(Buffer.concat(chunks).equals(bytes)).toBe(true);
+  },
+);
+
+test("write results validate errors, preserve partial details and report lost publication results as unknown", async () => {
+  const f = await fixture();
+  const replies = [
+    { outcome: "unknown", error: null },
+    { outcome: "partial", error: { code: "io_error", message: null } },
+    { outcome: "failed", error: { code: "", message: "diagnostic" } },
+    { outcome: ["unknown"], error: { code: "io_error", message: "diagnostic" } },
+    {
+      outcome: "partial",
+      error: { code: "conflict", message: "", details: { changed: ["file"] } },
+      result: { completed: 1 },
+    },
+    {
+      outcome: "unknown",
+      error: {
+        code: "io_error",
+        message: "diagnostic\n".repeat(1000) + "\0",
+        details: { pending: true },
+      },
+      result: { target: "file" },
+    },
+    undefined,
+  ];
+  for (const [index, reply] of replies.entries()) {
+    const channel = await f.fileChannel("file.write", 4);
+    const chunks: Buffer[] = [];
+    const stored = join(f.config.dataDir, `published-${index}`);
+    channel.socket.on("message", (data, binary) => {
+      if (binary) chunks.push(Buffer.from(data as Buffer));
+      else if (JSON.parse(data.toString()).type === "end") {
+        if (reply)
+          channel.socket.send(
+            JSON.stringify({ type: "result", reply: { id: channel.id, ...reply } }),
+          );
+        else void writeFile(stored, Buffer.concat(chunks)).then(() => channel.socket.close(1000));
+      }
+    });
+    const response = await fetch(channel.url, {
+      method: "PUT",
+      headers: channel.headers,
+      body: "text",
+    });
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    if (index < 4)
+      expect(result).toMatchObject({
+        id: channel.id,
+        outcome: "unknown",
+        error: { code: "invalid_argument" },
+      });
+    else if (reply) expect(result).toEqual({ id: channel.id, ...reply });
+    else {
+      expect(result).toMatchObject({
+        id: channel.id,
+        outcome: "unknown",
+        error: { code: "offline" },
+      });
+      expect(await readFile(stored, "utf8")).toBe("text");
+    }
+    expect(Buffer.concat(chunks).toString()).toBe("text");
+  }
+});
+
+test("WebSocket handshake distinguishes version, authentication, origin and missing channel", async () => {
   const f = await fixture();
   const login = f.store.createSession(60_000);
   const device = f.store.bind(f.store.newBinding().code, "Protocol check");
   for (const [path, headers, status] of [
-    [
-      `/api/agent/control?protocolVersion=2&appVersion=${appVersion}`,
-      { authorization: `Bearer ${device.deviceToken}` },
-      426,
-    ],
-    ["/api/agent/control?protocolVersion=2", {}, 401],
+    ["/api/agent/control", { authorization: `Bearer ${device.deviceToken}` }, 426],
+    ["/api/agent/control", {}, 401],
     [agentPath, {}, 401],
     ["/api/events", { origin: "https://other.test" }, 403],
     [
@@ -365,8 +502,7 @@ test("version refusal is visible, blocks all device tools, and does not replace 
   const cookie = `kiteline_session_http=${login.token}`;
   async function rejectVersion(token: string) {
     const socket = new WebSocket(
-      f.origin.replace("http:", "ws:") +
-        `/api/agent/control?protocolVersion=${protocolVersion}&appVersion=0.0.0-test`,
+      f.origin.replace("http:", "ws:") + "/api/agent/control?appVersion=0.0.0-test",
       { headers: { authorization: `Bearer ${token}` } },
     );
     socket.on("error", () => {});
@@ -409,7 +545,7 @@ test("version refusal is visible, blocks all device tools, and does not replace 
       "POST",
       {
         kind: "terminal.attach",
-        params: { workspaceId: "w", sessionId: "s", terminalProfile: "xterm-c1" },
+        params: { workspaceId: "w", sessionId: "s" },
       },
     ],
     [`/api/devices/${identity.deviceId}/download?workspaceId=w&path=file`, "GET", undefined],
@@ -426,21 +562,17 @@ test("version refusal is visible, blocks all device tools, and does not replace 
   await rejectVersion(healthy.deviceToken);
   expect(healthy.socket.readyState).toBe(WebSocket.OPEN);
   expect(f.app.connections.devices().find((d) => d.id === healthy.deviceId)).toEqual(before);
-  const invalid = new WebSocket(f.origin.replace("http:", "ws:") + agentPath, {
-    headers: { authorization: `Bearer ${healthy.deviceToken}` },
-  });
-  await once(invalid, "open");
-  invalid.send(JSON.stringify({ type: "hello", environment, editorBytes: 0, snapshot: {} }));
-  await once(invalid, "close");
-  expect(healthy.socket.readyState).toBe(WebSocket.OPEN);
-  expect(f.app.connections.devices().find((d) => d.id === healthy.deviceId)).toEqual(before);
 });
 
-test("missing or invalid current environment cannot replace a healthy connection", async () => {
+test("invalid current agent capabilities cannot replace a healthy connection", async () => {
   const f = await fixture();
   const peer = await f.device();
   const before = f.app.connections.devices()[0]!;
-  for (const value of [undefined, { ...environment, os: "windows", homePath: "C:relative" }]) {
+  for (const [value, editorBytes] of [
+    [undefined, 2000],
+    [{ ...environment, os: "windows", homePath: "C:relative" }, 2000],
+    [environment, 0],
+  ]) {
     const socket = new WebSocket(f.origin.replace("http:", "ws:") + agentPath, {
       headers: { authorization: `Bearer ${peer.deviceToken}` },
     });
@@ -449,7 +581,7 @@ test("missing or invalid current environment cannot replace a healthy connection
       JSON.stringify({
         type: "hello",
         environment: value,
-        editorBytes: 2000,
+        editorBytes,
         snapshot: before.snapshot,
       }),
     );
@@ -556,31 +688,6 @@ test("binding returns versioned installation commands from the current request o
   expect(head.headers.get("cache-control")).toBe("no-cache");
   expect(await head.text()).toBe("");
   expect((await f.call("/connect.sh", "POST")).status).toBe(405);
-});
-
-test("the matching upgrade command is available to an authenticated stale Web release", async () => {
-  const f = await fixture();
-  const path = "/api/agent/upgrade-command?appVersion=0.1.9-test";
-  expect((await fetch(f.origin + path)).status).toBe(401);
-  const login = f.store.createSession(60_000);
-  const response = await fetch(f.origin + path, {
-    headers: { cookie: `kiteline_session_http=${login.token}` },
-  });
-  expect(response.status).toBe(200);
-  const value = await response.json();
-  expect(value.version).toBe(appVersion);
-  expect(Object.keys(value).sort()).toEqual(["commands", "version"]);
-  expect(value.commands.linux).toContain(`${f.origin}/upgrade.sh`);
-  expect(value.commands.windows).toContain(`${f.origin}/upgrade.ps1`);
-  const script = await (await fetch(f.origin + "/upgrade.sh")).text();
-  expect(script).toContain(`${f.origin}/downloads/agent/${appVersion}/`);
-  expect(script).toContain("kiteline-agent upgrade --archive");
-  expect(script).not.toContain("--yes");
-  expect(script).not.toContain("kiteline-agent bind");
-  for (const command of Object.values(value.commands)) {
-    expect(command).not.toContain("--yes");
-    expect(command).not.toContain("kiteline-agent bind");
-  }
 });
 
 test("Windows scripts and exact ZIP resources support GET and HEAD without SPA fallback", async () => {
@@ -778,7 +885,7 @@ test("terminal channel has separate pairing deadlines, stays with its login, and
     "POST",
     {
       kind: "terminal.attach",
-      params: { workspaceId: "work", sessionId: "session", terminalProfile: "xterm-c1" },
+      params: { workspaceId: "work", sessionId: "session" },
     },
     cookie,
   );
@@ -796,11 +903,7 @@ test("terminal channel has separate pairing deadlines, stays with its login, and
     JSON.stringify({
       type: "ready",
       meta: {
-        sessionId: "session",
-        historyLines: 100,
-        terminalProfile: "xterm-c1",
         terminalInputBytes: 262144,
-        controlMessageBytes: 1048576,
       },
     }),
   );

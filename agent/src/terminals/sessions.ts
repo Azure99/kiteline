@@ -2,15 +2,9 @@ import { randomUUID } from "node:crypto";
 import { access, mkdir, rm } from "node:fs/promises";
 import { constants } from "node:fs";
 import { dirname, join } from "node:path";
-import {
-  AppError,
-  OperationError,
-  limits,
-  terminalProfile,
-  type Session,
-} from "@kiteline/shared/protocol";
+import { AppError, OperationError, limits, type Session } from "@kiteline/shared/protocol";
 import type { CreateTerminal, RecorderMessage, TerminalIdentity } from "@kiteline/shared/ipc";
-import { exitCodeFormat, msysPath, tmux } from "@kiteline/shared/terminal/node";
+import { exitCodeFormat, msysPath, tmux, tmuxServerMissing } from "@kiteline/shared/terminal/node";
 import { startTerminalServer } from "@kiteline/shared/terminal/windows";
 import type { AgentConfig } from "../config.js";
 import type { MetadataStore } from "../metadata.js";
@@ -18,7 +12,7 @@ import { Recorder, type Creation } from "./recorder.js";
 
 interface Managed {
   session: Session;
-  identity: Partial<TerminalIdentity> & Pick<TerminalIdentity, "socket" | "tmuxSession">;
+  identity: Partial<TerminalIdentity> & Pick<TerminalIdentity, "socket">;
   creation?: Promise<Session>;
   creationMayArrive?: boolean;
   createRequest?: Creation;
@@ -121,11 +115,10 @@ export class Sessions {
           createdAt: new Date().toISOString(),
           historyLines: metadata.settings.historyLines,
           state: "starting",
-          terminalProfile,
           webStatus: "unavailable",
           historyGap: false,
         },
-        identity: { socket, tmuxSession: "kiteline" },
+        identity: { socket },
       };
       // Reserve before creation, in the same boundary as workspace removal.
       this.records.set(id, item);
@@ -139,7 +132,6 @@ export class Sessions {
           const options: CreateTerminal = {
             sessionId: id,
             socket,
-            tmuxSession: "kiteline",
             workspacePath: workspace.path,
             shell: this.config.shell,
             command: shortcut?.command,
@@ -343,10 +335,7 @@ export class Sessions {
         rows: Number(result[6]),
       };
     } catch (error) {
-      if (
-        error instanceof Error &&
-        /no server running|No such file or directory|Connection refused/.test(error.message)
-      )
+      if (tmuxServerMissing(error))
         return { alive: false, exitCode: null, cols: undefined, rows: undefined };
       throw error;
     }
@@ -389,12 +378,8 @@ export class Sessions {
         if (!item.server && (await this.inspect(item)).alive) throw error;
       } finally {
         if (item.server) {
-          try {
-            item.server.job.terminate();
-          } finally {
-            await item.server.job.empty;
-            await item.server.drained;
-          }
+          await item.server.job.stop();
+          await item.server.drained;
         }
       }
       this.records.delete(item.session.id);

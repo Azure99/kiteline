@@ -36,7 +36,6 @@ export function TaskDetail({
   const [loadingMore, setLoadingMore] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const alive = useRef(true);
-  const generation = useRef(0);
   const readRequest = useRef<AbortController>(undefined);
   useEffect(() => {
     alive.current = true;
@@ -48,7 +47,6 @@ export function TaskDetail({
     if (!online) return;
     async function load() {
       readRequest.current?.abort();
-      const current = ++generation.current;
       if (document.hidden) return;
       const abort = new AbortController();
       readRequest.current = abort;
@@ -57,12 +55,12 @@ export function TaskDetail({
           rpc(deviceId, "tasks.get", { taskId }, abort.signal),
           rpc(deviceId, "runs.list", { taskId }, abort.signal),
         ]);
-        if (abort.signal.aborted || current !== generation.current) return;
+        if (abort.signal.aborted) return;
         setTask(definition);
         setRuns(history);
         setReadError(undefined);
       } catch (error) {
-        if (!abort.signal.aborted && current === generation.current) setReadError(error);
+        if (!abort.signal.aborted) setReadError(error);
       }
     }
     void load();
@@ -77,7 +75,6 @@ export function TaskDetail({
     readRequest.current?.abort();
     const abort = new AbortController();
     readRequest.current = abort;
-    const current = ++generation.current;
     setLoadingMore(true);
     try {
       const page = await rpc(
@@ -86,11 +83,10 @@ export function TaskDetail({
         { taskId, offset: runs.items.length },
         abort.signal,
       );
-      if (alive.current && !abort.signal.aborted && current === generation.current)
+      if (!abort.signal.aborted)
         setRuns({ items: [...runs.items, ...page.items], total: page.total });
     } catch (error) {
-      if (alive.current && !abort.signal.aborted && current === generation.current)
-        setReadError(error);
+      if (!abort.signal.aborted) setReadError(error);
     } finally {
       if (alive.current) setLoadingMore(false);
     }
