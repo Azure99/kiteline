@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { BigIntStats } from "node:fs";
-import { lstat, open, readlink, stat, symlink, unlink, type FileHandle } from "node:fs/promises";
-import { dirname, isAbsolute, join } from "node:path";
+import { open, stat, symlink, unlink, type FileHandle } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import {
   AppError,
   asError,
@@ -11,7 +11,7 @@ import {
 } from "@kiteline/shared/protocol";
 import { atomicJson, readJson } from "../config.js";
 import { publish } from "../mutations.js";
-import { sameObject } from "./paths.js";
+import { entryInfo, pathDependencies, realPath, sameObject } from "./paths.js";
 
 interface TemporaryRecord {
   name: string;
@@ -41,39 +41,6 @@ interface Cleanup {
 interface WriteAccess {
   path: string;
   followFinalLink?: boolean;
-}
-
-// Retain only the directory/link identities that the actual write path traverses.
-async function dependencies({ path, followFinalLink }: WriteAccess) {
-  const result: BigIntStats[] = [];
-  const remaining = path.split("/").filter(Boolean);
-  let current = "/",
-    links = 0;
-  while (remaining.length) {
-    const part = remaining.shift()!;
-    if (part === ".") continue;
-    if (part === "..") {
-      current = dirname(current);
-      continue;
-    }
-    const next = join(current, part);
-    if (!remaining.length && !followFinalLink) {
-      current = next;
-      break;
-    }
-    const info = await lstat(next, { bigint: true });
-    if (info.isSymbolicLink()) {
-      if (++links > 40) throw new AppError("conflict", "Too many symbolic links in the write path");
-      result.push(info);
-      const target = await readlink(next);
-      if (isAbsolute(target)) current = "/";
-      remaining.unshift(...target.split("/").filter(Boolean));
-    } else {
-      if (info.isDirectory()) result.push(info);
-      current = next;
-    }
-  }
-  return { path: current, items: result };
 }
 
 export class TemporaryFiles {
@@ -204,10 +171,13 @@ export class TemporaryFiles {
     access?: WriteAccess,
   ): Promise<Temporary> {
     return publish(async () => {
-      const info = await stat(parent, { bigint: true });
+      const info = await stat(await realPath(parent), { bigint: true });
       if (!sameObject(info, expected))
         throw new AppError("conflict", "Target parent directory has changed");
-      const route = await dependencies(access ?? { path: parent, followFinalLink: true });
+      const route = await pathDependencies(
+        access?.path ?? parent,
+        access ? !!access.followFinalLink : true,
+      );
       if ((access ? dirname(route.path) : route.path) !== parent)
         throw new AppError("conflict", "Write path no longer reaches the prepared parent");
       const name = `.kiteline-${randomUUID()}.tmp`;
@@ -245,20 +215,24 @@ export class TemporaryFiles {
     target: string | Buffer,
     signal: AbortSignal,
     access?: WriteAccess,
+    type?: "file" | "dir" | "junction",
   ): Promise<TrackedTemporary> {
     return publish(async () => {
-      const info = await stat(parent, { bigint: true });
+      const info = await stat(await realPath(parent), { bigint: true });
       if (!sameObject(info, expected))
         throw new AppError("conflict", "Target parent directory has changed");
-      const route = await dependencies(access ?? { path: parent, followFinalLink: true });
+      const route = await pathDependencies(
+        access?.path ?? parent,
+        access ? !!access.followFinalLink : true,
+      );
       if ((access ? dirname(route.path) : route.path) !== parent)
         throw new AppError("conflict", "Write path no longer reaches the prepared parent");
       const name = `.kiteline-${randomUUID()}.tmp`;
       const path = join(parent, name);
-      await symlink(target, path);
+      await symlink(target, path, type);
       let record: TemporaryRecord | undefined;
       try {
-        const file = await lstat(path, { bigint: true });
+        const file = await entryInfo(path);
         record = {
           parent,
           name,
@@ -346,8 +320,8 @@ export class TemporaryFiles {
   }
 
   async checkLocked(temporary: TrackedTemporary) {
-    const parent = await stat(temporary.parent, { bigint: true });
-    const file = await lstat(temporary.path, { bigint: true });
+    const parent = await stat(await realPath(temporary.parent), { bigint: true });
+    const file = await entryInfo(temporary.path);
     if (
       String(parent.dev) !== temporary.parentDev ||
       String(parent.ino) !== temporary.parentIno ||
@@ -369,7 +343,7 @@ export class TemporaryFiles {
   ownsLocked(location: { name: string; parentInfo: BigIntStats }, info: BigIntStats) {
     return [...this.active.values()].some(
       ({ record }) =>
-        record.name === location.name &&
+        (process.platform === "win32" || record.name === location.name) &&
         record.parentDev === String(location.parentInfo.dev) &&
         record.parentIno === String(location.parentInfo.ino) &&
         record.dev === String(info.dev) &&
@@ -408,11 +382,12 @@ export class TemporaryFiles {
     const path = join(record.parent, record.name);
     let info: BigIntStats;
     try {
-      info = await lstat(path, { bigint: true });
+      await realPath(record.parent);
+      info = await entryInfo(path);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         // A missing file only resolves the record if its original parent remains reachable.
-        const parent = await stat(record.parent, { bigint: true });
+        const parent = await stat(await realPath(record.parent), { bigint: true });
         if (String(parent.dev) !== record.parentDev || String(parent.ino) !== record.parentIno)
           throw new AppError(
             "conflict",
@@ -423,7 +398,7 @@ export class TemporaryFiles {
       }
       throw error;
     }
-    const parent = await stat(record.parent, { bigint: true });
+    const parent = await stat(await realPath(record.parent), { bigint: true });
     if (
       String(parent.dev) !== record.parentDev ||
       String(parent.ino) !== record.parentIno ||

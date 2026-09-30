@@ -27,6 +27,7 @@ export class RecordedSession {
   private ended = false;
   private failed = false;
   private starting?: Promise<TerminalIdentity>;
+  private closing?: Promise<void>;
   private initialized: boolean;
   constructor(
     readonly options: TerminalSource,
@@ -163,7 +164,7 @@ export class RecordedSession {
     }
   }
   private maybeRelease() {
-    if ((this.ended || this.failed) && !this.displays.size) this.release();
+    if (!this.closing && (this.ended || this.failed) && !this.displays.size) this.release();
   }
   detach(id: string) {
     this.displays.get(id)?.attachment.close();
@@ -178,7 +179,7 @@ export class RecordedSession {
     void this.model.ordered(() => {
       if (this.ended || this.failed) return;
       this.ended = true;
-      this.input.close();
+      void this.input.close();
       this.control.dispose();
       for (const display of this.displays.values()) display.attachment.end(exitCode);
       this.emit({ type: "ended", sessionId: this.options.sessionId, exitCode });
@@ -189,7 +190,7 @@ export class RecordedSession {
   fault(error: Error) {
     if (this.ended || this.failed) return;
     this.failed = true;
-    this.input.close();
+    void this.input.close();
     this.control.dispose(error);
     const fault = new AppError("recording_unavailable", error.message);
     for (const display of this.displays.values()) display.attachment.fail(fault);
@@ -199,7 +200,7 @@ export class RecordedSession {
   }
   async end() {
     await this.starting?.catch(() => {});
-    this.control.dispose();
+    await this.control.close();
     try {
       await tmux(
         this.options.socket,
@@ -213,11 +214,16 @@ export class RecordedSession {
     }
     this.finish(null);
   }
-  async close() {
+  close() {
+    if (this.closing) return this.closing;
     this.failed = true;
-    this.input.close();
+    const input = this.input.close();
     this.control.dispose();
+    this.closing = (async () => {
+      await this.starting?.catch(() => {});
+      await Promise.all([input, this.control.close(), this.model.dispose()]);
+    })();
     for (const display of this.displays.values()) display.attachment.close();
-    await this.model.dispose();
+    return this.closing;
   }
 }

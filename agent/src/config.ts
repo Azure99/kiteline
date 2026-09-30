@@ -1,9 +1,11 @@
 import { homedir, userInfo } from "node:os";
-import { resolve, isAbsolute } from "node:path";
-import { readFile, writeFile, rename, rm } from "node:fs/promises";
+import { resolve, isAbsolute, dirname } from "node:path";
+import { readFile, writeFile, rename, rm, mkdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { AppError, integer, record, string } from "@kiteline/shared/protocol";
 import { installedPaths } from "./installation.js";
+import { windowsNative } from "@kiteline/shared/windows/native";
+import { windowsExecutable } from "./tool-checks.js";
 
 export interface AgentConfig {
   dataDir: string;
@@ -64,10 +66,19 @@ export async function agentPaths() {
   const installed = await installedPaths();
   if (installed) return installed;
   const dataDir = resolve(
-    process.env.KITELINE_AGENT_HOME ?? resolve(homedir(), ".local/share/kiteline-agent"),
+    process.env.KITELINE_AGENT_HOME ??
+      (process.platform === "win32"
+        ? resolve(windowsNative().identity().localAppData, "kiteline-agent")
+        : resolve(homedir(), ".local/share/kiteline-agent")),
   );
   const runDir = resolve(process.env.KITELINE_AGENT_RUN_DIR ?? resolve(dataDir, "run"));
   return { dataDir, runDir };
+}
+export async function privateDirectory(path: string) {
+  if (process.platform === "win32") {
+    await mkdir(dirname(path), { recursive: true });
+    windowsNative().privateDirectory(path);
+  } else await mkdir(path, { recursive: true, mode: 0o700 });
 }
 export async function agentConfig(): Promise<AgentConfig> {
   const { dataDir, runDir } = await agentPaths();
@@ -83,9 +94,21 @@ export async function agentConfig(): Promise<AgentConfig> {
     if (settings[key] !== undefined)
       defaults[key] = integer(settings[key], key, 1, timerMaximums[key] ?? Number.MAX_SAFE_INTEGER);
   const shell =
-    input.shell === undefined ? userInfo().shell || "/bin/sh" : string(input.shell, "shell");
+    input.shell === undefined
+      ? process.platform === "win32"
+        ? await powershell()
+        : userInfo().shell || "/bin/sh"
+      : string(input.shell, "shell");
   if (!isAbsolute(shell)) throw new AppError("invalid_argument", "Shell must be an absolute path");
   return { dataDir, runDir, shell, limits: defaults };
+}
+async function powershell() {
+  return windowsExecutable("pwsh").catch(() => {
+    throw new AppError(
+      "not_found",
+      "PowerShell 7 is required; add pwsh.exe to PATH or configure an absolute shell path",
+    );
+  });
 }
 export async function readIdentity(config: AgentConfig): Promise<Identity> {
   let value: Record<string, unknown>;

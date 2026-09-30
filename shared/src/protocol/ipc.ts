@@ -52,6 +52,7 @@ export type TerminalFrame =
   | { type: "input.error"; code: string; message: string; outcome: "failed" | "unknown" };
 export type RecorderRequest =
   | ({ id: string } & TerminalSource)
+  | { type: "cancelCreate"; id: string; sessionId: string; createId: string }
   | { type: "end" | "redraw"; id: string; sessionId: string }
   | {
       type: "attach";

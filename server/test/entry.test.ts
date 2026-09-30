@@ -165,10 +165,11 @@ test("upgrade scripts are public while command recovery retains login and origin
     cookie: `kiteline_session=${session.token}`,
   });
   expect(command.status).toBe(200);
-  const upgrade = JSON.parse(command.text) as { version: string; command: string };
+  const upgrade = JSON.parse(command.text) as { version: string; commands: Record<string, string> };
   expect(upgrade.version).toBe(appVersion);
-  expect(upgrade.command).toContain("https://kiteline.test:9443/upgrade.sh");
-  expect(upgrade.command).toContain("--proto '=https' --proto-redir '=https'");
+  expect(upgrade.commands.linux).toContain("https://kiteline.test:9443/upgrade.sh");
+  expect(upgrade.commands.linux).toContain("--proto '=https' --proto-redir '=https'");
+  expect(upgrade.commands.windows).toContain("https://kiteline.test:9443/upgrade.ps1");
 });
 
 test("request authority and explicit proxy trust determine HTTP and Upgrade origins", async () => {
@@ -203,7 +204,8 @@ test("request authority and explicit proxy trust determine HTTP and Upgrade orig
     };
     const binding = await f.call(`/api/bindings?appVersion=${appVersion}`, headers, "POST");
     expect(binding.status).toBe(200);
-    expect(JSON.parse(binding.text).commands.foreground).toContain(`${origin}/connect.sh`);
+    expect(JSON.parse(binding.text).commands.linux.install).toContain(`${origin}/connect.sh`);
+    expect(JSON.parse(binding.text).commands.windows.install).toContain(`${origin}/connect.ps1`);
     const socket = await f.events(headers);
     socket.close();
     await once(socket, "close");

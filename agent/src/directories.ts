@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { opendir, realpath, mkdir, stat } from "node:fs/promises";
+import { opendir, mkdir, stat } from "node:fs/promises";
 import type { BigIntStats, Dir, Dirent } from "node:fs";
-import { basename, dirname, isAbsolute, join } from "node:path";
+import { basename, dirname, join, posix } from "node:path";
 import { AppError, limits, type DirectoryListing, type Entry } from "@kiteline/shared/protocol";
 import { publish } from "./mutations.js";
-import { readEntry, sameObject } from "./files/paths.js";
+import { devicePath, entryName, readEntry, realPath, sameObject } from "./files/paths.js";
 import { CursorBudget } from "./cursor-budget.js";
 
 interface Cursor {
@@ -42,8 +42,8 @@ export class Directories {
     signal?: AbortSignal,
     entryParent?: string,
   ): Promise<DirectoryListing> {
-    if (!isAbsolute(path))
-      throw new AppError("invalid_argument", "An absolute directory path is required");
+    devicePath(path);
+    const relativeEntries = entryParent !== undefined;
     signal?.throwIfAborted();
     const id = token ?? randomUUID();
     let cursor = this.cursors.get(id);
@@ -73,7 +73,7 @@ export class Directories {
     let more = false;
     const items: Entry[] = [];
     try {
-      path = await realpath(path);
+      path = await realPath(path);
       entryParent ??= path;
       signal.throwIfAborted();
       const info = await stat(path, { bigint: true });
@@ -106,7 +106,11 @@ export class Directories {
         const rawName: Buffer = Buffer.isBuffer(item.name) ? item.name : Buffer.from(item.name);
         let entry: Entry;
         try {
-          entry = await readEntry(path, rawName, join(entryParent, rawName.toString("utf8")));
+          entry = await readEntry(
+            path,
+            rawName,
+            (relativeEntries ? posix.join : join)(entryParent, rawName.toString("utf8")),
+          );
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
           throw error;
@@ -144,10 +148,10 @@ export class Directories {
     };
   }
   async mkdir(path: string, signal?: AbortSignal) {
-    if (!isAbsolute(path) || !basename(path))
-      throw new AppError("invalid_argument", "An absolute directory path is required");
+    devicePath(path);
+    const name = entryName(basename(path));
     return publish(async () => {
-      const target = join(await realpath(dirname(path)), basename(path));
+      const target = join(await realPath(dirname(path)), name);
       signal?.throwIfAborted();
       await mkdir(target);
       return { path: target };

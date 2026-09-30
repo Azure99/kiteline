@@ -120,11 +120,11 @@ export function taskRecord(value: unknown, filename: string): TaskRecord {
         ...storedFields(parameters),
         taskRevision: integer(parameters.taskRevision, "taskRevision", 1, Number.MAX_SAFE_INTEGER),
       },
-      pid: run.pid === undefined ? undefined : integer(run.pid, "pid", 1, 2147483647),
+      pid: run.pid === undefined ? undefined : integer(run.pid, "pid", 1, 0xffffffff),
       exitCode:
         run.exitCode === undefined || run.exitCode === null
           ? run.exitCode
-          : integer(run.exitCode, "exitCode", -2147483648, 2147483647),
+          : integer(run.exitCode, "exitCode", 0, 0xffffffff),
       signal:
         run.signal === undefined || run.signal === null
           ? run.signal

@@ -41,7 +41,7 @@ ${Object.values(command ? { [command]: usage[command] } : usage)
 
 All commands support --help and --json. Help works without a running or configured agent.
 Management requires the bound agent running under the same OS user. No command starts
-the agent or enables a service. IDs are stable opaque strings; copy them from results.
+the agent. IDs are stable opaque strings; copy them from results.
 
 Schedules: --cron is numeric five-field cron (minute hour day month weekday), with
 OR semantics for day and weekday. --at is a future ISO timestamp with Z or an explicit

@@ -683,7 +683,7 @@ export class ScheduledTasks {
     this.reservedRuns.add(runId);
     let process: TaskProcess;
     try {
-      process = new TaskProcess(
+      process = await TaskProcess.start(
         this.config.shell,
         run,
         (stream) => this.outputPath(runId, stream),
@@ -965,10 +965,13 @@ export class ScheduledTasks {
     }
   }
 
-  async close() {
+  beginClose() {
     this.closing = true;
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
+  }
+  async close() {
+    this.beginClose();
     await this.queue;
     const running = [...this.executions.values()];
     const stops = await Promise.allSettled(running.map((item) => item.process.stop("agent_stop")));

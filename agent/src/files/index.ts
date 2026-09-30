@@ -1,5 +1,5 @@
-import { lstat, mkdir, open } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir, open } from "node:fs/promises";
+import { join, posix } from "node:path";
 import {
   AppError,
   OperationError,
@@ -10,7 +10,15 @@ import {
 import type { Directories } from "../directories.js";
 import type { MetadataStore } from "../metadata.js";
 import { publish } from "../mutations.js";
-import { entryName, locate, protectRoot, readEntry, relativePath, versionOf } from "./paths.js";
+import {
+  entryInfo,
+  entryName,
+  locate,
+  protectRoot,
+  readEntry,
+  relativePath,
+  versionOf,
+} from "./paths.js";
 import { renameNoReplace } from "./rename.js";
 import type { TemporaryFiles } from "./temporary.js";
 
@@ -46,7 +54,7 @@ export class Files {
     const root = this.metadata.workspace(workspaceId).path;
     const path = relativePath(input);
     const target = await locate(root, path);
-    const info = await lstat(target.absolute, { bigint: true });
+    const info = await entryInfo(target.absolute);
     const entry = await readEntry(target.parent, Buffer.from(target.name), path);
     const targetVersion = versionOf(target.parent, target.name, info);
     if (!suggestCopyName) return { entry, targetVersion };
@@ -57,7 +65,7 @@ export class Files {
       signal?.throwIfAborted();
       const suggestedName = `${stem} (${n})${suffix}`;
       try {
-        await lstat(join(target.parent, suggestedName));
+        await entryInfo(join(target.parent, suggestedName));
       } catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
         if (code === "ENOENT") return { entry, targetVersion, suggestedName };
@@ -107,9 +115,9 @@ export class Files {
     const name = entryName(newName);
     return publish(async () => {
       const source = await locate(root, path);
-      const info = await lstat(source.absolute, { bigint: true });
+      const info = await entryInfo(source.absolute);
       await protectRoot(root, path, info);
-      const to = join(dirname(path), name);
+      const to = posix.join(posix.dirname(path), name);
       if (path === to)
         throw new AppError("invalid_argument", "New name is the same as the original name");
       await this.temporary.assertRelocatableLocked(source, info);

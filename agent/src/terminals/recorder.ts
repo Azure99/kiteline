@@ -1,62 +1,144 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
+import { finished } from "node:stream/promises";
 import { AppError, OperationError } from "@kiteline/shared/protocol";
 import type {
+  CreateTerminal,
   RecorderCall,
   RecorderConfig,
   RecorderMessage,
   RecorderRequest,
+  TerminalIdentity,
 } from "@kiteline/shared/ipc";
 import { JsonWriter, readLines } from "@kiteline/shared/stdio";
+import { internalNodeEnvironment } from "@kiteline/shared/terminal/node";
+import { spawnJob, type JobChild } from "@kiteline/shared/windows/job";
+
+interface Pending {
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
+  timer: NodeJS.Timeout;
+}
+interface Instance {
+  ready: Promise<void>;
+  done: Promise<void>;
+  finish: () => void;
+  finished: boolean;
+  stopping: boolean;
+  closing?: Promise<void>;
+  child?: ChildProcessWithoutNullStreams;
+  job?: JobChild;
+  writer?: JsonWriter;
+  pending: Map<string, Pending>;
+  stderr: string;
+}
+export interface Creation {
+  result: Promise<TerminalIdentity>;
+  cancel: () => Promise<void>;
+}
 
 export class Recorder {
-  private child?: ChildProcessWithoutNullStreams;
-  private writer?: JsonWriter;
-  private pending = new Map<
-    string,
-    { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
-  >();
+  private instance?: Instance;
+  private closing?: Promise<void>;
   onMessage?: (message: RecorderMessage) => void;
   onExit?: (reason: string) => void;
   constructor(private config: RecorderConfig) {}
   get available() {
-    return !!this.child;
+    return !!this.instance?.writer && !this.instance.stopping;
   }
   get pid() {
-    return this.child?.pid;
+    return this.instance?.job?.pid ?? this.instance?.child?.pid;
   }
-  private ensure() {
-    if (this.available) return;
-    const child = spawn(
-      process.execPath,
-      [
-        resolve(import.meta.dirname, "../../../terminal-recorder/dist/main.js"),
-        "--agent",
-        JSON.stringify(this.config),
-      ],
-      { stdio: "pipe" },
-    );
-    this.child = child;
-    const writer = new JsonWriter(child.stdin);
-    this.writer = writer;
-    let stderr = "";
-    child.stderr.on("data", (data: Buffer) => {
-      if (stderr.length < 8192) stderr += data.toString();
+  private async ensure(): Promise<Instance> {
+    if (this.closing) throw new AppError("cancelled", "Terminal recorder is closing");
+    if (this.instance?.stopping) {
+      await this.instance.done;
+      return this.ensure();
+    }
+    if (!this.instance) {
+      let finish!: () => void;
+      const instance: Instance = {
+        ready: Promise.resolve(),
+        done: new Promise<void>((resolve) => (finish = resolve)),
+        finish,
+        finished: false,
+        stopping: false,
+        pending: new Map(),
+        stderr: "",
+      };
+      this.instance = instance;
+      instance.ready = this.launch(instance).catch((error: unknown) => {
+        instance.stderr = error instanceof Error ? error.message : String(error);
+        this.exited(instance);
+        throw error;
+      });
+    }
+    const instance = this.instance;
+    await instance.ready;
+    if (instance.stopping) throw new AppError("recording_unavailable", "Terminal recorder exited");
+    return instance;
+  }
+  private async launch(instance: Instance) {
+    const args = [
+      resolve(import.meta.dirname, "../../../terminal-recorder/dist/main.js"),
+      "--agent",
+      JSON.stringify(this.config),
+    ];
+    let stdin;
+    let stdout;
+    let stderr;
+    if (process.platform === "win32") {
+      const job = await spawnJob(process.execPath, args, { env: internalNodeEnvironment() });
+      instance.job = job;
+      stdin = job.stdin!;
+      stdout = job.stdout!;
+      stderr = job.stderr!;
+      const drained = Promise.all([
+        finished(stdout, { writable: false, cleanup: true }),
+        finished(stderr, { writable: false, cleanup: true }),
+      ]);
+      void drained.catch(() => {});
+      void (async () => {
+        try {
+          await job.exited;
+        } catch (error) {
+          instance.stderr = String(error);
+        } finally {
+          instance.stopping = true;
+          this.terminate(instance);
+          await job.empty;
+          // A final reply can already be buffered when the leader exits.
+          await drained;
+        }
+      })()
+        .catch((error: unknown) => {
+          instance.stderr = String(error);
+        })
+        .finally(() => this.exited(instance));
+    } else {
+      const child = spawn(process.execPath, args, { stdio: "pipe" });
+      instance.child = child;
+      ({ stdin, stdout, stderr } = child);
+      child.on("error", (error) => {
+        instance.stderr = error.message;
+      });
+      child.on("close", () => this.exited(instance));
+    }
+    instance.writer = new JsonWriter(stdin);
+    stderr.on("data", (data: Buffer) => {
+      if (instance.stderr.length < 8192) instance.stderr += data.toString();
     });
-    child.stdin.on("error", () => {});
-    child.on("error", (error) => {
-      stderr = error.message;
-    });
+    stdin.on("error", () => {});
     readLines(
-      child.stdout,
+      stdout,
       (line) => {
-        if (this.child !== child) return;
+        if (this.instance !== instance) return;
         const message = JSON.parse(line.toString()) as RecorderMessage;
         if (message.type === "reply") {
-          const pending = this.pending.get(message.reply.id);
+          const pending = instance.pending.get(message.reply.id);
           if (pending) {
-            this.pending.delete(message.reply.id);
+            instance.pending.delete(message.reply.id);
             clearTimeout(pending.timer);
             if (message.reply.outcome === "succeeded") pending.resolve(message.reply.result);
             else if (message.reply.outcome === "failed")
@@ -74,65 +156,115 @@ export class Recorder {
         } else this.onMessage?.(message);
       },
       (error) => {
-        stderr = error.message;
-        child.kill("SIGTERM");
+        instance.stderr = error.message;
+        void this.stop(instance, true).catch(console.error);
       },
     );
-    child.on("close", () => {
-      writer.close();
-      if (this.child !== child) return;
-      this.child = undefined;
-      this.writer = undefined;
-      const reason = stderr.trim() || "Terminal recorder exited";
-      for (const pending of this.pending.values()) {
-        clearTimeout(pending.timer);
-        pending.reject(new OperationError("recording_unavailable", reason, "unknown"));
-      }
-      this.pending.clear();
-      this.onExit?.(reason);
-    });
   }
-  request<T>(message: RecorderCall): Promise<T> {
-    this.ensure();
+  private exited(instance: Instance) {
+    if (instance.finished) return;
+    instance.finished = true;
+    instance.stopping = true;
+    instance.writer?.close();
+    const reason = instance.stderr.trim() || "Terminal recorder exited";
+    for (const pending of instance.pending.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new OperationError("recording_unavailable", reason, "unknown"));
+    }
+    instance.pending.clear();
+    if (this.instance === instance) {
+      this.instance = undefined;
+      this.onExit?.(reason);
+    }
+    instance.finish();
+  }
+  async request<T>(message: RecorderCall): Promise<T> {
+    return this.call<T>(await this.ensure(), message);
+  }
+  create(message: CreateTerminal): Creation {
+    const instance = this.ensure();
     const id = randomUUID();
+    return {
+      result: instance.then((owner) =>
+        this.call<TerminalIdentity>(owner, { type: "create", ...message }, id),
+      ),
+      cancel: async () => {
+        const owner = await instance.catch(() => undefined);
+        if (!owner || owner.finished) return;
+        try {
+          await this.call(owner, {
+            type: "cancelCreate",
+            sessionId: message.sessionId,
+            createId: id,
+          });
+        } catch {
+          // Only this recorder's empty process set can replace its failed acknowledgement.
+          await this.stop(owner, true);
+        }
+      },
+    };
+  }
+  private call<T>(instance: Instance, message: RecorderCall, id = randomUUID()): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
-        this.pending.delete(id);
+        instance.pending.delete(id);
         reject(
           new OperationError("timeout", "Recorder did not acknowledge the operation", "unknown"),
         );
       }, this.config.channelPairTimeout);
-      this.pending.set(id, { resolve: (value) => resolve(value as T), reject, timer });
+      instance.pending.set(id, { resolve: (value) => resolve(value as T), reject, timer });
       try {
-        this.send({ ...message, id } as RecorderRequest);
+        this.write(instance, { ...message, id } as RecorderRequest);
       } catch (error) {
         clearTimeout(timer);
-        this.pending.delete(id);
+        instance.pending.delete(id);
         reject(error);
       }
     });
   }
-  send(message: RecorderRequest) {
-    if (!this.available || !this.writer)
+  private write(instance: Instance, message: RecorderRequest) {
+    if (instance.stopping || !instance.writer)
       throw new AppError("recording_unavailable", "Terminal recorder is unavailable");
     const owner = "attachmentId" in message ? message.attachmentId : undefined;
-    if (!this.writer.send(message, owner))
+    if (!instance.writer.send(message, owner))
       throw new AppError("limit_exceeded", "Terminal IPC send backlog limit reached");
   }
+  send(message: RecorderRequest) {
+    if (!this.instance)
+      throw new AppError("recording_unavailable", "Terminal recorder is unavailable");
+    this.write(this.instance, message);
+  }
   detach(sessionId: string, attachmentId: string) {
-    this.writer?.discard(attachmentId);
+    this.instance?.writer?.discard(attachmentId);
     if (this.available) this.send({ type: "detach", sessionId, attachmentId });
   }
-  async close() {
-    const child = this.child;
-    if (!child) return;
-    await new Promise<void>((resolve) => {
-      const deadline = setTimeout(() => child.kill("SIGKILL"), this.config.channelPairTimeout);
-      child.once("close", () => {
+  private terminate(instance: Instance) {
+    try {
+      if (instance.job) instance.job.terminate();
+      else instance.child?.kill("SIGKILL");
+    } catch (error) {
+      instance.stderr = String(error);
+    }
+  }
+  private stop(instance: Instance, force = false) {
+    instance.stopping = true;
+    if (force) this.terminate(instance);
+    return (instance.closing ??= (async () => {
+      await instance.ready.catch(() => {});
+      if (instance.finished) return;
+      const deadline = setTimeout(() => this.terminate(instance), this.config.channelPairTimeout);
+      instance.writer?.close();
+      if (force) this.terminate(instance);
+      else if (instance.job) instance.job.stdin!.end();
+      else instance.child?.kill("SIGTERM");
+      try {
+        await instance.done;
+      } finally {
         clearTimeout(deadline);
-        resolve();
-      });
-      child.kill("SIGTERM");
-    });
+      }
+    })());
+  }
+  close() {
+    return (this.closing ??= this.instance ? this.stop(this.instance) : Promise.resolve());
   }
 }

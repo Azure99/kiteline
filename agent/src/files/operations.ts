@@ -1,18 +1,7 @@
 import { isUtf8 } from "node:buffer";
 import { constants, type BigIntStats } from "node:fs";
-import {
-  chmod,
-  lstat,
-  mkdir,
-  open,
-  opendir,
-  readlink,
-  rename,
-  rmdir,
-  stat,
-  unlink,
-} from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { chmod, mkdir, open, opendir, readlink, rmdir, stat, unlink } from "node:fs/promises";
+import { dirname, join, posix } from "node:path";
 import {
   AppError,
   OperationError,
@@ -27,9 +16,9 @@ import {
 } from "@kiteline/shared/protocol";
 import type { MetadataStore } from "../metadata.js";
 import { publish } from "../mutations.js";
-import { locate, protectRoot, relativePath, sameObject } from "./paths.js";
+import { entryInfo, linkType, locate, protectRoot, relativePath, sameObject } from "./paths.js";
 import { checkTarget, targetAgain } from "./destination.js";
-import { renameNoReplace } from "./rename.js";
+import { renameNoReplace, renameReplace } from "./rename.js";
 import { TemporaryFiles, type TrackedTemporary } from "./temporary.js";
 
 interface ObjectRef {
@@ -313,7 +302,7 @@ export class FileOperations {
             signal,
             () =>
               item.collision === "replace"
-                ? rename(source.location.absolute, current.absolute)
+                ? renameReplace(source.location.absolute, current.absolute)
                 : renameNoReplace(source.location.absolute, current.absolute),
             () => {
               complete();
@@ -343,7 +332,7 @@ export class FileOperations {
         signal,
         result,
         async (child) => {
-          const childTarget = join(item.targetPath, child.location.name);
+          const childTarget = posix.join(item.targetPath, child.location.name);
           await this.copyMove(
             root,
             child,
@@ -391,6 +380,7 @@ export class FileOperations {
           text,
           signal,
           { path: join(root, item.targetPath) },
+          await linkType(source.location.absolute),
         );
       } else {
         const file = await open(
@@ -444,7 +434,7 @@ export class FileOperations {
           signal,
           () =>
             item.collision === "replace"
-              ? rename(temporary!.path, current.absolute)
+              ? renameReplace(temporary!.path, current.absolute)
               : renameNoReplace(temporary!.path, current.absolute),
           () => {
             published = true;
@@ -487,7 +477,7 @@ export class FileOperations {
         const entry = await directory.read();
         if (!entry) break;
         const raw = Buffer.isBuffer(entry.name) ? entry.name : Buffer.from(entry.name);
-        const path = join(source.path, raw.toString("utf8"));
+        const path = posix.join(source.path, raw.toString("utf8"));
         try {
           if (!isUtf8(raw))
             throw new AppError("unsupported", "Name is not valid UTF-8; the item is retained");
@@ -532,7 +522,7 @@ async function change<T>(
 
 async function capture(root: string, path: string): Promise<ObjectRef> {
   const location = await locate(root, path);
-  return { path, location, info: await lstat(location.absolute, { bigint: true }) };
+  return { path, location, info: await entryInfo(location.absolute) };
 }
 async function verify(root: string, original: ObjectRef, content = false) {
   const current = await capture(root, original.path);

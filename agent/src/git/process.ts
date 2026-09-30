@@ -5,6 +5,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { AppError, asError, OperationError, limits, type GitPath } from "@kiteline/shared/protocol";
 import { BytePrefix } from "../buffers.js";
 import { groupRunning } from "../process-group.js";
+import { JobChild, spawnJob } from "@kiteline/shared/windows/job";
+import { windowsExecutable } from "../tool-checks.js";
 
 interface Options {
   input?: Buffer | string;
@@ -30,20 +32,29 @@ export async function git(
     "GIT_ICASE_PATHSPECS",
   ])
     delete env[name];
-  const child = spawn(
-    "git",
-    [
-      "--no-pager",
-      ...(options.write ? [] : ["--no-optional-locks", "-c", "color.ui=false"]),
-      ...args,
-    ],
-    {
-      cwd: root,
-      detached: true,
-      env,
-      stdio: ["pipe", "pipe", "pipe"],
-    },
-  );
+  const command = [
+    "--no-pager",
+    ...(options.write ? [] : ["--no-optional-locks", "-c", "color.ui=false"]),
+    ...args,
+  ];
+  let child;
+  try {
+    const executable = process.platform === "win32" ? await windowsExecutable("git", env) : "git";
+    signal.throwIfAborted();
+    child =
+      process.platform === "win32"
+        ? await spawnJob(executable, command, { cwd: root, env })
+        : spawn(executable, command, {
+            cwd: root,
+            detached: true,
+            env,
+            stdio: ["pipe", "pipe", "pipe"],
+          });
+  } catch (error) {
+    if (!options.write) throw error;
+    const reason = asError(error);
+    throw new OperationError(reason.code, reason.message, "failed");
+  }
   const stdout = new BytePrefix(options.onData ? 0 : (options.maxBytes ?? limits.resultBytes));
   const stderr = new BytePrefix(32 * 1024);
   let error: unknown;
@@ -57,6 +68,14 @@ export async function git(
     groupFailure = true;
   };
   const stop = () => {
+    if (child instanceof JobChild) {
+      try {
+        child.terminate();
+      } catch (reason) {
+        groupError(reason);
+      }
+      return;
+    }
     if (child.pid && !groupEnded && !killTimer) {
       try {
         process.kill(-child.pid, "SIGTERM");
@@ -74,20 +93,30 @@ export async function git(
   };
   const abort = () => stop();
   signal.addEventListener("abort", abort, { once: true });
-  const exited = new Promise<number | null>((resolve) => {
-    child.on("error", (reason) => {
-      error ??= reason;
-      if (!child.pid) resolve(null);
-    });
-    child.once("exit", resolve);
-  });
-  child.stdin.on("error", (reason: NodeJS.ErrnoException) => {
+  const exited =
+    child instanceof JobChild
+      ? child.exited.then(
+          (result) => result.code,
+          (reason) => {
+            groupError(reason);
+            stop();
+            return null;
+          },
+        )
+      : new Promise<number | null>((resolve) => {
+          child.on("error", (reason) => {
+            error ??= reason;
+            if (!child.pid) resolve(null);
+          });
+          child.once("exit", resolve);
+        });
+  child.stdin!.on("error", (reason: NodeJS.ErrnoException) => {
     if (reason.code !== "EPIPE") {
       error = reason;
       stop();
     }
   });
-  child.stdout.on("data", (chunk: Buffer) => {
+  child.stdout!.on("data", (chunk: Buffer) => {
     if (error || clipped) return;
     try {
       if (options.onData) options.onData(chunk);
@@ -107,9 +136,9 @@ export async function git(
       stop();
     }
   });
-  child.stderr.on("data", (chunk: Buffer) => stderr.append(chunk));
+  child.stderr!.on("data", (chunk: Buffer) => stderr.append(chunk));
   const output = Promise.all(
-    [child.stdout, child.stderr].map(
+    [child.stdout!, child.stderr!].map(
       (stream) =>
         new Promise<void>((resolve) => {
           stream.once("end", resolve);
@@ -125,28 +154,35 @@ export async function git(
         }),
     ),
   );
-  child.stdin.end(options.input);
-  const code = await exited;
+  if (options.input === undefined) child.stdin!.end();
+  else child.stdin!.end(options.input);
+  if (signal.aborted) stop();
+  let code = await exited;
   let interval = 50;
-  while (child.pid) {
-    try {
-      if (!(await groupRunning(child.pid))) break;
-    } catch (reason) {
-      groupError(reason);
+  if (child instanceof JobChild) {
+    await child.empty;
+    code = child.exitCode ?? null;
+    if (child.cleanupError !== undefined) groupError(child.cleanupError);
+  } else
+    while (child.pid) {
+      try {
+        if (!(await groupRunning(child.pid))) break;
+      } catch (reason) {
+        groupError(reason);
+      }
+      await delay(interval);
+      interval = Math.min(interval * 2, 500);
     }
-    await delay(interval);
-    interval = Math.min(interval * 2, 500);
-  }
   groupEnded = true;
   clearTimeout(killTimer);
   const drainTimer = setTimeout(() => {
-    if (!child.stdout.readableEnded || !child.stderr.readableEnded) {
+    if (!child.stdout!.readableEnded || !child.stderr!.readableEnded) {
       error ??= new AppError(
         "io_error",
         "Git output pipes did not close after the process group ended",
       );
-      child.stdout.destroy();
-      child.stderr.destroy();
+      child.stdout!.destroy();
+      child.stderr!.destroy();
     }
   }, 1000);
   try {
@@ -154,7 +190,7 @@ export async function git(
   } finally {
     clearTimeout(drainTimer);
     signal.removeEventListener("abort", abort);
-    child.stdin.destroy();
+    child.stdin!.destroy();
   }
   const result = {
     stdout: stdout.text(),

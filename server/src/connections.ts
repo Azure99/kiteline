@@ -6,6 +6,7 @@ import {
   AppError,
   appVersion,
   checkMetadata,
+  checkEnvironment,
   integer,
   limits,
   record,
@@ -27,6 +28,7 @@ export interface AgentConnection {
   socket: WebSocket;
   snapshot?: Metadata;
   editorBytes?: number;
+  environment?: Device["environment"];
   taskRevision?: number;
 }
 interface Pending {
@@ -77,6 +79,7 @@ export class Connections {
             status: "online" as const,
             snapshot: connection.snapshot,
             editorBytes: connection.editorBytes,
+            environment: connection.environment,
           }
         : known;
     });
@@ -128,6 +131,7 @@ export class Connections {
         if (!this.handshakes.has(connection) && this.agents.get(id) !== connection) return;
         if (message.type === "hello") {
           if (connection.snapshot) throw new AppError("unsupported", "Invalid hello");
+          connection.environment = checkEnvironment(message.environment);
           connection.editorBytes = integer(
             message.editorBytes,
             "editorBytes",

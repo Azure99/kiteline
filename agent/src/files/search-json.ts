@@ -1,4 +1,5 @@
 import { isUtf8 } from "node:buffer";
+import { sep } from "node:path";
 import type { Token } from "stream-json/parser.js";
 import { limits, type SearchMatch } from "@kiteline/shared/protocol";
 import { BytePrefix } from "../buffers.js";
@@ -112,7 +113,7 @@ export class SearchJson {
       this.skipped();
       return;
     }
-    const path = item.path.bytes.toString().replace(/^\.\//, "");
+    const path = item.path.bytes.toString().replaceAll(sep, "/").replace(/^\.\//, "");
     const text = item.text.text().replace(/\r?\n$/, "");
     const prefixLength = (end: number) =>
       Math.min(text.length, new TextDecoder().decode(item.text.bytes.subarray(0, end)).length);

@@ -1,4 +1,3 @@
-import { rename } from "node:fs/promises";
 import { join } from "node:path";
 import { AppError, OperationError, type UploadedFile } from "@kiteline/shared/protocol";
 import type { AgentConfig } from "../config.js";
@@ -6,7 +5,7 @@ import type { MetadataStore } from "../metadata.js";
 import { publish } from "../mutations.js";
 import { checkTarget, targetAgain } from "./destination.js";
 import { locate, relativePath } from "./paths.js";
-import { renameNoReplace } from "./rename.js";
+import { renameNoReplace, renameReplace } from "./rename.js";
 import { readFile } from "./read.js";
 import type { Temporary, TemporaryFiles } from "./temporary.js";
 
@@ -95,7 +94,8 @@ export class BinaryFiles {
       await this.temporary.closeFile(item.temporary);
       signal.throwIfAborted();
       try {
-        if (item.collision === "replace") await rename(item.temporary.path, current.absolute);
+        if (item.collision === "replace")
+          await renameReplace(item.temporary.path, current.absolute);
         else await renameNoReplace(item.temporary.path, current.absolute);
         item.published = true;
       } catch (error) {

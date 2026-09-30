@@ -8,6 +8,8 @@ import { AppError, limits, type SearchMatch, type SearchResult } from "@kiteline
 import { SearchJson } from "./search-json.js";
 import { BytePrefix } from "../buffers.js";
 import { bundledRipgrep, ripgrepBinary } from "../tool-checks.js";
+import { JobChild, spawnJob } from "@kiteline/shared/windows/job";
+import { finished } from "node:stream/promises";
 
 export async function searchFiles(
   root: string,
@@ -22,21 +24,57 @@ export async function searchFiles(
       ? ["--no-config", "--files", "--hidden", "-0", "-g", "!.git"]
       : ["--no-config", "--json", "--hidden", "--fixed-strings", "-g", "!.git", "-e", query];
   if (includeIgnored) args.push("--no-ignore");
+  if (process.platform === "win32") args.push("--path-separator", "/");
   args.push("--", ".");
-  const child = spawn(ripgrepBinary, args, { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
+  let child;
+  try {
+    child =
+      process.platform === "win32"
+        ? await spawnJob(ripgrepBinary, args, { cwd: root, stdio: ["ignore", "pipe", "pipe"] })
+        : spawn(ripgrepBinary, args, { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
+  } catch (error) {
+    signal.throwIfAborted();
+    throw new AppError(
+      (error as NodeJS.ErrnoException).code === "ENOENT" ? "unsupported" : "io_error",
+      `ripgrep could not start: ${String(error)}`,
+    );
+  }
   let spawnError: NodeJS.ErrnoException | undefined;
-  child.on("error", (error) => {
-    spawnError = error;
-  });
-  const closed = new Promise<number | null>((resolve) => child.once("close", resolve));
+  if (!(child instanceof JobChild))
+    child.on("error", (error) => {
+      spawnError = error;
+    });
+  const exited =
+    child instanceof JobChild
+      ? child.exited.then(
+          (result) => result.code,
+          (error) => {
+            spawnError = error;
+            stop();
+            return null;
+          },
+        )
+      : new Promise<number | null>((resolve) => child.once("close", resolve));
+  const errorOutput =
+    child instanceof JobChild
+      ? finished(child.stderr!, { writable: false, cleanup: true }).catch((error) => {
+          spawnError ??= error;
+          stop();
+        })
+      : Promise.resolve();
   const stderr = new BytePrefix(limits.searchErrorBytes);
-  child.stderr.on("data", (data: Buffer) => stderr.append(data));
+  child.stderr!.on("data", (data: Buffer) => stderr.append(data));
   const controller = new AbortController();
   const result: SearchResult = { matches: [], truncated: false };
   let resultBytes = 64,
     limited = false;
   const stop = () => {
-    child.kill("SIGTERM");
+    try {
+      if (child instanceof JobChild) child.terminate();
+      else child.kill("SIGTERM");
+    } catch (error) {
+      spawnError ??= error as NodeJS.ErrnoException;
+    }
     controller.abort();
   };
   const abort = () => {
@@ -46,6 +84,18 @@ export async function searchFiles(
     }
     stop();
   };
+  let drainTimer: NodeJS.Timeout | undefined;
+  const groupDone =
+    child instanceof JobChild
+      ? child.empty.then(() => {
+          drainTimer = setTimeout(() => {
+            if (!child.stdout!.readableEnded)
+              child.stdout!.destroy(new Error("Search output did not close after its Job ended"));
+            if (!child.stderr!.readableEnded)
+              child.stderr!.destroy(new Error("Search output did not close after its Job ended"));
+          }, 1000);
+        })
+      : Promise.resolve();
   signal.addEventListener("abort", abort, { once: true });
   const found = (match: SearchMatch) => {
     const bytes = Buffer.byteLength(JSON.stringify(match)) + 1;
@@ -68,7 +118,7 @@ export async function searchFiles(
         result.truncated = true;
       });
       await pipeline(
-        child.stdout,
+        child.stdout!,
         parserStream({
           packStrings: false,
           packNumbers: false,
@@ -91,7 +141,7 @@ export async function searchFiles(
     } else {
       let name = new BytePrefix(limits.searchPathBytes);
       await pipeline(
-        child.stdout,
+        child.stdout!,
         new Writable({
           write(data: Buffer, _encoding, callback) {
             for (let start = 0; start < data.length; ) {
@@ -117,7 +167,12 @@ export async function searchFiles(
     failure = error;
     stop();
   }
-  const code = await closed;
+  const code = await exited;
+  await groupDone;
+  if (child instanceof JobChild)
+    spawnError ??= child.cleanupError as NodeJS.ErrnoException | undefined;
+  await errorOutput;
+  clearTimeout(drainTimer);
   signal.removeEventListener("abort", abort);
   if (signal.aborted && !limited) throw signal.reason;
   if (spawnError)

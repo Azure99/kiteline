@@ -1,19 +1,19 @@
 # 安装与运行
 
-首版面向 Linux amd64/arm64。这里集中给出实际命令。源码开发见[仓库入口](../README.md)。
+设备端面向 Linux amd64/arm64及Windows amd64，server仍为Linux。运行前提见[平台要求](#平台要求)。源码开发见[仓库入口](../README.md)。
 
 ## 生成交付物
 
-在已安装依赖的源码目录执行；构建机需要 Docker BuildKit（Dockerfile 1.6+）及binutils的readelf，可通过 binfmt/QEMU 构建另一架构。用户运行发布包不需要 npm 或编译器。基础镜像、Node、amd64 rg官方归档及用于引导系统CA的Ubuntu证书包身份集中在[release.json](release.json)，构建不使用反代镜像。rg与适用许可证随包归档，不参与Node重编。
+在已安装依赖的源码目录执行；构建机需要 Docker BuildKit（Dockerfile 1.6+）、binutils的readelf，以及libarchive-tools的bsdtar校验server所携带的跨平台agent归档，可通过 binfmt/QEMU 构建另一架构。用户运行发布包不需要 npm 或编译器。基础镜像、Node、amd64 rg官方归档及用于引导系统CA的Ubuntu证书包身份集中在[release.json](release.json)，构建不使用反代镜像。rg与适用许可证随包归档，不参与Node重编。
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm package agent amd64
-pnpm package server amd64 --agent-arch=amd64
+pnpm package server amd64 --agent-target=linux-amd64
 pnpm images amd64
 ```
 
-上述单平台构建命令只打amd64，并在server中提供配套amd64接入包。需要完整双架构发布时，先构建两种agent，再省略server的`--agent-arch`；ARM64 server另执行`pnpm package server arm64`、`pnpm images arm64`，串行控制内存。包及对应`.sha256`在`dist/releases/`；产品版本来自[version.json](../shared/src/version.json)，镜像名为`kiteline-server:<版本>-<amd64|arm64>`。本仓库不自动发布镜像，跨机器可用`docker save/load`搬运。清单记录commit、dirty、实际输入sourceDigest、Node/native与校验；组装server发现来源不一致时要求重建agent。
+上述单平台构建命令只打Linux amd64，并在server中提供该目标接入包。Windows先按[固定组件构建](windows-components.md)生成并验证组件，再执行`pnpm package agent windows-amd64 --windows-components=/var/tmp/kiteline-win-components`；组包需要zip，产物不含符号链接，不要求目标开启Developer Mode。完整交付先构建Linux两种agent及Windows agent，再省略server的`--agent-target`；也可明确逗号分隔的所携带目标。ARM64 server另执行`pnpm package server arm64`、`pnpm images arm64`，串行控制内存。包及对应`.sha256`在`dist/releases/`；产品版本来自[version.json](../shared/src/version.json)，镜像名为`kiteline-server:<版本>-<amd64|arm64>`。不构建Windows容器，也不自动发布镜像；跨机器可用`docker save/load`搬运。清单记录commit、dirty、平台、实际输入sourceDigest、组件及校验；组装server发现来源不一致时要求重建agent。
 
 `package agent amd64`自动构建/复用静态组件；也可单独用 `node scripts/build-agent-static.mjs` 预构建到`dist/agent-static-amd64/`。来源与SHA在[agent-static.json](agent-static.json)，工具链版本在[agent-static-packages.txt](agent-static-packages.txt)；固定官方Node源码，无Node补丁。首次构建需数GiB内存和较长编译时间，Node固定3个编译任务，8GiB构建机避免同时运行其他重负载。Docker分别缓存Node/native阶段，业务JS变更不触发Node重编；工具链清单变更会使两者重编，验证时不能用旧缓存命中替代冷构建。源下载缓存在`/var/tmp/kiteline-release-cache`并核验SHA。输出携带许可证、实际工具包清单、输入身份和文件校验，ELF检查拒绝动态加载器或库依赖。组件升级需同步来源/工具链和代表环境验收，不能只替换二进制。
 
@@ -48,11 +48,11 @@ docker compose -f deploy/compose.yaml up -d server
 
 ## 原生 Agent
 
-在网页设备列表点击“绑定设备”，生成并复制接入命令，在目标 Linux 机器以日常项目用户执行。命令从当前 server 下载配套包并校验，安装时需要 sudo，绑定与运行仍属于该用户。默认前台运行，Ctrl-C 停止；以后直接 `kiteline-agent run`，无需重新绑定。选择“后台常驻”才安装并启动 systemd 服务，需要非 root 用户与运行中的 systemd。
+在网页设备列表点击“绑定设备”，明确选择Linux或Windows并复制接入命令，在目标机器以日常项目用户执行。Windows先准备PowerShell 7及原生Git，rg和私有终端runtime随包；命令在PowerShell 7中执行，不在cmd或WSL中运行。程序安装需要系统提升，绑定与运行仍属于项目用户。默认前台run，Ctrl-C停止；以后执行公开launcher的`run`，无需重新绑定。项目没有系统服务管理或后台模式开关。
 
-网页自动生成当前访问地址的 `curl .../connect.sh | sh -s -- 'CODE'` 命令，后台方式只追加 `--service`。实际命令含下载协议限制：HTTPS不降级，HTTP可用HTTP/HTTPS；绑定码保留为 shell 参数，不进入下载 URL。目标设备必须能够访问该地址，不能从手机的 localhost 地址给另一台机器绑定。
+网页生成当前访问地址的接入命令；Linux用connect.sh，Windows用connect.ps1，完整下载脚本后执行。HTTPS不降级，HTTP可用HTTP/HTTPS；绑定码保留为Shell参数，不进入下载URL。目标设备必须能访问该地址，不能从手机的localhost地址给另一台机器绑定。不改全局PowerShell执行策略，企业策略限制时按实际错误处理。失败诊断与Linux管道行为见[设备安装说明](#原生-agent)。
 
-amd64目标机需要 curl、Git 2.23.0+、SSH、flock（util-linux）、有效的 UTF-8 locale 和项目使用的 Shell/CLI，rg已随包提供。缺项时命令停止并给出安装建议，不自动修改系统依赖。ARM工具要求见[运行基线](#平台要求)。下面的基础依赖命令以 root 执行，普通用户加 sudo：
+Linux amd64目标机需要 curl、Git 2.23.0+、SSH、flock（util-linux）、有效的 UTF-8 locale 和项目使用的 Shell/CLI，rg已随包提供。缺项时命令停止并给出安装建议，不自动修改系统依赖。Linux ARM工具要求见[运行基线](#平台要求)。下面的Linux基础依赖命令以 root 执行，普通用户加 sudo：
 
 ```sh
 # Ubuntu 24.04 / Debian 12
@@ -64,7 +64,7 @@ apk add curl ca-certificates tar gzip coreutils musl-utils git openssh-client nc
 yum install -y curl ca-certificates tar gzip coreutils openssh-clients ncurses glibc-common util-linux
 ```
 
-用 `locale -a` 确认已安装的 UTF-8 locale，`locale charmap` 应输出 UTF-8。CentOS 7 可使用已安装的 `en_US.UTF-8`；若该 locale 已安装，可在运行接入命令的 Shell 中执行 `export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8`。`LC_ALL` 优先于 `LC_CTYPE` 和 `LANG`。后台模式还需在首次接入前将相同设置写入 `/etc/kiteline-agent.env`；服务默认的 `LANG=C.UTF-8` 不能代替该系统实际安装的 locale。保留该文件原有内容；前台只读取其中的目录项，locale 沿用启动 Shell。
+Linux用`locale -a`确认已安装的UTF-8 locale，`locale charmap`应输出UTF-8。CentOS 7 可使用已安装的`en_US.UTF-8`；若已安装，可在启动Shell中执行`export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8`。LC_ALL优先于LC_CTYPE和LANG。后台须在用户所选管理器中配置同样环境，不能假定C.UTF-8在目标系统存在；应用目录配置文件不会自动加载locale。
 
 Node、recorder、固定 tmux、terminfo 和文件 helper 已随包提供，无需 npm/编译器。安装失败后先处理具体原因，再执行命令；绑定码已过期则在网页重新生成。程序已安装但绑定失败时不重复替换安装；已有身份或不同版本会停止，不自动重绑/升级。若已登记但未在线，先核对本地凭据和 `kiteline-agent run` 输出；凭据丢失在网页撤销残留身份并重新生成绑定码，不能把未知结果当成普通过期重试。
 
@@ -81,6 +81,31 @@ sudo "./$kiteline_package/bin/kiteline-agent" install --user YOUR_USER
 kiteline-agent run
 ```
 
+Windows手工安装在PowerShell 7中校验ZIP后解压；`$version`设为下载的实际版本：
+
+```powershell
+$package = "kiteline-agent-$version-windows-amd64"
+$expected = (Get-Content "$package.zip.sha256" -Raw).Trim().Split(' ')[0]
+if ((Get-FileHash "$package.zip" -Algorithm SHA256).Hash -ine $expected) { throw 'Checksum mismatch' }
+Expand-Archive -LiteralPath "$package.zip" -DestinationPath .
+& ".\$package\bin\kiteline-agent.ps1" check
+# 在提升的PowerShell中安装，明确原项目账户，不使用另一个管理员的HOME：
+& ".\$package\bin\kiteline-agent.ps1" install --user 'MACHINE\PROJECT_USER'
+# 回到项目用户PowerShell，执行网页绑定命令后：
+& "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" run
+```
+
+程序安装到Program Files，公开PS入口与安装记录在ProgramData\kiteline-agent。目标用户须有已初始化profile；无法确认其LocalAppData时安装明确要求`--data-dir`，可另给短`--run-dir`。两者须绝对路径，状态由项目用户bind/run创建。若执行策略禁止脚本，可在单次`pwsh -NoProfile -ExecutionPolicy Bypass -File <脚本> ...`调用使用进程级策略，组织策略仍须由管理员协调；不修改全局策略。手工解包使用已校验的完整包，不直接运行树内Node作为正式入口。
+
+Windows更新和卸载在提升的独立PowerShell中执行，先由用户正常停止所有使用者和外部重启策略：
+
+```powershell
+& "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" upgrade --archive "C:\Downloads\kiteline-agent-$version-windows-amd64.zip"
+& "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" uninstall
+```
+
+升级的ZIP与`.sha256`放在一起；确认后不自动启动。默认卸载保留状态；仅明确指定`--purge-state`删除应用JSON与tasks，不删除状态根或workspace。稳定锁文件保留以维持对象身份。同身份同版本安装重跑只核完整性，不替树或重绑。
+
 设备上线后，先在网页为该设备添加 workspace，选择项目目录；再获取 `WORKSPACE_ID` 创建终端：
 
 ```sh
@@ -89,19 +114,20 @@ kiteline-agent terminal new --workspace WORKSPACE_ID
 kiteline-agent terminal attach SESSION_ID
 ```
 
-CLI 与运行进程共用 `/etc/kiteline-agent.env` 中的目录。`KITELINE_AGENT_HOME` 和 `KITELINE_AGENT_RUN_DIR` 使用单行双引号绝对路径，不使用转义或尾部注释；新安装默认状态在项目用户的 `~/.local/share/kiteline-agent`，socket 在该目录下的 `run/`。其他服务环境如 PATH、SSH_AUTH_SOCK、LANG 也在该文件配置，重启后生效。`kiteline-agent doctor` 检查实际进程环境；仓库认证是否成功仍以实际 Git 同步为准。
+Linux CLI与运行进程共用`/etc/kiteline-agent.env`的目录项。KITELINE_AGENT_HOME和KITELINE_AGENT_RUN_DIR使用单行双引号绝对路径，不使用转义或尾部注释；默认状态在项目用户的`~/.local/share/kiteline-agent`，socket在其run目录。该文件由应用仅解析目录项，不自动加载PATH、SSH_AUTH_SOCK、LANG或代理。Windows默认状态在目标用户LocalAppData；自定义目录须让后台run与本机CLI一致，Web复制的接续命令携带实际目录。doctor检查实际agent环境，认证以真实Git调用为准。
 
-前台转常驻：先 Ctrl-C 停止，再执行 `sudo kiteline-agent service install --user YOUR_USER` 和 `sudo kiteline-agent service start`。常驻转前台：先 `sudo kiteline-agent service stop`、`sudo kiteline-agent service disable`，再 `kiteline-agent run`。两者保留身份、workspace、定时任务定义及有限结果，但停止会结束终端及在途定时运行。默认共用状态目录下的 `run/`。
+常驻、自启动、运行身份、凭据与维护停启由用户配置外部管理器。Linux可人工编辑[systemd示例](kiteline-agent.service)，Windows使用自行安装的WinSW 2.12及[XML示例](kiteline-agent.xml)，将wrapper、XML和日志放程序树外。用户自行安装管理器并在Windows服务属性中设置同一项目账户及凭据，不能使用默认LocalSystem；修改示例的实际PowerShell/Git、profile、data/run目录，保留console、parent-first及足够的停止宽限。项目不生成、安装或删除管理器配置，不保存密码。先以前台run/check/doctor验证项目用户环境，再自行接线；停止须给真实agent足够收尾时间。正确后台部署后用户注销任务继续，重登可接回；直接在交互会话运行不提供这项保证。切换部署方式先正常停止，身份/workspace/任务数据保留，但旧运行任务不迁移。
+
+WinSW 2.12的`stop`只提交停止请求；维护前使用wrapper的`stopwait`，或自行等待服务实际停止，再确认没有仍使用安装的本机attach或其他实例。停止超时不能当作正常收尾；升级仍会独立检查占用。
 
 ```sh
-kiteline-agent service status
-sudo kiteline-agent service logs --follow
-sudo kiteline-agent service stop
-sudo kiteline-agent service upgrade --archive "/path/to/kiteline-agent-${KITELINE_VERSION}-linux-amd64.tar.gz"
-sudo kiteline-agent service uninstall
+kiteline-agent doctor
+# 先由用户停止agent及外部管理器自动重启，再执行：
+sudo kiteline-agent upgrade --archive "/path/to/kiteline-agent-${KITELINE_VERSION}-linux-amd64.tar.gz"
+sudo kiteline-agent uninstall
 ```
 
-更新server后，刷新网页；设备版本不匹配时，在设备详情动作中选“升级agent”，复制命令到该设备的独立终端或SSH执行。命令从当前网页入口下载配套包和`.sha256`，调用上述upgrade，无需重新绑定；换入口下载不会更改agent已保存的连接地址。前台先自行停止，完成后再运行`kiteline-agent run`；systemd沿原方式重启。卸载默认保留状态与环境文件，`--purge-state`移除agent自己的状态JSON及`tasks/`内的任务定义和有限结果，保留状态根目录、项目与命令另写的报告文件。
+更新server后刷新网页；设备版本不匹配时，在设备详情选“升级agent”，明确目标平台后复制到独立终端执行。命令从当前入口下载配套包及校验，无需重绑，不改变保存的连接地址。所有安装使用者须先停止，包括其他dataDir实例和本机attach；占用时明确拒绝，不由项目停服务。成功后仍停止，由用户run或外部管理器启动。失败只尝试回退程序树，不恢复服务状态。卸载默认保留应用状态，显式purge仅移除本应用状态JSON和tasks，保留状态根、项目、命令报告及用户管理器配置。
 
 ### 定时任务
 
@@ -119,7 +145,7 @@ kiteline-agent schedule pause TASK_ID --json
 kiteline-agent schedule stop RUN_ID --json
 ```
 
-定义和有限结果保存在设备状态目录的`tasks/`；暂停、错过执行、异常重启核查及JSON/退出码含义统一见`kiteline-agent schedule --help`。升级确认前会列出在途运行；升级不重新绑定，保留任务数据目录，结果继续遵守有限留存规则。
+定义和有限结果保存在设备状态目录的`tasks/`；暂停、错过执行、异常重启核查及JSON/退出码含义见`kiteline-agent schedule --help`。升级前用户自行查询并停止运行，升级占用时拒绝；保留绑定及任务数据，结果继续遵守有限留存规则。
 
 ### Agent 出站代理
 
@@ -132,15 +158,13 @@ export NO_PROXY=localhost,127.0.0.1,.internal.example
 kiteline-agent run
 ```
 
-HTTP/WS使用HTTP代理变量，HTTPS/WSS使用HTTPS代理变量；上例HTTP选小写`http_proxy`，也供安装下载的curl使用。systemd 将相同的 `KEY=value` 写入 `/etc/kiteline-agent.env`，不带 `export`，在维护窗口停止/启动服务后生效；只在执行 `systemctl` 的 Shell 中 export 不会改变服务环境。停止会结束终端及在途定时运行。前台只共用该文件的安装目录项，不自动加载其中的代理变量。
+HTTP/WS使用HTTP代理变量，HTTPS/WSS使用HTTPS代理变量；上例HTTP选小写http_proxy，也供curl下载使用。后台通过用户所选管理器注入这些环境，在用户协调的维护窗口重启生效；只在执行管理命令的Shell中export不会改变后台环境。应用目录配置文件不自动加载代理，停止会结束终端及在途定时运行。
 
 设备本地 HTTP 服务始终直连。新 Shell/AI CLI 继承 agent 的环境，但程序是否使用代理由自身决定；现有任务不会自动更新。同名非空小写变量优先；未配置协议代理时回退 ALL_PROXY，HTTPS 不回退 HTTP_PROXY。NO_PROXY 指定直连目标，仅支持 HTTP(S) 代理。
 
 ### 运行与维护补充
 
 Linux 的 Unix socket 完整路径限 103 字节。显式使用 `/run` 等易失运行目录时，启动前及系统重启后需准备属于运行用户的可写目录。
-
-维护需明确确认，停止会结束终端及在途定时运行，保留配置、绑定和 workspace。新服务未就绪时恢复旧安装并报告结果；前台升级后保持停止。
 
 短接入命令的外层 curl 失败时，POSIX 管道退出状态未必非零；以实际绑定和设备在线状态确认完成。
 
@@ -170,6 +194,7 @@ linked worktree 同时挂载工作目录、gitDir 和 commonDir；`.git` 指向�
 | ---------------------------- | -------------------------------------------------------------------- |
 | Linux agent amd64            | Ubuntu 24.04、Debian 12、Alpine 3.23、CentOS 7.9；静态 musl，rg 随包 |
 | Linux agent arm64            | Ubuntu 24.04；另需 rg 14+                                            |
+| Windows agent amd64          | Windows 11 x64、本地 NTFS、原生 Git 和 PowerShell 7                  |
 | server 包及镜像 amd64、arm64 | Ubuntu 24.04                                                         |
 
 设备还需 Git 2.23+、SSH、有效 UTF-8 locale 和项目使用的 Shell/CLI。Linux 静态包不替代这些外部程序的系统依赖，也不加载 glibc NSS 插件或动态 Node addon。Linux 文件发布要求内核与文件系统支持 `renameat2(RENAME_NOREPLACE)`；CentOS 7.9 amd64 基线为含此回移植的 `3.10.0-1160.el7.x86_64`。

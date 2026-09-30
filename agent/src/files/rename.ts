@@ -1,12 +1,16 @@
 import { spawn } from "node:child_process";
-import { resolve } from "node:path";
+import { resolve, toNamespacedPath } from "node:path";
+import { rename } from "node:fs/promises";
 import { getSystemErrorName } from "node:util";
 import { OperationError } from "@kiteline/shared/protocol";
+import { windowsNative } from "@kiteline/shared/windows/native";
 
 const helper = resolve(import.meta.dirname, "../../../dist/native/bin/rename-noreplace");
 
 // The caller holds the publication lock until close; a started rename cannot be cancelled.
 export function renameNoReplace(source: string, target: string): Promise<void> {
+  if (process.platform === "win32")
+    return windowsNative().renameFile(toNamespacedPath(source), toNamespacedPath(target), false);
   return new Promise((resolve, reject) => {
     const child = spawn(helper, [source, target], { stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
@@ -30,4 +34,10 @@ export function renameNoReplace(source: string, target: string): Promise<void> {
       );
     });
   });
+}
+
+export function renameReplace(source: string, target: string): Promise<void> {
+  return process.platform === "win32"
+    ? windowsNative().renameFile(toNamespacedPath(source), toNamespacedPath(target), true)
+    : rename(source, target);
 }

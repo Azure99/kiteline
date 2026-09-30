@@ -126,6 +126,9 @@ export function Workbench({
   } = useDevices(!!session, route.deviceId, route.workspaceId, setSession);
   const recents = useRecentWorkspaces(route, devices, devicesLoaded, !!session);
   const device = devices.find((d) => d.id === route.deviceId);
+  const directoryTarget = devices.find((item) => item.id === directoryDevice?.device.id);
+  const directoryEnvironment =
+    directoryTarget?.status === "online" ? directoryTarget.environment : undefined;
   const workspace = device?.snapshot?.workspaces.find((w) => w.id === route.workspaceId);
   const terminalPage =
     !!session && route.valid && !!device && !!workspace && route.tool === "terminal";
@@ -586,7 +589,9 @@ export function Workbench({
       )}
       {directoryDevice && (
         <DirectoryDialog
+          key={`${directoryTarget?.id}:${directoryTarget?.lastSeenAt}:${JSON.stringify(directoryEnvironment)}`}
           deviceId={directoryDevice.device.id}
+          environment={directoryEnvironment}
           onClose={() => setDirectoryDevice(undefined)}
           onAdded={(w) => {
             const id = directoryDevice.device.id;

@@ -1,0 +1,20 @@
+<!-- Copy beside your independently installed WinSW 2.12 wrapper, outside the agent tree.
+     Configure the project account and credentials in Windows service properties.
+     Do not run with WinSW's default LocalSystem identity. -->
+<service>
+  <id>kiteline-agent</id>
+  <name>Kiteline Agent</name>
+  <description>User-managed Kiteline agent process</description>
+  <executable>C:\Program Files\PowerShell\7\pwsh.exe</executable>
+  <arguments>-NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\kiteline-agent\kiteline-agent.ps1" run</arguments>
+  <workingdirectory>C:\Users\PROJECT_USER</workingdirectory>
+  <env name="USERPROFILE" value="C:\Users\PROJECT_USER" />
+  <env name="HOME" value="C:\Users\PROJECT_USER" />
+  <env name="PATH" value="C:\Program Files\PowerShell\7;C:\Program Files\Git\cmd;C:\Windows\System32;C:\Windows" />
+  <env name="KITELINE_AGENT_HOME" value="C:\Users\PROJECT_USER\AppData\Local\kiteline-agent" />
+  <env name="KITELINE_AGENT_RUN_DIR" value="C:\Users\PROJECT_USER\AppData\Local\kiteline-agent\run" />
+  <hidewindow>false</hidewindow>
+  <stopparentprocessfirst>true</stopparentprocessfirst>
+  <stoptimeout>45sec</stoptimeout>
+  <log mode="roll" />
+</service>

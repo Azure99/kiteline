@@ -14,7 +14,12 @@
     "./http-stream": "./dist/protocol/http-stream.js",
     "./text": "./dist/protocol/text.js",
     "./terminal": "./dist/terminal/index.js",
-    "./terminal/node": "./dist/terminal/native.js"
+    "./terminal/node": "./dist/terminal/native.js",
+    "./terminal/windows": "./dist/terminal/windows.js",
+    "./windows/native": "./dist/windows/native.js",
+    "./windows/components": "./dist/windows/components.js",
+    "./windows/job": "./dist/windows/job.js",
+    "./windows/pipe": "./dist/windows/pipe.js"
   },
   "dependencies": {
     "ws": "8.18.3"

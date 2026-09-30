@@ -1,10 +1,22 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { finished } from "node:stream/promises";
+import type { Writable } from "node:stream";
 import { AppError, limits } from "@kiteline/shared/protocol";
 import { readLines } from "@kiteline/shared/stdio";
-import { tmuxBinary, tmuxEnvironment } from "@kiteline/shared/terminal/node";
-import type { CreateTerminal, TerminalSource, TerminalIdentity } from "@kiteline/shared/ipc";
+import {
+  exitCodeFormat,
+  msysDirectory,
+  msysPath,
+  shellWords,
+  terminalPreset,
+  tmuxBinary,
+  tmuxEnvironment,
+} from "@kiteline/shared/terminal/node";
+import { paneCommand } from "@kiteline/shared/terminal/windows";
+import { spawnJob, type JobChild } from "@kiteline/shared/windows/job";
+import type { TerminalSource, TerminalIdentity } from "@kiteline/shared/ipc";
 
 interface Pending {
   resolve: (result: string[]) => void;
@@ -30,30 +42,13 @@ function decodeOutput(value: Buffer) {
   }
   return result.subarray(0, length);
 }
-function preset(options: CreateTerminal) {
-  return [
-    "set -g status off",
-    "set -g window-size latest",
-    "set -g default-terminal tmux-256color",
-    `set -g history-limit ${options.historyLines}`,
-    `set -g default-size ${options.cols}x${options.rows}`,
-    "set -g remain-on-exit on",
-    "set -g mouse on",
-    "set -g allow-passthrough off",
-    "set -g set-clipboard external",
-    "unbind-key -a -T prefix",
-    "bind-key -T prefix C-b send-prefix",
-    "bind-key -T prefix d detach-client",
-    "bind-key -T prefix [ copy-mode",
-    "bind-key -T prefix ] paste-buffer -p",
-    "bind-key -T root MouseDown3Pane send-keys -M",
-    "unbind-key -T root M-MouseDown3Pane",
-    "",
-  ].join("\n");
-}
-
 export class Control {
-  private child!: ChildProcessWithoutNullStreams;
+  private child?: ChildProcessWithoutNullStreams;
+  private job?: JobChild;
+  private stdin?: Writable;
+  private starting?: Promise<TerminalIdentity>;
+  private stopped?: Promise<void>;
+  private cleanupError?: unknown;
   private pending: Pending[] = [];
   private block?: { guard: string; lines: string[]; bytes: number; pending: Pending };
   private disposed = false;
@@ -67,13 +62,21 @@ export class Control {
     private timeout: number,
   ) {}
 
-  async start(): Promise<TerminalIdentity> {
+  start() {
+    return (this.starting ??= this.initialize().catch((error: unknown) => {
+      this.dispose(error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    }));
+  }
+  private async initialize(): Promise<TerminalIdentity> {
     const o = this.options;
     const creating = o.type === "create";
     const config = join(dirname(this.options.socket), "tmux.conf");
-    if (creating) await writeFile(config, preset(o), { mode: 0o600 });
+    if (creating && process.platform !== "win32")
+      await writeFile(config, terminalPreset(o), { mode: 0o600 });
     if (this.disposed) throw new AppError("cancelled", "Terminal creation interrupted");
     const started = this.expect();
+    void started.catch(() => {});
     const command = creating
       ? [
           "new-session",
@@ -87,31 +90,85 @@ export class Control {
           "-y",
           String(o.rows),
           // tmux removes one escape before a trailing argv semicolon.
-          ...(o.command === undefined ? [o.shell, "-l"] : [o.shell, "-lc", o.command]).map(
-            (value) => value.replace(/;$/, "\\;"),
-          ),
+          ...(process.platform === "win32"
+            ? paneCommand(o.socket)
+            : o.command === undefined
+              ? [o.shell, "-l"]
+              : [o.shell, "-lc", o.command]
+          ).map((value) => value.replace(/;$/, "\\;")),
         ]
       : ["attach-session", "-E", "-t", o.tmuxSession];
     if (!creating) this.identity = o;
-    this.child = spawn(tmuxBinary, ["-S", o.socket, "-f", config, "-u", "-C", ...command], {
-      // -c expands tmux formats; the new private server inherits this literal cwd.
-      cwd: creating ? o.workspacePath : undefined,
-      env: tmuxEnvironment(),
-      stdio: "pipe",
-    });
-    this.child.stdin.on("error", (error) => this.fail(error));
-    this.child.stderr.on("data", (data: Buffer) => {
+    let stdout;
+    let stderr;
+    if (process.platform === "win32") {
+      const args = ["-N", "-S", msysPath(o.socket), "-f", msysPath(config), "-u", "-C", ...command];
+      this.job = await spawnJob(
+        join(msysDirectory, "usr/bin/script.exe"),
+        [
+          "-qef",
+          "-E",
+          "never",
+          "-c",
+          "/usr/bin/stty raw -echo && exec " + shellWords([msysPath(tmuxBinary), ...args]),
+          "/dev/null",
+        ],
+        { cwd: creating ? o.workspacePath : undefined, env: tmuxEnvironment() },
+      );
+      const job = this.job;
+      this.stdin = job.stdin!;
+      stdout = job.stdout!;
+      stderr = job.stderr!;
+      const drained = Promise.all([
+        finished(stdout, { writable: false, cleanup: true }),
+        finished(stderr, { writable: false, cleanup: true }),
+      ]);
+      void drained.catch(() => {});
+      this.stopped = (async () => {
+        try {
+          await job.exited;
+        } catch (error) {
+          this.fail(error instanceof Error ? error : new Error(String(error)));
+        } finally {
+          this.terminate();
+          await job.empty;
+          await drained;
+        }
+      })().then(
+        () => this.fail(new Error(this.stderr.trim() || "tmux control connection closed")),
+        (error: unknown) => this.fail(error instanceof Error ? error : new Error(String(error))),
+      );
+    } else {
+      this.child = spawn(tmuxBinary, ["-S", o.socket, "-f", config, "-u", "-C", ...command], {
+        // -c expands tmux formats; the new private server inherits this literal cwd.
+        cwd: creating ? o.workspacePath : undefined,
+        env: tmuxEnvironment(),
+        stdio: "pipe",
+      });
+      this.stdin = this.child.stdin;
+      stdout = this.child.stdout;
+      stderr = this.child.stderr;
+      this.child.on("error", (error) => this.fail(error));
+      this.stopped = new Promise<void>((resolve) => {
+        this.child!.on("close", () => {
+          this.fail(new Error(this.stderr.trim() || "tmux control connection closed"));
+          resolve();
+        });
+      });
+    }
+    this.stdin.on("error", (error) => this.fail(error));
+    stderr.on("data", (data: Buffer) => {
       if (this.stderr.length < 8192) this.stderr += data.toString();
     });
-    this.child.on("error", (error) => this.fail(error));
-    this.child.on("close", () =>
-      this.fail(new Error(this.stderr.trim() || "tmux control connection closed")),
-    );
     readLines(
-      this.child.stdout,
+      stdout,
       (line) => this.line(line),
       (error) => this.fail(error),
     );
+    if (this.disposed) {
+      this.terminate();
+      throw new AppError("cancelled", "Terminal creation interrupted");
+    }
     const output = await started;
     const identity = creating
       ? output
@@ -126,9 +183,9 @@ export class Control {
       paneId: match[1]!,
       windowId: match[2]!,
     };
-    await this.command("refresh-client -B 'life:%*:#{pane_dead} #{pane_dead_status}'");
+    await this.command(`refresh-client -B 'life:%*:#{pane_dead} ${exitCodeFormat}'`);
     const life = await this.command(
-      `display-message -p -t ${this.identity.paneId} '#{pane_dead} #{pane_dead_status}'`,
+      `display-message -p -t ${this.identity.paneId} '#{pane_dead} ${exitCodeFormat}'`,
     );
     this.life(life[0] ?? "");
     this.initializing = false;
@@ -177,7 +234,7 @@ export class Control {
     if (this.disposed)
       return Promise.reject(new AppError("recording_unavailable", "Recording interrupted"));
     const result = this.expect();
-    this.child.stdin.write(value + "\n");
+    this.stdin!.write(value + "\n");
     return result;
   }
   async resize(cols: number, rows: number) {
@@ -188,7 +245,8 @@ export class Control {
   private life(value: string) {
     const match = /^1(?: (\d*))?$/.exec(value.trimEnd());
     if (match) {
-      const code = match[1] ? Number(match[1]) : null;
+      const value = match[1] ? Number(match[1]) : null;
+      const code = value !== null && value <= 0xffffffff ? value : null;
       if (this.initializing) this.initialDeath = code;
       else this.events.dead(code);
     }
@@ -263,6 +321,20 @@ export class Control {
       clearTimeout(pending.timer);
       pending.reject(error);
     }
-    this.child?.kill("SIGTERM");
+    this.terminate();
+  }
+  private terminate() {
+    try {
+      this.job?.terminate();
+      this.child?.kill("SIGTERM");
+    } catch (error) {
+      this.cleanupError = error;
+    }
+  }
+  async close() {
+    this.dispose();
+    await this.starting?.catch(() => {});
+    await this.stopped;
+    if (this.cleanupError) throw this.cleanupError;
   }
 }

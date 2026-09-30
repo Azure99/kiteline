@@ -2,21 +2,100 @@ import { createHash } from "node:crypto";
 import { isUtf8 } from "node:buffer";
 import type { BigIntStats } from "node:fs";
 import { lstat, readlink, realpath, stat } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, normalize } from "node:path";
-import { AppError, string, type Entry } from "@kiteline/shared/protocol";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  parse,
+  posix,
+  sep,
+  toNamespacedPath,
+} from "node:path";
+import { AppError, absolutePath, string, windowsName, type Entry } from "@kiteline/shared/protocol";
+import { windowsNative } from "@kiteline/shared/windows/native";
 
 export function relativePath(value: unknown): string {
   const path = string(value, "path");
-  if (isAbsolute(path) || path.split("/").includes(".."))
+  if (posix.isAbsolute(path) || path.split("/").includes(".."))
     throw new AppError("invalid_argument", "A relative path within the workspace is required");
-  return normalize(path).replace(/\/$/, "") || ".";
+  if (process.platform === "win32")
+    for (const part of path.split("/")) if (part && part !== ".") windowsName(part);
+  return posix.normalize(path).replace(/\/$/, "") || ".";
 }
 
 export function entryName(value: unknown): string {
   const name = string(value, "name");
   if (name.includes("/") || name === "." || name === "..")
     throw new AppError("invalid_argument", "Enter a single file or directory name");
+  if (process.platform === "win32") windowsName(name);
   return name;
+}
+
+export function devicePath(value: unknown) {
+  return absolutePath(value, process.platform === "win32" ? "windows" : "linux");
+}
+
+export async function linkType(path: string | Buffer) {
+  if (process.platform !== "win32") return;
+  const { attributes, tag } = await windowsNative().fileAttributes(toNamespacedPath(String(path)));
+  if (!(attributes & 0x400)) return;
+  if (tag === 0xa0000003) return "junction";
+  if (tag === 0xa000000c) return attributes & 0x10 ? "dir" : "file";
+  throw new AppError("unsupported", `Unsupported Windows reparse point: ${String(path)}`);
+}
+
+export async function entryInfo(path: string | Buffer) {
+  await linkType(path);
+  return lstat(path, { bigint: true });
+}
+
+// Preserve the directory and link objects traversed by an active write, not just its spelling.
+export async function pathDependencies(path: string, followFinalLink: boolean) {
+  const native = (value: string) =>
+    process.platform === "win32" ? value.replaceAll("/", "\\") : value;
+  path = native(path);
+  let current = parse(path).root;
+  const remaining = path.slice(current.length).split(sep).filter(Boolean);
+  const items: BigIntStats[] = [];
+  let links = 0;
+  while (remaining.length) {
+    const part = remaining.shift()!;
+    if (part === ".") continue;
+    if (part === "..") {
+      current = dirname(current);
+      continue;
+    }
+    const next = join(current, part);
+    if (!remaining.length && !followFinalLink) {
+      current = next;
+      break;
+    }
+    const info = await entryInfo(next);
+    if (info.isSymbolicLink()) {
+      if (++links > 40) throw new AppError("conflict", "Too many symbolic links in the write path");
+      items.push(info);
+      let target = native(await readlink(next));
+      if (isAbsolute(target)) {
+        current = parse(target).root;
+        target = target.slice(current.length);
+      }
+      remaining.unshift(...target.split(sep).filter(Boolean));
+    } else {
+      if (info.isDirectory()) items.push(info);
+      current = next;
+    }
+  }
+  return {
+    path: followFinalLink
+      ? await realpath(current)
+      : join(await realpath(dirname(current)), basename(current)),
+    items,
+  };
+}
+
+export async function realPath(path: string) {
+  return process.platform === "win32" ? (await pathDependencies(path, true)).path : realpath(path);
 }
 
 export function sameObject(a: BigIntStats, b: BigIntStats) {
@@ -35,7 +114,7 @@ export function versionOf(parent: string, name: string, info: BigIntStats) {
 
 export async function locate(root: string, path: string) {
   const absolute = join(root, relativePath(path));
-  const parent = await realpath(dirname(absolute));
+  const parent = await realPath(dirname(absolute));
   const name = basename(absolute);
   return {
     parent,
@@ -58,11 +137,12 @@ export async function readEntry(parent: string, rawName: Buffer, path?: string):
     Buffer.from(parent.endsWith("/") ? parent : parent + "/"),
     rawName,
   ]);
-  const info = await lstat(absolute, { bigint: true });
+  const valid = isUtf8(rawName);
+  const info = valid ? await entryInfo(absolute) : await lstat(absolute, { bigint: true });
   const name = rawName.toString("utf8");
   return {
     name,
-    ...(isUtf8(rawName)
+    ...(valid
       ? { path: path ?? join(parent, name) }
       : { path: null, unavailableReason: "invalid_utf8" as const }),
     kind: info.isDirectory()

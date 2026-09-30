@@ -1,8 +1,19 @@
 import { randomUUID } from "node:crypto";
-import { basename, isAbsolute, resolve } from "node:path";
-import { realpath, stat } from "node:fs/promises";
-import { AppError, checkMetadata, limits, type Metadata } from "@kiteline/shared/protocol";
+import { basename, resolve } from "node:path";
+import { homedir } from "node:os";
+import { stat } from "node:fs/promises";
+import {
+  AppError,
+  checkEnvironment,
+  checkMetadata,
+  limits,
+  type AgentEnvironment,
+  type Metadata,
+} from "@kiteline/shared/protocol";
 import { atomicJson, readJson, type AgentConfig } from "./config.js";
+import { windowsNative } from "@kiteline/shared/windows/native";
+import { devicePath, realPath, sameObject } from "./files/paths.js";
+import { publicCliPath } from "./installation.js";
 
 export class MetadataStore {
   value: Metadata = {
@@ -18,7 +29,18 @@ export class MetadataStore {
   };
   onChange?: (snapshot: Metadata) => void;
   private queue: Promise<unknown> = Promise.resolve();
-  constructor(private config: AgentConfig) {}
+  readonly environment: AgentEnvironment;
+  constructor(private config: AgentConfig) {
+    const windows = process.platform === "win32" ? windowsNative().identity() : undefined;
+    this.environment = checkEnvironment({
+      os: windows ? "windows" : "linux",
+      homePath: windows?.home ?? homedir(),
+      rootPaths: windows?.roots ?? ["/"],
+      cliPath: publicCliPath,
+      dataDir: config.dataDir,
+      runDir: config.runDir,
+    });
+  }
   async load() {
     try {
       this.value = checkMetadata(await readJson(resolve(this.config.dataDir, "agent.json")));
@@ -32,6 +54,7 @@ export class MetadataStore {
       type: "hello",
       snapshot,
       editorBytes: this.config.limits.editorBytes,
+      environment: this.environment,
     };
   }
   private checkBudget(snapshot: Metadata) {
@@ -42,11 +65,11 @@ export class MetadataStore {
           "Device registration information exceeds the control message size limit",
         );
   }
-  update<T>(change: (candidate: Metadata) => T, signal?: AbortSignal): Promise<T> {
+  update<T>(change: (candidate: Metadata) => T | Promise<T>, signal?: AbortSignal): Promise<T> {
     const operation = this.queue.then(async () => {
       signal?.throwIfAborted();
       const candidate = structuredClone(this.value);
-      const result = change(candidate);
+      const result = await change(candidate);
       candidate.revision++;
       this.checkBudget(candidate);
       await atomicJson(resolve(this.config.dataDir, "agent.json"), candidate);
@@ -63,14 +86,18 @@ export class MetadataStore {
     return operation;
   }
   async add(absolutePath: string, name?: string, signal?: AbortSignal) {
-    if (!isAbsolute(absolutePath))
-      throw new AppError("invalid_argument", "An absolute directory path is required");
-    const path = await realpath(absolutePath);
-    if (!(await stat(path)).isDirectory())
-      throw new AppError("invalid_argument", "Select a directory");
-    return this.update((metadata) => {
-      const previous = metadata.workspaces.find((w) => w.path === path);
-      if (previous) return previous;
+    devicePath(absolutePath);
+    return this.update(async (metadata) => {
+      const path = await realPath(absolutePath);
+      const info = await stat(path, { bigint: true });
+      if (!info.isDirectory()) throw new AppError("invalid_argument", "Select a directory");
+      for (const workspace of metadata.workspaces) {
+        if (workspace.path === path) return workspace;
+        // An inaccessible old registration must not block a valid new directory.
+        const other = await stat(workspace.path, { bigint: true }).catch(() => undefined);
+        if (other && sameObject(info, other)) return workspace;
+      }
+      signal?.throwIfAborted();
       const workspace = { id: randomUUID(), path, name: name ?? (basename(path) || path) };
       metadata.workspaces.push(workspace);
       return workspace;

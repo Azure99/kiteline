@@ -1,4 +1,4 @@
-import { realpath } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import type { FileProgress, Repo } from "@kiteline/shared/protocol";
 import type { Repositories } from "./repos.js";
 
@@ -14,7 +14,8 @@ export class GitWriteQueue {
     progress?: (value: FileProgress) => void,
   ): Promise<T> {
     const repo = await this.repos.resolve(workspaceId, repoId, signal);
-    const key = await realpath(repo.commonDir);
+    const info = await stat(repo.commonDir, { bigint: true });
+    const key = `${info.dev}:${info.ino}`;
     const previous = this.tails.get(key) ?? Promise.resolve();
     let release!: () => void;
     const held = new Promise<void>((resolve) => {

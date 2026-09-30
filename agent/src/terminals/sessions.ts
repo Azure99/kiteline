@@ -9,17 +9,20 @@ import {
   terminalProfile,
   type Session,
 } from "@kiteline/shared/protocol";
-import type { RecorderMessage, TerminalIdentity } from "@kiteline/shared/ipc";
-import { tmux } from "@kiteline/shared/terminal/node";
+import type { CreateTerminal, RecorderMessage, TerminalIdentity } from "@kiteline/shared/ipc";
+import { exitCodeFormat, msysPath, tmux } from "@kiteline/shared/terminal/node";
+import { startTerminalServer } from "@kiteline/shared/terminal/windows";
 import type { AgentConfig } from "../config.js";
 import type { MetadataStore } from "../metadata.js";
-import { Recorder } from "./recorder.js";
+import { Recorder, type Creation } from "./recorder.js";
 
 interface Managed {
   session: Session;
   identity: Partial<TerminalIdentity> & Pick<TerminalIdentity, "socket" | "tmuxSession">;
   creation?: Promise<Session>;
   creationMayArrive?: boolean;
+  createRequest?: Creation;
+  server?: Awaited<ReturnType<typeof startTerminalServer>>;
   cleanup?: Promise<void>;
   recovery?: Promise<void>;
   ending?: boolean;
@@ -53,7 +56,7 @@ export class Sessions {
     this.recorder.onMessage = (message) => this.message(message);
     this.recorder.onExit = (reason) => {
       for (const item of this.records.values()) {
-        item.creationMayArrive = false;
+        if (process.platform !== "win32") item.creationMayArrive = false;
         this.unavailable(item, reason);
         this.onFrame?.({
           type: "fault",
@@ -95,7 +98,7 @@ export class Sessions {
     await access(this.config.shell, constants.X_OK);
     const id = randomUUID();
     const socket = join(this.config.runDir, id, "tmux.sock");
-    if (Buffer.byteLength(socket) > 103)
+    if (Buffer.byteLength(process.platform === "win32" ? msysPath(socket) : socket) > 103)
       throw new AppError(
         "invalid_argument",
         "Runtime directory path is too long; use a shorter KITELINE_AGENT_RUN_DIR",
@@ -133,9 +136,7 @@ export class Sessions {
       (async () => {
         try {
           await mkdir(dirname(socket), { recursive: true, mode: 0o700 });
-          item.creationMayArrive = true;
-          const identity = await this.recorder.request<TerminalIdentity>({
-            type: "create",
+          const options: CreateTerminal = {
             sessionId: id,
             socket,
             tmuxSession: "kiteline",
@@ -145,7 +146,20 @@ export class Sessions {
             cols: limits.terminalInitialCols,
             rows: limits.terminalInitialRows,
             historyLines: item.session.historyLines,
-          });
+          };
+          if (process.platform === "win32")
+            item.server = await startTerminalServer(options, this.config.limits.channelPairTimeout);
+          if (this.closing) throw new AppError("cancelled", "Agent is stopping");
+          item.creationMayArrive = true;
+          let identity: TerminalIdentity;
+          if (process.platform === "win32") {
+            item.createRequest = this.recorder.create(options);
+            identity = await item.createRequest.result;
+          } else
+            identity = await this.recorder.request<TerminalIdentity>({
+              type: "create",
+              ...options,
+            });
           item.creationMayArrive = false;
           if (!this.records.has(id) || item.cleanup)
             throw new OperationError("io_error", "Terminal has ended", "unknown", {
@@ -157,7 +171,10 @@ export class Sessions {
           this.onChanged?.(workspaceId);
           return { ...item.session };
         } catch (error) {
-          if (!(error instanceof OperationError)) item.creationMayArrive = false;
+          if (process.platform === "win32") {
+            await item.createRequest?.cancel();
+            item.creationMayArrive = false;
+          } else if (!(error instanceof OperationError)) item.creationMayArrive = false;
           if (!this.records.has(id))
             throw new OperationError(
               "io_error",
@@ -223,7 +240,11 @@ export class Sessions {
         try {
           await this.recorder.request({ type: "end", sessionId: id });
         } catch (error) {
-          if (!(error instanceof AppError) || error.code !== "recording_unavailable") throw error;
+          if (
+            process.platform !== "win32" &&
+            (!(error instanceof AppError) || error.code !== "recording_unavailable")
+          )
+            throw error;
         }
       }
       await this.remove(item);
@@ -303,11 +324,13 @@ export class Sessions {
           "list-panes",
           "-a",
           "-F",
-          "#{pane_id} #{window_id} #{pane_dead} #{pane_dead_status}|#{pane_width} #{pane_height}",
+          `#{pane_id} #{window_id} #{pane_dead} ${exitCodeFormat}|#{pane_width} #{pane_height}`,
         ],
         undefined,
         AbortSignal.timeout(this.config.limits.rpcTimeout),
       );
+      if (process.platform === "win32" && !output.trim())
+        return { alive: false, exitCode: null, cols: undefined, rows: undefined };
       const result = /^(%\d+) (@\d+) ([01]) (\d*)\|(\d+) (\d+)\s*$/.exec(output);
       if (!result) throw new Error("Cannot verify the managed terminal identity");
       item.creationMayArrive = false;
@@ -363,7 +386,16 @@ export class Sessions {
           AbortSignal.timeout(this.config.limits.rpcTimeout),
         );
       } catch (error) {
-        if ((await this.inspect(item)).alive) throw error;
+        if (!item.server && (await this.inspect(item)).alive) throw error;
+      } finally {
+        if (item.server) {
+          try {
+            item.server.job.terminate();
+          } finally {
+            await item.server.job.empty;
+            await item.server.drained;
+          }
+        }
       }
       this.records.delete(item.session.id);
       this.onChanged?.(item.session.workspaceId);
@@ -376,6 +408,8 @@ export class Sessions {
   async close() {
     this.closing = true;
     clearInterval(this.lifeTimer);
+    if (process.platform === "win32")
+      await Promise.all([...this.records.values()].map((item) => item.createRequest?.cancel()));
     await Promise.allSettled([...this.jobs]);
     await this.recorder.close();
     const results = await Promise.allSettled(

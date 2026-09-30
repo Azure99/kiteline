@@ -4,6 +4,7 @@ import type { Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { taskLimits, type TaskRun } from "@kiteline/shared/protocol";
 import { groupRunning } from "../process-group.js";
+import { JobChild, spawnJob } from "@kiteline/shared/windows/job";
 
 function diagnostic(error: unknown) {
   return Buffer.from(error instanceof Error ? error.message : String(error))
@@ -20,36 +21,67 @@ export class TaskProcess {
   }>;
   readonly pid?: number;
   stopReason?: "requested_stop" | "agent_stop";
-  private readonly child: ChildProcess;
   private readonly groupDone: Promise<void>;
   private groupEnded = false;
   private lifecycleDiagnostic?: string;
   private stopping?: Promise<void>;
 
-  constructor(
+  static async start(
     shell: string,
     run: TaskRun,
+    outputPath: (stream: "stdout" | "stderr") => string,
+    reserveBytes: (wanted: number) => number,
+    releaseBytes: (bytes: number) => void,
+    outputLimit: number,
+  ) {
+    const child =
+      process.platform === "win32"
+        ? await spawnJob(
+            shell,
+            ["-NoProfile", "-NonInteractive", "-Command", run.parameters.command],
+            {
+              cwd: run.parameters.cwd,
+              stdio: ["ignore", "pipe", "pipe"],
+            },
+          )
+        : spawn(shell, ["-c", run.parameters.command], {
+            cwd: run.parameters.cwd,
+            detached: true,
+            stdio: ["ignore", "pipe", "pipe"],
+          });
+    return new TaskProcess(child, outputPath, reserveBytes, releaseBytes, outputLimit);
+  }
+
+  private constructor(
+    private readonly child: ChildProcess | JobChild,
     outputPath: (stream: "stdout" | "stderr") => string,
     private readonly reserveBytes: (wanted: number) => number,
     private readonly releaseBytes: (bytes: number) => void,
     private readonly outputLimit: number,
   ) {
-    this.child = spawn(shell, ["-c", run.parameters.command], {
-      cwd: run.parameters.cwd,
-      detached: true,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    this.pid = this.child.pid;
+    this.pid = child.pid;
     let failure: string | undefined;
-    const exited = new Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }>(
-      (resolve) => {
-        this.child.on("error", (error) => {
-          failure = diagnostic(error);
-          if (!this.pid) resolve({ exitCode: null, signal: null });
-        });
-        this.child.once("exit", (exitCode, signal) => resolve({ exitCode, signal }));
-      },
-    );
+    const exited =
+      child instanceof JobChild
+        ? child.exited.then(
+            (result) => ({ exitCode: result.code, signal: null }),
+            (error) => {
+              failure = diagnostic(error);
+              try {
+                child.terminate();
+              } catch (cleanup) {
+                this.reportLifecycleError(cleanup);
+              }
+              return { exitCode: null, signal: null };
+            },
+          )
+        : new Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+            child.on("error", (error) => {
+              failure = diagnostic(error);
+              if (!this.pid) resolve({ exitCode: null, signal: null });
+            });
+            child.once("exit", (exitCode, signal) => resolve({ exitCode, signal }));
+          });
     const output = Promise.all([
       this.drain(this.child.stdout!, "stdout", outputPath("stdout")),
       this.drain(this.child.stderr!, "stderr", outputPath("stderr")),
@@ -57,15 +89,17 @@ export class TaskProcess {
     const groupDone = (async () => {
       await exited;
       let interval = 50;
-      while (this.pid) {
-        try {
-          if (!(await groupRunning(this.pid))) break;
-        } catch (error) {
-          this.reportLifecycleError(error);
+      if (child instanceof JobChild) await child.empty;
+      else
+        while (this.pid) {
+          try {
+            if (!(await groupRunning(this.pid))) break;
+          } catch (error) {
+            this.reportLifecycleError(error);
+          }
+          await delay(interval);
+          interval = Math.min(interval * 2, 500);
         }
-        await delay(interval);
-        interval = Math.min(interval * 2, 500);
-      }
       this.groupEnded = true;
     })();
     this.groupDone = groupDone;
@@ -85,6 +119,10 @@ export class TaskProcess {
       } finally {
         clearTimeout(timer);
       }
+      if (child instanceof JobChild) {
+        result.exitCode = child.exitCode ?? null;
+        if (child.cleanupError !== undefined) this.reportLifecycleError(child.cleanupError);
+      }
       return { ...result, diagnostic: failure ?? this.lifecycleDiagnostic };
     })();
   }
@@ -98,6 +136,15 @@ export class TaskProcess {
 
   private async stopGroup() {
     if (!this.pid) return;
+    if (this.child instanceof JobChild) {
+      try {
+        this.child.terminate();
+      } catch (error) {
+        this.reportLifecycleError(error);
+      }
+      await this.groupDone;
+      return;
+    }
     const signal = (name: NodeJS.Signals) => {
       try {
         process.kill(-this.pid!, name);

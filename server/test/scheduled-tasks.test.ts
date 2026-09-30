@@ -215,6 +215,14 @@ test("summary ownership, first revision, stale cache and nested whitelist are in
     socket.send(
       JSON.stringify({
         type: "hello",
+        environment: {
+          os: "linux",
+          homePath: "/home/project",
+          rootPaths: ["/"],
+          cliPath: "/usr/local/bin/kiteline-agent",
+          dataDir: "/var/tmp/state",
+          runDir: "/var/tmp/run",
+        },
         editorBytes: 1000,
         snapshot: {
           schemaVersion: 1,

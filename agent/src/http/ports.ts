@@ -1,6 +1,7 @@
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { AppError, limits, type ListeningPorts } from "@kiteline/shared/protocol";
+import { windowsNative } from "@kiteline/shared/windows/native";
 
 export function listeningPort(line: string, ipv6: boolean): number | undefined {
   const fields = line.trim().split(/\s+/);
@@ -20,6 +21,15 @@ export function listeningPort(line: string, ipv6: boolean): number | undefined {
 }
 
 export async function listeningPorts(signal: AbortSignal): Promise<ListeningPorts> {
+  signal.throwIfAborted();
+  if (process.platform === "win32") {
+    const ports = await windowsNative().listeningPorts();
+    signal.throwIfAborted();
+    return {
+      ports: ports.slice(0, limits.listPageEntries),
+      truncated: ports.length > limits.listPageEntries,
+    };
+  }
   const ports = new Set<number>();
   let truncated = false;
   for (const ipv6 of [false, true]) {

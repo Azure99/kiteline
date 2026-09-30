@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, open, realpath, rename, stat } from "node:fs/promises";
+import { open, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { AppError, OperationError, limits, type SavedFile } from "@kiteline/shared/protocol";
 import { decodeText } from "@kiteline/shared/text";
@@ -8,8 +8,8 @@ import { readFile, readExact, revisionOf, revisionDigest } from "./read.js";
 import type { AgentConfig } from "../config.js";
 import type { MetadataStore } from "../metadata.js";
 import { publish } from "../mutations.js";
-import { locate, readEntry, relativePath, versionOf } from "./paths.js";
-import { renameNoReplace } from "./rename.js";
+import { entryInfo, locate, readEntry, realPath, relativePath, versionOf } from "./paths.js";
+import { renameNoReplace, renameReplace } from "./rename.js";
 import type { TemporaryFiles, Temporary } from "./temporary.js";
 
 export interface TextWrite {
@@ -57,14 +57,14 @@ export class TextFiles {
       const location = await locate(this.metadata.workspace(workspaceId).path, path);
       target = location.absolute;
       try {
-        await lstat(target);
+        await entryInfo(target);
         throw new AppError("conflict", "Target already exists");
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
     } else {
       try {
-        target = await realpath(absolute);
+        target = await realPath(absolute);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT")
           throw new AppError("conflict", "Original file no longer exists; save as a new file");
@@ -120,7 +120,7 @@ export class TextFiles {
         target = current.resolvedPath;
         if (current.revision !== item.expectedRevision) {
           const location = await locate(this.metadata.workspace(item.workspaceId).path, item.path);
-          const info = await lstat(location.absolute, { bigint: true });
+          const info = await entryInfo(location.absolute);
           throw new AppError("conflict", "Disk content or link target has changed", {
             path: item.path,
             current: {
@@ -142,7 +142,7 @@ export class TextFiles {
       signal.throwIfAborted();
       try {
         if (item.createOnly) await renameNoReplace(item.temporary.path, target);
-        else await rename(item.temporary.path, target);
+        else await renameReplace(item.temporary.path, target);
         item.published = true;
       } catch (error) {
         if (error instanceof OperationError && error.outcome === "unknown") item.uncertain = true;
@@ -159,7 +159,7 @@ export class TextFiles {
   }
 
   private async currentVersion(workspaceId: string, path: string, signal: AbortSignal) {
-    const resolvedPath = await realpath(this.absolute(workspaceId, path));
+    const resolvedPath = await realPath(this.absolute(workspaceId, path));
     const file = await open(resolvedPath, constants.O_RDONLY | constants.O_NONBLOCK);
     try {
       const info = await file.stat({ bigint: true });

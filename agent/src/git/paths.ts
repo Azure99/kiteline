@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, open, opendir, readlink, unlink } from "node:fs/promises";
+import { open, opendir, readlink, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AppError,
@@ -12,7 +12,7 @@ import {
   type GitReview,
   type Repo,
 } from "@kiteline/shared/protocol";
-import { relativePath } from "../files/paths.js";
+import { entryInfo, relativePath } from "../files/paths.js";
 import { git, gitPath, NulRecords } from "./process.js";
 import { headIdentity, modeType, observeIndex, readStatus } from "./status.js";
 
@@ -33,7 +33,15 @@ export function gitPaths(value: unknown) {
       "limit_exceeded",
       "Selected paths exceed the size limit; select fewer items",
     );
-  if (paths.some((path) => path === "." || path.split("/").includes(".git")))
+  if (
+    paths.some(
+      (path) =>
+        path === "." ||
+        path
+          .split("/")
+          .some((part) => (process.platform === "win32" ? part.toLowerCase() : part) === ".git"),
+    )
+  )
     throw new AppError("invalid_argument", "Cannot operate on the repository root or Git metadata");
   return paths.sort();
 }
@@ -174,7 +182,7 @@ async function diskTarget(repo: Repo, path: string, blocked?: Blockers) {
     const current = parts.slice(0, i + 1).join("/");
     let info;
     try {
-      info = await lstat(join(repo.rootPath, current), { bigint: true });
+      info = await entryInfo(join(repo.rootPath, current));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
       throw error;

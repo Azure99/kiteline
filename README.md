@@ -1,8 +1,8 @@
 # Kiteline
 
-单人自托管的 Linux 远程工作台。
+单人自托管的远程工作台，受控设备支持 Linux 与 Windows，server 部署在 Linux。
 
-正式包、原生服务和容器的运行方式见 [安装与运行](deploy/README.md)。
+正式包、前台运行及用户自管后台部署见 [安装与运行](deploy/README.md)。项目不注册或控制系统服务。
 
 ## 从源码开发
 

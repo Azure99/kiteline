@@ -1,7 +1,15 @@
 import { spawn } from "node:child_process";
+import { join } from "node:path";
 import { string, type Session, type Workspace } from "@kiteline/shared/protocol";
 import type { TerminalIdentity } from "@kiteline/shared/ipc";
-import { tmuxBinary, tmuxEnvironment } from "@kiteline/shared/terminal/node";
+import {
+  msysDirectory,
+  msysPath,
+  shellWords,
+  tmuxBinary,
+  tmuxEnvironment,
+} from "@kiteline/shared/terminal/node";
+import { spawnJob, type JobChild } from "@kiteline/shared/windows/job";
 import type { AgentConfig } from "./config.js";
 import { localRequest } from "./local.js";
 
@@ -16,6 +24,46 @@ export async function terminalCli(config: AgentConfig, args: string[]) {
     const identity = await localRequest<TerminalIdentity>(config, "terminal.attach", {
       sessionId: id,
     });
+    if (process.platform === "win32") {
+      const interrupted = () => {};
+      process.on("SIGINT", interrupted);
+      process.on("SIGBREAK", interrupted);
+      let child: JobChild | undefined;
+      try {
+        const command =
+          "exec " +
+          shellWords([
+            msysPath(tmuxBinary),
+            "-N",
+            "-S",
+            msysPath(identity.socket),
+            "attach-session",
+            "-E",
+            "-t",
+            identity.tmuxSession,
+          ]);
+        child = await spawnJob(
+          join(msysDirectory, "usr/bin/bash.exe"),
+          [
+            "--noprofile",
+            "--norc",
+            "-ic",
+            shellWords(["/usr/bin/script", "-qef", "-c", command, "/dev/null"]),
+          ],
+          { env: tmuxEnvironment(), stdio: ["inherit", "inherit", "inherit"] },
+        );
+        process.exitCode = (await child.exited).code;
+      } finally {
+        try {
+          child?.terminate();
+        } finally {
+          await child?.empty;
+          process.off("SIGINT", interrupted);
+          process.off("SIGBREAK", interrupted);
+        }
+      }
+      return;
+    }
     await new Promise<void>((resolve, reject) => {
       const child = spawn(
         tmuxBinary,

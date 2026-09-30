@@ -100,6 +100,31 @@ test("scheduled command admission, pause, immutable parameters, revision and bou
   }
 });
 
+test("stored task results retain full Windows DWORD process IDs and exit codes", async () => {
+  const f = await fixture();
+  let reloaded: ScheduledTasks | undefined;
+  try {
+    await f.tasks.create("wide", input(f.root, "exit 0"), signal);
+    await f.tasks.start("wide", "wide-run", signal);
+    await finished(f.tasks, "wide-run");
+    await f.tasks.close();
+    const path = join(f.root, "tasks", "wide.json");
+    const record = JSON.parse(await readFile(path, "utf8"));
+    Object.assign(record.runs[0], { pid: 0xffffffff, exitCode: 0xc0000005, state: "failed" });
+    await writeFile(path, JSON.stringify(record));
+    reloaded = new ScheduledTasks(f.config);
+    await reloaded.load();
+    expect(reloaded.run("wide-run")).toMatchObject({
+      pid: 0xffffffff,
+      exitCode: 0xc0000005,
+      state: "failed",
+    });
+  } finally {
+    await reloaded?.close();
+    await f.close();
+  }
+});
+
 test("real one-shot timers skip overlaps and persist consumption independently of manual runs", async () => {
   const f = await fixture();
   try {

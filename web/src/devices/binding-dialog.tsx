@@ -14,12 +14,13 @@ import {
 } from "../components/ui/dialog";
 import { Button } from "../components/ui/button";
 import { IconButton } from "../components/icon-button";
+import { AgentPlatformChoice, type AgentPlatform } from "./agent-platform";
 
 interface Binding {
   bindingId: string;
   code: string;
   expiresAt: string;
-  commands: Record<"foreground" | "service" | "bind", string>;
+  commands: Record<AgentPlatform, Record<"install" | "bind", string>>;
 }
 interface Result {
   status: "pending" | "consumed" | "expired";
@@ -40,9 +41,9 @@ export function BindingDialog({
   const [binding, setBinding] = useState<Binding>();
   const [result, setResult] = useState<Result>();
   const [error, setError] = useState<unknown>();
-  const [copyError, setCopyError] = useState<unknown>();
+  const [copyError, setCopyError] = useState<{ text: string; error: unknown }>();
+  const [platform, setPlatform] = useState<AgentPlatform>("linux");
   const [busy, setBusy] = useState(true);
-  const [mode, setMode] = useState<"foreground" | "service">("foreground");
   const [copied, setCopied] = useState("");
   const create = useCallback(async () => {
     setError(undefined);
@@ -90,7 +91,12 @@ export function BindingDialog({
       clearTimeout(timer);
     };
   }, [binding]);
-  const command = binding?.commands[mode];
+  const commands = binding?.commands[platform];
+  const command = commands?.install;
+  const visibleCopyError =
+    copyError && (copyError.text === command || copyError.text === commands?.bind)
+      ? copyError.error
+      : undefined;
   const device = devices.find((entry) => entry.id === result?.deviceId);
   const online = connected && device?.status === "online";
   const copy = (text: string) => {
@@ -98,7 +104,7 @@ export function BindingDialog({
     setCopied("");
     void copyText(text)
       .then(() => setCopied(text))
-      .catch((error: unknown) => setCopyError(error));
+      .catch((error: unknown) => setCopyError({ text, error }));
   };
   return (
     <DialogContent>
@@ -116,6 +122,7 @@ export function BindingDialog({
           )
         ) : (
           <>
+            <AgentPlatformChoice value={platform} onChange={setPlatform} />
             <div className="flex flex-wrap items-center justify-between gap-2 text-muted-foreground">
               <span role="status" className="text-sm">
                 {result?.status === "consumed"
@@ -136,35 +143,6 @@ export function BindingDialog({
                 })}
               </span>
             </div>
-            <fieldset className="space-y-2 text-sm">
-              <legend className="sr-only">{t(($) => $.devices.runMode)}</legend>
-              {(
-                [
-                  [
-                    "foreground",
-                    t(($) => $.devices.foreground),
-                    t(($) => $.devices.foregroundHint),
-                  ],
-                  ["service", t(($) => $.devices.service), t(($) => $.devices.serviceHint)],
-                ] as const
-              ).map(([value, label, hint]) => (
-                <label key={value} className="flex flex-wrap items-center gap-2">
-                  <input
-                    type="radio"
-                    name="agent-mode"
-                    value={value}
-                    checked={mode === value}
-                    onChange={() => {
-                      setMode(value);
-                      setCopied("");
-                      setCopyError(undefined);
-                    }}
-                  />
-                  <span>{label}</span>
-                  <span className="text-xs text-muted-foreground">{hint}</span>
-                </label>
-              ))}
-            </fieldset>
             <div className="rounded border border-border">
               <div className="flex items-center justify-between border-b border-border px-3 py-1">
                 <span className="text-xs text-muted-foreground">
@@ -193,19 +171,19 @@ export function BindingDialog({
               </summary>
               <div className="mt-2 flex items-start gap-2">
                 <code className="min-w-0 flex-1 whitespace-pre-wrap break-all text-xs">
-                  {binding.commands.bind}
+                  {commands!.bind}
                 </code>
                 <IconButton
                   label={
-                    copied === binding.commands.bind
+                    copied === commands!.bind
                       ? t(($) => $.devices.copiedBind)
                       : t(($) => $.devices.copyBind)
                   }
                   disabled={result?.status !== "pending"}
                   onPointerDown={(event) => event.preventDefault()}
-                  onClick={() => copy(binding.commands.bind)}
+                  onClick={() => copy(commands!.bind)}
                 >
-                  {copied === binding.commands.bind ? <Check /> : <Copy />}
+                  {copied === commands!.bind ? <Check /> : <Copy />}
                 </IconButton>
               </div>
             </details>
@@ -214,9 +192,9 @@ export function BindingDialog({
             )}
           </>
         )}
-        {!!(copyError || error) && (
+        {!!(visibleCopyError || error) && (
           <div role="alert" className="text-sm text-destructive">
-            <ErrorNotice error={copyError || error} />
+            <ErrorNotice error={visibleCopyError || error} />
           </div>
         )}
       </div>

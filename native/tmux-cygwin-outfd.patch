@@ -1,0 +1,10 @@
+--- a/server-client.c
++++ b/server-client.c
+@@ -3037,6 +3037,7 @@
+ 
+ #ifdef __CYGWIN__
+ 	c->fd = open(c->ttyname, O_RDWR|O_NOCTTY);
++	c->out_fd = dup(c->fd);
+ #endif
+ 
+ 	if (c->flags & CLIENT_CONTROL)

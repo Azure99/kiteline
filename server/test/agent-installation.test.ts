@@ -31,7 +31,7 @@ test("the one-line command executes only a fully downloaded script and preserves
   await once(server, "listening");
   cleanup.push(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const { command } = upgradeCommand(origin);
+  const command = upgradeCommand(origin).commands.linux;
   expect(command.split("\n")).toHaveLength(1);
   for (const failure of ["truncated", "failed"] as const) {
     mode = failure;

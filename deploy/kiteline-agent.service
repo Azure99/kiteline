@@ -5,13 +5,14 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=@USER@
-WorkingDirectory=@HOME@
-Environment=@HOME_ENV@
-Environment=@PATH_ENV@
+# Copy and edit explicitly. The application does not install or control this unit.
+User=YOUR_PROJECT_USER
+WorkingDirectory=/home/YOUR_PROJECT_USER
+Environment=HOME=/home/YOUR_PROJECT_USER
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
 Environment=LANG=C.UTF-8
 EnvironmentFile=-/etc/kiteline-agent.env
-ExecStart=/opt/kiteline-agent/bin/kiteline-agent run
+ExecStart=/usr/local/bin/kiteline-agent run
 Restart=on-failure
 RestartSec=3
 KillMode=control-group

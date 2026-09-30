@@ -1,8 +1,13 @@
 import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, Folder, FolderPlus, RefreshCw } from "lucide-react";
-import type { DirectoryListing, Workspace } from "@kiteline/shared/protocol";
+import { ArrowUp, Folder, FolderPlus, RefreshCw, HardDrive, House } from "lucide-react";
+import {
+  windowsName,
+  type AgentEnvironment,
+  type DirectoryListing,
+  type Workspace,
+} from "@kiteline/shared/protocol";
 import { rpc } from "../lib/api";
 import { cursorRpc, releaseCursor } from "../lib/cursors";
 import { Button } from "../components/ui/button";
@@ -16,26 +21,30 @@ import {
   DialogTitle,
 } from "../components/ui/dialog";
 import { IconButton } from "../components/icon-button";
+import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
 
 export function DirectoryDialog({
   deviceId,
+  environment,
   onAdded,
   onClose,
 }: {
   deviceId: string;
+  environment?: AgentEnvironment;
   onAdded: (workspace: Workspace) => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
 
-  const [path, setPath] = useState("/");
-  const [input, setInput] = useState("/");
+  const [path, setPath] = useState(environment?.homePath ?? "");
+  const [input, setInput] = useState(environment?.homePath ?? "");
   const [listing, setListing] = useState<DirectoryListing>();
   const [error, setError] = useState<unknown>();
   const [invalid, setInvalid] = useState(false);
   const [reading, setReading] = useState(true);
   const [writing, setWriting] = useState(false);
-  const busy = reading || writing;
+  const environmentAvailable = environment !== undefined;
+  const busy = reading || writing || !environmentAvailable;
   const [revision, setRevision] = useState(0);
   const [newName, setNewName] = useState<string>();
   const [cursor, setCursor] = useState<string>();
@@ -49,6 +58,7 @@ export function DirectoryDialog({
     };
   }, [deviceId]);
   useEffect(() => {
+    if (!environmentAvailable) return;
     const controller = new AbortController();
     setReading(true);
     setError(undefined);
@@ -83,7 +93,7 @@ export function DirectoryDialog({
         if (!controller.signal.aborted) setReading(false);
       });
     return () => controller.abort();
-  }, [deviceId, path, cursor, revision]);
+  }, [deviceId, path, cursor, revision, environmentAvailable]);
   function go(value: string) {
     setListing(undefined);
     setCursor(undefined);
@@ -111,6 +121,15 @@ export function DirectoryDialog({
       setError(undefined);
       setInvalid(true);
       return;
+    }
+    if (environment?.os === "windows") {
+      try {
+        windowsName(newName);
+      } catch {
+        setError(undefined);
+        setInvalid(true);
+        return;
+      }
     }
     setWriting(true);
     setError(undefined);
@@ -146,6 +165,27 @@ export function DirectoryDialog({
               go(input);
             }}
           >
+            <Menu>
+              <MenuTrigger
+                disabled={busy}
+                render={<IconButton label={t(($) => $.devices.rootDirectories)} />}
+              >
+                <HardDrive />
+              </MenuTrigger>
+              <MenuContent>
+                {environment?.rootPaths.map((root) => (
+                  <MenuItem key={root} onClick={() => go(root)}>
+                    {root}
+                  </MenuItem>
+                ))}
+                {environment && (
+                  <MenuItem onClick={() => go(environment.homePath)}>
+                    <House />
+                    {environment.homePath}
+                  </MenuItem>
+                )}
+              </MenuContent>
+            </Menu>
             <IconButton
               label={t(($) => $.files.parentDirectory)}
               disabled={busy || !listing?.parentPath}
@@ -171,6 +211,11 @@ export function DirectoryDialog({
               <FolderPlus />
             </IconButton>
           </form>
+          {!environment && (
+            <p role="alert" className="text-sm text-destructive">
+              {t(($) => $.devices.environmentUnavailable)}
+            </p>
+          )}
           {newName !== undefined && (
             <form
               className="flex gap-2"
@@ -226,7 +271,7 @@ export function DirectoryDialog({
                 )}
               </button>
             ))}
-            {busy && (
+            {environment && busy && (
               <p role="status" className="p-3 text-sm text-muted-foreground">
                 {t(($) => $.common.reading)}
               </p>

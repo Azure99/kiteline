@@ -1,7 +1,6 @@
 import type { BigIntStats } from "node:fs";
-import { lstat } from "node:fs/promises";
 import { AppError, type CopyItem } from "@kiteline/shared/protocol";
-import { locate, readEntry, sameObject, versionOf } from "./paths.js";
+import { entryInfo, locate, readEntry, sameObject, versionOf } from "./paths.js";
 
 export async function targetAgain(
   root: string,
@@ -21,7 +20,7 @@ export async function checkTarget(
 ) {
   let info: BigIntStats;
   try {
-    info = await lstat(target.absolute, { bigint: true });
+    info = await entryInfo(target.absolute);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     if (item.collision === "replace")

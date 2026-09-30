@@ -18,8 +18,9 @@ const cost = (item: Input) => ("data" in item ? item.data.length : 32);
 export class InputQueue {
   private queue: Input[] = [];
   private bytes = 0;
-  private running = false;
+  private running?: Promise<void>;
   private closed = false;
+  private abort = new AbortController();
   constructor(
     private control: Control,
     private model: Model,
@@ -99,67 +100,73 @@ export class InputQueue {
   private reject(id: string, error: unknown, outcome: "failed" | "unknown") {
     this.report(id, { type: "input.error", ...asError(error), outcome });
   }
-  private async run() {
+  private run() {
     if (this.running || this.closed) return;
-    this.running = true;
-    try {
-      while (!this.closed && this.queue.length) {
-        const item = this.queue.shift()!;
-        try {
-          if (item.type === "redraw") {
-            await this.redrawTask();
-            item.resolve();
-          } else if (item.type === "resize") {
-            await this.control.resize(item.cols, item.rows);
-            await this.model.waitForSize(item.cols, item.rows, this.config.channelPairTimeout);
-          } else {
-            const identity = this.control.identity;
-            if (!identity) throw new AppError("busy", "Terminal creation is not complete");
-            await tmux(
-              identity.socket,
-              [
-                "load-buffer",
-                "-b",
-                "kiteline-web-input",
-                "-",
-                ";",
-                "paste-buffer",
-                "-r",
-                "-d",
-                ...(item.type === "paste" ? ["-p"] : []),
-                "-b",
-                "kiteline-web-input",
-                "-t",
-                identity.paneId,
-              ],
-              item.data,
+    this.running = this.drain().finally(() => {
+      this.running = undefined;
+    });
+    return this.running;
+  }
+  private async drain() {
+    while (!this.closed && this.queue.length) {
+      const item = this.queue.shift()!;
+      try {
+        if (item.type === "redraw") {
+          await this.redrawTask();
+          item.resolve();
+        } else if (item.type === "resize") {
+          await this.control.resize(item.cols, item.rows);
+          await this.model.waitForSize(item.cols, item.rows, this.config.channelPairTimeout);
+        } else {
+          const identity = this.control.identity;
+          if (!identity) throw new AppError("busy", "Terminal creation is not complete");
+          await tmux(
+            identity.socket,
+            [
+              "load-buffer",
+              "-b",
+              "kiteline-web-input",
+              "-",
+              ";",
+              "paste-buffer",
+              "-r",
+              "-d",
+              ...(item.type === "paste" ? ["-p"] : []),
+              "-b",
+              "kiteline-web-input",
+              "-t",
+              identity.paneId,
+            ],
+            item.data,
+            AbortSignal.any([
+              this.abort.signal,
               AbortSignal.timeout(this.config.channelPairTimeout),
-            );
-          }
-        } catch (error) {
-          if (item.type === "redraw") item.reject(error);
-          else this.reject(item.attachmentId, error, "unknown");
-          const socket = this.control.identity?.socket;
-          if (socket && "data" in item)
-            await tmux(
-              socket,
-              ["delete-buffer", "-b", "kiteline-web-input"],
-              undefined,
-              AbortSignal.timeout(this.config.channelPairTimeout),
-            ).catch(() => {});
-        } finally {
-          this.bytes -= cost(item);
+            ]),
+          );
         }
+      } catch (error) {
+        if (item.type === "redraw") item.reject(error);
+        else this.reject(item.attachmentId, error, "unknown");
+        const socket = this.control.identity?.socket;
+        if (socket && "data" in item)
+          await tmux(
+            socket,
+            ["delete-buffer", "-b", "kiteline-web-input"],
+            undefined,
+            AbortSignal.timeout(this.config.channelPairTimeout),
+          ).catch(() => {});
+      } finally {
+        this.bytes -= cost(item);
       }
-    } finally {
-      this.running = false;
     }
   }
   close() {
     this.closed = true;
+    this.abort.abort(new AppError("cancelled", "Terminal closed"));
     for (const item of this.queue.splice(0)) {
       this.bytes -= cost(item);
       if (item.type === "redraw") item.reject(new AppError("cancelled", "Terminal closed"));
     }
+    return this.running ?? Promise.resolve();
   }
 }

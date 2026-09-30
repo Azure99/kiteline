@@ -1,6 +1,5 @@
 import { WebSocket } from "ws";
 import { randomUUID } from "node:crypto";
-import { mkdir } from "node:fs/promises";
 import {
   AppError,
   appVersion,
@@ -19,7 +18,7 @@ import {
   type RpcResult,
   type RpcMethod,
 } from "@kiteline/shared/protocol";
-import type { AgentConfig, Identity } from "./config.js";
+import { privateDirectory, type AgentConfig, type Identity } from "./config.js";
 import { MetadataStore } from "./metadata.js";
 import { Directories } from "./directories.js";
 import { Sessions } from "./terminals/sessions.js";
@@ -97,6 +96,8 @@ export class Agent {
   private connectionError?: string;
   private reconnect?: NodeJS.Timeout;
   private stopped = false;
+  private starting?: Promise<void>;
+  private closing?: Promise<void>;
   private delay = 1000;
   constructor(
     readonly config: AgentConfig,
@@ -143,6 +144,7 @@ export class Agent {
     this.sessions.onChanged = (workspaceId) =>
       this.send({ type: "sessions.changed", workspaceId } satisfies AgentEvent);
     this.local = new LocalServer(config, (method, params, signal) => {
+      if (this.stopped) throw new AppError("cancelled", "Agent is stopping");
       if (method === "doctor")
         return diagnose(this.config, signal, {
           server: this.identity.server,
@@ -170,14 +172,10 @@ export class Agent {
     });
   }
   async start() {
+    if (this.stopped) return;
+    this.starting ??= this.initialize();
     try {
-      await mkdir(this.config.dataDir, { recursive: true, mode: 0o700 });
-      await mkdir(this.config.runDir, { recursive: true, mode: 0o700 });
-      await this.metadata.load();
-      await this.temporaryFiles.load();
-      await this.schedules.load();
-      await this.local.start();
-      this.connect();
+      await this.starting;
     } catch (error) {
       try {
         await this.close();
@@ -188,6 +186,20 @@ export class Agent {
       }
       throw error;
     }
+  }
+  private async initialize() {
+    await privateDirectory(this.config.dataDir);
+    if (this.stopped) return;
+    await privateDirectory(this.config.runDir);
+    if (this.stopped) return;
+    await this.metadata.load();
+    if (this.stopped) return;
+    await this.temporaryFiles.load();
+    if (this.stopped) return;
+    await this.schedules.load();
+    if (this.stopped) return;
+    await this.local.start();
+    this.connect();
   }
   send(message: unknown) {
     const text = JSON.stringify(message);
@@ -790,8 +802,19 @@ export class Agent {
       }
     }
   }
-  async close() {
+  close() {
+    if (this.closing) return this.closing;
     this.stopped = true;
+    this.schedules.beginClose();
+    this.temporaryFiles.beginClose();
+    clearTimeout(this.reconnect);
+    for (const controller of this.requests.values())
+      controller.abort(new AppError("cancelled", "Agent is stopping"));
+    this.socket?.terminate();
+    return (this.closing = this.finishClose());
+  }
+  private async finishClose() {
+    await this.starting?.catch(() => {});
     const errors: unknown[] = [];
     const finish = async (action: () => unknown) => {
       try {
@@ -800,11 +823,6 @@ export class Agent {
         errors.push(error);
       }
     };
-    clearTimeout(this.reconnect);
-    this.temporaryFiles.beginClose();
-    for (const controller of this.requests.values())
-      controller.abort(new AppError("cancelled", "Agent is stopping"));
-    this.socket?.terminate();
     await Promise.all([
       finish(() => this.channels.close()),
       finish(() => this.httpChannels.close()),

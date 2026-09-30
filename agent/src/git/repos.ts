@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { isUtf8 } from "node:buffer";
 import type { Dir } from "node:fs";
-import { lstat, opendir, realpath, stat } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { opendir, stat } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   AppError,
   asError,
@@ -14,6 +14,7 @@ import {
 import { CursorBudget } from "../cursor-budget.js";
 import type { MetadataStore } from "../metadata.js";
 import { commandLine, git } from "./process.js";
+import { entryInfo, realPath } from "../files/paths.js";
 
 interface Scan {
   workspaceId: string;
@@ -30,7 +31,7 @@ interface Scan {
 }
 async function exists(path: string) {
   try {
-    return await lstat(path);
+    return await entryInfo(path);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
     throw error;
@@ -63,15 +64,15 @@ export class Repositories {
     private budget: CursorBudget,
   ) {}
   async inspect(path: string, workspaceRoot: string, signal: AbortSignal): Promise<Repo> {
-    const root = await realpath(path);
+    const root = await realPath(path);
     const readPath = async (option: string) =>
-      realpath(resolve(root, commandLine((await git(root, ["rev-parse", option], signal)).bytes)));
+      realPath(resolve(root, commandLine((await git(root, ["rev-parse", option], signal)).bytes)));
     const bare =
       commandLine((await git(root, ["rev-parse", "--is-bare-repository"], signal)).bytes) ===
       "true";
     const rootPath = bare ? root : await readPath("--show-toplevel");
     const within = relative(workspaceRoot, rootPath);
-    if (within === ".." || within.startsWith("../") || isAbsolute(within))
+    if (within === ".." || within.startsWith(".." + sep) || isAbsolute(within))
       throw new AppError("unsupported", "Repository root is outside the workspace");
     const gitDir = await readPath("--git-dir");
     const commonDir = await readPath("--git-common-dir");
@@ -79,7 +80,7 @@ export class Repositories {
     const repo: Repo = {
       ...entry,
       id: await identity(entry),
-      path: relative(workspaceRoot, rootPath) || ".",
+      path: within.split(sep).join("/") || ".",
       linked: gitDir !== commonDir,
     };
     signal.throwIfAborted();
@@ -195,7 +196,13 @@ export class Repositories {
             }
           } catch (error) {
             signal.throwIfAborted();
-            if (!add({ path: relative(root, frame.path) || ".", error: asError(error) })) break;
+            if (
+              !add({
+                path: relative(root, frame.path).split(sep).join("/") || ".",
+                error: asError(error),
+              })
+            )
+              break;
           }
         }
         try {
@@ -213,12 +220,13 @@ export class Repositories {
             scan.stack.pop();
             continue;
           }
-          if (!entry.isDirectory()) continue;
+          if (!entry.isDirectory() && !(process.platform === "win32" && entry.isSymbolicLink()))
+            continue;
           const name = Buffer.isBuffer(entry.name) ? entry.name : Buffer.from(entry.name);
           if (!isUtf8(name)) {
             if (
               !add({
-                path: relative(root, frame.path) || ".",
+                path: relative(root, frame.path).split(sep).join("/") || ".",
                 error: {
                   code: "unsupported",
                   message: "Directory contains a non-UTF-8 name; this item cannot be scanned",
@@ -226,13 +234,27 @@ export class Repositories {
               })
             )
               break;
-          } else if (name.toString() !== ".git")
-            scan.stack.push({ path: join(frame.path, name.toString()), checked: false });
+          } else if (name.toString() !== ".git") {
+            const path = join(frame.path, name.toString());
+            try {
+              if ((await entryInfo(path)).isDirectory()) scan.stack.push({ path, checked: false });
+            } catch (error) {
+              signal.throwIfAborted();
+              if (!add({ path: relative(root, path).split(sep).join("/"), error: asError(error) }))
+                break;
+            }
+          }
         } catch (error) {
           signal.throwIfAborted();
           await frame.directory?.close().catch(() => {});
           scan.stack.pop();
-          if (!add({ path: relative(root, frame.path) || ".", error: asError(error) })) break;
+          if (
+            !add({
+              path: relative(root, frame.path).split(sep).join("/") || ".",
+              error: asError(error),
+            })
+          )
+            break;
         }
       }
       signal.throwIfAborted();

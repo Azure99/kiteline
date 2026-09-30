@@ -5,7 +5,7 @@ import { Directories } from "../src/directories.js";
 import { Agent } from "../src/control.js";
 import { MetadataStore } from "../src/metadata.js";
 import { defaultAgentLimits, type AgentConfig } from "../src/config.js";
-import { checkMetadata } from "@kiteline/shared/protocol";
+import { absolutePath, checkMetadata, limits, windowsName } from "@kiteline/shared/protocol";
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -24,6 +24,30 @@ function config(dataDir: string): AgentConfig {
     limits: { ...defaultAgentLimits },
   };
 }
+
+test("device paths distinguish native absolute paths from Windows aliases", () => {
+  for (const path of [
+    "C:\\",
+    "C:/Users/Project",
+    "\\\\host.example\\share\\folder",
+    "\\\\host\\C$\\folder",
+  ])
+    expect(absolutePath(path, "windows")).toBe(path);
+  for (const path of [
+    "/",
+    "\\folder",
+    "C:folder",
+    "\\\\?\\C:\\x",
+    "\\\\.\\pipe\\x",
+    "C:\\a:b",
+    "C:\\AUX.txt",
+    "C:\\folder.\\x",
+  ])
+    expect(() => absolutePath(path, "windows")).toThrow();
+  for (const name of ["a\\b", "a:b", "CON .txt", "CONOUT$", "a.", "a "])
+    expect(() => windowsName(name)).toThrow();
+  expect(absolutePath("/a:b/CON.txt/space ", "linux")).toBe("/a:b/CON.txt/space ");
+});
 
 test("directory pages keep raw names non-actionable and enforce the concurrent cursor limit", async () => {
   const path = await directory();
@@ -126,6 +150,49 @@ test("agent shutdown waits for an accepted workspace publication", async () => {
   await expect(
     agent.dispatch("workspaces.add", { absolutePath: dataDir }, new AbortController().signal),
   ).rejects.toMatchObject({ code: "cancelled" });
+});
+
+test("an unreachable old workspace does not block a valid new registration", async () => {
+  const dataDir = await directory();
+  const old = join(dataDir, "old");
+  const next = join(dataDir, "next");
+  await mkdir(old);
+  await mkdir(next);
+  const metadata = new MetadataStore(config(dataDir));
+  await metadata.add(old);
+  await rm(old, { recursive: true });
+  await symlink("old", old);
+  expect(await metadata.add(next)).toMatchObject({ path: next });
+  await expect(metadata.add(old)).rejects.toMatchObject({ code: "ELOOP" });
+});
+
+test("environment counts towards hello before metadata is committed", async () => {
+  const dataDir = await directory();
+  const metadata = new MetadataStore(config(dataDir));
+  await metadata.add(dataDir);
+  const before = await readFile(join(dataDir, "agent.json"), "utf8");
+  const candidate = structuredClone(metadata.value);
+  candidate.shortcuts = Array.from({ length: 16 }, (_, index) => ({
+    id: String(index),
+    name: "x",
+    command: "x",
+  }));
+  const bare = { type: "hello", snapshot: candidate, editorBytes: metadata.hello().editorBytes };
+  let remaining = limits.controlMessageBytes - Buffer.byteLength(JSON.stringify(bare)) - 1;
+  for (const shortcut of candidate.shortcuts) {
+    const size = Math.min(remaining, 65_535);
+    shortcut.command += "x".repeat(size);
+    remaining -= size;
+  }
+  expect(remaining).toBe(0);
+  expect(checkMetadata(candidate)).toEqual(candidate);
+  expect(Buffer.byteLength(JSON.stringify(bare))).toBeLessThan(limits.controlMessageBytes);
+  await expect(
+    metadata.update((value) => {
+      value.shortcuts = candidate.shortcuts;
+    }),
+  ).rejects.toMatchObject({ code: "limit_exceeded" });
+  expect(await readFile(join(dataDir, "agent.json"), "utf8")).toBe(before);
 });
 
 test("new device shortcuts do not replace saved customizations or restore deleted defaults", async () => {

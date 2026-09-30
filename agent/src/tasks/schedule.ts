@@ -1,7 +1,8 @@
 import { Cron } from "croner";
 import { homedir } from "node:os";
-import { isAbsolute } from "node:path";
-import { realpath, stat } from "node:fs/promises";
+import { stat } from "node:fs/promises";
+import { devicePath, realPath } from "../files/paths.js";
+import { windowsNative } from "@kiteline/shared/windows/native";
 import {
   AppError,
   record,
@@ -100,15 +101,20 @@ export function taskFields(value: unknown): Required<ScheduledTaskInput> {
   const command = text(input.command, "command", taskLimits.commandBytes);
   const schedule = checkSchedule(input.schedule);
   const timezone = checkTimezone(input.timezone);
-  const cwd = input.cwd === undefined ? homedir() : string(input.cwd, "cwd");
-  if (!isAbsolute(cwd)) throw new AppError("invalid_argument", "cwd must be an absolute directory");
+  const cwd = devicePath(
+    input.cwd === undefined
+      ? process.platform === "win32"
+        ? windowsNative().identity().home
+        : homedir()
+      : input.cwd,
+  );
   return { name, command, schedule, timezone, cwd };
 }
 
 export async function checkTaskInput(value: unknown, previousCwd?: string) {
   const fields = taskFields(value);
   if (fields.cwd === previousCwd) return fields;
-  fields.cwd = await realpath(fields.cwd);
+  fields.cwd = await realPath(fields.cwd);
   if (!(await stat(fields.cwd)).isDirectory())
     throw new AppError("invalid_argument", "cwd must be a directory");
   return fields;

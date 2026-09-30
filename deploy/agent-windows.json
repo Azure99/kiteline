@@ -1,0 +1,391 @@
+{
+  "nodeArchiveSha256": "6cac9ffbca8f6a47091e4b5c772e0606049c3871cb67d900c0cedde630e545ba",
+  "nodeHeadersSha256": "7b2141e77e66ab23ead6b200c546afc5837136e3075d8a3ac5a67e540dcc59c1",
+  "ripgrep": {
+    "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-pc-windows-msvc.zip",
+    "sha256": "71b2fef860abe467217a538ff31de02f5258807c0129f771846f87bd029aafc5"
+  },
+  "bootstrap": {
+    "url": "https://github.com/msys2/msys2-installer/releases/download/2026-06-11/msys2-base-x86_64-20260611.tar.xz",
+    "sha256": "a2d047e8ee213c3c6a49a8de427eb1069df12207c0422ff1b3cbb5c905c34221"
+  },
+  "packages": [
+    {
+      "name": "bison",
+      "version": "3.8.2-5",
+      "url": "https://repo.msys2.org/msys/x86_64/bison-3.8.2-5-x86_64.pkg.tar.zst",
+      "sha256": "7439ca784a9909e0730a513d3aff15852c3b292ac85053fa2dd7a2a19c1ce04c",
+      "depends": ["m4", "sh", "libiconv", "libintl"]
+    },
+    {
+      "name": "m4",
+      "version": "1.4.21-1",
+      "url": "https://repo.msys2.org/msys/x86_64/m4-1.4.21-1-x86_64.pkg.tar.zst",
+      "sha256": "b561e8871c7599502d9fae7196ee965b3fed3d7af09154eb8d2f5e4d9e5e5106",
+      "depends": ["bash", "gcc-libs", "libiconv"]
+    },
+    {
+      "name": "bash",
+      "version": "5.3.020-1",
+      "url": "https://repo.msys2.org/msys/x86_64/bash-5.3.020-1-x86_64.pkg.tar.zst",
+      "sha256": "dd601817a00a48024a58ed087e1aec786301d929f3d373ec5c1861dd76fe3029",
+      "depends": []
+    },
+    {
+      "name": "binutils",
+      "version": "2.47-1",
+      "url": "https://repo.msys2.org/msys/x86_64/binutils-2.47-1-x86_64.pkg.tar.zst",
+      "sha256": "b7ddaca6e8b63774cdb1f5ac2720963cd76f8f62ca7e2667b1b0f008ed7ecba2",
+      "depends": ["libiconv", "libintl", "zlib", "zstd"]
+    },
+    {
+      "name": "coreutils",
+      "version": "8.32-5",
+      "url": "https://repo.msys2.org/msys/x86_64/coreutils-8.32-5-x86_64.pkg.tar.zst",
+      "sha256": "62dfee1c39fd15f99c39802b35e82643bc14fffc16d6c76d4001caa385ec77e3",
+      "depends": ["gmp", "libiconv", "libintl"]
+    },
+    {
+      "name": "diffutils",
+      "version": "3.12-1",
+      "url": "https://repo.msys2.org/msys/x86_64/diffutils-3.12-1-x86_64.pkg.tar.zst",
+      "sha256": "7902c8ce3d4dd69a0f5e98dc9d5c83c17b23314ba486169db57ef6e2835ce3b6",
+      "depends": ["sh", "libiconv", "libintl"]
+    },
+    {
+      "name": "findutils",
+      "version": "4.11.0-2",
+      "url": "https://repo.msys2.org/msys/x86_64/findutils-4.11.0-2-x86_64.pkg.tar.zst",
+      "sha256": "f19d3c6b1b073d4c5759ae83f5639d11a5f0227b772f7d86d600db573d9d5d32",
+      "depends": ["libiconv", "libintl"]
+    },
+    {
+      "name": "gawk",
+      "version": "5.4.1-1",
+      "url": "https://repo.msys2.org/msys/x86_64/gawk-5.4.1-1-x86_64.pkg.tar.zst",
+      "sha256": "4b1322cb6c83d61fde5100e229e3cabc5b7d01fc0d0d8bc311edc08df91916be",
+      "depends": ["sh", "mpfr", "libintl", "libreadline"]
+    },
+    {
+      "name": "gcc",
+      "version": "15.3.0-1",
+      "url": "https://repo.msys2.org/msys/x86_64/gcc-15.3.0-1-x86_64.pkg.tar.zst",
+      "sha256": "f8e7e4bf21bb8f690058384fd6ee27bb3567edad49077e691d1f12f0a42119f1",
+      "depends": [
+        "gcc-libs=15.3.0-1",
+        "binutils",
+        "gmp",
+        "isl",
+        "libiconv",
+        "libintl",
+        "mpc",
+        "mpfr",
+        "zlib",
+        "msys2-runtime-devel",
+        "msys2-w32api-headers",
+        "msys2-w32api-runtime",
+        "windows-default-manifest"
+      ]
+    },
+    {
+      "name": "gcc-libs",
+      "version": "15.3.0-1",
+      "url": "https://repo.msys2.org/msys/x86_64/gcc-libs-15.3.0-1-x86_64.pkg.tar.zst",
+      "sha256": "0d99a122c453c05ae21ba3dcea910f2e0d93d38ae067c677a112a315b0f3cec5",
+      "depends": []
+    },
+    {
+      "name": "gmp",
+      "version": "6.3.0-2",
+      "url": "https://repo.msys2.org/msys/x86_64/gmp-6.3.0-2-x86_64.pkg.tar.zst",
+      "sha256": "f84536138e618d47a1df2da83916cfebbd449f159ffad52f994a71060a41cf34",
+      "depends": []
+    },
+    {
+      "name": "grep",
+      "version": "1~3.0-7",
+      "url": "https://repo.msys2.org/msys/x86_64/grep-1~3.0-7-x86_64.pkg.tar.zst",
+      "sha256": "2909b3bbef8d33d66980339fb7bd2d3d9145bae0f04191e6671df39868aea427",
+      "depends": ["libiconv", "libintl", "libpcre", "sh"]
+    },
+    {
+      "name": "gzip",
+      "version": "1.15-1",
+      "url": "https://repo.msys2.org/msys/x86_64/gzip-1.15-1-x86_64.pkg.tar.zst",
+      "sha256": "3f967c87cf041391d0d43819c91174742917ccc2d1bb9419050df29ef22f4bfd",
+      "depends": ["bash", "less"]
+    },
+    {
+      "name": "isl",
+      "version": "0.28-1",
+      "url": "https://repo.msys2.org/msys/x86_64/isl-0.28-1-x86_64.pkg.tar.zst",
+      "sha256": "20c8d3a623fe948c9175b236236ae31b09e77e66dc514f8467d35e81a8514f95",
+      "depends": ["gmp"]
+    },
+    {
+      "name": "less",
+      "version": "710-1",
+      "url": "https://repo.msys2.org/msys/x86_64/less-710-1-x86_64.pkg.tar.zst",
+      "sha256": "894a643ecd01861490e5767873d67b55cd5a2faf2c77b0b24a62dbba7bd038fd",
+      "depends": ["ncurses", "libpcre2_8"]
+    },
+    {
+      "name": "libevent",
+      "version": "2.1.13-1",
+      "url": "https://repo.msys2.org/msys/x86_64/libevent-2.1.13-1-x86_64.pkg.tar.zst",
+      "sha256": "ce967e0bbeb4cf396a42e6cd7516b6bbcef23237bf0a55099adbdfe1e9b3fce3",
+      "depends": ["openssl"]
+    },
+    {
+      "name": "libevent-devel",
+      "version": "2.1.13-1",
+      "url": "https://repo.msys2.org/msys/x86_64/libevent-devel-2.1.13-1-x86_64.pkg.tar.zst",
+      "sha256": "dde197faabd81129dc3386102ed247f4add799a6172e4a61046fc704158bed59",
+      "depends": ["libevent=2.1.13", "openssl-devel"]
+    },
+    {
+      "name": "libiconv",
+      "version": "1.19-1",
+      "url": "https://repo.msys2.org/msys/x86_64/libiconv-1.19-1-x86_64.pkg.tar.zst",
+      "sha256": "0fa55ea2a6ccf97cf8c58b24b2615815e15e16e6e4e888091c263c2c83c5313d",
+      "depends": ["gcc-libs"]
+    },
+    {
+      "name": "libintl",
+      "version": "0.22.5-1",
+      "url": "https://repo.msys2.org/msys/x86_64/libintl-0.22.5-1-x86_64.pkg.tar.zst",
+      "sha256": "336d66b9d95cf9c1804958f8e260762a3e83bf158ed5981f783bc772a31073cf",
+      "depends": ["gcc-libs", "libiconv"]
+    },
+    {
+      "name": "libopenssl",
+      "version": "3.6.4-1",
+      "url": "https://repo.msys2.org/msys/x86_64/libopenssl-3.6.4-1-x86_64.pkg.tar.zst",
+      "sha256": "a965ce712fe42d940aad6dcd9e4ec69653c44dc4c2a1e1a109752df55f23dd1d",
+      "depends": []
+    },
+    {
+      "name": "libpcre",
+      "version": "8.45-5",
+      "url": "https://repo.msys2.org/msys/x86_64/libpcre-8.45-5-x86_64.pkg.tar.zst",
+      "sha256": "b4dc2eb7795cbacaa683101d720fa67f536262497a1d89934a58f5dab8d17d17",
+      "depends": ["gcc-libs"]
+    },
+    {
+      "name": "libpcre2_8",
+      "version": "10.48-1",
+      "url": "https://repo.msys2.org/msys/x86_64/libpcre2_8-10.48-1-x86_64.pkg.tar.zst",
+      "sha256": "0e9c99ff4ef4e0e957cb4adc9f65b329c7ebd7ca00f90f66f7bb37d3ed99df9b",
+      "depends": ["gcc-libs"]
+    },
+    {
+      "name": "libreadline",
+      "version": "8.3.006-1",
+      "url": "https://repo.msys2.org/msys/x86_64/libreadline-8.3.006-1-x86_64.pkg.tar.zst",
+      "sha256": "29e25c50bf6cd7a5e6f2253af76f54fe3c1a915313c7c18e98bedaa665c6adea",
+      "depends": ["ncurses"]
+    },
+    {
+      "name": "libsqlite",
+      "version": "3.53.4-1",
+      "url": "https://repo.msys2.org/msys/x86_64/libsqlite-3.53.4-1-x86_64.pkg.tar.zst",
+      "sha256": "3cd9364e0e3df848454bdbefad2bc84608178209fac9497636bdae11ab8972df",
+      "depends": []
+    },
+    {
+      "name": "libutil-linux",
+      "version": "2.40.2-2",
+      "url": "https://repo.msys2.org/msys/x86_64/libutil-linux-2.40.2-2-x86_64.pkg.tar.zst",
+      "sha256": "148ec8e668cb0a30ea0c4e2687e16e0953d6628305598f4c3225bedf2564192d",
+      "depends": ["gcc-libs", "libintl"]
+    },
+    {
+      "name": "libzstd",
+      "version": "1.5.7-1",
+      "url": "https://repo.msys2.org/msys/x86_64/libzstd-1.5.7-1-x86_64.pkg.tar.zst",
+      "sha256": "5e370b2e725a0a7e5ff58d84653c9a0cd5a10b9cfe930f2d949a28ad2a11c1f2",
+      "depends": ["gcc-libs"]
+    },
+    {
+      "name": "make",
+      "version": "4.4.1-3",
+      "url": "https://repo.msys2.org/msys/x86_64/make-4.4.1-3-x86_64.pkg.tar.zst",
+      "sha256": "af0bdba17f06fe037f0194069adaa31a8fe45f1a11381501896aea1fae37bd5d",
+      "depends": ["libintl", "sh"]
+    },
+    {
+      "name": "mpc",
+      "version": "1.4.1-1",
+      "url": "https://repo.msys2.org/msys/x86_64/mpc-1.4.1-1-x86_64.pkg.tar.zst",
+      "sha256": "0f5073ec2e8be265854ee3c7cb1079b5e8e02264d53e659d8414988c6c182f16",
+      "depends": ["gmp>=5.0", "mpfr"]
+    },
+    {
+      "name": "mpfr",
+      "version": "4.2.2-1",
+      "url": "https://repo.msys2.org/msys/x86_64/mpfr-4.2.2-1-x86_64.pkg.tar.zst",
+      "sha256": "8f1b6c17c53e00494a488e03dfdf8fc742027ed03a5bd7b1b3a6a33f595a7498",
+      "depends": ["gmp>=5.0"]
+    },
+    {
+      "name": "msys2-runtime",
+      "version": "3.6.10-4",
+      "url": "https://repo.msys2.org/msys/x86_64/msys2-runtime-3.6.10-4-x86_64.pkg.tar.zst",
+      "sha256": "b13c14c3cbcd34cbcd6aaa0597444779b6102c709120bda2615a2229a482eae2",
+      "depends": []
+    },
+    {
+      "name": "msys2-runtime-devel",
+      "version": "3.6.10-4",
+      "url": "https://repo.msys2.org/msys/x86_64/msys2-runtime-devel-3.6.10-4-x86_64.pkg.tar.zst",
+      "sha256": "6babd4a24a5888e7b59aa138f555e8ada855d5a8e72060e63d3871d277c03be1",
+      "depends": ["msys2-runtime=3.6.10"]
+    },
+    {
+      "name": "msys2-w32api-headers",
+      "version": "14.0.0.r0.g9b3dd0125-1",
+      "url": "https://repo.msys2.org/msys/x86_64/msys2-w32api-headers-14.0.0.r0.g9b3dd0125-1-x86_64.pkg.tar.zst",
+      "sha256": "fcadf735fb214d33c64e145f82490c8693aeb6cb6a20ee8479e9f408aa832613",
+      "depends": []
+    },
+    {
+      "name": "msys2-w32api-runtime",
+      "version": "14.0.0.r0.g9b3dd0125-1",
+      "url": "https://repo.msys2.org/msys/x86_64/msys2-w32api-runtime-14.0.0.r0.g9b3dd0125-1-x86_64.pkg.tar.zst",
+      "sha256": "a9c5c922f5191f7e73333ea2d5392811282387986b9cb7f94a7c9156f717d4b3",
+      "depends": ["msys2-w32api-headers"]
+    },
+    {
+      "name": "ncurses",
+      "version": "6.6-2",
+      "url": "https://repo.msys2.org/msys/x86_64/ncurses-6.6-2-x86_64.pkg.tar.zst",
+      "sha256": "828c92f09b17f00d3b49362fcfa4affa58e5e50e238f290ea36eb7a690da3acb",
+      "depends": ["gcc-libs"]
+    },
+    {
+      "name": "ncurses-devel",
+      "version": "6.6-2",
+      "url": "https://repo.msys2.org/msys/x86_64/ncurses-devel-6.6-2-x86_64.pkg.tar.zst",
+      "sha256": "d5bc13fcce30b33cbd83cfb2982db76f18bbb967cd399e4d2ece54c4968a33a1",
+      "depends": ["ncurses=6.6"]
+    },
+    {
+      "name": "openssl",
+      "version": "3.6.4-1",
+      "url": "https://repo.msys2.org/msys/x86_64/openssl-3.6.4-1-x86_64.pkg.tar.zst",
+      "sha256": "4554223c1ad0e01cce0f2088be5eaf128908663c280b175d2e78f93e55c6dfff",
+      "depends": ["libopenssl"]
+    },
+    {
+      "name": "openssl-devel",
+      "version": "3.6.4-1",
+      "url": "https://repo.msys2.org/msys/x86_64/openssl-devel-3.6.4-1-x86_64.pkg.tar.zst",
+      "sha256": "850a2b5d772dfb7a76210b0b8242e29034019bbf285566bce3260771d1ef7d1b",
+      "depends": ["libopenssl=3.6.4"]
+    },
+    {
+      "name": "patch",
+      "version": "2.8-2",
+      "url": "https://repo.msys2.org/msys/x86_64/patch-2.8-2-x86_64.pkg.tar.zst",
+      "sha256": "df34ebf345d607cabf0b2cbad60f562f775f07985647b84035b40702f62ee9b1",
+      "depends": []
+    },
+    {
+      "name": "pkgconf",
+      "version": "3.0.7-1",
+      "url": "https://repo.msys2.org/msys/x86_64/pkgconf-3.0.7-1-x86_64.pkg.tar.zst",
+      "sha256": "5e051b9623f7e539515f8c42430bf4bd1e377a459e810faea4358f48c3115199",
+      "depends": []
+    },
+    {
+      "name": "sed",
+      "version": "4.9-1",
+      "url": "https://repo.msys2.org/msys/x86_64/sed-4.9-1-x86_64.pkg.tar.zst",
+      "sha256": "3748af28f69e946ec5a42e6670c9bbf6da7352dc93baaa537f69e99c5483b9fc",
+      "depends": ["libintl", "sh"]
+    },
+    {
+      "name": "tar",
+      "version": "1.35-3",
+      "url": "https://repo.msys2.org/msys/x86_64/tar-1.35-3-x86_64.pkg.tar.zst",
+      "sha256": "71983bed200c4026cdec157837d989728d3de65e8cf644e03876df41a0f1b7c4",
+      "depends": ["libiconv", "libintl", "sh"]
+    },
+    {
+      "name": "util-linux",
+      "version": "2.40.2-2",
+      "url": "https://repo.msys2.org/msys/x86_64/util-linux-2.40.2-2-x86_64.pkg.tar.zst",
+      "sha256": "969edb185d37986e6feddb3c54807598e3cc6774b736fec3a27d5d27731f7fdd",
+      "depends": ["coreutils", "libutil-linux", "libiconv", "libreadline", "libsqlite"]
+    },
+    {
+      "name": "windows-default-manifest",
+      "version": "20260815-1",
+      "url": "https://repo.msys2.org/msys/x86_64/windows-default-manifest-20260815-1-x86_64.pkg.tar.zst",
+      "sha256": "256ce04dba46a072d4dba477be83d54f7057d07ddc7d621eab3a629a8ecd17c6",
+      "depends": []
+    },
+    {
+      "name": "zlib",
+      "version": "1.3.2-1",
+      "url": "https://repo.msys2.org/msys/x86_64/zlib-1.3.2-1-x86_64.pkg.tar.zst",
+      "sha256": "a04aa79996c57f0db936be66cf94326d7e67e9cd8dbffe4cf6e97693d0a1d9ef",
+      "depends": ["gcc-libs"]
+    },
+    {
+      "name": "zstd",
+      "version": "1.5.7-1",
+      "url": "https://repo.msys2.org/msys/x86_64/zstd-1.5.7-1-x86_64.pkg.tar.zst",
+      "sha256": "7b8ab77828c5a1efe53ebc53e3ea9d719bfbd609bf4c810eaa88d626188ed407",
+      "depends": ["gcc-libs", "libzstd"]
+    }
+  ],
+  "sources": {
+    "bash-5.3.020-1.src.tar.zst": {
+      "url": "https://repo.msys2.org/msys/sources/bash-5.3.020-1.src.tar.zst",
+      "sha256": "92c9edc67b962374cb79868fefa4ef26d8327f679cd0d5460834651c5939ee2d"
+    },
+    "coreutils-8.32-5.src.tar.zst": {
+      "url": "https://repo.msys2.org/msys/sources/coreutils-8.32-5.src.tar.zst",
+      "sha256": "2b8689413bc50367a9995adf50ea84cd3caaff0ec68a8f32d8328842c3f83835"
+    },
+    "util-linux-2.40.2-2.src.tar.zst": {
+      "url": "https://repo.msys2.org/msys/sources/util-linux-2.40.2-2.src.tar.zst",
+      "sha256": "ea018e116866c0e2d9a3d6cee3f0d09801e6725789b6f99fd1979dfc7a68b703"
+    },
+    "gettext-0.22.5-1.src.tar.zst": {
+      "url": "https://repo.msys2.org/msys/sources/gettext-0.22.5-1.src.tar.zst",
+      "sha256": "e07a0b3e6716aae86dc0edd2dcdc8864731d56051345592b53659a3840ccfbd8"
+    },
+    "libiconv-1.19-1.src.tar.zst": {
+      "url": "https://repo.msys2.org/msys/sources/libiconv-1.19-1.src.tar.zst",
+      "sha256": "5a8bcd3242e2be94fffd9f03fadcda8d9fd64047430050c5cbd214cd3bf7f0a7"
+    },
+    "readline-8.3.006-1.src.tar.zst": {
+      "url": "https://repo.msys2.org/msys/sources/readline-8.3.006-1.src.tar.zst",
+      "sha256": "9ddb3eb989f6ad7d696ce5a2d92322b33a20056b293e3c4fc4f6cc568a320640"
+    },
+    "msys2-runtime-3.6.10-4.src.tar.zst": {
+      "url": "https://repo.msys2.org/msys/sources/msys2-runtime-3.6.10-4.src.tar.zst",
+      "sha256": "47e6e49710116d1bb57adaa24530306ee5841b58b8abca66ffcc107736393cec"
+    },
+    "libevent-2.1.13-1.src.tar.zst": {
+      "url": "https://repo.msys2.org/msys/sources/libevent-2.1.13-1.src.tar.zst",
+      "sha256": "41bb755eb9721b7717e673af107a656546bd87d906e1f94a27bba5bf687daf53"
+    },
+    "ncurses-6.6-2.src.tar.zst": {
+      "url": "https://repo.msys2.org/msys/sources/ncurses-6.6-2.src.tar.zst",
+      "sha256": "f5df12bd297e6b6930e2aa68e8014347b2193592645d93acce6774e05cbf15e6"
+    }
+  },
+  "runtimeFiles": {
+    "bash": ["usr/bin/bash.exe", "usr/bin/sh.exe"],
+    "coreutils": ["usr/bin/stty.exe"],
+    "util-linux": ["usr/bin/script.exe"],
+    "msys2-runtime": ["usr/bin/msys-2.0.dll", "usr/bin/cygwin-console-helper.exe"],
+    "libevent": ["usr/bin/msys-event_core-2-1-7.dll"],
+    "ncurses": ["usr/bin/msys-ncursesw6.dll", "usr/share/terminfo/78/xterm-256color"],
+    "libintl": ["usr/bin/msys-intl-8.dll"],
+    "libiconv": ["usr/bin/msys-iconv-2.dll"]
+  }
+}

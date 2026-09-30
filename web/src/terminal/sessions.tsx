@@ -596,6 +596,7 @@ export function WorkspaceTerminal({
           key={`${action.kind}:${action.session.id}`}
           action={action}
           busy={remote.busy}
+          environment={device.status === "online" ? device.environment : undefined}
           onClose={() => setAction(undefined)}
           onChange={remote.change}
         />

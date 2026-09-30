@@ -24,6 +24,7 @@ test("real rg respects ignore rules, excludes metadata and directory links, and 
   await writeFile(join(root, "ignored.txt"), "needle");
   await writeFile(join(root, ".visible"), "needle");
   await writeFile(join(root, "line\nname.txt"), "needle");
+  await writeFile(join(root, "literal\\name.txt"), "needle");
   await writeFile(Buffer.concat([Buffer.from(root + "/"), Buffer.from([0xff])]), "needle");
   await symlink(root, join(root, "loop"));
   const names = await searchFiles(root, "name", "", false, signal());
@@ -31,6 +32,7 @@ test("real rg respects ignore rules, excludes metadata and directory links, and 
     ".gitignore",
     ".visible",
     "line\nname.txt",
+    "literal\\name.txt",
   ]);
   expect(names.truncated).toBe(true);
   const all = await searchFiles(root, "content", "needle", true, signal());
@@ -38,6 +40,7 @@ test("real rg respects ignore rules, excludes metadata and directory links, and 
     ".visible",
     "ignored.txt",
     "line\nname.txt",
+    "literal\\name.txt",
   ]);
   expect(all.truncated).toBe(true);
 });

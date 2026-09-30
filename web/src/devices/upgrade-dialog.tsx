@@ -6,6 +6,12 @@ import { copyText } from "../lib/clipboard";
 import { ErrorNotice } from "../components/error-notice";
 import { Button } from "../components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
+import { AgentPlatformChoice, type AgentPlatform } from "./agent-platform";
+
+interface Upgrade {
+  version: string;
+  commands: Record<AgentPlatform, string>;
+}
 
 export function UpgradeDialog({
   deviceName,
@@ -17,14 +23,16 @@ export function UpgradeDialog({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const [upgrade, setUpgrade] = useState<{ version: string; command: string }>();
+  const [upgrade, setUpgrade] = useState<Upgrade>();
+  const [platform, setPlatform] = useState<AgentPlatform>("linux");
   const [error, setError] = useState<unknown>();
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState("");
+  const [copyError, setCopyError] = useState<{ text: string; error: unknown }>();
   const [pending, setPending] = useState(false);
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
-    void api<{ version: string; command: string }>("/api/agent/upgrade-command", {
+    void api<Upgrade>("/api/agent/upgrade-command", {
       signal: controller.signal,
     })
       .then((value) => {
@@ -36,16 +44,18 @@ export function UpgradeDialog({
     return () => controller.abort();
   }, [attempt]);
 
+  const command = upgrade?.commands[platform];
+  const visibleCopyError = copyError?.text === command ? copyError?.error : undefined;
   async function copy() {
-    if (!upgrade) return;
-    setCopied(false);
-    setError(undefined);
+    if (!command) return;
+    setCopied("");
+    setCopyError(undefined);
     setPending(true);
     try {
-      await copyText(upgrade.command);
-      setCopied(true);
+      await copyText(command);
+      setCopied(command);
     } catch (error) {
-      setError(error);
+      setCopyError({ text: command, error });
     } finally {
       setPending(false);
     }
@@ -67,6 +77,7 @@ export function UpgradeDialog({
           </p>
           {upgrade ? (
             <>
+              <AgentPlatformChoice value={platform} onChange={setPlatform} />
               <p>{t(($) => $.devices.upgradeTarget, { version: upgrade.version })}</p>
               <p className="text-muted-foreground">{t(($) => $.devices.upgradeHint)}</p>
               <Button
@@ -75,20 +86,20 @@ export function UpgradeDialog({
                 onPointerDown={(event) => event.preventDefault()}
                 onClick={() => void copy()}
               >
-                {copied ? <Check /> : <Copy />}
-                {copied ? t(($) => $.common.copied) : t(($) => $.devices.copyUpgrade)}
+                {copied === command ? <Check /> : <Copy />}
+                {copied === command ? t(($) => $.common.copied) : t(($) => $.devices.copyUpgrade)}
               </Button>
               <pre className="max-h-64 overflow-auto rounded bg-muted p-3 text-xs" tabIndex={0}>
-                {upgrade.command}
+                {command}
               </pre>
             </>
           ) : (
             !error && <p role="status">{t(($) => $.common.loading)}</p>
           )}
-          {!!error && (
+          {!!(error || visibleCopyError) && (
             <div role="alert" className="break-words text-destructive">
-              {upgrade && <p>{t(($) => $.devices.upgradeCopyFailed)}</p>}
-              <ErrorNotice error={error} />
+              {!!visibleCopyError && <p>{t(($) => $.devices.upgradeCopyFailed)}</p>}
+              <ErrorNotice error={error || visibleCopyError} />
             </div>
           )}
           {!upgrade && !!error && (

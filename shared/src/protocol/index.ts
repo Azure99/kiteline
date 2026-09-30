@@ -124,7 +124,16 @@ export interface Device {
   lastSeenAt: string | null;
   snapshot?: Metadata;
   editorBytes?: number;
+  environment?: AgentEnvironment;
   release?: { agentVersion: string | null; serverVersion: string; observedAt: string };
+}
+export interface AgentEnvironment {
+  os: "linux" | "windows";
+  homePath: string;
+  rootPaths: string[];
+  cliPath: string;
+  dataDir: string;
+  runDir: string;
 }
 export interface Entry {
   name: string;
@@ -426,6 +435,53 @@ export function integer(value: unknown, name: string, min: number, max: number):
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < min || value > max)
     throw new AppError("invalid_argument", `Invalid ${name}`);
   return value;
+}
+export function windowsName(value: string) {
+  if (
+    /[<>:"/\\|?*]/.test(value) ||
+    [...value].some((character) => character.charCodeAt(0) < 32) ||
+    /[. ]$/.test(value) ||
+    /^(?:con|prn|aux|nul|conin\$|conout\$|com[1-9\u00b9\u00b2\u00b3]|lpt[1-9\u00b9\u00b2\u00b3]) *(?:\.|$)/i.test(
+      value,
+    )
+  )
+    throw new AppError("invalid_argument", "This name is not a regular Windows file name");
+  return value;
+}
+export function absolutePath(value: unknown, os: AgentEnvironment["os"]) {
+  const path = string(value, "absolute path");
+  if (os === "linux") {
+    if (!path.startsWith("/"))
+      throw new AppError("invalid_argument", "An absolute directory path is required");
+  } else {
+    const root =
+      /^(?:[a-z]:[/\\]|[/\\]{2}(?![.?][/\\])[^/\\:?*|<>]+[/\\]([^/\\:?*|<>]+)(?:[/\\]|$))/i.exec(
+        path,
+      );
+    if (!root || [...path].some((character) => character.charCodeAt(0) < 32))
+      throw new AppError("invalid_argument", "A full Windows drive or UNC path is required");
+    if (root[1] && /[. ]$/.test(root[1]))
+      throw new AppError("invalid_argument", "Invalid Windows share name");
+    for (const part of path.slice(root[0].length).split(/[/\\]/))
+      if (part && part !== "." && part !== "..") windowsName(part);
+  }
+  return path;
+}
+export function checkEnvironment(value: unknown): AgentEnvironment {
+  const input = record(value);
+  if (input.os !== "linux" && input.os !== "windows")
+    throw new AppError("invalid_argument", "Unsupported agent operating system");
+  if (!Array.isArray(input.rootPaths) || !input.rootPaths.length)
+    throw new AppError("invalid_argument", "Device root paths are required");
+  const os = input.os;
+  return {
+    os,
+    homePath: absolutePath(input.homePath, os),
+    rootPaths: input.rootPaths.map((path) => absolutePath(path, os)),
+    cliPath: absolutePath(input.cliPath, os),
+    dataDir: absolutePath(input.dataDir, os),
+    runDir: absolutePath(input.runDir, os),
+  };
 }
 export function checkShortcutIcon(value: unknown): ShortcutIcon | undefined {
   if (value === undefined) return undefined;

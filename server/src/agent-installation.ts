@@ -5,6 +5,11 @@ import { pipeline } from "node:stream/promises";
 import { AppError, appVersion } from "@kiteline/shared/protocol";
 
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+const psQuote = (value: string) => `'${value.replaceAll("'", "''")}'`;
+const windowsLauncher = "(Join-Path $env:ProgramData 'kiteline-agent/kiteline-agent.ps1')";
+function powershellCommand(url: string, arguments_: string) {
+  return `& { $ErrorActionPreference = 'Stop'; $kitelinePolicy = Get-ExecutionPolicy -Scope Process; $kitelineScript = Join-Path ([IO.Path]::GetTempPath()) ('kiteline-connect-' + [Guid]::NewGuid().ToString('N') + '.ps1'); try { Set-ExecutionPolicy -Scope Process Bypass -Force; Invoke-WebRequest -Uri ${psQuote(url)} -OutFile $kitelineScript; & $kitelineScript ${arguments_} } finally { try { if ([IO.File]::Exists($kitelineScript)) { [IO.File]::Delete($kitelineScript) } } finally { Set-ExecutionPolicy -Scope Process $kitelinePolicy -Force } } }`;
+}
 function curlCommand(entryOrigin: string) {
   const protocols = entryOrigin.startsWith("https:") ? "=https" : "=http,https";
   return `curl -fsSL --proto '${protocols}' --proto-redir '${protocols}'`;
@@ -13,9 +18,17 @@ function curlCommand(entryOrigin: string) {
 export function installationCommands(entryOrigin: string, code: string) {
   const origin = quote(entryOrigin);
   const bind = `kiteline-agent check && printf '%s\\n' ${quote(code)} | kiteline-agent bind --server ${origin} --if-unbound`;
-  const command = (service: boolean) =>
-    `${curlCommand(entryOrigin)} ${quote(entryOrigin + "/connect.sh")} | sh -s -- ${quote(code)}${service ? " --service" : ""}`;
-  return { foreground: command(false), service: command(true), bind };
+  const install = `${curlCommand(entryOrigin)} ${quote(entryOrigin + "/connect.sh")} | sh -s -- ${quote(code)}`;
+  return {
+    linux: { install, bind },
+    windows: {
+      install: powershellCommand(
+        entryOrigin + "/connect.ps1",
+        `-Version ${psQuote(appVersion)} -Code ${psQuote(code)}`,
+      ),
+      bind: `& (Join-Path $PSHOME 'pwsh.exe') -NoProfile -ExecutionPolicy Bypass -File ${windowsLauncher} check; if ($LASTEXITCODE -eq 0) { ${psQuote(code)} | & (Join-Path $PSHOME 'pwsh.exe') -NoProfile -ExecutionPolicy Bypass -File ${windowsLauncher} bind --server ${psQuote(entryOrigin)} --if-unbound }`,
+    },
+  };
 }
 
 function connectionScript(entryOrigin: string) {
@@ -23,8 +36,8 @@ function connectionScript(entryOrigin: string) {
 set -eu
 
 connect() {
-    if [ "$#" -ne 1 ] && ! { [ "$#" -eq 2 ] && [ "$2" = --service ]; }; then
-        echo 'Usage: sh -s -- CODE [--service]' >&2
+    if [ "$#" -ne 1 ]; then
+        echo 'Usage: sh -s -- CODE' >&2
         exit 1
     fi
     [ -n "$1" ] || { echo 'Missing binding code; generate a connection command in the web app' >&2; exit 1; }
@@ -33,6 +46,9 @@ connect() {
     done
     kiteline_install=$(mktemp /var/tmp/kiteline-install.XXXXXX)
     trap 'rm -f "$kiteline_install"' EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
     ${curlCommand(entryOrigin)} ${quote(entryOrigin + "/install.sh")} -o "$kiteline_install"
     kiteline_code=$1
     shift
@@ -46,8 +62,24 @@ connect "$@"
 export function upgradeCommand(entryOrigin: string) {
   return {
     version: appVersion,
-    command: `(kiteline_script=$(${curlCommand(entryOrigin)} ${quote(entryOrigin + "/upgrade.sh")}) && sh -c "$kiteline_script" -- --version ${quote(appVersion)})`,
+    commands: {
+      linux: `(kiteline_script=$(${curlCommand(entryOrigin)} ${quote(entryOrigin + "/upgrade.sh")}) && sh -c "$kiteline_script" -- --version ${quote(appVersion)})`,
+      windows: powershellCommand(entryOrigin + "/upgrade.ps1", `-Version ${psQuote(appVersion)}`),
+    },
   };
+}
+
+function windowsScript(entryOrigin: string, mode: "Connect" | "Upgrade") {
+  return `param([string]$Version, [string]$Code)
+$ErrorActionPreference = 'Stop'
+if ($PSVersionTable.PSVersion.Major -lt 7 -or -not $IsWindows) { throw 'Use PowerShell 7 on Windows' }
+if ($Version -cne ${psQuote(appVersion)}) { throw 'The server release changed; obtain a new command from the web app' }
+$kitelineInstaller = Join-Path ([IO.Path]::GetTempPath()) ('kiteline-install-' + [Guid]::NewGuid().ToString('N') + '.ps1')
+try {
+    Invoke-WebRequest -Uri ${psQuote(entryOrigin + "/install.ps1")} -OutFile $kitelineInstaller
+    & $kitelineInstaller -Mode ${mode} -Server ${psQuote(entryOrigin)} -Version $Version -Code $Code
+} finally { if ([IO.File]::Exists($kitelineInstaller)) { [IO.File]::Delete($kitelineInstaller) } }
+`;
 }
 
 function upgradeScript(entryOrigin: string) {
@@ -70,15 +102,23 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 kiteline_upgrade=$(mktemp -d /var/tmp/kiteline-agent-upgrade.XXXXXX)
 trap 'rm -rf "$kiteline_upgrade"' EXIT
+kiteline_interrupted=0
+trap 'kiteline_interrupted=129' HUP
+trap 'kiteline_interrupted=130' INT
+trap 'kiteline_interrupted=143' TERM
 kiteline_name="kiteline-agent-${appVersion}-linux-$kiteline_arch.tar.gz"
 kiteline_base=${quote(entryOrigin + "/downloads/agent/" + appVersion + "/")}"$kiteline_name"
 ${curlCommand(entryOrigin)} "$kiteline_base" -o "$kiteline_upgrade/$kiteline_name"
 ${curlCommand(entryOrigin)} "$kiteline_base.sha256" -o "$kiteline_upgrade/$kiteline_name.sha256"
+[ "$kiteline_interrupted" -eq 0 ] || exit "$kiteline_interrupted"
+kiteline_result=0
 if [ "$(id -u)" -eq 0 ]; then
-  /usr/local/bin/kiteline-agent service upgrade --archive "$kiteline_upgrade/$kiteline_name"
+  /usr/local/bin/kiteline-agent upgrade --archive "$kiteline_upgrade/$kiteline_name" || kiteline_result=$?
 else
-  sudo -- /usr/local/bin/kiteline-agent service upgrade --archive "$kiteline_upgrade/$kiteline_name"
+  sudo -- /usr/local/bin/kiteline-agent upgrade --archive "$kiteline_upgrade/$kiteline_name" || kiteline_result=$?
 fi
+[ "$kiteline_interrupted" -eq 0 ] || kiteline_result=$kiteline_interrupted
+exit "$kiteline_result"
 `;
 }
 
@@ -93,6 +133,9 @@ export async function serveAgentInstallation(
     path !== "/connect.sh" &&
     path !== "/upgrade.sh" &&
     path !== "/install.sh" &&
+    path !== "/connect.ps1" &&
+    path !== "/upgrade.ps1" &&
+    path !== "/install.ps1" &&
     !path.startsWith("/downloads/")
   )
     return false;
@@ -100,9 +143,13 @@ export async function serveAgentInstallation(
     response.writeHead(405, { allow: "GET, HEAD" }).end();
     return true;
   }
-  if (path === "/connect.sh" || path === "/upgrade.sh") {
+  if (["/connect.sh", "/upgrade.sh", "/connect.ps1", "/upgrade.ps1"].includes(path)) {
     const script =
-      path === "/connect.sh" ? connectionScript(entryOrigin) : upgradeScript(entryOrigin);
+      path === "/connect.sh"
+        ? connectionScript(entryOrigin)
+        : path === "/upgrade.sh"
+          ? upgradeScript(entryOrigin)
+          : windowsScript(entryOrigin, path === "/connect.ps1" ? "Connect" : "Upgrade");
     response.writeHead(200, {
       "content-type": "text/plain; charset=utf-8",
       "content-length": Buffer.byteLength(script),
@@ -112,12 +159,16 @@ export async function serveAgentInstallation(
     response.end(request.method === "HEAD" ? undefined : script);
     return true;
   }
-  let filename = path === "/install.sh" ? "install.sh" : undefined;
+  let filename = ["/install.sh", "/install.ps1"].includes(path) ? path.slice(1) : undefined;
   for (const arch of ["amd64", "arm64"])
     for (const suffix of [".tar.gz", ".tar.gz.sha256"]) {
       const name = `kiteline-agent-${appVersion}-linux-${arch}${suffix}`;
       if (path === `/downloads/agent/${appVersion}/${name}`) filename = name;
     }
+  for (const suffix of [".zip", ".zip.sha256"]) {
+    const name = `kiteline-agent-${appVersion}-windows-amd64${suffix}`;
+    if (path === `/downloads/agent/${appVersion}/${name}`) filename = name;
+  }
   if (!filename) throw new AppError("not_found", "Installation resource not found");
   const file = await open(resolve(directory, filename), "r").catch(
     (error: NodeJS.ErrnoException) => {
@@ -134,7 +185,9 @@ export async function serveAgentInstallation(
     response.writeHead(200, {
       "content-type": filename.endsWith(".tar.gz")
         ? "application/gzip"
-        : "text/plain; charset=utf-8",
+        : filename.endsWith(".zip")
+          ? "application/zip"
+          : "text/plain; charset=utf-8",
       "content-length": info.size,
       "cache-control": "no-cache",
       "content-disposition": `attachment; filename="${filename}"`,

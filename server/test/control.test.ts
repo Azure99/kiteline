@@ -9,7 +9,21 @@ import { WebSocket } from "ws";
 import { createKitelineServer } from "../src/app.js";
 import { Store } from "../src/store.js";
 import type { ServerConfig } from "../src/config.js";
-import { appVersion, limits, protocolVersion } from "@kiteline/shared/protocol";
+import {
+  appVersion,
+  limits,
+  protocolVersion,
+  type AgentEnvironment,
+} from "@kiteline/shared/protocol";
+
+const environment: AgentEnvironment = {
+  os: "linux",
+  homePath: "/home/project",
+  rootPaths: ["/"],
+  cliPath: "/usr/local/bin/kiteline-agent",
+  dataDir: "/var/tmp/kiteline-data",
+  runDir: "/var/tmp/kiteline-run",
+};
 
 const agentPath = `/api/agent/control?protocolVersion=${protocolVersion}&appVersion=${appVersion}`;
 const webPath = (path: string) =>
@@ -73,6 +87,7 @@ async function fixture() {
     socket.send(
       JSON.stringify({
         type: "hello",
+        environment,
         editorBytes: 2000,
         snapshot: {
           schemaVersion: 1,
@@ -96,29 +111,43 @@ test("last connected records successful hello, not metadata updates or disconnec
   const peer = await f.device();
   const connected = f.store.devices()[0]!.lastSeenAt;
   expect(connected).not.toBeNull();
+  expect(f.app.connections.devices()[0]!.environment).toEqual(environment);
   const snapshot = f.app.connections.devices()[0]!.snapshot!;
   peer.socket.send(
     JSON.stringify({ type: "metadata.snapshot", snapshot: { ...snapshot, revision: 1 } }),
   );
   await expect.poll(() => f.store.devices()[0]!.snapshot?.revision).toBe(1);
   expect(f.store.devices()[0]!.lastSeenAt).toBe(connected);
+  expect(f.app.connections.devices()[0]!.environment).toEqual(environment);
   peer.socket.close();
   await expect.poll(() => f.app.connections.devices()[0]!.status).toBe("offline");
+  expect(f.app.connections.devices()[0]!.environment).toBeUndefined();
+  expect(f.store.devices()[0]).not.toHaveProperty("environment");
   expect(f.store.devices()[0]!.lastSeenAt).toBe(connected);
   const next = new WebSocket(f.origin.replace("http:", "ws:") + agentPath, {
     headers: { authorization: `Bearer ${peer.deviceToken}` },
   });
   await once(next, "open");
   expect(f.store.devices()[0]!.lastSeenAt).toBe(connected);
+  const windows: AgentEnvironment = {
+    os: "windows",
+    homePath: "C:\\Users\\Project",
+    rootPaths: ["C:\\", "D:\\"],
+    cliPath: "C:\\Program Files\\Kiteline\\bin\\kiteline-agent.ps1",
+    dataDir: "C:\\kiteline-state",
+    runDir: "C:\\kiteline-run",
+  };
   next.send(
     JSON.stringify({
       type: "hello",
+      environment: windows,
       editorBytes: 2000,
       snapshot,
     }),
   );
   await expect.poll(() => f.app.connections.devices()[0]!.status).toBe("online");
   expect(f.store.devices()[0]!.lastSeenAt! > connected!).toBe(true);
+  expect(f.app.connections.devices()[0]!.environment).toEqual(windows);
 });
 
 test("long RPC diagnostics preserve the reply and the device connection", async () => {
@@ -401,10 +430,33 @@ test("version refusal is visible, blocks all device tools, and does not replace 
     headers: { authorization: `Bearer ${healthy.deviceToken}` },
   });
   await once(invalid, "open");
-  invalid.send(JSON.stringify({ type: "hello", editorBytes: 0, snapshot: {} }));
+  invalid.send(JSON.stringify({ type: "hello", environment, editorBytes: 0, snapshot: {} }));
   await once(invalid, "close");
   expect(healthy.socket.readyState).toBe(WebSocket.OPEN);
   expect(f.app.connections.devices().find((d) => d.id === healthy.deviceId)).toEqual(before);
+});
+
+test("missing or invalid current environment cannot replace a healthy connection", async () => {
+  const f = await fixture();
+  const peer = await f.device();
+  const before = f.app.connections.devices()[0]!;
+  for (const value of [undefined, { ...environment, os: "windows", homePath: "C:relative" }]) {
+    const socket = new WebSocket(f.origin.replace("http:", "ws:") + agentPath, {
+      headers: { authorization: `Bearer ${peer.deviceToken}` },
+    });
+    await once(socket, "open");
+    socket.send(
+      JSON.stringify({
+        type: "hello",
+        environment: value,
+        editorBytes: 2000,
+        snapshot: before.snapshot,
+      }),
+    );
+    await once(socket, "close");
+    expect(peer.socket.readyState).toBe(WebSocket.OPEN);
+    expect(f.app.connections.devices()[0]).toEqual(before);
+  }
 });
 
 test("pending device handshakes are owned by revocation and server shutdown", async () => {
@@ -421,6 +473,7 @@ test("pending device handshakes are owned by revocation and server shutdown", as
     JSON.stringify({
       type: "hello",
       editorBytes: 1000,
+      environment,
       snapshot: {
         schemaVersion: 1,
         revision: 0,
@@ -477,15 +530,20 @@ test("binding returns versioned installation commands from the current request o
   );
   expect(response.status).toBe(200);
   const value = await response.json();
-  expect(value.commands.foreground).toBe(
+  expect(value.commands.linux.install).toBe(
     `curl -fsSL --proto '=http,https' --proto-redir '=http,https' '${f.origin}/connect.sh' | sh -s -- '${value.code}'`,
   );
-  expect(value.commands.foreground).not.toContain("--service");
-  expect(value.commands.service).toContain("--service");
-  expect(value.commands.bind).toBe(
+  expect(Object.keys(value.commands).sort()).toEqual(["linux", "windows"]);
+  expect(Object.keys(value.commands.linux).sort()).toEqual(["bind", "install"]);
+  expect(Object.keys(value.commands.windows).sort()).toEqual(["bind", "install"]);
+  expect(value.commands.linux.bind).toBe(
     `kiteline-agent check && printf '%s\\n' '${value.code}' | kiteline-agent bind --server '${f.origin}' --if-unbound`,
   );
   expect(f.store.binding(value.bindingId).status).toBe("pending");
+  expect(value.commands.windows.install).toContain(`${f.origin}/connect.ps1`);
+  expect(value.commands.windows.install).toContain(`-Code '${value.code}'`);
+  expect(value.commands.windows.bind).toContain(`'${value.code}' | &`);
+  expect(value.commands.windows.bind).toContain(`bind --server '${f.origin}' --if-unbound`);
   const entry = await f.call("/connect.sh");
   expect(entry.status).toBe(200);
   const script = await entry.text();
@@ -511,14 +569,58 @@ test("the matching upgrade command is available to an authenticated stale Web re
   expect(response.status).toBe(200);
   const value = await response.json();
   expect(value.version).toBe(appVersion);
-  expect(value.command).toContain(`${f.origin}/upgrade.sh`);
+  expect(Object.keys(value).sort()).toEqual(["commands", "version"]);
+  expect(value.commands.linux).toContain(`${f.origin}/upgrade.sh`);
+  expect(value.commands.windows).toContain(`${f.origin}/upgrade.ps1`);
   const script = await (await fetch(f.origin + "/upgrade.sh")).text();
   expect(script).toContain(`${f.origin}/downloads/agent/${appVersion}/`);
-  expect(script).toContain("service upgrade --archive");
+  expect(script).toContain("kiteline-agent upgrade --archive");
   expect(script).not.toContain("--yes");
   expect(script).not.toContain("kiteline-agent bind");
-  expect(value.command).not.toContain("--yes");
-  expect(value.command).not.toContain("kiteline-agent bind");
+  for (const command of Object.values(value.commands)) {
+    expect(command).not.toContain("--yes");
+    expect(command).not.toContain("kiteline-agent bind");
+  }
+});
+
+test("Windows scripts and exact ZIP resources support GET and HEAD without SPA fallback", async () => {
+  const f = await fixture();
+  const zip = `kiteline-agent-${appVersion}-windows-amd64.zip`;
+  for (const [path, file, type] of [
+    [`/downloads/agent/${appVersion}/${zip}`, zip, "application/zip"],
+    [`/downloads/agent/${appVersion}/${zip}.sha256`, `${zip}.sha256`, "text/plain; charset=utf-8"],
+    ["/install.ps1", "install.ps1", "text/plain; charset=utf-8"],
+  ]) {
+    expect((await f.call(path!)).status).toBe(404);
+    const bytes = Buffer.from(`resource ${file}`);
+    await writeFile(join(f.config.downloadsDir, file!), bytes);
+    const response = await f.call(path!);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe(type);
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes);
+    const head = await f.call(path!, "HEAD");
+    expect(head.headers.get("content-length")).toBe(String(bytes.length));
+    expect(head.headers.get("cache-control")).toBe("no-cache");
+    expect(await head.text()).toBe("");
+    expect((await f.call(path!, "POST")).status).toBe(405);
+  }
+  for (const path of ["/connect.ps1", "/upgrade.ps1"]) {
+    const response = await f.call(path);
+    const script = await response.text();
+    expect(response.status).toBe(200);
+    expect(script).toContain(`${f.origin}/install.ps1`);
+    expect(script).toContain(`$Version -cne '${appVersion}'`);
+    const head = await f.call(path, "HEAD");
+    expect(head.headers.get("content-length")).toBe(String(Buffer.byteLength(script)));
+    expect(await head.text()).toBe("");
+    expect((await f.call(path, "POST")).status).toBe(405);
+  }
+  for (const path of [
+    `/downloads/agent/old/${zip}`,
+    `/downloads/agent/${appVersion}/kiteline-agent-${appVersion}-windows-arm64.zip`,
+    `/downloads/agent/${appVersion}/${zip}/extra`,
+  ])
+    expect((await f.call(path)).status).toBe(404);
 });
 
 test("server stop closes a request whose JSON body has not finished", async () => {
@@ -623,6 +725,7 @@ test("absolute expiry cancels RPC without an event socket and connection replace
       type: "hello",
       editorBytes: 2000,
       snapshot: f.app.connections.devices()[0]!.snapshot,
+      environment,
     }),
   );
   expect(await (await old).json()).toMatchObject({ id: "old", outcome: "unknown" });
