@@ -15,6 +15,7 @@ import {
   origin,
   requestOrigin,
   requireVersion,
+  serverError,
   sessionCookie,
 } from "./http.js";
 import { bearer, Connections } from "./connections.js";
@@ -30,7 +31,8 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
   const connections = new Connections(store);
   const channels = new Channels(connections, config);
   const proxy = new HttpProxy(config, store, connections, channels);
-  const limiter = new AttemptLimiter();
+  const bindingLimiter = new AttemptLimiter();
+  const authenticationLimiter = new AttemptLimiter();
   function login(request: IncomingMessage, entryOrigin: string) {
     const session = store.session(cookie(request, entryOrigin));
     if (!session) throw new AppError("unauthenticated", "Please sign in");
@@ -53,7 +55,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
     if (path === "/healthz" && method === "GET")
       return json(response, 200, { status: "ok", version: appVersion });
     if (path === "/api/agent/bind" && method === "POST") {
-      limiter.check(request.socket.remoteAddress ?? "unknown");
+      bindingLimiter.check(request.socket.remoteAddress ?? "unknown");
       const input = record(await body(request));
       const result = store.bind(
         string(input.code, "binding code", 128),
@@ -67,7 +69,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       if (path === "/api/bootstrap" && method === "GET")
         return json(response, 200, { initialized: store.initialized() });
       if ((path === "/api/setup" || path === "/api/login") && method === "POST") {
-        limiter.check(request.socket.remoteAddress ?? "unknown");
+        authenticationLimiter.check(request.socket.remoteAddress ?? "unknown");
         const input = record(await body(request));
         const value = password(input.password);
         if (path === "/api/setup")
@@ -193,6 +195,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
     } catch {
       throw new AppError("invalid_argument", "Invalid URL path");
     }
+    if (decodedPath.includes("\0")) throw new AppError("invalid_argument", "Invalid URL path");
     const file = resolve(config.webDir, "." + decodedPath);
     if (file !== config.webDir && !file.startsWith(config.webDir + sep))
       throw new AppError("not_found", "File not found");
@@ -276,7 +279,8 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
         );
       } else
         socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n", () => socket.destroy());
-    } catch (error) {
+    } catch (cause) {
+      const error = serverError(cause);
       const status = errorStatus(error);
       const payload = JSON.stringify({ error: asError(error) });
       socket.end(

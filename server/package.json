@@ -1,5 +1,6 @@
 {
   "name": "@kiteline/server",
+  "license": "Apache-2.0",
   "private": true,
   "type": "module",
   "files": [
@@ -9,6 +10,6 @@
     "@kiteline/shared": "workspace:*",
     "bcryptjs": "3.0.3",
     "proper-lockfile": "4.1.2",
-    "ws": "8.18.3"
+    "ws": "8.21.0"
   }
 }

@@ -30,8 +30,8 @@ SHA256 matches. Build outputs include input and file identities; assembly reject
 changed recipes, missing files and mismatched hashes. Assembly records the verified
 file hashes in the component identity. Use `verify OUTPUT` for an independent
 check of an existing component tree. Packaging must verify the
-component output again against the current source. A successful cross-build is
-not Windows runtime acceptance.
+component output again against the current source. Validate the assembled package
+on Windows 11 with its actual terminal, file and installation paths.
 
 The private runtime contains only the listed executables/DLLs, the console
 helper, and the two terminal entries used by the managed preset: xterm-256color

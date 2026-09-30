@@ -1,10 +1,12 @@
 # 安装与运行
 
-设备端面向Linux amd64/arm64、Windows amd64及macOS 11 x86_64，server仍为Linux。运行前提见[平台要求](#平台要求)。源码开发见[仓库入口](../README.md)。
+设备端提供Linux amd64/arm64、Windows amd64及macOS amd64包，server提供Linux amd64/arm64包及镜像。系统与工具要求见[运行基线](#平台要求)，源码开发见[仓库入口](../README.md)。
 
 ## 生成交付物
 
-在已安装依赖的源码目录执行；构建机需要 Docker BuildKit（Dockerfile 1.6+）、binutils的readelf，以及libarchive-tools的bsdtar校验server所携带的跨平台agent归档，可通过 binfmt/QEMU 构建另一架构。用户运行发布包不需要 npm 或编译器。基础镜像、Node、amd64 rg官方归档及用于引导系统CA的Ubuntu证书包身份集中在[release.json](release.json)，构建不使用反代镜像。rg与适用许可证随包归档，不参与Node重编。
+使用[package.json](../package.json)固定的Node和pnpm。Linux构建机需要Docker BuildKit、binutils的readelf、libarchive-tools的bsdtar，以及Windows组包所需zip；可通过binfmt/QEMU执行另一架构的构建。基础镜像、Node、rg和Ubuntu证书包身份集中在[release.json](release.json)。用户运行发布包无需npm或编译器。
+
+只构建Linux amd64及对应server的命令：
 
 ```sh
 pnpm install --frozen-lockfile
@@ -13,11 +15,13 @@ pnpm package server amd64 --agent-target=linux-amd64
 pnpm images amd64
 ```
 
-上述单平台构建命令只打Linux amd64，并在server中提供该目标接入包。Windows先按[固定组件构建](windows-components.md)生成并验证组件，再执行`pnpm package agent windows-amd64 --windows-components=/var/tmp/kiteline-win-components`；组包需要zip，产物不含符号链接，不要求目标开启Developer Mode。完整交付先构建Linux两种agent、Windows和macOS agent，再省略server的`--agent-target`；也可明确逗号分隔的所携带目标，ARM64 server配方仍为`pnpm package server arm64`、`pnpm images arm64`，串行控制内存。包及对应`.sha256`在`dist/releases/`；产品版本来自[version.json](../shared/src/version.json)，镜像名为`kiteline-server:<版本>-<amd64|arm64>`。不构建Windows容器，也不自动发布镜像；跨机器可用`docker save/load`搬运。清单记录commit、dirty、平台、实际输入sourceDigest、组件及校验；组装server发现来源不一致时要求重建agent。
+`--agent-target`选择server携带的agent，可用逗号分隔多个目标；省略时携带全部四个目标。Windows先按[固定组件构建](windows-components.md)生成并验证组件；其ZIP不含符号链接，目标机无需Developer Mode。macOS构建步骤见下文。
 
-`package agent amd64`自动构建/复用静态组件；也可单独用 `node scripts/build-agent-static.mjs` 预构建到`dist/agent-static-amd64/`。来源与SHA在[agent-static.json](agent-static.json)，工具链版本在[agent-static-packages.txt](agent-static-packages.txt)；固定官方Node源码，无Node补丁。首次构建需数GiB内存和较长编译时间，Node固定3个编译任务，8GiB构建机避免同时运行其他重负载。Docker分别缓存Node/native阶段，业务JS变更不触发Node重编；工具链清单变更会使两者重编，验证时不能用旧缓存命中替代冷构建。源下载缓存在`/var/tmp/kiteline-release-cache`并核验SHA。输出携带许可证、实际工具包清单、输入身份和文件校验，ELF检查拒绝动态加载器或库依赖。组件升级需同步来源/工具链和代表环境验收，不能只替换二进制。
+包及对应`.sha256`位于`dist/releases/`；产品版本来自[version.json](../shared/src/version.json)，镜像名为`kiteline-server:<版本>-<amd64|arm64>`。跨机器可用`docker save/load`搬运镜像。清单记录commit、dirty、平台、sourceDigest及组件身份；组装server和构建镜像时核对当前来源、版本和目标，来源不一致须重建相应包。
 
-macOS原生组件使用[固定输入](agent-macos.json)及Darwin x64构建环境，需要匹配架构的 macOS 构建机、Command Line Tools 和 SDK，部署目标 11.0。先在源码目录准备输入，再将完整输入目录传至macOS构建机；使用固定Node运行其中同一脚本，输出目录须不存在：
+`package agent amd64`自动构建/复用静态组件；也可单独用`node scripts/build-agent-static.mjs`构建到`dist/agent-static-amd64/`。来源与SHA在[agent-static.json](agent-static.json)，工具链版本在[agent-static-packages.txt](agent-static-packages.txt)。首次构建需要数GiB内存和较长编译时间，Node固定3个编译任务，8GiB构建机应串行安排重负载。Docker分别缓存Node/native阶段；源码、脚本、工具链或构建输入模式变化可能使相关缓存失效。源下载缓存在`/var/tmp/kiteline-release-cache`并核验SHA。输出携带许可证、工具包清单、输入身份和文件校验，静态ELF检查拒绝动态加载器或库依赖。组件升级同步来源、工具链和对应环境验收。
+
+macOS原生组件使用[固定输入](agent-macos.json)及Darwin x64构建环境，需要 Command Line Tools 和 SDK，部署目标 11.0。先在源码目录准备输入，再将完整输入目录传至macOS构建机；使用固定Node运行其中同一脚本，输出目录须不存在：
 
 ```sh
 node scripts/build-macos-components.mjs prepare /var/tmp/kiteline-mac-inputs
@@ -30,7 +34,22 @@ node scripts/build-macos-components.mjs verify /var/tmp/kiteline-mac-components
 pnpm package agent macos-amd64 --macos-components=/var/tmp/kiteline-mac-components
 ```
 
-macOS组包使用固定Node/pnpm、Git及系统tar，无需Linux Docker/readelf；server携带此包时将`macos-amd64`加入`--agent-target`。组件输入/文件摘要核验仍在组包入口执行，包名`kiteline-agent-<版本>-macos-amd64.tar.gz`中的amd64对应x86_64。
+macOS组包使用固定Node/pnpm、Git及系统tar，组件输入和文件摘要在组包入口再次核验。包名中的amd64对应x86_64。
+
+完整交付从相同源码构建四个agent。将macOS生成的包及`.sha256`放入Linux源码侧`dist/releases/`，然后依次组装两个server和镜像：
+
+```sh
+pnpm package agent amd64
+pnpm package agent arm64
+pnpm package agent windows-amd64 --windows-components=/var/tmp/kiteline-win-components
+# 确认同源macOS包及.sha256已放入dist/releases/。
+pnpm package server amd64
+pnpm package server arm64
+pnpm images amd64
+pnpm images arm64
+```
+
+各包根目录包含项目LICENSE；第三方许可位置见[随包材料](#随包材料)。组包后检查各实际包及镜像的启动，以及受影响的安装升级流程。
 
 ## Server 部署
 
@@ -45,7 +64,7 @@ docker compose -f deploy/compose.yaml logs server
 
 打开 http://localhost:8443。上述版本读取命令在源码根目录执行；仅导入镜像时，直接将 `KITELINE_VERSION` 设置为导入的发布版本。局域网访问时在启动前另设 `KITELINE_HTTP_BIND=0.0.0.0`，然后打开 `http://主机IP:8443`；端口可按需更改。
 
-使用已有 HTTPS 反代时，设置 `KITELINE_TRUST_PROXY_PROTO=1` 后运行同一 Compose 命令。反代将 HTTPS 入口转到发布的 HTTP 端口，保留原 Host（含端口）、覆盖 `X-Forwarded-Proto`，普通请求与 WebSocket Upgrade 都要处理。反代必须允许 WebSocket、SSE、流式响应与上传，不缓冲流式正文、不自动重放写请求，并为长连接设置合适期限。同一实例可同时使用多个域名和 HTTP 地址，各入口分别登录；不配置单一公开 URL。
+HTTP直连可正常使用；建议有反代时使用HTTPS。使用HTTPS反代时，设置 `KITELINE_TRUST_PROXY_PROTO=1` 后运行同一 Compose 命令。反代将 HTTPS 入口转到发布的 HTTP 端口，保留原 Host（含端口）、覆盖 `X-Forwarded-Proto`，普通请求与 WebSocket Upgrade 都要处理。反代必须允许 WebSocket、SSE、流式响应与上传，不缓冲流式正文、不自动重放写请求，并为长连接设置合适期限。同一实例可同时使用多个域名和 HTTP 地址，各入口分别登录；不配置单一公开 URL。
 
 反代在另一主机/容器时，可设置 `KITELINE_HTTP_BIND` 为可达的宿主地址，或将反代接入 Compose 网络、使用 `http://server:8080`。另一容器的 `127.0.0.1` 不是宿主机。ARM64 镜像另设 `KITELINE_ARCH=arm64`。
 
@@ -57,9 +76,9 @@ docker compose -f deploy/compose.yaml run --rm --no-deps server setup-token
 docker compose -f deploy/compose.yaml up -d server
 ```
 
-已初始化后的密码恢复将中间命令换成 `reset-password`，按提示输入新密码。不要换空卷；原登录会话会失效。备份可停止 server 后备份整个 `server-data` 卷，agent 登记和凭据单独备份，项目文件沿原方式备份。
+已初始化后的密码恢复将中间命令换成 `reset-password`，按提示输入新密码（输入不回显，Enter提交，Ctrl+C取消）。使用原卷；原登录会话会失效。备份可停止 server 后备份整个 `server-data` 卷，agent 登记和凭据单独备份，项目文件沿原方式备份。
 
-原生 server：校验并解压完整 server 包到 `/opt/kiteline-server`，创建专用 `kiteline` 用户及其可写的 `/var/lib/kiteline`，将 [unit](kiteline-server.service) 安装为 `/etc/systemd/system/kiteline-server.service`。创建 `/etc/kiteline-server.env`，默认可只写 `KITELINE_TRUST_PROXY_PROTO=0`；接 HTTPS 反代时改为1，需要局域网直连或自定义端口时设置 `KITELINE_LISTEN_ADDR=0.0.0.0:8443`。执行 `systemctl daemon-reload`、`systemctl enable --now kiteline-server`，查看 `journalctl -u kiteline-server` 取得初始化 token。
+原生 server：校验并解压完整 server 包到 `/opt/kiteline-server`，创建专用 `kiteline` 用户及归其所有的 `/var/lib/kiteline`，将 [unit](kiteline-server.service) 安装为 `/etc/systemd/system/kiteline-server.service`。创建 `/etc/kiteline-server.env`，默认可只写 `KITELINE_TRUST_PROXY_PROTO=0`；接 HTTPS 反代时改为1，需要局域网直连或自定义端口时设置 `KITELINE_LISTEN_ADDR=0.0.0.0:8443`。执行 `systemctl daemon-reload`、`systemctl enable --now kiteline-server`，查看 `journalctl -u kiteline-server` 取得初始化 token。
 
 未初始化而 token 过期或遗失时，以同一专用用户和原管理目录重新生成：
 
@@ -69,7 +88,7 @@ sudo -u kiteline /opt/kiteline-server/bin/kiteline-server setup-token --data-dir
 systemctl start kiteline-server
 ```
 
-已初始化后的密码恢复，将中间命令的 `setup-token` 换为 `reset-password`，按提示输入新密码；原登录会话会失效。两种恢复均须保持原管理目录，不能指向另一空目录。
+已初始化后的密码恢复，将中间命令的 `setup-token` 换为 `reset-password`，按上述不回显方式输入新密码；原登录会话会失效。两种恢复均使用原管理目录。
 
 ## 原生 Agent
 
@@ -89,7 +108,7 @@ apk add curl ca-certificates tar gzip coreutils musl-utils git openssh-client nc
 yum install -y curl ca-certificates tar gzip coreutils openssh-clients ncurses glibc-common util-linux
 ```
 
-Linux用`locale -a`确认已安装的UTF-8 locale，`locale charmap`应输出UTF-8。CentOS 7 可使用已安装的`en_US.UTF-8`；若已安装，可在启动Shell中执行`export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8`。LC_ALL优先于LC_CTYPE和LANG。后台须在用户所选管理器中配置同样环境，不能假定C.UTF-8在目标系统存在；应用目录配置文件不会自动加载locale。
+Linux用`locale -a`确认已安装的UTF-8 locale，`locale charmap`应输出UTF-8。例如已安装`en_US.UTF-8`时，可在启动Shell中执行`export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8`。LC_ALL优先于LC_CTYPE和LANG。后台管理器需配置同样环境；应用目录配置文件只解析目录项。
 
 Node、recorder、固定 tmux、terminfo 和文件 helper 已随包提供，无需 npm/编译器。安装失败后先处理具体原因，再执行命令；绑定码已过期则在网页重新生成。程序已安装但绑定失败时不重复替换安装；已有身份或不同版本会停止，不自动重绑/升级。若已登记但未在线，先核对本地凭据和 `kiteline-agent run` 输出；凭据丢失在网页撤销残留身份并重新生成绑定码，不能把未知结果当成普通过期重试。
 
@@ -121,7 +140,7 @@ sudo kiteline-agent upgrade --archive "/path/to/$kiteline_package.tar.gz"
 sudo kiteline-agent uninstall
 ```
 
-升级归档与`.sha256`放在一起。Mac沿Linux的程序/目录配置布局和事务规则；不自动授权TCC、清quarantine或关闭Gatekeeper。
+升级归档与`.sha256`放在一起。Mac沿Linux的程序/目录配置布局和事务规则；TCC、quarantine或Gatekeeper提示由用户按系统要求处理，见[macOS设备端](#平台要求)。
 
 Windows手工安装在PowerShell 7中校验ZIP后解压；`$version`设为下载的实际版本：
 
@@ -263,3 +282,7 @@ linked worktree 同时挂载工作目录、gitDir 和 commonDir；`.git` 指向�
 设备还需 Git 2.23+、SSH、有效 UTF-8 locale 和项目使用的 Shell/CLI。Linux 静态包不替代这些外部程序的系统依赖，也不加载 glibc NSS 插件或动态 Node addon。Linux 文件发布要求内核与文件系统支持 `renameat2(RENAME_NOREPLACE)`；CentOS 7.9 amd64 基线为含此回移植的 `3.10.0-1160.el7.x86_64`。
 
 macOS 组件在匹配架构的 macOS 构建机上编译，需要 Command Line Tools 和 SDK；部署目标为 11.0。
+
+## 随包材料
+
+各包包含项目 LICENSE。Web 第三方材料位于 `licenses/`，原生材料位于 `native/licenses/`，Windows 对应源码位于 `native/sources/`；随实际组件保留其已有文件。

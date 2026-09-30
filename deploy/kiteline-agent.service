@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-# Copy and edit explicitly. The application does not install or control this unit.
+# Set the project account, home directory, PATH and an installed UTF-8 locale.
 User=YOUR_PROJECT_USER
 WorkingDirectory=/home/YOUR_PROJECT_USER
 Environment=HOME=/home/YOUR_PROJECT_USER

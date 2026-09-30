@@ -435,7 +435,7 @@ export function Files({
               <FolderInput />
             </IconButton>
             <IconButton
-              label={t(($) => $.files.deleteSelected)}
+              label={t(($) => $.common.delete)}
               disabled={!enabled}
               onClick={() => selectedAction("delete")}
             >

@@ -176,6 +176,12 @@ export class TerminalDisplay {
             : uri;
         };
         const leaveLink = () => this.element.removeAttribute("title");
+        let savedFontSize = 0;
+        try {
+          savedFontSize = Number(localStorage.getItem("kiteline.terminal-font-size"));
+        } catch {
+          // Font preferences are optional when browser storage is unavailable.
+        }
         const terminal = new Terminal({
           ...terminalOptions(integer(frame.historyLines, "historyLines", 0, 50000)),
           cols: integer(frame.cols, "cols", 1, 10000),
@@ -183,11 +189,7 @@ export class TerminalDisplay {
           fontFamily: "'Cascadia Code', 'DejaVu Sans Mono', monospace",
           fontSize: Math.max(
             10,
-            Math.min(
-              24,
-              Number(localStorage.getItem("kiteline.terminal-font-size")) ||
-                (matchMedia("(max-width: 959px)").matches ? 12 : 13),
-            ),
+            Math.min(24, savedFontSize || (matchMedia("(max-width: 959px)").matches ? 12 : 13)),
           ),
           lineHeight: 1.2,
           cursorBlink: true,
@@ -331,7 +333,11 @@ export class TerminalDisplay {
     if (!this.terminal) return;
     const size = Math.max(10, Math.min(24, (this.terminal.options.fontSize ?? 13) + delta));
     this.terminal.options.fontSize = size;
-    localStorage.setItem("kiteline.terminal-font-size", String(size));
+    try {
+      localStorage.setItem("kiteline.terminal-font-size", String(size));
+    } catch {
+      // The current terminal still uses the selected size.
+    }
     this.resize();
   }
   paste(text: string) {

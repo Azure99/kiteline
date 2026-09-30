@@ -74,9 +74,9 @@ test("existing errors are translated at display time without changing diagnostic
     result = { completed: ["one"] };
   const error = new ApiError("conflict", "original diagnostic", "unknown", details, result);
   await setLanguagePreference("en");
-  expect(errorMessage(error)).toContain("The result is unknown");
+  expect(errorMessage(error)).toContain("Result unconfirmed");
   await setLanguagePreference("zh-CN");
-  expect(errorMessage(error)).toContain("结果未知");
+  expect(errorMessage(error)).toContain("结果未确认");
   expect(errorMessage(error)).toContain("[conflict] original diagnostic");
   expect(error).toMatchObject({
     code: "conflict",

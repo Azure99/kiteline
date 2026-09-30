@@ -12,7 +12,8 @@ export CFLAGS="-O2 -mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET"
 export LDFLAGS="-mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET"
 export TMPDIR="$build/tmp"
 mkdir -p "$TMPDIR" "$build/libevent" "$build/tmux" "$build/flock" \
-  "$output/native/bin" "$output/native/share/terminfo" "$output/native/licenses"
+  "$output/native/bin" "$output/native/share/terminfo" "$output/native/licenses" \
+  "$output/native/sources"
 
 tar -xzf "$inputs/libevent.tar.gz" -C "$build/libevent" --strip-components=1
 cd "$build/libevent"
@@ -31,6 +32,7 @@ LIBEVENT_CORE_CFLAGS="-I$build/dependencies/include" \
 make -j2
 cp tmux "$output/native/bin/tmux"
 cp COPYING "$output/native/licenses/tmux.txt"
+cp "$inputs/tmux.tar.gz" "$output/native/sources/tmux.tar.gz"
 
 tar -xzf "$inputs/flock.tar.gz" -C "$build/flock" --strip-components=1
 cd "$build/flock"
@@ -51,6 +53,7 @@ done
 sed 's/pairs#0x10000,/pairs#32767,/' "$inputs/native/tmux.terminfo" >"$build/tmux.terminfo"
 printf '\tbox1@,\n' >>"$build/tmux.terminfo"
 tic -x -o "$output/native/share/terminfo" "$build/tmux.terminfo"
+cp "$inputs/native/tmux-terminfo-LICENSE" "$output/native/licenses/terminfo.txt"
 TERMINFO="$output/native/share/terminfo" infocmp -x -1 tmux-256color >"$build/terminfo.actual"
 for capability in 'pairs#32767,' 'AX,' 'BE=\E[?2004h,' 'BD=\E[?2004l,' \
   'Ms=\E]52;%p1%s;%p2%s\007,' 'kDC3=\E[3;3~,'; do

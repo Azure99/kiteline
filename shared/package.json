@@ -1,5 +1,6 @@
 {
   "name": "@kiteline/shared",
+  "license": "Apache-2.0",
   "private": true,
   "type": "module",
   "files": [
@@ -23,6 +24,6 @@
   },
   "dependencies": {
     "@xterm/addon-unicode11": "0.9.0",
-    "ws": "8.18.3"
+    "ws": "8.21.0"
   }
 }

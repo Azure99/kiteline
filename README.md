@@ -1,15 +1,15 @@
 # Kiteline
 
-单人自托管的远程工作台，受控设备支持 Linux 与 Windows，server 部署在 Linux。
+单人自托管的远程工作台，通过桌面或手机浏览器使用 Linux、Windows 和 macOS 设备上的终端、文件、Git 与定时任务。server 部署在 Linux。
 
-正式包、前台运行及用户自管后台部署见 [安装与运行](deploy/README.md)。项目不注册或控制系统服务。
+安装包、前台运行及后台部署见 [安装与运行](deploy/README.md)，平台要求见 [运行基线](deploy/README.md#平台要求)。后台服务由用户配置和管理。
 
 ## 从源码开发
 
 开发环境使用 [package.json](package.json) 指定的 Node 和 pnpm。Ubuntu 原生组件构建需要 `build-essential pkg-config libevent-dev libncurses-dev ncurses-term bison curl patch`，运行设备工具还需要 Git 2.23.0+ 和 Shell。amd64组件准备会取得固定rg到内部路径，不要求系统rg；Linux arm64 需要外部 rg 14+，运行基线为 Ubuntu 24.04。
 
 ```sh
-pnpm install
+pnpm install --frozen-lockfile
 pnpm native:build
 pnpm build
 KITELINE_DATA_DIR=/var/tmp/kiteline-dev/server pnpm dev
@@ -23,7 +23,7 @@ pnpm agent bind --server http://localhost:5173
 pnpm agent run
 ```
 
-可选 HTTPS 开发：启动 `pnpm dev` 时增加 `KITELINE_TRUST_PROXY_PROTO=1`，再运行以下本地 Caddy fixture（不属于产品部署）：
+可选 HTTPS 开发：启动 `pnpm dev` 时增加 `KITELINE_TRUST_PROXY_PROTO=1`，再运行本地 Caddy：
 
 ```sh
 docker run --rm --name kiteline-dev-caddy --network host \
@@ -55,7 +55,11 @@ pnpm test
 pnpm build
 ```
 
-真实文件/进程测试需要先构建原生组件。
+文件和进程测试需要先构建原生组件。
+
+## 许可证
+
+项目使用 [Apache-2.0](LICENSE)。随包第三方组件保留各自的许可证和版权声明，位置见 [随包材料](deploy/README.md#随包材料)。
 
 ## 终端适配
 

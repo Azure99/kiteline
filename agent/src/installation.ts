@@ -106,9 +106,28 @@ export async function lockInstallationManagement() {
 }
 export async function readInstallation(): Promise<Installation | undefined> {
   try {
-    return JSON.parse(await readFile(installationFile, "utf8")) as Installation;
+    const value = JSON.parse(await readFile(installationFile, "utf8"));
+    if (
+      !value ||
+      typeof value !== "object" ||
+      Array.isArray(value) ||
+      typeof value.user !== "string" ||
+      !value.user ||
+      !Number.isSafeInteger(value.uid) ||
+      value.uid < 0 ||
+      !Number.isSafeInteger(value.gid) ||
+      value.gid < 0 ||
+      typeof value.home !== "string" ||
+      !isAbsolute(value.home)
+    )
+      throw new Error("Invalid installation record");
+    return value as Installation;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+      throw new Error(
+        `${installationFile}: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
   }
 }
 export async function installationPaths(

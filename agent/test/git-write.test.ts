@@ -87,6 +87,72 @@ test("stage and unstage exact names on unborn HEAD, keeping other staged data", 
   await expect(readFile(join(root, name))).rejects.toMatchObject({ code: "ENOENT" });
   expect(await cli("ls-files", "-z")).toBe("third\0");
 });
+test("selected repositories and linked worktrees own storage while retaining identity and hooks", async () => {
+  const { root, repo, cli, repos, workspace, write } = await setup();
+  const other = await setup();
+  await write("base.txt", "base\n");
+  await cli("add", ".");
+  await cli("commit", "-m", "base");
+  await other.write("other.txt", "other\n");
+  await other.cli("add", ".");
+  await other.cli("commit", "-m", "other");
+  const linked = join(root, "linked");
+  await cli("worktree", "add", "-b", "linked", linked);
+  const hooks = join(root, "hooks");
+  await mkdir(hooks);
+  await writeFile(
+    join(hooks, "pre-commit"),
+    "#!/bin/sh\ngit diff --cached --name-only > hook-seen\n",
+  );
+  await chmod(join(hooks, "pre-commit"), 0o755);
+  const config = join(process.env.HOME!, ".gitconfig");
+  await writeFile(config, `[core]\n\thooksPath = ${hooks}\n`);
+  const cleanEnv = { ...process.env };
+  const otherIndex = await readFile(join(other.root, ".git/index"));
+  const otherHead = await other.cli("rev-parse", "HEAD");
+  for (const [name, value] of Object.entries({
+    GIT_DIR: join(other.root, ".git"),
+    GIT_WORK_TREE: other.root,
+    GIT_COMMON_DIR: join(other.root, ".git"),
+    GIT_INDEX_FILE: join(other.root, ".git/index"),
+    GIT_OBJECT_DIRECTORY: join(other.root, ".git/objects"),
+    GIT_CONFIG_GLOBAL: config,
+    GIT_AUTHOR_NAME: "Selected Author",
+    GIT_AUTHOR_EMAIL: "selected@example.test",
+  }))
+    vi.stubEnv(name, value);
+  try {
+    const found = await repos.discover(workspace.id, undefined, signal());
+    expect(found.complete).toBe(true);
+    const linkedRepo = found.repos.find((candidate) => candidate.rootPath === linked)!;
+    expect(found.repos.find((candidate) => candidate.id === repo.id)).toBeDefined();
+    expect(linkedRepo.commonDir).toBe(repo.commonDir);
+    expect(linkedRepo.gitDir).not.toBe(repo.gitDir);
+    for (const selected of [repo, linkedRepo]) {
+      await writeFile(join(selected.rootPath, "selected.txt"), selected.rootPath + "\n");
+      expect(
+        (await status(selected, 0, undefined, signal())).entries.some(
+          (entry) => entry.path === "selected.txt",
+        ),
+      ).toBe(true);
+      await changeIndex(selected, ["selected.txt"], "stage", signal());
+      await commit(selected, "selected", (await observeIndex(selected, signal())).token, signal());
+      const actual = await exec("git", ["log", "-1", "--format=%an <%ae>: %s"], {
+        cwd: selected.rootPath,
+        env: cleanEnv,
+      });
+      expect(actual.stdout).toBe("Selected Author <selected@example.test>: selected\n");
+      expect(await readFile(join(selected.rootPath, "hook-seen"), "utf8")).toBe("selected.txt\n");
+    }
+    expect(await readFile(join(other.root, ".git/index"))).toEqual(otherIndex);
+    expect(
+      (await exec("git", ["rev-parse", "HEAD"], { cwd: other.root, env: cleanEnv })).stdout,
+    ).toBe(otherHead);
+  } finally {
+    await repos.close();
+    await other.repos.close();
+  }
+});
 test.each(["stage", "unstage", "discard"])(
   "%s blocks an unselected non-UTF-8 index descendant before writing",
   async (kind) => {

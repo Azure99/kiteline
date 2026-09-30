@@ -62,7 +62,9 @@ export function taskRecord(value: unknown, filename: string): TaskRecord {
   string(task.cwd, "cwd");
   string(task.timezone, "timezone", 128);
   const fields = taskFields(task);
-  nextOccurrence(fields.schedule, fields.timezone, new Date());
+  const next = nextOccurrence(fields.schedule, fields.timezone, new Date());
+  if (fields.schedule.kind === "cron" && !next)
+    throw new AppError("invalid_argument", "Schedule has no future occurrence");
   const onceStatus =
     fields.schedule.kind === "once" ? taskValue(task.onceStatus, "onceStatus") : undefined;
   if (fields.schedule.kind === "cron" && task.onceStatus !== undefined)

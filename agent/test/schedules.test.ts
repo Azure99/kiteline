@@ -63,6 +63,43 @@ async function finished(tasks: ScheduledTasks, id: string, timeout = 8000) {
   return tasks.run(id);
 }
 
+test("case-equivalent identities are rejected while original IDs survive restart and deletion", async () => {
+  const f = await fixture();
+  let restored: ScheduledTasks | undefined;
+  try {
+    await f.tasks.create("ReviewTask", input(f.root, "printf result"), signal);
+    const path = join(f.root, "tasks", "ReviewTask.json");
+    const before = await readFile(path, "utf8");
+    await expect(f.tasks.create("reviewtask", input(f.root), signal)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    expect(await readFile(path, "utf8")).toBe(before);
+    await f.tasks.create("Other", input(f.root), signal);
+    await f.tasks.start("ReviewTask", "ReviewRun", signal);
+    await finished(f.tasks, "ReviewRun");
+    await expect(f.tasks.start("Other", "reviewrun", signal)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    expect(() => f.tasks.get("reviewtask")).toThrow("does not exist");
+    expect(() => f.tasks.run("reviewrun")).toThrow("does not exist");
+    await f.tasks.close();
+    restored = new ScheduledTasks(f.config);
+    await restored.load();
+    expect(restored.get("ReviewTask").id).toBe("ReviewTask");
+    expect(restored.run("ReviewRun").taskId).toBe("ReviewTask");
+    expect((await restored.output("ReviewRun", "stdout", 0, 32, signal)).text).toBe("result");
+    await restored.delete("ReviewTask", undefined, signal);
+    await expect(readFile(path)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(join(f.root, "tasks", "ReviewRun.stdout"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    expect(restored.get("Other").id).toBe("Other");
+  } finally {
+    await restored?.close();
+    await f.close();
+  }
+});
+
 test("scheduled command admission, pause, immutable parameters, revision and bounded records", async () => {
   const f = await fixture({ taskHistoryRuns: 2 });
   try {
@@ -655,8 +692,15 @@ test.each([
   "broken JSON",
   "unknown state",
   "invalid definition",
+  "unschedulable definition",
   "non-file output",
   "duplicate run",
+  "case-equivalent task",
+  "case-equivalent run",
+  "output identity",
+  "orphan output identity",
+  "task suffix",
+  "output suffix",
   "summary budget",
 ])(
   "%s disables every task RPC before any startup write while the real agent stays usable",
@@ -692,6 +736,27 @@ test.each([
         data.task.name = null;
         await writeFile(path, JSON.stringify(data));
       }
+      if (kind === "unschedulable definition") {
+        data.task.schedule = { kind: "cron", expression: "0 0 30 2 *" };
+        await writeFile(path, JSON.stringify(data));
+      }
+      if (kind === "case-equivalent task") {
+        data.task.id = "BAD";
+        await writeFile(join(directory, "BAD.json"), JSON.stringify(data));
+      }
+      if (kind === "case-equivalent run") {
+        data.runs = [{ ...good.runs[0], id: "BEFORE", taskId: "bad" }];
+        await writeFile(path, JSON.stringify(data));
+      }
+      if (kind === "output identity")
+        await rename(join(directory, "before.stdout"), join(directory, "BEFORE.stdout"));
+      if (kind === "orphan output identity") {
+        await writeFile(join(directory, "Loose.stdout"), "one");
+        await writeFile(join(directory, "loose.stderr"), "two");
+      }
+      if (kind === "task suffix") await rename(path, join(directory, "bad.JSON"));
+      if (kind === "output suffix")
+        await rename(join(directory, "before.stdout"), join(directory, "before.STDOUT"));
       if (kind === "non-file output") {
         await mkdir(join(directory, "bad.stdout"));
         await writeFile(join(directory, "bad.stdout/keep"), "user content");
@@ -919,6 +984,9 @@ test("retention failures do not erase completed results or release residual outp
     expect((await finished(f.tasks, "second")).state).toBe("succeeded");
     await f.tasks.create("other", input(f.root), signal);
     await expect(f.tasks.start("other", "first", signal)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    await expect(f.tasks.start("other", "FIRST", signal)).rejects.toMatchObject({
       code: "conflict",
     });
     await f.tasks.start("other", "third", signal);

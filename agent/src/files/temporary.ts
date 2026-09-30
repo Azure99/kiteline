@@ -54,9 +54,25 @@ export class TemporaryFiles {
 
   async load() {
     try {
-      this.records = (await readJson(this.path)) as TemporaryRecord[];
+      const records = await readJson(this.path);
+      if (!Array.isArray(records)) throw new Error("Temporary records must be an array");
+      for (const [index, record] of records.entries()) {
+        if (
+          !record ||
+          typeof record !== "object" ||
+          Array.isArray(record) ||
+          ["name", "parent", "parentDev", "parentIno", "dev", "ino"].some(
+            (key) => typeof record[key] !== "string",
+          )
+        )
+          throw new Error(`Invalid temporary record at index ${index}`);
+      }
+      this.records = records;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+        throw new Error(`${this.path}: ${error instanceof Error ? error.message : String(error)}`, {
+          cause: error,
+        });
     }
     for (const record of this.records) void this.clean(record);
   }

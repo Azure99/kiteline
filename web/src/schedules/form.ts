@@ -1,5 +1,6 @@
 import type { ScheduledTask, ScheduledTaskInput, TaskSchedule } from "@kiteline/shared/protocol";
 import { ApiError } from "../lib/api";
+import { i18n } from "../i18n";
 
 export type SchedulePreset = "once" | "hourly" | "daily" | "weekly" | "cron";
 export interface ScheduleForm {
@@ -40,13 +41,13 @@ export function scheduleForm(schedule?: TaskSchedule): ScheduleForm {
     : { ...form, preset: "cron", cron: expression };
 }
 
-export function formSchedule(form: ScheduleForm, original?: TaskSchedule): TaskSchedule {
+export function formSchedule(
+  form: ScheduleForm,
+  original?: TaskSchedule,
+  initialOnce?: string,
+): TaskSchedule {
   // An unchanged date control must not lose the saved seconds or consume a new once plan.
-  if (
-    original?.kind === "once" &&
-    form.preset === "once" &&
-    form.once === localDateTime(original.at)
-  )
+  if (original?.kind === "once" && form.preset === "once" && form.once === initialOnce)
     return original;
   if (form.preset === "once") {
     const date = new Date(form.once);
@@ -76,6 +77,27 @@ export function taskChanges(
   return changes;
 }
 
-export function taskTime(at: string, language: string | undefined, timezone?: string) {
-  return new Date(at).toLocaleString(language, { timeZone: timezone, timeZoneName: "shortOffset" });
+export function taskTime(at: string, language: string | undefined) {
+  const date = new Date(at);
+  if (!Number.isFinite(date.valueOf())) return i18n.t(($) => $.schedules.timeUnavailable);
+  try {
+    const parts = new Intl.DateTimeFormat(language, {
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit",
+      timeZoneName: "shortOffset",
+    }).formatToParts(date);
+    const time = parts
+      .filter((part) => part.type !== "timeZoneName")
+      .map((part) => part.value)
+      .join("")
+      .trim();
+    const offset = parts.find((part) => part.type === "timeZoneName")!.value;
+    return `${time} ${offset}`;
+  } catch {
+    return `${date.toISOString()} (UTC)`;
+  }
 }

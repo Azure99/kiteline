@@ -56,6 +56,19 @@ test("leaving a workspace cancels its active discovery without returning a dead 
   await cancelled;
   await repos.close();
 });
+test("discovery retains a distinct mixed-case metadata name on a case-sensitive volume", async () => {
+  const { root, cli, workspace, repos } = await setup();
+  const nested = join(root, ".GiT", "project");
+  await mkdir(nested, { recursive: true });
+  await cli("-C", nested, "init");
+  try {
+    const found = await repos.discover(workspace.id, undefined, signals());
+    expect(found.complete).toBe(true);
+    expect(found.repos.map((repo) => repo.path).sort()).toEqual([".", ".GiT/project"]);
+  } finally {
+    await repos.close();
+  }
+});
 test("returning to a workspace keeps discovery started after leaving", async () => {
   const { workspace, repos } = await setup();
   const old = repos.discover(workspace.id, undefined, signals());

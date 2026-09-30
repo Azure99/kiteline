@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "./ui/button";
 import { ErrorNotice } from "./error-notice";
 import { ReleaseNotice } from "./release-notice";
+import { useServerVersion, webCompatible } from "../lib/release";
 
 function Loading() {
   const { t } = useTranslation();
@@ -13,19 +14,24 @@ function Loading() {
     </div>
   );
 }
-function Failure({ error }: { error: unknown }) {
+function Failure({ error, releaseNotice = false }: { error: unknown; releaseNotice?: boolean }) {
   const { t } = useTranslation();
+  useServerVersion();
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-4">
-      <ReleaseNotice />
+      {releaseNotice && <ReleaseNotice />}
       <ErrorNotice error={error} />
-      <p className="text-sm text-muted-foreground">{t(($) => $.release.reloadDrafts)}</p>
-      <div className="flex flex-wrap gap-2">
-        <Button variant="outline" onClick={() => location.reload()}>
-          <RefreshCw />
-          {t(($) => $.release.reload)}
-        </Button>
-      </div>
+      {webCompatible() && (
+        <>
+          <p className="text-sm text-muted-foreground">{t(($) => $.release.reloadDrafts)}</p>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => location.reload()}>
+              <RefreshCw />
+              {t(($) => $.release.reload)}
+            </Button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -45,7 +51,11 @@ export class ViewBoundary extends Component<
 }
 export function deferredView<P extends object>(
   load: () => Promise<{ default: ComponentType<P> }>,
-  options: { active?: (props: P) => boolean; isolateRenderErrors?: boolean } = {},
+  options: {
+    active?: (props: P) => boolean;
+    isolateRenderErrors?: boolean;
+    releaseNotice?: boolean;
+  } = {},
 ) {
   return function DeferredView(props: P) {
     const visible = options.active?.(props) ?? true;
@@ -79,7 +89,7 @@ export function deferredView<P extends object>(
         <result.View {...props} />
       ) : visible ? (
         result.kind === "failed" ? (
-          <Failure error={result.error} />
+          <Failure error={result.error} releaseNotice={options.releaseNotice} />
         ) : (
           <Loading />
         )

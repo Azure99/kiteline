@@ -14,7 +14,7 @@ import {
 import { CursorBudget } from "../cursor-budget.js";
 import type { MetadataStore } from "../metadata.js";
 import { commandLine, git } from "./process.js";
-import { entryInfo, realPath } from "../files/paths.js";
+import { entryInfo, realPath, sameObject } from "../files/paths.js";
 
 interface Scan {
   workspaceId: string;
@@ -237,7 +237,14 @@ export class Repositories {
           } else if (name.toString() !== ".git") {
             const path = join(frame.path, name.toString());
             try {
-              if ((await entryInfo(path)).isDirectory()) scan.stack.push({ path, checked: false });
+              const info = await entryInfo(path);
+              if (info.isDirectory()) {
+                if (name.toString().toLowerCase() === ".git") {
+                  const metadata = await exists(join(frame.path, ".git"));
+                  if (metadata && sameObject(info, metadata)) continue;
+                }
+                scan.stack.push({ path, checked: false });
+              }
             } catch (error) {
               signal.throwIfAborted();
               if (!add({ path: relative(root, path).split(sep).join("/"), error: asError(error) }))

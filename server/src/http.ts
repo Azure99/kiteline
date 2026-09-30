@@ -46,18 +46,26 @@ export function json(response: ServerResponse, status: number, value: unknown) {
   response.end(JSON.stringify(value));
 }
 export async function body(request: IncomingMessage): Promise<unknown> {
-  let size = 0;
-  const parts: Buffer[] = [];
-  for await (const part of request) {
-    size += part.length;
-    if (size > limits.controlMessageBytes)
-      throw new AppError("limit_exceeded", "Request exceeds the size limit");
-    parts.push(part);
-  }
+  const timer = setTimeout(
+    () => request.destroy(new AppError("timeout", "JSON body reception timed out")),
+    30_000,
+  ).unref();
   try {
-    return JSON.parse(Buffer.concat(parts).toString("utf8"));
-  } catch {
-    throw new AppError("invalid_argument", "Invalid JSON");
+    let size = 0;
+    const parts: Buffer[] = [];
+    for await (const part of request) {
+      size += part.length;
+      if (size > limits.controlMessageBytes)
+        throw new AppError("limit_exceeded", "Request exceeds the size limit");
+      parts.push(part);
+    }
+    try {
+      return JSON.parse(Buffer.concat(parts).toString("utf8"));
+    } catch {
+      throw new AppError("invalid_argument", "Invalid JSON");
+    }
+  } finally {
+    clearTimeout(timer);
   }
 }
 export function requestOrigin(request: IncomingMessage, trustProxyProto: boolean) {
@@ -107,7 +115,17 @@ export function errorStatus(error: unknown) {
   };
   return statuses[asError(error).code] ?? 500;
 }
-export function failure(response: ServerResponse, error: unknown) {
+export function serverError(error: unknown) {
+  if (error instanceof AppError) return error;
+  console.error(
+    "Unexpected server error:",
+    error instanceof Error ? (error.stack ?? error.message) : "Non-Error exception",
+  );
+  return new AppError("io_error", "Internal server error");
+}
+export function failure(response: ServerResponse, cause: unknown) {
+  const error = serverError(cause);
+  if (response.destroyed) return;
   if (response.headersSent) response.destroy();
   else json(response, errorStatus(error), { error: asError(error) });
 }

@@ -38,6 +38,8 @@ try {
   cpSync(resolve(source, "tmux"), resolve(destination, "bin/tmux"));
   mkdirSync(resolve(destination, "licenses"), { recursive: true });
   cpSync(resolve(source, "COPYING"), resolve(destination, "licenses/tmux.txt"));
+  mkdirSync(resolve(destination, "sources"), { recursive: true });
+  cpSync(tarball, resolve(destination, "sources/tmux.tar.gz"));
   const libraries = {};
   if (process.env.KITELINE_BUNDLE_LIBS === "1") {
     const linked = spawnSync("ldd", [resolve(destination, "bin/tmux")], { encoding: "utf8" });

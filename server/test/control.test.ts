@@ -793,6 +793,35 @@ test("server stop closes a request whose JSON body has not finished", async () =
   }
 });
 
+test("normal setup, login and binding accept JSON and retain the device across logout", async () => {
+  const f = await fixture();
+  const setup = await f.call("/api/setup", "POST", {
+    setupToken: f.store.newSetupToken(),
+    password: "test-password",
+  });
+  expect(setup.status).toBe(200);
+  const cookie = setup.headers.get("set-cookie")!.split(";")[0]!;
+  const binding = await f.call("/api/bindings", "POST", {}, cookie);
+  expect(binding.status).toBe(200);
+  const { code, bindingId } = await binding.json();
+  const bound = await f.call("/api/agent/bind", "POST", { code, name: "Test device" });
+  expect(bound.status).toBe(200);
+  const identity = await bound.json();
+  expect(f.store.binding(bindingId).deviceId).toBe(identity.deviceId);
+  expect((await f.call("/api/logout", "POST", {}, cookie)).status).toBe(200);
+  const login = await f.call("/api/login", "POST", { password: "test-password" });
+  expect(login.status).toBe(200);
+  const devices = await f.call(
+    "/api/devices",
+    "GET",
+    undefined,
+    login.headers.get("set-cookie")!.split(";")[0],
+  );
+  expect(await devices.json()).toMatchObject({
+    devices: [{ id: identity.deviceId, name: "Test device" }],
+  });
+});
+
 test("owner setup, cookie, binding consumption, revocation and password recovery", async () => {
   const f = await fixture();
   const setupToken = f.store.newSetupToken();

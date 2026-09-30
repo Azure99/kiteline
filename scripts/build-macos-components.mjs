@@ -33,6 +33,7 @@ const sourceFiles = [
   "native/macos/entry-name.c",
   "native/tmux-paste.patch",
   "native/tmux.terminfo",
+  "native/tmux-terminfo-LICENSE",
 ];
 const downloads = {
   "node.tar.xz": {

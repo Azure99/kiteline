@@ -10,6 +10,7 @@ import { returnToService } from "./lib/login-return";
 
 const Workbench = deferredView(async () => ({ default: (await import("./workbench")).Workbench }), {
   isolateRenderErrors: false,
+  releaseNotice: true,
 });
 
 export function App() {

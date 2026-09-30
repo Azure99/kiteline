@@ -16,6 +16,29 @@ interface Options {
   env?: NodeJS.ProcessEnv;
   write?: boolean;
 }
+const repositoryEnvironment = new Set([
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_COMMON_DIR",
+  "GIT_INDEX_FILE",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_SHALLOW_FILE",
+  "GIT_GRAFT_FILE",
+  "GIT_REPLACE_REF_BASE",
+  "GIT_NAMESPACE",
+  "GIT_REFERENCE_BACKEND",
+  "GIT_CEILING_DIRECTORIES",
+  "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+  "GIT_IMPLICIT_WORK_TREE",
+  "GIT_PREFIX",
+  "GIT_INTERNAL_SUPER_PREFIX",
+  "GIT_QUARANTINE_PATH",
+  "GIT_LITERAL_PATHSPECS",
+  "GIT_GLOB_PATHSPECS",
+  "GIT_NOGLOB_PATHSPECS",
+  "GIT_ICASE_PATHSPECS",
+]);
 export async function git(
   root: string,
   args: string[],
@@ -24,13 +47,9 @@ export async function git(
 ) {
   signal.throwIfAborted();
   const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0", ...options.env };
-  for (const name of [
-    "GIT_LITERAL_PATHSPECS",
-    "GIT_GLOB_PATHSPECS",
-    "GIT_NOGLOB_PATHSPECS",
-    "GIT_ICASE_PATHSPECS",
-  ])
-    delete env[name];
+  for (const name of Object.keys(env))
+    if (repositoryEnvironment.has(process.platform === "win32" ? name.toUpperCase() : name))
+      delete env[name];
   const command = [
     "--no-pager",
     ...(options.write ? [] : ["--no-optional-locks", "-c", "color.ui=false"]),

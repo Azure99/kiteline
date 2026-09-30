@@ -238,16 +238,19 @@ export function TaskDetail({
             <p className="break-words">
               {task.nextRunAt
                 ? t(($) => $.schedules.next, {
-                    time: taskTime(task.nextRunAt, i18n.resolvedLanguage, task.timezone),
+                    time: taskTime(task.nextRunAt, i18n.resolvedLanguage),
                   })
                 : t(($) => $.schedules.noNext)}
               {task.onceStatus && ` · ${t(($) => $.schedules[`once_${task.onceStatus!}`])}`}
             </p>
             <p className="break-all">
-              {task.schedule.kind === "cron"
-                ? task.schedule.expression
-                : taskTime(task.schedule.at, i18n.resolvedLanguage, task.timezone)}{" "}
-              · {task.timezone}
+              {task.schedule.kind === "cron" ? (
+                <>
+                  {task.schedule.expression} · {t(($) => $.schedules.timezone)}: {task.timezone}
+                </>
+              ) : (
+                taskTime(task.schedule.at, i18n.resolvedLanguage)
+              )}
             </p>
             <p className="break-all">
               {t(($) => $.schedules.cwd)}: {task.cwd}
@@ -270,7 +273,7 @@ export function TaskDetail({
                 >
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm">
-                      {taskTime(run.acceptedAt, i18n.resolvedLanguage, task.timezone)}
+                      {taskTime(run.acceptedAt, i18n.resolvedLanguage)}
                     </span>
                     <span className="text-xs text-muted-foreground">
                       {t(($) => $.schedules[run.trigger])} ·{" "}

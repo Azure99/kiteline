@@ -184,19 +184,16 @@ export function RunDetail({
             </div>
             <div className="space-y-1 text-xs text-muted-foreground">
               <p>
-                {t(($) => $.schedules.accepted)}:{" "}
-                {taskTime(run.acceptedAt, i18n.resolvedLanguage, run.parameters.timezone)}
+                {t(($) => $.schedules.accepted)}: {taskTime(run.acceptedAt, i18n.resolvedLanguage)}
               </p>
               {run.startedAt && (
                 <p>
-                  {t(($) => $.schedules.started)}:{" "}
-                  {taskTime(run.startedAt, i18n.resolvedLanguage, run.parameters.timezone)}
+                  {t(($) => $.schedules.started)}: {taskTime(run.startedAt, i18n.resolvedLanguage)}
                 </p>
               )}
               {run.endedAt && (
                 <p>
-                  {t(($) => $.schedules.ended)}:{" "}
-                  {taskTime(run.endedAt, i18n.resolvedLanguage, run.parameters.timezone)}
+                  {t(($) => $.schedules.ended)}: {taskTime(run.endedAt, i18n.resolvedLanguage)}
                 </p>
               )}
               {run.reasonCode && <p>{t(($) => $.schedules[`reason_${run.reasonCode!}`])}</p>}

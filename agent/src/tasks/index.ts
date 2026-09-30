@@ -17,7 +17,7 @@ import {
   type TaskSnapshot,
 } from "@kiteline/shared/protocol";
 import { atomicJson, readJson, type AgentConfig } from "../config.js";
-import { checkTaskInput, nextOccurrence, previewSchedule } from "./schedule.js";
+import { checkTaskInput, nextOccurrence, previewSchedule, taskId } from "./schedule.js";
 import { TaskProcess } from "./process.js";
 import { taskRecord, type TaskRecord } from "./record.js";
 
@@ -179,19 +179,31 @@ export class ScheduledTasks {
     try {
       await mkdir(this.directory, { recursive: true, mode: 0o700 });
       files = await readdir(this.directory);
-      const runs = new Set<string>();
-      for (const file of files.filter((name) => name.endsWith(".json"))) {
+      const runs = new Map<string, string>();
+      for (const file of files.filter((name) => /\.json$/i.test(name))) {
         source = join(this.directory, file);
+        if (!file.endsWith(".json")) throw new Error("Task state suffix must be .json");
         if (!(await lstat(source)).isFile()) throw new Error("Task state is not a regular file");
         const candidate = taskRecord(await readJson(source), file);
+        const key = candidate.task.id.toLowerCase();
+        if (candidates.has(key))
+          throw new Error(`Task ${candidate.task.id} conflicts with another task ID`);
         for (const run of candidate.runs) {
-          if (runs.has(run.id)) throw new Error(`Run ${run.id} belongs to multiple task files`);
-          runs.add(run.id);
+          const key = run.id.toLowerCase();
+          if (runs.has(key)) throw new Error(`Run ${run.id} conflicts with another run ID`);
+          runs.set(key, run.id);
         }
-        candidates.set(candidate.task.id, candidate);
+        candidates.set(key, candidate);
       }
-      for (const file of files.filter((name) => /\.(stdout|stderr)$/.test(name))) {
+      for (const file of files.filter((name) => /\.(stdout|stderr)$/i.test(name))) {
         source = join(this.directory, file);
+        if (!/\.(stdout|stderr)$/.test(file))
+          throw new Error("Output suffix must be .stdout or .stderr");
+        const id = taskId(file.replace(/\.(stdout|stderr)$/, ""), "runId");
+        const key = id.toLowerCase();
+        if (runs.has(key) && runs.get(key) !== id)
+          throw new Error(`Output ${file} conflicts with another run ID`);
+        runs.set(key, id);
         if (!(await lstat(source)).isFile()) throw new Error("Output is not a regular file");
         const output = await open(source, "r");
         try {
@@ -212,7 +224,7 @@ export class ScheduledTasks {
       this.reservedRuns.add(id);
       this.outputSize(id, bytes);
     }
-    for (const [id, candidate] of candidates) this.records.set(id, candidate);
+    for (const candidate of candidates.values()) this.records.set(candidate.task.id, candidate);
     for (const current of this.records.values()) {
       const record = structuredClone(current);
       for (const run of record.runs) {
@@ -324,7 +336,8 @@ export class ScheduledTasks {
   create(id: string, input: unknown, signal: AbortSignal) {
     return this.serial(async () => {
       await this.writable();
-      if (this.records.has(id)) throw new AppError("conflict", "Scheduled task ID already exists");
+      if ([...this.records.keys()].some((existing) => existing.toLowerCase() === id.toLowerCase()))
+        throw new AppError("conflict", "Scheduled task ID already exists");
       if (this.records.size >= this.config.limits.tasksPerDevice)
         throw new AppError("limit_exceeded", "Scheduled task count exceeds the device limit");
       const parameters = await checkTaskInput(input);
@@ -570,9 +583,12 @@ export class ScheduledTasks {
       throw new AppError("busy", "Review the unfinished run before starting another", {
         reviewRunId: record.task.reviewRunId,
       });
+    const key = runId.toLowerCase();
     if (
-      this.reservedRuns.has(runId) ||
-      [...this.records.values()].some((item) => item.runs.some((run) => run.id === runId))
+      [...this.reservedRuns].some((id) => id.toLowerCase() === key) ||
+      [...this.records.values()].some((item) =>
+        item.runs.some((run) => run.id.toLowerCase() === key),
+      )
     )
       throw new AppError("conflict", "Run ID already exists; query that run");
     const run = this.newRun(record, runId, scheduledAt);

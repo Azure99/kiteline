@@ -53,6 +53,7 @@ export function TaskEditor({
   const [cwd, setCwd] = useState(task?.cwd ?? "");
   const [timezone, setTimezone] = useState(task?.timezone ?? "");
   const [form, setForm] = useState(() => scheduleForm(task?.schedule));
+  const initialOnce = useRef(form.once);
   const [preview, setPreview] = useState<{ timezone: string; nextRunAts: string[] }>();
   const [previewError, setPreviewError] = useState<unknown>();
   const [error, setError] = useState<unknown>();
@@ -69,9 +70,11 @@ export function TaskEditor({
   }, []);
   const parsed = useMemo(() => {
     try {
-      return { schedule: formSchedule(form, task?.schedule) };
+      return { schedule: formSchedule(form, task?.schedule, initialOnce.current) };
     } catch (error) {
-      return { error };
+      if (error instanceof ApiError && error.code === "invalid_argument")
+        return { invalidLocalTime: true };
+      throw error;
     }
   }, [form, task?.schedule]);
   useEffect(() => {
@@ -111,10 +114,13 @@ export function TaskEditor({
   const unknown = uncertain;
   async function save() {
     if (!parsed.schedule || !enabled || busy || unknown) return;
+    if (baseline && !cwd) {
+      setError("cwdRequired");
+      return;
+    }
     setBusy(true);
     setError(undefined);
     try {
-      if (baseline && !cwd) throw new ApiError("invalid_argument", "Working directory is required");
       const input: ScheduledTaskInput = {
         name,
         command,
@@ -160,7 +166,6 @@ export function TaskEditor({
       if (alive.current) setBusy(false);
     }
   }
-  const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   return (
     <Dialog
       open
@@ -234,7 +239,7 @@ export function TaskEditor({
               </label>
               {form.preset === "once" && (
                 <label className="block space-y-1 text-sm">
-                  <span>{t(($) => $.schedules.onceTime, { timezone: browserTimezone })}</span>
+                  <span>{t(($) => $.schedules.onceTime)}</span>
                   <Input
                     type="datetime-local"
                     value={form.once}
@@ -331,23 +336,31 @@ export function TaskEditor({
               </details>
               {preview && (
                 <div className="space-y-1 text-xs text-muted-foreground">
-                  <p>{t(($) => $.schedules.preview, { timezone: preview.timezone })}</p>
+                  <p>{t(($) => $.schedules.preview)}</p>
                   {preview.nextRunAts.slice(0, 3).map((at) => (
-                    <p key={at}>{taskTime(at, i18n.resolvedLanguage, preview.timezone)}</p>
+                    <p key={at}>{taskTime(at, i18n.resolvedLanguage)}</p>
                   ))}
                   {!preview.nextRunAts.length && <p>{t(($) => $.schedules.noNext)}</p>}
                 </div>
               )}
-              {!!(parsed.error || previewError) && (
+              {!!(parsed.invalidLocalTime || previewError) && (
                 <div className="break-words text-sm text-destructive" role="alert">
-                  <ErrorNotice error={parsed.error ?? previewError} />
+                  {parsed.invalidLocalTime ? (
+                    t(($) => $.schedules.invalidLocalTime)
+                  ) : (
+                    <ErrorNotice error={previewError} />
+                  )}
                 </div>
               )}
             </fieldset>
           </div>
           {!!error && (
             <div className="max-h-40 overflow-auto px-5 pb-3 text-sm text-destructive" role="alert">
-              <ErrorNotice error={error} />
+              {error === "cwdRequired" ? (
+                t(($) => $.schedules.cwdRequired)
+              ) : (
+                <ErrorNotice error={error} />
+              )}
               {(unknown || conflict) && (
                 <div className="mt-2 space-y-2">
                   <p>
@@ -389,7 +402,7 @@ export function TaskEditor({
                   <dd>
                     {current.schedule.kind === "cron"
                       ? current.schedule.expression
-                      : taskTime(current.schedule.at, i18n.resolvedLanguage, current.timezone)}
+                      : taskTime(current.schedule.at, i18n.resolvedLanguage)}
                   </dd>
                 </div>
                 <div>

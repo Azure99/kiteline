@@ -21,6 +21,7 @@ import { buildStaticAgent } from "./build-agent-static.mjs";
 import { prepareRipgrep } from "./prepare-ripgrep.mjs";
 import { verifyWindowsComponents } from "./build-windows-components.mjs";
 import { verifyMacosComponents } from "./build-macos-components.mjs";
+import { releaseMatches, sourceDigest } from "./release-inputs.mjs";
 import {
   requiredWindowsComponents,
   windowsComponentFiles,
@@ -74,38 +75,6 @@ function run(command, args, options = {}) {
 function text(command, args) {
   return run(command, args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).trim();
 }
-function sourceDigest() {
-  const files = text("git", [
-    "ls-files",
-    "-z",
-    "--cached",
-    "--others",
-    "--exclude-standard",
-    "--",
-    "agent",
-    "server",
-    "web",
-    "shared",
-    "terminal-recorder",
-    "native",
-    "scripts",
-    "deploy",
-    "package.json",
-    "pnpm-lock.yaml",
-    "pnpm-workspace.yaml",
-    "tsconfig*.json",
-  ])
-    .split("\0")
-    .filter((file) => file && existsSync(join(root, file)));
-  const hash = createHash("sha256");
-  for (const file of [...new Set(files)].sort())
-    hash
-      .update(file)
-      .update("\0")
-      .update(digest(join(root, file)))
-      .update("\0");
-  return hash.digest("hex");
-}
 async function agentArchives(sourceHash) {
   const agents = [];
   for (const target of agentTargets) {
@@ -127,12 +96,14 @@ async function agentArchives(sourceHash) {
     const directory = join(extracted, name);
     const manifest = JSON.parse(readFileSync(join(directory, "release.json"), "utf8"));
     if (
-      manifest.kind !== "agent" ||
-      manifest.platform !== platform ||
-      manifest.version !== version ||
-      manifest.architecture !== release.nodeArchives[architecture].architecture ||
-      manifest.node !== release.node ||
-      manifest.sourceDigest !== sourceHash
+      !releaseMatches(manifest, {
+        kind: "agent",
+        platform,
+        version,
+        architecture: release.nodeArchives[architecture].architecture,
+        node: release.node,
+        sourceDigest: sourceHash,
+      })
     )
       throw new Error(
         `Agent ${target} must match this source/version/platform/architecture; rebuild it`,
@@ -278,12 +249,13 @@ function deploy(name, target) {
     "--prod",
     "--offline",
     "--config.inject-workspace-packages=true",
-    ...(windowsAgent ? ["--config.node-linker=hoisted"] : []),
+    `--config.node-linker=${windowsAgent ? "hoisted" : "isolated"}`,
     target,
   ]);
   // Shared's real location determines the existing native-component paths.
   if (name !== "shared") {
     const link = join(target, "node_modules/@kiteline/shared");
+    const injected = windowsAgent ? undefined : resolve(realpathSync(link), "../../..");
     rmSync(link, { recursive: true, force: true });
     if (windowsAgent) {
       mkdirSync(link, { recursive: true });
@@ -296,11 +268,31 @@ function deploy(name, target) {
       }
       writeFileSync(
         join(link, "package.json"),
-        JSON.stringify({ name: "@kiteline/shared", type: "module", exports: forwarding }) + "\n",
+        JSON.stringify({
+          name: "@kiteline/shared",
+          license: "Apache-2.0",
+          type: "module",
+          exports: forwarding,
+        }) + "\n",
       );
-    } else symlinkSync("../../../shared", link);
+    } else {
+      symlinkSync("../../../shared", link);
+      rmSync(injected, { recursive: true, force: true });
+    }
+    const manifest = join(target, "package.json");
+    const metadata = JSON.parse(readFileSync(manifest, "utf8"));
+    metadata.dependencies["@kiteline/shared"] = "file:../shared";
+    writeFileSync(manifest, JSON.stringify(metadata, null, 2) + "\n");
   }
-  if (windowsAgent) rmSync(join(target, "node_modules/.bin"), { recursive: true, force: true });
+  for (const path of [
+    "pnpm-lock.yaml",
+    "node_modules/.pnpm/lock.yaml",
+    "node_modules/.modules.yaml",
+    "node_modules/.package-map.json",
+    "node_modules/.pnpm-workspace-state-v1.json",
+    "node_modules/.bin",
+  ])
+    rmSync(join(target, path), { recursive: true, force: true });
 }
 function checksums(directory) {
   const entries = [];
@@ -315,19 +307,31 @@ function checksums(directory) {
       : [],
   );
   function walk(path) {
+    if (!windowsAgent) chmodSync(path, 0o755);
     for (const name of readdirSync(path).sort()) {
       const file = join(path, name);
       const stat = lstatSync(file);
       if (stat.isDirectory()) walk(file);
       else if (stat.isFile()) {
         const name = relative(directory, file);
+        const executable =
+          !!(stat.mode & 0o111) || /^(?:bin|runtime\/bin|dist\/native\/bin)\//.test(name);
+        if (!windowsAgent) {
+          // pnpm can hard-link both store entries and local workspace dependencies.
+          if (stat.nlink > 1) {
+            const copy = join(temporary, "permission-file");
+            cpSync(file, copy);
+            renameSync(copy, file);
+          }
+          chmodSync(file, executable ? 0o755 : 0o644);
+        }
         const bytes = readFileSync(file);
         if (staticAgent) {
           if (name.endsWith(".node"))
             throw new Error(`Dynamic Node addon is not supported: ${name}`);
           if (bytes.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) {
             if (!expectedELFs.delete(name)) throw new Error(`Unexpected agent ELF: ${name}`);
-            if (!(stat.mode & 0o111)) throw new Error(`Agent ELF is not executable: ${name}`);
+            if (!executable) throw new Error(`Agent ELF is not executable: ${name}`);
             if (
               /INTERP/.test(text("readelf", ["-l", file])) ||
               /NEEDED/.test(text("readelf", ["-d", file]))
@@ -347,9 +351,10 @@ function checksums(directory) {
   walk(directory);
   if (expectedELFs.size) throw new Error(`Missing agent ELF: ${[...expectedELFs].join(", ")}`);
   writeFileSync(join(directory, "SHA256SUMS"), entries.join("\n") + "\n");
+  if (!windowsAgent) chmodSync(join(directory, "SHA256SUMS"), 0o644);
 }
 try {
-  const sourceHash = sourceDigest();
+  const sourceHash = sourceDigest(root);
   run("pnpm", ["build"]);
   const agents = kind === "server" ? await agentArchives(sourceHash) : [];
   mkdirSync(cache, { recursive: true });
@@ -506,6 +511,7 @@ try {
   const name = `kiteline-${kind}-${version}-${platform}-${arch}`;
   const destination = join(temporary, name);
   mkdirSync(destination);
+  cpSync(join(root, "LICENSE"), join(destination, "LICENSE"));
   deploy("shared", join(destination, "shared"));
   deploy(kind, join(destination, kind));
   if (kind === "agent") {
@@ -620,7 +626,7 @@ try {
     ) + "\n",
   );
   checksums(destination);
-  if (sourceDigest() !== sourceHash)
+  if (sourceDigest(root) !== sourceHash)
     throw new Error("Source changed during packaging; rerun the build");
   const extension = windowsAgent ? "zip" : "tar.gz";
   const tarball = join(output, `${name}.${extension}`);
