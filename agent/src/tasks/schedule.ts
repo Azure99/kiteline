@@ -1,3 +1,4 @@
+import { taskLimits } from "../limits.js";
 import { Cron } from "croner";
 import { homedir } from "node:os";
 import { stat } from "node:fs/promises";
@@ -7,7 +8,6 @@ import {
   AppError,
   record,
   string,
-  taskLimits,
   type ScheduledTaskInput,
   type TaskSchedule,
 } from "@kiteline/shared/protocol";

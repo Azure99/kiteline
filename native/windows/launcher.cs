@@ -121,9 +121,10 @@ public sealed class __KITELINE_LAUNCHER_TYPE__ : IDisposable {
     }
     public int Run(string executable,string bootstrap,string[] arguments,string directory) {
         if(Interrupted!=0) return Interrupted;
-        var security=new Security(); security.length=Marshal.SizeOf<Security>(); security.inherit=1;
+        var security=new Security(); security.length=Marshal.SizeOf<Security>();
         IntPtr pin=CreateFileW(directory,0x81,3,ref security,3,0x02000000,IntPtr.Zero);
         Check(Valid(pin),"pin installation directory");
+        security.inherit=1;
         IntPtr attrs=IntPtr.Zero,handleList=IntPtr.Zero,job=IntPtr.Zero,jobList=IntPtr.Zero;
         var streams=new IntPtr[3]; bool initialized=false,completed=false;
         var process=new ProcessInfo();
@@ -140,15 +141,14 @@ public sealed class __KITELINE_LAUNCHER_TYPE__ : IDisposable {
             IntPtr size=IntPtr.Zero; InitializeProcThreadAttributeList(IntPtr.Zero,2,0,ref size);
             attrs=Marshal.AllocHGlobal(size);
             Check(InitializeProcThreadAttributeList(attrs,2,0,ref size),"initialize launch attributes"); initialized=true;
-            handleList=Marshal.AllocHGlobal(IntPtr.Size*4);
+            handleList=Marshal.AllocHGlobal(IntPtr.Size*3);
             for(int i=0;i<3;i++) Marshal.WriteIntPtr(handleList,i*IntPtr.Size,streams[i]);
-            Marshal.WriteIntPtr(handleList,3*IntPtr.Size,pin);
-            Check(UpdateProcThreadAttribute(attrs,0,new IntPtr(0x20002),handleList,new IntPtr(IntPtr.Size*4),IntPtr.Zero,IntPtr.Zero),"restrict inherited handles");
+            Check(UpdateProcThreadAttribute(attrs,0,new IntPtr(0x20002),handleList,new IntPtr(IntPtr.Size*3),IntPtr.Zero,IntPtr.Zero),"restrict inherited handles");
             jobList=Marshal.AllocHGlobal(IntPtr.Size); Marshal.WriteIntPtr(jobList,job);
             Check(UpdateProcThreadAttribute(attrs,0,new IntPtr(0x2000d),jobList,new IntPtr(IntPtr.Size),IntPtr.Zero,IntPtr.Zero),"set atomic launcher Job");
             var startup=new StartupEx(); startup.start.cb=(uint)Marshal.SizeOf<StartupEx>(); startup.attributes=attrs; startup.start.flags=0x100;
             startup.start.input=streams[0]; startup.start.output=streams[1]; startup.start.error=streams[2];
-            var command=new StringBuilder(Quote(executable)).Append(" -e ").Append(Quote(bootstrap.Replace("__KITELINE_PIN__",pin.ToInt64().ToString()))).Append(" --");
+            var command=new StringBuilder(Quote(executable)).Append(" -e ").Append(Quote(bootstrap)).Append(" --");
             foreach(string argument in arguments) command.Append(' ').Append(Quote(argument));
             if(Interrupted!=0) return Interrupted;
             Check(CreateProcessW(executable,command,IntPtr.Zero,IntPtr.Zero,true,0x80004,IntPtr.Zero,null,ref startup,out process),"start native Node");

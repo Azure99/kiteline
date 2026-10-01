@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { once } from "node:events";
+import { join } from "node:path";
 import { request, type OutgoingHttpHeaders } from "node:http";
 import { connect, type AddressInfo } from "node:net";
 import { WebSocket } from "ws";
@@ -24,13 +25,6 @@ async function fixture(trustProxyProto: boolean) {
       trustProxyProto,
       webDir: root,
       downloadsDir: root,
-      limits: {
-        sessionLifetime: 60_000,
-        draftTotalBytes: 1000,
-        channelsPerDevice: 128,
-        channelPairTimeout: 1000,
-        channelIdleTimeout: 1000,
-      },
     },
     store,
   );
@@ -69,7 +63,7 @@ async function fixture(trustProxyProto: boolean) {
     await once(socket, "open");
     return socket;
   }
-  return { store, call, events, port, server: app.server };
+  return { store, call, events, port, server: app.server, downloadsDir: root };
 }
 
 test("raw upgrade and CONNECT rejections drain responses and release half-open peers", async () => {
@@ -139,26 +133,80 @@ test("a reset during a raw rejection leaves the server available", async () => {
   expect((await f.call("/healthz", { host: `127.0.0.1:${f.port}` })).status).toBe(200);
 });
 
-test("upgrade scripts are public while command recovery retains login and origin rules", async () => {
+test("installer resources stream GET/HEAD, reject other methods and never fall back to the SPA", async () => {
+  const f = await fixture(false);
+  const origin = `http://127.0.0.1:${f.port}`;
+  const linux = `kiteline-agent-${appVersion}-linux-arm64.tar.gz`;
+  const windows = `kiteline-agent-${appVersion}-windows-amd64.zip`;
+  const macos = `kiteline-agent-${appVersion}-macos-amd64.tar.gz`;
+  for (const [path, file, type] of [
+    [`/downloads/agent/${appVersion}/${linux}`, linux, "application/gzip"],
+    [`/downloads/agent/${appVersion}/${windows}`, windows, "application/zip"],
+    [
+      `/downloads/agent/${appVersion}/${windows}.sha256`,
+      `${windows}.sha256`,
+      "text/plain; charset=utf-8",
+    ],
+    [`/downloads/agent/${appVersion}/${macos}`, macos, "application/gzip"],
+    [
+      `/downloads/agent/${appVersion}/${macos}.sha256`,
+      `${macos}.sha256`,
+      "text/plain; charset=utf-8",
+    ],
+    ["/install.sh", "install.sh", "text/plain; charset=utf-8"],
+    ["/install.ps1", "install.ps1", "text/plain; charset=utf-8"],
+  ]) {
+    expect((await fetch(origin + path)).status).toBe(404);
+    const bytes = file === linux ? Buffer.alloc(512 * 1024, 93) : Buffer.from(`resource ${file}`);
+    await writeFile(join(f.downloadsDir, file!), bytes);
+    const response = await fetch(origin + path);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe(type);
+    expect(Number(response.headers.get("content-length"))).toBe(bytes.length);
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes);
+    const head = await fetch(origin + path, { method: "HEAD" });
+    expect(head.status).toBe(200);
+    expect(head.headers.get("content-length")).toBe(String(bytes.length));
+    expect(head.headers.get("cache-control")).toBe("no-cache");
+    expect(await head.text()).toBe("");
+    const post = await fetch(origin + path, { method: "POST" });
+    expect(post.status).toBe(405);
+    expect(post.headers.get("allow")).toBe("GET, HEAD");
+  }
+  for (const path of ["/connect.sh", "/upgrade.sh", "/connect.ps1", "/upgrade.ps1"]) {
+    const response = await fetch(origin + path);
+    const script = await response.text();
+    expect(response.status).toBe(200);
+    expect(script).toContain(
+      path === "/upgrade.sh"
+        ? `${origin}/downloads/agent/${appVersion}/`
+        : `${origin}/install.${path.endsWith(".ps1") ? "ps1" : "sh"}`,
+    );
+    expect(script).toContain(appVersion);
+    expect(response.headers.get("content-disposition")).toContain(`filename="${path.slice(1)}"`);
+    const head = await fetch(origin + path, { method: "HEAD" });
+    expect(head.status).toBe(200);
+    expect(Number(head.headers.get("content-length"))).toBe(Buffer.byteLength(script));
+    expect(await head.text()).toBe("");
+    expect((await fetch(origin + path, { method: "POST" })).status).toBe(405);
+  }
+  for (const path of [
+    "/downloads/agent/unknown/missing",
+    `/downloads/agent/old/${windows}`,
+    `/downloads/agent/${appVersion}/kiteline-agent-${appVersion}-windows-arm64.zip`,
+    `/downloads/agent/${appVersion}/${windows}/extra`,
+    `/downloads/agent/old/${macos}`,
+    `/downloads/agent/${appVersion}/${macos}/extra`,
+  ])
+    expect((await fetch(origin + path)).status).toBe(404);
+  const interrupted = await fetch(origin + `/downloads/agent/${appVersion}/${linux}`);
+  await interrupted.body!.cancel();
+  expect((await fetch(origin + "/healthz")).status).toBe(200);
+});
+
+test("upgrade command recovery retains login and origin rules", async () => {
   const f = await fixture(true);
   const origin = `http://127.0.0.1:${f.port}`;
-  const response = await fetch(origin + "/upgrade.sh");
-  const script = await response.text();
-  expect(response.status).toBe(200);
-  expect(response.headers.get("cache-control")).toBe("no-cache");
-  expect(Number(response.headers.get("content-length"))).toBe(Buffer.byteLength(script));
-  expect(response.headers.get("content-disposition")).toContain('filename="upgrade.sh"');
-  expect(script).toContain(`${origin}/downloads/agent/${appVersion}/`);
-  expect(script).toContain("kiteline-agent upgrade --archive");
-  expect(script).not.toContain("--yes");
-  expect(script).not.toContain("kiteline-agent bind");
-  const head = await fetch(origin + "/upgrade.sh", { method: "HEAD" });
-  expect(head.status).toBe(200);
-  expect(head.headers.get("content-length")).toBe(response.headers.get("content-length"));
-  expect(await head.text()).toBe("");
-  const post = await fetch(origin + "/upgrade.sh", { method: "POST" });
-  expect(post.status).toBe(405);
-  expect(post.headers.get("allow")).toBe("GET, HEAD");
   expect((await fetch(origin + "/api/agent/upgrade-command")).status).toBe(401);
 
   const session = f.store.createSession(60_000);

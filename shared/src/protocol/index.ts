@@ -16,47 +16,21 @@ export type {
 } from "./rpc.js";
 
 export const limits = {
+  channelPairTimeout: 30_000,
   controlMessageBytes: 1024 * 1024,
-  resultBytes: 512 * 1024,
   dataChunkBytes: 64 * 1024,
   filePendingFrames: 256,
   filePendingBytes: 2 * 1024 * 1024,
   pendingRequestsPerDevice: 32,
-  listPageEntries: 500,
-  cursorLifetime: 60_000,
-  cursorsPerDevice: 16,
-  copyNameAttempts: 1000,
-  searchMatches: 1000,
-  searchLineBytes: 2048,
-  searchPathBytes: 4096,
-  searchRanges: 128,
-  searchErrorBytes: 4096,
-  discoveryDirectories: 10_000,
-  discoverySlice: 2000,
-  diffRenderLines: 2000,
-  diffRawBytes: 32 * 1024,
   watchDebounce: 300,
-  visibleRefreshInterval: 15_000,
   heartbeatInterval: 20_000,
   heartbeatTimeout: 60_000,
   tcpKeepAliveDelayMs: 20_000,
-  terminalOutstandingBytes: 256 * 1024,
   terminalPendingBytes: 1024 * 1024,
-  terminalModelPendingBytes: 8 * 1024 * 1024,
-  terminalCheckpointIntervalBytes: 4 * 1024 * 1024,
-  terminalRecoveryTailBytes: 8 * 1024 * 1024,
   terminalSnapshotBytes: 16 * 1024 * 1024,
-  terminalInitialCols: 80,
-  terminalInitialRows: 24,
   terminalMaxCols: 500,
   terminalMaxRows: 200,
-  setupTokenLifetime: 30 * 60_000,
-  bindingLifetime: 10 * 60_000,
 } as const;
-if (limits.dataChunkBytes > limits.terminalOutstandingBytes)
-  throw new Error("Terminal output window must hold a complete data chunk");
-if (limits.terminalCheckpointIntervalBytes > limits.terminalRecoveryTailBytes / 2)
-  throw new Error("Terminal checkpoint trigger must not exceed half the recovery tail budget");
 
 export type Outcome = "succeeded" | "failed" | "partial" | "unknown";
 export interface KitelineError {
@@ -310,13 +284,6 @@ export interface FileProgress {
   currentPath?: string;
   completedItems?: number;
   bytes?: number;
-}
-export interface FileCleanup {
-  pending: boolean;
-  retained: number;
-  failed: number;
-  failures: PathError[];
-  truncated: boolean;
 }
 export type WorkspaceEvent =
   | { type: "workspace.changed"; workspaceId: string; scopes: ("files" | "git" | "repos")[] }

@@ -1,7 +1,8 @@
+import { taskLimits } from "../limits.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { open, type FileHandle } from "node:fs/promises";
 import type { Readable } from "node:stream";
-import { taskLimits, type TaskRun } from "@kiteline/shared/protocol";
+import { type TaskRun } from "@kiteline/shared/protocol";
 import { stopGroup, waitForGroup } from "../process-group.js";
 import { JobChild, spawnJob } from "@kiteline/shared/windows/job";
 

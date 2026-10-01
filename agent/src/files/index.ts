@@ -1,9 +1,9 @@
+import { agentLimits } from "../limits.js";
 import { mkdir, open } from "node:fs/promises";
 import { join, posix } from "node:path";
 import {
   AppError,
   OperationError,
-  limits,
   type FileListing,
   type FileInspection,
 } from "@kiteline/shared/protocol";
@@ -21,13 +21,11 @@ import {
   versionOf,
 } from "./paths.js";
 import { renameNoReplace } from "./rename.js";
-import type { TemporaryFiles } from "./temporary.js";
 
 export class Files {
   constructor(
     private metadata: MetadataStore,
     private directories: Directories,
-    private temporary: TemporaryFiles,
   ) {}
 
   async list(
@@ -62,7 +60,7 @@ export class Files {
     const dot = info.isDirectory() ? -1 : target.name.lastIndexOf(".");
     const stem = dot > 0 ? target.name.slice(0, dot) : target.name;
     const suffix = dot > 0 ? target.name.slice(dot) : "";
-    for (let n = 2; n < 2 + limits.copyNameAttempts; n++) {
+    for (let n = 2; n < 2 + agentLimits.copyNameAttempts; n++) {
       signal?.throwIfAborted();
       const suggestedName = `${stem} (${n})${suffix}`;
       try {
@@ -123,7 +121,6 @@ export class Files {
       const to = posix.join(posix.dirname(actual), name);
       if (actual === to)
         throw new AppError("invalid_argument", "New name is the same as the original name");
-      await this.temporary.assertRelocatableLocked(source, info);
       signal?.throwIfAborted();
       await renameNoReplace(source.absolute, join(source.parent, name));
       return { from: path, to };

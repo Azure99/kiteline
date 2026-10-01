@@ -16,7 +16,4 @@ dpkg-query -W > /output/build-packages.txt
 mkdir -p /output/licenses
 cp -L /usr/share/doc/gcc-mingw-w64-base/copyright /output/licenses/gcc-mingw-w64.txt
 cp -L /usr/share/doc/mingw-w64-x86-64-dev/copyright /output/licenses/mingw-w64.txt
-for license in GPL-3 GPL-2 LGPL-2 LGPL-2.1; do
-  cp -L "/usr/share/common-licenses/$license" "/output/licenses/$license"
-done
 x86_64-w64-mingw32-objdump -p /output/kiteline-windows.node > /output/addon-pe.txt

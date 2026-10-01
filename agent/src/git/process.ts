@@ -1,7 +1,8 @@
+import { agentLimits } from "../limits.js";
 import { spawn } from "node:child_process";
 import { isUtf8 } from "node:buffer";
 import { createHash } from "node:crypto";
-import { AppError, asError, OperationError, limits, type GitPath } from "@kiteline/shared/protocol";
+import { AppError, asError, OperationError, type GitPath } from "@kiteline/shared/protocol";
 import { BytePrefix } from "../buffers.js";
 import { stopGroup, waitForGroup } from "../process-group.js";
 import { JobChild, spawnJob } from "@kiteline/shared/windows/job";
@@ -73,7 +74,7 @@ export async function git(
     const reason = asError(error);
     throw new OperationError(reason.code, reason.message, "failed");
   }
-  const stdout = new BytePrefix(options.onData ? 0 : (options.maxBytes ?? limits.resultBytes));
+  const stdout = new BytePrefix(options.onData ? 0 : (options.maxBytes ?? agentLimits.resultBytes));
   const stderr = new BytePrefix(32 * 1024);
   let error: unknown;
   let clipped = false;
@@ -250,13 +251,13 @@ export class NulRecords {
     let start = 0,
       end: number;
     while ((end = bytes.indexOf(0, start)) !== -1) {
-      if (end - start > limits.resultBytes)
+      if (end - start > agentLimits.resultBytes)
         throw new AppError("limit_exceeded", "A Git record exceeds the size limit");
       this.each(bytes.subarray(start, end));
       start = end + 1;
     }
     this.partial = Buffer.from(bytes.subarray(start));
-    if (this.partial.length > limits.resultBytes)
+    if (this.partial.length > agentLimits.resultBytes)
       throw new AppError("limit_exceeded", "A Git record exceeds the size limit");
   };
   end() {

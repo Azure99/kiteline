@@ -36,14 +36,6 @@ export interface Installation {
   gid: number;
   home: string;
 }
-export class InstallationLockCloseError extends AggregateError {
-  constructor(errors: unknown[]) {
-    super(
-      errors,
-      `Installation lock ownership is unknown because ${installationUseFile} could not be closed: ${errors.map(String).join("; ")}`,
-    );
-  }
-}
 export async function lockFileDescriptor(fd: number, mode: "shared" | "exclusive") {
   const flock =
     process.platform === "darwin" ? resolve(packageDirectory, "dist/native/bin/flock") : "flock";
@@ -75,7 +67,11 @@ export async function lockInstallation(mode: "shared" | "exclusive") {
     try {
       await file.close();
     } catch (cleanupError) {
-      throw new InstallationLockCloseError([error, cleanupError]);
+      throw new AggregateError(
+        [error, cleanupError],
+        "Installation lock acquisition and close failed",
+        { cause: cleanupError },
+      );
     }
     throw error;
   }
@@ -92,17 +88,9 @@ export async function lockInstallationManagement() {
     if ((error as NodeJS.ErrnoException).code !== "EBADF") throw error;
   }
   if (expected && inherited?.dev === expected.dev && inherited.ino === expected.ino) {
-    await lockFileDescriptor(9, "exclusive");
     return { close: async () => closeSync(9) };
   }
-  const file = await open(installationManagementFile, "a", 0o600);
-  try {
-    await lockFileDescriptor(file.fd, "exclusive");
-    return file;
-  } catch (error) {
-    await file.close();
-    throw error;
-  }
+  throw new Error("Management lock was not inherited; use the public kiteline-agent launcher");
 }
 export async function readInstallation(): Promise<Installation | undefined> {
   try {

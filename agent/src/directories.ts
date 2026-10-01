@@ -1,8 +1,9 @@
+import { agentLimits } from "./limits.js";
 import { randomUUID } from "node:crypto";
 import { opendir, mkdir, stat } from "node:fs/promises";
 import type { BigIntStats, Dir, Dirent } from "node:fs";
 import { basename, dirname, join, posix } from "node:path";
-import { AppError, limits, type DirectoryListing, type Entry } from "@kiteline/shared/protocol";
+import { AppError, type DirectoryListing, type Entry } from "@kiteline/shared/protocol";
 import { publish } from "./mutations.js";
 import { devicePath, entryName, readEntry, realPath, sameObject } from "./files/paths.js";
 import { CursorBudget } from "./cursor-budget.js";
@@ -58,7 +59,7 @@ export class Directories {
         busy: false,
         release,
         controller: new AbortController(),
-        timer: setTimeout(() => void this.release(id), limits.cursorLifetime),
+        timer: setTimeout(() => void this.release(id), agentLimits.cursorLifetime),
       };
       this.cursors.set(id, cursor);
     }
@@ -97,7 +98,7 @@ export class Directories {
         512 +
         Buffer.byteLength(JSON.stringify(path)) * 2 +
         Buffer.byteLength(JSON.stringify(entryParent));
-      while (items.length < limits.listPageEntries) {
+      while (items.length < agentLimits.listPageEntries) {
         signal.throwIfAborted();
         const item = cursor.carry ?? (await cursor.directory.read());
         cursor.carry = null;
@@ -116,7 +117,7 @@ export class Directories {
           throw error;
         }
         const size = Buffer.byteLength(JSON.stringify(entry));
-        if (bytes + size > limits.resultBytes) {
+        if (bytes + size > agentLimits.resultBytes) {
           if (!items.length)
             throw new AppError("limit_exceeded", "A directory entry exceeds the size limit");
           cursor.carry = item;
@@ -125,7 +126,7 @@ export class Directories {
         bytes += size + 1;
         items.push(entry);
       }
-      if (items.length === limits.listPageEntries) {
+      if (items.length === agentLimits.listPageEntries) {
         signal.throwIfAborted();
         cursor.carry ??= await cursor.directory.read();
       }

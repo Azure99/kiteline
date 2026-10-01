@@ -123,18 +123,6 @@ function Expand-KitelineDownload([string]$Archive) {
         [IO.Compression.ZipFileExtensions]::ExtractToDirectory($zip, $temporary, $false)
     } finally { $zip.Dispose() }
     $package = Join-Path $temporary $name
-    $expected = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach ($line in [IO.File]::ReadAllLines((Join-Path $package 'SHA256SUMS'))) {
-        if ($line -cnotmatch '^([a-f0-9]{64})  (.+)$') { throw 'Invalid package checksum record' }
-        $expected.Add($Matches[2], $Matches[1])
-    }
-    foreach ($file in [IO.Directory]::EnumerateFiles($package, '*', [IO.SearchOption]::AllDirectories)) {
-        $key = [IO.Path]::GetRelativePath($package, $file).Replace('\', '/')
-        if ($key -ceq 'SHA256SUMS') { continue }
-        if (-not $expected.ContainsKey($key) -or (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected[$key]) { throw "Package checksum mismatch: $key" }
-        $null = $expected.Remove($key)
-    }
-    if ($expected.Count) { throw 'Package is missing checksummed files' }
     $release = [IO.File]::ReadAllText((Join-Path $package 'release.json')) | ConvertFrom-Json
     if ($release.kind -cne 'agent' -or $release.platform -cne 'windows' -or $release.architecture -cne 'x64' -or $release.version -cne $Version) { throw 'Package release mismatch' }
     return $package

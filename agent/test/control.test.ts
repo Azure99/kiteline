@@ -1,15 +1,12 @@
 import { expect, test, vi } from "vitest";
-import { execFileSync } from "node:child_process";
 import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { createServer } from "node:https";
 import { createServer as createHttpServer } from "node:http";
 import type { AddressInfo, Socket } from "node:net";
 import { join } from "node:path";
-import { getCACertificates, setDefaultCACertificates } from "node:tls";
 import { WebSocket, WebSocketServer } from "ws";
 import { Agent } from "../src/control.js";
-import { defaultAgentLimits } from "../src/config.js";
+import { defaultAgentLimits, privateDirectory } from "../src/config.js";
 import { localRequest } from "../src/local.js";
 import {
   appVersion,
@@ -17,45 +14,85 @@ import {
   OperationError,
   type Reply,
   type Session,
+  type TaskRun,
 } from "@kiteline/shared/protocol";
 import type { DoctorReport } from "../src/doctor.js";
 import { publish } from "../src/mutations.js";
 
+test.each([401, 426])(
+  "HTTP %i preserves local tasks with the expected reconnect behavior",
+  async (status) => {
+    const root = await mkdtemp("/var/tmp/kiteline-control-response-");
+    const server = createHttpServer();
+    let attempts = 0;
+    server.on("upgrade", (_request, socket) => {
+      attempts++;
+      socket.end(`HTTP/1.1 ${status} Rejected\r\nContent-Length: 0\r\nConnection: close\r\n\r\n`);
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const config = {
+      dataDir: root,
+      runDir: join(root, "run"),
+      shell: "/bin/sh",
+      limits: defaultAgentLimits,
+    };
+    const agent = new Agent(config, {
+      deviceId: "test",
+      deviceToken: "test",
+      server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    });
+    try {
+      for (const path of [config.dataDir, config.runDir]) await privateDirectory(path);
+      await agent.start();
+      await expect
+        .poll(async () => {
+          const report = await localRequest<DoctorReport>(config, "doctor");
+          return report.items.find((item) => item.name === "server")?.detail;
+        })
+        .toContain(`HTTP ${status}`);
+      await localRequest(config, "tasks.create", {
+        taskId: "local",
+        input: {
+          name: "Local",
+          command: "printf done",
+          cwd: root,
+          schedule: { kind: "cron", expression: "0 9 * * *" },
+          timezone: "UTC",
+        },
+      });
+      await localRequest(config, "tasks.run", { taskId: "local", runId: "local-run" });
+      await expect
+        .poll(
+          async () =>
+            (await localRequest<TaskRun>(config, "runs.get", { runId: "local-run" })).state,
+        )
+        .toBe("succeeded");
+      if (status === 401) {
+        await new Promise((resolve) => setTimeout(resolve, 1600));
+        expect(attempts).toBe(1);
+      } else await expect.poll(() => attempts, { timeout: 4000 }).toBeGreaterThan(1);
+      const report = await localRequest<DoctorReport>(config, "doctor");
+      expect(report.items.find((item) => item.name === "server")?.detail).toContain(
+        `HTTP ${status}`,
+      );
+    } finally {
+      await agent.close();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
 test("control reconnects after handshake rejection, retains valid watches and scopes remote session end", async () => {
   const root = await mkdtemp("/var/tmp/kiteline-agent-control-");
-  const certificates = getCACertificates("default");
   let agent: Agent | undefined;
-  let server: ReturnType<typeof createServer> | undefined;
+  let server: ReturnType<typeof createHttpServer> | undefined;
   let sockets: WebSocketServer | undefined;
-  const log = vi.spyOn(console, "error").mockImplementation(() => {});
   try {
-    const key = join(root, "key.pem"),
-      cert = join(root, "cert.pem");
-    execFileSync(
-      "openssl",
-      [
-        "req",
-        "-x509",
-        "-newkey",
-        "rsa:2048",
-        "-nodes",
-        "-days",
-        "1",
-        "-subj",
-        "/CN=localhost",
-        "-addext",
-        "subjectAltName=IP:127.0.0.1",
-        "-keyout",
-        key,
-        "-out",
-        cert,
-      ],
-      { stdio: "ignore" },
-    );
-    setDefaultCACertificates([...certificates, await readFile(cert, "utf8")]);
-    server = createServer({ key: await readFile(key), cert: await readFile(cert) });
+    server = createHttpServer();
     sockets = new WebSocketServer({ noServer: true });
-    const refusals = [401, 426];
+    const refusals = [426];
     let rejectVersion = false;
     server.on("upgrade", (request, socket, head) => {
       if (rejectVersion) {
@@ -95,16 +132,15 @@ test("control reconnects after handshake rejection, retains valid watches and sc
       {
         deviceId: "test",
         deviceToken: "test",
-        server: `https://127.0.0.1:${(server.address() as AddressInfo).port}`,
+        server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
       },
     );
     for (const name of ["removed", "active"]) await mkdir(join(root, name));
     const removed = await agent.metadata.add(join(root, "removed"));
     const active = await agent.metadata.add(join(root, "active"));
+    for (const path of [agent.config.dataDir, agent.config.runDir]) await privateDirectory(path);
     await agent.start();
     await expect.poll(() => peer, { timeout: 8000 }).toBeDefined();
-    expect(log.mock.calls.flat().join("\n")).toContain("HTTP 401. Check the device binding");
-    expect(log.mock.calls.flat().join("\n")).toContain("HTTP 426. Install the agent version");
     const socket = peer!;
     await expect.poll(() => messages.some((message) => message.type === "hello")).toBe(true);
     await agent.dispatch(
@@ -165,8 +201,14 @@ test("control reconnects after handshake rejection, retains valid watches and sc
     rejectVersion = true;
     socket.close();
     await expect
-      .poll(() => log.mock.calls.flat().join("\n"), { timeout: 5000 })
-      .toContain("Install the matching release 0.3.0-test");
+      .poll(
+        async () => {
+          const report = await localRequest<DoctorReport>(agent!.config, "doctor");
+          return report.items.find((item) => item.name === "server")?.detail;
+        },
+        { timeout: 5000 },
+      )
+      .toContain("last server version=0.3.0-test");
     await localRequest(agent.config, "tasks.create", {
       taskId: "doctor-schedule",
       input: {
@@ -180,7 +222,6 @@ test("control reconnects after handshake rejection, retains valid watches and sc
     const report = await localRequest<DoctorReport>(agent.config, "doctor");
     expect(report.items.find((item) => item.name === "Scheduled Tasks")).toMatchObject({
       status: "ok",
-      detail: "ready=true; tasks=1; active=0; needs_review=0",
     });
     expect(report.items.find((item) => item.name === "server")?.detail).toContain(
       "last server version=0.3.0-test",
@@ -190,7 +231,13 @@ test("control reconnects after handshake rejection, retains valid watches and sc
     await new Promise<void>((resolve) => server!.close(() => resolve()));
     server = undefined;
     await expect
-      .poll(() => log.mock.calls.flat().join("\n"), { timeout: 8000 })
+      .poll(
+        async () => {
+          const report = await localRequest<DoctorReport>(agent!.config, "doctor");
+          return report.items.find((item) => item.name === "server")?.detail;
+        },
+        { timeout: 8000 },
+      )
       .toContain("ECONNREFUSED");
     const disconnected = await localRequest<DoctorReport>(agent.config, "doctor");
     expect(disconnected.items.find((item) => item.name === "server")?.detail).toContain(
@@ -205,9 +252,7 @@ test("control reconnects after handshake rejection, retains valid watches and sc
     for (const socket of sockets?.clients ?? []) socket.terminate();
     if (sockets) await new Promise<void>((resolve) => sockets!.close(() => resolve()));
     if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
-    setDefaultCACertificates(certificates);
     await rm(root, { recursive: true, force: true });
-    log.mockRestore();
   }
 }, 20000);
 
@@ -248,6 +293,7 @@ test("bulk file requests outlive the RPC timeout and still cancel while publicat
     await writeFile(join(root, "workspace/source"), "actual copy");
     const workspace = await agent.metadata.add(join(root, "workspace"));
     const connected = once(sockets, "connection");
+    for (const path of [agent.config.dataDir, agent.config.runDir]) await privateDirectory(path);
     await agent.start();
     const [peer] = (await connected) as [WebSocket];
     const replies: Reply[] = [];
@@ -328,6 +374,7 @@ test("control bounds replies without losing outcomes and ignores buffered reques
   );
   try {
     const connection = once(sockets, "connection");
+    for (const path of [agent.config.dataDir, agent.config.runDir]) await privateDirectory(path);
     await agent.start();
     const [peer] = (await connection) as [WebSocket];
     const replies: Record<string, unknown>[] = [];

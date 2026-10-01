@@ -1,5 +1,4 @@
-import { stat } from "node:fs/promises";
-import type { FileProgress, Repo } from "@kiteline/shared/protocol";
+import { AppError, type FileProgress, type Repo } from "@kiteline/shared/protocol";
 import type { Repositories } from "./repos.js";
 
 export class GitWriteQueue {
@@ -13,9 +12,9 @@ export class GitWriteQueue {
     operation: (repo: Repo) => Promise<T>,
     progress?: (value: FileProgress) => void,
   ): Promise<T> {
-    const repo = await this.repos.resolve(workspaceId, repoId, signal);
-    const info = await stat(repo.commonDir, { bigint: true });
-    const key = `${info.dev}:${info.ino}`;
+    const repo = this.repos.known.get(repoId);
+    if (!repo) throw new AppError("not_found", "Repository is unavailable; discover it again");
+    const key = repo.commonDir;
     const previous = this.tails.get(key) ?? Promise.resolve();
     let release!: () => void;
     const held = new Promise<void>((resolve) => {

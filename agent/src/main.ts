@@ -1,3 +1,4 @@
+import { limits } from "@kiteline/shared/protocol";
 import { createInterface } from "node:readline/promises";
 import { hostname } from "node:os";
 import { resolve } from "node:path";
@@ -72,9 +73,9 @@ async function runAgent() {
     if (stopping) return;
     releaseState = await lockAgentState(config.dataDir);
     if (stopping) return;
+    await privateDirectory(config.runDir);
+    if (stopping) return;
     if (process.platform !== "win32") {
-      await privateDirectory(config.runDir);
-      if (stopping) return;
       releaseRuntime = await lockAgentRuntime(config.runDir);
       if (stopping) return;
     }
@@ -184,7 +185,7 @@ async function main() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ code, name: hostname() }),
-        signal: AbortSignal.timeout(config.limits.channelPairTimeout),
+        signal: AbortSignal.timeout(limits.channelPairTimeout),
       });
       value = record(response.body);
       if (!response.ok)

@@ -23,30 +23,23 @@ export async function readOperation(
     async function info(name: string) {
       signal.throwIfAborted();
       try {
-        const value = await lstat(join(repo.gitDir, name), { bigint: true });
-        hash.update(
-          JSON.stringify([name, String(value.dev), String(value.ino), String(value.ctimeNs)]),
-        );
-        return value;
+        return await lstat(join(repo.gitDir, name));
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        hash.update(JSON.stringify([name, null]));
       }
     }
-    async function scalar(name: string) {
+    async function marker(name: string) {
       const metadata = await info(name);
       if (!metadata) return;
       if (!metadata.isFile()) throw new AppError("io_error", `${name} is not a regular state file`);
       const file = await open(join(repo.gitDir, name), "r");
+      const stream = file.createReadStream({ signal });
+      const digest = createHash("sha256");
       try {
-        const bytes = Buffer.alloc(16 * 1024 + 1);
-        const result = await file.read(bytes);
-        if (result.bytesRead > 16 * 1024)
-          throw new AppError("limit_exceeded", `${name} exceeds the state read size limit`);
-        const content = bytes.subarray(0, result.bytesRead);
-        hash.update(JSON.stringify([name, content.toString("base64")]));
-        return content.toString();
+        for await (const chunk of stream) digest.update(chunk as Buffer);
+        hash.update(JSON.stringify([name, digest.digest("hex")]));
       } finally {
+        stream.destroy();
         await file.close();
       }
     }
@@ -57,7 +50,6 @@ export async function readOperation(
       if (!metadata.isFile()) throw new AppError("io_error", `${name} is not a regular step file`);
       const file = await open(join(repo.gitDir, name), "r");
       const stream = file.createReadStream({ signal });
-      const digest = createHash("sha256");
       let pending: Buffer = Buffer.alloc(0);
       function line(bytes: Buffer) {
         const value = bytes
@@ -72,7 +64,6 @@ export async function readOperation(
         for await (const chunk of stream) {
           signal.throwIfAborted();
           const bytes = chunk as Buffer;
-          digest.update(bytes);
           let start = 0;
           while (start < bytes.length) {
             const end = bytes.indexOf(10, start);
@@ -90,7 +81,6 @@ export async function readOperation(
           }
         }
         if (pending.length) line(pending);
-        hash.update(JSON.stringify([name, digest.digest("hex")]));
       } finally {
         stream.destroy();
         await file.close();
@@ -100,9 +90,9 @@ export async function readOperation(
     const mergeRebase = await info("rebase-merge");
     const applyRebase = await info("rebase-apply");
     const sequence = await info("sequencer");
-    const merge = await scalar("MERGE_HEAD");
-    const cherry = await scalar("CHERRY_PICK_HEAD");
-    const revert = await scalar("REVERT_HEAD");
+    const merge = await info("MERGE_HEAD");
+    const cherry = await info("CHERRY_PICK_HEAD");
+    const revert = await info("REVERT_HEAD");
     if (
       !mergeRebase &&
       !applyRebase &&
@@ -119,9 +109,8 @@ export async function readOperation(
       if (!mergeRebase.isDirectory())
         throw new AppError("io_error", "rebase-merge state is unreadable");
       kind = "rebase";
-      for (const name of ["head-name", "orig-head", "onto", "stopped-sha", "msgnum"])
-        await scalar(`rebase-merge/${name}`);
-      await scalar("REBASE_HEAD");
+      await marker("rebase-merge/onto");
+      await marker("REBASE_HEAD");
       let comment = "";
       try {
         comment = commandLine(
@@ -148,24 +137,19 @@ export async function readOperation(
     } else if (applyRebase) {
       if (!applyRebase.isDirectory())
         throw new AppError("io_error", "rebase-apply state is unreadable");
-      const applying = await scalar("rebase-apply/applying"),
-        rebasing = await scalar("rebase-apply/rebasing");
+      const applying = await info("rebase-apply/applying"),
+        rebasing = await info("rebase-apply/rebasing");
+      if ((applying && !applying.isFile()) || (rebasing && !rebasing.isFile()))
+        throw new AppError("io_error", "rebase-apply marker is not a regular state file");
       kind = applying !== undefined ? "am" : rebasing !== undefined ? "rebase" : "unknown";
-      for (const name of [
-        "next",
-        "last",
-        "original-commit",
-        "abort-safety",
-        "head-name",
-        "orig-head",
-        "onto",
-      ])
-        await scalar(`rebase-apply/${name}`);
+      if (kind === "am") await marker("rebase-apply/patch");
+      else if (kind === "rebase") {
+        await marker("rebase-apply/onto");
+        await marker("rebase-apply/original-commit");
+      }
     } else if (cherry !== undefined || revert !== undefined || sequence) {
       if (sequence && !sequence.isDirectory())
         throw new AppError("io_error", "sequencer state is unreadable");
-      await scalar("sequencer/head");
-      await scalar("sequencer/abort-safety");
       const commands = await steps("sequencer/todo", "#");
       kind =
         cherry !== undefined
@@ -177,10 +161,16 @@ export async function readOperation(
               : commands.size === 1 && commands.has("revert")
                 ? "revert"
                 : "unknown";
+      await marker(
+        cherry !== undefined
+          ? "CHERRY_PICK_HEAD"
+          : revert !== undefined
+            ? "REVERT_HEAD"
+            : "sequencer/todo",
+      );
     } else if (merge !== undefined) {
       kind = "merge";
-      await scalar("ORIG_HEAD");
-      await scalar("MERGE_AUTOSTASH");
+      await marker("MERGE_HEAD");
     } else kind = "unknown";
     if (kind === "unknown")
       return {

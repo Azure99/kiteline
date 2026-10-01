@@ -1,9 +1,10 @@
+import { agentLimits } from "../src/limits.js";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, mkdir, writeFile, rm, rename, chmod, symlink } from "node:fs/promises";
 import { join } from "node:path";
-import { AppError, limits } from "@kiteline/shared/protocol";
+import { AppError } from "@kiteline/shared/protocol";
 import { MetadataStore } from "../src/metadata.js";
 import { CursorBudget } from "../src/cursor-budget.js";
 import { defaultAgentLimits } from "../src/config.js";
@@ -273,7 +274,7 @@ test("status pages count the whole repo, reject stale pages, and use semantic in
   );
   const first = await status(repo, 0, undefined, signals());
   expect(first.totalCount).toBe(503);
-  expect(first.entries.length).toBe(limits.listPageEntries);
+  expect(first.entries.length).toBe(agentLimits.listPageEntries);
   expect((await status(repo, first.nextOffset!, first.listToken, signals())).entries.length).toBe(
     3,
   );
@@ -326,10 +327,10 @@ test("diff preserves machine paths, rename, modes, binary and both sides without
   expect((await workingDiff(repo, next, "worktree", signals())).summary.newMode).toBe("100755");
   await writeFile(join(root, "binary"), Buffer.from([0, 1, 3]));
   expect((await workingDiff(repo, "binary", "worktree", signals())).summary.binary).toBe(true);
-  await writeFile(join(root, "untracked"), "a".repeat(limits.resultBytes + 100));
+  await writeFile(join(root, "untracked"), "a".repeat(agentLimits.resultBytes + 100));
   const large = await workingDiff(repo, "untracked", "worktree", signals());
   expect(large.truncated).toBe(true);
-  expect(Buffer.byteLength(JSON.stringify(large))).toBeLessThan(limits.resultBytes);
+  expect(Buffer.byteLength(JSON.stringify(large))).toBeLessThan(agentLimits.resultBytes);
   await symlink("binary", join(root, "symlink"));
   const links = await status(repo, 0, undefined, signals());
   expect(links.entries.find((entry) => entry.path === "symlink")?.types.worktree).toBe("symlink");
@@ -394,7 +395,7 @@ test("commit file offsets continue at the actual byte-limited page length", asyn
   expect(first.files.length).toBeGreaterThan(0);
   expect(first.files.length).toBeLessThan(paths.length);
   expect(first.nextOffset).toBe(first.files.length);
-  expect(Buffer.byteLength(JSON.stringify(first))).toBeLessThan(limits.resultBytes);
+  expect(Buffer.byteLength(JSON.stringify(first))).toBeLessThan(agentLimits.resultBytes);
   const second = await commitFiles(repo, oid, undefined, first.nextOffset!, signals());
   expect([...first.files, ...second.files].map((file) => file.path)).toEqual(paths);
   expect(second.nextOffset).toBeUndefined();

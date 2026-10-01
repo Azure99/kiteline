@@ -1,3 +1,4 @@
+import { agentLimits } from "../limits.js";
 import { createHash, randomUUID } from "node:crypto";
 import { isUtf8 } from "node:buffer";
 import type { Dir } from "node:fs";
@@ -6,7 +7,6 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   AppError,
   asError,
-  limits,
   type PathError,
   type Repo,
   type RepoDiscovery,
@@ -134,7 +134,7 @@ export class Repositories {
         found: new Set(),
         timer: setTimeout(() => {
           void this.release(id);
-        }, limits.cursorLifetime),
+        }, agentLimits.cursorLifetime),
       };
       this.scans.set(id, scan);
     }
@@ -152,9 +152,9 @@ export class Repositories {
     const started = Date.now();
     const add = (item: Repo | PathError) => {
       const size = Buffer.byteLength(JSON.stringify(item)) + 1;
-      if (size + 256 > limits.resultBytes)
+      if (size + 256 > agentLimits.resultBytes)
         throw new AppError("limit_exceeded", "Repository entry exceeds the size limit");
-      if (bytes + size > limits.resultBytes) {
+      if (bytes + size > agentLimits.resultBytes) {
         scan!.pending = item;
         return false;
       }
@@ -169,8 +169,8 @@ export class Repositories {
       while (
         scan.stack.length &&
         !scan.pending &&
-        visited < limits.discoveryDirectories &&
-        Date.now() - started < limits.discoverySlice
+        visited < agentLimits.discoveryDirectories &&
+        Date.now() - started < agentLimits.discoverySlice
       ) {
         signal.throwIfAborted();
         const frame = scan.stack.at(-1)!;

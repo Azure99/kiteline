@@ -1,10 +1,5 @@
-import {
-  AppError,
-  limits,
-  type GitRemotes,
-  type HeadIdentity,
-  type Repo,
-} from "@kiteline/shared/protocol";
+import { agentLimits } from "../limits.js";
+import { AppError, type GitRemotes, type HeadIdentity, type Repo } from "@kiteline/shared/protocol";
 import { commandLine, git, utf8 } from "./process.js";
 import { headIdentity } from "./status.js";
 
@@ -100,7 +95,7 @@ export async function remotes(repo: Repo, signal: AbortSignal): Promise<GitRemot
     defaultPushRemote,
     pushTarget,
   };
-  if (Buffer.byteLength(JSON.stringify(metadata)) > limits.resultBytes)
+  if (Buffer.byteLength(JSON.stringify(metadata)) > agentLimits.resultBytes)
     throw new AppError(
       "limit_exceeded",
       "Remote configuration exceeds the read size limit; view it in the terminal",

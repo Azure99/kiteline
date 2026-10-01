@@ -1,5 +1,4 @@
 import type { IBufferCellPosition, Terminal } from "@xterm/xterm";
-import { adaptTouchGestures, touchHoldMs, touchSlopPx } from "@kiteline/shared/terminal";
 import { scrollTerminalLines } from "./readonly-viewport";
 
 type Cell = IBufferCellPosition;
@@ -291,4 +290,92 @@ export class TouchSelection {
     window.removeEventListener("kiteline:viewport", this.geometry);
     cancelAnimationFrame(this.geometryFrame);
   }
+}
+
+const touchHoldMs = 550;
+const touchSlopPx = 8;
+
+// Fixed xterm beta inertia omits coordinates; only an explicit tap requests focus.
+export function adaptTouchGestures(
+  container: HTMLElement,
+  screen: HTMLElement,
+  selecting: () => boolean,
+  onTap: () => void,
+) {
+  let last: { clientX: number; clientY: number } | undefined;
+  let blocked = false;
+  let contact:
+    | { identifier: number; x: number; y: number; started: number; eligible: boolean }
+    | undefined;
+  const document = container.ownerDocument;
+  const touch = (event: TouchEvent) => {
+    const inBody = screen.contains(event.target as Node);
+    if (!contact && !inBody) return;
+    const point = event.changedTouches[0];
+    if (point) last = { clientX: point.clientX, clientY: point.clientY };
+    if (event.type === "touchstart") {
+      if (contact) contact.eligible = false;
+      else if (point && inBody && event.touches.length === 1) {
+        blocked = selecting();
+        contact = {
+          identifier: point.identifier,
+          x: point.clientX,
+          y: point.clientY,
+          started: event.timeStamp,
+          eligible: !blocked,
+        };
+      }
+      return;
+    }
+    if (!contact) return;
+    if (event.type === "touchmove" || event.type === "touchcancel" || selecting())
+      contact.eligible = false;
+    if (event.type !== "touchend" && event.type !== "touchcancel") return;
+    const tap =
+      contact.eligible &&
+      event.type === "touchend" &&
+      event.touches.length === 0 &&
+      point?.identifier === contact.identifier &&
+      event.timeStamp - contact.started < touchHoldMs &&
+      Math.hypot(point.clientX - contact.x, point.clientY - contact.y) <= touchSlopPx;
+    if (event.touches.length === 0) contact = undefined;
+    else contact.eligible = false;
+    if (tap) onTap();
+  };
+  const gesture = (raw: Event) => {
+    const event = raw as Event & { clientX?: number; clientY?: number };
+    if (contact && event.type === "-xterm-gesturechange") contact.eligible = false;
+    if (selecting()) blocked = true;
+    if (blocked || event.type === "-xterm-gesturetap") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    } else if (event.type === "-xterm-gesturechange") {
+      if (last) {
+        event.clientX ??= last.clientX;
+        event.clientY ??= last.clientY;
+      }
+    }
+  };
+  const mouse = (event: MouseEvent) => {
+    if (
+      (event as MouseEvent & { sourceCapabilities?: { firesTouchEvents: boolean } })
+        .sourceCapabilities?.firesTouchEvents
+    ) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  };
+  const touches = ["touchstart", "touchmove", "touchend", "touchcancel"] as const;
+  const gestures = ["-xterm-gesturechange", "-xterm-gesturetap", "-xterm-gesturecontextmenu"];
+  for (const name of touches)
+    document.addEventListener(name, touch, { capture: true, passive: true });
+  for (const name of gestures) container.addEventListener(name, gesture, true);
+  container.addEventListener("mousedown", mouse, true);
+  return {
+    dispose: () => {
+      for (const name of touches) document.removeEventListener(name, touch, { capture: true });
+      for (const name of gestures) container.removeEventListener(name, gesture, true);
+      container.removeEventListener("mousedown", mouse, true);
+    },
+  };
 }

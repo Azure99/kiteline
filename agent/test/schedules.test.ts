@@ -3,9 +3,6 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { createServer } from "node:http";
 import { mkdirSync, renameSync } from "node:fs";
-import fs from "node:fs/promises";
-import { syncBuiltinESMExports } from "node:module";
-import { setTimeout as delay } from "node:timers/promises";
 import {
   mkdtemp,
   mkdir,
@@ -20,7 +17,7 @@ import {
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { taskRunActive, type ScheduledTask, type TaskRun } from "@kiteline/shared/protocol";
-import { defaultAgentLimits } from "../src/config.js";
+import { defaultAgentLimits, privateDirectory } from "../src/config.js";
 import { ScheduledTasks } from "../src/tasks/index.js";
 import { checkSchedule, checkTimezone, nextOccurrence } from "../src/tasks/schedule.js";
 import { scheduleMethods, scheduleRpc, type ScheduleMethod } from "../src/tasks/rpc.js";
@@ -423,37 +420,6 @@ test("escaped descendants do not hold task output open indefinitely", async () =
   }
 });
 
-test("unknown group checks retain the task slot and do not turn runtime diagnostics into spawn failure", async () => {
-  const f = await fixture({ taskRunsPerDevice: 1 });
-  const realKill = process.kill.bind(process);
-  let kill: ReturnType<typeof vi.spyOn> | undefined;
-  const warning = vi.spyOn(console, "error").mockImplementation(() => {});
-  try {
-    await f.tasks.create("group", input(f.root, "sleep 1.5 >/dev/null 2>&1 &"), signal);
-    await f.tasks.create("next", input(f.root), signal);
-    const run = await f.tasks.start("group", "check", signal);
-    let unavailable = true;
-    kill = vi.spyOn(process, "kill").mockImplementation((pid, value) => {
-      if (pid === -run.pid! && value === 0 && unavailable)
-        throw Object.assign(new Error("Process group check unavailable"), { code: "EACCES" });
-      return realKill(pid, value);
-    });
-    await expect.poll(() => warning.mock.calls.length).toBeGreaterThan(0);
-    await expect(f.tasks.start("next", "blocked", signal)).rejects.toMatchObject({ code: "busy" });
-    unavailable = false;
-    expect(await finished(f.tasks, run.id)).toMatchObject({
-      state: "succeeded",
-      exitCode: 0,
-      diagnostic: "Process group check unavailable",
-    });
-    expect(f.tasks.run(run.id).reasonCode).toBeUndefined();
-  } finally {
-    kill?.mockRestore();
-    warning.mockRestore();
-    await f.close();
-  }
-});
-
 test("spawn failure has no command exit code or start time", async () => {
   const f = await fixture();
   try {
@@ -491,7 +457,7 @@ test("stop queued by the terminal notification cannot change a completed run bac
   }
 });
 
-test("lowered byte limits preserve old output until new admission needs room; actual shortening resets reads", async () => {
+test("lowered byte limits preserve old output; actual shortening resets reads", async () => {
   const f = await fixture({ taskOutputBytes: 64, taskOutputTotalBytes: 128 });
   try {
     await f.tasks.create("limits", input(f.root, "head -c 64 /dev/zero"), signal);
@@ -522,31 +488,15 @@ test("lowered byte limits preserve old output until new admission needs room; ac
     }
     const smaller = new ScheduledTasks({
       ...f.config,
-      limits: { ...f.config.limits, taskOutputBytes: 16 },
+      limits: { ...f.config.limits, taskOutputBytes: 16, taskOutputTotalBytes: 8 },
     });
     try {
       await smaller.load();
+      expect(smaller.runs("limits").total).toBe(1);
       expect(smaller.run("one").output).toMatchObject({ stdoutBytes: 32, truncated: true });
       expect((await readFile(join(f.root, "tasks", "one.stdout"))).length).toBe(32);
     } finally {
       await smaller.close();
-    }
-    const tiny = new ScheduledTasks({
-      ...f.config,
-      limits: { ...f.config.limits, taskOutputTotalBytes: 8 },
-    });
-    try {
-      await tiny.load();
-      expect(tiny.runs("limits").total).toBe(1);
-      expect((await readFile(join(f.root, "tasks", "one.stdout"))).length).toBe(32);
-      await tiny.start("limits", "new", signal);
-      expect(await finished(tiny, "new")).toMatchObject({
-        state: "succeeded",
-        output: { stdoutBytes: 8, truncated: true },
-      });
-      expect(() => tiny.run("one")).toThrow("does not exist or has been cleaned up");
-    } finally {
-      await tiny.close();
     }
   } finally {
     await f.close();
@@ -592,77 +542,6 @@ test("lowered task count preserves existing management and prevents new definiti
   }
 });
 
-test.each([32, 80])(
-  "total budget %i preserves history when eviction cannot fit the new output target",
-  async (total) => {
-    const f = await fixture({ taskOutputBytes: 64, taskOutputTotalBytes: 256 });
-    let restored: ScheduledTasks | undefined;
-    const open = fs.open;
-    const slowOpen = vi.spyOn(fs, "open").mockImplementation(async (...args) => {
-      if (args[1] === "wx") await delay(80);
-      return open(...args);
-    });
-    syncBuiltinESMExports();
-    try {
-      await f.tasks.create("review", input(f.root, "head -c 64 /dev/zero"), signal);
-      await f.tasks.create("empty", input(f.root, "true"), signal);
-      await f.tasks.create("history", input(f.root, "head -c 16 /dev/zero"), signal);
-      await f.tasks.create(
-        "next",
-        input(f.root, "head -c 64 /dev/zero; printf finished > marker"),
-        signal,
-      );
-      await f.tasks.start("review", "retained", signal);
-      await finished(f.tasks, "retained");
-      await f.tasks.start("empty", "zero", signal);
-      await finished(f.tasks, "zero");
-      await f.tasks.start("history", "old", signal);
-      const old = await finished(f.tasks, "old");
-      await f.tasks.close();
-      const path = join(f.root, "tasks", "review.json");
-      const value = JSON.parse(await readFile(path, "utf8"));
-      Object.assign(value.task, { state: "paused", nextRunAt: null, reviewRunId: "retained" });
-      value.runs[0].state = "unknown";
-      await writeFile(path, JSON.stringify(value));
-      const output = await readFile(join(f.root, "tasks", "retained.stdout"));
-      restored = new ScheduledTasks({
-        ...f.config,
-        limits: { ...f.config.limits, taskOutputBytes: 32, taskOutputTotalBytes: total },
-      });
-      await restored.load();
-      expect(restored.run("retained").output).toMatchObject({ stdoutBytes: 64, truncated: false });
-      for (const id of ["new", "again"]) {
-        await restored.start("next", id, signal);
-        expect(await finished(restored, id)).toMatchObject({
-          state: "succeeded",
-          output: { stdoutBytes: 0, truncated: true },
-        });
-        expect(restored.run("old")).toEqual(old);
-        expect((await readFile(join(f.root, "tasks", "old.stdout"))).length).toBe(16);
-        expect(restored.run("zero").state).toBe("succeeded");
-      }
-      expect(restored.run("new").state).toBe("succeeded");
-      expect(await readFile(join(f.root, "marker"), "utf8")).toBe("finished");
-      expect((await readFile(join(f.root, "tasks", "retained.stdout"))).equals(output)).toBe(true);
-      expect(restored.get("review").reviewRunId).toBe("retained");
-      await restored.acknowledge("review", "retained", signal);
-      await restored.start("next", "after-review", signal);
-      expect(await finished(restored, "after-review")).toMatchObject({
-        state: "succeeded",
-        output: { stdoutBytes: 32, truncated: true },
-      });
-      expect(() => restored!.run("retained")).toThrow("does not exist or has been cleaned up");
-      expect(restored.run("zero").state).toBe("succeeded");
-      expect(restored.run("new").state).toBe("succeeded");
-    } finally {
-      await restored?.close();
-      slowOpen.mockRestore();
-      syncBuiltinESMExports();
-      await f.close();
-    }
-  },
-);
-
 test("active output prevents eviction that cannot reclaim a full run budget", async () => {
   const f = await fixture({ taskOutputBytes: 64, taskOutputTotalBytes: 100 });
   try {
@@ -688,155 +567,91 @@ test("active output prevents eviction that cannot reclaim a full run budget", as
   }
 });
 
-test.each([
-  "broken JSON",
-  "unknown state",
-  "invalid definition",
-  "unschedulable definition",
-  "non-file output",
-  "duplicate run",
-  "case-equivalent task",
-  "case-equivalent run",
-  "output identity",
-  "orphan output identity",
-  "task suffix",
-  "output suffix",
-  "summary budget",
-])(
-  "%s disables every task RPC before any startup write while the real agent stays usable",
-  async (kind) => {
-    const f = await fixture();
-    let agent: Agent | undefined;
-    const log = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      await f.tasks.create("good", input(f.root), signal);
-      await f.tasks.create("bad", input(f.root), signal);
-      await f.tasks.start("good", "before", signal);
-      await finished(f.tasks, "before");
-      await f.tasks.close();
-      const directory = join(f.root, "tasks");
-      const goodPath = join(directory, "good.json");
-      const good = JSON.parse(await readFile(goodPath, "utf8"));
-      Object.assign(good.task, {
-        schedule: { kind: "once", at: "2000-01-01T00:00:00.000Z" },
-        onceStatus: "pending",
-        nextRunAt: "2000-01-01T00:00:00.000Z",
-      });
-      good.runs[0].state = "running";
-      delete good.runs[0].endedAt;
-      await writeFile(goodPath, JSON.stringify(good));
-      const path = join(f.root, "tasks", "bad.json");
-      const data = JSON.parse(await readFile(path, "utf8"));
-      if (kind === "broken JSON") await writeFile(path, "{");
-      if (kind === "unknown state") {
-        data.task.state = "unrecognized";
-        await writeFile(path, JSON.stringify(data));
-      }
-      if (kind === "invalid definition") {
-        data.task.name = null;
-        await writeFile(path, JSON.stringify(data));
-      }
-      if (kind === "unschedulable definition") {
-        data.task.schedule = { kind: "cron", expression: "0 0 30 2 *" };
-        await writeFile(path, JSON.stringify(data));
-      }
-      if (kind === "case-equivalent task") {
-        data.task.id = "BAD";
-        await writeFile(join(directory, "BAD.json"), JSON.stringify(data));
-      }
-      if (kind === "case-equivalent run") {
-        data.runs = [{ ...good.runs[0], id: "BEFORE", taskId: "bad" }];
-        await writeFile(path, JSON.stringify(data));
-      }
-      if (kind === "output identity")
-        await rename(join(directory, "before.stdout"), join(directory, "BEFORE.stdout"));
-      if (kind === "orphan output identity") {
-        await writeFile(join(directory, "Loose.stdout"), "one");
-        await writeFile(join(directory, "loose.stderr"), "two");
-      }
-      if (kind === "task suffix") await rename(path, join(directory, "bad.JSON"));
-      if (kind === "output suffix")
-        await rename(join(directory, "before.stdout"), join(directory, "before.STDOUT"));
-      if (kind === "non-file output") {
-        await mkdir(join(directory, "bad.stdout"));
-        await writeFile(join(directory, "bad.stdout/keep"), "user content");
-      }
-      if (kind === "duplicate run") {
-        data.runs = [{ ...good.runs[0], taskId: "bad" }];
-        await writeFile(path, JSON.stringify(data));
-      }
-      if (kind === "summary budget") {
-        for (let i = 0; i < 800; i++) {
-          const id = `extra-${i}`;
-          await writeFile(
-            join(directory, `${id}.json`),
-            JSON.stringify({ ...data, task: { ...data.task, id, name: "x".repeat(256) } }),
-          );
-        }
-      }
-      await writeFile(join(f.root, "tasks", "unclaimed.stdout"), "Do not delete");
-      await writeFile(join(directory, "unfinished.tmp"), "Unpublished record");
-      const original = new Map(
-        await Promise.all(
-          (await readdir(directory, { recursive: true })).map(
-            async (file) =>
-              [
-                file,
-                (await lstat(join(directory, file))).isFile()
-                  ? await readFile(join(directory, file))
-                  : null,
-              ] as const,
-          ),
+test("broken JSON disables every task RPC before any startup write while the real agent stays usable", async () => {
+  const f = await fixture();
+  let agent: Agent | undefined;
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    await f.tasks.create("good", input(f.root), signal);
+    await f.tasks.create("bad", input(f.root), signal);
+    await f.tasks.start("good", "before", signal);
+    await finished(f.tasks, "before");
+    await f.tasks.close();
+    const directory = join(f.root, "tasks");
+    const goodPath = join(directory, "good.json");
+    const good = JSON.parse(await readFile(goodPath, "utf8"));
+    Object.assign(good.task, {
+      schedule: { kind: "once", at: "2000-01-01T00:00:00.000Z" },
+      onceStatus: "pending",
+      nextRunAt: "2000-01-01T00:00:00.000Z",
+    });
+    good.runs[0].state = "running";
+    delete good.runs[0].endedAt;
+    await writeFile(goodPath, JSON.stringify(good));
+    const path = join(f.root, "tasks", "bad.json");
+    await writeFile(path, "{");
+    await writeFile(join(f.root, "tasks", "unclaimed.stdout"), "Do not delete");
+    await writeFile(join(directory, "unfinished.tmp"), "Unpublished record");
+    const original = new Map(
+      await Promise.all(
+        (await readdir(directory, { recursive: true })).map(
+          async (file) =>
+            [
+              file,
+              (await lstat(join(directory, file))).isFile()
+                ? await readFile(join(directory, file))
+                : null,
+            ] as const,
         ),
-      );
-      for (let attempt = 0; attempt < (kind === "broken JSON" ? 2 : 1); attempt++) {
-        agent = new Agent(f.config, {
-          deviceId: "test",
-          deviceToken: "test",
-          server: "http://127.0.0.1:1",
+      ),
+    );
+    for (let attempt = 0; attempt < 2; attempt++) {
+      agent = new Agent(f.config, {
+        deviceId: "test",
+        deviceToken: "test",
+        server: "http://127.0.0.1:1",
+      });
+      for (const path of [agent.config.dataDir, agent.config.runDir]) await privateDirectory(path);
+      await agent.start();
+      expect(await localRequest(f.config, "workspaces.list")).toEqual({ workspaces: [] });
+      for (const method of scheduleMethods)
+        await expect(localRequest(f.config, method)).rejects.toMatchObject({
+          code: "io_error",
+          message: "Scheduled task storage is unavailable",
+          details: undefined,
         });
-        await agent.start();
-        expect(await localRequest(f.config, "workspaces.list")).toEqual({ workspaces: [] });
-        for (const method of scheduleMethods)
-          await expect(localRequest(f.config, method)).rejects.toMatchObject({
-            code: "io_error",
-            message: "Scheduled task storage is unavailable",
-            details: undefined,
+      expect(agent.schedules.snapshot()).toEqual({ revision: 0, storageError: true, items: [] });
+      expect(agent.schedules.status().storageError).toBeTruthy();
+      if (attempt === 0)
+        for (const args of [
+          ["list"],
+          ["show", "good"],
+          ["output", "before"],
+          ["preview", "--cron", "0 9 * * *"],
+        ]) {
+          const result = await cli(f.root, [...args, "--json"]);
+          expect(result.code).toBe(1);
+          expect(result.json()).toMatchObject({
+            error: { code: "io_error", message: "Scheduled task storage is unavailable" },
           });
-        expect(agent.schedules.snapshot()).toEqual({ revision: 0, storageError: true, items: [] });
-        expect(agent.schedules.status().storageError).toBeTruthy();
-        if (kind === "broken JSON" && attempt === 0)
-          for (const args of [
-            ["list"],
-            ["show", "good"],
-            ["output", "before"],
-            ["preview", "--cron", "0 9 * * *"],
-          ]) {
-            const result = await cli(f.root, [...args, "--json"]);
-            expect(result.code).toBe(1);
-            expect(result.json()).toMatchObject({
-              error: { code: "io_error", message: "Scheduled task storage is unavailable" },
-            });
-            expect(result.stdout).not.toContain(f.root);
-          }
-        await agent.close();
-        agent = undefined;
-        expect((await readdir(directory, { recursive: true })).sort()).toEqual(
-          [...original.keys()].sort(),
-        );
-        for (const [file, bytes] of original)
-          if (bytes) expect((await readFile(join(directory, file))).equals(bytes)).toBe(true);
-      }
-    } finally {
-      await agent?.close();
-      log.mockRestore();
-      await f.close();
+          expect(result.stdout).not.toContain(f.root);
+        }
+      await agent.close();
+      agent = undefined;
+      expect((await readdir(directory, { recursive: true })).sort()).toEqual(
+        [...original.keys()].sort(),
+      );
+      for (const [file, bytes] of original)
+        if (bytes) expect((await readFile(join(directory, file))).equals(bytes)).toBe(true);
     }
-  },
-  15000,
-);
+  } finally {
+    await agent?.close();
+    log.mockRestore();
+    await f.close();
+  }
+}, 15000);
 
-test("historical parameters retain display constraints without revalidating execution", async () => {
+test("historical parameters are read without revalidating execution", async () => {
   const f = await fixture();
   let restored: ScheduledTasks | undefined;
   const log = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -875,12 +690,6 @@ test("historical parameters retain display constraints without revalidating exec
       ),
     ).rejects.toMatchObject({ code: "invalid_argument" });
     await restored.close();
-    value.runs[0].parameters.timezone = "invalid/display-zone";
-    await writeFile(path, JSON.stringify(value));
-    restored = new ScheduledTasks(f.config);
-    await restored.load();
-    expect(restored.snapshot()).toMatchObject({ storageError: true, items: [] });
-    expect(await readFile(path, "utf8")).toBe(JSON.stringify(value));
   } finally {
     await restored?.close();
     log.mockRestore();

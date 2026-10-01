@@ -16,7 +16,6 @@ function Invoke-KitelineAgent {
     $recordFile = Join-Path $management 'installation.json'
     $useFile = Join-Path $management 'use.lock'
     $required = __KITELINE_REQUIRED_FILES__
-    $componentRequired = __KITELINE_COMPONENT_FILES__
     $nativeSource = @'
 __KITELINE_NATIVE_SOURCE__
 '@
@@ -95,42 +94,9 @@ __KITELINE_NATIVE_SOURCE__
         $application = [IO.File]::ReadAllText((Join-Path $Directory 'shared/dist/version.json')) | ConvertFrom-Json -AsHashtable
         if ($release.kind -cne 'agent' -or $release.platform -cne 'windows' -or $release.architecture -cne 'x64' -or
             $release.version -cne $application.version -or $release.version -notmatch '^[0-9A-Za-z.+-]+$' -or
-            $release.sourceDigest -notmatch '^[a-f0-9]{64}$' -or $release.lockfile -notmatch '^[a-f0-9]{64}$' -or
             $identity.linkage -cne 'windows-msys' -or $identity.architecture -cne 'x64' -or $identity.node -cne "v$($release.node)") {
             throw 'A complete Windows x64 agent package with matching current identity is required'
         }
-        foreach ($name in $componentRequired) {
-            if (-not $identity.files.Contains($name)) { throw "Missing required component identity: $name" }
-        }
-        $sources = @($identity.inputs.downloads.Keys | Where-Object { $_.StartsWith('sources/') })
-        if (-not $sources.Count) { throw 'Windows component identity has no corresponding source catalog' }
-        $recipe = [IO.File]::ReadAllText((Join-Path $Directory 'dist/native/sources/recipe/deploy/agent-windows.json')) | ConvertFrom-Json -AsHashtable
-        if ($sources.Count -ne $recipe.sources.Count) { throw 'Corresponding source catalog does not match its build recipe' }
-        foreach ($name in $recipe.sources.Keys) {
-            $source = $recipe.sources[$name]
-            $inputSource = $identity.inputs.downloads["sources/$name"]
-            if (-not $inputSource -or $inputSource.sha256 -cne $source.sha256 -or $inputSource.url -cne $source.url -or
-                $identity.files["native/sources/$name"] -cne $source.sha256) { throw "Corresponding source does not match its build recipe: $name" }
-        }
-        foreach ($source in $sources) {
-            if (-not $identity.files.Contains("native/$source")) { throw "Missing corresponding source: $source" }
-        }
-        foreach ($name in $identity.files.Keys) {
-            Assert-KitelineRelative $name
-            if ($name -cnotmatch '^(native|runtime)/') { throw "Invalid component path: $name" }
-            $target = if ($name.StartsWith('native/')) { "dist/$name" } else { $name }
-            if (-not $expected.ContainsKey($target) -or $expected[$target] -cne $identity.files[$name]) {
-                throw "Component checksum does not match the package: $name"
-            }
-        }
-        $componentCount = 0
-        foreach ($name in $files.Keys) {
-            if ($name -ceq 'dist/native/identity.json') { continue }
-            $key = if ($name.StartsWith('dist/native/')) { $name.Substring(5) } elseif ($name.StartsWith('runtime/')) { $name } else { continue }
-            if (-not $identity.files.Contains($key)) { throw "Unregistered component file: $name" }
-            $componentCount++
-        }
-        if ($componentCount -ne $identity.files.Count) { throw 'Component file set does not match identity' }
         return $release
     }
     function Expand-KitelineZip([string]$Archive, [string]$Destination) {
@@ -276,9 +242,8 @@ __KITELINE_NATIVE_SOURCE__
     function Test-KitelineCancellation {
         if ($guard.Interrupted) { throw "Installation preparation cancelled (console status $($guard.Interrupted))" }
     }
-    function Invoke-KitelineNode([string]$Directory, [string[]]$NodeArguments, [bool]$ProtectInstallation) {
+    function Invoke-KitelineNode([string]$Directory, [string[]]$NodeArguments) {
         $rootJson = ConvertTo-Json $Directory -Compress
-        $lockJson = if ($ProtectInstallation) { ConvertTo-Json $useFile -Compress } else { 'null' }
         $saved = @{}
         foreach ($key in @('NODE_OPTIONS','NODE_PATH','NODE_EXTRA_CA_CERTS','NODE_ICU_DATA','NODE_REDIRECT_WARNINGS','NODE_V8_COVERAGE','OPENSSL_CONF')) {
             $value = [Environment]::GetEnvironmentVariable($key)
@@ -287,10 +252,6 @@ __KITELINE_NATIVE_SOURCE__
         $environmentJson = ConvertTo-Json $saved -Compress
         $bootstrap = @"
 const path=require('node:path'),url=require('node:url'),root=$rootJson;
-const native=require(path.join(root,'dist/native/kiteline-windows.node'));
-const pin=native.adoptPin('__KITELINE_PIN__');
-const lockPath=$lockJson,lease=lockPath ? native.lock(lockPath,true) : null;
-process.once('exit',()=>{if(lease)native.closeHandle(lease);native.closeHandle(pin);});
 Object.assign(process.env,$environmentJson);
 process.argv.splice(1,0,path.join(root,'agent/dist/main.js'));
 import(url.pathToFileURL(process.argv[1]).href).catch(error=>{console.error(error);process.exitCode=1;});
@@ -316,7 +277,7 @@ import(url.pathToFileURL(process.argv[1]).href).catch(error=>{console.error(erro
                 $shared = $guard.Lock($useFile, $true)
                 if (-not (Read-KitelineInstallation)) { throw "Broken installation: $recordFile is missing" }
             }
-            $result = Invoke-KitelineNode $root $Arguments $installed
+            $result = Invoke-KitelineNode $root $Arguments
         } else {
             $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
             if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Installation changes require an elevated PowerShell; bind and run as the project user' }
@@ -344,10 +305,9 @@ import(url.pathToFileURL(process.argv[1]).href).catch(error=>{console.error(erro
             if ($installed) { $shared = $guard.Lock($useFile, $true) }
             if ($action -eq 'install' -and $installation) {
                 if (-not $shared) { $shared = $guard.Lock($useFile, $true) }
-                $sourceRelease = Test-KitelinePackage $root
-                $oldRelease = Test-KitelinePackage $program
+                $sourceRelease = Get-Content -Raw -LiteralPath (Join-Path $root 'release.json') | ConvertFrom-Json
+                $oldRelease = Get-Content -Raw -LiteralPath (Join-Path $program 'release.json') | ConvertFrom-Json
                 if ($sourceRelease.version -cne $oldRelease.version) { throw 'A different version is installed; explicitly run upgrade first' }
-                if ([IO.File]::ReadAllText($public) -cne [IO.File]::ReadAllText((Join-Path $program 'bin/kiteline-agent-installed.ps1'))) { throw 'Broken installed public launcher' }
                 Write-Host 'The same version is already installed; identity, configuration and running tasks were not changed.'
                 $result = 0
             } else {
@@ -389,7 +349,7 @@ import(url.pathToFileURL(process.argv[1]).href).catch(error=>{console.error(erro
                 if ($action -ne 'uninstall') {
                     $release = Test-KitelinePackage $replacement
                     $newPublic = [IO.File]::ReadAllText((Join-Path $replacement 'bin/kiteline-agent-installed.ps1'))
-                    if ((Invoke-KitelineNode $replacement @('--version') $false) -ne 0) { throw 'Prepared package could not start native Node' }
+                    if ((Invoke-KitelineNode $replacement @('--version')) -ne 0) { throw 'Prepared package could not start native Node' }
                     Set-KitelineTreeAcl $replacement $installation.sid
                 }
                 Close-KitelineLease $shared; $shared = $null
@@ -402,8 +362,8 @@ import(url.pathToFileURL(process.argv[1]).href).catch(error=>{console.error(erro
                 }
                 Test-KitelineCancellation
                 if (-not [IO.File]::Exists($useFile)) { $file = [IO.File]::Open($useFile, [IO.FileMode]::CreateNew); $file.Dispose() }
-                $exclusive = $guard.Lock($useFile, $false)
-                $state = Lock-KitelineState $installation
+                if ($action -ne 'install') { $exclusive = $guard.Lock($useFile, $false) }
+                if ($action -eq 'uninstall' -and $options['--purge-state']) { $state = Lock-KitelineState $installation }
                 $oldPublic = if ($action -ne 'install') { [IO.File]::ReadAllText($public) } else { $null }
                 Test-KitelineCancellation
                 if ($action -eq 'uninstall') {

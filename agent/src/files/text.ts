@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { open, stat } from "node:fs/promises";
+import { open } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { AppError, OperationError, limits, type SavedFile } from "@kiteline/shared/protocol";
 import { decodeText } from "@kiteline/shared/text";
@@ -95,11 +95,7 @@ export class TextFiles {
       }
     }
     const parent = dirname(target);
-    const temporary = await this.temporary.create(
-      parent,
-      await stat(parent, { bigint: true }),
-      signal,
-    );
+    const temporary = await this.temporary.create(parent, signal);
     return {
       workspaceId,
       path,
@@ -119,10 +115,10 @@ export class TextFiles {
       throw new AppError("invalid_argument", "Received body length is incomplete");
     const content = await readExact(item.temporary.handle, item.size, signal);
     decodeText(content);
+    const { dev } = await item.temporary.handle.stat({ bigint: true });
     await this.temporary.closeFile(item.temporary);
     return publish(async () => {
       signal.throwIfAborted();
-      await this.temporary.checkLocked(item.temporary);
       let target: string;
       let mode = 0o666 & ~process.umask();
       if (item.createOnly) {
@@ -173,9 +169,8 @@ export class TextFiles {
       const result = {
         path: item.path,
         size: item.size,
-        revision: revisionOf(target, BigInt(item.temporary.dev), content),
+        revision: revisionOf(target, dev, content),
       };
-      await this.temporary.publishedLocked(item.temporary);
       return result;
     }, signal);
   }

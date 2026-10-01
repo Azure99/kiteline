@@ -14,7 +14,6 @@ test("create cancellation fences both same-chunk admission and a retiring record
       resolve("terminal-recorder/dist/main.js"),
       "--agent",
       JSON.stringify({
-        channelPairTimeout: 3000,
         terminalInputBytes: 65536,
         terminalStallTimeout: 3000,
       }),

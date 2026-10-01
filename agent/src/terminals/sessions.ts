@@ -1,10 +1,11 @@
+import { agentLimits } from "../limits.js";
 import { randomBytes } from "node:crypto";
 import { access, rm } from "node:fs/promises";
 import { constants, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { AppError, OperationError, limits, type Session } from "@kiteline/shared/protocol";
 import type { CreateTerminal, RecorderMessage, TerminalIdentity } from "@kiteline/shared/ipc";
-import { exitCodeFormat, msysPath, tmux, tmuxServerMissing } from "@kiteline/shared/terminal/node";
+import { exitCodeFormat, tmux, tmuxServerMissing } from "@kiteline/shared/terminal/node";
 import { startTerminalServer } from "@kiteline/shared/terminal/windows";
 import type { AgentConfig } from "../config.js";
 import type { MetadataStore } from "../metadata.js";
@@ -92,12 +93,6 @@ export class Sessions {
   ) {
     if (this.closing) throw new AppError("cancelled", "Agent is stopping");
     await access(this.config.shell, constants.X_OK);
-    const socket = join(this.config.runDir, "0".repeat(sessionIdBytes * 2), "tmux.sock");
-    if (Buffer.byteLength(process.platform === "win32" ? msysPath(socket) : socket) > 103)
-      throw new AppError(
-        "invalid_argument",
-        "Runtime directory path is too long; use a shorter KITELINE_AGENT_RUN_DIR",
-      );
     const { item, workspace, shortcut } = await this.metadata.withCurrent((metadata) => {
       signal.throwIfAborted();
       if (this.closing) throw new AppError("cancelled", "Agent is stopping");
@@ -148,12 +143,12 @@ export class Sessions {
             workspacePath: workspace.path,
             shell: this.config.shell,
             command: shortcut?.command,
-            cols: limits.terminalInitialCols,
-            rows: limits.terminalInitialRows,
+            cols: agentLimits.terminalInitialCols,
+            rows: agentLimits.terminalInitialRows,
             historyLines: item.session.historyLines,
           };
           if (process.platform === "win32")
-            item.server = await startTerminalServer(options, this.config.limits.channelPairTimeout);
+            item.server = await startTerminalServer(options, limits.channelPairTimeout);
           if (this.closing) throw new AppError("cancelled", "Agent is stopping");
           item.creationMayArrive = true;
           let identity: TerminalIdentity;

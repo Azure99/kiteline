@@ -1,3 +1,4 @@
+import { limits } from "@kiteline/shared/protocol";
 import { AppError, asError } from "@kiteline/shared/protocol";
 import { setTimeout as delay } from "node:timers/promises";
 import type {
@@ -51,7 +52,7 @@ export class RecordedSession {
         dead: (code) => this.finish(code),
         fault: (error) => this.fault(error),
       },
-      config.channelPairTimeout,
+      limits.channelPairTimeout,
     );
     this.input = new InputQueue(
       this.control,
@@ -96,11 +97,11 @@ export class RecordedSession {
     }));
     try {
       await this.control.resize(cols, rows + 1);
-      await this.model.waitForSize(cols, rows + 1, this.config.channelPairTimeout);
+      await this.model.waitForSize(cols, rows + 1, limits.channelPairTimeout);
       await delay(80);
     } finally {
       await this.control.resize(cols, rows);
-      await this.model.waitForSize(cols, rows, this.config.channelPairTimeout);
+      await this.model.waitForSize(cols, rows, limits.channelPairTimeout);
     }
   }
   private frame(id: string, frame: TerminalFrame) {
@@ -147,7 +148,7 @@ export class RecordedSession {
     try {
       display.unsubscribe = await this.model.attach(
         history,
-        this.config.channelPairTimeout,
+        limits.channelPairTimeout,
         (snapshot) => attachment.start(snapshot, this.options.historyLines, historyGap),
         attachment.output,
         abort.signal,
@@ -201,7 +202,7 @@ export class RecordedSession {
         this.options.socket,
         ["kill-server"],
         undefined,
-        AbortSignal.timeout(this.config.channelPairTimeout),
+        AbortSignal.timeout(limits.channelPairTimeout),
       );
     } catch (error) {
       this.fault(error instanceof Error ? error : new Error(String(error)));

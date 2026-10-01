@@ -39,7 +39,7 @@ docker run --rm --name kiteline-dev-caddy --network host \
 export NODE_EXTRA_CA_CERTS=/var/tmp/kiteline-dev/caddy/caddy/pki/authorities/local/root.crt
 ```
 
-正式部署支持 HTTP 直连及已有 HTTPS 反代，见[安装与运行](deploy/README.md#server-部署)。密码恢复需先停止 server，再以相同 `KITELINE_DATA_DIR` 运行 `pnpm server reset-password`，完成后重新启动。原生组件及构建身份位于 `dist/native/`；临时编译目录和包缓存使用 `/var/tmp`。
+正式部署、密码恢复和代理环境见[安装与运行](deploy/README.md#server-部署)。原生组件及构建身份位于 `dist/native/`；临时编译目录和包缓存使用 `/var/tmp`。
 
 ## 访问设备上的开发服务
 
@@ -57,7 +57,7 @@ pnpm test
 pnpm build
 ```
 
-文件和进程测试需要先构建原生组件。
+文件、Git和进程测试使用真实文件系统、Git及tmux，需要先构建原生组件。浏览器改动在当前Chrome与实际Chromium 97检查，覆盖桌面、手机布局和连续操作；输入法、软键盘、剪贴板和全屏另在Android真机核对。Windows文件与安装链使用Windows 11本地NTFS；各平台从最终包运行并检查受影响的安装升级流程，构建入口见[生成交付物](deploy/README.md#生成交付物)。
 
 ## 许可证
 

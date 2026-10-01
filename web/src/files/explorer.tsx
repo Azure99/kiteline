@@ -30,6 +30,7 @@ export function FileExplorer({
   mobile,
   selecting,
   disabled,
+  savingWithin,
   onFolder,
   onOpen,
   onSelect,
@@ -48,6 +49,7 @@ export function FileExplorer({
   mobile: boolean;
   selecting: boolean;
   disabled: boolean;
+  savingWithin: (path: string) => boolean;
   onFolder: (path: string) => void;
   onOpen: (entry: Entry) => void;
   onSelect: (path: string) => void;
@@ -142,7 +144,7 @@ export function FileExplorer({
                         </MenuItem>
                       </>
                     )}
-                    <MenuItem onClick={() => onRename(entry)}>
+                    <MenuItem disabled={savingWithin(entry.path)} onClick={() => onRename(entry)}>
                       <Pencil />
                       {t(($) => $.common.rename)}
                     </MenuItem>
@@ -150,11 +152,17 @@ export function FileExplorer({
                       <Copy />
                       {t(($) => $.common.copy)}
                     </MenuItem>
-                    <MenuItem onClick={() => onAction("move", entry)}>
+                    <MenuItem
+                      disabled={savingWithin(entry.path)}
+                      onClick={() => onAction("move", entry)}
+                    >
                       <FolderInput />
                       {t(($) => $.common.move)}
                     </MenuItem>
-                    <MenuItem onClick={() => onAction("delete", entry)}>
+                    <MenuItem
+                      disabled={savingWithin(entry.path)}
+                      onClick={() => onAction("delete", entry)}
+                    >
                       <Trash2 />
                       {t(($) => $.common.delete)}
                     </MenuItem>
@@ -178,6 +186,7 @@ export function FileExplorer({
                   mobile,
                   selecting,
                   disabled,
+                  savingWithin,
                   onFolder,
                   onOpen,
                   onSelect,

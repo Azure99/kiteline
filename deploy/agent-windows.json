@@ -309,14 +309,6 @@
     "msys2-runtime-3.6.10-4.src.tar.zst": {
       "url": "https://repo.msys2.org/msys/sources/msys2-runtime-3.6.10-4.src.tar.zst",
       "sha256": "47e6e49710116d1bb57adaa24530306ee5841b58b8abca66ffcc107736393cec"
-    },
-    "libevent-2.1.13-1.src.tar.zst": {
-      "url": "https://repo.msys2.org/msys/sources/libevent-2.1.13-1.src.tar.zst",
-      "sha256": "41bb755eb9721b7717e673af107a656546bd87d906e1f94a27bba5bf687daf53"
-    },
-    "ncurses-6.6-2.src.tar.zst": {
-      "url": "https://repo.msys2.org/msys/sources/ncurses-6.6-2.src.tar.zst",
-      "sha256": "f5df12bd297e6b6930e2aa68e8014347b2193592645d93acce6774e05cbf15e6"
     }
   },
   "runtimeFiles": {

@@ -1,8 +1,8 @@
+import { agentLimits } from "../limits.js";
 import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AppError,
-  limits,
   type DiffSummary,
   type GitDiff,
   type GitPath,
@@ -85,7 +85,7 @@ export function binaryPaths(bytes: Buffer) {
   return paths;
 }
 export function boundedDiff(patch: string, summary: DiffSummary, truncated: boolean): GitDiff {
-  const budget = limits.resultBytes - Buffer.byteLength(JSON.stringify(summary)) - 256;
+  const budget = agentLimits.resultBytes - Buffer.byteLength(JSON.stringify(summary)) - 256;
   if (Buffer.byteLength(JSON.stringify(patch)) > budget) {
     let low = 0,
       high = patch.length;
@@ -99,6 +99,7 @@ export function boundedDiff(patch: string, summary: DiffSummary, truncated: bool
   }
   return { patch, summary, truncated };
 }
+// The parser needs the context prefix even on blank lines to avoid silently losing them.
 export const patchConfig = ["-c", "core.quotePath=true", "-c", "diff.suppressBlankEmpty=false"];
 function leafPathspecs(paths: string[]) {
   return paths.flatMap((path) => {
@@ -118,7 +119,7 @@ export async function selectedPatch(
   const overlapping = paths.some((path) => paths.some((other) => path.startsWith(`${other}/`)));
   const groups = overlapping ? paths.map((path) => [path]) : [paths];
   let patch = "",
-    remaining = limits.resultBytes,
+    remaining = agentLimits.resultBytes,
     truncated = false;
   for (const group of groups) {
     const result = await git(

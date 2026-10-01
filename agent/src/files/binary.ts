@@ -63,7 +63,7 @@ export class BinaryFiles {
       await checkTarget(location, { targetPath: path, collision, expectedTargetVersion }, false);
       return location;
     }, signal);
-    const temporary = await this.temporary.create(target.parent, target.parentInfo, signal);
+    const temporary = await this.temporary.create(target.parent, signal);
     return {
       workspaceId,
       path,
@@ -83,7 +83,6 @@ export class BinaryFiles {
     if (item.received !== item.size)
       throw new AppError("invalid_argument", "Received body length is incomplete");
     return publish(async () => {
-      await this.temporary.checkLocked(item.temporary);
       const current = await targetAgain(
         this.metadata.workspace(item.workspaceId).path,
         item.path,
@@ -104,7 +103,6 @@ export class BinaryFiles {
         if (error instanceof OperationError && error.outcome === "unknown") item.uncertain = true;
         throw error;
       }
-      await this.temporary.publishedLocked(item.temporary);
       return { path: item.path, size: item.size };
     }, signal);
   }

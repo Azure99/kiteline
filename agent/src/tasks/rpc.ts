@@ -1,9 +1,9 @@
+import { taskLimits } from "../limits.js";
 import {
   AppError,
   integer,
   record,
   string,
-  taskLimits,
   type RpcResult,
   type ScheduledTaskInput,
 } from "@kiteline/shared/protocol";

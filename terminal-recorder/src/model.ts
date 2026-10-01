@@ -60,7 +60,7 @@ export class Model {
     if (!data) return;
     const bytes = Buffer.byteLength(data);
     this.pendingBytes += bytes;
-    if (this.pendingBytes > limits.terminalModelPendingBytes) {
+    if (this.pendingBytes > modelLimits.terminalModelPendingBytes) {
       this.fault(
         new AppError("limit_exceeded", "Terminal recording parser backlog exceeds the limit"),
       );
@@ -159,11 +159,11 @@ export class Model {
     this.tailBytes += event.type === "output" ? Buffer.byteLength(event.data) : 32;
     if (this.checkpoint) this.tail.push(event);
     if (
-      (this.tailBytes >= limits.terminalCheckpointIntervalBytes || !this.checkpoint) &&
+      (this.tailBytes >= modelLimits.terminalCheckpointIntervalBytes || !this.checkpoint) &&
       atGround(this.terminal)
     )
       this.rotate();
-    if (this.tailBytes > limits.terminalRecoveryTailBytes) {
+    if (this.tailBytes > modelLimits.terminalRecoveryTailBytes) {
       this.checkpoint = undefined;
       this.tail = [];
     }
@@ -232,3 +232,9 @@ export class Model {
     this.terminal.dispose();
   }
 }
+
+export const modelLimits = {
+  terminalModelPendingBytes: 8 * 1024 * 1024,
+  terminalCheckpointIntervalBytes: 4 * 1024 * 1024,
+  terminalRecoveryTailBytes: 8 * 1024 * 1024,
+} as const;

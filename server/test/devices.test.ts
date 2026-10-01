@@ -1,8 +1,5 @@
 import { expect, test } from "vitest";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
-import { execFileSync } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
 import { Store } from "../src/store.js";
 
 async function withStore(run: (store: Store) => void) {
@@ -42,32 +39,6 @@ test("device deletion removes its associations and preserves other devices and p
   });
 });
 
-test("unsupported device records preserve an uncheckpointed WAL", async () => {
-  const root = await mkdtemp("/var/tmp/kiteline-device-wal-");
-  const path = join(root, "kiteline.sqlite");
-  try {
-    execFileSync(process.execPath, [
-      "--input-type=module",
-      "-e",
-      `import { DatabaseSync } from 'node:sqlite';
-       const db = new DatabaseSync(process.argv[1]);
-       db.exec("PRAGMA journal_mode=WAL; CREATE TABLE devices (id TEXT, revoked INTEGER); INSERT INTO devices VALUES('retained-record', 1)");
-       process.exit(0);`,
-      path,
-    ]);
-    const before = await readFile(path);
-    const wal = await readFile(path + "-wal");
-    expect(wal.length).toBeGreaterThan(0);
-
-    expect(() => new Store(root)).toThrow("Unsupported device database format");
-
-    expect(await readFile(path)).toEqual(before);
-    expect(await readFile(path + "-wal")).toEqual(wal);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
 test("a failed device deletion rolls back its binding and task summary together", async () => {
   await withStore((store) => {
     const binding = store.newBinding();
@@ -85,34 +56,4 @@ test("a failed device deletion rolls back its binding and task summary together"
     store.deleteDevice(device.deviceId);
     expect(store.devices()).toEqual([]);
   });
-});
-
-test("unsupported device records fail before changing the original database", async () => {
-  const root = await mkdtemp("/var/tmp/kiteline-device-format-");
-  const path = join(root, "kiteline.sqlite");
-  try {
-    const db = new DatabaseSync(path);
-    db.exec("CREATE TABLE devices (id TEXT PRIMARY KEY, revoked INTEGER NOT NULL)");
-    db.prepare("INSERT INTO devices VALUES(?,?)").run("retained-record", 1);
-    db.close();
-    const before = await readFile(path);
-
-    expect(() => new Store(root)).toThrow("Unsupported device database format");
-
-    expect(await readFile(path)).toEqual(before);
-    const retained = new DatabaseSync(path, { readOnly: true });
-    try {
-      expect(retained.prepare("SELECT * FROM devices").all()).toEqual([
-        { id: "retained-record", revoked: 1 },
-      ]);
-      expect(retained.prepare("PRAGMA journal_mode").get()).toEqual({ journal_mode: "delete" });
-      expect(retained.prepare("SELECT name FROM sqlite_schema WHERE type='table'").all()).toEqual([
-        { name: "devices" },
-      ]);
-    } finally {
-      retained.close();
-    }
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
 });

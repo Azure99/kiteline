@@ -106,7 +106,7 @@ export class Attachment {
       if (!piece) break;
       if (
         Buffer.isBuffer(piece) &&
-        this.sent - this.consumed + piece.length > limits.terminalOutstandingBytes
+        this.sent - this.consumed + piece.length > terminalOutstandingBytes
       ) {
         this.held = piece;
         break;
@@ -156,3 +156,5 @@ export class Attachment {
     this.onClose();
   }
 }
+
+export const terminalOutstandingBytes = 256 * 1024;

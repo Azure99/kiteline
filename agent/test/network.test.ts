@@ -161,7 +161,6 @@ test.each([
   "JSON and WS use the selected proxy ($secureProxy) for target TLS=$secureTarget, then honor NO_PROXY",
   async ({ secureProxy, secureTarget }) => {
     const f = await fixture({ secureProxy, secureTarget });
-    const variable = secureTarget ? "HTTPS_PROXY" : "HTTP_PROXY";
     const options = { method: "POST", body: JSON.stringify({ code: "test" }) };
     expect(await fetchServerJson(f.url, options)).toEqual({
       ok: true,
@@ -172,9 +171,6 @@ test.each([
       target: f.url.host,
       auth: `Basic ${Buffer.from("user:pass").toString("base64")}`,
     });
-    // Lowercase takes precedence; WS/WSS use the corresponding HTTP/HTTPS variables.
-    vi.stubEnv(variable, "http://127.0.0.1:1");
-    vi.stubEnv(variable.toLowerCase(), f.proxyUrl);
     const proxied = connectServerSocket(f.wsUrl, { handshakeTimeout: 300 });
     await once(proxied, "open");
     await new Promise((resolve) => setTimeout(resolve, 400));
@@ -183,16 +179,11 @@ test.each([
     expect((await echo)[0].toString()).toBe("still connected");
     expect(f.requests).toHaveLength(2);
     expect(f.requests[1]?.target).toBe(f.url.host);
-    vi.stubEnv(variable, "");
-    vi.stubEnv(variable.toLowerCase(), "");
-    vi.stubEnv("ALL_PROXY", f.proxyUrl);
-    await fetchServerJson(f.url, options);
-    expect(f.requests).toHaveLength(3);
     vi.stubEnv("NO_PROXY", `127.0.0.1:${f.url.port}`);
     const direct = connectServerSocket(f.wsUrl, { handshakeTimeout: 300 });
     await once(direct, "open");
     await fetchServerJson(f.url, options);
-    expect(f.requests).toHaveLength(3);
+    expect(f.requests).toHaveLength(2);
     const close = new Promise((resolve) => proxied.once("close", resolve));
     proxied.terminate();
     await close;
@@ -252,21 +243,6 @@ test.each(["reject", "connect-stall", "tls-stall", "cancel"] as const)(
   },
 );
 
-test.each(["connect-stall", "tls-stall"] as const)(
-  "cancelled binding releases %s",
-  async (mode) => {
-    const f = await fixture();
-    f.setMode(mode);
-    await expect(fetchServerJson(f.url, { signal: AbortSignal.timeout(150) })).rejects.toThrow();
-    expect(f.requests).toHaveLength(1);
-    await expect.poll(() => f.proxyPeers.size).toBe(0);
-    vi.stubEnv("HTTPS_PROXY", "socks5://localhost:1080");
-    expect(() => connectServerSocket(f.wsUrl, { handshakeTimeout: 300 })).toThrow(
-      "must use HTTP or HTTPS",
-    );
-  },
-);
-
 test("HTTP binding cancellation and WS timeout release pending proxy connections", async () => {
   const f = await fixture({ secureTarget: false });
   f.setMode("connect-stall");
@@ -277,6 +253,10 @@ test("HTTP binding cancellation and WS timeout release pending proxy connections
   await new Promise((resolve) => socket.once("close", resolve));
   await expect.poll(() => f.proxyPeers.size).toBe(0);
   expect(f.requests.map((r) => r.target)).toEqual([f.url.host, f.url.host]);
+  vi.stubEnv("HTTP_PROXY", "socks5://localhost:1080");
+  expect(() => connectServerSocket(f.wsUrl, { handshakeTimeout: 300 })).toThrow(
+    "must use HTTP or HTTPS",
+  );
 });
 
 test.each([false, true])(

@@ -46,10 +46,7 @@ export async function fetchServerJson(url: URL, options: RequestInit) {
   }
 }
 
-export function connectServerSocket(
-  url: URL,
-  options: ClientOptions & { handshakeTimeout: number },
-) {
+export function connectServerSocket(url: URL, options: ClientOptions) {
   const proxy = proxyFor(url);
   const controller = new AbortController();
   const agent = proxy
@@ -66,10 +63,13 @@ export function connectServerSocket(
     throw error;
   }
   // ws's handshake timeout does not cover an Agent's pending CONNECT/TLS dial.
-  const deadline = setTimeout(() => {
-    controller.abort(new Error("Server connection timed out"));
-    socket.terminate();
-  }, options.handshakeTimeout);
+  const deadline =
+    options.handshakeTimeout === undefined
+      ? undefined
+      : setTimeout(() => {
+          controller.abort(new Error("Server connection timed out"));
+          socket.terminate();
+        }, options.handshakeTimeout);
   socket.once("open", () => clearTimeout(deadline));
   socket.once("close", () => {
     clearTimeout(deadline);

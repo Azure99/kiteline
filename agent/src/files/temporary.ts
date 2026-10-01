@@ -1,53 +1,25 @@
 import { randomUUID } from "node:crypto";
-import type { BigIntStats } from "node:fs";
-import { open, stat, symlink, unlink, type FileHandle } from "node:fs/promises";
+import { open, symlink, unlink, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
-import {
-  AppError,
-  asError,
-  limits,
-  type FileCleanup,
-  type PathError,
-} from "@kiteline/shared/protocol";
+import { AppError } from "@kiteline/shared/protocol";
 import { atomicJson, readJson } from "../config.js";
 import { publish } from "../mutations.js";
-import { containsDirectory, entryInfo, realPath, sameObject } from "./paths.js";
 
 interface TemporaryRecord {
   name: string;
   parent: string;
-  parentDev: string;
-  parentIno: string;
-  dev: string;
-  ino: string;
 }
 export interface TrackedTemporary extends TemporaryRecord {
   path: string;
 }
 export interface Temporary extends TrackedTemporary {
-  path: string;
   handle: FileHandle;
-  closing?: Promise<void>;
-}
-
-interface Cleanup {
-  record: TemporaryRecord;
-  published: boolean;
-  running?: Promise<void>;
-  error?: unknown;
-  retry: boolean;
-  failures: number;
 }
 
 export class TemporaryFiles {
   private records: TemporaryRecord[] = [];
-  private active = new Map<string, TemporaryRecord>();
   private path: string;
-  private cleanup = new Map<string, Cleanup>();
-  private cleanupAbort = new AbortController();
-  private retryTimer?: NodeJS.Timeout;
-  private closeTimer?: NodeJS.Timeout;
-  private stopping = false;
+  private startup?: Promise<void>;
   constructor(dataDir: string) {
     this.path = join(dataDir, "temporary-files.json");
   }
@@ -56,163 +28,35 @@ export class TemporaryFiles {
     try {
       const records = await readJson(this.path);
       if (!Array.isArray(records)) throw new Error("Temporary records must be an array");
-      for (const [index, record] of records.entries()) {
-        if (
-          !record ||
-          typeof record !== "object" ||
-          Array.isArray(record) ||
-          ["name", "parent", "parentDev", "parentIno", "dev", "ino"].some(
-            (key) => typeof record[key] !== "string",
-          )
-        )
-          throw new Error(`Invalid temporary record at index ${index}`);
-      }
       this.records = records;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT")
-        throw new Error(`${this.path}: ${error instanceof Error ? error.message : String(error)}`, {
-          cause: error,
-        });
+        console.error("Temporary file records:", this.path, error);
     }
-    for (const record of this.records) void this.clean(record);
-  }
-
-  status(): FileCleanup {
-    const failures: PathError[] = [];
-    let failed = 0,
-      bytes = 0;
-    for (const [path, item] of this.cleanup) {
-      if (!item.error) continue;
-      failed++;
-      const error = asError(item.error);
-      const failure = { path, error: { code: error.code, message: error.message.slice(0, 4096) } };
-      const size = Buffer.byteLength(JSON.stringify(failure));
-      if (bytes + size <= limits.resultBytes / 2 && failures.length < limits.listPageEntries) {
-        failures.push(failure);
-        bytes += size;
-      }
-    }
-    return {
-      pending: [...this.cleanup.values()].some((item) => !!item.running || item.retry),
-      retained: this.records.length,
-      failed,
-      failures,
-      truncated: failures.length < failed,
-    };
-  }
-
-  beginClose() {
-    if (this.stopping) return;
-    this.stopping = true;
-    clearTimeout(this.retryTimer);
-    this.closeTimer = setTimeout(() => {
-      this.cleanupAbort.abort(new AppError("cancelled", "Cleanup retained for the next start"));
-    }, 5000).unref();
-  }
-
-  async drain() {
-    for (;;) {
-      const running = [...this.cleanup.values()].flatMap((item) =>
-        item.running ? [item.running] : [],
-      );
-      if (!running.length) return;
-      await Promise.all(running);
-    }
+    this.startup = Promise.all(
+      this.records.map((record) => publish(() => this.removeLocked(record))),
+    ).then(() => {});
   }
 
   async close() {
-    this.beginClose();
-    await this.drain();
-    clearTimeout(this.closeTimer);
+    await this.startup;
   }
 
-  private cleanupItem(record: TemporaryRecord, published = false) {
-    const path = join(record.parent, record.name);
-    let item = this.cleanup.get(path);
-    if (!item) {
-      item = { record, published, retry: false, failures: 0 };
-      this.cleanup.set(path, item);
-    }
-    item.published ||= published;
-    return item;
-  }
-
-  private clean(record: TemporaryRecord, published = false): Promise<void> {
-    const path = join(record.parent, record.name);
-    const item = this.cleanupItem(record, published);
-    if (item.running) return item.running;
-    if (item.failures && !item.retry) return Promise.resolve();
-    item.retry = false;
-    if (this.cleanupAbort.signal.aborted) return Promise.resolve();
-    const current = item;
-    const operation = publish(
-      () => (current.published ? this.forgetLocked(record) : this.removeLocked(record)),
-      this.cleanupAbort.signal,
-    );
-    const running = operation
-      .then(
-        () => {
-          this.cleanup.delete(path);
-        },
-        (error: unknown) => {
-          if (!this.cleanupAbort.signal.aborted) this.failedCleanup(current, error);
-        },
-      )
-      .finally(() => {
-        current.running = undefined;
-        this.active.delete(path);
-        this.retryLater();
-      });
-    current.running = running;
-    return running;
-  }
-
-  private failedCleanup(item: Cleanup, error: unknown) {
-    item.error = error;
-    item.failures++;
-    item.retry = item.failures < 3 && (error as NodeJS.ErrnoException).code === "EBUSY";
-    console.error("Temporary file cleanup:", join(item.record.parent, item.record.name), error);
-  }
-
-  private retryLater() {
-    if (this.stopping || this.retryTimer || ![...this.cleanup.values()].some((item) => item.retry))
-      return;
-    this.retryTimer = setTimeout(() => {
-      this.retryTimer = undefined;
-      for (const item of this.cleanup.values())
-        if (item.retry) void this.clean(item.record, item.published);
-    }, 30_000).unref();
-  }
-
-  create(parent: string, expected: BigIntStats, signal: AbortSignal): Promise<Temporary> {
+  create(parent: string, signal: AbortSignal): Promise<Temporary> {
     return publish(async () => {
-      const info = await stat(await realPath(parent), { bigint: true });
-      if (!sameObject(info, expected))
-        throw new AppError("conflict", "Target parent directory has changed");
       const name = `.kiteline-${randomUUID()}.tmp`;
       const path = join(parent, name);
       const handle = await open(path, "wx+", 0o600);
-      let record: TemporaryRecord | undefined;
+      const record = { parent, name };
+      this.records.push(record);
       try {
-        const file = await handle.stat({ bigint: true });
-        record = {
-          parent,
-          name,
-          parentDev: String(info.dev),
-          parentIno: String(info.ino),
-          dev: String(file.dev),
-          ino: String(file.ino),
-        };
-        this.records.push(record);
-        await this.persist();
-        this.active.set(path, record);
+        await atomicJson(this.path, this.records);
         return { ...record, path, handle };
       } catch (error) {
         await handle
           .close()
           .catch((closeError: unknown) => console.error("Temporary file close:", path, closeError));
-        if (record) await this.rollbackLocked(record);
-        else console.error("Temporary file identity could not be recorded:", path, error);
+        await this.removeLocked(record);
         throw error;
       }
     }, signal);
@@ -220,43 +64,28 @@ export class TemporaryFiles {
 
   createLink(
     parent: string,
-    expected: BigIntStats,
     target: string | Buffer,
     signal: AbortSignal,
     type?: "file" | "dir" | "junction",
   ): Promise<TrackedTemporary> {
     return publish(async () => {
-      const info = await stat(await realPath(parent), { bigint: true });
-      if (!sameObject(info, expected))
-        throw new AppError("conflict", "Target parent directory has changed");
       const name = `.kiteline-${randomUUID()}.tmp`;
       const path = join(parent, name);
       await symlink(target, path, type);
-      let record: TemporaryRecord | undefined;
+      const record = { parent, name };
+      this.records.push(record);
       try {
-        const file = await entryInfo(path);
-        record = {
-          parent,
-          name,
-          parentDev: String(info.dev),
-          parentIno: String(info.ino),
-          dev: String(file.dev),
-          ino: String(file.ino),
-        };
-        this.records.push(record);
-        await this.persist();
-        this.active.set(path, record);
+        await atomicJson(this.path, this.records);
         return { ...record, path };
       } catch (error) {
-        if (record) await this.rollbackLocked(record);
-        else console.error("Temporary link identity could not be recorded:", path, error);
+        await this.removeLocked(record);
         throw error;
       }
     }, signal);
   }
 
   closeFile(temporary: Temporary) {
-    return (temporary.closing ??= temporary.handle.close());
+    return temporary.handle.close();
   }
 
   async write(temporary: Temporary, bytes: Buffer, position: number, signal: AbortSignal) {
@@ -280,131 +109,26 @@ export class TemporaryFiles {
     try {
       if ("handle" in temporary) await this.closeFile(temporary as Temporary);
     } finally {
-      if (
-        this.records.some(
-          (item) => item.parent === temporary.parent && item.name === temporary.name,
-        )
-      )
-        await this.clean(temporary, published);
-      this.active.delete(temporary.path);
+      await publish(() => this.removeLocked(temporary, published));
     }
   }
 
-  private async rollbackLocked(record: TemporaryRecord) {
-    if (this.cleanupAbort.signal.aborted) return this.clean(record);
+  private async removeLocked(record: TemporaryRecord, published = false) {
     try {
-      await this.removeLocked(record);
-    } catch (error) {
-      this.failedCleanup(this.cleanupItem(record), error);
-      this.retryLater();
-    }
-  }
-
-  async publishedLocked(temporary: TrackedTemporary) {
-    if (this.cleanupAbort.signal.aborted) return this.clean(temporary, true);
-    try {
-      await this.forgetLocked(temporary);
-    } catch (error) {
-      this.failedCleanup(this.cleanupItem(temporary, true), error);
-      this.retryLater();
-    }
-  }
-
-  async checkLocked(temporary: TrackedTemporary) {
-    const parent = await stat(await realPath(temporary.parent), { bigint: true });
-    const file = await entryInfo(temporary.path);
-    if (
-      String(parent.dev) !== temporary.parentDev ||
-      String(parent.ino) !== temporary.parentIno ||
-      String(file.dev) !== temporary.dev ||
-      String(file.ino) !== temporary.ino
-    )
-      throw new AppError("conflict", "Temporary file or target parent directory has changed");
-  }
-
-  async forgetLocked(record: TemporaryRecord) {
-    this.active.delete(join(record.parent, record.name));
-    const next = this.records.filter(
-      (item) => item.parent !== record.parent || item.name !== record.name,
-    );
-    await atomicJson(this.path, next);
-    this.records = next;
-  }
-
-  ownsLocked(location: { name: string; parentInfo: BigIntStats }, info: BigIntStats) {
-    return [...this.active.values()].some(
-      (record) =>
-        (process.platform === "win32" || record.name === location.name) &&
-        record.parentDev === String(location.parentInfo.dev) &&
-        record.parentIno === String(location.parentInfo.ino) &&
-        record.dev === String(info.dev) &&
-        record.ino === String(info.ino),
-    );
-  }
-
-  async assertRelocatableLocked(
-    location: { name: string; parentInfo: BigIntStats },
-    info: BigIntStats,
-    publishing?: TrackedTemporary,
-  ) {
-    const busy = () =>
-      new AppError("busy", "A file write is using this location; retry after it finishes");
-    if (this.ownsLocked(location, info)) throw busy();
-    if (!info.isDirectory()) return;
-    for (const [path, record] of this.active) {
-      // This same publication releases its own temporary before changing the source.
-      if (path === publishing?.path) continue;
-      try {
-        if (!(await containsDirectory(info, record.parent))) continue;
-        await this.checkLocked({ ...record, path: join(record.parent, record.name) });
-      } catch (error) {
-        if (
-          (error instanceof AppError && error.code === "conflict") ||
-          ["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")
-        )
-          continue;
-        throw error;
+      if (!published) {
+        try {
+          await unlink(join(record.parent, record.name));
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
       }
-      throw busy();
-    }
-  }
-
-  private async removeLocked(record: TemporaryRecord) {
-    const path = join(record.parent, record.name);
-    let info: BigIntStats;
-    try {
-      await realPath(record.parent);
-      info = await entryInfo(path);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        // A missing file only resolves the record if its original parent remains reachable.
-        const parent = await stat(await realPath(record.parent), { bigint: true });
-        if (String(parent.dev) !== record.parentDev || String(parent.ino) !== record.parentIno)
-          throw new AppError(
-            "conflict",
-            "Temporary file parent directory has changed; the location record is retained",
-          );
-        await this.forgetLocked(record);
-        return;
-      }
-      throw error;
-    }
-    const parent = await stat(await realPath(record.parent), { bigint: true });
-    if (
-      String(parent.dev) !== record.parentDev ||
-      String(parent.ino) !== record.parentIno ||
-      String(info.dev) !== record.dev ||
-      String(info.ino) !== record.ino
-    )
-      throw new AppError(
-        "conflict",
-        "Temporary item identity has changed; the location record is retained",
+      const next = this.records.filter(
+        (item) => item.parent !== record.parent || item.name !== record.name,
       );
-    await unlink(path);
-    await this.forgetLocked(record);
-  }
-
-  private persist() {
-    return atomicJson(this.path, this.records);
+      await atomicJson(this.path, next);
+      this.records = next;
+    } catch (error) {
+      console.error("Temporary file cleanup:", record, error);
+    }
   }
 }

@@ -1,7 +1,7 @@
+import { agentLimits } from "../limits.js";
 import { basename, dirname } from "node:path";
 import {
   AppError,
-  limits,
   type Branch,
   type Commit,
   type CommitFile,
@@ -52,10 +52,14 @@ export async function history(
     fields = [];
     const commit = { oid, parents: parents ? parents.split(" ") : [], author, time, subject };
     const size = Buffer.byteLength(JSON.stringify(commit)) + 1;
-    if (size + 256 > limits.resultBytes)
+    if (size + 256 > agentLimits.resultBytes)
       throw new AppError("limit_exceeded", "A commit message exceeds the size limit");
     count++;
-    if (full || commits.length >= limits.listPageEntries || bytes + size > limits.resultBytes) {
+    if (
+      full ||
+      commits.length >= agentLimits.listPageEntries ||
+      bytes + size > agentLimits.resultBytes
+    ) {
       full = true;
       return;
     }
@@ -71,7 +75,7 @@ export async function history(
       "--encoding=UTF-8",
       "-z",
       "--format=%H%x00%P%x00%an%x00%aI%x00%s",
-      `--max-count=${limits.listPageEntries + 1}`,
+      `--max-count=${agentLimits.listPageEntries + 1}`,
       `--skip=${offset}`,
       anchorOid,
       "--",
@@ -176,10 +180,10 @@ export async function commitFiles(
       binary: false,
     };
     const size = Buffer.byteLength(JSON.stringify(item)) + 1;
-    if (size + 512 > limits.resultBytes)
+    if (size + 512 > agentLimits.resultBytes)
       throw new AppError("limit_exceeded", "A commit file entry exceeds the size limit");
     if (count++ < offset || full) return;
-    if (files.length >= limits.listPageEntries || bytes + size > limits.resultBytes) {
+    if (files.length >= agentLimits.listPageEntries || bytes + size > agentLimits.resultBytes) {
       full = true;
       return;
     }
@@ -260,7 +264,7 @@ export async function branches(repo: Repo, signal: AbortSignal) {
       worktreePath: bareRoot && fields[i + 2] === mainPath ? undefined : fields[i + 2] || undefined,
     });
   }
-  if (Buffer.byteLength(JSON.stringify({ branches: result })) > limits.resultBytes)
+  if (Buffer.byteLength(JSON.stringify({ branches: result })) > agentLimits.resultBytes)
     throw new AppError("limit_exceeded", "Branch list exceeds the size limit");
   return { branches: result };
 }

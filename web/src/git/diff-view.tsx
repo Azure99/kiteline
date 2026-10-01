@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { Decoration, Diff, Hunk, parseDiff, type FileData, type HunkTokens } from "react-diff-view";
-import { limits, type GitDiff } from "@kiteline/shared/protocol";
+import { type GitDiff } from "@kiteline/shared/protocol";
 import { ApiError, errorMessage, rpc } from "../lib/api";
 import { ErrorNotice, ErrorDetails } from "../components/error-notice";
 
@@ -132,7 +132,7 @@ export function Patch({ value }: { value: GitDiff }) {
 
   const parsed = useMemo(() => {
     if (value.truncated) return { reason: "diffTruncated" as const };
-    if (value.patch.split("\n").length > limits.diffRenderLines)
+    if (value.patch.split("\n").length > diffRenderLines)
       return { reason: "diffLineLimit" as const };
     try {
       const files = parseDiff(value.patch);
@@ -158,9 +158,9 @@ export function Patch({ value }: { value: GitDiff }) {
   const fallback = useMemo(() => {
     if (!parsed.reason) return;
     const bytes = new TextEncoder().encode(value.patch);
-    const truncated = bytes.length > limits.diffRawBytes;
+    const truncated = bytes.length > diffRawBytes;
     return {
-      text: new TextDecoder().decode(bytes.subarray(0, limits.diffRawBytes), { stream: truncated }),
+      text: new TextDecoder().decode(bytes.subarray(0, diffRawBytes), { stream: truncated }),
       truncated,
     };
   }, [parsed.reason, value.patch]);
@@ -262,3 +262,6 @@ function DiffBlock({ file }: { file: FileData }) {
     </>
   );
 }
+
+const diffRenderLines = 2000;
+const diffRawBytes = 32 * 1024;

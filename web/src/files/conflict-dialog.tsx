@@ -74,7 +74,7 @@ export function FileConflictDialog({
           <Button
             variant="outline"
             disabled={directory || inspection.entry.kind === "directory"}
-            onClick={() => onChoose(target, inspection.targetVersion)}
+            onClick={() => onChoose(inspection.entry.path!, inspection.targetVersion)}
           >
             {t(($) => $.files.replace)}
           </Button>

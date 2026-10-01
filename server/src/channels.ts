@@ -1,3 +1,4 @@
+import { serverLimits } from "./limits.js";
 import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
 import {
@@ -15,7 +16,6 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { heartbeat, sendFrame } from "@kiteline/shared/ws";
 import { httpStream } from "@kiteline/shared/http-stream";
-import type { ServerConfig } from "./config.js";
 import type { Login } from "./store.js";
 import { send, type AgentConnection, type Connections } from "./connections.js";
 import { FileTransfer } from "./file-transfer.js";
@@ -40,10 +40,7 @@ interface Channel {
 }
 export class Channels {
   private entries = new Map<string, Channel>();
-  constructor(
-    private connections: Connections,
-    private config: ServerConfig,
-  ) {
+  constructor(private connections: Connections) {
     connections.onLoginClosed = (loginId) => {
       for (const item of this.entries.values())
         if (item.loginId === loginId)
@@ -124,14 +121,14 @@ export class Channels {
       return unavailable(new AppError("limit_exceeded", "Channel request exceeds the size limit"));
     if (
       [...this.entries.values()].filter((item) => item.connection === connection).length >=
-      this.config.limits.channelsPerDevice
+      serverLimits.channelsPerDevice
     )
       return unavailable(new AppError("busy", "Device channel limit reached"));
     let item: Channel;
     const ready = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(
         () => this.cancel(id, new AppError("timeout", "Channel pairing timed out")),
-        this.config.limits.channelPairTimeout,
+        limits.channelPairTimeout,
       );
       item = {
         id,
@@ -221,7 +218,7 @@ export class Channels {
         else
           item.timer = setTimeout(
             () => this.cancel(id, new AppError("timeout", "Timed out waiting for browser pairing")),
-            this.config.limits.channelPairTimeout,
+            limits.channelPairTimeout,
           );
         item.resolve();
       } catch (error) {
@@ -271,7 +268,6 @@ export class Channels {
       item.agent,
       request,
       response,
-      this.config.limits.channelIdleTimeout,
       (error) => this.cancel(id, error),
       () => this.release(id),
       id,

@@ -19,7 +19,6 @@ import { connectServerSocket } from "../network.js";
 interface Channel {
   socket: WebSocket;
   controller: AbortController;
-  timer: NodeJS.Timeout;
   prepare: Promise<void>;
   dispose: () => Promise<void>;
   admitted: boolean;
@@ -38,26 +37,19 @@ export class FileChannels {
     private temporary: TemporaryFiles,
     private config: AgentConfig,
     private identity: Identity,
-    private otherChannels: () => number,
     private changed: (workspaceId: string) => void = () => {},
   ) {}
   get count() {
     return this.cleaningCount + [...this.entries.values()].filter((item) => item.admitted).length;
   }
-  get cleaning() {
-    return this.cleaningCount > 0;
-  }
   open(id: string, connectionId: string, kind: string, params: Record<string, unknown>) {
-    const admitted =
-      this.count < this.config.limits.transfersPerDevice &&
-      this.count + this.otherChannels() < this.config.limits.channelsPerDevice;
+    const admitted = this.count < this.config.limits.transfersPerDevice;
     const url = new URL(`/api/agent/channels/${encodeURIComponent(id)}`, this.identity.server);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     url.searchParams.set("connectionId", connectionId);
     const socket = connectServerSocket(url, {
       headers: { authorization: `Bearer ${this.identity.deviceToken}` },
       maxPayload: limits.controlMessageBytes,
-      handshakeTimeout: this.config.limits.channelPairTimeout,
     });
     const controller = new AbortController();
     const signal = controller.signal;
@@ -67,15 +59,10 @@ export class FileChannels {
       admitted,
       ready: false,
       started: false,
-      timer: setTimeout(
-        () => this.fail(id, new AppError("timeout", "File preparation timed out")),
-        this.config.limits.channelPairTimeout,
-      ),
       prepare: Promise.resolve(),
       dispose: async () => {},
     };
     this.entries.set(id, channel);
-    const touch = () => channel.timer.refresh();
     const send = (data: Buffer | string) => sendFileFrame(socket, data, signal);
     socket.on("upgrade", (response) =>
       response.socket.setKeepAlive(true, limits.tcpKeepAliveDelayMs),
@@ -88,11 +75,6 @@ export class FileChannels {
           if (!channel.ready || frame?.type !== "start")
             throw new AppError("invalid_argument", "File channel is not ready");
           channel.started = true;
-          clearTimeout(channel.timer);
-          channel.timer = setTimeout(
-            () => this.fail(id, new AppError("timeout", "File transfer stalled for too long")),
-            this.config.limits.channelIdleTimeout,
-          );
           if (channel.read) {
             const { size } = channel.read.meta;
             const last = Math.max(0, size - limits.dataChunkBytes);
@@ -101,13 +83,11 @@ export class FileChannels {
               const end = Math.min(last, offset + limits.dataChunkBytes);
               await send(await channel.read.read(offset, end - offset));
               offset = end;
-              touch();
             }
             const tail = await channel.read.read(last, size - last);
             await channel.read.finish();
             if (size) {
               await send(tail);
-              touch();
             }
             this.finish(id, undefined, true);
           }
@@ -123,7 +103,6 @@ export class FileChannels {
               item.received,
               signal,
             );
-            if (data.length) touch();
           } else if (frame?.type === "end") {
             let reply;
             try {
@@ -213,11 +192,6 @@ export class FileChannels {
           };
         } else throw new AppError("unsupported", "Unsupported file channel purpose");
         signal.throwIfAborted();
-        clearTimeout(channel.timer);
-        channel.timer = setTimeout(
-          () => this.fail(id, new AppError("timeout", "Timed out waiting for a file request")),
-          this.config.limits.channelPairTimeout,
-        );
         channel.ready = true;
         await send(JSON.stringify({ type: "ready", meta }));
       })().catch((error: unknown) => {
@@ -242,7 +216,6 @@ export class FileChannels {
     if (!channel) return;
     this.entries.delete(id);
     if (channel.admitted) this.cleaningCount++;
-    clearTimeout(channel.timer);
     channel.controller.abort(error ?? new AppError("cancelled", "File request completed"));
     if (graceful && channel.socket.readyState === WebSocket.OPEN) {
       channel.socket.resume();

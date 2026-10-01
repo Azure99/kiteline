@@ -21,25 +21,21 @@ export const defaultAgentLimits = {
   transfersPerDevice: 4,
   searchTimeout: 10_000,
   gitWriteTimeout: 10 * 60_000,
-  channelIdleTimeout: 120_000,
   rpcTimeout: 30_000,
-  channelPairTimeout: 30_000,
   terminalInputBytes: 256 * 1024,
   terminalSessionsPerDevice: 32,
   terminalStallTimeout: 10_000,
-  channelsPerDevice: 128,
   tasksPerDevice: 100,
   taskRunsPerDevice: 4,
   taskHistoryRuns: 20,
   taskOutputBytes: 1024 * 1024,
   taskOutputTotalBytes: 128 * 1024 * 1024,
 };
-const timerMaximums: Partial<Record<keyof typeof defaultAgentLimits, number>> = {
+const limitMaximums: Partial<Record<keyof typeof defaultAgentLimits, number>> = {
+  tasksPerDevice: 300,
   rpcTimeout: 2147482647,
   searchTimeout: 2147483647,
   gitWriteTimeout: 2147483647,
-  channelIdleTimeout: 2147483647,
-  channelPairTimeout: 2147483647,
   terminalStallTimeout: 2147483647,
 };
 export interface Identity {
@@ -95,7 +91,7 @@ export async function agentConfig(): Promise<AgentConfig> {
   const defaults = { ...defaultAgentLimits };
   for (const key of Object.keys(defaults) as (keyof typeof defaults)[])
     if (settings[key] !== undefined)
-      defaults[key] = integer(settings[key], key, 1, timerMaximums[key] ?? Number.MAX_SAFE_INTEGER);
+      defaults[key] = integer(settings[key], key, 1, limitMaximums[key] ?? Number.MAX_SAFE_INTEGER);
   const shell =
     input.shell === undefined
       ? process.platform === "win32"

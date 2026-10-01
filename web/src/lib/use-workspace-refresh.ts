@@ -52,7 +52,7 @@ export function useWorkspaceRefresh(
     window.addEventListener("kiteline:event", event);
     window.addEventListener("kiteline:connected", schedule);
     document.addEventListener("visibilitychange", visible);
-    const interval = setInterval(schedule, limits.visibleRefreshInterval);
+    const interval = setInterval(schedule, visibleRefreshInterval);
     void run();
     return () => {
       controller.abort();
@@ -83,3 +83,5 @@ export function useWatchStatus(deviceId: string, workspaceId: string) {
   }, [deviceId, workspaceId]);
   return reason;
 }
+
+const visibleRefreshInterval = 15_000;

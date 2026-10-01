@@ -1,41 +1,36 @@
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
 import {
   cpSync,
-  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   realpathSync,
-  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { prepareRipgrepNotices } from "./prepare-ripgrep-notices.mjs";
+import { digest, fetchPinned, run } from "./release-inputs.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const json = (file) => JSON.parse(readFileSync(file, "utf8"));
 const release = json(join(root, "deploy/release.json"));
 const recipe = json(join(root, "deploy/agent-macos.json"));
 const unix = json(join(root, "deploy/agent-static.json"));
-const digest = (file) => createHash("sha256").update(readFileSync(file)).digest("hex");
 const hash = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const sourceFiles = [
   "deploy/release.json",
   "deploy/agent-static.json",
   "deploy/agent-macos.json",
   "scripts/build-macos-components.mjs",
-  "scripts/prepare-ripgrep-notices.mjs",
+  "scripts/release-inputs.mjs",
   "scripts/build-macos-native.sh",
   "native/macos/rename-noreplace.c",
   "native/macos/entry-name.c",
   "native/tmux-paste.patch",
   "native/tmux.terminfo",
-  "native/tmux-terminfo-LICENSE",
 ];
 const downloads = {
   "node.tar.xz": {
@@ -46,23 +41,11 @@ const downloads = {
   "libevent.tar.gz": unix.sources["libevent.tar.gz"],
   "flock.tar.gz": recipe.flock,
   "rg.tar.gz": recipe.ripgrep,
-  ...Object.fromEntries(
-    Object.entries(release.ripgrep.notices).map(([name, input]) => [
-      `licenses/ripgrep/${name}`,
-      input,
-    ]),
-  ),
 };
 const binaries = [
   "runtime/bin/node",
   ...["tmux", "rg", "flock", "rename-noreplace", "entry-name"].map((name) => `native/bin/${name}`),
 ];
-function run(command, args, options = {}) {
-  const result = spawnSync(command, args, { stdio: "inherit", ...options });
-  if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`${command} exited with ${result.status}`);
-  return result.stdout;
-}
 const capture = (command, args) =>
   run(command, args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).trim();
 function copy(source, destination) {
@@ -93,19 +76,7 @@ function files(directory, prefix = "") {
 
 export function prepareMacosInputs(directory) {
   mkdirSync(directory, { recursive: true });
-  for (const [file, input] of Object.entries(downloads)) {
-    const target = join(directory, file);
-    if (existsSync(target) && digest(target) === input.sha256) continue;
-    mkdirSync(dirname(target), { recursive: true });
-    const pending = `${target}.${process.pid}.pending`;
-    try {
-      run("curl", ["--fail", "--location", "--output", pending, input.url]);
-      if (digest(pending) !== input.sha256) throw new Error(`Checksum mismatch: ${input.url}`);
-      renameSync(pending, target);
-    } finally {
-      rmSync(pending, { force: true });
-    }
-  }
+  for (const [file, input] of Object.entries(downloads)) fetchPinned(input, join(directory, file));
   for (const file of sourceFiles) copy(join(root, file), join(directory, file));
   writeJson(join(directory, "inputs.json"), inputs());
 }
@@ -163,8 +134,6 @@ export function buildMacosComponents(directory, destination) {
     clang: capture("/usr/bin/clang", ["--version"]).split("\n")[0],
     sdk: capture("/usr/bin/xcrun", ["--show-sdk-version"]),
   };
-  if (hash(toolchain) !== hash(recipe.toolchain))
-    throw new Error("Unexpected macOS build toolchain");
   mkdirSync(destination);
   const temporary = mkdtempSync("/var/tmp/kiteline-macos-build-");
   try {
@@ -184,17 +153,11 @@ export function buildMacosComponents(directory, destination) {
     copy(join(rg, "rg"), join(destination, "native/bin/rg"));
     for (const file of ["COPYING", "LICENSE-MIT", "UNLICENSE"])
       copy(join(rg, file), join(destination, "native/licenses/ripgrep", file));
-    prepareRipgrepNotices(directory, join(destination, "native"));
     const linkage = Object.fromEntries(
       binaries.map((file) => [file, macho(join(destination, file))]),
     );
-    if (
-      capture(join(destination, "runtime/bin/node"), ["--version"]) !== `v${release.node}` ||
-      capture(join(destination, "native/bin/tmux"), ["-V"]) !== `tmux ${unix.tmux.version}` ||
-      capture(join(destination, "native/bin/rg"), ["--version"]).split(/\s+/)[1] !==
-        release.ripgrep.version
-    )
-      throw new Error("macOS component version mismatch");
+    if (capture(join(destination, "native/bin/tmux"), ["-V"]) !== `tmux ${unix.tmux.version}`)
+      throw new Error("macOS tmux version mismatch");
     writeJson(join(destination, "native/identity.json"), {
       linkage: "macos-system",
       architecture: "x64",
@@ -218,14 +181,12 @@ export function buildMacosComponents(directory, destination) {
   }
 }
 
-export function verifyMacosComponents(directory, packaged = false) {
-  const native = join(directory, packaged ? "dist/native" : "native");
+export function verifyMacosComponents(directory) {
+  const native = join(directory, "native");
   const identity = json(join(native, "identity.json"));
   if (hash(identity.inputs) !== hash(inputs()))
     throw new Error("macOS components do not match this source; rebuild them");
-  const actual = packaged
-    ? { ...files(native, "native/"), ...files(join(directory, "runtime"), "runtime/") }
-    : files(directory);
+  const actual = files(directory);
   delete actual["native/identity.json"];
   for (const file of [...binaries, "runtime/LICENSE", "native/share/terminfo/74/tmux-256color"])
     if (!actual[file]) throw new Error(`Missing macOS component: ${file}`);

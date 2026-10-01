@@ -13,7 +13,7 @@ import {
   type TaskRun,
 } from "@kiteline/shared/protocol";
 import { Agent } from "../../agent/src/control.js";
-import { defaultAgentLimits } from "../../agent/src/config.js";
+import { defaultAgentLimits, privateDirectory } from "../../agent/src/config.js";
 import { localRequest } from "../../agent/src/local.js";
 import { createKitelineServer } from "../src/app.js";
 import { Store } from "../src/store.js";
@@ -29,13 +29,6 @@ async function fixture() {
       port: 0,
       webDir: root,
       downloadsDir: root,
-      limits: {
-        sessionLifetime: 60000,
-        draftTotalBytes: 1024 * 1024,
-        channelsPerDevice: 128,
-        channelPairTimeout: 30000,
-        channelIdleTimeout: 120000,
-      },
     },
     store,
   );
@@ -102,6 +95,7 @@ test("real device CLI/RPC share tasks, snapshots persist only summaries, and rem
       (await fetch(f.origin + "/api/tasks?appVersion=other", { headers: { cookie: f.cookie } }))
         .status,
     ).toBe(426);
+    for (const path of [agent.config.dataDir, agent.config.runDir]) await privateDirectory(path);
     await agent.start();
     await expect.poll(async () => (await f.summaries())[0]?.current).toBe(true);
     expect((await f.summaries())[0]?.snapshot?.items).toEqual([]);
@@ -210,6 +204,7 @@ test("startup storage faults replace active summaries without exposing local dia
   };
   let agent = new Agent(config, { ...f.identity, server: f.origin });
   try {
+    for (const path of [agent.config.dataDir, agent.config.runDir]) await privateDirectory(path);
     await agent.start();
     await localRequest(config, "tasks.create", {
       taskId: "good",
@@ -227,6 +222,7 @@ test("startup storage faults replace active summaries without exposing local dia
     const path = join(config.dataDir, "tasks", "LOCAL_ONLY_SENTINEL.json");
     await writeFile(path, "invalid JSON with LOCAL_ONLY_SENTINEL");
     agent = new Agent(config, { ...f.identity, server: f.origin });
+    for (const path of [agent.config.dataDir, agent.config.runDir]) await privateDirectory(path);
     await agent.start();
     await expect
       .poll(async () => (await f.summaries())[0])
@@ -237,9 +233,9 @@ test("startup storage faults replace active summaries without exposing local dia
       outcome: "failed",
       error: { code: "io_error", message: "Scheduled task storage is unavailable" },
     });
-    expect(await f.rpc("files.cleanup")).toMatchObject({
+    expect(await f.rpc("sessions.list")).toMatchObject({
       outcome: "succeeded",
-      result: { pending: false, retained: 0, failed: 0 },
+      result: { sessions: [] },
     });
     expect(
       JSON.stringify([
@@ -252,6 +248,7 @@ test("startup storage faults replace active summaries without exposing local dia
     await agent.close();
     await rm(path);
     agent = new Agent(config, { ...f.identity, server: f.origin });
+    for (const path of [agent.config.dataDir, agent.config.runDir]) await privateDirectory(path);
     await agent.start();
     await expect
       .poll(async () => (await f.summaries())[0]?.snapshot?.items[0]?.state)
@@ -357,43 +354,13 @@ test("summary DWORD results, ownership, revision and nested whitelist are indepe
     } finally {
       reopened.close();
     }
-    for (const exitCode of [-1, 0x100000000, 1.5, 0xc0000005]) {
-      const socket = await connect();
-      const closed = once(socket, "close");
-      socket.send(
-        JSON.stringify({
-          ...snapshot,
-          items: snapshot.items.map((item) => ({
-            ...item,
-            latestRun: { ...item.latestRun, exitCode },
-          })),
-        }),
-      );
-      if (exitCode === 0xc0000005) {
-        await expect
-          .poll(async () => (await f.summaries())[0]?.snapshot?.items[0]?.latestRun?.exitCode)
-          .toBe(exitCode);
-        expect((await f.summaries())[0]?.current).toBe(true);
-        socket.close();
-        await closed;
-      } else expect((await closed)[0]).toBe(1008);
-    }
-    for (const fault of [
-      { storageError: false, items: [] },
-      { storageError: true, items: snapshot.items },
-    ]) {
-      const socket = await connect();
-      const closed = once(socket, "close");
-      socket.send(JSON.stringify({ ...snapshot, ...fault }));
-      expect((await closed)[0]).toBe(1008);
-    }
     const fault = await connect();
     fault.send(
       JSON.stringify({
         type: "tasks.snapshot",
         revision: 0,
         storageError: true,
-        items: [],
+        items: snapshot.items,
         diagnostic: "LOCAL_ONLY_SENTINEL",
       }),
     );

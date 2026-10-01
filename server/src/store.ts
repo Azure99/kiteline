@@ -1,11 +1,10 @@
+import { serverLimits } from "./limits.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { resolve } from "node:path";
 import bcrypt from "bcryptjs";
 import {
   AppError,
-  limits,
   type Device,
   type Metadata,
   type TaskSnapshot,
@@ -34,23 +33,6 @@ export class Store {
   readonly db: DatabaseSync;
   constructor(directory: string) {
     const path = resolve(directory, "kiteline.sqlite");
-    if (existsSync(path)) {
-      // A read-only connection also preserves an uncheckpointed WAL on rejection.
-      const existing = new DatabaseSync(path, { readOnly: true });
-      try {
-        if (
-          existing
-            .prepare("PRAGMA table_info(devices)")
-            .all()
-            .some((column) => column.name === "revoked")
-        )
-          throw new Error(
-            "Unsupported device database format; the original database has been retained",
-          );
-      } finally {
-        existing.close();
-      }
-    }
     this.db = new DatabaseSync(path);
     try {
       this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
@@ -73,7 +55,7 @@ export class Store {
     const token = secret();
     this.db
       .prepare("INSERT OR REPLACE INTO setup VALUES(1,?,?)")
-      .run(digest(token), new Date(Date.now() + limits.setupTokenLifetime).toISOString());
+      .run(digest(token), new Date(Date.now() + serverLimits.setupTokenLifetime).toISOString());
     return token;
   }
   ensureSetupToken() {
@@ -139,7 +121,7 @@ export class Store {
   newBinding() {
     const bindingId = randomUUID();
     const code = secret(16);
-    const expiresAt = new Date(Date.now() + limits.bindingLifetime).toISOString();
+    const expiresAt = new Date(Date.now() + serverLimits.bindingLifetime).toISOString();
     this.db
       .prepare("DELETE FROM bindings WHERE consumedDeviceId IS NULL AND expiresAt<=?")
       .run(new Date().toISOString());

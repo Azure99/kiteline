@@ -1,7 +1,8 @@
+import { agentLimits } from "../src/limits.js";
 import { afterEach, expect, test, vi } from "vitest";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { AppError, limits } from "@kiteline/shared/protocol";
+import { AppError } from "@kiteline/shared/protocol";
 import { searchFiles } from "../src/files/search.js";
 import * as paths from "../src/files/paths.js";
 
@@ -108,11 +109,11 @@ test("content results use UTF-16 highlights, base64 bodies and bounded long-line
   await writeFile(join(root, "long.txt"), "a".repeat(2 * 1024 * 1024) + "needle\n");
   const long = await searchFiles(root, "content", "needle", false, signal());
   expect(long.matches[0]).toMatchObject({ path: "long.txt", line: 1, truncated: true, ranges: [] });
-  expect(long.matches[0]!.text!.length).toBe(limits.searchLineBytes);
+  expect(long.matches[0]!.text!.length).toBe(agentLimits.searchLineBytes);
   expect(long.truncated).toBe(true);
-  await writeFile(join(root, "many.txt"), "needle\n".repeat(limits.searchMatches + 1));
+  await writeFile(join(root, "many.txt"), "needle\n".repeat(agentLimits.searchMatches + 1));
   const many = await searchFiles(root, "content", "needle", false, signal());
-  expect(many.matches.length).toBe(limits.searchMatches);
+  expect(many.matches.length).toBe(agentLimits.searchMatches);
   expect(many.truncated).toBe(true);
 });
 

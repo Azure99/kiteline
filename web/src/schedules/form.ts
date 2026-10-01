@@ -80,24 +80,20 @@ export function taskChanges(
 export function taskTime(at: string, language: string | undefined) {
   const date = new Date(at);
   if (!Number.isFinite(date.valueOf())) return i18n.t(($) => $.schedules.timeUnavailable);
-  try {
-    const parts = new Intl.DateTimeFormat(language, {
-      year: "numeric",
-      month: "numeric",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-      second: "2-digit",
-      timeZoneName: "shortOffset",
-    }).formatToParts(date);
-    const time = parts
-      .filter((part) => part.type !== "timeZoneName")
-      .map((part) => part.value)
-      .join("")
-      .trim();
-    const offset = parts.find((part) => part.type === "timeZoneName")!.value;
-    return `${time} ${offset}`;
-  } catch {
-    return `${date.toISOString()} (UTC)`;
-  }
+  const parts = new Intl.DateTimeFormat(language, {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "shortOffset",
+  }).formatToParts(date);
+  const time = parts
+    .filter((part) => part.type !== "timeZoneName")
+    .map((part) => part.value)
+    .join("")
+    .trim();
+  const offset = parts.find((part) => part.type === "timeZoneName")!.value;
+  return `${time} ${offset}`;
 }

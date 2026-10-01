@@ -1,3 +1,4 @@
+import { agentLimits } from "../limits.js";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { open, opendir, readlink, unlink } from "node:fs/promises";
@@ -5,7 +6,6 @@ import { join } from "node:path";
 import {
   AppError,
   asError,
-  limits,
   OperationError,
   type DiscardScope,
   type GitEntry,
@@ -25,10 +25,10 @@ const leaf = (item?: Leaf) => item && ["file", "symlink", "gitlink"].includes(mo
 const nul = (paths: string[]) => Buffer.from(paths.join("\0") + "\0");
 
 export function gitPaths(value: unknown) {
-  if (!Array.isArray(value) || !value.length || value.length > limits.listPageEntries * 2)
+  if (!Array.isArray(value) || !value.length || value.length > agentLimits.listPageEntries * 2)
     throw new AppError("invalid_argument", "Select files from the current page");
   const paths = [...new Set(value.map(relativePath))];
-  if (Buffer.byteLength(JSON.stringify({ changedPaths: paths })) > limits.resultBytes)
+  if (Buffer.byteLength(JSON.stringify({ changedPaths: paths })) > agentLimits.resultBytes)
     throw new AppError(
       "limit_exceeded",
       "Selected paths exceed the size limit; select fewer items",
@@ -71,8 +71,8 @@ class Blockers {
     if (target.has(path)) return;
     const size = Buffer.byteLength(JSON.stringify(path)) + 1;
     if (
-      this.paths.size + this.invalid.size >= limits.listPageEntries ||
-      this.bytes + size > limits.resultBytes - 4096
+      this.paths.size + this.invalid.size >= agentLimits.listPageEntries ||
+      this.bytes + size > agentLimits.resultBytes - 4096
     ) {
       this.truncated = true;
       return;
@@ -350,7 +350,7 @@ async function discardPlan(
       renamedOrigins.add(entry.oldPath);
     }
   }
-  if (paths.size > limits.listPageEntries * 2)
+  if (paths.size > agentLimits.listPageEntries * 2)
     throw new AppError("limit_exceeded", "Too many related paths; select fewer items");
   const ordered = [...paths].sort();
   const index = await leaves(repo, ordered, "index", signal);
@@ -417,7 +417,7 @@ async function discardPlan(
   if ((await observeIndex(repo, signal)).token !== observation.token)
     throw new AppError("conflict", "HEAD/index changed during review; try again");
   const review = { paths: ordered, summary, reviewToken: hash.digest("hex") };
-  if (Buffer.byteLength(JSON.stringify(review)) > limits.resultBytes)
+  if (Buffer.byteLength(JSON.stringify(review)) > agentLimits.resultBytes)
     throw new AppError("limit_exceeded", "Too many paths to confirm; select fewer items");
   return { review, restore, remove, unlink: deleted };
 }

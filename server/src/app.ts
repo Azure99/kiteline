@@ -1,3 +1,4 @@
+import { serverLimits } from "./limits.js";
 import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
@@ -31,7 +32,7 @@ import {
 
 export function createKitelineServer(config: ServerConfig, store: Store) {
   const connections = new Connections(store);
-  const channels = new Channels(connections, config);
+  const channels = new Channels(connections);
   const proxy = new HttpProxy(config, store, connections, channels);
   const bindingLimiter = new AttemptLimiter();
   const authenticationLimiter = new AttemptLimiter();
@@ -41,7 +42,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
     return session;
   }
   function newSession(response: ServerResponse, entryOrigin: string) {
-    const session = store.createSession(config.limits.sessionLifetime);
+    const session = store.createSession(serverLimits.sessionLifetime);
     response.setHeader("set-cookie", sessionCookie(entryOrigin, session.token, session.expiresAt));
     json(response, 200, { expiresAt: session.expiresAt });
   }
@@ -84,7 +85,6 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       if (path === "/api/session" && method === "GET")
         return json(response, 200, {
           expiresAt: session.expiresAt,
-          draftTotalBytes: config.limits.draftTotalBytes,
         });
       if (path === "/api/logout" && method === "POST") {
         store.logout(session.id);

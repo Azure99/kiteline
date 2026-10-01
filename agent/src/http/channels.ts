@@ -3,37 +3,26 @@ import type { Duplex } from "node:stream";
 import { WebSocket } from "ws";
 import { AppError, asError, integer, limits, record } from "@kiteline/shared/protocol";
 import { httpStream } from "@kiteline/shared/http-stream";
-import type { AgentConfig, Identity } from "../config.js";
+import type { Identity } from "../config.js";
 import { connectServerSocket } from "../network.js";
 
 interface Channel {
   socket: WebSocket;
-  timer: NodeJS.Timeout;
   local?: Socket;
   stream?: Duplex;
-  admitted: boolean;
   ready: boolean;
 }
 
 export class HttpChannels {
   private entries = new Map<string, Channel>();
-  constructor(
-    private config: AgentConfig,
-    private identity: Identity,
-    private otherChannels: () => number,
-  ) {}
-  get count() {
-    return [...this.entries.values()].filter((item) => item.admitted).length;
-  }
+  constructor(private identity: Identity) {}
   open(id: string, connectionId: string, _kind: string, params: Record<string, unknown>) {
-    const admitted = this.count + this.otherChannels() < this.config.limits.channelsPerDevice;
     const url = new URL(`/api/agent/channels/${encodeURIComponent(id)}`, this.identity.server);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     url.searchParams.set("connectionId", connectionId);
     const socket = connectServerSocket(url, {
       headers: { authorization: `Bearer ${this.identity.deviceToken}` },
       maxPayload: limits.dataChunkBytes,
-      handshakeTimeout: this.config.limits.channelPairTimeout,
       finishRequest(request) {
         request.setSocketKeepAlive(true, limits.tcpKeepAliveDelayMs);
         request.end();
@@ -41,12 +30,7 @@ export class HttpChannels {
     });
     const item: Channel = {
       socket,
-      admitted,
       ready: false,
-      timer: setTimeout(
-        () => this.fail(id, new AppError("timeout", "Local service connection timed out")),
-        this.config.limits.channelPairTimeout,
-      ),
     };
     this.entries.set(id, item);
     const start = (raw: Buffer, binary: boolean) => {
@@ -54,7 +38,6 @@ export class HttpChannels {
         if (binary || !item.ready || record(JSON.parse(raw.toString())).type !== "start")
           throw new AppError("invalid_argument", "HTTP channel is not ready");
         socket.off("message", start);
-        clearTimeout(item.timer);
         item.stream = httpStream(socket, (error) => this.fail(id, error));
         item.local!.pipe(item.stream).pipe(item.local!);
       } catch (error) {
@@ -67,7 +50,6 @@ export class HttpChannels {
     socket.on("open", () => {
       if (this.entries.get(id) !== item) return socket.terminate();
       try {
-        if (!admitted) throw new AppError("busy", "Device channel limit reached");
         const port = integer(params.port, "port", 1, 65535);
         const dial = (host: string) => {
           const local = connect({ host, port });
@@ -78,7 +60,6 @@ export class HttpChannels {
             if (this.entries.get(id) !== item) return local.destroy();
             local.setKeepAlive(true, limits.tcpKeepAliveDelayMs);
             item.ready = true;
-            item.timer.refresh();
             socket.send(JSON.stringify({ type: "ready", meta: {} }));
           });
           local.on("error", (error) => {
@@ -116,7 +97,6 @@ export class HttpChannels {
     const item = this.entries.get(id);
     if (!item) return;
     this.entries.delete(id);
-    clearTimeout(item.timer);
     item.local?.destroy();
     item.stream?.destroy();
     if (terminate) item.socket.terminate();

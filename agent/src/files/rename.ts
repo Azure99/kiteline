@@ -7,6 +7,7 @@ import { windowsNative } from "@kiteline/shared/windows/native";
 
 const helper = resolve(import.meta.dirname, "../../../dist/native/bin/rename-noreplace");
 
+// A separate existence check cannot prevent rename from overwriting a concurrently created target.
 // The caller holds the publication lock until close; a started rename cannot be cancelled.
 export function renameNoReplace(source: string, target: string): Promise<void> {
   if (process.platform === "win32")

@@ -17,7 +17,6 @@ import {
 
 export interface Session {
   expiresAt: string;
-  draftTotalBytes: number;
 }
 
 export function Auth({ initialized, onLogin }: { initialized: boolean; onLogin: () => void }) {

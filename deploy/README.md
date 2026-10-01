@@ -17,15 +17,15 @@ pnpm images amd64
 
 `--agent-target`选择server携带的agent，可用逗号分隔多个目标；省略时携带全部四个目标。Windows先按[固定组件构建](windows-components.md)生成并验证组件；其ZIP不含符号链接，目标机无需Developer Mode。macOS构建步骤见下文。
 
-包及对应`.sha256`位于`dist/releases/`；产品版本来自[version.json](../shared/src/version.json)，镜像名为`kiteline-server:<版本>-<amd64|arm64>`。跨机器可用`docker save/load`搬运镜像。清单记录commit、dirty、平台、sourceDigest及组件身份；组装server和构建镜像时核对当前来源、版本和目标，来源不一致须重建相应包。
+包及对应`.sha256`位于`dist/releases/`；产品版本来自[version.json](../shared/src/version.json)，镜像名为`kiteline-server:<版本>-<amd64|arm64>`。跨机器可用`docker save/load`搬运镜像。构建从干净commit开始，结束时再次核HEAD和工作区/index；清单记录sourceCommit、sourceDirty=false、平台及组件身份。组装server和构建镜像时核对当前来源、版本和目标，来源不一致须重建相应包；原生组件仍按实际输入闭包复用。
 
-`package agent amd64`自动构建/复用静态组件；也可单独用`node scripts/build-agent-static.mjs`构建到`dist/agent-static-amd64/`。来源与SHA在[agent-static.json](agent-static.json)，工具链版本在[agent-static-packages.txt](agent-static-packages.txt)。首次构建需要数GiB内存和较长编译时间，Node固定3个编译任务，8GiB构建机应串行安排重负载。Docker分别缓存Node/native阶段；源码、脚本、工具链或构建输入模式变化可能使相关缓存失效。源下载缓存在`/var/tmp/kiteline-release-cache`并核验SHA。输出携带许可证、工具包清单、输入身份和文件校验，静态ELF检查拒绝动态加载器或库依赖。组件升级同步来源、工具链和对应环境验收。
+`package agent amd64`自动构建/复用静态组件；也可单独用`node scripts/build-agent-static.mjs`构建到`dist/agent-static-amd64/`。来源与SHA在[agent-static.json](agent-static.json)，工具链包名在[agent-static-packages.txt](agent-static-packages.txt)，实际版本记录于输出build-packages.txt。首次构建需要数GiB内存和较长编译时间，Node固定3个编译任务，8GiB构建机应串行安排重负载。Docker分别缓存Node/native阶段；源码、脚本、工具链或构建输入模式变化可能使相关缓存失效。源下载缓存在`/var/tmp/kiteline-release-cache`并核验SHA。输出携带许可证、工具包清单、输入身份和文件校验，静态ELF检查拒绝动态加载器或库依赖。组件升级同步来源、工具链和对应环境验收。
 
 macOS原生组件使用[固定输入](agent-macos.json)及Darwin x64构建环境，需要 Command Line Tools 和 SDK，部署目标 11.0。先在源码目录准备输入，再将完整输入目录传至macOS构建机；使用固定Node运行其中同一脚本，输出目录须不存在：
 
 ```sh
 node scripts/build-macos-components.mjs prepare /var/tmp/kiteline-mac-inputs
-# 在固定macOS构建环境中：
+# 在macOS x86_64构建环境中：
 node /var/tmp/kiteline-mac-inputs/scripts/build-macos-components.mjs build \
   /var/tmp/kiteline-mac-inputs /var/tmp/kiteline-mac-components
 # 将完整组件带回源码侧，核对当前输入与实际文件：
@@ -49,7 +49,7 @@ pnpm images amd64
 pnpm images arm64
 ```
 
-各包根目录包含项目LICENSE；第三方许可位置见[随包材料](#随包材料)。组包后检查各实际包及镜像的启动，以及受影响的安装升级流程。
+各包根目录包含项目LICENSE；第三方许可位置见[随包材料](#随包材料)。构建后从各实际产物核对内容、来源、启动及受影响安装升级流程，区分原生、模拟和最低系统的验证结果。
 
 ## Server 部署
 
@@ -165,7 +165,7 @@ Windows更新和卸载在提升的独立PowerShell中执行，先由用户正常
 & "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" uninstall
 ```
 
-升级的ZIP与`.sha256`放在一起；确认后不自动启动。默认卸载保留状态；`--purge-state`范围和稳定锁规则见[卸载规则](#原生-agent)。同身份同版本安装重跑只核完整性，不替树或重绑。
+升级的ZIP与`.sha256`放在一起；确认后不自动启动。默认卸载保留状态；`--purge-state`范围和稳定锁规则见[卸载规则](#原生-agent)。同身份同版本安装重跑按版本识别，不替树或重绑。
 
 设备上线后，先在网页为该设备添加 workspace，选择项目目录；再获取 `WORKSPACE_ID` 创建终端：
 
@@ -208,21 +208,7 @@ sudo kiteline-agent uninstall
 
 ### 定时任务
 
-网页主页和设备详情均可进入“定时任务”。CLI须以agent运行用户执行；agent需持续运行，但不要求relay在线，也不会因为创建任务自动开启常驻服务。
-
-```sh
-kiteline-agent schedule --help
-kiteline-agent schedule create --name 'Daily review' --cron '0 9 * * 1-5' \
-  --timezone Asia/Shanghai --cwd '/srv/My Project' --command './daily-review.sh' --json
-kiteline-agent schedule list --json
-kiteline-agent schedule run TASK_ID --json
-kiteline-agent schedule status RUN_ID --json
-kiteline-agent schedule output RUN_ID --stream stdout --offset 0 --json
-kiteline-agent schedule pause TASK_ID --json
-kiteline-agent schedule stop RUN_ID --json
-```
-
-定义和有限结果保存在设备状态目录的`tasks/`；暂停、错过执行、异常重启核查及JSON/退出码含义见`kiteline-agent schedule --help`。升级前用户自行查询并停止运行，升级占用时拒绝；保留绑定及任务数据，结果继续遵守有限留存规则。
+`kiteline-agent schedule --help`及各子命令`--help`提供完整参数与示例，agent未运行时也可阅读。实际管理需要本机agent运行；执行与核查规则见`kiteline-agent schedule --help`。
 
 ### Agent 出站代理
 
@@ -291,7 +277,7 @@ macOS 组件在匹配架构的 macOS 构建机上编译，需要 Command Line To
 
 ### xterm补丁再生成
 
-使用项目固定Node/pnpm，在隔离维护目录安装`esbuild@0.28.0`。取得同版本未修补的npm包，保留其`lib/xterm.mjs`及map原件；先按以下参数重生成未修补包的副本，逐字比对两文件。一致后，在`pnpm patch @xterm/xterm@6.1.0-beta.304`给出的编辑目录修改TS并重生成，最后用`pnpm patch-commit <编辑目录>`更新现有补丁。
+使用项目固定Node/pnpm，在隔离维护目录安装`esbuild@0.28.0`。取得同版本未修补的npm包，保留其`lib/xterm.mjs`及map原件；先按以下参数重生成未修补包的副本，逐字比对ESM。一致后，在`pnpm patch @xterm/xterm@6.1.0-beta.304`给出的编辑目录修改TS并重生成，还原`lib/xterm.mjs.map`原件，最后用`pnpm patch-commit <编辑目录>`更新现有补丁。
 
 将以下脚本放在安装esbuild的维护目录，以`node generate.mjs <生成目标目录> <未修补包目录>`执行；banner始终取自未修补原件。
 
@@ -323,4 +309,4 @@ await build({
 });
 ```
 
-补丁同时保留可读TS修改、实际消费的ESM及对应sourcemap；升级后复核适配并执行受影响的类型和终端验证。生成工具仅用于隔离维护目录。
+补丁保留可读TS修改和实际消费的ESM；升级后复核适配并执行受影响的类型和终端验证。生成工具仅用于隔离维护目录。

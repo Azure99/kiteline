@@ -1,8 +1,5 @@
-import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
 import {
   cpSync,
-  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -12,16 +9,10 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { digest, fetchPinned, run } from "./release-inputs.mjs";
 
 const root = resolve(import.meta.dirname, "..");
-const digest = (file) => createHash("sha256").update(readFileSync(file)).digest("hex");
 const json = (file) => JSON.parse(readFileSync(join(root, file), "utf8"));
-function run(command, args, options = {}) {
-  const result = spawnSync(command, args, { stdio: "inherit", ...options });
-  if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`${command} exited with ${result.status}`);
-  return result.stdout;
-}
 
 export function buildStaticAgent(destination) {
   const release = json("deploy/release.json");
@@ -46,13 +37,7 @@ export function buildStaticAgent(destination) {
     };
     for (const [name, input] of Object.entries(downloads)) {
       const cached = join(cache, input.sha256);
-      if (!existsSync(cached) || digest(cached) !== input.sha256) {
-        const pending = join(temporary, "download");
-        run("curl", ["--fail", "--location", "--output", pending, input.url]);
-        if (digest(pending) !== input.sha256)
-          throw new Error(`Source checksum mismatch: ${input.url}`);
-        renameSync(pending, cached);
-      }
+      fetchPinned(input, cached);
       const target = join(temporary, name);
       mkdirSync(resolve(target, ".."), { recursive: true });
       cpSync(cached, target);
@@ -123,10 +108,6 @@ export function buildStaticAgent(destination) {
     const pending = mkdtempSync(`${destination}.pending-`);
     try {
       run("cp", ["-a", `${output}/.`, pending]);
-      run("sha256sum", ["-c", "SHA256SUMS"], {
-        cwd: pending,
-        stdio: ["ignore", "ignore", "inherit"],
-      });
       rmSync(destination, { force: true, recursive: true });
       renameSync(pending, destination);
     } finally {

@@ -2,7 +2,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { mkdtemp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { AppError } from "@kiteline/shared/protocol";
+import { AppError, limits } from "@kiteline/shared/protocol";
 import { tmux } from "@kiteline/shared/terminal/node";
 import type { RecorderCall } from "@kiteline/shared/ipc";
 import { Agent } from "../src/control.js";
@@ -18,16 +18,21 @@ vi.mock("node:crypto", async (original) => {
   };
 });
 
+const originalPairTimeout = limits.channelPairTimeout;
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
   candidateIds.length = 0;
   const failures: unknown[] = [];
-  for (const cleanup of cleanups.splice(0).reverse()) {
-    try {
-      await cleanup();
-    } catch (error) {
-      failures.push(error);
+  try {
+    for (const cleanup of cleanups.splice(0).reverse()) {
+      try {
+        await cleanup();
+      } catch (error) {
+        failures.push(error);
+      }
     }
+  } finally {
+    Object.assign(limits, { channelPairTimeout: originalPairTimeout });
   }
   if (failures.length) throw new AggregateError(failures, "Terminal test cleanup failed");
 });
@@ -321,7 +326,7 @@ test("recovery restores the same task and pending Shell input, then redraw and e
 test("an unresponsive recorder cannot leave a phantom creation or block agent shutdown", async () => {
   const { agent, workspace, signal } = await fixture();
   await agent.sessions.create(workspace.id, undefined, undefined, signal);
-  agent.config.limits.channelPairTimeout = 200;
+  Object.assign(limits, { channelPairTimeout: 200 });
   process.kill(agent.sessions.recorder.pid!, "SIGSTOP");
   await expect(
     agent.sessions.create(workspace.id, undefined, undefined, signal),
@@ -338,14 +343,14 @@ test("an unresponsive recorder cannot leave a phantom creation or block agent sh
 test("a failed end does not permanently block recovery of a surviving task", async () => {
   const { agent, workspace, signal } = await fixture();
   const session = await agent.sessions.create(workspace.id, undefined, undefined, signal);
-  agent.config.limits.channelPairTimeout = 200;
+  Object.assign(limits, { channelPairTimeout: 200 });
   process.kill(agent.sessions.recorder.pid!, "SIGSTOP");
   await expect(agent.sessions.end(workspace.id, session.id)).rejects.toMatchObject({
     outcome: "unknown",
   });
   process.kill(agent.sessions.recorder.pid!, "SIGKILL");
   await until(() => agent.sessions.get(session.id).session.webStatus === "unavailable");
-  agent.config.limits.channelPairTimeout = 3000;
+  Object.assign(limits, { channelPairTimeout: 3000 });
   expect(agent.sessions.recover(workspace.id, session.id).webStatus).toBe("recovering");
   await until(() => agent.sessions.get(session.id).session.webStatus !== "recovering");
   expect(agent.sessions.get(session.id).session.webStatus).toBe("available");

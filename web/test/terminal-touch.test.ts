@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { adaptTouchGestures } from "@kiteline/shared/terminal";
+import { adaptTouchGestures } from "../src/terminal/touch-selection";
 
 test("only a single, stationary body tap requests input", () => {
   const document = new EventTarget();

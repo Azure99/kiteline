@@ -21,6 +21,7 @@ export function FileNameDialog({
   deviceId,
   workspaceId,
   action,
+  blocked,
   rename,
   onClose,
   onDone,
@@ -28,6 +29,7 @@ export function FileNameDialog({
   deviceId: string;
   workspaceId: string;
   action: NameAction;
+  blocked: boolean;
   rename: (path: string, name: string) => Promise<{ from: string; to: string }>;
   onClose: () => void;
   onDone: (result: { from?: string; to: string; entry?: Entry }) => void;
@@ -54,6 +56,7 @@ export function FileNameDialog({
         : t(($) => $.files.newDirectory);
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    if (blocked) return;
     if (!name || name.includes("/") || name === "." || name === "..") {
       setError(undefined);
       setInvalid(true);
@@ -115,12 +118,17 @@ export function FileNameDialog({
                 <ErrorNotice error={error} />
               </div>
             )}
+            {blocked && (
+              <p role="status" className="text-sm">
+                {t(($) => $.files.saving)}
+              </p>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" disabled={busy} onClick={onClose}>
               {t(($) => $.common.cancel)}
             </Button>
-            <Button type="submit" disabled={busy}>
+            <Button type="submit" disabled={busy || blocked}>
               {busy ? t(($) => $.common.processing) : title}
             </Button>
           </DialogFooter>

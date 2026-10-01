@@ -10,9 +10,7 @@ interface Channel {
   id: string;
   sessionId: string;
   socket: WebSocket;
-  timer: NodeJS.Timeout;
   started: boolean;
-  admitted: boolean;
 }
 export class TerminalChannels {
   private entries = new Map<string, Channel>();
@@ -20,34 +18,23 @@ export class TerminalChannels {
     private sessions: Sessions,
     private config: AgentConfig,
     private identity: Identity,
-    private otherChannels: () => number = () => 0,
   ) {
     sessions.onFrame = (message) => this.frame(message);
   }
-  get count() {
-    return [...this.entries.values()].filter((item) => item.admitted).length;
-  }
   open(id: string, connectionId: string, kind: string, params: Record<string, unknown>) {
     if (this.entries.has(id)) throw new AppError("conflict", "Channel already exists");
-    const admitted = this.count + this.otherChannels() < this.config.limits.channelsPerDevice;
     const url = new URL(`/api/agent/channels/${encodeURIComponent(id)}`, this.identity.server);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     url.searchParams.set("connectionId", connectionId);
     const socket = connectServerSocket(url, {
       headers: { authorization: `Bearer ${this.identity.deviceToken}` },
       maxPayload: limits.controlMessageBytes,
-      handshakeTimeout: this.config.limits.channelPairTimeout,
     });
     const channel: Channel = {
       id,
       sessionId: typeof params.sessionId === "string" ? params.sessionId : "",
       socket,
       started: false,
-      admitted,
-      timer: setTimeout(
-        () => this.fail(id, new AppError("timeout", "Timed out waiting for channel pairing")),
-        this.config.limits.channelPairTimeout,
-      ),
     };
     this.entries.set(id, channel);
     socket.on("upgrade", (response) =>
@@ -56,7 +43,6 @@ export class TerminalChannels {
     socket.on("open", () => {
       heartbeat(socket);
       try {
-        if (!admitted) throw new AppError("busy", "Device channel limit reached");
         if (kind !== "terminal.attach")
           throw new AppError("unsupported", "Unsupported data channel");
         const item = this.sessions.get(string(params.sessionId), string(params.workspaceId));
@@ -79,11 +65,6 @@ export class TerminalChannels {
             },
           }),
         );
-        clearTimeout(channel.timer);
-        channel.timer = setTimeout(
-          () => this.fail(id, new AppError("timeout", "Timed out waiting for channel start")),
-          this.config.limits.channelPairTimeout,
-        );
       } catch (error) {
         this.fail(id, error);
       }
@@ -99,7 +80,6 @@ export class TerminalChannels {
           if (item.session.webStatus !== "available")
             throw new AppError("recording_unavailable", "Terminal recording is unavailable");
           channel.started = true;
-          clearTimeout(channel.timer);
           void this.sessions.recorder
             .request({
               type: "attach",
@@ -194,7 +174,6 @@ export class TerminalChannels {
     const channel = this.entries.get(id);
     if (!channel) return;
     this.entries.delete(id);
-    clearTimeout(channel.timer);
     try {
       this.sessions.recorder.detach(channel.sessionId, id);
     } catch {

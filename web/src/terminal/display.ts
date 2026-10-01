@@ -105,15 +105,11 @@ export class TerminalDisplay {
         if (this.disposed || this.finalFrame) return;
         try {
           if (event.data instanceof ArrayBuffer) {
-            if (event.data.byteLength > limits.dataChunkBytes)
-              throw new Error("Terminal data frame exceeds its limit");
             const data = new Uint8Array(event.data);
             this.queue = this.queue
               .then(() => this.output(data))
               .catch((error: unknown) => this.fail(error));
           } else {
-            if (new TextEncoder().encode(event.data).length > limits.controlMessageBytes)
-              throw new Error("Invalid terminal control frame");
             const frame = record(JSON.parse(event.data));
             if (frame.type === "ended" || frame.type === "error") {
               this.finalFrame = true;

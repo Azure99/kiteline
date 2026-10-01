@@ -1,3 +1,4 @@
+import { agentLimits } from "../limits.js";
 import { isUtf8 } from "node:buffer";
 import { constants, type BigIntStats } from "node:fs";
 import { chmod, mkdir, open, opendir, readlink, rmdir, unlink } from "node:fs/promises";
@@ -60,10 +61,6 @@ export class FileOperations {
     private changed: (workspaceId: string) => void = () => {},
   ) {}
 
-  get cleanupPending() {
-    return [...this.executions.values()].some(({ signal }) => signal.aborted);
-  }
-
   async close() {
     this.closing = true;
     for (const { controller } of this.executions.values())
@@ -81,7 +78,7 @@ export class FileOperations {
     if (this.closing) throw new AppError("cancelled", "Agent is stopping");
     if (this.executions.size >= limits.pendingRequestsPerDevice)
       throw new AppError("busy", "File operations are still finishing; try again later");
-    if (!Array.isArray(inputs) || !inputs.length || inputs.length > limits.listPageEntries)
+    if (!Array.isArray(inputs) || !inputs.length || inputs.length > agentLimits.listPageEntries)
       throw new AppError("invalid_argument", "Select a limited number of files");
     const items: CopyItem[] = inputs.map((input: unknown) => {
       if (kind === "delete")
@@ -102,7 +99,7 @@ export class FileOperations {
         expectedTargetVersion: item.expectedTargetVersion as string | undefined,
       };
     });
-    if (Buffer.byteLength(JSON.stringify(items)) > limits.resultBytes / 2)
+    if (Buffer.byteLength(JSON.stringify(items)) > agentLimits.resultBytes / 2)
       throw new AppError(
         "limit_exceeded",
         "Selected paths exceed the operation limit; process them in batches",
@@ -115,7 +112,7 @@ export class FileOperations {
       failed: 0,
       failures: [],
       detailBytes: 0,
-      budget: Math.floor(limits.resultBytes / (items.length * 4)),
+      budget: Math.floor(agentLimits.resultBytes / (items.length * 4)),
       truncated: false,
       unknown: false,
       finished: false,
@@ -309,10 +306,8 @@ export class FileOperations {
       try {
         await publish(async () => {
           await verify(root, source);
-          await this.temporary.assertRelocatableLocked(source.location, source.info);
           const current = await targetAgain(root, item.targetPath, target);
           const destination = await checkTarget(current, item, source.info.isDirectory());
-          if (destination) await this.temporary.assertRelocatableLocked(current, destination);
           if (destination && sameObject(source.info, destination))
             throw new AppError(
               "invalid_argument",
@@ -347,27 +342,20 @@ export class FileOperations {
         );
         return capture(root, item.targetPath);
       }, signal);
-      await this.children(
-        root,
-        source,
-        signal,
-        result,
-        async (child) => {
-          const childTarget = posix.join(item.targetPath, child.location.name);
-          await this.copyMove(
-            root,
-            child,
-            { path: child.path, targetPath: childTarget, collision: "error" },
-            move,
-            signal,
-            result,
-            done,
-            bytes,
-            created,
-          );
-        },
-        { omitTemporary: true },
-      );
+      await this.children(root, source, signal, result, async (child) => {
+        const childTarget = posix.join(item.targetPath, child.location.name);
+        await this.copyMove(
+          root,
+          child,
+          { path: child.path, targetPath: childTarget, collision: "error" },
+          move,
+          signal,
+          result,
+          done,
+          bytes,
+          created,
+        );
+      });
       await publish(async () => {
         await verify(root, created);
         await change(
@@ -382,7 +370,6 @@ export class FileOperations {
       if (move)
         await publish(async () => {
           await verify(root, source);
-          await this.temporary.assertRelocatableLocked(source.location, source.info);
           await change(result, signal, () => rmdir(source.location.absolute), complete);
         }, signal);
       return;
@@ -396,7 +383,6 @@ export class FileOperations {
         const text = await readlink(source.location.absolute, { encoding: "buffer" });
         temporary = await this.temporary.createLink(
           target.parent,
-          target.parentInfo,
           text,
           signal,
           await linkType(source.location.absolute),
@@ -411,7 +397,7 @@ export class FileOperations {
           if (!info.isFile() || !sameObject(info, source.info))
             throw new AppError("conflict", "Source file has changed");
           copied = { ...source, info };
-          const output = await this.temporary.create(target.parent, target.parentInfo, signal);
+          const output = await this.temporary.create(target.parent, signal);
           temporary = output;
           const block = Buffer.alloc(limits.dataChunkBytes);
           let position = 0;
@@ -438,14 +424,8 @@ export class FileOperations {
         }
       }
       await publish(async () => {
-        await this.temporary.checkLocked(temporary!);
         const current = await targetAgain(root, item.targetPath, target);
-        const destination = await checkTarget(current, item, false);
-        if (move) {
-          await this.temporary.assertRelocatableLocked(source.location, source.info, temporary);
-          if (destination)
-            await this.temporary.assertRelocatableLocked(current, destination, temporary);
-        }
+        await checkTarget(current, item, false);
         await change(
           result,
           signal,
@@ -459,12 +439,10 @@ export class FileOperations {
             done(item.targetPath);
           },
         );
-        await this.temporary.publishedLocked(temporary!);
       }, signal);
       if (move)
         await publish(async () => {
           await verify(root, copied, true);
-          await this.temporary.assertRelocatableLocked(copied.location, copied.info);
           await change(result, signal, () => unlink(copied.location.absolute), complete);
         }, signal);
     } finally {
@@ -478,16 +456,13 @@ export class FileOperations {
     signal: AbortSignal,
     result: ResultState,
     visit: (child: ObjectRef) => Promise<void>,
-    { omitTemporary = false }: { omitTemporary?: boolean } = {},
   ) {
-    await publish(() => verify(root, source), signal);
     const directory = await opendir(source.location.absolute, {
       encoding: "buffer" as BufferEncoding,
     });
     try {
       for (;;) {
         signal.throwIfAborted();
-        await publish(() => verify(root, source), signal);
         const entry = await directory.read();
         if (!entry) break;
         const raw = Buffer.isBuffer(entry.name) ? entry.name : Buffer.from(entry.name);
@@ -497,12 +472,9 @@ export class FileOperations {
             throw new AppError("unsupported", "Name is not valid UTF-8; the item is retained");
           const child = await publish(async () => {
             await verify(root, source);
-            const child = await capture(root, path);
-            return omitTemporary && this.temporary.ownsLocked(child.location, child.info)
-              ? undefined
-              : child;
+            return capture(root, path);
           }, signal);
-          if (child) await visit(child);
+          await visit(child);
         } catch (error) {
           fail(result, path, error);
         }
@@ -566,7 +538,10 @@ function fail(state: ResultState, path: string, error: unknown) {
     if (state.error.message.length !== failure.error.message.length) state.truncated = true;
   }
   const size = Buffer.byteLength(JSON.stringify(failure));
-  if (state.detailBytes + size <= state.budget && state.failures.length < limits.listPageEntries) {
+  if (
+    state.detailBytes + size <= state.budget &&
+    state.failures.length < agentLimits.listPageEntries
+  ) {
     state.failures.push(failure);
     state.detailBytes += size;
   } else state.truncated = true;

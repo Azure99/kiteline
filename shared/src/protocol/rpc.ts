@@ -5,7 +5,6 @@ import type {
   DirectoryListing,
   DiscardScope,
   Entry,
-  FileCleanup,
   FileInspection,
   FileItemResult,
   FileListing,
@@ -93,7 +92,6 @@ export interface RpcMethods {
   "shortcuts.put": Contract<Omit<Shortcut, "id"> & { id?: string }, Shortcut>;
   "shortcuts.remove": Contract<{ id: string }, { removed: boolean }>;
   "files.list": Contract<FileParams & { cursor?: string }, FileListing>;
-  "files.cleanup": Contract<Record<string, never>, FileCleanup>;
   "files.inspect": Contract<FileParams & { suggestCopyName?: boolean }, FileInspection>;
   "files.create": Contract<FileParams & { kind: "file" | "directory" }, Entry>;
   "files.rename": Contract<FileParams & { newName: string }, { from: string; to: string }>;
@@ -183,7 +181,6 @@ export const rpcMutates: Record<RpcMethod, boolean> = {
   "shortcuts.put": true,
   "shortcuts.remove": true,
   "files.list": false,
-  "files.cleanup": false,
   "files.inspect": false,
   "files.create": true,
   "files.rename": true,

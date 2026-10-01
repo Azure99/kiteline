@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   mkdirSync,
   mkdtempSync,
@@ -11,6 +10,7 @@ import {
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { prepareRipgrep } from "./prepare-ripgrep.mjs";
+import { digest, fetchPinned, run as execute } from "./release-inputs.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const destination = resolve(process.env.KITELINE_NATIVE_OUTPUT ?? resolve(root, "dist/native"));
@@ -18,17 +18,13 @@ const directory = mkdtempSync("/var/tmp/kiteline-native-");
 const tarball = resolve(directory, "tmux.tar.gz");
 const { tmux } = JSON.parse(readFileSync(resolve(root, "deploy/agent-static.json"), "utf8"));
 const checksum = tmux.sha256;
-const digest = (file) => createHash("sha256").update(readFileSync(file)).digest("hex");
 function run(command, args, cwd = directory) {
-  const result = spawnSync(command, args, { cwd, stdio: "inherit" });
-  if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`${command} exited with ${result.status}`);
+  return execute(command, args, { cwd });
 }
 
 try {
   mkdirSync(destination, { recursive: true });
-  run("curl", ["--fail", "--location", "--output", tarball, tmux.url]);
-  if (digest(tarball) !== checksum) throw new Error("tmux source checksum mismatch");
+  fetchPinned(tmux, tarball);
   run("tar", ["-xzf", tarball]);
   const source = resolve(directory, `tmux-${tmux.version}`);
   run("patch", ["-p1", "-i", resolve(root, "native/tmux-paste.patch")], source);
@@ -38,8 +34,6 @@ try {
   cpSync(resolve(source, "tmux"), resolve(destination, "bin/tmux"));
   mkdirSync(resolve(destination, "licenses"), { recursive: true });
   cpSync(resolve(source, "COPYING"), resolve(destination, "licenses/tmux.txt"));
-  mkdirSync(resolve(destination, "sources"), { recursive: true });
-  cpSync(tarball, resolve(destination, "sources/tmux.tar.gz"));
   const libraries = {};
   if (process.env.KITELINE_BUNDLE_LIBS === "1") {
     const linked = spawnSync("ldd", [resolve(destination, "bin/tmux")], { encoding: "utf8" });

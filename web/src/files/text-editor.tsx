@@ -1,11 +1,12 @@
 import { useTranslation } from "react-i18next";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { EditorView } from "@codemirror/view";
+import { EditorState } from "@codemirror/state";
 import { LanguageDescription } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { encodeText } from "@kiteline/shared/text";
 import type { Draft, DraftStore } from "./drafts";
-import { updateEditorLocale } from "./editor-locale";
+import { editorPhrases } from "./editor-locale";
 
 export function TextEditor({
   draft,
@@ -28,6 +29,7 @@ export function TextEditor({
       parent: host.current,
       state: draft.state,
       dispatchTransactions(transactions, current) {
+        // Undo can bypass transaction filters; reject before updating either the document or history.
         let measured: { text: string; bytes: number } | undefined;
         for (const tr of transactions) {
           if (!tr.docChanged) continue;
@@ -67,7 +69,9 @@ export function TextEditor({
   });
   useLayoutEffect(() => {
     const editor = view.current;
-    if (editor) updateEditorLocale(editor, draft.phrases);
+    editor?.dispatch({
+      effects: draft.phrases.reconfigure(EditorState.phrases.of(editorPhrases())),
+    });
   }, [draft, i18n.resolvedLanguage]);
   useLayoutEffect(() => {
     const editor = view.current;

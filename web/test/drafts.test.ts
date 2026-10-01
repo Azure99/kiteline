@@ -41,7 +41,7 @@ function disk(text: string, revision: string, path = "a.txt"): DiskText {
 }
 async function opened() {
   const store = new DraftStore();
-  store.limits([{ id: "device", editorBytes: 1024 } as Device], 4096);
+  store.limits([{ id: "device", editorBytes: 1024 } as Device]);
   transport.read.mockResolvedValueOnce(disk("base", "a-base"));
   const draft = store.open({ ...target, deviceName: "Device", workspaceName: "Workspace" });
   await vi.waitFor(() => expect(draft.state).toBeDefined());
@@ -56,7 +56,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 test("preloaded open adopts once and never replaces an existing editor or its undo state", () => {
   const store = new DraftStore();
-  store.limits([{ id: "device", editorBytes: 1024 } as Device], 4096);
+  store.limits([{ id: "device", editorBytes: 1024 } as Device]);
   const named = { ...target, deviceName: "Device", workspaceName: "Workspace" };
   const draft = store.open(named, disk("base", "first"));
   const edited = draft.state!.update({ changes: { from: 4, insert: " edited" } }).state;
@@ -142,35 +142,12 @@ test("save retains later typing and unknown save-as checks its submitted target"
   expect(isDirty(draft)).toBe(true);
   transport.write.mockRejectedValueOnce(new ApiError("io_error", "lost result", "unknown"));
   await store.save(draft, "copy.txt", null);
-  transport.read.mockResolvedValueOnce(disk("base later", "copy", "copy.txt"));
+  transport.read.mockImplementationOnce(async ({ path }) =>
+    path === "copy.txt" ? disk("base later", "copy", path) : disk("base", "original", path),
+  );
   await store.check(draft);
-  expect(transport.read.mock.calls.at(-1)?.[0].path).toBe("copy.txt");
   expect(draft.path).toBe("copy.txt");
   expect(isDirty(draft)).toBe(false);
-});
-
-test("old save confirmation cannot replace a newer baseline after a rename round trip", async () => {
-  const { store, draft } = await opened();
-  store.update(draft, draft.state!.update({ changes: { from: 0, to: 4, insert: "first" } }).state);
-  let finish!: (value: unknown) => void;
-  transport.write.mockImplementationOnce(
-    () =>
-      new Promise((resolve) => {
-        finish = resolve;
-      }),
-  );
-  const saving = store.save(draft);
-  transport.read.mockResolvedValueOnce(disk("first", "b-first", "b.txt"));
-  await store.rename("device", "workspace", "a.txt", "b.txt");
-  transport.read.mockResolvedValueOnce(disk("first", "a-first"));
-  await store.rename("device", "workspace", "b.txt", "a.txt");
-  store.update(draft, draft.state!.update({ changes: { from: 0, to: 5, insert: "second" } }).state);
-  transport.write.mockResolvedValueOnce({ path: "a.txt", revision: "second", size: 6 });
-  await store.save(draft, "a.txt", "a-first");
-  finish({ path: "a.txt", revision: "first", size: 5 });
-  await saving;
-  expect(draft.baseText).toBe("second");
-  expect(draft.revision).toBe("second");
 });
 
 test.each([
@@ -199,11 +176,11 @@ test.each([
     final: "renamed.txt",
   },
 ])(
-  "a published save to $saved follows rename $from without replacing the editor",
+  "save to $saved blocks rename $from until its reply, then preserves the editor on move",
   async (paths) => {
     const root = await mkdtemp("/var/tmp/kiteline-draft-save-");
     const store = new DraftStore();
-    store.limits([{ id: "device", editorBytes: 1024 } as Device], 4096);
+    store.limits([{ id: "device", editorBytes: 1024 } as Device]);
     const release = deferred<void>();
     try {
       const read = async (target: FileTarget) => {
@@ -264,6 +241,13 @@ test.each([
         await rename(join(root, paths.from), join(root, paths.to));
         return Response.json({ outcome: "succeeded", result: { from: paths.from, to: paths.to } });
       });
+      await expect(
+        store.renameFile({ ...target, path: paths.from }, paths.to),
+      ).rejects.toMatchObject({ code: "busy" });
+      expect(store.savingWithin("device", "workspace", paths.from)).toBe(true);
+      expect(store.savingWithin("other", "workspace", paths.from)).toBe(false);
+      release.resolve();
+      expect(await saving).toBe(true);
       await store.renameFile({ ...target, path: paths.from }, paths.to);
       await vi.waitFor(() => expect(draft.busy).toBeUndefined());
       expect(draft.path).toBe(paths.final);
@@ -281,8 +265,6 @@ test.each([
         true,
       );
       expect(draft.state!.doc.toString()).toBe("sent later");
-      release.resolve();
-      expect(await saving).toBe(false);
       expect(draft.baseText).toBe("sent");
     } finally {
       release.resolve();
@@ -292,132 +274,17 @@ test.each([
   },
 );
 
-test.each(["base", "external"])(
-  "rename checks actual bytes %s before adopting a pending save",
-  async (raw) => {
-    const { store, draft } = await opened();
-    store.update(draft, draft.state!.update({ changes: { from: 0, to: 4, insert: "sent" } }).state);
-    const release = deferred<unknown>();
-    transport.write.mockReturnValueOnce(release.promise);
-    const saving = store.save(draft);
-    transport.read.mockResolvedValueOnce(disk(raw, `b-${raw}`, "b.txt"));
-    await store.rename("device", "workspace", "a.txt", "b.txt");
-    release.resolve({ path: "a.txt", revision: "late", size: 4 });
-    await saving;
-    expect(draft.baseText).toBe("base");
-    expect(draft.state!.doc.toString()).toBe("sent");
-    expect(draft.unknownSave).toMatchObject({ target: { ...target, path: "b.txt" }, raw: "sent" });
-    expect(isDirty(draft)).toBe(true);
-    expect(draft.notice).toBe(raw === "base" ? undefined : "diskChangedKept");
-  },
-);
-
-test.each(["failed", "unknown"] as const)(
-  "moving the source preserves its baseline when an independent save is %s",
-  async (outcome) => {
-    const { store, draft } = await opened();
-    store.update(draft, draft.state!.update({ changes: { from: 0, to: 4, insert: "sent" } }).state);
-    const release = deferred<void>();
-    transport.write.mockImplementationOnce(async () => {
-      await release.promise;
-      throw new ApiError("io_error", "write result", outcome);
-    });
-    const saving = store.save(draft, "copy.txt", null);
-    transport.read.mockResolvedValueOnce(disk("base", "moved-base", "moved.txt"));
-    transport.read.mockRejectedValueOnce(new ApiError("not_found", "copy absent"));
-    await store.rename("device", "workspace", "a.txt", "moved.txt");
-    expect(draft.busy).toBe("saving");
-    expect(transport.write.mock.calls.at(-1)?.[3].aborted).toBe(false);
-    expect(draft.revision).toBe("moved-base");
-    release.resolve();
-    expect(await saving).toBe(false);
-    expect(draft.path).toBe("moved.txt");
-    expect(draft.busy).toBeUndefined();
-    expect(draft.unknownSave?.target.path).toBe(outcome === "unknown" ? "copy.txt" : undefined);
-    transport.write.mockResolvedValueOnce({ path: "moved.txt", revision: "saved", size: 4 });
-    expect(await store.save(draft)).toBe(true);
-    expect(transport.write.mock.calls.at(-1)?.[2]).toBe("moved-base");
-  },
-);
-
-test.each(["missing", "old baseline"])(
-  "an ended unknown save keeps source and target revisions separate when the target is %s",
-  async (contents) => {
-    const { store, draft } = await opened();
-    store.update(draft, draft.state!.update({ changes: { from: 4, insert: " sent" } }).state);
-    const state = draft.state;
-    transport.write.mockRejectedValueOnce(new ApiError("io_error", "lost result", "unknown"));
-    await store.save(draft, "copy.txt", null);
-    expect(draft.pendingSave).toBeUndefined();
-    const unknown = draft.unknownSave;
-    transport.read.mockResolvedValueOnce(disk("base", "moved-base", "moved.txt"));
-    if (contents === "missing")
-      transport.read.mockRejectedValueOnce(new ApiError("not_found", "target absent"));
-    else transport.read.mockResolvedValueOnce(disk("base", "copy-base", "copy.txt"));
-    await store.rename("device", "workspace", "a.txt", "moved.txt");
-    expect(draft.path).toBe("moved.txt");
-    expect(draft.revision).toBe("moved-base");
-    expect(draft.missing).toBe(false);
-    expect(draft.unknownSave).toBe(unknown);
-    expect(draft.state).toBe(state);
-    if (contents === "missing") {
-      transport.write.mockResolvedValueOnce({ path: "moved.txt", revision: "saved", size: 9 });
-      expect(await store.save(draft)).toBe(true);
-      expect(transport.write.mock.calls.at(-1)?.[2]).toBe("moved-base");
-    } else {
-      transport.read.mockResolvedValueOnce(disk("base sent", "copy-sent", "copy.txt"));
-      const checked = await store.check(draft);
-      expect(checked?.target.path).toBe("copy.txt");
-      expect(draft.path).toBe("copy.txt");
-      expect(draft.revision).toBe("copy-sent");
-      expect(draft.unknownSave).toBeUndefined();
-      expect(draft.state).toBe(state);
-    }
-  },
-);
-
-test("an absent moved source does not prevent confirming the saved target", async () => {
-  const { store, draft } = await opened();
-  transport.write.mockRejectedValueOnce(new ApiError("io_error", "lost result", "unknown"));
-  await store.save(draft, "copy.txt", null);
-  transport.read.mockRejectedValueOnce(new ApiError("not_found", "source removed"));
-  transport.read.mockResolvedValueOnce(disk("base", "copy", "copy.txt"));
-  await store.rename("device", "workspace", "a.txt", "moved.txt");
-  expect(draft.path).toBe("copy.txt");
-  expect(draft.missing).toBe(false);
-  expect(draft.unknownSave).toBeUndefined();
-});
-
-test("directory reconciliation reads one draft at a time and marks queued checks busy", async () => {
-  const { store, draft } = await opened();
-  draft.path = "dir/a.txt";
-  const other = store.open(
-    { ...target, path: "dir/b.txt", deviceName: "Device", workspaceName: "Workspace" },
-    disk("base", "b-base", "dir/b.txt"),
-  );
-  const firstRead = deferred<DiskText>();
-  transport.read.mockReturnValueOnce(firstRead.promise);
-  transport.read.mockResolvedValueOnce(disk("base", "moved-b", "moved/b.txt"));
-  const before = transport.read.mock.calls.length;
-  const moving = store.rename("device", "workspace", "dir", "moved");
-  await vi.waitFor(() => expect(transport.read.mock.calls.length).toBe(before + 1));
-  expect(other.busy).toBe("checking");
-  firstRead.resolve(disk("base", "moved-a", "moved/a.txt"));
-  await moving;
-  expect(draft.revision).toBe("moved-a");
-  expect(other.revision).toBe("moved-b");
-  expect(other.busy).toBeUndefined();
-});
-
 test("late channel failures cannot contaminate a moved-source observation", async () => {
   const { store, draft } = await opened();
   const first = deferred<DiskText>();
+  const entered = deferred<void>();
   transport.read.mockImplementationOnce((_target, _signal, onChannel) => {
     onChannel("old-read");
+    entered.resolve();
     return first.promise;
   });
   const checking = store.check(draft);
-  await vi.waitFor(() => expect(draft.readChannel).toBe("old-read"));
+  await entered.promise;
   const second = deferred<DiskText>();
   transport.read.mockReturnValueOnce(second.promise);
   const moving = store.rename("device", "workspace", "a.txt", "b.txt");
@@ -425,79 +292,21 @@ test("late channel failures cannot contaminate a moved-source observation", asyn
   expect(draft.error).toBeUndefined();
   first.resolve(disk("external", "a-old"));
   await checking;
-  expect(draft.readChannel).toBeUndefined();
   second.resolve(disk("base", "b-base", "b.txt"));
   await moving;
   expect(draft.revision).toBe("b-base");
   expect(draft.error).toBeUndefined();
 });
 
-test("late save settlement cannot invalidate the next save's moved-source observation", async () => {
-  const { store, draft } = await opened();
-  const firstResponse = deferred<unknown>();
-  transport.write.mockReturnValueOnce(firstResponse.promise);
-  const firstSave = store.save(draft, "copy.txt", null);
-  transport.read.mockResolvedValueOnce(disk("base", "b-base", "b.txt"));
-  transport.read.mockResolvedValueOnce(disk("base", "copy-base", "copy.txt"));
-  await store.rename("device", "workspace", "a.txt", "b.txt");
-  expect(draft.busy).toBeUndefined();
-  const secondResponse = deferred<void>();
-  transport.write.mockImplementationOnce(async () => {
-    await secondResponse.promise;
-    throw new ApiError("conflict", "target occupied", "failed");
-  });
-  const secondSave = store.save(draft, "other.txt", null);
-  const sourceRead = deferred<DiskText>();
-  transport.read.mockReturnValueOnce(sourceRead.promise);
-  const moving = store.rename("device", "workspace", "copy.txt", "moved-copy.txt");
-  await vi.waitFor(() => expect(transport.read.mock.calls.at(-1)?.[0].path).toBe("moved-copy.txt"));
-  firstResponse.resolve({ path: "copy.txt", revision: "copy-base", size: 4 });
-  expect(await firstSave).toBe(false);
-  transport.read.mockRejectedValueOnce(new ApiError("not_found", "other absent"));
-  sourceRead.resolve(disk("base", "moved-copy-base", "moved-copy.txt"));
-  await moving;
-  secondResponse.resolve();
-  expect(await secondSave).toBe(false);
-  expect(draft.path).toBe("moved-copy.txt");
-  expect(draft.revision).toBe("moved-copy-base");
-});
-
-test("moving an earlier uncertain target during another save preserves both identities", async () => {
-  const { store, draft } = await opened();
-  transport.write.mockRejectedValueOnce(new ApiError("io_error", "lost", "unknown"));
-  await store.save(draft, "copy.txt", null);
-  const release = deferred<void>();
-  transport.write.mockImplementationOnce(async () => {
-    await release.promise;
-    throw new ApiError("conflict", "exists", "failed");
-  });
-  const saving = store.save(draft, "other.txt", null);
-  transport.read.mockResolvedValueOnce(disk("base", "a-base"));
-  transport.read.mockRejectedValueOnce(new ApiError("not_found", "other absent"));
-  await store.rename("device", "workspace", "copy.txt", "renamed-copy.txt");
-  release.resolve();
-  expect(await saving).toBe(false);
-  expect(draft.path).toBe("a.txt");
-  expect(draft.unknownSave).toMatchObject({
-    target: { ...target, path: "renamed-copy.txt" },
-    raw: "base",
-  });
-});
-
 test("stale moved-source reads cannot survive rename round trips or a closed draft", async () => {
   const { store, draft } = await opened();
-  const response = deferred<unknown>();
-  transport.write.mockReturnValueOnce(response.promise);
-  const saving = store.save(draft, "copy.txt", null);
   const firstRead = deferred<DiskText>();
   transport.read.mockReturnValueOnce(firstRead.promise);
   const firstRename = store.rename("device", "workspace", "a.txt", "b.txt");
   await vi.waitFor(() => expect(transport.read.mock.calls.at(-1)?.[0].path).toBe("b.txt"));
   transport.read.mockResolvedValueOnce(disk("base", "a-new"));
-  transport.read.mockRejectedValueOnce(new ApiError("not_found", "copy absent"));
   await store.rename("device", "workspace", "b.txt", "a.txt");
   transport.read.mockResolvedValueOnce(disk("base", "b-new", "b.txt"));
-  transport.read.mockRejectedValueOnce(new ApiError("not_found", "copy absent"));
   await store.rename("device", "workspace", "a.txt", "b.txt");
   firstRead.resolve(disk("base", "b-old", "b.txt"));
   await firstRename;
@@ -513,8 +322,6 @@ test("stale moved-source reads cannot survive rename round trips or a closed dra
   );
   lastRead.resolve(disk("base", "old"));
   await lastRename;
-  response.resolve({ path: "copy.txt", revision: "copy", size: 4 });
-  await saving;
   expect(store.snapshot()).toEqual([replacement]);
   expect(replacement.revision).toBe("replacement");
 });
@@ -673,12 +480,10 @@ test.each(["move", "delete", "check"])(
     const change = store.capture("device", "workspace", "a.txt");
     response.resolve({ path: "a.txt", revision: "recreated", size: 4 });
     expect(await saving).toBe(true);
-    const before = transport.read.mock.calls.length;
     if (kind === "move") await store.rename("device", "workspace", "a.txt", "b.txt", change);
     else if (kind === "delete")
       store.deleted("device", "workspace", "a.txt", "deletedDraft", change);
     else await store.checkMissing("device", "workspace", "a.txt", change);
-    expect(transport.read.mock.calls.length).toBe(before);
     expect(draft.path).toBe("a.txt");
     expect(draft.revision).toBe("recreated");
     expect(draft.missing).toBe(false);
@@ -696,7 +501,7 @@ test("a normal revision save completed before move still follows its source", as
   expect(draft.revision).toBe("moved");
 });
 
-test("a later ordinary save that becomes unknown is checked at the moved source", async () => {
+test("moving an unknown save source keeps its original snapshot and the editor", async () => {
   const { store, draft } = await opened();
   const change = store.capture("device", "workspace", "a.txt");
   const state = draft.state!.update({ changes: { from: 0, to: 4, insert: "sent" } }).state;
@@ -706,10 +511,57 @@ test("a later ordinary save that becomes unknown is checked at the moved source"
   transport.read.mockResolvedValueOnce(disk("sent", "moved", "b.txt"));
   await store.rename("device", "workspace", "a.txt", "b.txt", change);
   expect(draft.path).toBe("b.txt");
-  expect(draft.revision).toBe("moved");
-  expect(draft.unknownSave).toBeUndefined();
-  expect(draft.baseText).toBe("sent");
+  expect(draft.revision).toBe("a-base");
+  expect(draft.unknownSave).toMatchObject({ target: { path: "a.txt" }, raw: "sent" });
+  expect(draft.baseText).toBe("base");
+  expect(draft.diskChanged).toBe(true);
   expect(draft.state).toBe(state);
+  transport.read.mockImplementationOnce(async ({ path }) => {
+    if (path === "a.txt") throw new ApiError("not_found", "original target moved");
+    return disk("sent", "moved", path);
+  });
+  await store.check(draft);
+  expect(draft.error).toMatchObject({ code: "not_found" });
+  expect(draft.unknownSave).toBeDefined();
+});
+
+test("moving an unknown save-as target neither follows nor probes it", async () => {
+  const { store, draft } = await opened();
+  transport.write.mockRejectedValueOnce(new ApiError("io_error", "lost result", "unknown"));
+  await store.save(draft, "copy.txt", null);
+  const unknown = draft.unknownSave;
+  transport.read.mockClear();
+  await store.rename("device", "workspace", "copy.txt", "moved.txt");
+  expect(transport.read).not.toHaveBeenCalled();
+  expect(draft.path).toBe("a.txt");
+  expect(draft.unknownSave).toBe(unknown);
+  expect(draft.unknownSave?.target.path).toBe("copy.txt");
+});
+
+test("a late rename interrupts a later save but retains its fixed unknown snapshot", async () => {
+  const { store, draft } = await opened();
+  const reply = deferred<Response>();
+  vi.stubGlobal("fetch", () => reply.promise);
+  const renaming = store.renameFile(target, "b.txt");
+  transport.write.mockImplementationOnce(
+    (_target, _bytes, _revision, signal) =>
+      new Promise((_resolve, reject) => {
+        signal.addEventListener(
+          "abort",
+          () => reject(new ApiError("io_error", "save interrupted", "unknown")),
+          { once: true },
+        );
+      }),
+  );
+  const saving = store.save(draft, "copy.txt", null);
+  transport.read.mockResolvedValueOnce(disk("base", "b-base", "b.txt"));
+  reply.resolve(Response.json({ outcome: "succeeded", result: { from: "a.txt", to: "b.txt" } }));
+  await renaming;
+  expect(await saving).toBe(false);
+  await vi.waitFor(() => expect(draft.busy).toBeUndefined());
+  expect(draft.path).toBe("b.txt");
+  expect(draft.unknownSave).toMatchObject({ target: { path: "copy.txt" }, raw: "base" });
+  expect(isDirty(draft)).toBe(true);
 });
 
 test("a same-path create-only unknown confirmation takes ownership before an old move reply", async () => {
@@ -725,70 +577,23 @@ test("a same-path create-only unknown confirmation takes ownership before an old
   expect(draft.missing).toBe(false);
 });
 
-test.each(["normal", "independent"])(
-  "a later %s save in flight retains the appropriate target when its source moves",
-  async (kind) => {
-    const { store, draft } = await opened();
-    const change = store.capture("device", "workspace", "a.txt");
-    const response = deferred<unknown>();
-    transport.write.mockReturnValueOnce(response.promise);
-    const path = kind === "normal" ? "a.txt" : "copy.txt";
-    const saving = store.save(draft, path, kind === "normal" ? draft.revision : null);
-    transport.read.mockResolvedValueOnce(disk("base", "moved", "b.txt"));
-    if (kind === "independent")
-      transport.read.mockRejectedValueOnce(new ApiError("not_found", "still writing"));
-    await store.rename("device", "workspace", "a.txt", "b.txt", change);
-    response.resolve({ path, revision: "saved", size: 4 });
-    await saving;
-    expect(draft.path).toBe(kind === "normal" ? "b.txt" : "copy.txt");
-    expect(draft.revision).toBe(kind === "normal" ? "moved" : "saved");
-  },
-);
-
-test.each(["succeeded", "failed", "unknown"])(
-  "deleting a source preserves an independent save that later %s",
-  async (outcome) => {
-    const { store, draft } = await opened();
-    const state = draft.state;
-    const response = deferred<unknown>();
-    transport.write.mockReturnValueOnce(response.promise);
-    const saving = store.save(draft, "copy.txt", null);
-    const change = store.capture("device", "workspace", "a.txt");
-    const request = draft.request;
-    store.deleted("device", "workspace", "a.txt", "deletedDraft", change);
-    expect(draft.missing).toBe(true);
-    expect(request!.signal.aborted).toBe(false);
-    if (outcome === "succeeded") response.resolve({ path: "copy.txt", revision: "copy", size: 4 });
-    else response.resolve(Promise.reject(new ApiError("io_error", "write outcome", outcome)));
-    expect(await saving).toBe(outcome === "succeeded");
-    expect(draft.path).toBe(outcome === "succeeded" ? "copy.txt" : "a.txt");
-    expect(draft.missing).toBe(outcome !== "succeeded");
-    expect(draft.state).toBe(state);
-    if (outcome === "unknown")
-      expect(draft.unknownSave).toMatchObject({
-        target: { ...target, path: "copy.txt" },
-        raw: "base",
-      });
-  },
-);
-
 test.each(["move", "retry"])(
   "a capacity-rejected opening initializes at its renamed path during %s",
   async (when) => {
     const store = new DraftStore();
-    store.limits([{ id: "device", editorBytes: 3 } as Device], 4096);
+    store.limits([{ id: "device", editorBytes: 3 } as Device]);
     const draft = store.open(
       { ...target, deviceName: "Device", workspaceName: "Workspace" },
       disk("base", "old"),
     );
     expect(draft.state).toBeUndefined();
-    if (when === "move") store.limits([{ id: "device", editorBytes: 1024 } as Device], 4096);
+    if (when === "move") store.limits([{ id: "device", editorBytes: 1024 } as Device]);
     transport.read.mockResolvedValueOnce(disk("base", "moved", "b.txt"));
     await store.rename("device", "workspace", "a.txt", "b.txt");
     if (when === "retry") {
       expect(draft.state).toBeUndefined();
       expect(draft.notice).toBe("fileCapacity");
-      store.limits([{ id: "device", editorBytes: 1024 } as Device], 4096);
+      store.limits([{ id: "device", editorBytes: 1024 } as Device]);
       transport.read.mockResolvedValueOnce(disk("base", "retry", "b.txt"));
       await store.load(draft);
     }
@@ -800,7 +605,7 @@ test.each(["move", "retry"])(
 
 test("closed drafts stay closed after a late read; lower limits allow shrinking and compliant saves", async () => {
   const { store, draft } = await opened();
-  store.limits([{ id: "device", editorBytes: 3 } as Device], 2);
+  store.limits([{ id: "device", editorBytes: 3 } as Device]);
   expect(store.canSave(draft)).toBe(false);
   expect(store.limitError(draft, 5)).toBeTruthy();
   expect(store.limitError(draft, 3)).toBeUndefined();
@@ -822,20 +627,15 @@ test("closed drafts stay closed after a late read; lower limits allow shrinking 
   expect(next.state).toBeUndefined();
 });
 
-test("deleting an open file invalidates a late save while preserving its text", async () => {
+test("deleting an open file preserves its text and unknown save snapshot", async () => {
   const { store, draft } = await opened();
   store.update(draft, draft.state!.update({ changes: { from: 4, insert: " edited" } }).state);
-  let finish!: (value: unknown) => void;
-  transport.write.mockImplementationOnce(
-    () =>
-      new Promise((resolve) => {
-        finish = resolve;
-      }),
-  );
-  const saving = store.save(draft);
+  transport.write.mockRejectedValueOnce(new ApiError("io_error", "lost result", "unknown"));
+  await store.save(draft);
+  const unknown = draft.unknownSave;
   store.deleted("device", "workspace", "a.txt");
-  finish({ path: "a.txt", revision: "late", size: 11 });
-  expect(await saving).toBe(false);
+  expect(draft.unknownSave).toBe(unknown);
+  expect(draft.missing).toBe(true);
   expect(draft.baseText).toBe("base");
   expect(draft.state!.doc.toString()).toBe("base edited");
   expect(isDirty(draft)).toBe(true);

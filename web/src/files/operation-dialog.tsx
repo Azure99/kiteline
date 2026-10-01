@@ -24,9 +24,8 @@ import {
 } from "../components/ui/dialog";
 import { childPath, formatBytes } from "./use-browser";
 import { FileConflictDialog } from "./conflict-dialog";
-import { FileCleanupNotice } from "./cleanup-notice";
 import type { WorkspaceTarget } from "../lib/navigation";
-import type { DraftStore } from "./drafts";
+import { useDrafts, type DraftStore } from "./drafts";
 
 export interface FileAction {
   kind: "copy" | "move" | "delete";
@@ -66,6 +65,7 @@ export function FileOperationDialog({
   onResult: (items: FileItemResult[]) => void;
 }) {
   const { t } = useTranslation();
+  useDrafts(store);
 
   const [rows, setRows] = useState<Row[]>(() =>
     action.entries.map((entry) => ({
@@ -77,10 +77,8 @@ export function FileOperationDialog({
   const [directory, setDirectory] = useState(folder);
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const [cleanupRefresh, setCleanupRefresh] = useState(0);
   const [progress, setProgress] = useState<FileProgress>();
   const [error, setError] = useState<unknown>();
-  const [invalid, setInvalid] = useState(false);
   const [conflict, setConflict] = useState<{
     row: Row;
     inspection: FileInspection;
@@ -139,25 +137,22 @@ export function FileOperationDialog({
   }, [action, deviceId, workspaceId, folder]);
   const editable = (row: Row) => !row.skipped && (!row.result || row.result.outcome === "failed");
   const pending = rows.filter(editable);
+  const savingConflict = () =>
+    action.kind !== "copy" &&
+    pending.some(
+      (row) =>
+        store.savingWithin(deviceId, workspaceId, row.entry.path!) ||
+        (action.kind === "move" &&
+          row.collision === "replace" &&
+          store.savingWithin(deviceId, workspaceId, row.targetPath)),
+    );
   function updateRow(row: Row, values: Partial<Row>) {
     edited.current = true;
     setRows((old) => old.map((item) => (item === row ? { ...item, ...values } : item)));
   }
   async function run() {
     if (!pending.length || busy) return;
-    if (
-      action.kind !== "delete" &&
-      pending.some(
-        (row) =>
-          !row.targetPath ||
-          row.targetPath.startsWith("/") ||
-          row.targetPath.split("/").some((part) => part === ".."),
-      )
-    ) {
-      setError(undefined);
-      setInvalid(true);
-      return;
-    }
+    if (savingConflict()) return;
     const submitted = pending.map((row) => ({ ...row }));
     const changes = new Map(
       action.kind === "copy"
@@ -184,7 +179,6 @@ export function FileOperationDialog({
     setBusy(true);
     setCancelling(false);
     setError(undefined);
-    setInvalid(false);
     setProgress({ phase: "queued" });
     try {
       const params = {
@@ -247,7 +241,6 @@ export function FileOperationDialog({
       if (alive.current) {
         setBusy(false);
         setCancelling(false);
-        setCleanupRefresh((value) => value + 1);
       }
     }
   }
@@ -255,7 +248,6 @@ export function FileOperationDialog({
     edited.current = true;
     setConflictBusy(true);
     setError(undefined);
-    setInvalid(false);
     try {
       const inspection = await rpc(deviceId, "files.inspect", {
         workspaceId,
@@ -299,7 +291,11 @@ export function FileOperationDialog({
               {deviceName} / {workspaceName} / {folder}
             </p>
           </DialogHeader>
-          <FileCleanupNotice deviceId={deviceId} refresh={cleanupRefresh} />
+          {savingConflict() && (
+            <p role="status" className="px-4 text-sm">
+              {t(($) => $.files.saving)}
+            </p>
+          )}
           <div className="scroll-area min-h-0 space-y-3 overflow-auto p-4">
             {action.kind === "delete" ? (
               <p className="text-sm">
@@ -443,11 +439,6 @@ export function FileOperationDialog({
                 <p className="truncate">{progress.currentPath}</p>
               </div>
             )}
-            {invalid && (
-              <p role="alert" className="text-sm text-destructive">
-                {t(($) => $.files.targetPathRequired)}
-              </p>
-            )}
             {!!error && (
               <div role="alert" className="break-words text-sm text-destructive">
                 <ErrorNotice error={error} />
@@ -483,7 +474,7 @@ export function FileOperationDialog({
             {!busy && !!pending.length && (
               <Button
                 variant={action.kind === "delete" ? "destructive" : "default"}
-                disabled={conflictBusy}
+                disabled={conflictBusy || savingConflict()}
                 onClick={() => void run()}
               >
                 <Icon />

@@ -46,8 +46,6 @@ make -j2
 cp tmux /output/native/bin/tmux
 cp COPYING /output/native/licenses/tmux.txt
 cd ..
-mkdir -p /output/native/sources
-cp tmux.tar.gz /output/native/sources/tmux.tar.gz
 cc -static -Wall -Wextra -Werror -O2 -march=x86-64 -mtune=generic \
   rename-noreplace.c -o /output/native/bin/rename-noreplace
 "$prefix/bin/tic" -x -o /output/native/share/terminfo tmux.terminfo

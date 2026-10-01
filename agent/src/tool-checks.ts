@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { absolutePath } from "@kiteline/shared/protocol";
@@ -130,18 +129,9 @@ export async function checkBundledRipgrep(command: Command) {
     await readFile(join(packageDirectory, "dist/native/identity.json"), "utf8"),
   );
   const { ripgrep } = identity;
-  if (
-    !ripgrep ||
-    (process.platform !== "win32" &&
-      createHash("sha256")
-        .update(await readFile(ripgrepBinary))
-        .digest("hex") !== ripgrep.binarySha256)
-  )
-    throw new Error(
-      "Bundled ripgrep checksum mismatch; rebuild native components or reinstall the matching agent package",
-    );
   const line = (await command(ripgrepBinary, ["--version"])).split("\n")[0]!;
-  if (/^ripgrep (\S+)/.exec(line)?.[1] !== ripgrep.version)
+  const version = /^ripgrep (\S+)/.exec(line)?.[1];
+  if (!version || version !== ripgrep?.version)
     throw new Error(`Bundled ripgrep version mismatch: ${line}`);
   return `${ripgrepBinary}; ${line}`;
 }

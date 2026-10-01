@@ -1,29 +1,25 @@
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
 import {
   cpSync,
-  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
-  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { prepareWindowsNotices } from "./prepare-windows-notices.mjs";
-import { prepareRipgrepNotices } from "./prepare-ripgrep-notices.mjs";
-import { requiredWindowsComponents } from "../shared/src/windows/components.ts";
+import { windowsRuntimeFiles } from "../shared/src/windows/components.ts";
+import { digest, fetchPinned, run } from "./release-inputs.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const json = (file) => JSON.parse(readFileSync(file, "utf8"));
 const release = json(join(root, "deploy/release.json"));
 const recipe = json(join(root, "deploy/agent-windows.json"));
 const { tmux } = json(join(root, "deploy/agent-static.json"));
-const digest = (file) => createHash("sha256").update(readFileSync(file)).digest("hex");
 const hash = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const sourceFiles = [
   "deploy/release.json",
@@ -32,11 +28,10 @@ const sourceFiles = [
   "deploy/ubuntu.sources",
   "deploy/Dockerfile.windows-native",
   "scripts/build-windows-components.mjs",
+  "scripts/release-inputs.mjs",
   "scripts/build-windows-tmux.sh",
   "scripts/build-windows-addon.sh",
   "scripts/prepare-windows-notices.mjs",
-  "scripts/prepare-ripgrep-notices.mjs",
-  "deploy/windows-components.md",
   "shared/src/windows/components.ts",
   "native/tmux-paste.patch",
   "native/tmux-cygwin-outfd.patch",
@@ -58,23 +53,11 @@ const downloads = {
   "rg.zip": recipe.ripgrep,
   "msys2-base.tar.xz": recipe.bootstrap,
   "tmux.tar.gz": tmux,
-  ...Object.fromEntries(
-    Object.entries(release.ripgrep.notices).map(([name, input]) => [
-      `licenses/ripgrep/${name}`,
-      input,
-    ]),
-  ),
   ...Object.fromEntries(recipe.packages.map((pkg) => [`packages/${pkg.name}.tar.zst`, pkg])),
   ...Object.fromEntries(
     Object.entries(recipe.sources).map(([name, input]) => [`sources/${name}`, input]),
   ),
 };
-function run(command, args, options = {}) {
-  const result = spawnSync(command, args, { stdio: "inherit", ...options });
-  if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`${command} exited with ${result.status}`);
-  return result.stdout;
-}
 function copy(source, destination) {
   mkdirSync(dirname(destination), { recursive: true });
   cpSync(source, destination);
@@ -115,19 +98,7 @@ function files(directory, prefix = "") {
 
 export function prepareWindowsInputs(directory) {
   mkdirSync(directory, { recursive: true });
-  for (const [file, input] of Object.entries(downloads)) {
-    const target = join(directory, file);
-    if (existsSync(target) && digest(target) === input.sha256) continue;
-    mkdirSync(dirname(target), { recursive: true });
-    const pending = `${target}.${process.pid}.pending`;
-    try {
-      run("curl", ["--fail", "--location", "--output", pending, input.url]);
-      if (digest(pending) !== input.sha256) throw new Error(`Checksum mismatch: ${input.url}`);
-      renameSync(pending, target);
-    } finally {
-      rmSync(pending, { force: true });
-    }
-  }
+  for (const [file, input] of Object.entries(downloads)) fetchPinned(input, join(directory, file));
   for (const file of sourceFiles) copy(join(root, file), join(directory, file));
   writeJson(join(directory, "inputs.json"), inputs());
 }
@@ -240,15 +211,13 @@ function verifiedBuild(directory, expected) {
   return build;
 }
 
-const requiredFiles = requiredWindowsComponents(downloads);
-
 export function verifyWindowsComponents(directory) {
   const identity = json(join(directory, "native/identity.json"));
   if (hash(identity.inputs) !== hash(inputs()))
     throw new Error("Windows components do not match this source; rebuild them");
   const actual = files(directory);
   delete actual["native/identity.json"];
-  for (const file of requiredFiles)
+  for (const file of windowsRuntimeFiles)
     if (!actual[file]) throw new Error(`Missing Windows component: ${file}`);
   if (hash(actual) !== hash(identity.files)) throw new Error("Windows component checksum mismatch");
   return identity;
@@ -256,8 +225,8 @@ export function verifyWindowsComponents(directory) {
 
 export function assembleWindowsComponents(directory, tmuxDirectory, addonDirectory, destination) {
   const expected = verifyInputs(directory);
-  const tmuxBuild = verifiedBuild(tmuxDirectory, expected);
-  const addonBuild = verifiedBuild(addonDirectory, expected);
+  verifiedBuild(tmuxDirectory, expected);
+  verifiedBuild(addonDirectory, expected);
   mkdirSync(destination);
   const temporary = mkdtempSync("/var/tmp/kiteline-windows-assemble-");
   const native = join(destination, "native");
@@ -283,7 +252,6 @@ export function assembleWindowsComponents(directory, tmuxDirectory, addonDirecto
     copy(join(rg, "rg.exe"), join(native, "bin/rg.exe"));
     for (const file of ["COPYING", "LICENSE-MIT", "UNLICENSE"])
       copy(join(rg, file), join(native, "licenses/ripgrep", file));
-    prepareRipgrepNotices(directory, native);
     for (const [pkg, paths] of Object.entries(recipe.runtimeFiles)) {
       const extracted = join(temporary, pkg);
       mkdirSync(extracted);
@@ -300,24 +268,9 @@ export function assembleWindowsComponents(directory, tmuxDirectory, addonDirecto
     copy(join(addonDirectory, "kiteline-windows.node"), join(native, "kiteline-windows.node"));
     cpSync(join(addonDirectory, "licenses"), join(native, "licenses"), { recursive: true });
     prepareWindowsNotices(directory, native);
-    copy(join(directory, "tmux.tar.gz"), join(native, "sources/tmux.tar.gz"));
-    for (const file of sourceFiles)
-      copy(join(directory, file), join(native, "sources/recipe", file));
-    for (const [name, build] of [
-      ["tmux", tmuxBuild],
-      ["addon", addonBuild],
-    ])
-      writeJson(join(native, `sources/${name}-build.json`), build);
-    for (const [from, file] of [
-      [tmuxDirectory, "config.site"],
-      [tmuxDirectory, "cmd-parse.c"],
-      [addonDirectory, "build-packages.txt"],
-      [addonDirectory, "addon.map"],
-    ])
-      copy(join(from, file), join(native, "sources", file));
 
     const componentFiles = files(destination);
-    for (const file of requiredFiles)
+    for (const file of windowsRuntimeFiles)
       if (!componentFiles[file]) throw new Error(`Missing Windows component: ${file}`);
     const binaries = new Set(
       Object.keys(componentFiles).map((name) => basename(name).toLowerCase()),

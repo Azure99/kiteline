@@ -1,7 +1,8 @@
+import { agentLimits } from "../limits.js";
 import { isUtf8 } from "node:buffer";
 import { sep } from "node:path";
 import type { Token } from "stream-json/parser.js";
-import { limits, type SearchMatch } from "@kiteline/shared/protocol";
+import { type SearchMatch } from "@kiteline/shared/protocol";
 import { BytePrefix } from "../buffers.js";
 
 interface MatchRecord {
@@ -35,15 +36,15 @@ export class SearchJson {
       if (!this.stack.length)
         this.current = {
           type: "",
-          path: new BytePrefix(limits.searchPathBytes),
+          path: new BytePrefix(agentLimits.searchPathBytes),
           line: 0,
-          text: new BytePrefix(limits.searchLineBytes),
+          text: new BytePrefix(agentLimits.searchLineBytes),
           ranges: [],
           truncated: false,
         };
       const parent = this.stack.at(-1);
       if (token.name === "startObject" && parent?.array && parent.path === "data.submatches") {
-        this.range = this.current!.ranges.length < limits.searchRanges ? {} : undefined;
+        this.range = this.current!.ranges.length < agentLimits.searchRanges ? {} : undefined;
         if (this.range) this.current!.ranges.push(this.range);
         else this.current!.truncated = true;
       }

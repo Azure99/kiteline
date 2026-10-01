@@ -14,11 +14,6 @@ export default defineConfig({
       generateBundle() {
         for (const [name, source] of [
           ["project.txt", new URL("../LICENSE", import.meta.url)],
-          ["ui.txt", new URL("./src/components/ui/LICENSE", import.meta.url)],
-          [
-            "react-diff-view-bundled.txt",
-            new URL("./build/react-diff-view-LICENSE.txt", import.meta.url),
-          ],
           [
             "tailwindcss.txt",
             new URL("./LICENSE", import.meta.resolve("tailwindcss/package.json")),

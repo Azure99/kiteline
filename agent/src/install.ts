@@ -24,7 +24,6 @@ import {
   installationManagementFile,
   installationPaths,
   installationUseFile,
-  InstallationLockCloseError,
   installDirectory,
   launcherFile,
   lockInstallation,
@@ -148,12 +147,14 @@ async function account(name: string): Promise<Installation> {
     throw new Error("Specify an existing project user");
   return { user: fields[0]!, uid, gid, home };
 }
-async function stoppedInstallation(installation: Installation) {
+async function stoppedInstallation(installation: Installation, purge = false) {
   const use = await lockInstallation("exclusive");
   let state: (() => Promise<void>) | undefined;
   try {
-    const { dataDir } = await installationPaths(installation);
-    if (await exists(dataDir)) state = await lockAgentState(dataDir);
+    if (purge) {
+      const { dataDir } = await installationPaths(installation);
+      if (await exists(dataDir)) state = await lockAgentState(dataDir);
+    }
   } catch (error) {
     const errors = [error];
     await cleanup(errors, installationUseFile, () => use.close());
@@ -165,7 +166,7 @@ async function stoppedInstallation(installation: Installation) {
       const errors: unknown[] = [];
       if (state) await cleanup(errors, "agent state lock", state);
       await cleanup(errors, installationUseFile, () => use.close());
-      if (errors.length) throw new InstallationLockCloseError(errors);
+      if (errors.length) throw failures("Installation locks could not be closed", errors);
     },
   };
 }
@@ -213,19 +214,12 @@ async function installProgram(user: string, protectSignals: () => void) {
   if (previous) {
     if (previous.uid !== installation.uid)
       throw new Error(`Current installation belongs to ${previous.user}`);
-    if ((await verifyPackage(packageDirectory)) !== (await verifyPackage(installDirectory)))
+    const source = JSON.parse(await readFile(join(packageDirectory, "release.json"), "utf8"));
+    const installed = JSON.parse(await readFile(join(installDirectory, "release.json"), "utf8"));
+    if (source.version !== installed.version)
       throw new Error(
         "A different version is installed; explicitly run kiteline-agent upgrade first",
       );
-    const entry = await lstat(launcherFile);
-    if (
-      !entry.isFile() ||
-      (entry.mode & 0o7777) !== 0o755 ||
-      !(await readFile(launcherFile)).equals(
-        await readFile(join(installDirectory, "bin/kiteline-agent-installed")),
-      )
-    )
-      throw new Error(`Broken installation: ${launcherFile} does not match the installed package`);
     return "The same version is already installed; the program, identity and running tasks were not changed.";
   }
   for (const path of [installDirectory, launcherFile])
@@ -247,7 +241,6 @@ async function installProgram(user: string, protectSignals: () => void) {
   await writeFile(installationUseFile, "", { flag: "a", mode: 0o640 });
   await chown(installationUseFile, 0, installation.gid);
   await chmod(installationUseFile, 0o640);
-  const use = await lockInstallation("exclusive");
   const errors: unknown[] = [];
   try {
     if (process.platform === "darwin")
@@ -264,8 +257,6 @@ async function installProgram(user: string, protectSignals: () => void) {
     errors.push(error);
     for (const path of [launcherFile, installationFile, installDirectory])
       await cleanup(errors, path, () => rm(path, { recursive: true, force: true }));
-  } finally {
-    await cleanup(errors, installationUseFile, () => use.close());
   }
   if (errors.length) throw failures("Installation did not complete", errors);
   return `Installed but not started. As ${installation.user}, run kiteline-agent bind --server <http-or-https-origin>, then kiteline-agent run.\nApplication directories: ${environmentFile}`;
@@ -357,7 +348,7 @@ async function uninstall(
   protectSignals: () => void,
   signal: AbortSignal,
 ) {
-  await (await stoppedInstallation(installation)).close();
+  await (await stoppedInstallation(installation, purge)).close();
   const { dataDir } = await installationPaths(installation);
   await confirm(
     `Remove the agent program? ${purge ? `Delete its state JSON and tasks at ${dataDir}.` : `Retain state and tasks at ${dataDir}.`} Workspaces and external manager configuration are not removed.`,
@@ -365,7 +356,7 @@ async function uninstall(
     signal,
   );
   protectSignals();
-  const use = await stoppedInstallation(installation);
+  const use = await stoppedInstallation(installation, purge);
   const purgePaths =
     purge && use.stateLocked
       ? ["agent.json", "connection.json", "config.json", "temporary-files.json", "tasks"].map(

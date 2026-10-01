@@ -153,7 +153,7 @@ export function Workbench({
         )
       : undefined;
   useLayoutEffect(() => {
-    if (session) drafts.limits(devices, session.draftTotalBytes);
+    if (session) drafts.limits(devices);
   }, [drafts, devices, session]);
   useEffect(() => {
     const unload = (event: BeforeUnloadEvent) => {

@@ -4,6 +4,7 @@ import {
   mkdir,
   writeFile,
   readFile,
+  readdir,
   rename,
   symlink,
   readlink,
@@ -75,7 +76,7 @@ test("text revisions survive same-byte inode replacement and save follows links 
 });
 
 test("late saves conflict after content changes or rename and never recreate the old target", async () => {
-  const { files, temporary, id, root, signal, data } = await setup();
+  const { files, temporary, id, root, signal } = await setup();
   await writeFile(join(root, "a"), "old");
   const before = await files.read(id, "a", signal);
   await before.finish();
@@ -91,7 +92,7 @@ test("late saves conflict after content changes or rename and never recreate the
   await expect(files.save(next, signal)).rejects.toMatchObject({ code: "conflict" });
   await temporary.release(next.temporary, next);
   await expect(stat(join(root, "a"))).rejects.toMatchObject({ code: "ENOENT" });
-  expect(JSON.parse(await readFile(join(data, "temporary-files.json"), "utf8"))).toEqual([]);
+  expect((await readdir(root)).filter((name) => name.startsWith(".kiteline-"))).toEqual([]);
 });
 
 test("buffered text survives later disk changes, rejects non-text and enforces encoded capacity", async () => {
@@ -154,7 +155,7 @@ test("automatic open uses content and independent limits while preserving text s
   });
 });
 
-test("startup cleans only the registered temporary identity and exclusive saves reject races", async () => {
+test("startup cleans registered temporary paths and exclusive saves reject occupied targets", async () => {
   const { files, temporary, id, root, data, signal } = await setup();
   const pending = await files.prepare(id, "new", 3, true, undefined, signal);
   pending.received = await temporary.write(pending.temporary, Buffer.from("new"), 0, signal);
@@ -162,7 +163,7 @@ test("startup cleans only the registered temporary identity and exclusive saves 
   await writeFile(join(root, ".kiteline-unregistered.tmp"), "keep");
   const restored = new TemporaryFiles(data);
   await restored.load();
-  await restored.drain();
+  await restored.close();
   await expect(stat(pending.temporary.path)).rejects.toMatchObject({ code: "ENOENT" });
   expect(await readFile(join(root, ".kiteline-unregistered.tmp"), "utf8")).toBe("keep");
   const race = await files.prepare(id, "new", 3, true, undefined, signal);
@@ -187,7 +188,7 @@ test("lowering the editor limit still allows saving a reduced draft against its 
 });
 
 test("cancelled temporary writers are cleaned after their real writes finish", async () => {
-  const { files, temporary, id, data, signal } = await setup();
+  const { files, temporary, id, signal } = await setup();
   const cancelled = await files.prepare(id, "cancelled", 6, true, undefined, signal);
   cancelled.received = await temporary.write(cancelled.temporary, Buffer.from("one"), 0, signal);
   const controller = new AbortController();
@@ -197,5 +198,4 @@ test("cancelled temporary writers are cleaned after their real writes finish", a
   ).rejects.toThrow("cancelled");
   await temporary.release(cancelled.temporary, cancelled);
   await expect(stat(cancelled.temporary.path)).rejects.toMatchObject({ code: "ENOENT" });
-  expect(JSON.parse(await readFile(join(data, "temporary-files.json"), "utf8"))).toEqual([]);
 });

@@ -18,6 +18,17 @@ import {
   type RpcMethod,
 } from "@kiteline/shared/protocol";
 import type { AgentConfig } from "./config.js";
+import { msysPath } from "@kiteline/shared/terminal/node";
+import { sessionIdBytes } from "./terminals/sessions.js";
+
+export function checkRunDir(runDir: string) {
+  const socket = join(runDir, "0".repeat(sessionIdBytes * 2), "tmux.sock");
+  if (Buffer.byteLength(process.platform === "win32" ? msysPath(socket) : socket) > 103)
+    throw new AppError(
+      "invalid_argument",
+      "KITELINE_AGENT_RUN_DIR is too long; configure a shorter user-writable directory",
+    );
+}
 
 async function localEndpoint(runDir: string) {
   if (process.platform !== "win32") return join(runDir, "agent.sock");
@@ -45,10 +56,9 @@ export class LocalServer {
     ) => Promise<unknown>,
   ) {}
   async start() {
+    checkRunDir(this.config.runDir);
     this.socketPath = await localEndpoint(this.config.runDir);
     if (process.platform !== "win32") {
-      if (Buffer.byteLength(this.socketPath) > 103)
-        throw new AppError("invalid_argument", "KITELINE_AGENT_RUN_DIR path is too long");
       await rm(this.socketPath, { force: true });
     }
     const server = createServer(async (request, response) => {

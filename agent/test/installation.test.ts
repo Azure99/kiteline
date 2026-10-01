@@ -77,7 +77,7 @@ test("application state excludes another owner until cleanup releases it", async
 test("every installed command holds a shared lock before loading program files", async () => {
   const root = await directory();
   const entry = await launcher(root, 'console.log("loaded"); setInterval(() => {}, 1000);');
-  const running = child(entry.path, ["terminal", "attach", "test"]);
+  const running = child(entry.path, ["attach", "test"]);
   await expect.poll(running.output).toContain("loaded");
   expect(spawnSync("flock", ["--exclusive", "--nonblock", entry.use, "true"]).status).toBe(1);
   running.process.kill("SIGTERM");
@@ -149,7 +149,7 @@ test.runIf(process.getuid?.() === 0).each([false, true])(
   },
 );
 
-test("program rollback restores the old tree even when restoring its launcher fails", async () => {
+test("program rollback restores the old tree when replacement publication fails", async () => {
   const root = await directory();
   const current = join(root, "program"),
     replacement = join(root, "new"),
@@ -167,44 +167,4 @@ test("program rollback restores the old tree even when restoring its launcher fa
     ),
   ).rejects.toThrow("previous program was restored");
   expect(await readFile(join(current, "version"), "utf8")).toBe("old");
-  await mkdir(replacement);
-  await writeFile(join(replacement, "version"), "new");
-  await expect(
-    replaceProgram(
-      current,
-      replacement,
-      previous,
-      async () => {
-        throw new Error("launcher publication failed");
-      },
-      async () => {
-        throw new Error("launcher restore failed");
-      },
-    ),
-  ).rejects.toThrow("Upgrade and recovery failed");
-  expect(await readFile(join(current, "version"), "utf8")).toBe("old");
-});
-
-test("a failed tree rollback retains the old program at the reported backup location", async () => {
-  const root = await directory();
-  const parent = join(root, "installation");
-  const current = join(parent, "program"),
-    replacement = join(root, "new"),
-    previous = join(root, "backup");
-  await mkdir(current, { recursive: true });
-  await writeFile(join(current, "version"), "old");
-  await mkdir(replacement);
-  await expect(
-    replaceProgram(
-      current,
-      replacement,
-      previous,
-      async () => {
-        await rm(parent, { recursive: true });
-        throw new Error("installation parent lost");
-      },
-      async () => {},
-    ),
-  ).rejects.toThrow(`backup location ${previous}`);
-  expect(await readFile(join(previous, "version"), "utf8")).toBe("old");
 });

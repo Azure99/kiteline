@@ -44,7 +44,6 @@ export function DraftView({
   const [saveAs, setSaveAs] = useState(false);
   const [path, setPath] = useState(draft.path);
   const [error, setError] = useState<unknown>();
-  const [invalid, setInvalid] = useState(false);
   const generation = useRef(0);
   const tabStrip = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -160,7 +159,6 @@ export function DraftView({
           onClick={() => {
             setPath(draft.path);
             setError(undefined);
-            setInvalid(false);
             setSaveAs(true);
           }}
         >
@@ -319,16 +317,6 @@ export function DraftView({
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              if (
-                !path ||
-                path.startsWith("/") ||
-                path.split("/").some((part) => !part || part === "." || part === "..")
-              ) {
-                setError(undefined);
-                setInvalid(true);
-                return;
-              }
-              setInvalid(false);
               setError(undefined);
               const submitted = ++generation.current;
               void store.save(draft, path, null).then((saved) => {
@@ -352,11 +340,6 @@ export function DraftView({
                 value={path}
                 onChange={(event) => setPath(event.target.value)}
               />
-              {invalid && (
-                <p role="alert" className="text-sm text-destructive">
-                  {t(($) => $.files.savePathRequired)}
-                </p>
-              )}
               {!!error && (
                 <div role="alert" className="text-sm text-destructive">
                   <ErrorNotice error={error} />

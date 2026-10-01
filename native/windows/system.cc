@@ -89,17 +89,6 @@ static napi_value lock(napi_env env, napi_callback_info info) {
     return resource(env, std::move(value));
   });
 }
-static napi_value adoptPin(napi_env env, napi_callback_info info) {
-  return call(env, [&] {
-    auto value = string(env, arguments(env, info, 1)[0]);
-    auto pin = std::make_unique<Handle>(reinterpret_cast<HANDLE>(std::stoull(value)));
-    BY_HANDLE_FILE_INFORMATION facts{};
-    check(GetFileInformationByHandle(pin->value, &facts), "read inherited installation pin");
-    if (!(facts.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) throw std::runtime_error("Installation pin is not a directory");
-    check(SetHandleInformation(pin->value, HANDLE_FLAG_INHERIT, 0), "isolate installation pin");
-    return resource(env, std::move(pin));
-  });
-}
 static napi_value closeHandle(napi_env env, napi_callback_info info) {
   return call(env, [&] {
     auto value = external<Handle>(env, arguments(env, info, 1)[0]);
@@ -112,7 +101,6 @@ void exportSystem(napi_env env, napi_value exports) {
     {"identity", nullptr, identity, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"privateDirectory", nullptr, privateDirectory, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"lock", nullptr, lock, nullptr, nullptr, nullptr, napi_default, nullptr},
-    {"adoptPin", nullptr, adoptPin, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"closeHandle", nullptr, closeHandle, nullptr, nullptr, nullptr, napi_default, nullptr},
   };
   napi_define_properties(env, exports, sizeof(properties) / sizeof(*properties), properties);

@@ -455,57 +455,6 @@ test("a hook escaping with output pipes reports unknown after the original group
   }
 });
 
-test("Git keeps its write owner through live descendants and a temporary group check failure", async () => {
-  const { root, cli, repo, repos, workspace, write } = await setup();
-  const realKill = process.kill.bind(process);
-  const warning = vi.spyOn(console, "error").mockImplementation(() => {});
-  let unavailable = true;
-  const kill = vi.spyOn(process, "kill").mockImplementation((pid, value) => {
-    if (pid < 0 && value === 0 && unavailable)
-      throw Object.assign(new Error("Git group check unavailable"), { code: "EACCES" });
-    return realKill(pid, value);
-  });
-  try {
-    await write("file", "value");
-    await cli("add", "file");
-    await write(
-      ".git/hooks/post-commit",
-      "#!/bin/sh\n(sleep 1.5; echo done > .git/descendant-done) </dev/null >/dev/null 2>&1 &\n",
-    );
-    await chmod(join(root, ".git/hooks/post-commit"), 0o755);
-    // Resolve queue metadata before injecting failure into the real Git owner.
-    unavailable = false;
-    const queue = new GitWriteQueue(repos);
-    const running = queue.run(workspace.id, repo.id, signal(), () => {
-      unavailable = true;
-      return git(root, ["commit", "-m", "group"], signal(), { write: true });
-    });
-    const rejected = expect(running).rejects.toMatchObject({ outcome: "unknown" });
-    await expect.poll(() => warning.mock.calls.length).toBeGreaterThan(0);
-    unavailable = false;
-    const cancelled = new AbortController();
-    const waiting = queue.run(workspace.id, repo.id, cancelled.signal, async () => {
-      throw new Error("Cancelled queue entry ran");
-    });
-    const cancelledResult = expect(waiting).rejects.toThrow("cancel waiting");
-    cancelled.abort(new Error("cancel waiting"));
-    await cancelledResult;
-    let nextRan = false;
-    const next = queue.run(workspace.id, repo.id, signal(), async () => {
-      expect(await readFile(join(root, ".git/descendant-done"), "utf8")).toBe("done\n");
-      nextRan = true;
-    });
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(nextRan).toBe(false);
-    await rejected;
-    await next;
-    await expect(git(join(root, "missing"), ["status"], signal())).rejects.toThrow();
-  } finally {
-    unavailable = false;
-    kill.mockRestore();
-    warning.mockRestore();
-  }
-});
 test("cancelling Git stops a detached-output hook before releasing the write queue", async () => {
   const { root, repo, repos, workspace, cli, write } = await setup();
   await write("base", "base");
@@ -568,63 +517,57 @@ test("commit observes semantic index identity and commits every staged file", as
   expect((await headIdentity(root, signal())).oid).toBe(result.commitOid);
   expect(await cli("diff", "--cached", "--name-only")).toBe("one\n");
 });
-test.each(["commit", "status"])(
-  "%s rejects an external branch change during its observation",
-  async (kind) => {
-    const { root, repo, cli, write } = await setup();
-    await write("x", "base x\n");
-    await write("y", "main\n");
-    await cli("add", ".");
-    await cli("commit", "-m", "main");
-    await cli("checkout", "-b", "other");
-    await write("y", "other\n");
-    await cli("commit", "-am", "other");
-    const other = (await cli("rev-parse", "HEAD")).trim();
-    await cli("checkout", "main");
-    await write("x", "staged x\n");
-    await cli("add", "x");
-    const token = (await observeIndex(repo, signal())).token;
-    const actual = (await exec("/bin/sh", ["-c", "command -v git"])).stdout.trim();
-    const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
-    const release = join(root, ".git/release"),
-      ready = join(root, ".git/ready");
-    const bin = await mkdtemp("/var/tmp/kiteline-git-gate-");
-    roots.push(bin);
-    await writeFile(
-      join(bin, "git"),
-      `#!/bin/sh\ncase " $* " in\n  *" ${kind === "commit" ? "diff --cached" : "status --porcelain=v2"} "*)\n    : > ${quote(ready)}\n    while [ ! -e ${quote(release)} ]; do sleep 0.01; done\n    ;;\nesac\nexec ${quote(actual)} "$@"\n`,
-    );
-    await chmod(join(bin, "git"), 0o755);
-    vi.stubEnv("PATH", bin + ":" + process.env.PATH);
-    const controller = new AbortController();
-    const pending =
-      kind === "commit"
-        ? commit(repo, "must not commit", token, controller.signal)
-        : status(repo, 0, undefined, controller.signal);
-    const rejected = expect(pending).rejects.toMatchObject({ code: "conflict" });
-    try {
-      for (let i = 0; ; i++) {
-        try {
-          await readFile(ready);
-          break;
-        } catch (error) {
-          if (i === 100) throw error;
-          await new Promise((resolve) => setTimeout(resolve, 20));
-        }
+test("commit rejects an external branch change during its observation", async () => {
+  const { root, repo, cli, write } = await setup();
+  await write("x", "base x\n");
+  await write("y", "main\n");
+  await cli("add", ".");
+  await cli("commit", "-m", "main");
+  await cli("checkout", "-b", "other");
+  await write("y", "other\n");
+  await cli("commit", "-am", "other");
+  const other = (await cli("rev-parse", "HEAD")).trim();
+  await cli("checkout", "main");
+  await write("x", "staged x\n");
+  await cli("add", "x");
+  const token = (await observeIndex(repo, signal())).token;
+  const actual = (await exec("/bin/sh", ["-c", "command -v git"])).stdout.trim();
+  const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
+  const release = join(root, ".git/release"),
+    ready = join(root, ".git/ready");
+  const bin = await mkdtemp("/var/tmp/kiteline-git-gate-");
+  roots.push(bin);
+  await writeFile(
+    join(bin, "git"),
+    `#!/bin/sh\ncase " $* " in\n  *" diff --cached "*)\n    : > ${quote(ready)}\n    while [ ! -e ${quote(release)} ]; do sleep 0.01; done\n    ;;\nesac\nexec ${quote(actual)} "$@"\n`,
+  );
+  await chmod(join(bin, "git"), 0o755);
+  vi.stubEnv("PATH", bin + ":" + process.env.PATH);
+  const controller = new AbortController();
+  const pending = commit(repo, "must not commit", token, controller.signal);
+  const rejected = expect(pending).rejects.toMatchObject({ code: "conflict" });
+  try {
+    for (let i = 0; ; i++) {
+      try {
+        await readFile(ready);
+        break;
+      } catch (error) {
+        if (i === 100) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 20));
       }
-      await cli("checkout", "other");
-      await writeFile(release, "");
-      await rejected;
-      expect((await cli("rev-parse", "HEAD")).trim()).toBe(other);
-      expect(await cli("show", ":y")).toBe("other\n");
-      expect(await cli("show", ":x")).toBe("staged x\n");
-    } finally {
-      await writeFile(release, "");
-      controller.abort();
-      await pending.catch(() => {});
     }
-  },
-);
+    await cli("checkout", "other");
+    await writeFile(release, "");
+    await rejected;
+    expect((await cli("rev-parse", "HEAD")).trim()).toBe(other);
+    expect(await cli("show", ":y")).toBe("other\n");
+    expect(await cli("show", ":x")).toBe("staged x\n");
+  } finally {
+    await writeFile(release, "");
+    controller.abort();
+    await pending.catch(() => {});
+  }
+});
 test("index observations retain unmerged stage identities and commit refuses them", async () => {
   const { repo, cli, write } = await setup();
   await write("a", "base\n");

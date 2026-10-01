@@ -1,3 +1,4 @@
+import { taskLimits } from "../limits.js";
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, open, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -5,11 +6,8 @@ import {
   AppError,
   OperationError,
   asError,
-  limits,
-  taskLimits,
   taskRunActive,
   taskRunSummary,
-  type ScheduledTask,
   type ScheduledTaskInput,
   type ScheduledTaskSummary,
   type TaskOutput,
@@ -17,7 +15,7 @@ import {
   type TaskSnapshot,
 } from "@kiteline/shared/protocol";
 import { atomicJson, readJson, type AgentConfig } from "../config.js";
-import { checkTaskInput, nextOccurrence, previewSchedule, taskId } from "./schedule.js";
+import { checkTaskInput, nextOccurrence, previewSchedule } from "./schedule.js";
 import { TaskProcess } from "./process.js";
 import { taskRecord, type TaskRecord } from "./record.js";
 
@@ -65,9 +63,8 @@ export class ScheduledTasks {
     if (this.loadError) throw new AppError("io_error", "Scheduled task storage is unavailable");
   }
 
-  private async writable(id?: string) {
+  private writable() {
     if (this.closing) throw new AppError("cancelled", "Agent is stopping");
-    if (id && this.pending.has(id)) await this.save(this.record(id));
   }
 
   private record(id: string) {
@@ -136,74 +133,21 @@ export class ScheduledTasks {
     }
   }
 
-  private checkSummaryBudget(tasks: ScheduledTask[]) {
-    const run = {
-      id: "r".repeat(128),
-      taskId: "t".repeat(128),
-      trigger: "scheduled",
-      scheduledAt: "9999-12-31T23:59:59.999Z",
-      acceptedAt: "9999-12-31T23:59:59.999Z",
-      startedAt: "9999-12-31T23:59:59.999Z",
-      endedAt: "9999-12-31T23:59:59.999Z",
-      state: "succeeded",
-      exitCode: 0xffffffff,
-      signal: "SIG".repeat(16),
-      reasonCode: "requested_stop",
-    };
-    const items = tasks.map((task) => ({
-      id: task.id,
-      name: task.name,
-      state: "paused",
-      reviewRunId: "r".repeat(128),
-      nextRunAt: "9999-12-31T23:59:59.999Z",
-      onceStatus: "consumed",
-      currentRun: run,
-      latestRun: run,
-    }));
-    if (
-      Buffer.byteLength(
-        JSON.stringify({ type: "tasks.snapshot", revision: Number.MAX_SAFE_INTEGER, items }),
-      ) > limits.controlMessageBytes
-    )
-      throw new AppError(
-        "limit_exceeded",
-        "Scheduled task summary exceeds the control message size limit",
-      );
-  }
-
   async load() {
     let files: string[];
-    const candidates = new Map<string, TaskRecord>();
+    const candidates: TaskRecord[] = [];
     const outputSizes = new Map<string, number>();
     let source = this.directory;
     try {
       await mkdir(this.directory, { recursive: true, mode: 0o700 });
       files = await readdir(this.directory);
-      const runs = new Map<string, string>();
-      for (const file of files.filter((name) => /\.json$/i.test(name))) {
+      for (const file of files.filter((name) => name.endsWith(".json"))) {
         source = join(this.directory, file);
-        if (!file.endsWith(".json")) throw new Error("Task state suffix must be .json");
         if (!(await lstat(source)).isFile()) throw new Error("Task state is not a regular file");
-        const candidate = taskRecord(await readJson(source), file);
-        const key = candidate.task.id.toLowerCase();
-        if (candidates.has(key))
-          throw new Error(`Task ${candidate.task.id} conflicts with another task ID`);
-        for (const run of candidate.runs) {
-          const key = run.id.toLowerCase();
-          if (runs.has(key)) throw new Error(`Run ${run.id} conflicts with another run ID`);
-          runs.set(key, run.id);
-        }
-        candidates.set(key, candidate);
+        candidates.push(taskRecord(await readJson(source), file));
       }
-      for (const file of files.filter((name) => /\.(stdout|stderr)$/i.test(name))) {
+      for (const file of files.filter((name) => /\.(stdout|stderr)$/.test(name))) {
         source = join(this.directory, file);
-        if (!/\.(stdout|stderr)$/.test(file))
-          throw new Error("Output suffix must be .stdout or .stderr");
-        const id = taskId(file.replace(/\.(stdout|stderr)$/, ""), "runId");
-        const key = id.toLowerCase();
-        if (runs.has(key) && runs.get(key) !== id)
-          throw new Error(`Output ${file} conflicts with another run ID`);
-        runs.set(key, id);
         if (!(await lstat(source)).isFile()) throw new Error("Output is not a regular file");
         const output = await open(source, "r");
         try {
@@ -212,8 +156,28 @@ export class ScheduledTasks {
           await output.close();
         }
       }
-      source = this.directory;
-      this.checkSummaryBudget([...candidates.values()].map((item) => item.task));
+      // Normalize every candidate before saving records or removing any files.
+      for (const record of candidates) {
+        source = this.statePath(record.task.id);
+        for (const run of record.runs) {
+          for (const stream of ["stdout", "stderr"] as const) {
+            const key = stream === "stdout" ? "stdoutBytes" : "stderrBytes";
+            const bytes = outputSizes.get(`${run.id}.${stream}`) ?? 0;
+            if (bytes < run.output[key]) run.output.truncated = true;
+            run.output[key] = bytes;
+          }
+          if (taskRunActive(run.state)) {
+            run.state = "unknown";
+            run.reasonCode = "unconfirmed";
+            run.endedAt = new Date().toISOString();
+            record.task.state = "paused";
+            record.task.reviewRunId = run.id;
+            record.task.revision++;
+          }
+        }
+        await this.expireOnce(record);
+        this.nextTime(record);
+      }
     } catch (error) {
       this.loadError = `${source}: ${asError(error).message}`;
       console.error("Scheduled task storage:", this.loadError);
@@ -224,28 +188,8 @@ export class ScheduledTasks {
       this.reservedRuns.add(id);
       this.outputSize(id, bytes);
     }
-    for (const candidate of candidates.values()) this.records.set(candidate.task.id, candidate);
-    for (const current of this.records.values()) {
-      const record = structuredClone(current);
-      for (const run of record.runs) {
-        for (const stream of ["stdout", "stderr"] as const) {
-          const key = stream === "stdout" ? "stdoutBytes" : "stderrBytes";
-          const path = `${run.id}.${stream}`;
-          const bytes = outputSizes.get(path) ?? 0;
-          if (bytes < run.output[key]) run.output.truncated = true;
-          run.output[key] = bytes;
-        }
-        if (taskRunActive(run.state)) {
-          run.state = "unknown";
-          run.reasonCode = "unconfirmed";
-          run.endedAt = new Date().toISOString();
-          record.task.state = "paused";
-          record.task.reviewRunId = run.id;
-          record.task.revision++;
-        }
-      }
-      await this.expireOnce(record);
-      this.nextTime(record);
+    for (const candidate of candidates) this.records.set(candidate.task.id, candidate);
+    for (const record of candidates) {
       await this.saveKnown(record);
       await this.cleanup(() => this.prune(record.task.id));
     }
@@ -335,7 +279,7 @@ export class ScheduledTasks {
 
   create(id: string, input: unknown, signal: AbortSignal) {
     return this.serial(async () => {
-      await this.writable();
+      this.writable();
       if ([...this.records.keys()].some((existing) => existing.toLowerCase() === id.toLowerCase()))
         throw new AppError("conflict", "Scheduled task ID already exists");
       if (this.records.size >= this.config.limits.tasksPerDevice)
@@ -354,9 +298,6 @@ export class ScheduledTasks {
         runs: [],
       };
       this.nextTime(record);
-      this.checkSummaryBudget(
-        [...this.records.values()].map((item) => item.task).concat(record.task),
-      );
       signal.throwIfAborted();
       await this.save(record);
       this.arm(record);
@@ -371,7 +312,7 @@ export class ScheduledTasks {
     signal: AbortSignal,
   ) {
     return this.serial(async () => {
-      await this.writable(id);
+      this.writable();
       const record = structuredClone(this.record(id));
       if (record.task.revision !== expectedRevision)
         throw new AppError("conflict", "Scheduled task changed; read it again before updating");
@@ -399,9 +340,6 @@ export class ScheduledTasks {
       record.task.revision++;
       await this.expireOnce(record);
       this.nextTime(record);
-      this.checkSummaryBudget(
-        [...this.records.values()].map((item) => (item.task.id === id ? record.task : item.task)),
-      );
       signal.throwIfAborted();
       await this.save(record);
       await this.cleanup(() => this.prune(id));
@@ -412,7 +350,7 @@ export class ScheduledTasks {
 
   setPaused(id: string, paused: boolean, signal: AbortSignal) {
     return this.serial(async () => {
-      await this.writable(id);
+      this.writable();
       const record = structuredClone(this.record(id));
       if (!paused && record.task.reviewRunId)
         throw new AppError("conflict", "Acknowledge the unfinished run before resuming", {
@@ -431,7 +369,7 @@ export class ScheduledTasks {
 
   acknowledge(id: string, runId: string, signal: AbortSignal) {
     return this.serial(async () => {
-      await this.writable(id);
+      this.writable();
       const record = structuredClone(this.record(id));
       if (record.task.reviewRunId !== runId)
         throw new AppError("conflict", "The pending review changed; read the current run ID", {
@@ -451,7 +389,7 @@ export class ScheduledTasks {
 
   delete(id: string, acknowledgeRunId: string | undefined, signal: AbortSignal) {
     return this.serial(async () => {
-      await this.writable(id);
+      this.writable();
       const record = this.record(id);
       if (record.runs.some((run) => taskRunActive(run.state) || this.executions.has(run.id)))
         throw new AppError("busy", "Stop the current run before deleting this task");
@@ -463,6 +401,7 @@ export class ScheduledTasks {
           reviewRunId: record.task.reviewRunId,
         });
       await rm(this.statePath(id));
+      this.pending.delete(id);
       clearTimeout(this.timers.get(id));
       this.timers.delete(id);
       this.records.delete(id);
@@ -577,7 +516,7 @@ export class ScheduledTasks {
   }
 
   private async admit(id: string, runId: string, scheduledAt?: string): Promise<TaskRun> {
-    await this.writable(id);
+    this.writable();
     let record = structuredClone(this.record(id));
     if (record.task.reviewRunId)
       throw new AppError("busy", "Review the unfinished run before starting another", {
@@ -832,7 +771,6 @@ export class ScheduledTasks {
   }
 
   private async prune(id: string) {
-    if (this.pending.has(id)) return;
     const record = this.record(id);
     const ended = record.runs.filter(
       (run) => !taskRunActive(run.state) && run.id !== record.task.reviewRunId,
@@ -845,13 +783,9 @@ export class ScheduledTasks {
   }
 
   private async makeOutputRoom() {
-    const ended = [...this.records.values()]
-      .filter((record) => !this.pending.has(record.task.id))
-      .flatMap((record) =>
-        record.runs.filter(
-          (run) => !taskRunActive(run.state) && run.id !== record.task.reviewRunId,
-        ),
-      );
+    const ended = [...this.records.values()].flatMap((record) =>
+      record.runs.filter((run) => !taskRunActive(run.state) && run.id !== record.task.reviewRunId),
+    );
     const target = Math.min(
       this.config.limits.taskOutputBytes,
       this.config.limits.taskOutputTotalBytes,

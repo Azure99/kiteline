@@ -1,8 +1,9 @@
+import { agentLimits } from "../limits.js";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { AppError, limits, type ListeningPorts } from "@kiteline/shared/protocol";
+import { AppError, type ListeningPorts } from "@kiteline/shared/protocol";
 import { windowsNative } from "@kiteline/shared/windows/native";
 
 export function listeningPort(line: string, ipv6: boolean): number | undefined {
@@ -40,8 +41,8 @@ export async function listeningPorts(signal: AbortSignal): Promise<ListeningPort
     const ports = await windowsNative().listeningPorts();
     signal.throwIfAborted();
     return {
-      ports: ports.slice(0, limits.listPageEntries),
-      truncated: ports.length > limits.listPageEntries,
+      ports: ports.slice(0, agentLimits.listPageEntries),
+      truncated: ports.length > agentLimits.listPageEntries,
     };
   }
   const ports = new Set<number>();
@@ -63,8 +64,8 @@ export async function listeningPorts(signal: AbortSignal): Promise<ListeningPort
       if (port !== undefined) ports.add(port);
     }
     return {
-      ports: [...ports].sort((a, b) => a - b).slice(0, limits.listPageEntries),
-      truncated: ports.size > limits.listPageEntries,
+      ports: [...ports].sort((a, b) => a - b).slice(0, agentLimits.listPageEntries),
+      truncated: ports.size > agentLimits.listPageEntries,
     };
   }
   let truncated = false;
@@ -88,7 +89,7 @@ export async function listeningPorts(signal: AbortSignal): Promise<ListeningPort
         if (!line.trim()) continue;
         const port = listeningPort(line, ipv6);
         if (port !== undefined) ports.add(port);
-        if (ports.size >= limits.listPageEntries) {
+        if (ports.size >= agentLimits.listPageEntries) {
           truncated = true;
           break;
         }

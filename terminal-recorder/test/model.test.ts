@@ -9,8 +9,8 @@ import {
   terminalOptions,
   initializeTerminalUnicode,
 } from "@kiteline/shared/terminal";
-import { Model, type Snapshot } from "../src/model.js";
-import { Attachment } from "../src/attachment.js";
+import { Model, modelLimits, type Snapshot } from "../src/model.js";
+import { Attachment, terminalOutstandingBytes } from "../src/attachment.js";
 
 function screen(cols = 80, rows = 24, history = 100, adapt = true) {
   const terminal = new headless.Terminal({ ...terminalOptions(history), cols, rows });
@@ -42,7 +42,7 @@ test("batched output preserves UTF-8, non-ground recovery, resize and live order
     // Cross the automatic checkpoint boundary, then attach with an incomplete CSI.
     for (
       let offset = 0;
-      offset < limits.terminalCheckpointIntervalBytes + block.length;
+      offset < modelLimits.terminalCheckpointIntervalBytes + block.length;
       offset += block.length
     ) {
       for (let i = 0; i < block.length; i += 1024)
@@ -115,7 +115,7 @@ test("recovery respects the ACK window before tail, ready, live output, resize a
     },
     () => (closed = true),
   );
-  const data = Buffer.alloc(limits.terminalOutstandingBytes * 2 + 7, 65);
+  const data = Buffer.alloc(terminalOutstandingBytes * 2 + 7, 65);
   const byteCount = () =>
     sent.reduce((total, piece) => total + (Buffer.isBuffer(piece) ? piece.length : 0), 0);
   try {
@@ -124,7 +124,7 @@ test("recovery respects the ACK window before tail, ready, live output, resize a
       100,
       false,
     );
-    expect(byteCount()).toBe(limits.terminalOutstandingBytes);
+    expect(byteCount()).toBe(terminalOutstandingBytes);
     expect(sent.some((piece) => !Buffer.isBuffer(piece) && piece.type === "ready")).toBe(false);
     attachment.output({ type: "output", data: "LIVE" });
     attachment.output({ type: "resize", cols: 40, rows: 12 });
@@ -157,19 +157,19 @@ test("periodic checkpoints retain a bounded incomplete OSC after total output cr
   try {
     const chunk = "ground line\r\n".repeat(4000);
     let groundBytes = 0;
-    while (groundBytes <= limits.terminalCheckpointIntervalBytes) {
+    while (groundBytes <= modelLimits.terminalCheckpointIntervalBytes) {
       model.output(Buffer.from(chunk));
       await model.ordered(() => {});
       groundBytes += Buffer.byteLength(chunk);
     }
     // No explicit checkpoint or attach may mask a delayed automatic rotation.
-    const unfinished = "\x1b]0;" + "x".repeat(limits.terminalCheckpointIntervalBytes);
+    const unfinished = "\x1b]0;" + "x".repeat(modelLimits.terminalCheckpointIntervalBytes);
     for (let offset = 0; offset < unfinished.length; offset += limits.dataChunkBytes) {
       model.output(Buffer.from(unfinished.slice(offset, offset + limits.dataChunkBytes)));
       await model.ordered(() => {});
     }
     expect(groundBytes + Buffer.byteLength(unfinished)).toBeGreaterThan(
-      limits.terminalRecoveryTailBytes,
+      modelLimits.terminalRecoveryTailBytes,
     );
     await model.attach(
       "retained",
@@ -189,7 +189,7 @@ test("periodic checkpoints retain a bounded incomplete OSC after total output cr
         (bytes, event) => bytes + (event.type === "output" ? Buffer.byteLength(event.data) : 32),
         0,
       ),
-    ).toBeLessThan(limits.terminalRecoveryTailBytes);
+    ).toBeLessThan(modelLimits.terminalRecoveryTailBytes);
     await restored.write(snapshot.data);
     for (const event of snapshot.tail) await apply(restored, event);
     model.output(Buffer.from("\x07\x1b[31mAFTER\x1b[0m\r\n"));
@@ -273,7 +273,7 @@ test("coalescing still rejects a real parser backlog above its byte budget", asy
   const model = new Model(80, 24, 100, (error) => faults.push(error));
   try {
     const chunk = Buffer.alloc(limits.dataChunkBytes / 4, 65);
-    for (let bytes = 0; bytes <= limits.terminalModelPendingBytes; bytes += chunk.length)
+    for (let bytes = 0; bytes <= modelLimits.terminalModelPendingBytes; bytes += chunk.length)
       model.output(chunk);
     expect(faults).toHaveLength(1);
     expect(faults[0]).toMatchObject({ code: "limit_exceeded" });

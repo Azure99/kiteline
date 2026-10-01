@@ -19,7 +19,7 @@ import {
   type RpcResult,
   type RpcMethod,
 } from "@kiteline/shared/protocol";
-import { privateDirectory, type AgentConfig, type Identity } from "./config.js";
+import type { AgentConfig, Identity } from "./config.js";
 import { MetadataStore } from "./metadata.js";
 import { Directories } from "./directories.js";
 import { Sessions } from "./terminals/sessions.js";
@@ -101,33 +101,23 @@ export class Agent {
     this.repos.onObserved = (workspaceId, repo) => this.watches.repo(workspaceId, repo);
     this.repos.onComplete = (workspaceId, ids) => this.watches.reposComplete(workspaceId, ids);
     this.temporaryFiles = new TemporaryFiles(config.dataDir);
-    this.files = new Files(this.metadata, this.directories, this.temporaryFiles);
+    this.files = new Files(this.metadata, this.directories);
     this.metadata.onChange = (snapshot) => this.send({ type: "metadata.snapshot", snapshot });
     this.sessions = new Sessions(config, this.metadata);
     this.textFiles = new TextFiles(config, this.metadata, this.temporaryFiles);
     this.fileOperations = new FileOperations(this.metadata, this.temporaryFiles, (workspaceId) =>
       this.watches.changed(workspaceId, true),
     );
-    this.channels = new TerminalChannels(
-      this.sessions,
-      config,
-      identity,
-      () => this.fileChannels.count + this.httpChannels.count,
-    );
+    this.channels = new TerminalChannels(this.sessions, config, identity);
     this.fileChannels = new FileChannels(
       this.textFiles,
       new BinaryFiles(config, this.metadata, this.temporaryFiles),
       this.temporaryFiles,
       config,
       identity,
-      () => this.channels.count + this.httpChannels.count,
       (workspaceId) => this.watches.changed(workspaceId, true),
     );
-    this.httpChannels = new HttpChannels(
-      config,
-      identity,
-      () => this.channels.count + this.fileChannels.count,
-    );
+    this.httpChannels = new HttpChannels(identity);
     this.sessions.onChanged = (workspaceId) =>
       this.send({ type: "sessions.changed", workspaceId } satisfies AgentEvent);
     this.local = new LocalServer(config, (method, params, signal) => {
@@ -164,10 +154,6 @@ export class Agent {
     await this.starting;
   }
   private async initialize() {
-    await privateDirectory(this.config.dataDir);
-    if (this.stopped) return;
-    await privateDirectory(this.config.runDir);
-    if (this.stopped) return;
     await this.metadata.load();
     if (this.stopped) return;
     await this.temporaryFiles.load();
@@ -193,7 +179,7 @@ export class Agent {
       socket = connectServerSocket(url, {
         headers: { authorization: `Bearer ${this.identity.deviceToken}` },
         maxPayload: limits.controlMessageBytes,
-        handshakeTimeout: this.config.limits.channelPairTimeout,
+        handshakeTimeout: limits.channelPairTimeout,
       });
     } catch (error) {
       this.connectionError = asError(error).message;
@@ -202,6 +188,7 @@ export class Agent {
       return;
     }
     let failure: string | undefined;
+    let unauthorized = false;
     this.socket = socket;
     heartbeat(socket);
     socket.on("open", () => this.send(this.metadata.hello()));
@@ -210,6 +197,7 @@ export class Agent {
       console.error("Control connection:", error.message);
     });
     socket.on("unexpected-response", (_request, response) => {
+      unauthorized = response.statusCode === 401;
       const hint =
         response.statusCode === 426
           ? "Install the agent version provided by this server."
@@ -350,8 +338,8 @@ export class Agent {
       this.httpChannels.close();
       void this.directories.close();
       if (this.stopped) return;
-      if (code === 4001 || code === 4003) {
-        console.error(`Remote connection stopped: ${reason.toString()}`);
+      if (unauthorized || code === 4001 || code === 4003) {
+        console.error(`Remote connection stopped: ${this.connectionError}`);
         return;
       }
       this.scheduleReconnect();
@@ -617,11 +605,6 @@ export class Agent {
           signal,
           progress,
         ) satisfies Promise<RpcResult<typeof method>>;
-      case "files.cleanup": {
-        const state = this.temporaryFiles.status();
-        state.pending ||= this.fileOperations.cleanupPending || this.fileChannels.cleaning;
-        return state satisfies RpcResult<typeof method>;
-      }
       case "files.list": {
         const result = await this.files.list(
           string(params.workspaceId),
@@ -769,7 +752,6 @@ export class Agent {
     if (this.closing) return this.closing;
     this.stopped = true;
     this.schedules.beginClose();
-    this.temporaryFiles.beginClose();
     clearTimeout(this.reconnect);
     for (const controller of this.requests.values())
       controller.abort(new AppError("cancelled", "Agent is stopping"));

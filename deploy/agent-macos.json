@@ -1,11 +1,6 @@
 {
   "nodeArchiveSha256": "ac41874c3352937119cfec39e1a98c578fe58ce8a86d7e785b89a4706015f305",
   "deploymentTarget": "11.0",
-  "toolchain": {
-    "clt": "13.2.0.0.1.1638488800",
-    "clang": "Apple clang version 13.0.0 (clang-1300.0.29.30)",
-    "sdk": "12.1"
-  },
   "libeventVersion": "2.1.12",
   "flock": {
     "version": "0.4.0",

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Copy, RefreshCw, Square } from "lucide-react";
-import { taskLimits, taskRunActive, type TaskRun } from "@kiteline/shared/protocol";
+import { taskRunActive, type TaskRun } from "@kiteline/shared/protocol";
 import { ApiError, rpc } from "../lib/api";
 import { copyText } from "../lib/clipboard";
 import { Button } from "../components/ui/button";
@@ -105,7 +105,7 @@ export function RunDetail({
       } finally {
         inFlight = false;
         if (!disposed && !document.hidden && again)
-          timer = setTimeout(() => void poll(), more ? 0 : taskLimits.outputPollMs);
+          timer = setTimeout(() => void poll(), more ? 0 : outputPollMs);
       }
     }
     function visibility() {
@@ -315,3 +315,5 @@ function OutputText({
     </pre>
   );
 }
+
+const outputPollMs = 2000;

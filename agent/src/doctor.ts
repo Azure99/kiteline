@@ -1,26 +1,14 @@
 import { access, readFile, stat } from "node:fs/promises";
 import { constants } from "node:fs";
-import { createHash } from "node:crypto";
-import { createRequire } from "node:module";
-import { isAbsolute, join } from "node:path";
+import { join } from "node:path";
 import { appVersion, terminalProfile, type Session } from "@kiteline/shared/protocol";
-import { terminfoDirectory, tmuxBinary, tmuxEnvironment } from "@kiteline/shared/terminal/node";
 import { windowsNative } from "@kiteline/shared/windows/native";
 import { agentConfig, agentPaths, defaultAgentLimits, type AgentConfig } from "./config.js";
 import { localRequest } from "./local.js";
 import { packageDirectory } from "./installation.js";
-import { checkWindowsComponents } from "./windows-components.js";
-import { checkMacosComponents } from "./macos-components.js";
+import { checkComponents, checkEnvironment } from "./prerequisites.js";
 import type { ScheduledTasks } from "./tasks/index.js";
-import {
-  bundledRipgrep,
-  checkBundledRipgrep,
-  checkFileHelper,
-  checkToolVersion,
-  toolRequirements,
-  toolCommand,
-  windowsExecutable,
-} from "./tool-checks.js";
+import { toolCommand, windowsExecutable } from "./tool-checks.js";
 
 interface Item {
   name: string;
@@ -67,55 +55,17 @@ export async function diagnose(
     "Configuration",
     `data=${config.dataDir}; run=${config.runDir}; metadata=${join(config.dataDir, "agent.json")}; schedules=${join(config.dataDir, "tasks")}`,
   );
-  await check("Node", async () => {
-    const info = JSON.parse(await readFile(join(packageDirectory, "release.json"), "utf8"));
-    if (`v${info.node}` !== process.version || info.architecture !== process.arch)
-      throw new Error(
-        `Installation manifest does not match the current runtime: ${process.version} ${process.arch}`,
-      );
-    return `${process.execPath}; ${process.version} ${process.arch}; release=${info.version}`;
-  });
+  add("Node", `${process.execPath}; ${process.version} ${process.arch}; agent=${appVersion}`);
   const native = join(packageDirectory, "dist/native");
-  let nativeLinkage: "static-musl" | "dynamic" | "windows-msys" | "macos-system" | undefined;
-  await check("Native build identity", async () => {
-    if (windows) {
-      const identity = await checkWindowsComponents(signal);
-      nativeLinkage = identity.linkage;
-      return `tmux=${identity.tmux}; linkage=${identity.linkage}; patch=${identity.patch}`;
-    }
-    if (macos) {
-      const identity = await checkMacosComponents(signal);
-      nativeLinkage = identity.linkage;
-      return `tmux=${identity.tmux}; linkage=${identity.linkage}`;
-    }
+  let nativeLinkage: string | undefined;
+  await check("Native build", async () => {
     const identity = JSON.parse(await readFile(join(native, "identity.json"), "utf8"));
-    const hash = async (file: string) =>
-      createHash("sha256")
-        .update(await readFile(file))
-        .digest("hex");
-    if (
-      identity.architecture !== process.arch ||
-      !["static-musl", "dynamic"].includes(identity.linkage) ||
-      (await hash(tmuxBinary)) !== identity.tmuxBinary ||
-      (await hash(join(native, "bin/rename-noreplace"))) !== identity.helperBinary
-    )
-      throw new Error("Native components, linkage or architecture do not match the build identity");
     nativeLinkage = identity.linkage;
-    return `tmux=${identity.tmux}; linkage=${nativeLinkage}; patch=${identity.patch}`;
+    return `tmux=${identity.tmux}; linkage=${nativeLinkage}`;
   });
-  await check("Recorder build identity", async () => {
-    const identity = JSON.parse(await readFile(join(native, "identity.json"), "utf8"));
-    const recorderRequire = createRequire(join(packageDirectory, "terminal-recorder/package.json"));
-    const sharedRequire = createRequire(join(packageDirectory, "shared/package.json"));
-    if (
-      identity.profile !== terminalProfile ||
-      recorderRequire("@xterm/headless/package.json").version !== identity.headless ||
-      recorderRequire("@xterm/addon-serialize/package.json").version !== identity.serialize ||
-      sharedRequire("@xterm/addon-unicode11/package.json").version !== identity.unicode11
-    )
-      throw new Error("Recorder dependencies or terminalProfile do not match the build identity");
+  await check("Recorder entry", async () => {
     await access(join(packageDirectory, "terminal-recorder/dist/main.js"), constants.R_OK);
-    return `profile=${identity.profile}; headless=${identity.headless}; serialize=${identity.serialize}; unicode11=${identity.unicode11}; xterm=${identity.xterm}`;
+    return `profile=${terminalProfile}`;
   });
   if (!nativeLinkage)
     add("Native linkage", "Unknown; shared library requirements could not be verified", "warn");
@@ -129,19 +79,7 @@ export async function diagnose(
         return result;
       });
     }
-  await check("tmux execution", () => command(tmuxBinary, ["-V"], tmuxEnvironment()));
-  await check("Helper execution", async () => {
-    if (!windows) return checkFileHelper(join(native, "bin/rename-noreplace"), command);
-    await windowsNative().fileAttributes(native);
-    return "Windows native filesystem API is loadable";
-  });
-  if (macos) {
-    await check("Entry name helper execution", () =>
-      checkFileHelper(join(native, "bin/entry-name"), command),
-    );
-    await check("flock execution", () => command(join(native, "bin/flock"), ["--version"]));
-  }
-  if (bundledRipgrep) await check("Bundled ripgrep", () => checkBundledRipgrep(command));
+  await checkComponents(check, command);
   if (!runtime) {
     add(
       "Runtime environment",
@@ -193,36 +131,7 @@ export async function diagnose(
         "[Console]::OutputEncoding.WebName",
       ]),
     );
-  else
-    await check("locale", async () => {
-      const encoding = await command("locale", ["charmap"]);
-      const values = `LANG=${process.env.LANG ?? ""}; LC_ALL=${process.env.LC_ALL ?? ""}; LC_CTYPE=${process.env.LC_CTYPE ?? ""}`;
-      if (!/^UTF-?8$/i.test(encoding))
-        throw new Error(
-          `${encoding}; ${values}; correct the launching Shell or your external process manager's environment`,
-        );
-      return `${encoding}; ${values}`;
-    });
-  await check("terminfo", async () => {
-    if (windows) {
-      if (!(await stat(terminfoDirectory)).isDirectory())
-        throw new Error("Private terminfo directory is missing");
-      return `${terminfoDirectory}; component hashes are checked with the installation identity`;
-    }
-    await command("infocmp", ["-x", "tmux-256color"], tmuxEnvironment());
-    return `tmux-256color; TERMINFO_DIRS=${tmuxEnvironment().TERMINFO_DIRS}`;
-  });
-  await check("Shell", async () => {
-    await access(runtime.shell, constants.X_OK);
-    return (
-      runtime.shell +
-      (windows
-        ? `; ${await checkToolVersion({ file: runtime.shell, major: 7, minor: 0 }, command)}`
-        : "")
-    );
-  });
-  for (const tool of toolRequirements)
-    await check(tool.file, () => checkToolVersion(tool, command));
+  await checkEnvironment(runtime.shell, check, command);
   await check("Git configuration sources", async () => {
     try {
       const value = await command("git", [
@@ -251,65 +160,6 @@ Repository-specific includeIf/configuration and actual authentication are verifi
         "No SSH executable in PATH; Git's bundled or configured SSH is verified by actual synchronization",
         "warn",
       );
-    }
-  } else await check("SSH", () => command("sh", ["-c", 'command -v "$1"', "sh", "ssh"]));
-  for (const key of ["credential.helper", "core.sshCommand", "gpg.program", "gpg.ssh.program"]) {
-    let values: string;
-    try {
-      values = await command("git", [
-        "config",
-        "--null",
-        key === "credential.helper" ? "--get-all" : "--get",
-        key,
-      ]);
-    } catch (error) {
-      if ((error as { code?: number }).code !== 1)
-        add(key, error instanceof Error ? error.message : String(error), "error");
-      continue;
-    }
-    const configured = values.split("\0").slice(0, -1);
-    // An empty helper resets inherited helpers; the other keys use Git's last value.
-    for (const value of configured.slice(configured.lastIndexOf("") + 1)) {
-      const first = windows
-        ? /^(?:"([^"\r\n]+)"|([^\s'"!]+))(?:\s|$)/.exec(value)?.slice(1).find(Boolean)
-        : /^([A-Za-z0-9_./+-]+)(?:\s|$)/.exec(value)?.[1];
-      if (!first) {
-        add(
-          key,
-          "A complex command is configured; executable dependencies have not been verified",
-          "warn",
-        );
-        continue;
-      }
-      if (windows && !isAbsolute(first)) {
-        add(
-          key,
-          `${value}; Git resolves its own bundled and configured tool paths; execution and authentication have not been verified`,
-          "warn",
-        );
-        continue;
-      }
-      await check(key, async () => {
-        let program = first;
-        if (key === "credential.helper" && !isAbsolute(first)) {
-          program = `git-credential-${first}`;
-          const bundled = join(
-            await command("git", ["--exec-path"]),
-            program + (windows ? ".exe" : ""),
-          );
-          try {
-            await access(bundled, constants.X_OK);
-            return `${bundled}; entry point is executable`;
-          } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-          }
-        }
-        const path = windows
-          ? await windowsExecutable(program)
-          : await command("sh", ["-c", 'command -v "$1"', "sh", program]);
-        await access(path, constants.X_OK);
-        return `${path}; entry point is executable`;
-      });
     }
   }
   if (process.env.SSH_AUTH_SOCK)

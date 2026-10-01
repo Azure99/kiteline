@@ -34,7 +34,6 @@ import {
 } from "../lib/navigation";
 import { FileExplorer } from "./explorer";
 import { FileDetails } from "./file-details";
-import { FileCleanupNotice } from "./cleanup-notice";
 import { FileNameDialog, type NameAction } from "./name-dialog";
 import { isWithin, movedPath, parentPath, useFileBrowser } from "./use-browser";
 import { DraftView } from "./draft-view";
@@ -280,6 +279,7 @@ export function Files({
     const chosen = paths.flatMap((path) => (entries.get(path) ? [entries.get(path)!] : []));
     if (chosen.length) onOperation({ kind, entries: chosen }, folder);
   }
+  const savingWithin = (path: string) => store.savingWithin(device.id, workspace.id, path);
   return (
     <div className={visible ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
       <FileSearch
@@ -429,14 +429,14 @@ export function Files({
             </IconButton>
             <IconButton
               label={t(($) => $.files.moveSelected)}
-              disabled={!enabled}
+              disabled={!enabled || [...selected].some(savingWithin)}
               onClick={() => selectedAction("move")}
             >
               <FolderInput />
             </IconButton>
             <IconButton
               label={t(($) => $.common.delete)}
-              disabled={!enabled}
+              disabled={!enabled || [...selected].some(savingWithin)}
               onClick={() => selectedAction("delete")}
             >
               <Trash2 />
@@ -458,7 +458,6 @@ export function Files({
             {t(($) => $.common.deviceOffline)}
           </p>
         )}
-        <FileCleanupNotice deviceId={device.id} active={visible} />
         {!!revealError && (
           <div role="alert" className="break-words px-3 py-2 text-sm text-destructive">
             <ErrorNotice error={revealError} />
@@ -477,6 +476,7 @@ export function Files({
                 {...{ pages, expanded, selected, mobile, selecting }}
                 currentFile={queryFile ?? reveal ?? undefined}
                 disabled={!enabled}
+                savingWithin={savingWithin}
                 onFolder={enter}
                 onOpen={open}
                 onSelect={(path) =>
@@ -534,6 +534,7 @@ export function Files({
           deviceId={device.id}
           workspaceId={workspace.id}
           action={action}
+          blocked={action.kind === "rename" && savingWithin(action.entry.path!)}
           rename={(path, name) =>
             store.renameFile({ deviceId: device.id, workspaceId: workspace.id, path }, name)
           }

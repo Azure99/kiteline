@@ -15,7 +15,6 @@ import { Directories } from "../src/directories.js";
 import { MetadataStore } from "../src/metadata.js";
 import { defaultAgentLimits } from "../src/config.js";
 import { publish } from "../src/mutations.js";
-import { TemporaryFiles } from "../src/files/temporary.js";
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -39,7 +38,7 @@ async function setup() {
     root,
     data,
     id: workspace.id,
-    files: new Files(metadata, directories, new TemporaryFiles(data)),
+    files: new Files(metadata, directories),
   };
 }
 

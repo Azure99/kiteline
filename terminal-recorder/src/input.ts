@@ -1,3 +1,4 @@
+import { limits } from "@kiteline/shared/protocol";
 import { AppError, asError } from "@kiteline/shared/protocol";
 import { normalizePaste } from "@kiteline/shared/terminal";
 import { tmux } from "@kiteline/shared/terminal/node";
@@ -101,10 +102,11 @@ export class InputQueue {
           item.resolve();
         } else if (item.type === "resize") {
           await this.control.resize(item.cols, item.rows);
-          await this.model.waitForSize(item.cols, item.rows, this.config.channelPairTimeout);
+          await this.model.waitForSize(item.cols, item.rows, limits.channelPairTimeout);
         } else {
           const identity = this.control.identity;
           if (!identity) throw new AppError("busy", "Terminal creation is not complete");
+          // load-buffer needs its own stdin; the persistent control client cannot supply it.
           await tmux(
             identity.socket,
             [
@@ -123,10 +125,7 @@ export class InputQueue {
               identity.paneId,
             ],
             item.data,
-            AbortSignal.any([
-              this.abort.signal,
-              AbortSignal.timeout(this.config.channelPairTimeout),
-            ]),
+            AbortSignal.any([this.abort.signal, AbortSignal.timeout(limits.channelPairTimeout)]),
           );
         }
       } catch (error) {
@@ -138,7 +137,7 @@ export class InputQueue {
             socket,
             ["delete-buffer", "-b", "kiteline-web-input"],
             undefined,
-            AbortSignal.timeout(this.config.channelPairTimeout),
+            AbortSignal.timeout(limits.channelPairTimeout),
           ).catch(() => {});
       } finally {
         this.bytes -= cost(item);

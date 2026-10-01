@@ -62,15 +62,12 @@ test("an unchanged one-time input survives a browser time-zone change and preset
   }
 });
 
-test("task instants use browser-local time with a local UTC fallback on formatting failure", () => {
+test("task instants use browser-local time and show invalid dates as unavailable", () => {
   const previous = process.env.TZ;
   process.env.TZ = "America/New_York";
   try {
     expect(taskTime("2030-01-01T12:00:00Z", "en-US")).toMatch(/7:00:00\sAM GMT-5/);
     expect(taskTime("2030-01-01T12:00:00Z", "zh-CN")).toMatch(/^2030\/1\/1\s+7:00:00 GMT-5$/);
-    expect(taskTime("2030-01-01T12:00:00Z", "invalid_locale")).toBe(
-      "2030-01-01T12:00:00.000Z (UTC)",
-    );
     expect(taskTime("not a date", "en-US")).toBe("Time unavailable");
     expect(taskTime("2030-01-01T12:00:00Z", "en-US")).toMatch(/7:00:00\sAM GMT-5/);
   } finally {

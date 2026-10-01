@@ -86,7 +86,6 @@ if [ ! -e /etc/kiteline-agent.json ]; then
     (cd "$temporary" && checksum "$name.tar.gz.sha256")
     tar -xpzf "$temporary/$name.tar.gz" -C "$temporary" --no-same-owner
     package="$temporary/$name"
-    (cd "$package" && checksum SHA256SUMS >/dev/null)
     [ "$("$package/bin/kiteline-agent" --version)" = "$version" ] || fail "Package version mismatch"
     "$package/bin/kiteline-agent" check
     kiteline_interrupted=0

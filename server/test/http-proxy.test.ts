@@ -1,3 +1,5 @@
+import { serverLimits } from "../src/limits.js";
+import { limits } from "@kiteline/shared/protocol";
 import { afterEach, expect, test } from "vitest";
 import {
   createServer,
@@ -20,11 +22,18 @@ import { createKitelineServer } from "../src/app.js";
 import { Store } from "../src/store.js";
 import type { ServerConfig } from "../src/config.js";
 import { Agent } from "../../agent/src/control.js";
-import { defaultAgentLimits } from "../../agent/src/config.js";
+import { defaultAgentLimits, privateDirectory } from "../../agent/src/config.js";
 
+const originalServerLimits = { ...serverLimits };
+const originalPairTimeout = limits.channelPairTimeout;
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  try {
+    for (const close of cleanup.splice(0).reverse()) await close();
+  } finally {
+    Object.assign(serverLimits, originalServerLimits);
+    Object.assign(limits, { channelPairTimeout: originalPairTimeout });
+  }
 });
 async function listen(server: Server, host = "127.0.0.1", port = 0) {
   server.listen(port, host);
@@ -32,6 +41,8 @@ async function listen(server: Server, host = "127.0.0.1", port = 0) {
   return (server.address() as AddressInfo).port;
 }
 async function fixture(handler: RequestListener, channels = 128) {
+  Object.assign(serverLimits, { channelsPerDevice: channels, channelIdleTimeout: 100 });
+  Object.assign(limits, { channelPairTimeout: 1000 });
   const root = await mkdtemp("/var/tmp/kiteline-http-");
   const keyFile = join(root, "key.pem"),
     certFile = join(root, "cert.pem");
@@ -66,13 +77,6 @@ async function fixture(handler: RequestListener, channels = 128) {
     port: 0,
     webDir: root,
     downloadsDir: root,
-    limits: {
-      sessionLifetime: 60_000,
-      draftTotalBytes: 1000,
-      channelsPerDevice: channels,
-      channelPairTimeout: 1000,
-      channelIdleTimeout: 100,
-    },
   };
   const kiteline = createKitelineServer(config, store);
   const port = await listen(kiteline.server);
@@ -98,9 +102,6 @@ async function fixture(handler: RequestListener, channels = 128) {
       shell: "/bin/sh",
       limits: {
         ...defaultAgentLimits,
-        channelPairTimeout: 1000,
-        channelIdleTimeout: 100,
-        channelsPerDevice: channels,
       },
     },
     { ...identity, server: entryOrigin },
@@ -116,6 +117,7 @@ async function fixture(handler: RequestListener, channels = 128) {
     setDefaultCACertificates(originalCA);
     await rm(root, { recursive: true, force: true });
   });
+  for (const path of [agent.config.dataDir, agent.config.runDir]) await privateDirectory(path);
   await agent.start();
   await expect.poll(() => kiteline.connections.devices()[0]?.status).toBe("online");
   const login = store.createSession(60_000);

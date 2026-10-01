@@ -1,9 +1,9 @@
+import { agentLimits } from "../limits.js";
 import { createHash } from "node:crypto";
 import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AppError,
-  limits,
   type GitEntry,
   type GitStatus,
   type GitType,
@@ -34,6 +34,7 @@ export async function headIdentity(root: string, signal: AbortSignal): Promise<H
 }
 export async function observeIndex(repo: Repo, signal: AbortSignal) {
   const head = await headIdentity(repo.rootPath, signal);
+  // An unborn branch needs an empty tree in this repository's object format, without writing it.
   const base =
     head.oid ??
     commandLine(
@@ -206,10 +207,10 @@ export async function status(
       hasConflicts ||= entry.conflict;
       if (entry.indexStatus !== "." && entry.indexStatus !== "?" && !entry.conflict) stagedCount++;
       const size = Buffer.byteLength(JSON.stringify(entry)) + 1;
-      if (size + 2048 > limits.resultBytes)
+      if (size + 2048 > agentLimits.resultBytes)
         throw new AppError("limit_exceeded", "A Git change exceeds the size limit");
       if (totalCount++ < offset || full) return;
-      if (entries.length >= limits.listPageEntries || bytes + size > limits.resultBytes) {
+      if (entries.length >= agentLimits.listPageEntries || bytes + size > agentLimits.resultBytes) {
         full = true;
         return;
       }
@@ -242,9 +243,6 @@ export async function status(
             ? "directory"
             : "other";
     }
-  const after = await observeIndex(repo, signal);
-  if (before.token !== after.token)
-    throw new AppError("conflict", "Git HEAD/index changed while being read; refresh");
   const listToken = createHash("sha256")
     .update(JSON.stringify([repo.id, before.token, hash.digest("hex")]))
     .digest("hex");
@@ -268,7 +266,7 @@ export async function status(
     operation: await readOperation(repo, before.head, hasConflicts, signal),
     truncated: nextOffset !== undefined,
   };
-  while (Buffer.byteLength(JSON.stringify(result)) > limits.resultBytes && entries.length) {
+  while (Buffer.byteLength(JSON.stringify(result)) > agentLimits.resultBytes && entries.length) {
     entries.pop();
     result.nextOffset = offset + entries.length;
     result.truncated = true;

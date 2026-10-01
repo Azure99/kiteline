@@ -4,6 +4,7 @@ import {
   mkdir,
   writeFile,
   readFile,
+  readdir,
   appendFile,
   truncate,
   rename,
@@ -42,7 +43,7 @@ async function setup() {
 }
 
 test("binary upload is independent of text limits and replaces only the confirmed link entry", async () => {
-  const { root, home, id, files, temporary, signal } = await setup();
+  const { root, id, files, temporary, signal } = await setup();
   await writeFile(join(root, "shared"), "original");
   await symlink("shared", join(root, "config"));
   const where = await locate(root, "config");
@@ -73,7 +74,7 @@ test("binary upload is independent of text limits and replaces only the confirme
   const info = await lstat(join(root, "config"));
   expect(info.isFile()).toBe(true);
   expect(info.mode & 0o777).toBe(0o666 & ~process.umask());
-  expect(JSON.parse(await readFile(join(home, "temporary-files.json"), "utf8"))).toEqual([]);
+  expect((await readdir(root)).filter((name) => name.startsWith(".kiteline-"))).toEqual([]);
   const competing = await files.prepare(id, "new", 3, true, undefined, signal);
   competing.received = await temporary.write(competing.temporary, Buffer.from("new"), 0, signal);
   await writeFile(join(root, "new"), "competitor");
@@ -85,7 +86,7 @@ test("binary upload is independent of text limits and replaces only the confirme
 test.each([0o600, 0o755, undefined])(
   "upload preserves regular target permissions: %s",
   async (mode) => {
-    const { root, home, id, files, temporary, signal } = await setup();
+    const { root, id, files, temporary, signal } = await setup();
     const path = join(root, "target");
     let version: string | undefined;
     if (mode !== undefined) {
@@ -103,12 +104,12 @@ test.each([0o600, 0o755, undefined])(
     }
     expect(await readFile(path, "utf8")).toBe("after");
     expect((await lstat(path)).mode & 0o777).toBe(mode ?? 0o666 & ~process.umask());
-    expect(JSON.parse(await readFile(join(home, "temporary-files.json"), "utf8"))).toEqual([]);
+    expect((await readdir(root)).filter((name) => name.startsWith(".kiteline-"))).toEqual([]);
   },
 );
 
 test("upload cancellation and changed targets leave no published or temporary file", async () => {
-  const { root, home, id, files, temporary, signal } = await setup();
+  const { root, id, files, temporary, signal } = await setup();
   const controller = new AbortController();
   const upload = await files.prepare(id, "cancelled", 1, true, undefined, signal);
   upload.received = await temporary.write(upload.temporary, Buffer.from("x"), 0, signal);
@@ -128,7 +129,7 @@ test("upload cancellation and changed targets leave no published or temporary fi
   await temporary.release(changed.temporary, changed);
   expect(await readFile(path, "utf8")).toBe("external");
   expect((await lstat(path)).mode & 0o777).toBe(0o600);
-  expect(JSON.parse(await readFile(join(home, "temporary-files.json"), "utf8"))).toEqual([]);
+  expect((await readdir(root)).filter((name) => name.startsWith(".kiteline-"))).toEqual([]);
 });
 
 test("download retains the initial handle and length while append, replace or late truncation is allowed", async () => {

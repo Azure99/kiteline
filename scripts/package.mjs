@@ -14,19 +14,20 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { spawnSync } from "node:child_process";
 import { basename, resolve, join, relative } from "node:path";
-import { isDeepStrictEqual, parseArgs } from "node:util";
+import { parseArgs } from "node:util";
 import { buildStaticAgent } from "./build-agent-static.mjs";
 import { prepareRipgrep } from "./prepare-ripgrep.mjs";
 import { verifyWindowsComponents } from "./build-windows-components.mjs";
 import { verifyMacosComponents } from "./build-macos-components.mjs";
-import { releaseMatches, sourceDigest } from "./release-inputs.mjs";
 import {
-  requiredWindowsComponents,
-  windowsComponentFiles,
-  windowsComponentPath,
-} from "../shared/src/windows/components.ts";
+  digest,
+  fetchPinned,
+  releaseMatches,
+  run as execute,
+  sourceCommit as readSourceCommit,
+} from "./release-inputs.mjs";
+import { windowsRuntimeFiles, windowsComponentPath } from "../shared/src/windows/components.ts";
 
 const root = resolve(import.meta.dirname, "..");
 const release = JSON.parse(readFileSync(join(root, "deploy/release.json"), "utf8"));
@@ -65,22 +66,17 @@ const { version } = JSON.parse(readFileSync(join(root, "shared/src/version.json"
 const output = join(root, "dist/releases");
 const cache = "/var/tmp/kiteline-release-cache";
 const temporary = realpathSync(mkdtempSync("/var/tmp/kiteline-package-"));
-const digest = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
 function run(command, args, options = {}) {
-  const result = spawnSync(command, args, { cwd: root, stdio: "inherit", ...options });
-  if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`${command} exited with ${result.status}`);
-  return result.stdout;
+  return execute(command, args, { cwd: root, ...options });
 }
 function text(command, args) {
   return run(command, args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).trim();
 }
-async function agentArchives(sourceHash) {
+async function agentArchives(sourceCommit) {
   const agents = [];
   for (const target of agentTargets) {
     const [platform, architecture] = target.split("-");
     const windows = platform === "windows";
-    const macos = platform === "macos";
     const name = `kiteline-agent-${version}-${target}`;
     const archive = join(output, `${name}.${windows ? "zip" : "tar.gz"}`);
     const checksum = archive + ".sha256";
@@ -88,13 +84,10 @@ async function agentArchives(sourceHash) {
       throw new Error(`Build agent ${target} first`);
     if (readFileSync(checksum, "utf8") !== `${digest(archive)}  ${basename(archive)}\n`)
       throw new Error(`Agent archive checksum mismatch: ${target}`);
-    const extracted = join(temporary, target);
-    mkdirSync(extracted);
-    run("bsdtar", ["-xf", archive, "-C", extracted, "--no-same-owner"]);
-    if (!isDeepStrictEqual(readdirSync(extracted), [name]))
+    const entries = text("bsdtar", ["-tf", archive]).split("\n");
+    if (entries.some((entry) => entry !== name && !entry.startsWith(name + "/")))
       throw new Error(`Unexpected agent archive roots: ${target}`);
-    const directory = join(extracted, name);
-    const manifest = JSON.parse(readFileSync(join(directory, "release.json"), "utf8"));
+    const manifest = JSON.parse(text("bsdtar", ["-xOf", archive, name + "/release.json"]));
     if (
       !releaseMatches(manifest, {
         kind: "agent",
@@ -102,141 +95,12 @@ async function agentArchives(sourceHash) {
         version,
         architecture: release.nodeArchives[architecture].architecture,
         node: release.node,
-        sourceDigest: sourceHash,
+        sourceCommit,
       })
     )
       throw new Error(
         `Agent ${target} must match this source/version/platform/architecture; rebuild it`,
       );
-    const expected = new Map();
-    for (const line of readFileSync(join(directory, "SHA256SUMS"), "utf8").trimEnd().split("\n")) {
-      const match = /^([a-f0-9]{64}) {2}(.+)$/.exec(line);
-      if (!match || expected.has(match[2]))
-        throw new Error(`Invalid agent checksum record: ${target}`);
-      expected.set(match[2], match[1]);
-    }
-    const actual = new Map();
-    function walk(path) {
-      for (const name of readdirSync(path)) {
-        const file = join(path, name);
-        const key = relative(directory, file);
-        const stat = lstatSync(file);
-        if (stat.isDirectory()) walk(file);
-        else if (stat.isFile()) {
-          if (key === "SHA256SUMS") continue;
-          const hash = digest(file);
-          if (expected.get(key) !== hash)
-            throw new Error(`Agent file checksum mismatch: ${target}/${key}`);
-          actual.set(key, hash);
-        } else if (
-          !windows &&
-          stat.isSymbolicLink() &&
-          realpathSync(file).startsWith(directory + "/")
-        )
-          continue;
-        else throw new Error(`Unsupported agent file: ${target}/${key}`);
-      }
-    }
-    walk(directory);
-    if (expected.size !== actual.size) throw new Error(`Agent file set mismatch: ${target}`);
-    const required = [
-      "release.json",
-      "agent/dist/main.js",
-      "agent/package.json",
-      "shared/package.json",
-      "shared/dist/version.json",
-      "terminal-recorder/dist/main.js",
-      "terminal-recorder/package.json",
-      "dist/native/identity.json",
-      "runtime/LICENSE",
-      `runtime/bin/node${windows ? ".exe" : ""}`,
-      `bin/kiteline-agent${windows ? ".ps1" : ""}`,
-      `bin/kiteline-agent-installed${windows ? ".ps1" : ""}`,
-    ];
-    if (!windows)
-      required.push(
-        "dist/native/bin/tmux",
-        "dist/native/bin/rename-noreplace",
-        `dist/native/share/terminfo/${macos ? "74" : "t"}/tmux-256color`,
-      );
-    if (target === "linux-amd64")
-      required.push("dist/native/bin/rg", "dist/native/share/terminfo-legacy/t/tmux-256color");
-    if (macos)
-      required.push("dist/native/bin/rg", "dist/native/bin/flock", "dist/native/bin/entry-name");
-    for (const file of required)
-      if (!actual.has(file)) throw new Error(`Missing required agent file: ${target}/${file}`);
-    const identity = JSON.parse(readFileSync(join(directory, "dist/native/identity.json"), "utf8"));
-    if (windows) {
-      if (
-        identity.linkage !== "windows-msys" ||
-        identity.architecture !== manifest.architecture ||
-        identity.node !== `v${release.node}`
-      )
-        throw new Error(`Agent native platform identity mismatch: ${target}`);
-      const components = Object.fromEntries(
-        [...actual].flatMap(([file, hash]) =>
-          file === "dist/native/identity.json"
-            ? []
-            : file.startsWith("dist/native/")
-              ? [[file.slice(5), hash]]
-              : file.startsWith("runtime/")
-                ? [[file, hash]]
-                : [],
-        ),
-      );
-      for (const file of requiredWindowsComponents(identity.inputs.downloads))
-        if (!components[file]) throw new Error(`Missing required Windows component: ${file}`);
-      if (!isDeepStrictEqual(components, identity.files))
-        throw new Error("Windows component files do not match their identity");
-      const recipe = JSON.parse(
-        readFileSync(
-          join(directory, "dist/native/sources/recipe/deploy/agent-windows.json"),
-          "utf8",
-        ),
-      );
-      const sources = Object.fromEntries(
-        Object.entries(recipe.sources).map(([name, value]) => ["sources/" + name, value]),
-      );
-      const catalog = Object.fromEntries(
-        Object.entries(identity.inputs.downloads).filter(([name]) => name.startsWith("sources/")),
-      );
-      if (!isDeepStrictEqual(sources, catalog))
-        throw new Error("Windows corresponding source catalog does not match its build recipe");
-      for (const [name, source] of Object.entries(sources))
-        if (components["native/" + name] !== source.sha256)
-          throw new Error(`Windows corresponding source checksum mismatch: ${name}`);
-    } else if (macos) {
-      if (
-        identity.linkage !== "macos-system" ||
-        identity.architecture !== manifest.architecture ||
-        identity.node !== `v${release.node}`
-      )
-        throw new Error(`Agent native platform identity mismatch: ${target}`);
-      verifyMacosComponents(directory, true);
-    } else {
-      if (
-        identity.architecture !== manifest.architecture ||
-        identity.node !== `v${release.node}` ||
-        identity.linkage !== (architecture === "amd64" ? "static-musl" : "dynamic")
-      )
-        throw new Error(`Agent native platform identity mismatch: ${target}`);
-      const components = {
-        "bin/tmux": identity.tmuxBinary,
-        "bin/rename-noreplace": identity.helperBinary,
-        ...(architecture === "amd64"
-          ? {
-              "bin/rg": identity.ripgrep?.binarySha256,
-              "share/terminfo/t/tmux-256color": identity.terminfoResources?.modern,
-              "share/terminfo-legacy/t/tmux-256color": identity.terminfoResources?.legacy,
-            }
-          : Object.fromEntries(
-              Object.entries(identity.libraries).map(([name, hash]) => [`lib/${name}`, hash]),
-            )),
-      };
-      for (const [file, hash] of Object.entries(components))
-        if (!actual.has(`dist/native/${file}`) || actual.get(`dist/native/${file}`) !== hash)
-          throw new Error(`Agent native component mismatch: ${target}/${file}`);
-    }
     agents.push({ archive, checksum });
   }
   return agents;
@@ -354,9 +218,9 @@ function checksums(directory) {
   if (!windowsAgent) chmodSync(join(directory, "SHA256SUMS"), 0o644);
 }
 try {
-  const sourceHash = sourceDigest(root);
+  const sourceCommit = readSourceCommit(root);
   run("pnpm", ["build"]);
-  const agents = kind === "server" ? await agentArchives(sourceHash) : [];
+  const agents = kind === "server" ? await agentArchives(sourceCommit) : [];
   mkdirSync(cache, { recursive: true });
   mkdirSync(output, { recursive: true });
   let runtime;
@@ -383,23 +247,10 @@ try {
   } else {
     const filename = `node-v${release.node}-linux-${node.architecture}.tar.xz`;
     const archive = join(cache, filename);
-    if (!existsSync(archive) || digest(archive) !== node.sha256) {
-      rmSync(archive, { force: true });
-      const pending = `${archive}.${process.pid}.pending`;
-      try {
-        run("curl", [
-          "--fail",
-          "--location",
-          "--output",
-          pending,
-          `https://nodejs.org/dist/v${release.node}/${filename}`,
-        ]);
-        if (digest(pending) !== node.sha256) throw new Error("Node archive checksum mismatch");
-        renameSync(pending, archive);
-      } finally {
-        rmSync(pending, { force: true });
-      }
-    }
+    fetchPinned(
+      { url: `https://nodejs.org/dist/v${release.node}/${filename}`, sha256: node.sha256 },
+      archive,
+    );
     run("tar", ["-xJf", archive, "-C", temporary]);
     runtime = join(temporary, filename.slice(0, -7));
   }
@@ -505,8 +356,6 @@ try {
       ) + "\n",
     );
   }
-  const sourceCommit = text("git", ["rev-parse", "HEAD"]);
-  const sourceDirty = text("git", ["status", "--porcelain"]) !== "";
   const platform = windowsAgent ? "windows" : macosAgent ? "macos" : "linux";
   const name = `kiteline-${kind}-${version}-${platform}-${arch}`;
   const destination = join(temporary, name);
@@ -562,11 +411,10 @@ try {
       "terminal-recorder/package.json",
       "terminal-recorder/dist/main.js",
       "dist/native/identity.json",
-      ...windowsComponentFiles.map(windowsComponentPath),
+      ...windowsRuntimeFiles.map(windowsComponentPath),
     ];
     const template = readFileSync(join(root, "deploy/kiteline-agent.ps1"), "utf8")
       .replace("__KITELINE_REQUIRED_FILES__", list(required))
-      .replace("__KITELINE_COMPONENT_FILES__", list(windowsComponentFiles))
       .replace("__KITELINE_NATIVE_SOURCE__", nativeSource)
       .replaceAll("__KITELINE_LAUNCHER_TYPE__", type);
     writeFileSync(
@@ -605,8 +453,7 @@ try {
         architecture: node.architecture,
         node: release.node,
         sourceCommit,
-        sourceDirty,
-        sourceDigest: sourceHash,
+        sourceDirty: false,
         lockfile: digest(join(root, "pnpm-lock.yaml")),
         ...(windowsBuild
           ? { nodeArchive: windowsBuild.inputs.downloads["node.zip"].sha256 }
@@ -626,13 +473,13 @@ try {
     ) + "\n",
   );
   checksums(destination);
-  if (sourceDigest(root) !== sourceHash)
-    throw new Error("Source changed during packaging; rerun the build");
   const extension = windowsAgent ? "zip" : "tar.gz";
   const tarball = join(output, `${name}.${extension}`);
   const staged = join(temporary, `${name}.${extension}`);
   if (windowsAgent) run("zip", ["-q", "-r", staged, name], { cwd: temporary });
   else run("tar", ["-czf", staged, "-C", temporary, name]);
+  if (readSourceCommit(root) !== sourceCommit)
+    throw new Error("Source changed during packaging; rerun the build");
   const pending = `${tarball}.${process.pid}.pending`;
   try {
     // Publish beside the destination so rename also works across cache filesystems.

@@ -38,12 +38,6 @@ helper, and the two terminal entries used by the managed preset: xterm-256color
 and the project's tmux-256color. It does not contain a package manager, compiler,
 service manager or general-purpose MSYS2 installation.
 
-`native/licenses` preserves component notices, including per-file script/PTY
-notices and GCC/MinGW static runtime notices. Official Bash uses external
-readline/history static inputs; its corresponding readline, ncurses, gettext
-and libiconv materials are included. `native/sources` contains the exact official
-MSYS2 source archives (source bodies, build recipes and patches), tmux source,
-project patches and build recipes. The runtime source archive includes its
-upstream Git objects; its PKGBUILD selects `cygwin-3.6.10` and applies the included
-MSYS2 patches. These archives accompany the Windows distribution, not just URLs
-or a source-offer placeholder. The package manager and toolchains are build-only.
+`native/licenses` contains component licenses; `native/sources` contains the
+official MSYS2 source archives for GPL/LGPL components, including their build
+recipes and patches.

@@ -1,10 +1,11 @@
+import { agentLimits } from "../limits.js";
 import { isUtf8 } from "node:buffer";
 import { spawn } from "node:child_process";
 import { Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { parserStream } from "stream-json";
 import type { Token } from "stream-json/parser.js";
-import { AppError, limits, type SearchMatch, type SearchResult } from "@kiteline/shared/protocol";
+import { AppError, type SearchMatch, type SearchResult } from "@kiteline/shared/protocol";
 import { SearchJson } from "./search-json.js";
 import { gitMetadataPath } from "./paths.js";
 import { BytePrefix } from "../buffers.js";
@@ -56,7 +57,7 @@ export async function searchFiles(
           stop();
         })
       : Promise.resolve();
-  const stderr = new BytePrefix(limits.searchErrorBytes);
+  const stderr = new BytePrefix(agentLimits.searchErrorBytes);
   child.stderr!.on("data", (data: Buffer) => stderr.append(data));
   const controller = new AbortController();
   const result: SearchResult = { matches: [], truncated: false };
@@ -92,12 +93,12 @@ export async function searchFiles(
     controller.signal.throwIfAborted();
     if (metadata) return;
     const bytes = Buffer.byteLength(JSON.stringify(match)) + 1;
-    if (resultBytes + bytes <= limits.resultBytes - 256) {
+    if (resultBytes + bytes <= agentLimits.resultBytes - 256) {
       result.matches.push(match);
       resultBytes += bytes;
       result.truncated ||= match.truncated === true;
     } else limited = true;
-    if (result.matches.length >= limits.searchMatches) limited = true;
+    if (result.matches.length >= agentLimits.searchMatches) limited = true;
     if (limited) {
       result.truncated = true;
       stop();
@@ -131,7 +132,7 @@ export async function searchFiles(
         { signal: controller.signal },
       );
     } else {
-      let name = new BytePrefix(limits.searchPathBytes);
+      let name = new BytePrefix(agentLimits.searchPathBytes);
       await pipeline(
         child.stdout!,
         new Writable({
@@ -147,7 +148,7 @@ export async function searchFiles(
                   const path = name.bytes.toString().replace(/^\.\//, "");
                   if (path.includes(query)) await found({ path });
                 }
-                name = new BytePrefix(limits.searchPathBytes);
+                name = new BytePrefix(agentLimits.searchPathBytes);
                 if (limited) break;
                 start = end + 1;
               }

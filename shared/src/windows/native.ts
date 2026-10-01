@@ -15,7 +15,6 @@ export interface WindowsNative {
   fileAttributes(path: string): Promise<{ attributes: number; tag: number }>;
   renameFile(source: string, target: string, replace: boolean): Promise<void>;
   lock(path: string, shared: boolean): NativeHandle;
-  adoptPin(handle: string): NativeHandle;
   closeHandle(handle: NativeHandle): void;
   jobStart(
     executable: string,

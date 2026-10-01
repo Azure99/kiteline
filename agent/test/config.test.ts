@@ -2,7 +2,6 @@ import { afterEach, expect, test, vi } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { agentConfig, agentPaths } from "../src/config.js";
-import { serverConfig } from "../../server/src/config.js";
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -19,11 +18,10 @@ test("explicit attach directory wins over inherited directories without reading 
   }
 });
 
-test("configuration rejects Node timer overflow without limiting absolute session expiry", async () => {
+test("configuration bounds timers and task capacity without limiting transfer bytes", async () => {
   const root = await mkdtemp("/var/tmp/kiteline-timer-config-");
   vi.stubEnv("KITELINE_AGENT_HOME", root);
   vi.stubEnv("KITELINE_AGENT_RUN_DIR", join(root, "run"));
-  vi.stubEnv("KITELINE_DATA_DIR", root);
   try {
     const configure = (limits: object) =>
       writeFile(join(root, "config.json"), JSON.stringify({ limits }));
@@ -31,8 +29,6 @@ test("configuration rejects Node timer overflow without limiting absolute sessio
       "rpcTimeout",
       "searchTimeout",
       "gitWriteTimeout",
-      "channelIdleTimeout",
-      "channelPairTimeout",
       "terminalStallTimeout",
     ] as const) {
       const maximum = key === "rpcTimeout" ? 2147482647 : 2147483647;
@@ -41,15 +37,12 @@ test("configuration rejects Node timer overflow without limiting absolute sessio
       await configure({ [key]: maximum + 1 });
       await expect(agentConfig()).rejects.toMatchObject({ code: "invalid_argument" });
     }
-    for (const key of ["channelPairTimeout", "channelIdleTimeout"] as const) {
-      await configure({ [key]: 2147483647 });
-      expect(serverConfig().limits[key]).toBe(2147483647);
-      await configure({ [key]: 2147483648 });
-      expect(() => serverConfig()).toThrow();
-    }
-    await configure({ sessionLifetime: 30 * 86400_000, transferBytes: 2147483648 });
-    expect(serverConfig().limits.sessionLifetime).toBe(30 * 86400_000);
+    await configure({ transferBytes: 2147483648 });
     expect((await agentConfig()).limits.transferBytes).toBe(2147483648);
+    await configure({ tasksPerDevice: 300 });
+    expect((await agentConfig()).limits.tasksPerDevice).toBe(300);
+    await configure({ tasksPerDevice: 301 });
+    await expect(agentConfig()).rejects.toMatchObject({ code: "invalid_argument" });
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -203,13 +203,22 @@ test("sequencer-only cherry-pick remains actionable after a manual conflict comm
   expect((await status(repo, 0, undefined, signal())).operation).toBeUndefined();
 });
 test("am and revert native conflict state can be resolved or aborted", async () => {
-  const { repo, root, cli, write, first } = await divergent();
+  const { repo, root, cli, write, first, second } = await divergent();
+  const otherPatch = await cli("format-patch", "-1", "--stdout", second);
+  await expect(
+    git(root, ["am", "--3way"], signal(), { input: otherPatch, write: true }),
+  ).rejects.toThrow();
+  const otherAm = await operation(repo);
+  const head = await headIdentity(root, signal());
+  await finishOperation(repo, "am", otherAm.token!, "abort", signal());
   const patch = await cli("format-patch", "-1", "--stdout", first);
   await expect(
     git(root, ["am", "--3way"], signal(), { input: patch, write: true }),
   ).rejects.toThrow();
   const am = await operation(repo);
   expect(am.kind).toBe("am");
+  expect(await headIdentity(root, signal())).toEqual(head);
+  expect(am.token).not.toBe(otherAm.token);
   await write("f", "resolved am\n");
   await cli("add", "f");
   const done = await finishOperation(repo, "am", am.token!, "continue", signal());

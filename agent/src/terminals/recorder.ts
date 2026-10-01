@@ -1,3 +1,4 @@
+import { limits } from "@kiteline/shared/protocol";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
@@ -205,7 +206,7 @@ export class Recorder {
         reject(
           new OperationError("timeout", "Recorder did not acknowledge the operation", "unknown"),
         );
-      }, this.config.channelPairTimeout);
+      }, limits.channelPairTimeout);
       instance.pending.set(id, { resolve: (value) => resolve(value as T), reject, timer });
       try {
         this.write(instance, { ...message, id } as RecorderRequest);
@@ -242,7 +243,7 @@ export class Recorder {
     return (instance.closing ??= (async () => {
       await instance.ready.catch(() => {});
       if (instance.finished) return;
-      const deadline = setTimeout(() => this.terminate(instance), this.config.channelPairTimeout);
+      const deadline = setTimeout(() => this.terminate(instance), limits.channelPairTimeout);
       instance.writer?.close();
       if (force) this.terminate(instance);
       else if (instance.job) instance.job.stdin!.end();

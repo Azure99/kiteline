@@ -3,7 +3,6 @@ import type { KitelineError, Reply } from "./index.js";
 export interface RecorderConfig {
   terminalInputBytes: number;
   terminalStallTimeout: number;
-  channelPairTimeout: number;
 }
 export interface TerminalIdentity {
   socket: string;

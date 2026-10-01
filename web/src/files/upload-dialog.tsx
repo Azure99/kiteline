@@ -67,7 +67,6 @@ export function UploadDialog({
   const [checking, setChecking] = useState(false);
   const [cancelled, setCancelled] = useState(false);
   const [error, setError] = useState<unknown>();
-  const [invalid, setInvalid] = useState(false);
   const [conflict, setConflict] = useState<{ row: UploadRow; inspection: FileInspection }>();
   const active = useRef<ActiveUpload>(undefined);
   const stop = useRef(false);
@@ -87,18 +86,8 @@ export function UploadDialog({
   };
   async function run() {
     const selected = rows.filter(editable);
-    if (
-      selected.some(
-        (row) => !row.path || row.path.startsWith("/") || row.path.split("/").includes(".."),
-      )
-    ) {
-      setError(undefined);
-      setInvalid(true);
-      return;
-    }
     setBusy(true);
     setError(undefined);
-    setInvalid(false);
     setCancelled(false);
     stop.current = false;
     for (const row of selected) {
@@ -156,7 +145,6 @@ export function UploadDialog({
   async function inspect(row: UploadRow) {
     setChecking(true);
     setError(undefined);
-    setInvalid(false);
     try {
       const inspection = await rpc(deviceId, "files.inspect", {
         workspaceId,
@@ -251,11 +239,6 @@ export function UploadDialog({
                 )}
               </div>
             ))}
-            {invalid && (
-              <p role="alert" className="text-sm text-destructive">
-                {t(($) => $.files.targetPathRequired)}
-              </p>
-            )}
             {!!error && (
               <div role="alert" className="break-words text-sm text-destructive">
                 <ErrorNotice error={error} />
