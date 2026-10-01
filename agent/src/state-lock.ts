@@ -3,6 +3,10 @@ import { join } from "node:path";
 import lockfile from "proper-lockfile";
 import { windowsNative } from "@kiteline/shared/windows/native";
 
+export function lockAgentRuntime(runDir: string) {
+  return lockfile.lock(join(runDir, "agent.sock"), { realpath: false });
+}
+
 export async function lockAgentState(dataDir: string) {
   const path = join(dataDir, "process.lock");
   if (process.platform !== "win32")

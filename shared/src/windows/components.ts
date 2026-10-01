@@ -35,7 +35,6 @@ export const windowsComponentFiles = [
   "native/licenses/libevent/LICENSE",
   "native/licenses/ncurses/COPYING",
   "native/licenses/ripgrep/LICENSE-MIT",
-  "native/licenses/ripgrep/PCRE2-LICENCE.md",
   "native/sources/tmux.tar.gz",
   "native/sources/recipe/deploy/agent-windows.json",
 ];
@@ -56,5 +55,6 @@ export function requiredWindowsComponents(downloads: Record<string, unknown>) {
   const sources = Object.keys(downloads).filter((file) => file.startsWith("sources/"));
   if (!sources.length)
     throw new Error("Windows component identity has no corresponding source catalog");
-  return [...windowsComponentFiles, ...sources.map((file) => "native/" + file)];
+  const notices = Object.keys(downloads).filter((file) => file.startsWith("licenses/ripgrep/"));
+  return [...windowsComponentFiles, ...[...sources, ...notices].map((file) => "native/" + file)];
 }

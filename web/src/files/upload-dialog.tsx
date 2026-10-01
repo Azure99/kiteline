@@ -27,6 +27,12 @@ interface UploadRow {
   error?: unknown;
 }
 
+interface ActiveUpload {
+  controller: AbortController;
+  rowId: number;
+  cancel?: () => Promise<unknown>;
+}
+
 export function UploadDialog({
   deviceId,
   workspaceId,
@@ -63,7 +69,7 @@ export function UploadDialog({
   const [error, setError] = useState<unknown>();
   const [invalid, setInvalid] = useState(false);
   const [conflict, setConflict] = useState<{ row: UploadRow; inspection: FileInspection }>();
-  const active = useRef<AbortController>(undefined);
+  const active = useRef<ActiveUpload>(undefined);
   const stop = useRef(false);
   const alive = useRef(true);
   useEffect(() => {
@@ -71,7 +77,7 @@ export function UploadDialog({
     return () => {
       alive.current = false;
       stop.current = true;
-      active.current?.abort();
+      active.current?.controller.abort();
     };
   }, []);
   const editable = (row: UploadRow) => row.status === "pending" || row.status === "failed";
@@ -98,7 +104,8 @@ export function UploadDialog({
     for (const row of selected) {
       if (stop.current) break;
       const controller = new AbortController();
-      active.current = controller;
+      const request: ActiveUpload = { controller, rowId: row.id };
+      active.current = request;
       update(row.id, { status: "sending", sent: 0, error: undefined });
       try {
         await uploadFile(
@@ -107,8 +114,11 @@ export function UploadDialog({
           row.version,
           controller.signal,
           (sent) => update(row.id, { sent }),
+          (cancel) => {
+            request.cancel = cancel;
+          },
         );
-        update(row.id, { status: "succeeded" });
+        update(row.id, { status: "succeeded", error: undefined });
         if (alive.current) onWritten(row.path);
       } catch (reason) {
         update(row.id, {
@@ -123,6 +133,25 @@ export function UploadDialog({
       }
     }
     if (alive.current) setBusy(false);
+  }
+  async function cancel() {
+    stop.current = true;
+    setCancelled(true);
+    const request = active.current;
+    if (!request) return;
+    update(request.rowId, { error: undefined });
+    if (!request.cancel) {
+      request.controller.abort();
+      return;
+    }
+    try {
+      await request.cancel();
+    } catch (reason) {
+      if (alive.current && active.current === request) {
+        update(request.rowId, { error: reason });
+        setCancelled(false);
+      }
+    }
   }
   async function inspect(row: UploadRow) {
     setChecking(true);
@@ -239,15 +268,7 @@ export function UploadDialog({
                 <Button variant="outline" onClick={onHide}>
                   {t(($) => $.common.collapse)}
                 </Button>
-                <Button
-                  variant="outline"
-                  disabled={cancelled}
-                  onClick={() => {
-                    stop.current = true;
-                    setCancelled(true);
-                    active.current?.abort();
-                  }}
-                >
+                <Button variant="outline" disabled={cancelled} onClick={() => void cancel()}>
                   {cancelled ? t(($) => $.common.cancelling) : t(($) => $.files.cancelUpload)}
                 </Button>
               </>

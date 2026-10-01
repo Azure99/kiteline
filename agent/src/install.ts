@@ -388,7 +388,7 @@ async function uninstall(
     await cleanup(errors, installationUseFile, () => use.close());
   }
   if (errors.length) throw failures("Uninstall did not complete", errors);
-  return `Uninstalled; ${purge && use.stateLocked ? "application state removed" : "state retained"}. External manager configuration was not changed.`;
+  return `Uninstalled; ${purge && use.stateLocked ? "application state removed" : "state retained"}. External manager configuration was not changed. Application directory configuration was not removed: ${environmentFile}. Stable installation lock files were not removed: ${installationUseFile}, ${installationManagementFile}.`;
 }
 
 export async function installCli(action: string, args: string[]) {

@@ -150,6 +150,7 @@ export async function uploadFile(
   version: string | undefined,
   signal: AbortSignal,
   onProgress: (sent: number) => void,
+  onReady: (cancel: () => Promise<unknown>) => void,
 ): Promise<UploadedFile> {
   const ready = await channel(
     target,
@@ -194,6 +195,7 @@ export async function uploadFile(
         reject(new ApiError("io_error", "The upload result is unconfirmed", "unknown"));
       };
       request.send(file);
+      onReady(() => api(`/api/channels/${ready.channelId}`, { method: "DELETE" }));
       if (signal.aborted) cancel();
     });
   } finally {

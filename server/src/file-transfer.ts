@@ -10,7 +10,7 @@ import {
   type FileMeta,
 } from "@kiteline/shared/protocol";
 import { consumeFileFrames, sendFileFrame } from "@kiteline/shared/file-stream";
-import { checkReply, replyError, failure, json } from "./http.js";
+import { checkReply, replyError, failure, finishRequest, json } from "./http.js";
 
 export class FileTransfer {
   readonly controller = new AbortController();
@@ -88,6 +88,7 @@ export class FileTransfer {
     }
   }
   private headers() {
+    finishRequest(this.response);
     this.response.writeHead(200, {
       "content-type":
         this.purpose === "image" || this.purpose === "open"

@@ -15,6 +15,7 @@ import {
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { prepareWindowsNotices } from "./prepare-windows-notices.mjs";
+import { prepareRipgrepNotices } from "./prepare-ripgrep-notices.mjs";
 import { requiredWindowsComponents } from "../shared/src/windows/components.ts";
 
 const root = resolve(import.meta.dirname, "..");
@@ -34,6 +35,7 @@ const sourceFiles = [
   "scripts/build-windows-tmux.sh",
   "scripts/build-windows-addon.sh",
   "scripts/prepare-windows-notices.mjs",
+  "scripts/prepare-ripgrep-notices.mjs",
   "deploy/windows-components.md",
   "shared/src/windows/components.ts",
   "native/tmux-paste.patch",
@@ -56,7 +58,12 @@ const downloads = {
   "rg.zip": recipe.ripgrep,
   "msys2-base.tar.xz": recipe.bootstrap,
   "tmux.tar.gz": tmux,
-  "licenses/PCRE2-LICENCE.md": release.ripgrep.pcre2License,
+  ...Object.fromEntries(
+    Object.entries(release.ripgrep.notices).map(([name, input]) => [
+      `licenses/ripgrep/${name}`,
+      input,
+    ]),
+  ),
   ...Object.fromEntries(recipe.packages.map((pkg) => [`packages/${pkg.name}.tar.zst`, pkg])),
   ...Object.fromEntries(
     Object.entries(recipe.sources).map(([name, input]) => [`sources/${name}`, input]),
@@ -276,6 +283,7 @@ export function assembleWindowsComponents(directory, tmuxDirectory, addonDirecto
     copy(join(rg, "rg.exe"), join(native, "bin/rg.exe"));
     for (const file of ["COPYING", "LICENSE-MIT", "UNLICENSE"])
       copy(join(rg, file), join(native, "licenses/ripgrep", file));
+    prepareRipgrepNotices(directory, native);
     for (const [pkg, paths] of Object.entries(recipe.runtimeFiles)) {
       const extracted = join(temporary, pkg);
       mkdirSync(extracted);

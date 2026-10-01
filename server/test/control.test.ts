@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "vitest";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { once } from "node:events";
-import { request } from "node:http";
+import { Agent as HttpAgent, request } from "node:http";
 import { getDefaultHighWaterMark, setDefaultHighWaterMark } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import type { AddressInfo } from "node:net";
@@ -793,6 +793,88 @@ test("server stop closes a request whose JSON body has not finished", async () =
   }
 });
 
+test("static notices keep their text and GET/HEAD types while navigation retains HTML", async () => {
+  const f = await fixture();
+  const notice = await readFile(new URL("../../web/public/icons/LICENSE.txt", import.meta.url));
+  const html = Buffer.from("<!doctype html><main>Kiteline</main>");
+  const files = [
+    ["NOTICE.txt", notice, "text/plain; charset=utf-8"],
+    ["dependencies.md", notice, "text/plain; charset=utf-8"],
+    ["index.html", html, "text/html; charset=utf-8"],
+    ["main.js", Buffer.from("console.log('kiteline')"), "text/javascript"],
+    ["main.css", Buffer.from("body { color: black; }"), "text/css"],
+    ["resource.bin", Buffer.from([0, 1, 2]), "application/octet-stream"],
+  ] as const;
+  for (const [name, bytes, type] of files) {
+    await writeFile(join(f.config.webDir, name), bytes);
+    for (const method of ["GET", "HEAD"]) {
+      const response = await f.call(`/${name}`, method);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe(type);
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(Buffer.from(await response.arrayBuffer())).toEqual(
+        method === "HEAD" ? Buffer.alloc(0) : bytes,
+      );
+    }
+  }
+  for (const path of ["/", "/devices"]) {
+    const response = await f.call(path);
+    expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(html);
+  }
+  expect((await f.call("/assets/missing.js")).status).toBe(404);
+});
+
+test("bodyless resources and complete JSON requests reuse their HTTP connection", async () => {
+  const f = await fixture();
+  const client = new HttpAgent({ keepAlive: true, maxSockets: 1 });
+  cleanups.push(() => client.destroy());
+  const sockets = new Set<unknown>();
+  const call = (path: string, method = "GET", body?: unknown) =>
+    new Promise<{ status: number; text: string }>((resolve, reject) => {
+      const payload = body === undefined ? undefined : JSON.stringify(body);
+      const req = request(
+        f.origin + path,
+        {
+          agent: client,
+          method,
+          headers: {
+            origin: f.origin,
+            ...(payload === undefined
+              ? {}
+              : {
+                  "content-type": "application/json",
+                  "content-length": Buffer.byteLength(payload),
+                }),
+          },
+        },
+        (response) => {
+          let text = "";
+          response.setEncoding("utf8");
+          response.on("data", (chunk: string) => (text += chunk));
+          response.on("error", reject);
+          response.on("end", () => resolve({ status: response.statusCode!, text }));
+        },
+      );
+      req.on("socket", (socket) => sockets.add(socket));
+      req.on("error", reject);
+      req.end(payload);
+    });
+  expect((await call("/connect.sh")).status).toBe(200);
+  expect(await call("/connect.sh", "HEAD")).toEqual({ status: 200, text: "" });
+  expect((await call("/healthz")).status).toBe(200);
+  expect(
+    (
+      await call("/api/setup", "POST", {
+        setupToken: f.store.newSetupToken(),
+        password: "test-password",
+      })
+    ).status,
+  ).toBe(200);
+  expect((await call("/api/bootstrap")).text).toBe('{"initialized":true}');
+  expect(sockets.size).toBe(1);
+});
+
 test("normal setup, login and binding accept JSON and retain the device across logout", async () => {
   const f = await fixture();
   const setup = await f.call("/api/setup", "POST", {
@@ -808,6 +890,19 @@ test("normal setup, login and binding accept JSON and retain the device across l
   expect(bound.status).toBe(200);
   const identity = await bound.json();
   expect(f.store.binding(bindingId).deviceId).toBe(identity.deviceId);
+  const encoded = (id: string) => id.replaceAll("-", "%2D");
+  const status = await f.call(`/api/bindings/${encoded(bindingId)}`, "GET", undefined, cookie);
+  expect(await status.json()).toMatchObject({ status: "consumed", deviceId: identity.deviceId });
+  expect(
+    (
+      await f.call(
+        `/api/devices/${encoded(identity.deviceId)}`,
+        "PATCH",
+        { name: "Renamed device" },
+        cookie,
+      )
+    ).status,
+  ).toBe(200);
   expect((await f.call("/api/logout", "POST", {}, cookie)).status).toBe(200);
   const login = await f.call("/api/login", "POST", { password: "test-password" });
   expect(login.status).toBe(200);
@@ -818,7 +913,7 @@ test("normal setup, login and binding accept JSON and retain the device across l
     login.headers.get("set-cookie")!.split(";")[0],
   );
   expect(await devices.json()).toMatchObject({
-    devices: [{ id: identity.deviceId, name: "Test device" }],
+    devices: [{ id: identity.deviceId, name: "Renamed device" }],
   });
 });
 

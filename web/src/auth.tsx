@@ -3,7 +3,7 @@ import { useState, type FormEvent } from "react";
 import { ArrowRight, Terminal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { LanguageMenu } from "./components/language-menu";
-import { api, post } from "./lib/api";
+import { post } from "./lib/api";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { ReleaseNotice } from "./components/release-notice";
@@ -20,13 +20,7 @@ export interface Session {
   draftTotalBytes: number;
 }
 
-export function Auth({
-  initialized,
-  onLogin,
-}: {
-  initialized: boolean;
-  onLogin: (session: Session) => void;
-}) {
+export function Auth({ initialized, onLogin }: { initialized: boolean; onLogin: () => void }) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
@@ -40,7 +34,7 @@ export function Auth({
         password: input.get("password"),
         setupToken: input.get("setupToken"),
       });
-      onLogin(await api<Session>("/api/session"));
+      onLogin();
     } catch (error) {
       setError(error);
     } finally {

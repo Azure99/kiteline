@@ -286,3 +286,41 @@ macOS 组件在匹配架构的 macOS 构建机上编译，需要 Command Line To
 ## 随包材料
 
 各包包含项目 LICENSE。Web 第三方材料位于 `licenses/`，原生材料位于 `native/licenses/`，Windows 对应源码位于 `native/sources/`；随实际组件保留其已有文件。
+
+## 终端补丁维护
+
+### xterm补丁再生成
+
+使用项目固定Node/pnpm，在隔离维护目录安装`esbuild@0.28.0`。取得同版本未修补的npm包，保留其`lib/xterm.mjs`及map原件；先按以下参数重生成未修补包的副本，逐字比对两文件。一致后，在`pnpm patch @xterm/xterm@6.1.0-beta.304`给出的编辑目录修改TS并重生成，最后用`pnpm patch-commit <编辑目录>`更新现有补丁。
+
+将以下脚本放在安装esbuild的维护目录，以`node generate.mjs <生成目标目录> <未修补包目录>`执行；banner始终取自未修补原件。
+
+```js
+import { build } from "esbuild";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+const root = resolve(process.argv[2]);
+const original = readFileSync(
+  resolve(process.argv[3], "lib/xterm.mjs"),
+  "utf8",
+);
+await build({
+  absWorkingDir: root,
+  entryPoints: ["src/browser/public/Terminal.ts"],
+  outfile: "lib/xterm.mjs",
+  bundle: true,
+  format: "esm",
+  target: "es2021",
+  sourcemap: true,
+  treeShaking: true,
+  minify: true,
+  legalComments: "none",
+  banner: { js: original.slice(0, original.indexOf("var ")).trimEnd() },
+  tsconfigRaw: {
+    compilerOptions: { target: "es2021", experimentalDecorators: true },
+  },
+});
+```
+
+补丁同时保留可读TS修改、实际消费的ESM及对应sourcemap；升级后复核适配并执行受影响的类型和终端验证。生成工具仅用于隔离维护目录。

@@ -9,8 +9,10 @@ import {
   AttemptLimiter,
   body,
   cookie,
+  decodePath,
   errorStatus,
   failure,
+  finishRequest,
   json,
   origin,
   requestOrigin,
@@ -108,22 +110,22 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       }
       const binding = /^\/api\/bindings\/([^/]+)$/.exec(path);
       if (binding && method === "GET")
-        return json(response, 200, store.binding(decodeURIComponent(binding[1]!)));
+        return json(response, 200, store.binding(decodePath(binding[1]!)));
       const device = /^\/api\/devices\/([^/]+)(.*)$/.exec(path);
       const channel = /^\/api\/channels\/([^/]+)$/.exec(path);
       const content = /^\/api\/channels\/([^/]+)\/content$/.exec(path);
       if (content && (method === "GET" || method === "PUT"))
-        return channels.content(decodeURIComponent(content[1]!), session.id, request, response);
+        return channels.content(decodePath(content[1]!), session.id, request, response);
       if (channel && method === "DELETE")
         return json(response, 200, {
           found: channels.cancel(
-            decodeURIComponent(channel[1]!),
+            decodePath(channel[1]!),
             new AppError("cancelled", "Channel cancelled"),
             session.id,
           ),
         });
       if (device) {
-        const id = decodeURIComponent(device[1]!);
+        const id = decodePath(device[1]!);
         const suffix = device[2];
         if (suffix === "/download" && method === "GET") {
           const pending = channels.create(
@@ -180,26 +182,25 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
         const cancel = /^\/requests\/([^/]+)$/.exec(suffix ?? "");
         if (cancel && method === "DELETE")
           return json(response, 200, {
-            found: connections.cancel(id, decodeURIComponent(cancel[1]!), session.id),
+            found: connections.cancel(id, decodePath(cancel[1]!), session.id),
           });
       }
       throw new AppError("not_found", "API endpoint not found");
     }
     if (method !== "GET" && method !== "HEAD") {
+      finishRequest(response);
       response.writeHead(405).end();
       return;
     }
-    let decodedPath: string;
-    try {
-      decodedPath = decodeURIComponent(path);
-    } catch {
-      throw new AppError("invalid_argument", "Invalid URL path");
-    }
+    const decodedPath = decodePath(path);
     if (decodedPath.includes("\0")) throw new AppError("invalid_argument", "Invalid URL path");
     const file = resolve(config.webDir, "." + decodedPath);
     if (file !== config.webDir && !file.startsWith(config.webDir + sep))
       throw new AppError("not_found", "File not found");
     const extensions: Record<string, string> = {
+      ".html": "text/html; charset=utf-8",
+      ".txt": "text/plain; charset=utf-8",
+      ".md": "text/plain; charset=utf-8",
       ".js": "text/javascript",
       ".css": "text/css",
       ".svg": "image/svg+xml",
@@ -212,14 +213,19 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
     let type: string;
     try {
       content = await readFile(file);
-      type = extensions[extname(file)] ?? "text/html; charset=utf-8";
+      type = extensions[extname(file)] ?? "application/octet-stream";
     } catch (error) {
       if (!["ENOENT", "EISDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
       if (path.startsWith("/assets/")) throw new AppError("not_found", "Resource not found");
       content = await readFile(resolve(config.webDir, "index.html"));
       type = "text/html; charset=utf-8";
     }
-    response.writeHead(200, { "content-type": type, "cache-control": "no-cache" });
+    finishRequest(response);
+    response.writeHead(200, {
+      "content-type": type,
+      "cache-control": "no-cache",
+      "x-content-type-options": "nosniff",
+    });
     response.end(method === "HEAD" ? undefined : content);
   }
   const server = createServer((request, response) => {
@@ -247,7 +253,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       if (agentChannel) {
         const device = store.authenticateAgent(bearer(request));
         if (!device) throw new AppError("unauthenticated", "Invalid device credentials");
-        const id = decodeURIComponent(agentChannel[1]!);
+        const id = decodePath(agentChannel[1]!);
         const kind = channels.checkAgent(
           id,
           device.id,
@@ -260,7 +266,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
         origin(request, entryOrigin);
         const session = login(request, entryOrigin);
         requireVersion(url.searchParams.get("appVersion"), "web");
-        const id = decodeURIComponent(browserChannel[1]!);
+        const id = decodePath(browserChannel[1]!);
         channels.checkBrowser(id, session.id);
         sockets.handleUpgrade(request, socket, head, (ws) => channels.acceptBrowser(id, ws));
       } else if (url.pathname === "/api/agent/control") {

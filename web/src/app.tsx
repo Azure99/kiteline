@@ -62,10 +62,9 @@ export function App() {
     ) : (
       <Auth
         initialized={initialized}
-        onLogin={(value) => {
-          setSession(value);
+        onLogin={() => {
           setInitialized(true);
-          returnToService();
+          void loadSession();
         }}
       />
     );

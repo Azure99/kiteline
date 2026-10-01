@@ -141,10 +141,6 @@ export function prepareWindowsNotices(directory, native) {
       mkdirSync(join(native, "sources"), { recursive: true });
       cpSync(join(directory, "sources", name), join(native, "sources", name));
     }
-    cpSync(
-      join(directory, "licenses/PCRE2-LICENCE.md"),
-      join(native, "licenses/ripgrep/PCRE2-LICENCE.md"),
-    );
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }

@@ -1,11 +1,70 @@
 import { expect, test, vi } from "vitest";
 import { spawn, execFileSync } from "node:child_process";
 import { once } from "node:events";
-import { access, mkdtemp, readdir, readlink, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readdir, readlink, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { Agent } from "../src/control.js";
 import { defaultAgentLimits } from "../src/config.js";
 import { ScheduledTasks } from "../src/tasks/index.js";
+import { localRequest } from "../src/local.js";
+
+test.runIf(process.platform !== "win32")(
+  "real main owns its runtime directory until normal cleanup completes",
+  async () => {
+    const root = await mkdtemp("/var/tmp/kiteline-runtime-owner-");
+    const other = join(root, "other");
+    const config = { runDir: root, limits: defaultAgentLimits };
+    const children: { child: ReturnType<typeof spawn>; ended: ReturnType<typeof once> }[] = [];
+    function start(dataDir: string) {
+      const child = spawn(process.execPath, [resolve("agent/dist/main.js"), "run"], {
+        env: { ...process.env, KITELINE_AGENT_HOME: dataDir, KITELINE_AGENT_RUN_DIR: root },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let output = "";
+      child.stdout.on("data", (part) => {
+        output += part.toString();
+      });
+      child.stderr.on("data", (part) => {
+        output += part.toString();
+      });
+      const running = { child, ended: once(child, "close"), output: () => output };
+      children.push(running);
+      return running;
+    }
+    try {
+      const unbound = start(root);
+      expect((await unbound.ended)[0], unbound.output()).toBe(1);
+      expect(unbound.output()).toContain("Device is not bound");
+      await mkdir(other);
+      const identity = JSON.stringify({
+        deviceId: "runtime-test",
+        deviceToken: "runtime-test",
+        server: "http://127.0.0.1:1",
+      });
+      for (const dataDir of [root, other])
+        await writeFile(join(dataDir, "connection.json"), identity);
+      const first = start(root);
+      await expect.poll(() => localRequest(config, "workspaces.list")).toEqual({ workspaces: [] });
+      const blocked = start(other);
+      expect((await blocked.ended)[0], blocked.output()).toBe(1);
+      expect(blocked.output()).toContain("ELOCKED");
+      expect(await localRequest(config, "workspaces.list")).toEqual({ workspaces: [] });
+      first.child.kill("SIGTERM");
+      expect((await first.ended)[0], first.output()).toBe(0);
+      const next = start(other);
+      await expect.poll(() => localRequest(config, "workspaces.list")).toEqual({ workspaces: [] });
+      next.child.kill("SIGTERM");
+      expect((await next.ended)[0], next.output()).toBe(0);
+    } finally {
+      for (const running of children) {
+        if (running.child.exitCode === null && running.child.signalCode === null)
+          running.child.kill("SIGTERM");
+        await running.ended;
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
 
 test("stopping during schedule load prevents late timers and local admission, and waits once", async () => {
   const root = await mkdtemp("/var/tmp/kiteline-startup-test-");

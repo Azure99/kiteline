@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "vitest";
 import { execFile } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { promisify } from "node:util";
@@ -17,6 +17,57 @@ const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
+
+test.runIf(process.platform === "linux")(
+  "POSIX entry scripts explain unsupported macOS architecture before downloading archives",
+  async () => {
+    const root = await mkdtemp("/var/tmp/kiteline-target-script-");
+    cleanup.push(() => rm(root, { recursive: true, force: true }));
+    await writeFile(
+      `${root}/uname`,
+      '#!/bin/sh\ncase "$1" in -s) echo Darwin ;; -m) echo arm64 ;; esac\n',
+      { mode: 0o755 },
+    );
+    await writeFile(`${root}/curl`, `#!/bin/sh\nprintf called > '${root}/download'\nexit 1\n`, {
+      mode: 0o755,
+    });
+    const server = createServer((request, response) => {
+      void serveAgentInstallation(request.url!, root, "http://127.0.0.1", request, response);
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    cleanup.push(() => new Promise<void>((resolve) => server.close(() => resolve())));
+    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const upgrade = await (await fetch(origin + "/upgrade.sh")).text();
+    const install = await readFile(
+      new URL("../../deploy/install-agent.sh", import.meta.url),
+      "utf8",
+    );
+    for (const [name, script, args] of [
+      [
+        "install",
+        install,
+        `--server ${origin} --version ${appVersion} --platform macos --code normal-test`,
+      ],
+      ["upgrade", upgrade, `--version ${appVersion} --platform macos`],
+    ]) {
+      const file = `${root}/${name}.sh`;
+      await writeFile(file, script!);
+      await expect(
+        execute("script", ["-qefc", `sh '${file}' ${args}`, "/dev/null"], {
+          env: { ...process.env, PATH: `${root}:${process.env.PATH}` },
+          timeout: 5000,
+        }),
+      ).rejects.toMatchObject({
+        code: 1,
+        stdout: expect.stringContaining(
+          "macOS arm64 is not supported by this release; macOS requires x86_64.",
+        ),
+      });
+      await expect(readFile(`${root}/download`)).rejects.toMatchObject({ code: "ENOENT" });
+    }
+  },
+);
 
 test.each(["linux", "macos"] as const)(
   "the %s upgrade command executes only a fully downloaded script and preserves its arguments",

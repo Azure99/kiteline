@@ -19,7 +19,7 @@ import { doctorCli } from "./doctor.js";
 import { installCli } from "./install.js";
 import { checkPrerequisites } from "./prerequisites.js";
 import { fetchServerJson } from "./network.js";
-import { lockAgentState } from "./state-lock.js";
+import { lockAgentRuntime, lockAgentState } from "./state-lock.js";
 
 async function input(prompt: string) {
   if (!process.stdin.isTTY) {
@@ -40,7 +40,8 @@ async function input(prompt: string) {
 async function runAgent() {
   let stopping = false;
   let agent: Agent | undefined;
-  let release: (() => Promise<void>) | undefined;
+  let releaseState: (() => Promise<void>) | undefined;
+  let releaseRuntime: (() => Promise<void>) | undefined;
   let closing: Promise<void> | undefined;
   const signals: NodeJS.Signals[] =
     process.platform === "win32" ? ["SIGINT", "SIGBREAK"] : ["SIGINT", "SIGTERM", "SIGHUP"];
@@ -52,7 +53,8 @@ async function runAgent() {
       await initialization.catch(() => {});
       await cleanup;
       // A failed cleanup must not hand live state to a second agent.
-      await release?.();
+      await releaseRuntime?.();
+      await releaseState?.();
       for (const signal of signals) process.off(signal, stop);
     })());
   };
@@ -68,8 +70,14 @@ async function runAgent() {
     if (stopping) return;
     await privateDirectory(config.dataDir);
     if (stopping) return;
-    release = await lockAgentState(config.dataDir);
+    releaseState = await lockAgentState(config.dataDir);
     if (stopping) return;
+    if (process.platform !== "win32") {
+      await privateDirectory(config.runDir);
+      if (stopping) return;
+      releaseRuntime = await lockAgentRuntime(config.runDir);
+      if (stopping) return;
+    }
     const identity = await readIdentity(config);
     if (stopping) return;
     agent = new Agent(config, identity);

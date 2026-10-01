@@ -32,9 +32,10 @@ case "$platform:$(uname -s)" in
 linux:Linux | macos:Darwin) ;;
 *) fail "Selected platform does not match this device" ;;
 esac
-case "$(uname -m)" in
-x86_64) arch=amd64 ;;
-aarch64 | arm64) arch=arm64 ;;
+case "$platform:$(uname -m)" in
+linux:x86_64 | macos:x86_64) arch=amd64 ;;
+linux:aarch64 | linux:arm64) arch=arm64 ;;
+macos:aarch64 | macos:arm64) fail "macOS arm64 is not supported by this release; macOS requires x86_64." ;;
 *) fail "No agent archive is available for this architecture" ;;
 esac
 

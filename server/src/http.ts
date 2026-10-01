@@ -38,7 +38,26 @@ export function versionMismatch(clientVersion: string | null, component: "agent"
   );
 }
 
+export function decodePath(value: string, message = "Invalid URL path") {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw new AppError("invalid_argument", message);
+  }
+}
+
+export function finishRequest(response: ServerResponse) {
+  const request = response.req;
+  if (
+    !request.complete &&
+    (request.headers["transfer-encoding"] !== undefined ||
+      Number(request.headers["content-length"] ?? 0) > 0)
+  )
+    response.setHeader("connection", "close");
+}
+
 export function json(response: ServerResponse, status: number, value: unknown) {
+  finishRequest(response);
   response.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",

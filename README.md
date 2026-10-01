@@ -2,7 +2,9 @@
 
 单人自托管的远程工作台，通过桌面或手机浏览器使用 Linux、Windows 和 macOS 设备上的终端、文件、Git 与定时任务。server 部署在 Linux。
 
-安装包、前台运行及后台部署见 [安装与运行](deploy/README.md)，平台要求见 [运行基线](deploy/README.md#平台要求)。后台服务由用户配置和管理。
+## 安装与运行
+
+发布包构建、server 部署、设备接入及后台运行见 [安装与运行](deploy/README.md)，平台要求见 [运行基线](deploy/README.md#平台要求)。后台服务由用户配置和管理。
 
 ## 从源码开发
 

@@ -9,7 +9,8 @@ import {
   renameSync,
   rmSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { prepareRipgrepNotices } from "./prepare-ripgrep-notices.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const digest = (file) => createHash("sha256").update(readFileSync(file)).digest("hex");
@@ -29,7 +30,13 @@ export function prepareRipgrep(destination) {
   const temporary = mkdtempSync("/var/tmp/kiteline-ripgrep-");
   try {
     mkdirSync(cache, { recursive: true });
-    for (const input of [ripgrep, ripgrep.pcre2License]) {
+    const downloads = {
+      "rg.tar.gz": ripgrep,
+      ...Object.fromEntries(
+        Object.entries(ripgrep.notices).map(([name, input]) => [`licenses/ripgrep/${name}`, input]),
+      ),
+    };
+    for (const [name, input] of Object.entries(downloads)) {
       const cached = join(cache, input.sha256);
       if (!existsSync(cached) || digest(cached) !== input.sha256) {
         const pending = join(temporary, "download");
@@ -38,6 +45,9 @@ export function prepareRipgrep(destination) {
           throw new Error(`ripgrep input checksum mismatch: ${input.url}`);
         renameSync(pending, cached);
       }
+      const target = join(temporary, name);
+      mkdirSync(dirname(target), { recursive: true });
+      cpSync(cached, target);
     }
     run("tar", ["-xzf", join(cache, ripgrep.sha256), "-C", temporary]);
     const source = join(temporary, `ripgrep-${ripgrep.version}-x86_64-unknown-linux-musl`);
@@ -55,7 +65,7 @@ export function prepareRipgrep(destination) {
     mkdirSync(licenses, { recursive: true });
     for (const name of ["COPYING", "LICENSE-MIT", "UNLICENSE"])
       cpSync(join(source, name), join(licenses, name));
-    cpSync(join(cache, ripgrep.pcre2License.sha256), join(licenses, "PCRE2-LICENCE.md"));
+    prepareRipgrepNotices(temporary, destination);
     return {
       ...ripgrep,
       architecture: "x64",

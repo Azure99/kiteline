@@ -3,6 +3,7 @@ import { open } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { AppError, appVersion } from "@kiteline/shared/protocol";
+import { finishRequest } from "./http.js";
 
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const psQuote = (value: string) => `'${value.replaceAll("'", "''")}'`;
@@ -103,9 +104,10 @@ case "$kiteline_platform:$(uname -s)" in
   linux:Linux|macos:Darwin) ;;
   *) echo 'Selected platform does not match this device' >&2; exit 1 ;;
 esac
-case "$(uname -m)" in
-  x86_64) kiteline_arch=amd64 ;;
-  aarch64|arm64) kiteline_arch=arm64 ;;
+case "$kiteline_platform:$(uname -m)" in
+  linux:x86_64|macos:x86_64) kiteline_arch=amd64 ;;
+  linux:aarch64|linux:arm64) kiteline_arch=arm64 ;;
+  macos:aarch64|macos:arm64) echo 'macOS arm64 is not supported by this release; macOS requires x86_64.' >&2; exit 1 ;;
   *) echo 'No agent archive is available for this architecture' >&2; exit 1 ;;
 esac
 [ -x /usr/local/bin/kiteline-agent ] || { echo 'Install and bind the agent before upgrading' >&2; exit 1; }
@@ -152,6 +154,7 @@ export async function serveAgentInstallation(
   )
     return false;
   if (request.method !== "GET" && request.method !== "HEAD") {
+    finishRequest(response);
     response.writeHead(405, { allow: "GET, HEAD" }).end();
     return true;
   }
@@ -162,6 +165,7 @@ export async function serveAgentInstallation(
         : path === "/upgrade.sh"
           ? upgradeScript(entryOrigin)
           : windowsScript(entryOrigin, path === "/connect.ps1" ? "Connect" : "Upgrade");
+    finishRequest(response);
     response.writeHead(200, {
       "content-type": "text/plain; charset=utf-8",
       "content-length": Buffer.byteLength(script),
@@ -198,6 +202,7 @@ export async function serveAgentInstallation(
   );
   try {
     const info = await file.stat();
+    finishRequest(response);
     response.writeHead(200, {
       "content-type": filename.endsWith(".tar.gz")
         ? "application/gzip"

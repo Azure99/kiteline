@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { prepareRipgrepNotices } from "./prepare-ripgrep-notices.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const json = (file) => JSON.parse(readFileSync(file, "utf8"));
@@ -28,6 +29,7 @@ const sourceFiles = [
   "deploy/agent-static.json",
   "deploy/agent-macos.json",
   "scripts/build-macos-components.mjs",
+  "scripts/prepare-ripgrep-notices.mjs",
   "scripts/build-macos-native.sh",
   "native/macos/rename-noreplace.c",
   "native/macos/entry-name.c",
@@ -44,7 +46,12 @@ const downloads = {
   "libevent.tar.gz": unix.sources["libevent.tar.gz"],
   "flock.tar.gz": recipe.flock,
   "rg.tar.gz": recipe.ripgrep,
-  "licenses/PCRE2-LICENCE.md": release.ripgrep.pcre2License,
+  ...Object.fromEntries(
+    Object.entries(release.ripgrep.notices).map(([name, input]) => [
+      `licenses/ripgrep/${name}`,
+      input,
+    ]),
+  ),
 };
 const binaries = [
   "runtime/bin/node",
@@ -177,10 +184,7 @@ export function buildMacosComponents(directory, destination) {
     copy(join(rg, "rg"), join(destination, "native/bin/rg"));
     for (const file of ["COPYING", "LICENSE-MIT", "UNLICENSE"])
       copy(join(rg, file), join(destination, "native/licenses/ripgrep", file));
-    copy(
-      join(directory, "licenses/PCRE2-LICENCE.md"),
-      join(destination, "native/licenses/ripgrep/PCRE2-LICENCE.md"),
-    );
+    prepareRipgrepNotices(directory, join(destination, "native"));
     const linkage = Object.fromEntries(
       binaries.map((file) => [file, macho(join(destination, file))]),
     );

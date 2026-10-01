@@ -12,7 +12,7 @@ import type { ServerConfig } from "./config.js";
 import type { Store, Login } from "./store.js";
 import type { Connections } from "./connections.js";
 import type { Channels } from "./channels.js";
-import { cookie, origin, requestOrigin } from "./http.js";
+import { cookie, decodePath, finishRequest, origin, requestOrigin } from "./http.js";
 import { requestHeaders, responseHeaders } from "./proxy-headers.js";
 
 interface Target {
@@ -28,12 +28,7 @@ export function proxyTarget(raw: string): Target {
   const match = /^(\/(proxy|absproxy)\/([^/?]+)\/(\d{1,5}))((?:[/?].*)?)$/.exec(raw);
   if (!match) throw new AppError("invalid_argument", "Invalid device port path");
   const [, prefix, kind, encodedDevice, port, suffix = ""] = match;
-  let deviceId: string;
-  try {
-    deviceId = decodeURIComponent(encodedDevice!);
-  } catch {
-    throw new AppError("invalid_argument", "Invalid device ID");
-  }
+  const deviceId = decodePath(encodedDevice!, "Invalid device ID");
   const targetPort = integer(Number(port), "port", 1, 65535);
   return {
     deviceId,
@@ -158,9 +153,10 @@ export class HttpProxy {
       const device = this.connections.devices().find((value) => value.id === target!.deviceId);
       if (!device) throw new AppError("not_found", "Device not found");
       if (target.redirect) {
-        if (destination instanceof ServerResponse)
+        if (destination instanceof ServerResponse) {
+          finishRequest(destination);
           destination.writeHead(308, { location: target.redirect }).end();
-        else
+        } else
           destination.end(
             rawHead(308, "Permanent Redirect", {
               location: target.redirect,
@@ -255,7 +251,7 @@ export class HttpProxy {
         });
         const headers = responseHeaders(result.headers, target.prefix, target.strip);
         if (response) {
-          if (!request.complete) headers.connection = "close";
+          finishRequest(response);
           response.writeHead(result.statusCode!, result.statusMessage, headers);
           response.flushHeaders();
           result.pipe(response);
