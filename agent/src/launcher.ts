@@ -19,18 +19,8 @@ export function agentLauncher(
   const root = source
     ? `kiteline_root=${quote(source)}`
     : macos
-      ? `kiteline_entry=$0 kiteline_links=0
-  while [ -L "$kiteline_entry" ]; do
-    kiteline_links=$((kiteline_links + 1))
-    [ "$kiteline_links" -le 40 ] || { echo 'Launcher symbolic link loop' >&2; return 1; }
-    kiteline_parent=$(CDPATH= cd -P -- "$(dirname -- "$kiteline_entry")" && pwd) || return
-    kiteline_link=$(readlink "$kiteline_entry") || return
-    case "$kiteline_link" in
-      /*) kiteline_entry=$kiteline_link ;;
-      *) kiteline_entry=$kiteline_parent/$kiteline_link ;;
-    esac
-  done
-  kiteline_root=$(CDPATH= cd -P -- "$(dirname -- "$kiteline_entry")/.." && pwd) || return`
+      ? `kiteline_entry=$(readlink -f -- "$0") || return
+  kiteline_root=$(dirname -- "$(dirname -- "$kiteline_entry")")`
       : 'kiteline_root=$(dirname -- "$(dirname -- "$(readlink -f -- "$0")")")';
   // The entire body is parsed before maintenance can replace or remove this launcher.
   return `#!/bin/sh

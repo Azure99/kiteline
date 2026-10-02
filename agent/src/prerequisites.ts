@@ -7,7 +7,6 @@ import { agentConfig, privateDirectory } from "./config.js";
 import { packageDirectory } from "./installation.js";
 import { checkRunDir } from "./local.js";
 import {
-  bundledRipgrep,
   checkBundledRipgrep,
   checkFileHelper,
   checkToolVersion,
@@ -22,7 +21,7 @@ export async function checkComponents(check: Check, command: Command) {
   const windows = process.platform === "win32";
   const macos = process.platform === "darwin";
   const native = join(packageDirectory, "dist/native");
-  if (bundledRipgrep) await check("Bundled ripgrep", () => checkBundledRipgrep(command));
+  await check("Bundled ripgrep", () => checkBundledRipgrep(command));
   await check("Bundled tmux", () => command(tmuxBinary, ["-V"], tmuxEnvironment()));
   await check("Bundled file helper", async () => {
     if (!windows) return checkFileHelper(join(native, "bin/rename-noreplace"), command);

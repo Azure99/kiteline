@@ -25,7 +25,9 @@ cp LICENSE "$output/native/licenses/libevent.txt"
 tar -xzf "$inputs/tmux.tar.gz" -C "$build/tmux" --strip-components=1
 cd "$build/tmux"
 patch -p1 -i "$inputs/native/tmux-paste.patch"
-LIBEVENT_CORE_CFLAGS="-I$build/dependencies/include" \
+# System ioctl headers can load an incomplete queue.h with the same include guard.
+CPPFLAGS="-include $build/tmux/compat/queue.h" \
+  LIBEVENT_CORE_CFLAGS="-I$build/dependencies/include" \
   LIBEVENT_CORE_LIBS="$build/dependencies/lib/libevent_core.a" \
   ./configure --disable-utf8proc --disable-sixel
 make -j2
@@ -46,11 +48,7 @@ for helper in rename-noreplace entry-name; do
     "$inputs/native/macos/$helper.c" \
     -o "$output/native/bin/$helper"
 done
-# Big Sur's reader needs 16-bit numbers and the full standard string table.
-[ "$(grep -c 'pairs#0x10000,' "$inputs/native/tmux.terminfo")" -eq 1 ]
-sed 's/pairs#0x10000,/pairs#32767,/' "$inputs/native/tmux.terminfo" >"$build/tmux.terminfo"
-printf '\tbox1@,\n' >>"$build/tmux.terminfo"
-tic -x -o "$output/native/share/terminfo" "$build/tmux.terminfo"
+tic -x -o "$output/native/share/terminfo" "$inputs/native/tmux.terminfo"
 TERMINFO="$output/native/share/terminfo" infocmp -x -1 tmux-256color >"$build/terminfo.actual"
 for capability in 'pairs#32767,' 'AX,' 'BE=\E[?2004h,' 'BD=\E[?2004l,' \
   'Ms=\E]52;%p1%s;%p2%s\007,' 'kDC3=\E[3;3~,'; do

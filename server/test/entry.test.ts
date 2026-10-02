@@ -139,6 +139,7 @@ test("installer resources stream GET/HEAD, reject other methods and never fall b
   const linux = `kiteline-agent-${appVersion}-linux-arm64.tar.gz`;
   const windows = `kiteline-agent-${appVersion}-windows-amd64.zip`;
   const macos = `kiteline-agent-${appVersion}-macos-amd64.tar.gz`;
+  const macosArm = `kiteline-agent-${appVersion}-macos-arm64.tar.gz`;
   for (const [path, file, type] of [
     [`/downloads/agent/${appVersion}/${linux}`, linux, "application/gzip"],
     [`/downloads/agent/${appVersion}/${windows}`, windows, "application/zip"],
@@ -151,6 +152,12 @@ test("installer resources stream GET/HEAD, reject other methods and never fall b
     [
       `/downloads/agent/${appVersion}/${macos}.sha256`,
       `${macos}.sha256`,
+      "text/plain; charset=utf-8",
+    ],
+    [`/downloads/agent/${appVersion}/${macosArm}`, macosArm, "application/gzip"],
+    [
+      `/downloads/agent/${appVersion}/${macosArm}.sha256`,
+      `${macosArm}.sha256`,
       "text/plain; charset=utf-8",
     ],
     ["/install.sh", "install.sh", "text/plain; charset=utf-8"],

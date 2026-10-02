@@ -19,6 +19,16 @@ async function setup() {
 }
 const signal = () => new AbortController().signal;
 
+test("search uses bundled rg when PATH contains a different executable", async () => {
+  const root = await setup();
+  const tools = await setup();
+  await writeFile(join(root, "file.txt"), "needle\n");
+  await writeFile(join(tools, "rg"), "#!/bin/sh\nexit 42\n", { mode: 0o755 });
+  vi.stubEnv("PATH", tools + ":" + process.env.PATH);
+  const result = await searchFiles(root, "content", "needle", false, signal());
+  expect(result.matches).toMatchObject([{ path: "file.txt", text: "needle" }]);
+});
+
 test.each(["name", "content"] as const)(
   "a deadline during a metadata lookup freezes %s results and stops consumption",
   async (mode) => {

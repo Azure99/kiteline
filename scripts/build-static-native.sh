@@ -1,7 +1,12 @@
 #!/bin/sh
 set -eu
 
-export CFLAGS='-O2 -std=gnu99 -march=x86-64 -mtune=generic'
+case "$1" in
+  x64) cpu_flags='-march=x86-64 -mtune=generic' ;;
+  arm64) cpu_flags='-march=armv8-a' ;;
+  *) echo "Unsupported native architecture: $1" >&2; exit 1 ;;
+esac
+export CFLAGS="-O2 -std=gnu99 $cpu_flags"
 export LDFLAGS='-static'
 prefix=/var/tmp/build/prefix
 export PKG_CONFIG_LIBDIR="$prefix/lib/pkgconfig"
@@ -46,7 +51,9 @@ make -j2
 cp tmux /output/native/bin/tmux
 cp COPYING /output/native/licenses/tmux.txt
 cd ..
-cc -static -Wall -Wextra -Werror -O2 -march=x86-64 -mtune=generic \
+# The flags contain separate compiler arguments.
+# shellcheck disable=SC2086
+cc -static -Wall -Wextra -Werror -O2 $cpu_flags \
   rename-noreplace.c -o /output/native/bin/rename-noreplace
 "$prefix/bin/tic" -x -o /output/native/share/terminfo tmux.terminfo
 [ "$(grep -c 'pairs#0x10000,' tmux.terminfo)" -eq 1 ]

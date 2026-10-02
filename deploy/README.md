@@ -1,6 +1,6 @@
 # 安装与运行
 
-设备端提供Linux amd64/arm64、Windows amd64及macOS amd64包，server提供Linux amd64/arm64包及镜像。系统与工具要求见[运行基线](#平台要求)，源码开发见[仓库入口](../README.md)。
+设备端提供Linux amd64/arm64、Windows amd64及macOS amd64/arm64包，server提供Linux amd64/arm64包及镜像。系统与工具要求见[运行基线](#平台要求)，源码开发见[仓库入口](../README.md)。
 
 ## 生成交付物
 
@@ -15,34 +15,35 @@ pnpm package server amd64 --agent-target=linux-amd64
 pnpm images amd64
 ```
 
-`--agent-target`选择server携带的agent，可用逗号分隔多个目标；省略时携带全部四个目标。Windows先按[固定组件构建](windows-components.md)生成并验证组件；其ZIP不含符号链接，目标机无需Developer Mode。macOS构建步骤见下文。
+`--agent-target`选择server携带的agent，可用逗号分隔多个目标；省略时携带全部五个目标。Windows先按[固定组件构建](windows-components.md)生成并验证组件；其ZIP不含符号链接，目标机无需Developer Mode。macOS构建步骤见下文。
 
 包及对应`.sha256`位于`dist/releases/`；产品版本来自[version.json](../shared/src/version.json)，镜像名为`kiteline-server:<版本>-<amd64|arm64>`。跨机器可用`docker save/load`搬运镜像。构建从干净commit开始，结束时再次核HEAD和工作区/index；清单记录sourceCommit、sourceDirty=false、平台及组件身份。组装server和构建镜像时核对当前来源、版本和目标，来源不一致须重建相应包；原生组件仍按实际输入闭包复用。
 
-`package agent amd64`自动构建/复用静态组件；也可单独用`node scripts/build-agent-static.mjs`构建到`dist/agent-static-amd64/`。来源与SHA在[agent-static.json](agent-static.json)，工具链包名在[agent-static-packages.txt](agent-static-packages.txt)，实际版本记录于输出build-packages.txt。首次构建需要数GiB内存和较长编译时间，Node固定3个编译任务，8GiB构建机应串行安排重负载。Docker分别缓存Node/native阶段；源码、脚本、工具链或构建输入模式变化可能使相关缓存失效。源下载缓存在`/var/tmp/kiteline-release-cache`并核验SHA。输出携带许可证、工具包清单、输入身份和文件校验，静态ELF检查拒绝动态加载器或库依赖。组件升级同步来源、工具链和对应环境验收。
+`package agent amd64`和`package agent arm64`自动构建/复用对应静态组件；也可单独用`node scripts/build-agent-static.mjs amd64`或`arm64`构建到`dist/agent-static-<架构>/`，省略架构时使用amd64。来源与SHA在[agent-static.json](agent-static.json)，工具链包名在[agent-static-packages.txt](agent-static-packages.txt)，实际版本记录于输出build-packages.txt。首次构建需要数GiB内存和较长编译时间，Node固定3个编译任务，8GiB构建机应串行安排重负载。Docker分别缓存Node/native阶段；源码、脚本、工具链或构建输入模式变化可能使相关缓存失效。源下载缓存在`/var/tmp/kiteline-release-cache`并核验SHA。输出携带许可证、工具包清单、输入身份和文件校验，静态ELF检查拒绝动态加载器或库依赖。组件升级同步来源、工具链和对应环境验收。
 
-macOS原生组件使用[固定输入](agent-macos.json)及Darwin x64构建环境，需要 Command Line Tools 和 SDK，部署目标 11.0。先在源码目录准备输入，再将完整输入目录传至macOS构建机；使用固定Node运行其中同一脚本，输出目录须不存在：
+macOS原生组件使用[固定输入](agent-macos.json)及对应架构的macOS构建环境，需要 Command Line Tools 和 SDK，部署目标 14.0。分别对amd64、arm64执行以下步骤：先在源码目录准备输入，再将完整输入目录传至相应构建机；使用固定Node运行其中同一脚本，输出目录须不存在：
 
 ```sh
-node scripts/build-macos-components.mjs prepare /var/tmp/kiteline-mac-inputs
-# 在macOS x86_64构建环境中：
-node /var/tmp/kiteline-mac-inputs/scripts/build-macos-components.mjs build \
-  /var/tmp/kiteline-mac-inputs /var/tmp/kiteline-mac-components
+kiteline_arch=arm64 # Intel构建机使用amd64。
+node scripts/build-macos-components.mjs prepare "$kiteline_arch" "/var/tmp/kiteline-mac-inputs-$kiteline_arch"
+# 在匹配架构的macOS构建环境中，kiteline_arch设置同上：
+node "/var/tmp/kiteline-mac-inputs-$kiteline_arch/scripts/build-macos-components.mjs" build "$kiteline_arch" \
+  "/var/tmp/kiteline-mac-inputs-$kiteline_arch" "/var/tmp/kiteline-mac-components-$kiteline_arch"
 # 将完整组件带回源码侧，核对当前输入与实际文件：
-node scripts/build-macos-components.mjs verify /var/tmp/kiteline-mac-components
+node scripts/build-macos-components.mjs verify "$kiteline_arch" "/var/tmp/kiteline-mac-components-$kiteline_arch"
 # 在macOS构建源码目录安装开发依赖后组包：
-pnpm package agent macos-amd64 --macos-components=/var/tmp/kiteline-mac-components
+pnpm package agent "macos-$kiteline_arch" --macos-components="/var/tmp/kiteline-mac-components-$kiteline_arch"
 ```
 
-macOS组包使用固定Node/pnpm、Git及系统tar，组件输入和文件摘要在组包入口再次核验。包名中的amd64对应x86_64。
+macOS组包使用固定Node/pnpm、Git及系统tar，组件输入和文件摘要在组包入口再次核验。包名中的amd64对应Intel x86_64，arm64对应Apple Silicon。
 
-完整交付从相同源码构建四个agent。将macOS生成的包及`.sha256`放入Linux源码侧`dist/releases/`，然后依次组装两个server和镜像：
+完整交付从相同源码构建五个agent。将macOS两架构生成的包及`.sha256`放入Linux源码侧`dist/releases/`，然后依次组装两个server和镜像：
 
 ```sh
 pnpm package agent amd64
 pnpm package agent arm64
 pnpm package agent windows-amd64 --windows-components=/var/tmp/kiteline-win-components
-# 确认同源macOS包及.sha256已放入dist/releases/。
+# 确认同源macOS两架构包及.sha256已放入dist/releases/。
 pnpm package server amd64
 pnpm package server arm64
 pnpm images amd64
@@ -96,7 +97,7 @@ systemctl start kiteline-server
 
 网页生成当前访问地址的接入命令；Linux/macOS用connect.sh并传所选平台，Windows用connect.ps1，完整下载脚本后执行。HTTPS不降级，HTTP可用HTTP/HTTPS；绑定码保留为Shell参数，不进入下载URL。目标设备必须能访问该地址，不能从手机的localhost地址给另一台机器绑定。不改全局PowerShell执行策略，企业策略限制时按实际错误处理。失败诊断与POSIX管道行为见[设备安装说明](#原生-agent)。
 
-Linux amd64目标机需要 curl、Git 2.23.0+、SSH、flock（util-linux）、有效的 UTF-8 locale 和项目使用的 Shell/CLI，rg已随包提供。缺项时命令停止并给出安装建议，不自动修改系统依赖。Linux ARM工具要求见[运行基线](#平台要求)。下面的Linux基础依赖命令以 root 执行，普通用户加 sudo：
+Linux两架构目标机均需要 curl、Git 2.23.0+、SSH、flock（util-linux）、有效的 UTF-8 locale 和项目使用的 Shell/CLI，rg已随包提供。缺项时命令停止并给出安装建议，不自动修改系统依赖。下面的Linux基础依赖命令以 root 执行，普通用户加 sudo：
 
 ```sh
 # Ubuntu 24.04 / Debian 12
@@ -107,6 +108,8 @@ apk add curl ca-certificates tar gzip coreutils musl-utils git openssh-client nc
 # CentOS 7.9：另外提供 Git 2.23.0+，默认仓库版本不足。
 yum install -y curl ca-certificates tar gzip coreutils openssh-clients ncurses glibc-common util-linux
 ```
+
+CentOS使用SCL Git时，在启动agent的Shell或外部管理器中加载对应`enable`脚本，例如`source /opt/rh/rh-git227/enable`，同时取得PATH和所需库环境。
 
 Linux用`locale -a`确认已安装的UTF-8 locale，`locale charmap`应输出UTF-8。例如已安装`en_US.UTF-8`时，可在启动Shell中执行`export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8`。LC_ALL优先于LC_CTYPE和LANG。后台管理器需配置同样环境；应用目录配置文件只解析目录项。
 
@@ -125,10 +128,11 @@ sudo "./$kiteline_package/bin/kiteline-agent" install --user YOUR_USER
 kiteline-agent run
 ```
 
-macOS手工取得完整包及校验文件后，在项目用户终端执行；先准备Git 2.23+、SSH、有效UTF-8 locale及项目Shell。Node、rg、tmux和flock随包，无需Homebrew。提升只用于程序安装，运行和绑定仍由项目用户执行：
+macOS手工取得匹配架构的完整包及校验文件后，在项目用户终端执行；先准备Git 2.23+、SSH、有效UTF-8 locale及项目Shell。Node、rg、tmux和flock随包，无需Homebrew。提升只用于程序安装，运行和绑定仍由项目用户执行：
 
 ```sh
-kiteline_package="kiteline-agent-${KITELINE_VERSION}-macos-amd64"
+# Apple Silicon使用arm64，Intel将arm64换成amd64。
+kiteline_package="kiteline-agent-${KITELINE_VERSION}-macos-arm64"
 shasum -a 256 -c "$kiteline_package.tar.gz.sha256"
 tar -xpzf "$kiteline_package.tar.gz" --no-same-owner
 "./$kiteline_package/bin/kiteline-agent" check
@@ -260,14 +264,16 @@ linked worktree 同时挂载工作目录、gitDir 和 commonDir；`.git` 指向�
 | 组件                         | 运行前提                                                             |
 | ---------------------------- | -------------------------------------------------------------------- |
 | Linux agent amd64            | Ubuntu 24.04、Debian 12、Alpine 3.23、CentOS 7.9；静态 musl，rg 随包 |
-| Linux agent arm64            | Ubuntu 24.04；另需 rg 14+                                            |
+| Linux agent arm64            | Ubuntu 24.04、Debian 12、Alpine 3.23、CentOS 7.9；静态 musl，rg 随包 |
 | Windows agent amd64          | Windows 11 x64、本地 NTFS、原生 Git 和 PowerShell 7                  |
-| macOS agent amd64            | macOS 11、Intel x86_64                                               |
+| macOS agent amd64、arm64     | macOS 14 及更高版本                                                  |
 | server 包及镜像 amd64、arm64 | Ubuntu 24.04                                                         |
 
 设备还需 Git 2.23+、SSH、有效 UTF-8 locale 和项目使用的 Shell/CLI。Linux 静态包不替代这些外部程序的系统依赖，也不加载 glibc NSS 插件或动态 Node addon。Linux 文件发布要求内核与文件系统支持 `renameat2(RENAME_NOREPLACE)`；CentOS 7.9 amd64 基线为含此回移植的 `3.10.0-1160.el7.x86_64`。
 
-macOS 组件在匹配架构的 macOS 构建机上编译，需要 Command Line Tools 和 SDK；部署目标为 11.0。
+CentOS 7.9 arm64 的基线为 `4.18.0-193.28.1.el7.aarch64`、64KiB 内存页与 XFS；其余三个 ARM 目标使用 ext4。
+
+macOS 组件在匹配架构的 macOS 构建机上编译，需要 Command Line Tools 和 SDK；部署目标为 14.0。
 
 ## 随包材料
 

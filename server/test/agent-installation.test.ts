@@ -25,7 +25,7 @@ test.runIf(process.platform === "linux")(
     cleanup.push(() => rm(root, { recursive: true, force: true }));
     await writeFile(
       `${root}/uname`,
-      '#!/bin/sh\ncase "$1" in -s) echo Darwin ;; -m) echo arm64 ;; esac\n',
+      '#!/bin/sh\ncase "$1" in -s) echo Darwin ;; -m) echo ppc64 ;; esac\n',
       { mode: 0o755 },
     );
     await writeFile(`${root}/curl`, `#!/bin/sh\nprintf called > '${root}/download'\nexit 1\n`, {
@@ -60,9 +60,7 @@ test.runIf(process.platform === "linux")(
         }),
       ).rejects.toMatchObject({
         code: 1,
-        stdout: expect.stringContaining(
-          "macOS arm64 is not supported by this release; macOS requires x86_64.",
-        ),
+        stdout: expect.stringContaining("No agent archive is available for this architecture"),
       });
       await expect(readFile(`${root}/download`)).rejects.toMatchObject({ code: "ENOENT" });
     }

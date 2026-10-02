@@ -41,11 +41,17 @@ const { positionals, values } = parseArgs({
 });
 const [kind, target] = positionals;
 const windowsAgent = kind === "agent" && target === "windows-amd64";
-const macosAgent = kind === "agent" && target === "macos-amd64";
-const arch = windowsAgent || macosAgent ? "amd64" : target;
+const macosAgent = kind === "agent" && ["macos-amd64", "macos-arm64"].includes(target);
+const arch = windowsAgent ? "amd64" : macosAgent ? target.slice("macos-".length) : target;
 const windowsComponents = values["windows-components"];
 const macosComponents = values["macos-components"];
-const allAgentTargets = ["linux-amd64", "linux-arm64", "windows-amd64", "macos-amd64"];
+const allAgentTargets = [
+  "linux-amd64",
+  "linux-arm64",
+  "windows-amd64",
+  "macos-amd64",
+  "macos-arm64",
+];
 const agentTargets = values["agent-target"]?.split(",") ?? allAgentTargets;
 if (
   positionals.length !== 2 ||
@@ -58,10 +64,10 @@ if (
   (macosAgent ? !macosComponents : macosComponents !== undefined)
 )
   throw new Error(
-    "Usage: pnpm package agent|server amd64|arm64 [--agent-target=linux-amd64,linux-arm64,windows-amd64,macos-amd64 (server only)] | agent windows-amd64 --windows-components=PATH | agent macos-amd64 --macos-components=PATH",
+    "Usage: pnpm package agent|server amd64|arm64 [--agent-target=linux-amd64,linux-arm64,windows-amd64,macos-amd64,macos-arm64 (server only)] | agent windows-amd64 --windows-components=PATH | agent macos-amd64|macos-arm64 --macos-components=PATH",
   );
 const node = release.nodeArchives[arch];
-const staticAgent = kind === "agent" && arch === "amd64" && !windowsAgent && !macosAgent;
+const staticAgent = kind === "agent" && !windowsAgent && !macosAgent;
 const { version } = JSON.parse(readFileSync(join(root, "shared/src/version.json"), "utf8"));
 const output = join(root, "dist/releases");
 const cache = "/var/tmp/kiteline-release-cache";
@@ -235,12 +241,12 @@ try {
     cpSync(join(components, "native"), native, { recursive: true });
   } else if (macosAgent) {
     const components = resolve(macosComponents);
-    macosBuild = verifyMacosComponents(components);
+    macosBuild = verifyMacosComponents(components, arch);
     runtime = join(components, "runtime");
     cpSync(join(components, "native"), native, { recursive: true });
   } else if (staticAgent) {
     const components = join(temporary, "static");
-    buildStaticAgent(components);
+    buildStaticAgent(components, arch);
     runtime = join(components, "runtime");
     run("cp", ["-a", join(components, "native"), native]);
     staticBuild = JSON.parse(readFileSync(join(components, "build.json"), "utf8"));
@@ -273,64 +279,12 @@ try {
           },
           tmuxBinary: digest(join(native, "bin/tmux")),
           helperBinary: digest(join(native, "bin/rename-noreplace")),
-          ripgrep: prepareRipgrep(native),
+          ripgrep: prepareRipgrep(native, arch),
         },
         null,
         2,
       ) + "\n",
     );
-  } else if (kind === "agent" && !windowsAgent && !macosAgent) {
-    mkdirSync(native);
-    const builder = `kiteline-native-builder:${arch}`;
-    run("docker", [
-      "build",
-      "--platform",
-      `linux/${arch}`,
-      "--build-arg",
-      `UBUNTU=${release.ubuntu}`,
-      "--build-arg",
-      `CA_CERTIFICATES_URL=${release.caCertificates.url}`,
-      "--build-arg",
-      `CA_CERTIFICATES_SHA256=${release.caCertificates.sha256}`,
-      "--build-arg",
-      "HTTP_PROXY",
-      "--build-arg",
-      "HTTPS_PROXY",
-      "--build-arg",
-      "NO_PROXY",
-      "-t",
-      builder,
-      "-f",
-      "deploy/Dockerfile.native",
-      "deploy",
-    ]);
-    run("docker", [
-      "run",
-      "--rm",
-      "--platform",
-      `linux/${arch}`,
-      "-e",
-      "HTTP_PROXY",
-      "-e",
-      "HTTPS_PROXY",
-      "-e",
-      "NO_PROXY",
-      "--add-host",
-      "host.docker.internal:host-gateway",
-      "-v",
-      `${root}:/src:ro`,
-      "-v",
-      `${runtime}:/runtime:ro`,
-      "-v",
-      `${native}:/output`,
-      "-e",
-      "KITELINE_NATIVE_OUTPUT=/output",
-      "-e",
-      "KITELINE_BUNDLE_LIBS=1",
-      builder,
-      "/runtime/bin/node",
-      "/src/scripts/build-native.mjs",
-    ]);
   }
   if (kind === "agent") {
     const recorder = JSON.parse(

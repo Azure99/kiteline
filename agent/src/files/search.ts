@@ -9,7 +9,7 @@ import { AppError, type SearchMatch, type SearchResult } from "@kiteline/shared/
 import { SearchJson } from "./search-json.js";
 import { gitMetadataPath } from "./paths.js";
 import { BytePrefix } from "../buffers.js";
-import { bundledRipgrep, ripgrepBinary } from "../tool-checks.js";
+import { ripgrepBinary } from "../tool-checks.js";
 import { JobChild, spawnJob } from "@kiteline/shared/windows/job";
 import { finished } from "node:stream/promises";
 
@@ -172,9 +172,7 @@ export async function searchFiles(
     throw new AppError(
       spawnError.code === "ENOENT" ? "unsupported" : "io_error",
       spawnError.code === "ENOENT"
-        ? bundledRipgrep
-          ? "Bundled ripgrep is unavailable; rebuild native components or reinstall the matching agent package"
-          : "ripgrep (rg) is not installed on the device"
+        ? "Bundled ripgrep is unavailable; rebuild native components or reinstall the matching agent package"
         : spawnError.message,
     );
   if (!limited && (failure || (code !== 0 && code !== 1)))

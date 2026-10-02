@@ -61,6 +61,42 @@ async function launcher(root: string, main: string) {
   return { ...paths, path };
 }
 
+test("portable macOS launcher follows relative links and paths with spaces", async () => {
+  const root = await directory();
+  const source = join(root, "package with spaces");
+  await mkdir(join(source, "bin"), { recursive: true });
+  await mkdir(join(source, "runtime/bin"), { recursive: true });
+  await mkdir(join(source, "agent/dist"), { recursive: true });
+  await symlink(process.execPath, join(source, "runtime/bin/node"));
+  await writeFile(join(source, "agent/dist/main.js"), 'console.log("loaded " + process.argv[2]);');
+  await writeFile(
+    join(source, "bin/kiteline-agent"),
+    agentLauncher(undefined, undefined, "darwin"),
+    {
+      mode: 0o755,
+    },
+  );
+  await symlink("package with spaces/bin/kiteline-agent", join(root, "first"));
+  await symlink("first", join(root, "second"));
+  const running = child(join(root, "second"), ["--version"]);
+  expect((await running.closed)[0]).toBe(0);
+  expect(running.output()).toBe("loaded --version\n");
+});
+
+test("portable macOS launcher stops when its entry cannot be resolved", async () => {
+  const root = await directory();
+  const loop = join(root, "loop");
+  await symlink("loop", loop);
+  const running = child("sh", [
+    "-c",
+    agentLauncher(undefined, undefined, "darwin"),
+    loop,
+    "--version",
+  ]);
+  expect((await running.closed)[0]).not.toBe(0);
+  expect(running.output()).not.toContain("runtime/bin/node");
+});
+
 test("application state excludes another owner until cleanup releases it", async () => {
   const root = await directory();
   const release = await lockAgentState(root);

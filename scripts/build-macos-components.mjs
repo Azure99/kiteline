@@ -10,7 +10,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { digest, fetchPinned, run } from "./release-inputs.mjs";
 
@@ -32,16 +32,21 @@ const sourceFiles = [
   "native/tmux-paste.patch",
   "native/tmux.terminfo",
 ];
-const downloads = {
-  "node.tar.xz": {
-    url: `https://nodejs.org/dist/v${release.node}/node-v${release.node}-darwin-x64.tar.xz`,
-    sha256: recipe.nodeArchiveSha256,
-  },
-  "tmux.tar.gz": unix.tmux,
-  "libevent.tar.gz": unix.sources["libevent.tar.gz"],
-  "flock.tar.gz": recipe.flock,
-  "rg.tar.gz": recipe.ripgrep,
-};
+function downloads(architecture) {
+  const target = recipe.architectures[architecture];
+  if (!target) throw new Error(`Unsupported macOS architecture: ${architecture}`);
+  const nodeArchitecture = release.nodeArchives[architecture].architecture;
+  return {
+    "node.tar.xz": {
+      url: `https://nodejs.org/dist/v${release.node}/node-v${release.node}-darwin-${nodeArchitecture}.tar.xz`,
+      sha256: target.nodeArchiveSha256,
+    },
+    "tmux.tar.gz": unix.tmux,
+    "libevent.tar.gz": unix.sources["libevent.tar.gz"],
+    "flock.tar.gz": recipe.flock,
+    "rg.tar.gz": target.ripgrep,
+  };
+}
 const binaries = [
   "runtime/bin/node",
   ...["tmux", "rg", "flock", "rename-noreplace", "entry-name"].map((name) => `native/bin/${name}`),
@@ -55,9 +60,10 @@ function copy(source, destination) {
 function writeJson(file, value) {
   writeFileSync(file, JSON.stringify(value, null, 2) + "\n");
 }
-function inputs() {
+function inputs(architecture) {
   return {
-    downloads,
+    architecture,
+    downloads: downloads(architecture),
     files: Object.fromEntries(sourceFiles.map((file) => [file, digest(join(root, file))])),
   };
 }
@@ -74,15 +80,19 @@ function files(directory, prefix = "") {
   return entries;
 }
 
-export function prepareMacosInputs(directory) {
+export function prepareMacosInputs(directory, architecture) {
+  const expected = inputs(architecture);
   mkdirSync(directory, { recursive: true });
-  for (const [file, input] of Object.entries(downloads)) fetchPinned(input, join(directory, file));
+  for (const [file, input] of Object.entries(expected.downloads))
+    fetchPinned(input, join(directory, file));
   for (const file of sourceFiles) copy(join(root, file), join(directory, file));
-  writeJson(join(directory, "inputs.json"), inputs());
+  writeJson(join(directory, "inputs.json"), expected);
 }
 
-function macho(file) {
-  if (capture("/usr/bin/lipo", ["-archs", file]) !== "x86_64")
+function macho(file, architecture) {
+  if (
+    capture("/usr/bin/lipo", ["-archs", file]) !== (architecture === "amd64" ? "x86_64" : "arm64")
+  )
     throw new Error(`Unexpected Mach-O architecture: ${file}`);
   const commands = capture("/usr/bin/otool", ["-l", file]);
   const minimum =
@@ -102,13 +112,16 @@ function macho(file) {
   return { minimum, libraries };
 }
 
-export function buildMacosComponents(directory, destination) {
-  if (process.platform !== "darwin" || process.arch !== "x64")
-    throw new Error("The macOS x86_64 component builder requires a Darwin x64 build host");
-  const expected = inputs();
+export function buildMacosComponents(directory, destination, architecture) {
+  const expected = inputs(architecture);
+  const nodeArchitecture = release.nodeArchives[architecture].architecture;
+  if (process.platform !== "darwin" || process.arch !== nodeArchitecture)
+    throw new Error(
+      `The macOS ${architecture} component builder requires a Darwin ${nodeArchitecture} build host`,
+    );
   if (hash(json(join(directory, "inputs.json"))) !== hash(expected))
     throw new Error("macOS component inputs do not match this source; prepare them again");
-  for (const [file, input] of Object.entries(downloads))
+  for (const [file, input] of Object.entries(expected.downloads))
     if (digest(join(directory, file)) !== input.sha256)
       throw new Error(`macOS component input checksum mismatch: ${file}`);
   for (const [file, sha256] of Object.entries(expected.files))
@@ -145,29 +158,35 @@ export function buildMacosComponents(directory, destination) {
       },
     );
     run("/usr/bin/tar", ["-xf", join(directory, "node.tar.xz"), "-C", temporary]);
-    const node = join(temporary, `node-v${release.node}-darwin-x64`);
+    const node = join(
+      temporary,
+      basename(new URL(expected.downloads["node.tar.xz"].url).pathname, ".tar.xz"),
+    );
     copy(join(node, "bin/node"), join(destination, "runtime/bin/node"));
     copy(join(node, "LICENSE"), join(destination, "runtime/LICENSE"));
     run("/usr/bin/tar", ["-xf", join(directory, "rg.tar.gz"), "-C", temporary]);
-    const rg = join(temporary, `ripgrep-${release.ripgrep.version}-x86_64-apple-darwin`);
+    const rg = join(
+      temporary,
+      basename(new URL(expected.downloads["rg.tar.gz"].url).pathname, ".tar.gz"),
+    );
     copy(join(rg, "rg"), join(destination, "native/bin/rg"));
     for (const file of ["COPYING", "LICENSE-MIT", "UNLICENSE"])
       copy(join(rg, file), join(destination, "native/licenses/ripgrep", file));
     const linkage = Object.fromEntries(
-      binaries.map((file) => [file, macho(join(destination, file))]),
+      binaries.map((file) => [file, macho(join(destination, file), architecture)]),
     );
     if (capture(join(destination, "native/bin/tmux"), ["-V"]) !== `tmux ${unix.tmux.version}`)
       throw new Error("macOS tmux version mismatch");
     writeJson(join(destination, "native/identity.json"), {
       linkage: "macos-system",
-      architecture: "x64",
+      architecture: nodeArchitecture,
       node: `v${release.node}`,
       tmux: unix.tmux.version,
       libevent: recipe.libeventVersion,
       flock: recipe.flock.version,
       ripgrep: {
         version: release.ripgrep.version,
-        ...recipe.ripgrep,
+        ...expected.downloads["rg.tar.gz"],
         binarySha256: digest(join(destination, "native/bin/rg")),
       },
       toolchain,
@@ -181,10 +200,14 @@ export function buildMacosComponents(directory, destination) {
   }
 }
 
-export function verifyMacosComponents(directory) {
+export function verifyMacosComponents(directory, architecture) {
   const native = join(directory, "native");
   const identity = json(join(native, "identity.json"));
-  if (hash(identity.inputs) !== hash(inputs()))
+  const expected = inputs(architecture);
+  if (
+    identity.architecture !== release.nodeArchives[architecture].architecture ||
+    hash(identity.inputs) !== hash(expected)
+  )
     throw new Error("macOS components do not match this source; rebuild them");
   const actual = files(directory);
   delete actual["native/identity.json"];
@@ -195,13 +218,13 @@ export function verifyMacosComponents(directory) {
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [mode, input, output, extra] = process.argv.slice(2);
+  const [mode, architecture, input, output, extra] = process.argv.slice(2);
   if (!input || extra || (mode === "build" ? !output : output))
     throw new Error(
-      "Usage: node scripts/build-macos-components.mjs prepare INPUTS | build INPUTS OUTPUT | verify OUTPUT",
+      "Usage: node scripts/build-macos-components.mjs prepare amd64|arm64 INPUTS | build amd64|arm64 INPUTS OUTPUT | verify amd64|arm64 OUTPUT",
     );
-  if (mode === "prepare") prepareMacosInputs(resolve(input));
-  else if (mode === "build") buildMacosComponents(resolve(input), resolve(output));
-  else if (mode === "verify") verifyMacosComponents(resolve(input));
+  if (mode === "prepare") prepareMacosInputs(resolve(input), architecture);
+  else if (mode === "build") buildMacosComponents(resolve(input), resolve(output), architecture);
+  else if (mode === "verify") verifyMacosComponents(resolve(input), architecture);
   else throw new Error(`Unknown macOS component build: ${mode}`);
 }

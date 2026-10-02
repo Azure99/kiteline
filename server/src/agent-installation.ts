@@ -106,8 +106,7 @@ case "$kiteline_platform:$(uname -s)" in
 esac
 case "$kiteline_platform:$(uname -m)" in
   linux:x86_64|macos:x86_64) kiteline_arch=amd64 ;;
-  linux:aarch64|linux:arm64) kiteline_arch=arm64 ;;
-  macos:aarch64|macos:arm64) echo 'macOS arm64 is not supported by this release; macOS requires x86_64.' >&2; exit 1 ;;
+  linux:aarch64|linux:arm64|macos:aarch64|macos:arm64) kiteline_arch=arm64 ;;
   *) echo 'No agent archive is available for this architecture' >&2; exit 1 ;;
 esac
 [ -x /usr/local/bin/kiteline-agent ] || { echo 'Install and bind the agent before upgrading' >&2; exit 1; }
@@ -176,17 +175,14 @@ export async function serveAgentInstallation(
     return true;
   }
   let filename = ["/install.sh", "/install.ps1"].includes(path) ? path.slice(1) : undefined;
-  for (const arch of ["amd64", "arm64"])
-    for (const suffix of [".tar.gz", ".tar.gz.sha256"]) {
-      const name = `kiteline-agent-${appVersion}-linux-${arch}${suffix}`;
-      if (path === `/downloads/agent/${appVersion}/${name}`) filename = name;
-    }
+  for (const platform of ["linux", "macos"])
+    for (const arch of ["amd64", "arm64"])
+      for (const suffix of [".tar.gz", ".tar.gz.sha256"]) {
+        const name = `kiteline-agent-${appVersion}-${platform}-${arch}${suffix}`;
+        if (path === `/downloads/agent/${appVersion}/${name}`) filename = name;
+      }
   for (const suffix of [".zip", ".zip.sha256"]) {
     const name = `kiteline-agent-${appVersion}-windows-amd64${suffix}`;
-    if (path === `/downloads/agent/${appVersion}/${name}`) filename = name;
-  }
-  for (const suffix of [".tar.gz", ".tar.gz.sha256"]) {
-    const name = `kiteline-agent-${appVersion}-macos-amd64${suffix}`;
     if (path === `/downloads/agent/${appVersion}/${name}`) filename = name;
   }
   if (!filename) throw new AppError("not_found", "Installation resource not found");

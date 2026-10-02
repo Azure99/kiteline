@@ -34,8 +34,7 @@ linux:Linux | macos:Darwin) ;;
 esac
 case "$platform:$(uname -m)" in
 linux:x86_64 | macos:x86_64) arch=amd64 ;;
-linux:aarch64 | linux:arm64) arch=arm64 ;;
-macos:aarch64 | macos:arm64) fail "macOS arm64 is not supported by this release; macOS requires x86_64." ;;
+linux:aarch64 | linux:arm64 | macos:aarch64 | macos:arm64) arch=arm64 ;;
 *) fail "No agent archive is available for this architecture" ;;
 esac
 

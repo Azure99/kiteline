@@ -14,8 +14,10 @@ import { digest, fetchPinned, run } from "./release-inputs.mjs";
 const root = resolve(import.meta.dirname, "..");
 const json = (file) => JSON.parse(readFileSync(join(root, file), "utf8"));
 
-export function buildStaticAgent(destination) {
+export function buildStaticAgent(destination, architecture = "amd64") {
   const release = json("deploy/release.json");
+  const nodeArchitecture = release.nodeArchives[architecture]?.architecture;
+  if (!nodeArchitecture) throw new Error(`Unsupported static agent architecture: ${architecture}`);
   const recipe = json("deploy/agent-static.json");
   const cache = "/var/tmp/kiteline-release-cache/static-sources";
   const temporary = mkdtempSync("/var/tmp/kiteline-static-");
@@ -54,8 +56,14 @@ export function buildStaticAgent(destination) {
     for (const [name, file] of Object.entries(files))
       cpSync(join(root, file), join(temporary, name));
     const toolchain = { image: recipe.alpine, packages: digest(join(temporary, "packages.txt")) };
-    const nodeInputs = { node, toolchain, recipe: digest(join(temporary, "build-static-node.sh")) };
+    const nodeInputs = {
+      architecture: nodeArchitecture,
+      node,
+      toolchain,
+      recipe: digest(join(temporary, "build-static-node.sh")),
+    };
     const nativeInputs = {
+      architecture: nodeArchitecture,
       sources: { tmux: recipe.tmux, ...recipe.sources },
       toolchain,
       recipe: digest(join(temporary, "build-static-native.sh")),
@@ -69,9 +77,11 @@ export function buildStaticAgent(destination) {
     run("docker", [
       "build",
       "--platform",
-      "linux/amd64",
+      `linux/${architecture}`,
       "--build-arg",
       `ALPINE=${recipe.alpine}`,
+      "--build-arg",
+      `NODE_ARCH=${nodeArchitecture}`,
       "--build-arg",
       "HTTP_PROXY",
       "--build-arg",
@@ -94,7 +104,7 @@ export function buildStaticAgent(destination) {
       JSON.stringify(
         {
           linkage: "static-musl",
-          architecture: "x64",
+          architecture: nodeArchitecture,
           image,
           node: nodeInputs,
           native: nativeInputs,
@@ -134,7 +144,11 @@ export function buildStaticAgent(destination) {
   if (cleanupErrors.length) throw new AggregateError(cleanupErrors, "Static build cleanup failed");
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url))
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const [architecture = "amd64", extra] = process.argv.slice(2);
+  if (extra) throw new Error("Usage: node scripts/build-agent-static.mjs [amd64|arm64]");
   buildStaticAgent(
-    resolve(process.env.KITELINE_STATIC_OUTPUT ?? join(root, "dist/agent-static-amd64")),
+    resolve(process.env.KITELINE_STATIC_OUTPUT ?? join(root, `dist/agent-static-${architecture}`)),
+    architecture,
   );
+}

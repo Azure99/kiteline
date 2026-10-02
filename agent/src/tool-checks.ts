@@ -10,14 +10,12 @@ import { packageDirectory } from "./installation.js";
 
 type Command = (file: string, args: string[]) => Promise<string>;
 
-export const bundledRipgrep = process.arch === "x64";
-export const ripgrepBinary = bundledRipgrep
-  ? join(packageDirectory, "dist/native/bin", process.platform === "win32" ? "rg.exe" : "rg")
-  : "rg";
-export const toolRequirements = [
-  { file: "git", major: 2, minor: 23 },
-  ...(!bundledRipgrep ? [{ file: "rg", major: 14, minor: 0 }] : []),
-];
+export const ripgrepBinary = join(
+  packageDirectory,
+  "dist/native/bin",
+  process.platform === "win32" ? "rg.exe" : "rg",
+);
+export const toolRequirements = [{ file: "git", major: 2, minor: 23 }];
 
 export async function windowsExecutable(file: string, env = process.env) {
   const fullPath = (value: string) => {

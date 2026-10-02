@@ -8,7 +8,7 @@
 
 ## 从源码开发
 
-开发环境使用 [package.json](package.json) 指定的 Node 和 pnpm。Ubuntu 原生组件构建需要 `build-essential pkg-config libevent-dev libncurses-dev ncurses-term bison curl patch`，运行设备工具还需要 Git 2.23.0+ 和 Shell。amd64组件准备会取得固定rg到内部路径，不要求系统rg；Linux arm64 需要外部 rg 14+，运行基线为 Ubuntu 24.04。
+开发环境使用 [package.json](package.json) 指定的 Node 和 pnpm。Ubuntu 原生组件构建需要 `build-essential pkg-config libevent-dev libncurses-dev ncurses-term bison curl patch`，运行设备工具还需要 Git 2.23.0+ 和 Shell。两种Linux架构的组件准备都会取得固定rg到内部路径，不要求系统rg；目标环境见[运行基线](deploy/README.md#平台要求)。
 
 ```sh
 pnpm install --frozen-lockfile

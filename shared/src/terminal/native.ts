@@ -61,7 +61,11 @@ export function tmuxEnvironment() {
   const environment: NodeJS.ProcessEnv = {
     ...process.env,
     TERMINFO_DIRS:
-      [terminfoDirectory, `${terminfoDirectory}-legacy`, process.env.TERMINFO_DIRS]
+      [
+        terminfoDirectory,
+        process.platform === "linux" ? `${terminfoDirectory}-legacy` : undefined,
+        process.env.TERMINFO_DIRS,
+      ]
         .filter(Boolean)
         .join(":") + ":",
   };
