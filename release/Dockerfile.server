@@ -1,0 +1,34 @@
+# Context: repository root, including dist/releases and release/ubuntu.sources.
+ARG UBUNTU
+FROM ${UBUNTU} AS base
+ARG CA_CERTIFICATES_URL
+ARG CA_CERTIFICATES_SHA256
+ADD --checksum=sha256:${CA_CERTIFICATES_SHA256} ${CA_CERTIFICATES_URL} /var/tmp/ca-certificates.deb
+COPY release/ubuntu.sources /etc/apt/sources.list.d/ubuntu.sources
+# Bootstrap HTTPS APT from the same pinned Ubuntu archive before installing system CAs.
+RUN dpkg-deb --extract /var/tmp/ca-certificates.deb /var/tmp/ca-bootstrap \
+    && mkdir -p /etc/ssl/certs \
+    && cat /var/tmp/ca-bootstrap/usr/share/ca-certificates/mozilla/*.crt > /etc/ssl/certs/ca-certificates.crt \
+    && apt-get update --error-on=any && apt-get install -y --no-install-recommends \
+    ca-certificates libstdc++6 libatomic1 \
+    && rm -rf /var/lib/apt/lists/* /var/tmp/ca-bootstrap /var/tmp/ca-certificates.deb
+ENV LANG=C.UTF-8 TMPDIR=/var/tmp
+
+FROM base AS server
+ARG TARGETARCH
+ARG VERSION
+RUN --mount=type=bind,source=dist/releases,target=/var/tmp/release \
+    cd /var/tmp/release \
+    && sha256sum --check kiteline-server-${VERSION}-linux-${TARGETARCH}.tar.gz.sha256 \
+    && mkdir /opt/kiteline-server \
+    && tar -xzf kiteline-server-${VERSION}-linux-${TARGETARCH}.tar.gz --no-same-owner --strip-components=1 -C /opt/kiteline-server \
+    && userdel ubuntu && groupadd --gid 1000 kiteline \
+    && useradd --uid 1000 --gid kiteline --create-home kiteline \
+    && mkdir -p /var/lib/kiteline && chown kiteline:kiteline /var/lib/kiteline \
+    && ln -s /opt/kiteline-server/bin/kiteline-server /usr/local/bin/kiteline-server
+ENV KITELINE_DATA_DIR=/var/lib/kiteline KITELINE_LISTEN_ADDR=0.0.0.0:8080
+USER kiteline
+WORKDIR /home/kiteline
+EXPOSE 8080
+ENTRYPOINT ["kiteline-server"]
+CMD ["serve"]

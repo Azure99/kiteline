@@ -5,7 +5,7 @@ import {
   updateWorkspaceQuery,
 } from "../lib/navigation";
 import { isDirty, type Draft, type DraftStore } from "./drafts";
-import { parentPath } from "./use-browser";
+import { parentPath } from "./paths";
 import type { FileTarget } from "./content";
 
 export function showFile(target: FileTarget) {

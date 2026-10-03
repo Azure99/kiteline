@@ -1,5 +1,5 @@
 import { AppError, limits } from "@kiteline/shared/protocol";
-import type { TerminalEvent, TerminalFrame } from "@kiteline/shared/ipc";
+import type { TerminalEvent, TerminalFrame } from "@kiteline/shared/protocol/ipc";
 import type { Snapshot } from "./model.js";
 
 type Piece = Buffer | TerminalFrame;

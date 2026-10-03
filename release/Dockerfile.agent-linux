@@ -1,0 +1,27 @@
+# Context: the Linux component builder's prepared temporary directory.
+ARG ALPINE
+FROM ${ALPINE} AS toolchain
+ENV TMPDIR=/var/tmp
+COPY packages.txt /var/tmp/packages.txt
+RUN xargs apk add --no-cache < /var/tmp/packages.txt \
+    && apk info -vv | sort > /var/tmp/build-packages.txt
+WORKDIR /var/tmp/build
+
+FROM toolchain AS native
+ARG NODE_ARCH
+COPY libevent* ncurses* tmux.tar.gz build-linux-native.sh ./
+COPY tmux-paste.patch rename-noreplace.c tmux.terminfo native-inputs.json ./
+RUN sh build-linux-native.sh "$NODE_ARCH"
+COPY licenses/musl-COPYRIGHT /output/native/licenses/musl-COPYRIGHT
+COPY --from=toolchain /var/tmp/build-packages.txt /output/native/build-packages.txt
+COPY native-inputs.json /output/native/inputs.json
+
+FROM toolchain AS verified
+COPY --from=native /output/ /output/
+COPY runtime/ /output/runtime/
+RUN /output/runtime/bin/node --version \
+    && /output/native/bin/tmux -V \
+    && cd /output && find runtime native -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+
+FROM scratch
+COPY --from=verified /output/ /output/

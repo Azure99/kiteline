@@ -3,12 +3,11 @@ import { constants } from "node:fs";
 import { join } from "node:path";
 import { appVersion, terminalProfile, type Session } from "@kiteline/shared/protocol";
 import { windowsNative } from "@kiteline/shared/windows/native";
-import { agentConfig, agentPaths, defaultAgentLimits, type AgentConfig } from "./config.js";
-import { localRequest } from "./local.js";
-import { packageDirectory } from "./installation.js";
-import { checkComponents, checkEnvironment } from "./prerequisites.js";
+import { stateFiles, type AgentConfig } from "./config.js";
+import { packageDirectory } from "./install/paths.js";
+import { checkComponents, checkHostEnvironment } from "./prerequisites.js";
 import type { ScheduledTasks } from "./tasks/index.js";
-import { toolCommand, windowsExecutable } from "./tool-checks.js";
+import { toolCommand, windowsExecutable } from "./tools.js";
 
 interface Item {
   name: string;
@@ -53,7 +52,7 @@ export async function diagnose(
     toolCommand(file, args, { env, signal });
   add(
     "Configuration",
-    `data=${config.dataDir}; run=${config.runDir}; metadata=${join(config.dataDir, "agent.json")}; schedules=${join(config.dataDir, "tasks")}`,
+    `data=${config.dataDir}; run=${config.runDir}; metadata=${join(config.dataDir, stateFiles.metadata)}; schedules=${join(config.dataDir, stateFiles.tasks)}`,
   );
   add("Node", `${process.execPath}; ${process.version} ${process.arch}; agent=${appVersion}`);
   const native = join(packageDirectory, "dist/native");
@@ -131,7 +130,7 @@ export async function diagnose(
         "[Console]::OutputEncoding.WebName",
       ]),
     );
-  await checkEnvironment(runtime.shell, check, command);
+  await checkHostEnvironment(runtime.shell, check, command);
   await check("Git configuration sources", async () => {
     try {
       const value = await command("git", [
@@ -172,29 +171,4 @@ Repository-specific includeIf/configuration and actual authentication are verifi
       return `${path}; accessible; authentication must be verified by an actual synchronization`;
     });
   return { runtime: true, items };
-}
-export async function doctorCli() {
-  const config = { ...(await agentPaths()), limits: defaultAgentLimits };
-  let report: DoctorReport;
-  try {
-    report = await localRequest<DoctorReport>(config, "doctor");
-  } catch (error) {
-    report = await diagnose(config, AbortSignal.timeout(config.limits.rpcTimeout));
-    try {
-      await agentConfig();
-    } catch (error) {
-      report.items.push({
-        name: "Configuration on disk",
-        status: "error",
-        detail: error instanceof Error ? error.message : String(error),
-      });
-    }
-    report.items.unshift({
-      name: "Local connection",
-      status: "warn",
-      detail: error instanceof Error ? error.message : String(error),
-    });
-  }
-  for (const item of report.items) console.log(`[${item.status}] ${item.name}: ${item.detail}`);
-  if (report.items.some((item) => item.status === "error")) process.exitCode = 1;
 }

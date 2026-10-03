@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { TemporaryFiles } from "../src/files/temporary.js";
-import { installationFile, readInstallation } from "../src/installation.js";
+import { installationFile, readInstallation } from "../src/install/paths.js";
 
 test("unreadable temporary records are logged and ignored; readable residual paths are removed", async () => {
   const root = await fs.mkdtemp("/var/tmp/kiteline-temporary-records-");

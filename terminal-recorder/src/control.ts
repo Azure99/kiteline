@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { finished } from "node:stream/promises";
 import type { Writable } from "node:stream";
 import { AppError, limits } from "@kiteline/shared/protocol";
-import { readLines } from "@kiteline/shared/stdio";
+import { readLines } from "@kiteline/shared/protocol/stdio";
 import {
   exitCodeFormat,
   msysDirectory,
@@ -17,7 +17,7 @@ import {
 } from "@kiteline/shared/terminal/node";
 import { paneCommand } from "@kiteline/shared/terminal/windows";
 import { spawnJob, type JobChild } from "@kiteline/shared/windows/job";
-import type { TerminalSource, TerminalIdentity } from "@kiteline/shared/ipc";
+import type { TerminalSource, TerminalIdentity } from "@kiteline/shared/protocol/ipc";
 
 interface Pending {
   resolve: (result: string[]) => void;

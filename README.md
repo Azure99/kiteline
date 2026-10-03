@@ -4,11 +4,11 @@
 
 ## 安装与运行
 
-发布包构建、server 部署、设备接入及后台运行见 [安装与运行](deploy/README.md)，平台要求见 [运行基线](deploy/README.md#平台要求)。后台服务由用户配置和管理。
+server 部署、设备接入及后台运行见 [安装与运行](deploy/README.md)，发布包构建见 [构建交付物](release/README.md)，平台要求见 [运行基线](deploy/README.md#平台要求)。后台服务由用户配置和管理。
 
 ## 从源码开发
 
-开发环境使用 [package.json](package.json) 指定的 Node 和 pnpm。Ubuntu 原生组件构建需要 `build-essential pkg-config libevent-dev libncurses-dev ncurses-term bison curl patch`，运行设备工具还需要 Git 2.23.0+ 和 Shell。两种Linux架构的组件准备都会取得固定rg到内部路径，不要求系统rg；目标环境见[运行基线](deploy/README.md#平台要求)。
+开发环境使用 [package.json](package.json) 指定的 Node 和 pnpm。Ubuntu 原生组件构建需要 `build-essential pkg-config libevent-dev libncurses-dev ncurses-bin bison curl patch`，terminfo使用仓内固定源；运行设备工具还需要 Git 2.23.0+ 和 Shell。两种Linux架构的组件准备都会取得固定rg到内部路径，不要求系统rg；目标环境见[运行基线](deploy/README.md#平台要求)。
 
 ```sh
 pnpm install --frozen-lockfile
@@ -57,7 +57,7 @@ pnpm test
 pnpm build
 ```
 
-文件、Git和进程测试使用真实文件系统、Git及tmux，需要先构建原生组件。浏览器改动在当前Chrome与实际Chromium 97检查，覆盖桌面、手机布局和连续操作；输入法、软键盘、剪贴板和全屏另在Android真机核对。Windows文件与安装链使用Windows 11本地NTFS；各平台从最终包运行并检查受影响的安装升级流程，构建入口见[生成交付物](deploy/README.md#生成交付物)。
+文件、Git和进程测试使用真实文件系统、Git及tmux，需要先构建原生组件。浏览器改动在当前Chrome与实际Chromium 97检查，覆盖桌面、手机布局和连续操作；输入法、软键盘、剪贴板和全屏另在Android真机核对。Windows文件与安装链使用Windows 11本地NTFS；各平台从最终包运行并检查受影响的安装升级流程，构建入口见[构建交付物](release/README.md)。
 
 ## 许可证
 

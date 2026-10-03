@@ -21,12 +21,12 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { AppError, OperationError } from "@kiteline/shared/protocol";
-import { publish } from "../src/mutations.js";
+import { publish } from "../src/files/publish.js";
 import { FileOperations } from "../src/files/operations.js";
 import { TemporaryFiles } from "../src/files/temporary.js";
 import { Files } from "../src/files/index.js";
 import { MetadataStore } from "../src/metadata.js";
-import { Directories } from "../src/directories.js";
+import { Directories } from "../src/files/directories.js";
 import { defaultAgentLimits } from "../src/config.js";
 import { BinaryFiles } from "../src/files/binary.js";
 import { TextFiles } from "../src/files/text.js";

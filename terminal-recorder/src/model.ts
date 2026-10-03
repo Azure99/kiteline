@@ -9,7 +9,7 @@ import {
   terminalOptions,
   initializeTerminalUnicode,
 } from "@kiteline/shared/terminal";
-import type { TerminalEvent } from "@kiteline/shared/ipc";
+import type { TerminalEvent } from "@kiteline/shared/protocol/ipc";
 
 const { Terminal } = headless;
 const { SerializeAddon } = serialize;

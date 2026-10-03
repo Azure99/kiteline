@@ -1,6 +1,10 @@
 import { asError, errorReply, AppError } from "@kiteline/shared/protocol";
-import type { RecorderConfig, RecorderMessage, RecorderRequest } from "@kiteline/shared/ipc";
-import { JsonWriter, readLines } from "@kiteline/shared/stdio";
+import type {
+  RecorderConfig,
+  RecorderMessage,
+  RecorderRequest,
+} from "@kiteline/shared/protocol/ipc";
+import { JsonWriter, readLines } from "@kiteline/shared/protocol/stdio";
 import { RecordedSession } from "./session.js";
 
 interface Creation {

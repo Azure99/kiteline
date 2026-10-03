@@ -20,8 +20,8 @@ test("device deletion removes its associations and preserves other devices and p
     const otherBinding = store.newBinding();
     const other = store.bind(otherBinding.code, "Other");
     const pending = store.newBinding();
-    store.taskSnapshot(first.deviceId, { revision: 1, items: [] });
-    store.taskSnapshot(other.deviceId, { revision: 2, items: [] });
+    store.saveTaskSnapshot(first.deviceId, { revision: 1, items: [] });
+    store.saveTaskSnapshot(other.deviceId, { revision: 2, items: [] });
 
     store.deleteDevice(first.deviceId);
 
@@ -43,7 +43,7 @@ test("a failed device deletion rolls back its binding and task summary together"
   await withStore((store) => {
     const binding = store.newBinding();
     const device = store.bind(binding.code, "Retained");
-    store.taskSnapshot(device.deviceId, { revision: 1, items: [] });
+    store.saveTaskSnapshot(device.deviceId, { revision: 1, items: [] });
     store.db.exec(`CREATE TRIGGER fail_delete BEFORE DELETE ON devices
       BEGIN SELECT RAISE(ABORT, 'fixture write failure'); END;`);
 

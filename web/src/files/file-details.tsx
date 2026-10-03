@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import type { Entry } from "@kiteline/shared/protocol";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
-import { formatBytes } from "./use-browser";
+import { formatBytes } from "./format";
 
 export function FileDetails({ entry, onClose }: { entry: Entry; onClose(): void }) {
   const { t, i18n } = useTranslation();

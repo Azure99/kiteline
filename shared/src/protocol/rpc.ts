@@ -32,7 +32,7 @@ import type {
   TaskRun,
   TaskRunSummary,
   TaskOutput,
-} from "./schedules.js";
+} from "./tasks.js";
 
 type Contract<P, R> = { params: P; result: R };
 type WorkspaceParams = { workspaceId: string };

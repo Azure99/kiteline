@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCw, Terminal } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Auth, type Session } from "./auth";
+import { Auth, type LoginSession } from "./auth";
 import { Button } from "./components/ui/button";
 import { ErrorNotice } from "./components/error-notice";
 import { deferredView } from "./components/deferred-view";
@@ -15,12 +15,12 @@ const Workbench = deferredView(async () => ({ default: (await import("./workbenc
 
 export function App() {
   const { t } = useTranslation();
-  const [session, updateSession] = useState<Session>();
+  const [session, updateSession] = useState<LoginSession>();
   const [entered, setEntered] = useState(false);
   const [initialized, setInitialized] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>();
-  const setSession = useCallback((value?: Session) => {
+  const setSession = useCallback((value?: LoginSession) => {
     updateSession(value);
     if (value) setEntered(true);
   }, []);
@@ -28,7 +28,7 @@ export function App() {
     setLoading(true);
     setError(undefined);
     try {
-      setSession(await api<Session>("/api/session"));
+      setSession(await api<LoginSession>("/api/session"));
       returnToService();
     } catch (error) {
       if (error instanceof ApiError && error.code === "unauthenticated") {

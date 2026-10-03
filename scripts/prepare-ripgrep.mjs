@@ -12,7 +12,7 @@ function run(command, args) {
 
 export function prepareRipgrep(destination, architecture) {
   const { ripgrep, nodeArchives } = JSON.parse(
-    readFileSync(join(root, "deploy/release.json"), "utf8"),
+    readFileSync(join(root, "release/inputs.json"), "utf8"),
   );
   const input = ripgrep.linuxArchives[architecture];
   if (!input) throw new Error(`Unsupported ripgrep architecture: ${architecture}`);

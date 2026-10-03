@@ -18,7 +18,7 @@ import {
   CalendarClock,
 } from "lucide-react";
 import type { BrowserEvent, Device } from "@kiteline/shared/protocol";
-import type { Session } from "./auth";
+import type { LoginSession } from "./auth";
 import { ApiError, errorMessage, post } from "./lib/api";
 import { ErrorDetails } from "./components/error-notice";
 import {
@@ -27,9 +27,9 @@ import {
   navigate,
   useRoute,
   workspacePath,
-  schedulePath,
+  tasksPath,
 } from "./lib/navigation";
-import { useDevices } from "./use-devices";
+import { useDevices } from "./devices/use-devices";
 import { Button } from "./components/ui/button";
 import {
   Dialog,
@@ -71,8 +71,8 @@ const Files = deferredView(async () => ({ default: (await import("./files/files"
 const GitTool = deferredView(async () => ({ default: (await import("./git/git")).GitTool }), {
   active: (props) => props.visible,
 });
-const ScheduledTasksPage = deferredView(async () => ({
-  default: (await import("./schedules/scheduled-tasks")).ScheduledTasksPage,
+const TasksPage = deferredView(async () => ({
+  default: (await import("./tasks/tasks")).TasksPage,
 }));
 
 export function Workbench({
@@ -80,8 +80,8 @@ export function Workbench({
   setSession,
   authentication,
 }: {
-  session?: Session;
-  setSession(session?: Session): void;
+  session?: LoginSession;
+  setSession(session?: LoginSession): void;
   authentication: ReactNode;
 }) {
   const { t, i18n } = useTranslation();
@@ -307,10 +307,10 @@ export function Workbench({
           />
           <IconButton
             label={t(($) => $.schedules.title)}
-            aria-current={route.schedule ? "page" : undefined}
-            className={route.schedule ? "bg-muted text-primary" : undefined}
+            aria-current={route.tasks ? "page" : undefined}
+            className={route.tasks ? "bg-muted text-primary" : undefined}
             onClick={() => {
-              if (!route.schedule) choose(schedulePath({ filter: device?.id }));
+              if (!route.tasks) choose(tasksPath({ filter: device?.id }));
             }}
           >
             <CalendarClock />
@@ -400,7 +400,7 @@ export function Workbench({
             <DeviceNavigation {...navigationProps} />
           </aside>
           <main className="flex min-w-0 flex-1 flex-col">
-            {route.valid && !route.schedule && device && (!route.workspaceId || workspace) && (
+            {route.valid && !route.tasks && device && (!route.workspaceId || workspace) && (
               <AgentReleaseNotice key={`agent-release:${device.id}`} device={device} />
             )}
             {!!(error || connectionError) && (
@@ -434,8 +434,8 @@ export function Workbench({
                   {t(($) => $.shell.backDevices)}
                 </Button>
               </div>
-            ) : route.schedule ? (
-              <ScheduledTasksPage devices={devices} connected={connected} route={route.schedule} />
+            ) : route.tasks ? (
+              <TasksPage devices={devices} connected={connected} route={route.tasks} />
             ) : !route.deviceId ? (
               <Home
                 devices={devices}

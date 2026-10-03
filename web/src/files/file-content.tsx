@@ -7,7 +7,7 @@ import { IconButton } from "../components/icon-button";
 import { ApiError } from "../lib/api";
 import { currentRoute, isWorkspaceRoute, updateWorkspaceQuery } from "../lib/navigation";
 import { showDraft } from "./navigation";
-import { parentPath } from "./use-browser";
+import { parentPath } from "./paths";
 import { downloadFile, readContent, type DiskImage, type FileTarget } from "./content";
 import type { DraftStore } from "./drafts";
 import { ImagePreview } from "./image-preview";

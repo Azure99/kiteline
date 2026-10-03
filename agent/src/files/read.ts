@@ -8,7 +8,7 @@ import { JPG } from "image-size/types/jpg";
 import { GIF } from "image-size/types/gif";
 import { WEBP } from "image-size/types/webp";
 import { AppError, limits, type FileMeta } from "@kiteline/shared/protocol";
-import { decodeText, encodeText } from "@kiteline/shared/text";
+import { decodeText, encodeText } from "@kiteline/shared/protocol/text";
 import type { AgentConfig } from "../config.js";
 import { realPath } from "./paths.js";
 

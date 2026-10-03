@@ -16,8 +16,7 @@ import {
 } from "node:fs";
 import { basename, resolve, join, relative } from "node:path";
 import { parseArgs } from "node:util";
-import { buildStaticAgent } from "./build-agent-static.mjs";
-import { prepareRipgrep } from "./prepare-ripgrep.mjs";
+import { buildLinuxComponents } from "./build-linux-components.mjs";
 import { verifyWindowsComponents } from "./build-windows-components.mjs";
 import { verifyMacosComponents } from "./build-macos-components.mjs";
 import {
@@ -27,10 +26,11 @@ import {
   run as execute,
   sourceCommit as readSourceCommit,
 } from "./release-inputs.mjs";
-import { windowsRuntimeFiles, windowsComponentPath } from "../shared/src/windows/components.ts";
+import { windowsRuntimeFiles, windowsComponentPath } from "./windows-components.ts";
+import { agentLauncher, windowsAgentLaunchers } from "./agent-launcher.ts";
 
 const root = resolve(import.meta.dirname, "..");
-const release = JSON.parse(readFileSync(join(root, "deploy/release.json"), "utf8"));
+const release = JSON.parse(readFileSync(join(root, "release/inputs.json"), "utf8"));
 const { positionals, values } = parseArgs({
   allowPositionals: true,
   options: {
@@ -42,7 +42,12 @@ const { positionals, values } = parseArgs({
 const [kind, target] = positionals;
 const windowsAgent = kind === "agent" && target === "windows-amd64";
 const macosAgent = kind === "agent" && ["macos-amd64", "macos-arm64"].includes(target);
-const arch = windowsAgent ? "amd64" : macosAgent ? target.slice("macos-".length) : target;
+const linuxAgent = kind === "agent" && ["linux-amd64", "linux-arm64"].includes(target);
+const arch = windowsAgent
+  ? "amd64"
+  : macosAgent || linuxAgent
+    ? target.slice(target.indexOf("-") + 1)
+    : target;
 const windowsComponents = values["windows-components"];
 const macosComponents = values["macos-components"];
 const allAgentTargets = [
@@ -56,6 +61,7 @@ const agentTargets = values["agent-target"]?.split(",") ?? allAgentTargets;
 if (
   positionals.length !== 2 ||
   !["server", "agent"].includes(kind) ||
+  (kind === "agent" && !windowsAgent && !macosAgent && !linuxAgent) ||
   !Object.hasOwn(release.nodeArchives, arch ?? "") ||
   (values["agent-target"] !== undefined && kind !== "server") ||
   agentTargets.some((target) => !allAgentTargets.includes(target)) ||
@@ -64,10 +70,9 @@ if (
   (macosAgent ? !macosComponents : macosComponents !== undefined)
 )
   throw new Error(
-    "Usage: pnpm package agent|server amd64|arm64 [--agent-target=linux-amd64,linux-arm64,windows-amd64,macos-amd64,macos-arm64 (server only)] | agent windows-amd64 --windows-components=PATH | agent macos-amd64|macos-arm64 --macos-components=PATH",
+    "Usage: pnpm package server amd64|arm64 [--agent-target=linux-amd64,linux-arm64,windows-amd64,macos-amd64,macos-arm64] | agent linux-amd64|linux-arm64 | agent windows-amd64 --windows-components=PATH | agent macos-amd64|macos-arm64 --macos-components=PATH",
   );
 const node = release.nodeArchives[arch];
-const staticAgent = kind === "agent" && !windowsAgent && !macosAgent;
 const { version } = JSON.parse(readFileSync(join(root, "shared/src/version.json"), "utf8"));
 const output = join(root, "dist/releases");
 const cache = "/var/tmp/kiteline-release-cache";
@@ -167,7 +172,7 @@ function deploy(name, target) {
 function checksums(directory) {
   const entries = [];
   const expectedELFs = new Set(
-    staticAgent
+    linuxAgent
       ? [
           "runtime/bin/node",
           "dist/native/bin/tmux",
@@ -196,7 +201,7 @@ function checksums(directory) {
           chmodSync(file, executable ? 0o755 : 0o644);
         }
         const bytes = readFileSync(file);
-        if (staticAgent) {
+        if (linuxAgent) {
           if (name.endsWith(".node"))
             throw new Error(`Dynamic Node addon is not supported: ${name}`);
           if (bytes.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) {
@@ -211,7 +216,7 @@ function checksums(directory) {
         }
         entries.push(`${createHash("sha256").update(bytes).digest("hex")}  ${name}`);
       } else if (windowsAgent) throw new Error(`Windows packages cannot contain links: ${file}`);
-      else if ((staticAgent || macosAgent) && stat.isSymbolicLink()) {
+      else if ((linuxAgent || macosAgent) && stat.isSymbolicLink()) {
         const target = realpathSync(file);
         if (target !== directory && !target.startsWith(directory + "/"))
           throw new Error(`Agent symlink escapes package: ${file}`);
@@ -225,6 +230,8 @@ function checksums(directory) {
 }
 try {
   const sourceCommit = readSourceCommit(root);
+  for (const name of ["shared", "server", "agent", "terminal-recorder"])
+    rmSync(join(root, name, "dist"), { recursive: true, force: true });
   run("pnpm", ["build"]);
   const agents = kind === "server" ? await agentArchives(sourceCommit) : [];
   mkdirSync(cache, { recursive: true });
@@ -244,9 +251,9 @@ try {
     macosBuild = verifyMacosComponents(components, arch);
     runtime = join(components, "runtime");
     cpSync(join(components, "native"), native, { recursive: true });
-  } else if (staticAgent) {
-    const components = join(temporary, "static");
-    buildStaticAgent(components, arch);
+  } else if (linuxAgent) {
+    const components = join(temporary, "linux");
+    buildLinuxComponents(components, arch);
     runtime = join(components, "runtime");
     run("cp", ["-a", join(components, "native"), native]);
     staticBuild = JSON.parse(readFileSync(join(components, "build.json"), "utf8"));
@@ -259,32 +266,6 @@ try {
     );
     run("tar", ["-xJf", archive, "-C", temporary]);
     runtime = join(temporary, filename.slice(0, -7));
-  }
-  if (staticAgent) {
-    writeFileSync(
-      join(native, "identity.json"),
-      JSON.stringify(
-        {
-          linkage: "static-musl",
-          node: `v${release.node}`,
-          architecture: node.architecture,
-          tmux: staticBuild.native.sources.tmux.version,
-          tmuxSource: staticBuild.native.sources.tmux.sha256,
-          patch: staticBuild.native.patch,
-          helper: staticBuild.native.helper,
-          terminfo: staticBuild.native.terminfo,
-          terminfoResources: {
-            modern: digest(join(native, "share/terminfo/t/tmux-256color")),
-            legacy: digest(join(native, "share/terminfo-legacy/t/tmux-256color")),
-          },
-          tmuxBinary: digest(join(native, "bin/tmux")),
-          helperBinary: digest(join(native, "bin/rename-noreplace")),
-          ripgrep: prepareRipgrep(native, arch),
-        },
-        null,
-        2,
-      ) + "\n",
-    );
   }
   if (kind === "agent") {
     const recorder = JSON.parse(
@@ -322,22 +303,26 @@ try {
     cpSync(native, join(destination, "dist/native"), { recursive: true });
     mkdirSync(join(destination, "deploy"));
     const manager = windowsAgent ? "xml" : macosAgent ? "plist" : "service";
+    const examples = windowsAgent ? "winsw" : macosAgent ? "launchd" : "systemd";
     cpSync(
-      join(root, `deploy/kiteline-agent.${manager}`),
+      join(root, `deploy/${examples}/kiteline-agent.${manager}`),
       join(destination, `deploy/kiteline-agent.${manager}`),
     );
   } else {
     cpSync(join(root, "web/dist"), join(destination, "web/dist"), { recursive: true });
+    mkdirSync(join(destination, "installer"));
+    for (const name of ["connect.in.sh", "upgrade.in.sh", "windows-entry.in.ps1"])
+      cpSync(join(root, "installer", name), join(destination, "installer", name));
     const downloads = join(destination, "downloads");
     mkdirSync(downloads);
     for (const { archive, checksum } of agents)
       for (const file of [archive, checksum]) cpSync(file, join(downloads, basename(file)));
-    cpSync(join(root, "deploy/install-agent.sh"), join(downloads, "install.sh"));
-    cpSync(join(root, "deploy/install-agent.ps1"), join(downloads, "install.ps1"));
+    cpSync(join(root, "installer/install.sh"), join(downloads, "install.sh"));
+    cpSync(join(root, "installer/install.ps1"), join(downloads, "install.ps1"));
   }
   if (windowsAgent || macosAgent)
     cpSync(runtime, join(destination, "runtime"), { recursive: true });
-  else if (staticAgent) run("cp", ["-a", runtime, join(destination, "runtime")]);
+  else if (linuxAgent) run("cp", ["-a", runtime, join(destination, "runtime")]);
   else {
     mkdirSync(join(destination, "runtime/bin"), { recursive: true });
     cpSync(join(runtime, "bin/node"), join(destination, "runtime/bin/node"));
@@ -346,56 +331,26 @@ try {
   mkdirSync(join(destination, "bin"));
   const launcher = join(destination, "bin", `kiteline-${kind}${windowsAgent ? ".ps1" : ""}`);
   if (windowsAgent) {
-    const nativeSource = readFileSync(join(root, "native/windows/launcher.cs"), "utf8");
-    const type = `KitelineLauncher_${createHash("sha256").update(nativeSource).digest("hex").slice(0, 16)}`;
-    const list = (values) =>
-      "@(" + values.map((value) => `'${value.replaceAll("'", "''")}'`).join(",") + ")";
-    const required = [
-      "SHA256SUMS",
-      "release.json",
-      "bin/kiteline-agent.ps1",
-      "bin/kiteline-agent-installed.ps1",
-      "agent/package.json",
-      "agent/dist/main.js",
-      "shared/package.json",
-      "shared/dist/version.json",
-      "shared/dist/protocol/index.js",
-      "shared/dist/windows/native.js",
-      "shared/dist/terminal/pane.js",
-      "terminal-recorder/package.json",
-      "terminal-recorder/dist/main.js",
-      "dist/native/identity.json",
-      ...windowsRuntimeFiles.map(windowsComponentPath),
-    ];
-    const template = readFileSync(join(root, "deploy/kiteline-agent.ps1"), "utf8")
-      .replace("__KITELINE_REQUIRED_FILES__", list(required))
-      .replace("__KITELINE_NATIVE_SOURCE__", nativeSource)
-      .replaceAll("__KITELINE_LAUNCHER_TYPE__", type);
-    writeFileSync(
-      launcher,
-      template.replace(
-        "__KITELINE_PACKAGE_ROOT__",
-        "[IO.Directory]::GetParent($PSScriptRoot).FullName",
-      ),
-    );
-    writeFileSync(
-      join(destination, "bin/kiteline-agent-installed.ps1"),
-      template.replace("__KITELINE_PACKAGE_ROOT__", "$program"),
-    );
+    const launchers = windowsAgentLaunchers(windowsRuntimeFiles.map(windowsComponentPath));
+    writeFileSync(launcher, launchers.portable);
+    writeFileSync(join(destination, "bin/kiteline-agent-installed.ps1"), launchers.installed);
   } else if (kind === "agent") {
-    const { agentLauncher } = await import("../agent/dist/launcher.js");
+    const { installDirectory, installationManagementFile, installationUseFile } = await import(
+      "../agent/dist/install/paths.js"
+    );
+    const paths = {
+      directory: installDirectory,
+      management: installationManagementFile,
+      use: installationUseFile,
+    };
     const platform = macosAgent ? "darwin" : "linux";
-    writeFileSync(launcher, agentLauncher(undefined, undefined, platform));
+    writeFileSync(launcher, agentLauncher(undefined, paths, platform));
     writeFileSync(
       join(destination, "bin/kiteline-agent-installed"),
-      agentLauncher("/opt/kiteline-agent", undefined, platform),
+      agentLauncher(installDirectory, paths, platform),
     );
     chmodSync(join(destination, "bin/kiteline-agent-installed"), 0o755);
-  } else
-    writeFileSync(
-      launcher,
-      `#!/bin/sh\nset -eu\nkiteline_root=$(dirname -- "$(dirname -- "$(readlink -f -- "$0")")")\nexec "$kiteline_root/runtime/bin/node" "$kiteline_root/${kind}/dist/main.js" "$@"\n`,
-    );
+  } else cpSync(join(root, "installer/kiteline-server"), launcher);
   chmodSync(launcher, 0o755);
   writeFileSync(
     join(destination, "release.json"),
@@ -418,7 +373,7 @@ try {
               : {
                   nodeArchive: node.sha256,
                   ubuntu: release.ubuntu,
-                  aptSources: digest(join(root, "deploy/ubuntu.sources")),
+                  aptSources: digest(join(root, "release/ubuntu.sources")),
                   caCertificates: release.caCertificates,
                 }),
       },

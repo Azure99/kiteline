@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { releaseMatches, run, sourceCommit as readSourceCommit } from "./release-inputs.mjs";
 
 const root = resolve(import.meta.dirname, "..");
-const release = JSON.parse(readFileSync(resolve(root, "deploy/release.json"), "utf8"));
+const release = JSON.parse(readFileSync(resolve(root, "release/inputs.json"), "utf8"));
 const { version } = JSON.parse(readFileSync(resolve(root, "shared/src/version.json"), "utf8"));
 const arch = process.argv[2];
 if (!Object.hasOwn(release.nodeArchives, arch ?? ""))
@@ -64,7 +64,7 @@ try {
       "--iidfile",
       imageFile,
       "-f",
-      "deploy/Dockerfile",
+      "release/Dockerfile.server",
       ".",
     ],
     { cwd: root },

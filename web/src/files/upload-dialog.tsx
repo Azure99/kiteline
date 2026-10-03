@@ -15,7 +15,8 @@ import {
 import { ApiError, rpc } from "../lib/api";
 import { FileConflictDialog } from "./conflict-dialog";
 import { uploadFile } from "./content";
-import { childPath, formatBytes } from "./use-browser";
+import { childPath } from "./paths";
+import { formatBytes } from "./format";
 
 interface UploadRow {
   id: number;

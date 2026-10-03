@@ -14,7 +14,7 @@ import {
   type TaskRun,
   type TaskSnapshot,
 } from "@kiteline/shared/protocol";
-import { atomicJson, readJson, type AgentConfig } from "../config.js";
+import { atomicJson, readJson, stateFiles, type AgentConfig } from "../config.js";
 import { checkTaskInput, nextOccurrence, previewSchedule } from "./schedule.js";
 import { TaskProcess } from "./process.js";
 import { taskRecord, type TaskRecord } from "./record.js";
@@ -40,7 +40,7 @@ export class ScheduledTasks {
   onChange?: (snapshot: TaskSnapshot) => void;
 
   constructor(private readonly config: AgentConfig) {
-    this.directory = join(config.dataDir, "tasks");
+    this.directory = join(config.dataDir, stateFiles.tasks);
   }
 
   private statePath(id: string) {

@@ -1,9 +1,10 @@
 import release from "../version.json" with { type: "json" };
+import type { TaskSnapshot } from "./tasks.js";
 
 export const appVersion = release.version;
 export const terminalProfile = "xterm-c2-unicode11";
 export { rpcMutates, gitWriteMethods } from "./rpc.js";
-export * from "./schedules.js";
+export * from "./tasks.js";
 export type {
   RpcMethods,
   RpcMethod,
@@ -290,6 +291,26 @@ export type WorkspaceEvent =
   | { type: "sessions.changed"; workspaceId: string }
   | { type: "watch.status"; workspaceId: string; status: "normal" | "degraded"; reason?: string };
 export type AgentEvent = WorkspaceEvent | ({ type: "request.progress"; id: string } & FileProgress);
+export type ChannelKind = "terminal.attach" | "file.read" | "file.write" | "http.proxy";
+export type AgentControlMessage =
+  | AgentEvent
+  | { type: "hello"; snapshot: Metadata; editorBytes: number; environment: AgentEnvironment }
+  | { type: "metadata.snapshot"; snapshot: Metadata }
+  | ({ type: "tasks.snapshot" } & TaskSnapshot)
+  | { type: "rpc.result"; reply: Reply };
+export type ServerControlMessage =
+  | { type: "welcome"; connectionId: string; serverVersion: string }
+  | { type: "watch.set"; workspaceIds: string[] }
+  | { type: "rpc.request"; id: string; method: string; params: Record<string, unknown> }
+  | { type: "rpc.cancel"; id: string }
+  | {
+      type: "channel.open";
+      channelId: string;
+      connectionId: string;
+      kind: ChannelKind;
+      params: Record<string, unknown>;
+    }
+  | { type: "channel.cancel"; channelId: string };
 export type BrowserEvent =
   | { type: "devices.changed"; devices: Device[] }
   | { type: "tasks.changed"; deviceId: string }

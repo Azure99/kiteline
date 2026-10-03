@@ -8,12 +8,13 @@ import {
   checkMetadata,
   limits,
   type AgentEnvironment,
+  type AgentControlMessage,
   type Metadata,
 } from "@kiteline/shared/protocol";
-import { atomicJson, readJson, type AgentConfig } from "./config.js";
+import { atomicJson, readJson, stateFiles, type AgentConfig } from "./config.js";
 import { windowsNative } from "@kiteline/shared/windows/native";
 import { devicePath, realPath, sameObject } from "./files/paths.js";
-import { publicCliPath } from "./installation.js";
+import { publicCliPath } from "./install/paths.js";
 
 export class MetadataStore {
   value: Metadata = {
@@ -43,13 +44,13 @@ export class MetadataStore {
   }
   async load() {
     try {
-      this.value = checkMetadata(await readJson(resolve(this.config.dataDir, "agent.json")));
+      this.value = checkMetadata(await readJson(resolve(this.config.dataDir, stateFiles.metadata)));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
     this.checkBudget(this.value);
   }
-  hello(snapshot = this.value) {
+  hello(snapshot = this.value): Extract<AgentControlMessage, { type: "hello" }> {
     return {
       type: "hello",
       snapshot,
@@ -58,7 +59,10 @@ export class MetadataStore {
     };
   }
   private checkBudget(snapshot: Metadata) {
-    for (const message of [this.hello(snapshot), { type: "metadata.snapshot", snapshot }])
+    for (const message of [
+      this.hello(snapshot),
+      { type: "metadata.snapshot", snapshot } satisfies AgentControlMessage,
+    ])
       if (Buffer.byteLength(JSON.stringify(message)) > limits.controlMessageBytes)
         throw new AppError(
           "limit_exceeded",
@@ -72,7 +76,7 @@ export class MetadataStore {
       const result = await change(candidate);
       candidate.revision++;
       this.checkBudget(candidate);
-      await atomicJson(resolve(this.config.dataDir, "agent.json"), candidate);
+      await atomicJson(resolve(this.config.dataDir, stateFiles.metadata), candidate);
       this.value = candidate;
       this.onChange?.(candidate);
       return result;

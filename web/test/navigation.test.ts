@@ -4,22 +4,22 @@ import {
   workspacePath,
   workspaceDestination,
   updateWorkspaceQuery,
-  schedulePath,
+  tasksPath,
 } from "../src/lib/navigation";
 
 afterEach(() => vi.unstubAllGlobals());
 
 test("scheduled task selection preserves an independent list device filter", () => {
   const selected = { filter: "d-filter", deviceId: "d/target", taskId: "t 1", runId: "r/1" };
-  const route = parseRoute(new URL(schedulePath(selected), "https://kiteline.test"));
-  expect(route.schedule).toEqual(selected);
+  const route = parseRoute(new URL(tasksPath(selected), "https://kiteline.test"));
+  expect(route.tasks).toEqual(selected);
   expect(route.deviceId).toBe("d/target");
   expect(route.workspaceId).toBeUndefined();
   expect(
-    parseRoute(new URL(schedulePath({ deviceId: "d", taskId: "t" }), "https://kiteline.test"))
-      .schedule?.filter,
+    parseRoute(new URL(tasksPath({ deviceId: "d", taskId: "t" }), "https://kiteline.test")).tasks
+      ?.filter,
   ).toBeUndefined();
-  expect(schedulePath()).toBe("/tasks");
+  expect(tasksPath()).toBe("/tasks");
 });
 
 test("malformed route encoding is invalid while encoded identities and query remain usable", () => {

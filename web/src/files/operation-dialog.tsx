@@ -22,7 +22,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../components/ui/dialog";
-import { childPath, formatBytes } from "./use-browser";
+import { childPath } from "./paths";
+import { formatBytes } from "./format";
 import { FileConflictDialog } from "./conflict-dialog";
 import type { WorkspaceTarget } from "../lib/navigation";
 import { useDrafts, type DraftStore } from "./drafts";

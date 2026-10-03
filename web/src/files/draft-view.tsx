@@ -24,7 +24,7 @@ import {
 } from "./drafts";
 import { requestCloseDraft, showDraft } from "./navigation";
 import { TextEditor } from "./text-editor";
-import { formatBytes } from "./use-browser";
+import { formatBytes } from "./format";
 import { downloadFile, type DiskText } from "./content";
 
 export function DraftView({

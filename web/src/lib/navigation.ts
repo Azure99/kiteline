@@ -14,7 +14,7 @@ export interface WorkspaceQuery {
   reveal?: string;
   search?: boolean;
 }
-export interface ScheduleRoute {
+export interface TasksRoute {
   filter?: string;
   deviceId?: string;
   taskId?: string;
@@ -42,7 +42,7 @@ export function useRoute() {
 }
 export function parseRoute(url: URL) {
   const params = url.searchParams;
-  const schedule: ScheduleRoute | undefined =
+  const tasks: TasksRoute | undefined =
     url.pathname === "/tasks"
       ? {
           filter: params.get("device") ?? undefined,
@@ -71,15 +71,15 @@ export function parseRoute(url: URL) {
     return { valid: false, query };
   }
   return {
-    valid: !!match || url.pathname === "/" || !!schedule,
-    deviceId: schedule?.deviceId ?? schedule?.filter ?? deviceId,
+    valid: !!match || url.pathname === "/" || !!tasks,
+    deviceId: tasks?.deviceId ?? tasks?.filter ?? deviceId,
     workspaceId,
     tool: match?.[3] as WorkspaceTool | undefined,
     query,
-    schedule,
+    tasks,
   };
 }
-export function schedulePath(route: ScheduleRoute = {}) {
+export function tasksPath(route: TasksRoute = {}) {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries({
     device: route.filter,

@@ -4,7 +4,7 @@ import { EditorView } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { LanguageDescription } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
-import { encodeText } from "@kiteline/shared/text";
+import { encodeText } from "@kiteline/shared/protocol/text";
 import type { Draft, DraftStore } from "./drafts";
 import { editorPhrases } from "./editor-locale";
 

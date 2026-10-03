@@ -35,14 +35,15 @@ import {
 import { FileExplorer } from "./explorer";
 import { FileDetails } from "./file-details";
 import { FileNameDialog, type NameAction } from "./name-dialog";
-import { isWithin, movedPath, parentPath, useFileBrowser } from "./use-browser";
+import { isWithin, movedPath, parentPath } from "./paths";
+import { useFileBrowser } from "./use-browser";
 import { DraftView } from "./draft-view";
 import { useDrafts, type Draft, type DraftStore } from "./drafts";
 import { showDraft, showFile } from "./navigation";
 import type { FileAction, FileOperationResult } from "./operation-dialog";
 import { FileContent } from "./file-content";
 import { downloadFile, type FileTarget } from "./content";
-import { FileSearch } from "./search-view";
+import { FileSearch } from "./file-search";
 import { useWorkspaceRefresh } from "../lib/use-workspace-refresh";
 
 export function Files({

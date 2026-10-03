@@ -18,7 +18,7 @@ import type { Entry } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
 import type { DirectoryPage } from "./use-browser";
-import { formatBytes } from "./use-browser";
+import { formatBytes } from "./format";
 
 export function FileExplorer({
   path,

@@ -11,11 +11,13 @@ import {
   type TerminalMeta,
   type FileMeta,
   type ChannelReady,
+  type ChannelKind,
+  type ServerControlMessage,
 } from "@kiteline/shared/protocol";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
-import { heartbeat, sendFrame } from "@kiteline/shared/ws";
-import { httpStream } from "@kiteline/shared/http-stream";
+import { heartbeat, sendFrame } from "@kiteline/shared/protocol/ws";
+import { httpStream } from "@kiteline/shared/protocol/http-stream";
 import type { Login } from "./store.js";
 import { send, type AgentConnection, type Connections } from "./connections.js";
 import { FileTransfer } from "./file-transfer.js";
@@ -26,7 +28,7 @@ interface Channel {
   loginId: string;
   connection: AgentConnection;
   timer: NodeJS.Timeout;
-  kind: "terminal.attach" | "file.read" | "file.write" | "http.proxy";
+  kind: ChannelKind;
   params: Record<string, unknown>;
   agent?: WebSocket;
   browser?: WebSocket;
@@ -116,7 +118,7 @@ export class Channels {
       connectionId: connection.connectionId,
       kind,
       params,
-    };
+    } satisfies ServerControlMessage;
     if (Buffer.byteLength(JSON.stringify(message)) > limits.controlMessageBytes)
       return unavailable(new AppError("limit_exceeded", "Channel request exceeds the size limit"));
     if (
@@ -321,7 +323,10 @@ export class Channels {
     if (item.kind === "file.read")
       this.notifyFileFailure(id, item.loginId, item.connection.id, item.params, error);
     item.file?.stop(error);
-    send(item.connection.socket, { type: "channel.cancel", channelId: id });
+    send(item.connection.socket, {
+      type: "channel.cancel",
+      channelId: id,
+    } satisfies ServerControlMessage);
     if (item.browser?.readyState === WebSocket.OPEN) {
       if (!item.terminalFinished)
         item.browser.send(JSON.stringify({ type: "error", ...asError(error) }));

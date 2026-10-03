@@ -2,7 +2,7 @@ import { connect, type Socket } from "node:net";
 import type { Duplex } from "node:stream";
 import { WebSocket } from "ws";
 import { AppError, asError, integer, limits, record } from "@kiteline/shared/protocol";
-import { httpStream } from "@kiteline/shared/http-stream";
+import { httpStream } from "@kiteline/shared/protocol/http-stream";
 import type { Identity } from "../config.js";
 import { connectServerSocket } from "../network.js";
 

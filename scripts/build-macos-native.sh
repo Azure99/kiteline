@@ -24,7 +24,7 @@ cp LICENSE "$output/native/licenses/libevent.txt"
 
 tar -xzf "$inputs/tmux.tar.gz" -C "$build/tmux" --strip-components=1
 cd "$build/tmux"
-patch -p1 -i "$inputs/native/tmux-paste.patch"
+patch -p1 -i "$inputs/native/tmux/paste.patch"
 # System ioctl headers can load an incomplete queue.h with the same include guard.
 CPPFLAGS="-include $build/tmux/compat/queue.h" \
   LIBEVENT_CORE_CFLAGS="-I$build/dependencies/include" \
@@ -48,7 +48,7 @@ for helper in rename-noreplace entry-name; do
     "$inputs/native/macos/$helper.c" \
     -o "$output/native/bin/$helper"
 done
-tic -x -o "$output/native/share/terminfo" "$inputs/native/tmux.terminfo"
+tic -x -o "$output/native/share/terminfo" "$inputs/native/tmux/tmux.terminfo"
 TERMINFO="$output/native/share/terminfo" infocmp -x -1 tmux-256color >"$build/terminfo.actual"
 for capability in 'pairs#32767,' 'AX,' 'BE=\E[?2004h,' 'BD=\E[?2004l,' \
   'Ms=\E]52;%p1%s;%p2%s\007,' 'kDC3=\E[3;3~,'; do

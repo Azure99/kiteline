@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import { readFileSync } from "node:fs";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import { editorResetCompat } from "./build/editor-reset-compat.js";
+import { editorResetCompat } from "./postcss/editor-reset-compat.js";
 
 const serverProxy = { target: "http://127.0.0.1:8080", ws: true };
 export default defineConfig({

@@ -16,21 +16,19 @@ import { digest, fetchPinned, run } from "./release-inputs.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const json = (file) => JSON.parse(readFileSync(file, "utf8"));
-const release = json(join(root, "deploy/release.json"));
-const recipe = json(join(root, "deploy/agent-macos.json"));
-const unix = json(join(root, "deploy/agent-static.json"));
+const release = json(join(root, "release/inputs.json"));
+const recipe = json(join(root, "release/agent-macos.json"));
 const hash = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const sourceFiles = [
-  "deploy/release.json",
-  "deploy/agent-static.json",
-  "deploy/agent-macos.json",
+  "release/inputs.json",
+  "release/agent-macos.json",
   "scripts/build-macos-components.mjs",
   "scripts/release-inputs.mjs",
   "scripts/build-macos-native.sh",
   "native/macos/rename-noreplace.c",
   "native/macos/entry-name.c",
-  "native/tmux-paste.patch",
-  "native/tmux.terminfo",
+  "native/tmux/paste.patch",
+  "native/tmux/tmux.terminfo",
 ];
 function downloads(architecture) {
   const target = recipe.architectures[architecture];
@@ -41,8 +39,8 @@ function downloads(architecture) {
       url: `https://nodejs.org/dist/v${release.node}/node-v${release.node}-darwin-${nodeArchitecture}.tar.xz`,
       sha256: target.nodeArchiveSha256,
     },
-    "tmux.tar.gz": unix.tmux,
-    "libevent.tar.gz": unix.sources["libevent.tar.gz"],
+    "tmux.tar.gz": release.tmux,
+    "libevent.tar.gz": release.libevent,
     "flock.tar.gz": recipe.flock,
     "rg.tar.gz": target.ripgrep,
   };
@@ -60,11 +58,25 @@ function copy(source, destination) {
 function writeJson(file, value) {
   writeFileSync(file, JSON.stringify(value, null, 2) + "\n");
 }
+function sharedInputs(value, architecture) {
+  return {
+    node: value.node,
+    nodeArchitecture: value.nodeArchives[architecture].architecture,
+    tmux: value.tmux,
+    libevent: value.libevent,
+    ripgrepVersion: value.ripgrep.version,
+  };
+}
 function inputs(architecture) {
   return {
     architecture,
     downloads: downloads(architecture),
-    files: Object.fromEntries(sourceFiles.map((file) => [file, digest(join(root, file))])),
+    shared: sharedInputs(release, architecture),
+    files: Object.fromEntries(
+      sourceFiles
+        .filter((file) => file !== "release/inputs.json")
+        .map((file) => [file, digest(join(root, file))]),
+    ),
   };
 }
 function files(directory, prefix = "") {
@@ -175,13 +187,13 @@ export function buildMacosComponents(directory, destination, architecture) {
     const linkage = Object.fromEntries(
       binaries.map((file) => [file, macho(join(destination, file), architecture)]),
     );
-    if (capture(join(destination, "native/bin/tmux"), ["-V"]) !== `tmux ${unix.tmux.version}`)
+    if (capture(join(destination, "native/bin/tmux"), ["-V"]) !== `tmux ${release.tmux.version}`)
       throw new Error("macOS tmux version mismatch");
     writeJson(join(destination, "native/identity.json"), {
       linkage: "macos-system",
       architecture: nodeArchitecture,
       node: `v${release.node}`,
-      tmux: unix.tmux.version,
+      tmux: release.tmux.version,
       libevent: recipe.libeventVersion,
       flock: recipe.flock.version,
       ripgrep: {

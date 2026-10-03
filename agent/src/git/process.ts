@@ -6,7 +6,7 @@ import { AppError, asError, OperationError, type GitPath } from "@kiteline/share
 import { BytePrefix } from "../buffers.js";
 import { stopGroup, waitForGroup } from "../process-group.js";
 import { JobChild, spawnJob } from "@kiteline/shared/windows/job";
-import { windowsExecutable } from "../tool-checks.js";
+import { windowsExecutable } from "../tools.js";
 
 interface Options {
   input?: Buffer | string;

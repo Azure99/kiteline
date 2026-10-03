@@ -12,7 +12,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "../components/ui/dialog";
-import { childPath } from "./use-browser";
+import { childPath } from "./paths";
 
 export type NameAction =
   | { kind: "file" | "directory"; parent: string }

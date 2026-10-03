@@ -1,0 +1,98 @@
+import { expect, test } from "vitest";
+import type { ScheduledTask } from "@kiteline/shared/protocol";
+import {
+  formSchedule,
+  localDateTime,
+  scheduleForm,
+  taskChanges,
+  taskTime,
+} from "../src/tasks/form";
+
+test("editing an elapsed one-time task preserves its original timestamp and consumption", () => {
+  const task: ScheduledTask = {
+    id: "t",
+    revision: 2,
+    name: "Old",
+    command: "printf old",
+    cwd: "/home/project",
+    timezone: "UTC",
+    schedule: { kind: "once", at: "2025-01-01T09:00:17.123Z" },
+    state: "active",
+    nextRunAt: null,
+    onceStatus: "consumed",
+  };
+  const initial = scheduleForm(task.schedule);
+  const schedule = formSchedule(initial, task.schedule, initial.once);
+  expect(taskChanges(task, { ...task, name: "New", schedule })).toEqual({ name: "New" });
+  const returned = formSchedule(
+    { ...scheduleForm(task.schedule), time: "17:30", cron: "0 * * * *" },
+    task.schedule,
+    initial.once,
+  );
+  expect(taskChanges(task, { ...task, name: "New", schedule: returned })).toEqual({ name: "New" });
+  const changed = formSchedule(
+    { ...scheduleForm(task.schedule), once: localDateTime("2030-01-01T12:00:00Z") },
+    task.schedule,
+    initial.once,
+  );
+  expect(changed).toEqual({ kind: "once", at: "2030-01-01T12:00:00.000Z" });
+});
+
+test("an unchanged one-time input survives a browser time-zone change and preset round trip", () => {
+  const previous = process.env.TZ;
+  const original = { kind: "once" as const, at: "2025-01-01T09:00:17.123Z" };
+  process.env.TZ = "America/New_York";
+  const initial = scheduleForm(original);
+  try {
+    process.env.TZ = "Asia/Tokyo";
+    expect(formSchedule(initial, original, initial.once)).toBe(original);
+    const daily = { ...initial, preset: "daily" as const, time: "12:00" };
+    expect(formSchedule(daily, original, initial.once)).toEqual({
+      kind: "cron",
+      expression: "0 12 * * *",
+    });
+    expect(formSchedule({ ...daily, preset: "once" }, original, initial.once)).toBe(original);
+    expect(formSchedule({ ...initial, once: "2030-01-01T12:00" }, original, initial.once)).toEqual({
+      kind: "once",
+      at: "2030-01-01T03:00:00.000Z",
+    });
+  } finally {
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
+  }
+});
+
+test("task instants use browser-local time and show invalid dates as unavailable", () => {
+  const previous = process.env.TZ;
+  process.env.TZ = "America/New_York";
+  try {
+    expect(taskTime("2030-01-01T12:00:00Z", "en-US")).toMatch(/7:00:00\sAM GMT-5/);
+    expect(taskTime("2030-01-01T12:00:00Z", "zh-CN")).toMatch(/^2030\/1\/1\s+7:00:00 GMT-5$/);
+    expect(taskTime("not a date", "en-US")).toBe("Time unavailable");
+    expect(taskTime("2030-01-01T12:00:00Z", "en-US")).toMatch(/7:00:00\sAM GMT-5/);
+  } finally {
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
+  }
+});
+
+test("common presets use one cron and local dates reject missing DST wall time", () => {
+  for (const expression of ["0 * * * *", "5 9 * * *", "30 18 * * 0", "*/10 * * * 1-5"])
+    expect(formSchedule(scheduleForm({ kind: "cron", expression }))).toEqual({
+      kind: "cron",
+      expression,
+    });
+  const previous = process.env.TZ;
+  process.env.TZ = "America/New_York";
+  try {
+    const form = { ...scheduleForm(), preset: "once" as const, once: "2027-03-14T02:30" };
+    expect(() => formSchedule(form)).toThrow("existing local date");
+    expect(formSchedule({ ...form, once: "2027-03-14T03:30" })).toEqual({
+      kind: "once",
+      at: "2027-03-14T07:30:00.000Z",
+    });
+  } finally {
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
+  }
+});

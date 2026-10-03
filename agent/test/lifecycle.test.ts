@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { Agent } from "../src/control.js";
+import { Agent } from "../src/agent.js";
 import { defaultAgentLimits, privateDirectory } from "../src/config.js";
 import { ScheduledTasks } from "../src/tasks/index.js";
 import { localRequest } from "../src/local.js";

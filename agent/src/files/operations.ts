@@ -16,7 +16,7 @@ import {
   type PathError,
 } from "@kiteline/shared/protocol";
 import type { MetadataStore } from "../metadata.js";
-import { publish } from "../mutations.js";
+import { publish } from "./publish.js";
 import {
   containsDirectory,
   entryInfo,

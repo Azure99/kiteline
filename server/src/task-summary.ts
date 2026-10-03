@@ -14,7 +14,7 @@ function runSummary(value: unknown): TaskRunSummary | undefined {
     : taskRunSummary(record(value) as unknown as TaskRunSummary);
 }
 
-export function taskSnapshot(value: unknown): TaskSnapshot {
+export function projectTaskSnapshot(value: unknown): TaskSnapshot {
   const input = record(value);
   const revision = integer(input.revision, "revision", 0, Number.MAX_SAFE_INTEGER);
   if (!Array.isArray(input.items)) throw new AppError("invalid_argument", "Invalid task summaries");

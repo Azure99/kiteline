@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../components/ui/dialog";
-import { childPath, parentPath } from "./use-browser";
+import { childPath, parentPath } from "./paths";
 
 export function FileConflictDialog({
   target,

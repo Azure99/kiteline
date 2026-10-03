@@ -42,16 +42,16 @@ import {
   updateWorkspaceQuery,
   useRoute,
 } from "../lib/navigation";
-import { parentPath } from "../files/use-browser";
+import { childPath, parentPath } from "../files/paths";
 import { type GitActions, useGitActivity } from "./actions";
 import {
   confirmDiskVersion,
   DiscardDialog,
   discardable,
-  GitFeedback,
   RowActions,
   stageable,
 } from "./change-actions";
+import { GitFeedback } from "./feedback";
 import { CommitBox } from "./commit-box";
 import { BranchDialog } from "./branch-dialog";
 import { RemoteActions } from "./remote-actions";
@@ -165,12 +165,12 @@ export function GitTool({
     showFile({
       deviceId: device.id,
       workspaceId: workspace.id,
-      path: repo.path === "." ? path : `${repo.path}/${path}`,
+      path: childPath(repo.path, path),
     });
   }
   function locateFile(path: string) {
     if (!repo) return;
-    const full = repo.path === "." ? path : `${repo.path}/${path}`;
+    const full = childPath(repo.path, path);
     navigateWorkspace({ deviceId: device.id, workspaceId: workspace.id }, "files", {
       folder: parentPath(full),
       reveal: full,
@@ -252,7 +252,7 @@ export function GitTool({
         )}
       </ToolHeader>
       {repo?.available ? (
-        <Changes
+        <RepoView
           key={repo.id}
           {...{ device, workspace, repo, visible, enabled, actions, store, picker }}
           onFile={openFile}
@@ -275,7 +275,7 @@ export function GitTool({
   );
 }
 
-function Changes({
+function RepoView({
   device,
   workspace,
   repo,

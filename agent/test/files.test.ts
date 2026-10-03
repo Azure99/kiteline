@@ -11,10 +11,10 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { Files } from "../src/files/index.js";
-import { Directories } from "../src/directories.js";
+import { Directories } from "../src/files/directories.js";
 import { MetadataStore } from "../src/metadata.js";
 import { defaultAgentLimits } from "../src/config.js";
-import { publish } from "../src/mutations.js";
+import { publish } from "../src/files/publish.js";
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {

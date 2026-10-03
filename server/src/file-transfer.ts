@@ -10,7 +10,7 @@ import {
   record,
   type FileMeta,
 } from "@kiteline/shared/protocol";
-import { consumeFileFrames, sendFileFrame } from "@kiteline/shared/file-stream";
+import { consumeFileFrames, sendFileFrame } from "@kiteline/shared/protocol/file-stream";
 import { checkReply, replyError, failure, finishRequest, json } from "./http.js";
 
 export class FileTransfer {

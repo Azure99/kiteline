@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from "vitest";
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { Directories } from "../src/directories.js";
-import { Agent } from "../src/control.js";
+import { Directories } from "../src/files/directories.js";
+import { Agent } from "../src/agent.js";
 import { MetadataStore } from "../src/metadata.js";
 import { defaultAgentLimits, type AgentConfig } from "../src/config.js";
 import { absolutePath, checkMetadata, limits, windowsName } from "@kiteline/shared/protocol";

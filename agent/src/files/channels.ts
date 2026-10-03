@@ -8,7 +8,7 @@ import {
   record,
   string,
 } from "@kiteline/shared/protocol";
-import { consumeFileFrames, sendFileFrame } from "@kiteline/shared/file-stream";
+import { consumeFileFrames, sendFileFrame } from "@kiteline/shared/protocol/file-stream";
 import type { AgentConfig, Identity } from "../config.js";
 import type { TextFiles, TextWrite } from "./text.js";
 import type { FileRead } from "./read.js";

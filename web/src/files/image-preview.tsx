@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Download, Maximize, RefreshCw, Scan, ZoomIn, ZoomOut } from "lucide-react";
 import { IconButton } from "../components/icon-button";
 import { downloadFile, type DiskImage, type FileTarget } from "./content";
-import { formatBytes } from "./use-browser";
+import { formatBytes } from "./format";
 
 export function ImagePreview({
   image,

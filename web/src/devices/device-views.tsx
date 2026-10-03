@@ -20,7 +20,7 @@ import {
 import type { Device } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
-import { devicePath, workspacePath, schedulePath } from "../lib/navigation";
+import { devicePath, workspacePath, tasksPath } from "../lib/navigation";
 import type { DeviceAction } from "./device-actions";
 import { useEffect, useRef, useState } from "react";
 import { TerminalSettings } from "../terminal/settings";
@@ -58,7 +58,7 @@ export function Home({
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-base font-semibold">Kiteline</h1>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => onNavigate(schedulePath())}>
+          <Button variant="outline" onClick={() => onNavigate(tasksPath())}>
             <CalendarClock />
             {t(($) => $.schedules.title)}
           </Button>
@@ -280,7 +280,7 @@ export function DeviceDetail({
       <Button
         variant="outline"
         className="mb-4"
-        onClick={() => onNavigate(schedulePath({ filter: device.id }))}
+        onClick={() => onNavigate(tasksPath({ filter: device.id }))}
       >
         <CalendarClock />
         {t(($) => $.schedules.title)}

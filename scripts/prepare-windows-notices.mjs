@@ -59,7 +59,7 @@ export function prepareWindowsNotices(directory, native) {
         read(join(directory, "packages/msys2-runtime.tar.zst"), "usr/share/doc/Cygwin/" + name),
       );
     const sources = JSON.parse(
-      readFileSync(join(directory, "deploy/agent-windows.json"), "utf8"),
+      readFileSync(join(directory, "release/agent-windows.json"), "utf8"),
     ).sources;
     mkdirSync(join(native, "sources"), { recursive: true });
     for (const name of Object.keys(sources))

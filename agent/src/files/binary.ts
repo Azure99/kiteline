@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { AppError, OperationError, type UploadedFile } from "@kiteline/shared/protocol";
 import type { AgentConfig } from "../config.js";
 import type { MetadataStore } from "../metadata.js";
-import { publish } from "../mutations.js";
+import { publish } from "./publish.js";
 import { checkTarget, targetAgain } from "./destination.js";
 import { locate, logicalPath } from "./paths.js";
 import { renameNoReplace, renameReplace } from "./rename.js";

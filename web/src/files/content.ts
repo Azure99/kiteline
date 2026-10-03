@@ -6,7 +6,7 @@ import type {
   SavedFile,
   UploadedFile,
 } from "@kiteline/shared/protocol";
-import { decodeText } from "@kiteline/shared/text";
+import { decodeText } from "@kiteline/shared/protocol/text";
 import { ApiError, api, apiError, post } from "../lib/api";
 import { observeServerVersion, versionedPath, webCompatible } from "../lib/release";
 

@@ -12,30 +12,29 @@ import {
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { prepareWindowsNotices } from "./prepare-windows-notices.mjs";
-import { windowsRuntimeFiles } from "../shared/src/windows/components.ts";
+import { windowsRuntimeFiles } from "./windows-components.ts";
 import { digest, fetchPinned, run } from "./release-inputs.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const json = (file) => JSON.parse(readFileSync(file, "utf8"));
-const release = json(join(root, "deploy/release.json"));
-const recipe = json(join(root, "deploy/agent-windows.json"));
-const { tmux } = json(join(root, "deploy/agent-static.json"));
+const release = json(join(root, "release/inputs.json"));
+const recipe = json(join(root, "release/agent-windows.json"));
+const { tmux } = release;
 const hash = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const sourceFiles = [
-  "deploy/release.json",
-  "deploy/agent-static.json",
-  "deploy/agent-windows.json",
-  "deploy/ubuntu.sources",
-  "deploy/Dockerfile.windows-native",
+  "release/inputs.json",
+  "release/agent-windows.json",
+  "release/ubuntu.sources",
+  "release/Dockerfile.windows-native",
   "scripts/build-windows-components.mjs",
   "scripts/release-inputs.mjs",
   "scripts/build-windows-tmux.sh",
   "scripts/build-windows-addon.sh",
   "scripts/prepare-windows-notices.mjs",
-  "shared/src/windows/components.ts",
-  "native/tmux-paste.patch",
-  "native/tmux-cygwin-outfd.patch",
-  "native/tmux.terminfo",
+  "scripts/windows-components.ts",
+  "native/tmux/paste.patch",
+  "native/tmux/cygwin-outfd.patch",
+  "native/tmux/tmux.terminfo",
   ...readdirSync(join(root, "native/windows"))
     .filter((file) => /\.(cc|hpp|def)$/.test(file))
     .sort()
@@ -173,8 +172,8 @@ export function buildWindowsAddon(directory, destination) {
     "-t",
     image,
     "-f",
-    join(directory, "deploy/Dockerfile.windows-native"),
-    join(directory, "deploy"),
+    join(directory, "release/Dockerfile.windows-native"),
+    join(directory, "release"),
   ]);
   const imageId = run("docker", ["image", "inspect", "--format", "{{.Id}}", image], {
     encoding: "utf8",
@@ -295,9 +294,9 @@ export function assembleWindowsComponents(directory, tmuxDirectory, addonDirecto
       node: `v${release.node}`,
       tmux: tmux.version,
       tmuxSource: tmux.sha256,
-      patch: expected.files["native/tmux-paste.patch"],
-      controlPatch: expected.files["native/tmux-cygwin-outfd.patch"],
-      terminfo: expected.files["native/tmux.terminfo"],
+      patch: expected.files["native/tmux/paste.patch"],
+      controlPatch: expected.files["native/tmux/cygwin-outfd.patch"],
+      terminfo: expected.files["native/tmux/tmux.terminfo"],
       ripgrep: { version: release.ripgrep.version, ...recipe.ripgrep },
       msysRuntime: recipe.packages.find((pkg) => pkg.name === "msys2-runtime").version,
       inputs: expected,

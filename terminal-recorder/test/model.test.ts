@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import headless from "@xterm/headless";
 import serialize from "@xterm/addon-serialize";
 import { limits } from "@kiteline/shared/protocol";
-import type { TerminalEvent, TerminalFrame } from "@kiteline/shared/ipc";
+import type { TerminalEvent, TerminalFrame } from "@kiteline/shared/protocol/ipc";
 import {
   mouseEncodingVT,
   adaptTerminalScrolling,

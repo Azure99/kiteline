@@ -16,7 +16,7 @@ import { MetadataStore } from "../src/metadata.js";
 import { defaultAgentLimits } from "../src/config.js";
 import { TextFiles } from "../src/files/text.js";
 import { TemporaryFiles } from "../src/files/temporary.js";
-import { decodeText, encodeText } from "@kiteline/shared/text";
+import { decodeText, encodeText } from "@kiteline/shared/protocol/text";
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {

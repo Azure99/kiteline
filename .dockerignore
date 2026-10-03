@@ -1,6 +1,6 @@
 **
-!deploy/
-!deploy/**
+!release/
+!release/**
 !dist/
 !dist/releases/
 !dist/releases/*.tar.gz

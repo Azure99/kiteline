@@ -4,15 +4,15 @@ import { join } from "node:path";
 import { terminfoDirectory, tmuxBinary, tmuxEnvironment } from "@kiteline/shared/terminal/node";
 import { windowsNative } from "@kiteline/shared/windows/native";
 import { agentConfig, privateDirectory } from "./config.js";
-import { packageDirectory } from "./installation.js";
-import { checkRunDir } from "./local.js";
+import { packageDirectory } from "./install/paths.js";
+import { checkRunDir } from "./terminal/sessions.js";
 import {
   checkBundledRipgrep,
   checkFileHelper,
   checkToolVersion,
   toolRequirements,
   toolCommand,
-} from "./tool-checks.js";
+} from "./tools.js";
 
 type Command = (file: string, args: string[], env?: NodeJS.ProcessEnv) => Promise<string>;
 type Check = (name: string, action: () => Promise<string>) => Promise<void>;
@@ -36,7 +36,7 @@ export async function checkComponents(check: Check, command: Command) {
   }
 }
 
-export async function checkEnvironment(shell: string, check: Check, command: Command) {
+export async function checkHostEnvironment(shell: string, check: Check, command: Command) {
   const windows = process.platform === "win32";
   for (const tool of toolRequirements)
     await check(tool.file, () => checkToolVersion(tool, command));
@@ -91,7 +91,7 @@ export async function checkPrerequisites() {
   const command = (file: string, args: string[], env = process.env) =>
     toolCommand(file, args, { env, timeout: 5000 });
   await checkComponents(check, command);
-  await checkEnvironment(config.shell, check, command);
+  await checkHostEnvironment(config.shell, check, command);
   await check("Runtime directory", async () => {
     checkRunDir(config.runDir);
     for (const path of [config.dataDir, config.runDir]) {

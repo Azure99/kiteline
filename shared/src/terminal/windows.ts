@@ -11,7 +11,7 @@ import {
   tmuxBinary,
   tmuxEnvironment,
   tmuxServerMissing,
-} from "./native.js";
+} from "./node.js";
 
 export interface PaneLaunch {
   shell: string;

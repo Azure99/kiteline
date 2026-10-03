@@ -1,4 +1,4 @@
-import type { IncomingMessage, ServerResponse } from "node:http";
+import type { IncomingMessage, OutgoingHttpHeaders, ServerResponse } from "node:http";
 import {
   AppError,
   appVersion,
@@ -8,6 +8,21 @@ import {
   string,
   type Reply,
 } from "@kiteline/shared/protocol";
+
+export function bearer(request: IncomingMessage) {
+  const value = request.headers.authorization;
+  if (!value?.startsWith("Bearer "))
+    throw new AppError("unauthenticated", "Missing device credentials");
+  return value.slice(7);
+}
+
+export function rawHead(status: number, message: string, headers: OutgoingHttpHeaders) {
+  const lines = [`HTTP/1.1 ${status} ${message}`];
+  for (const [key, value] of Object.entries(headers))
+    if (value !== undefined)
+      for (const item of Array.isArray(value) ? value : [value]) lines.push(`${key}: ${item}`);
+  return lines.join("\r\n") + "\r\n\r\n";
+}
 
 export function replyError(value: unknown) {
   const error = record(value);
@@ -109,7 +124,7 @@ export function sessionCookie(entryOrigin: string, token: string, expiresAt: str
   const expiry = token ? `Expires=${new Date(expiresAt).toUTCString()}` : "Max-Age=0";
   return `${cookieName(entryOrigin)}=${token}; Path=/; HttpOnly;${secure} SameSite=Strict; ${expiry}`;
 }
-export function cookie(request: IncomingMessage, entryOrigin: string) {
+export function loginCookieToken(request: IncomingMessage, entryOrigin: string) {
   const prefix = cookieName(entryOrigin) + "=";
   return request.headers.cookie
     ?.split(";")
@@ -117,7 +132,7 @@ export function cookie(request: IncomingMessage, entryOrigin: string) {
     .find((s) => s.startsWith(prefix))
     ?.slice(prefix.length);
 }
-export function origin(request: IncomingMessage, expected: string) {
+export function requireOrigin(request: IncomingMessage, expected: string) {
   if (request.headers.origin !== expected) throw new AppError("forbidden", "Origin mismatch");
 }
 export function errorStatus(error: unknown) {
@@ -129,6 +144,9 @@ export function errorStatus(error: unknown) {
     busy: 429,
     limit_exceeded: 413,
     invalid_argument: 400,
+    unsupported: 400,
+    permission_denied: 403,
+    timeout: 504,
     offline: 503,
     version_mismatch: 426,
   };

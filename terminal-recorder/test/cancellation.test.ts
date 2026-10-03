@@ -2,9 +2,13 @@ import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { expect, test } from "vitest";
-import { readLines } from "@kiteline/shared/stdio";
+import { readLines } from "@kiteline/shared/protocol/stdio";
 import { tmux } from "@kiteline/shared/terminal/node";
-import type { RecorderMessage, RecorderRequest, TerminalSource } from "@kiteline/shared/ipc";
+import type {
+  RecorderMessage,
+  RecorderRequest,
+  TerminalSource,
+} from "@kiteline/shared/protocol/ipc";
 
 test("create cancellation fences both same-chunk admission and a retiring recording", async () => {
   const root = await mkdtemp("/var/tmp/kiteline-create-cancel-");

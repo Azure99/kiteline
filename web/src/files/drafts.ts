@@ -2,11 +2,11 @@ import { newId } from "../lib/id";
 import { useCallback, useSyncExternalStore } from "react";
 import { Compartment, type EditorState } from "@codemirror/state";
 import type { KitelineError, Device, TextFormat } from "@kiteline/shared/protocol";
-import { encodeText } from "@kiteline/shared/text";
+import { encodeText } from "@kiteline/shared/protocol/text";
 import { ApiError, errorMessage, rpc } from "../lib/api";
 import { readText, writeText, type DiskText, type FileTarget } from "./content";
 import { textState } from "./editor-state";
-import { isWithin, movedPath } from "./use-browser";
+import { isWithin, movedPath } from "./paths";
 
 export type DraftNotice =
   | "loadingCapacity"

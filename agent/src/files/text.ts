@@ -3,11 +3,11 @@ import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { AppError, OperationError, limits, type SavedFile } from "@kiteline/shared/protocol";
-import { decodeText } from "@kiteline/shared/text";
+import { decodeText } from "@kiteline/shared/protocol/text";
 import { readFile, readExact, revisionOf, revisionDigest } from "./read.js";
 import type { AgentConfig } from "../config.js";
 import type { MetadataStore } from "../metadata.js";
-import { publish } from "../mutations.js";
+import { publish } from "./publish.js";
 import {
   entryInfo,
   locate,

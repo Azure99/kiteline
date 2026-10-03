@@ -21,7 +21,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import { createKitelineServer } from "../src/app.js";
 import { Store } from "../src/store.js";
 import type { ServerConfig } from "../src/config.js";
-import { Agent } from "../../agent/src/control.js";
+import { Agent } from "../../agent/src/agent.js";
 import { defaultAgentLimits, privateDirectory } from "../../agent/src/config.js";
 
 const originalServerLimits = { ...serverLimits };
@@ -120,7 +120,7 @@ async function fixture(handler: RequestListener, channels = 128) {
   for (const path of [agent.config.dataDir, agent.config.runDir]) await privateDirectory(path);
   await agent.start();
   await expect.poll(() => kiteline.connections.devices()[0]?.status).toBe("online");
-  const login = store.createSession(60_000);
+  const login = store.createLogin(60_000);
   const cookie = `kiteline_session=${login.token}`;
   const browserHeaders = {
     cookie,
@@ -448,7 +448,7 @@ test("quiet SSE occupies the shared budget and logout closes only its original l
   expect(first[0].toString()).toBe("data: first\n\n");
   await new Promise((resolve) => setTimeout(resolve, 1200));
   expect(open).toBe(1);
-  const other = f.store.createSession(60_000);
+  const other = f.store.createLogin(60_000);
   const additional = f.open(undefined, "GET", { cookie: `kiteline_session=${other.token}` });
   additional.req.end();
   const otherResponse = await additional.result;

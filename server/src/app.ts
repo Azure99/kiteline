@@ -8,20 +8,22 @@ import type { ServerConfig } from "./config.js";
 import { Store, password } from "./store.js";
 import {
   AttemptLimiter,
+  bearer,
   body,
-  cookie,
+  loginCookieToken,
   decodePath,
   errorStatus,
   failure,
   finishRequest,
   json,
-  origin,
+  requireOrigin,
+  rawHead,
   requestOrigin,
   requireVersion,
   serverError,
   sessionCookie,
 } from "./http.js";
-import { bearer, Connections } from "./connections.js";
+import { Connections } from "./connections.js";
 import { Channels } from "./channels.js";
 import { HttpProxy, isProxyPath } from "./http-proxy.js";
 import {
@@ -36,15 +38,15 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
   const proxy = new HttpProxy(config, store, connections, channels);
   const bindingLimiter = new AttemptLimiter();
   const authenticationLimiter = new AttemptLimiter();
-  function login(request: IncomingMessage, entryOrigin: string) {
-    const session = store.session(cookie(request, entryOrigin));
-    if (!session) throw new AppError("unauthenticated", "Please sign in");
-    return session;
+  function requireLogin(request: IncomingMessage, entryOrigin: string) {
+    const login = store.login(loginCookieToken(request, entryOrigin));
+    if (!login) throw new AppError("unauthenticated", "Please sign in");
+    return login;
   }
-  function newSession(response: ServerResponse, entryOrigin: string) {
-    const session = store.createSession(serverLimits.sessionLifetime);
-    response.setHeader("set-cookie", sessionCookie(entryOrigin, session.token, session.expiresAt));
-    json(response, 200, { expiresAt: session.expiresAt });
+  function newLogin(response: ServerResponse, entryOrigin: string) {
+    const login = store.createLogin(serverLimits.loginLifetime);
+    response.setHeader("set-cookie", sessionCookie(entryOrigin, login.token, login.expiresAt));
+    json(response, 200, { expiresAt: login.expiresAt });
   }
   async function route(request: IncomingMessage, response: ServerResponse) {
     if (isProxyPath(request.url ?? "")) return proxy.handle(request, response);
@@ -68,7 +70,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       return json(response, 200, result);
     }
     if (path.startsWith("/api/")) {
-      if (!["GET", "HEAD"].includes(method)) origin(request, entryOrigin);
+      if (!["GET", "HEAD"].includes(method)) requireOrigin(request, entryOrigin);
       if (path === "/api/bootstrap" && method === "GET")
         return json(response, 200, { initialized: store.initialized() });
       if ((path === "/api/setup" || path === "/api/login") && method === "POST") {
@@ -79,16 +81,16 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
           await store.setup(string(input.setupToken, "setup token", 256), value);
         else if (!(await store.verifyPassword(value)))
           throw new AppError("unauthenticated", "Incorrect password");
-        return newSession(response, entryOrigin);
+        return newLogin(response, entryOrigin);
       }
-      const session = login(request, entryOrigin);
+      const login = requireLogin(request, entryOrigin);
       if (path === "/api/session" && method === "GET")
         return json(response, 200, {
-          expiresAt: session.expiresAt,
+          expiresAt: login.expiresAt,
         });
       if (path === "/api/logout" && method === "POST") {
-        store.logout(session.id);
-        connections.closeLogin(session.id);
+        store.logout(login.id);
+        connections.closeLogin(login.id);
         response.setHeader("set-cookie", sessionCookie(entryOrigin, "", ""));
         return json(response, 200, {});
       }
@@ -115,13 +117,13 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       const channel = /^\/api\/channels\/([^/]+)$/.exec(path);
       const content = /^\/api\/channels\/([^/]+)\/content$/.exec(path);
       if (content && (method === "GET" || method === "PUT"))
-        return channels.content(decodePath(content[1]!), session.id, request, response);
+        return channels.content(decodePath(content[1]!), login.id, request, response);
       if (channel && method === "DELETE")
         return json(response, 200, {
           found: channels.cancel(
             decodePath(channel[1]!),
             new AppError("cancelled", "Channel cancelled"),
-            session.id,
+            login.id,
           ),
         });
       if (device) {
@@ -130,7 +132,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
         if (suffix === "/download" && method === "GET") {
           const pending = channels.create(
             id,
-            session,
+            login,
             "file.read",
             {
               workspaceId: string(url.searchParams.get("workspaceId")),
@@ -144,8 +146,8 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
         }
         if (suffix === "/channels" && method === "POST") {
           const input = record(await body(request));
-          login(request, entryOrigin);
-          const pending = channels.create(id, session, string(input.kind), record(input.params));
+          requireLogin(request, entryOrigin);
+          const pending = channels.create(id, login, string(input.kind), record(input.params));
           response.on("close", () => {
             if (!response.writableFinished)
               channels.cancel(pending.id, new AppError("cancelled", "Request closed"));
@@ -154,7 +156,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
         }
         if (!suffix && method === "PATCH") {
           const input = record(await body(request));
-          login(request, entryOrigin);
+          requireLogin(request, entryOrigin);
           store.renameDevice(id, string(input.name, "device name", 256));
           connections.broadcastDevices();
           return json(response, 200, {});
@@ -165,31 +167,31 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
         }
         if (suffix === "/rpc" && method === "POST") {
           const input = record(await body(request));
-          login(request, entryOrigin);
+          requireLogin(request, entryOrigin);
           const requestId = string(input.id, "request id", 128);
           const pending = connections.rpc(
             id,
-            session,
+            login,
             requestId,
             string(input.method, "method", 128),
             record(input.params),
           );
           response.on("close", () => {
-            if (!response.writableFinished) connections.cancel(id, requestId, session.id);
+            if (!response.writableFinished) connections.cancel(id, requestId, login.id);
           });
           return json(response, 200, await pending);
         }
         const cancel = /^\/requests\/([^/]+)$/.exec(suffix ?? "");
         if (cancel && method === "DELETE")
           return json(response, 200, {
-            found: connections.cancel(id, decodePath(cancel[1]!), session.id),
+            found: connections.cancel(id, decodePath(cancel[1]!), login.id),
           });
       }
       throw new AppError("not_found", "API endpoint not found");
     }
     if (method !== "GET" && method !== "HEAD") {
       finishRequest(response);
-      response.writeHead(405).end();
+      response.writeHead(405, { allow: "GET, HEAD" }).end();
       return;
     }
     const decodedPath = decodePath(path);
@@ -263,11 +265,11 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
           channels.acceptAgent(id, ws),
         );
       } else if (browserChannel) {
-        origin(request, entryOrigin);
-        const session = login(request, entryOrigin);
+        requireOrigin(request, entryOrigin);
+        const login = requireLogin(request, entryOrigin);
         requireVersion(url.searchParams.get("appVersion"), "web");
         const id = decodePath(browserChannel[1]!);
-        channels.checkBrowser(id, session.id);
+        channels.checkBrowser(id, login.id);
         sockets.handleUpgrade(request, socket, head, (ws) => channels.acceptBrowser(id, ws));
       } else if (url.pathname === "/api/agent/control") {
         const device = store.authenticateAgent(bearer(request));
@@ -277,20 +279,22 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
           connections.acceptAgent(device.id, ws),
         );
       } else if (url.pathname === "/api/events") {
-        origin(request, entryOrigin);
-        const session = login(request, entryOrigin);
+        requireOrigin(request, entryOrigin);
+        const login = requireLogin(request, entryOrigin);
         requireVersion(url.searchParams.get("appVersion"), "web");
-        sockets.handleUpgrade(request, socket, head, (ws) =>
-          connections.acceptBrowser(ws, session),
-        );
-      } else
-        socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n", () => socket.destroy());
+        sockets.handleUpgrade(request, socket, head, (ws) => connections.acceptBrowser(ws, login));
+      } else socket.end(rawHead(404, "Not Found", { Connection: "close" }), () => socket.destroy());
     } catch (cause) {
       const error = serverError(cause);
       const status = errorStatus(error);
       const payload = JSON.stringify({ error: asError(error) });
       socket.end(
-        `HTTP/1.1 ${status} ${STATUS_CODES[status]}\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nContent-Length: ${Buffer.byteLength(payload)}\r\nConnection: close\r\n\r\n${payload}`,
+        rawHead(status, STATUS_CODES[status]!, {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-store",
+          "Content-Length": Buffer.byteLength(payload),
+          Connection: "close",
+        }) + payload,
         () => socket.destroy(),
       );
     }

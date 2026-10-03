@@ -11,14 +11,14 @@ output=$(cygpath -u "$2")
 mkdir -p "$output/source" "$output/terminfo"
 cd "$output/source"
 tar -xf "$inputs/tmux.tar.gz" --strip-components=1
-patch -p1 -i "$inputs/native/tmux-paste.patch"
-patch -p1 -i "$inputs/native/tmux-cygwin-outfd.patch"
+patch -p1 -i "$inputs/native/tmux/paste.patch"
+patch -p1 -i "$inputs/native/tmux/cygwin-outfd.patch"
 ./configure --disable-sixel --prefix=/usr/local
 make -j2
 cp tmux.exe "$output/tmux.exe"
 cp COPYING "$output/tmux-LICENSE"
 cp cmd-parse.c "$output/cmd-parse.c"
-tic -x -o "$output/terminfo" "$inputs/native/tmux.terminfo"
+tic -x -o "$output/terminfo" "$inputs/native/tmux/tmux.terminfo"
 cp /etc/config.site "$output/config.site"
 gcc --version > "$output/gcc-version.txt"
 ./tmux.exe -V

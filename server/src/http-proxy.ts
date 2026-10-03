@@ -4,7 +4,6 @@ import {
   STATUS_CODES,
   type ClientRequest,
   type IncomingMessage,
-  type OutgoingHttpHeaders,
 } from "node:http";
 import type { Duplex } from "node:stream";
 import { AppError, asError, integer } from "@kiteline/shared/protocol";
@@ -12,7 +11,14 @@ import type { ServerConfig } from "./config.js";
 import type { Store, Login } from "./store.js";
 import type { Connections } from "./connections.js";
 import type { Channels } from "./channels.js";
-import { cookie, decodePath, finishRequest, origin, requestOrigin } from "./http.js";
+import {
+  loginCookieToken,
+  decodePath,
+  finishRequest,
+  requireOrigin,
+  rawHead,
+  requestOrigin,
+} from "./http.js";
 import { requestHeaders, responseHeaders } from "./proxy-headers.js";
 
 interface Target {
@@ -52,13 +58,6 @@ function escape(text: string) {
     (value) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[value]!,
   );
 }
-function rawHead(status: number, message: string, headers: OutgoingHttpHeaders) {
-  const lines = [`HTTP/1.1 ${status} ${message}`];
-  for (const [key, value] of Object.entries(headers))
-    if (value !== undefined)
-      for (const item of Array.isArray(value) ? value : [value]) lines.push(`${key}: ${item}`);
-  return lines.join("\r\n") + "\r\n\r\n";
-}
 function write(stream: Duplex, bytes: string | Buffer) {
   return new Promise<void>((resolve, reject) =>
     stream.write(bytes, (error) => (error ? reject(error) : resolve())),
@@ -78,7 +77,7 @@ function failure(
     unauthenticated: 401,
     forbidden: 403,
     not_found: 404,
-    unsupported: 405,
+    unsupported: 501,
     invalid_argument: 400,
     offline: 503,
     version_mismatch: 426,
@@ -146,10 +145,10 @@ export class HttpProxy {
         throw new AppError("unsupported", "CONNECT is not supported");
       target = proxyTarget(request.url ?? "");
       const entryOrigin = requestOrigin(request, this.config.trustProxyProto);
-      const login = this.store.session(cookie(request, entryOrigin));
+      const login = this.store.login(loginCookieToken(request, entryOrigin));
       if (!login) throw new AppError("unauthenticated", "Please sign in");
       if (head !== undefined || !["GET", "HEAD"].includes(request.method ?? "GET"))
-        origin(request, entryOrigin);
+        requireOrigin(request, entryOrigin);
       const device = this.connections.devices().find((value) => value.id === target!.deviceId);
       if (!device) throw new AppError("not_found", "Device not found");
       if (target.redirect) {

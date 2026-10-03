@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { open, symlink, unlink, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import { AppError } from "@kiteline/shared/protocol";
-import { atomicJson, readJson } from "../config.js";
-import { publish } from "../mutations.js";
+import { atomicJson, readJson, stateFiles } from "../config.js";
+import { publish } from "./publish.js";
 
 interface TemporaryRecord {
   name: string;
@@ -21,7 +21,7 @@ export class TemporaryFiles {
   private path: string;
   private startup?: Promise<void>;
   constructor(dataDir: string) {
-    this.path = join(dataDir, "temporary-files.json");
+    this.path = join(dataDir, stateFiles.temporaryFiles);
   }
 
   async load() {

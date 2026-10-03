@@ -86,13 +86,13 @@ export class Store {
       | undefined;
     return !!row && (await bcrypt.compare(password(value), row.password));
   }
-  createSession(lifetime: number) {
+  createLogin(lifetime: number) {
     const token = secret();
     const expiresAt = new Date(Date.now() + lifetime).toISOString();
     this.db.prepare("INSERT INTO sessions VALUES(?,?)").run(digest(token), expiresAt);
     return { token, id: digest(token), expiresAt };
   }
-  session(token: string | undefined): Login | undefined {
+  login(token: string | undefined): Login | undefined {
     if (!token) return undefined;
     return this.db
       .prepare("SELECT id,expiresAt FROM sessions WHERE id=? AND expiresAt>?")
@@ -101,7 +101,7 @@ export class Store {
   logout(id: string) {
     this.db.prepare("DELETE FROM sessions WHERE id=?").run(id);
   }
-  expiredSessions() {
+  expiredLogins() {
     return this.db
       .prepare("SELECT id FROM sessions WHERE expiresAt<=?")
       .all(new Date().toISOString()) as { id: string }[];
@@ -204,13 +204,13 @@ export class Store {
       throw error;
     }
   }
-  snapshot(id: string, snapshot: Metadata) {
+  saveSnapshot(id: string, snapshot: Metadata) {
     this.db.prepare("UPDATE devices SET snapshot=? WHERE id=?").run(JSON.stringify(snapshot), id);
   }
-  connected(id: string) {
+  recordConnectedAt(id: string) {
     this.db.prepare("UPDATE devices SET lastSeenAt=? WHERE id=?").run(new Date().toISOString(), id);
   }
-  taskSnapshot(id: string, snapshot: TaskSnapshot) {
+  saveTaskSnapshot(id: string, snapshot: TaskSnapshot) {
     this.db
       .prepare(
         "INSERT INTO taskSummaries(deviceId,snapshot,observedAt) VALUES(?,?,?) ON CONFLICT(deviceId) DO UPDATE SET snapshot=excluded.snapshot,observedAt=excluded.observedAt",

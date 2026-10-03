@@ -14,12 +14,22 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
-import { agentLauncher } from "../src/launcher.js";
-import { lockFileDescriptor } from "../src/installation.js";
-import { replaceProgram } from "../src/install.js";
+import { agentLauncher } from "../../scripts/agent-launcher.js";
+import {
+  installDirectory,
+  installationManagementFile,
+  installationUseFile,
+  lockFileDescriptor,
+} from "../src/install/paths.js";
+import { replaceProgram } from "../src/install/commands.js";
 import { lockAgentState } from "../src/state-lock.js";
 
 const cleanups: (() => Promise<unknown>)[] = [];
+const installedPaths = {
+  directory: installDirectory,
+  management: installationManagementFile,
+  use: installationUseFile,
+};
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
@@ -71,7 +81,7 @@ test("portable macOS launcher follows relative links and paths with spaces", asy
   await writeFile(join(source, "agent/dist/main.js"), 'console.log("loaded " + process.argv[2]);');
   await writeFile(
     join(source, "bin/kiteline-agent"),
-    agentLauncher(undefined, undefined, "darwin"),
+    agentLauncher(undefined, installedPaths, "darwin"),
     {
       mode: 0o755,
     },
@@ -89,7 +99,7 @@ test("portable macOS launcher stops when its entry cannot be resolved", async ()
   await symlink("loop", loop);
   const running = child("sh", [
     "-c",
-    agentLauncher(undefined, undefined, "darwin"),
+    agentLauncher(undefined, installedPaths, "darwin"),
     loop,
     "--version",
   ]);

@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import type { PaneLaunch } from "./windows.js";
-import { msysPath, tmuxBinary, tmuxEnvironment } from "./native.js";
+import { msysPath, tmuxBinary, tmuxEnvironment } from "./node.js";
 
 async function main() {
   const launch = JSON.parse(await readFile(process.argv[2]!, "utf8")) as PaneLaunch;

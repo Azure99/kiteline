@@ -68,14 +68,14 @@ async function fixture(trustProxyProto: boolean) {
 
 test("raw upgrade and CONNECT rejections drain responses and release half-open peers", async () => {
   const f = await fixture(false);
-  const session = f.store.createSession(60_000);
+  const login = f.store.createLogin(60_000);
   const device = f.store.bind(f.store.newBinding().code, "Raw connection test");
   const redirect = `/proxy/${device.deviceId}/5173`;
   for (const [path, status] of [
     ["/nope", 404],
     ["/api/events", 426],
     ["/proxy/missing/5173/", 404],
-    ["CONNECT", 405],
+    ["CONNECT", 501],
     [redirect, 308],
   ] as const) {
     const socket = connect({ host: "127.0.0.1", port: f.port, allowHalfOpen: true });
@@ -89,7 +89,7 @@ test("raw upgrade and CONNECT rejections drain responses and release half-open p
     socket.write(
       path === "CONNECT"
         ? "CONNECT example.test:443 HTTP/1.1\r\nHost: example.test:443\r\n\r\n"
-        : `GET ${path} HTTP/1.1\r\nHost: 127.0.0.1:${f.port}\r\nOrigin: http://127.0.0.1:${f.port}\r\nCookie: kiteline_session_http=${session.token}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n`,
+        : `GET ${path} HTTP/1.1\r\nHost: 127.0.0.1:${f.port}\r\nOrigin: http://127.0.0.1:${f.port}\r\nCookie: kiteline_session_http=${login.token}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n`,
     );
     await ended;
     const response = Buffer.concat(chunks).toString();
@@ -216,11 +216,11 @@ test("upgrade command recovery retains login and origin rules", async () => {
   const origin = `http://127.0.0.1:${f.port}`;
   expect((await fetch(origin + "/api/agent/upgrade-command")).status).toBe(401);
 
-  const session = f.store.createSession(60_000);
+  const login = f.store.createLogin(60_000);
   const command = await f.call("/api/agent/upgrade-command?appVersion=old", {
     host: "kiteline.test:9443",
     "x-forwarded-proto": "https",
-    cookie: `kiteline_session=${session.token}`,
+    cookie: `kiteline_session=${login.token}`,
   });
   expect(command.status).toBe(200);
   const upgrade = JSON.parse(command.text) as { version: string; commands: Record<string, string> };
@@ -244,17 +244,17 @@ test("request authority and explicit proxy trust determine HTTP and Upgrade orig
     (await direct.call("/healthz", { host: "kiteline.test:8443", "x-forwarded-proto": "invalid" }))
       .status,
   ).toBe(200);
-  const session = direct.store.createSession(60_000);
+  const directLogin = direct.store.createLogin(60_000);
   const directHeaders = {
     host: "kiteline.test:8443",
     origin: "http://kiteline.test:8443",
     "x-forwarded-proto": "https",
-    cookie: `kiteline_session_http=${session.token}`,
+    cookie: `kiteline_session_http=${directLogin.token}`,
   };
   expect((await direct.call("/api/logout", directHeaders, "POST")).status).toBe(200);
 
   const f = await fixture(true);
-  const login = f.store.createSession(60_000);
+  const login = f.store.createLogin(60_000);
   for (const [host, protocol, origin] of [
     ["kiteline.test:8443", "http", "http://kiteline.test:8443"],
     ["KITELINE.test:80", "http", "http://kiteline.test"],

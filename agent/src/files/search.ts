@@ -9,7 +9,7 @@ import { AppError, type SearchMatch, type SearchResult } from "@kiteline/shared/
 import { SearchJson } from "./search-json.js";
 import { gitMetadataPath } from "./paths.js";
 import { BytePrefix } from "../buffers.js";
-import { ripgrepBinary } from "../tool-checks.js";
+import { ripgrepBinary } from "../tools.js";
 import { JobChild, spawnJob } from "@kiteline/shared/windows/job";
 import { finished } from "node:stream/promises";
 

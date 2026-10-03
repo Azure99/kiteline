@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { IncomingMessage } from "node:http";
 import { WebSocket } from "ws";
-import { controlWritable, heartbeat } from "@kiteline/shared/ws";
+import { controlWritable, heartbeat } from "@kiteline/shared/protocol/ws";
 import {
   AppError,
   appVersion,
@@ -11,7 +10,7 @@ import {
   limits,
   record,
   string,
-  type AgentEvent,
+  type ServerControlMessage,
   type BrowserEvent,
   type WorkspaceEvent,
   type Metadata,
@@ -20,7 +19,7 @@ import {
 } from "@kiteline/shared/protocol";
 import type { Login, Store } from "./store.js";
 import { checkReply, requireVersion, versionMismatch } from "./http.js";
-import { taskSnapshot } from "./task-summary.js";
+import { projectTaskSnapshot } from "./task-summary.js";
 
 export interface AgentConnection {
   id: string;
@@ -42,7 +41,7 @@ interface Browser {
   targets: { deviceId: string; workspaceId: string }[];
 }
 
-export function send(socket: WebSocket, value: unknown) {
+export function send(socket: WebSocket, value: ServerControlMessage | BrowserEvent) {
   if (controlWritable(socket)) socket.send(JSON.stringify(value));
 }
 export class Connections {
@@ -57,7 +56,7 @@ export class Connections {
 
   constructor(private store: Store) {
     this.expiry = setInterval(() => {
-      for (const { id } of this.store.expiredSessions()) {
+      for (const { id } of this.store.expiredLogins()) {
         this.closeLogin(id);
         this.store.logout(id);
       }
@@ -147,13 +146,13 @@ export class Connections {
             serverVersion: appVersion,
             observedAt: new Date().toISOString(),
           });
-          this.store.snapshot(id, connection.snapshot);
-          this.store.connected(id);
+          this.store.saveSnapshot(id, connection.snapshot);
+          this.store.recordConnectedAt(id);
           send(socket, {
             type: "welcome",
             connectionId: connection.connectionId,
             serverVersion: appVersion,
-          });
+          } satisfies ServerControlMessage);
           this.broadcastDevices();
           this.updateWatch(id);
         } else if (!connection.snapshot) throw new AppError("invalid_argument", "hello required");
@@ -161,17 +160,17 @@ export class Connections {
           const snapshot = checkMetadata(message.snapshot);
           if (snapshot.revision > connection.snapshot.revision) {
             connection.snapshot = snapshot;
-            this.store.snapshot(id, snapshot);
+            this.store.saveSnapshot(id, snapshot);
             this.broadcastDevices();
           }
         } else if (message.type === "tasks.snapshot") {
-          const snapshot = taskSnapshot(message);
+          const snapshot = projectTaskSnapshot(message);
           if (
             connection.taskRevision === undefined ||
             snapshot.revision > connection.taskRevision
           ) {
             connection.taskRevision = snapshot.revision;
-            this.store.taskSnapshot(id, snapshot);
+            this.store.saveTaskSnapshot(id, snapshot);
             for (const browser of this.browsers)
               send(browser.socket, { type: "tasks.changed", deviceId: id } satisfies BrowserEvent);
           }
@@ -185,20 +184,56 @@ export class Connections {
             pending.resolve(checked);
           }
         } else if (message.type === "request.progress") {
-          const pending = this.pending.get(string(message.id));
-          if (pending?.connection === connection)
+          const requestId = string(message.id);
+          const pending = this.pending.get(requestId);
+          if (pending?.connection === connection) {
+            const { phase, currentPath, completedItems, bytes } = message;
+            if (
+              (phase !== "queued" && phase !== "running") ||
+              (currentPath !== undefined && typeof currentPath !== "string") ||
+              (completedItems !== undefined && typeof completedItems !== "number") ||
+              (bytes !== undefined && typeof bytes !== "number")
+            )
+              throw new AppError("invalid_argument", "Invalid request progress");
             this.notify(pending.loginId, {
-              ...(message as unknown as Extract<AgentEvent, { type: "request.progress" }>),
+              type: "request.progress",
+              id: requestId,
               deviceId: id,
+              phase,
+              currentPath,
+              completedItems,
+              bytes,
             });
+          }
         } else if (
-          ["workspace.changed", "sessions.changed", "watch.status"].includes(String(message.type))
+          message.type === "workspace.changed" ||
+          message.type === "sessions.changed" ||
+          message.type === "watch.status"
         ) {
           const workspaceId = string(message.workspaceId);
-          const event = { ...(message as WorkspaceEvent), deviceId: id } satisfies BrowserEvent;
+          let event: WorkspaceEvent;
+          if (message.type === "workspace.changed") {
+            const scopes = message.scopes;
+            if (
+              !Array.isArray(scopes) ||
+              !scopes.every((scope) => scope === "files" || scope === "git" || scope === "repos")
+            )
+              throw new AppError("invalid_argument", "Invalid workspace change scopes");
+            event = { type: "workspace.changed", workspaceId, scopes };
+          } else if (message.type === "sessions.changed") {
+            event = { type: "sessions.changed", workspaceId };
+          } else {
+            const { status, reason } = message;
+            if (
+              (status !== "normal" && status !== "degraded") ||
+              (reason !== undefined && typeof reason !== "string")
+            )
+              throw new AppError("invalid_argument", "Invalid workspace watch status");
+            event = { type: "watch.status", workspaceId, status, reason };
+          }
           for (const browser of this.browsers)
             if (browser.targets.some((t) => t.deviceId === id && t.workspaceId === workspaceId))
-              send(browser.socket, event);
+              send(browser.socket, { ...event, deviceId: id });
         }
       } catch {
         socket.close(1008, "invalid_control_message");
@@ -270,7 +305,10 @@ export class Connections {
           connection.snapshot.workspaces.some((w) => w.id === target.workspaceId)
         )
           workspaceIds.add(target.workspaceId);
-    send(connection.socket, { type: "watch.set", workspaceIds: [...workspaceIds] });
+    send(connection.socket, {
+      type: "watch.set",
+      workspaceIds: [...workspaceIds],
+    } satisfies ServerControlMessage);
   }
   rpc(
     deviceId: string,
@@ -287,7 +325,12 @@ export class Connections {
       limits.pendingRequestsPerDevice
     )
       throw new AppError("busy", "Too many pending requests for this device");
-    const message = { type: "rpc.request", id: requestId, method, params };
+    const message = {
+      type: "rpc.request",
+      id: requestId,
+      method,
+      params,
+    } satisfies ServerControlMessage;
     if (Buffer.byteLength(JSON.stringify(message)) > limits.controlMessageBytes)
       throw new AppError("limit_exceeded", "Request exceeds the size limit");
     return new Promise<Reply>((resolve) => {
@@ -298,7 +341,10 @@ export class Connections {
   cancel(deviceId: string, requestId: string, loginId: string) {
     const pending = this.pending.get(requestId);
     if (!pending || pending.loginId !== loginId || pending.connection.id !== deviceId) return false;
-    send(pending.connection.socket, { type: "rpc.cancel", id: requestId });
+    send(pending.connection.socket, {
+      type: "rpc.cancel",
+      id: requestId,
+    } satisfies ServerControlMessage);
     return true;
   }
   closeLogin(loginId: string) {
@@ -332,10 +378,4 @@ export class Connections {
       connection.socket.terminate();
     }
   }
-}
-export function bearer(request: IncomingMessage) {
-  const value = request.headers.authorization;
-  if (!value?.startsWith("Bearer "))
-    throw new AppError("unauthenticated", "Missing device credentials");
-  return value.slice(7);
 }

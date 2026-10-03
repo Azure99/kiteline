@@ -17,7 +17,7 @@ import { MetadataStore } from "../src/metadata.js";
 import { CursorBudget } from "../src/cursor-budget.js";
 import { defaultAgentLimits } from "../src/config.js";
 import { Repositories } from "../src/git/repos.js";
-import { changeIndex, reviewDiscard, discard } from "../src/git/paths.js";
+import { changeIndex, reviewDiscard, discard } from "../src/git/changes.js";
 import { GitWriteQueue } from "../src/git/queue.js";
 import { git } from "../src/git/process.js";
 import { commit, createBranch, changeBranch } from "../src/git/refs.js";

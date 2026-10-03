@@ -2,59 +2,11 @@
 
 设备端提供Linux amd64/arm64、Windows amd64及macOS amd64/arm64包，server提供Linux amd64/arm64包及镜像。系统与工具要求见[运行基线](#平台要求)，源码开发见[仓库入口](../README.md)。
 
-## 生成交付物
-
-使用[package.json](../package.json)固定的Node和pnpm。Linux构建机需要Docker BuildKit、binutils的readelf、libarchive-tools的bsdtar，以及Windows组包所需zip；可通过binfmt/QEMU执行另一架构的native构建。基础镜像、Node版本、rg和Ubuntu证书包身份集中在[release.json](release.json)，Linux静态Node归档固定于[node-static.json](node-static.json)。用户运行发布包无需npm或编译器。
-
-只构建Linux amd64及对应server的命令：
-
-```sh
-pnpm install --frozen-lockfile
-pnpm package agent amd64
-pnpm package server amd64 --agent-target=linux-amd64
-pnpm images amd64
-```
-
-`--agent-target`选择server携带的agent，可用逗号分隔多个目标；省略时携带全部五个目标。Windows先按[固定组件构建](windows-components.md)生成并验证组件；其ZIP不含符号链接，目标机无需Developer Mode。macOS构建步骤见下文。
-
-包及对应`.sha256`位于`dist/releases/`；产品版本来自[version.json](../shared/src/version.json)，镜像名为`kiteline-server:<版本>-<amd64|arm64>`。跨机器可用`docker save/load`搬运镜像。构建从干净commit开始，结束时再次核HEAD和工作区/index；清单记录sourceCommit、sourceDirty=false、平台及组件身份。组装server和构建镜像时核对当前来源、版本和目标，来源不一致须重建相应包；原生组件仍按实际输入闭包复用。
-
-`package agent amd64`和`package agent arm64`下载对应静态Node并构建/复用native；也可单独用`node scripts/build-agent-static.mjs amd64`或`arm64`输出到`dist/agent-static-<架构>/`，省略架构时使用amd64。Node归档及SHA固定于[node-static.json](node-static.json)；Node版本与配方修订变更时，先在[node-static-builds](https://github.com/Azure99/node-static-builds)构建验证新组件，再更新本仓引用。native来源与SHA见[agent-static.json](agent-static.json)，工具链包名见[agent-static-packages.txt](agent-static-packages.txt)，实际版本随输出记录。下载缓存位于`/var/tmp/kiteline-release-cache`并核验SHA，native编译沿Docker缓存复用。产物记录及静态边界见[运行基线](#平台要求)。
-
-macOS原生组件使用[固定输入](agent-macos.json)及对应架构的macOS构建环境，需要 Command Line Tools 和 SDK，部署目标 14.0。分别对amd64、arm64执行以下步骤：先在源码目录准备输入，再将完整输入目录传至相应构建机；使用固定Node运行其中同一脚本，输出目录须不存在：
-
-```sh
-kiteline_arch=arm64 # Intel构建机使用amd64。
-node scripts/build-macos-components.mjs prepare "$kiteline_arch" "/var/tmp/kiteline-mac-inputs-$kiteline_arch"
-# 在匹配架构的macOS构建环境中，kiteline_arch设置同上：
-node "/var/tmp/kiteline-mac-inputs-$kiteline_arch/scripts/build-macos-components.mjs" build "$kiteline_arch" \
-  "/var/tmp/kiteline-mac-inputs-$kiteline_arch" "/var/tmp/kiteline-mac-components-$kiteline_arch"
-# 将完整组件带回源码侧，核对当前输入与实际文件：
-node scripts/build-macos-components.mjs verify "$kiteline_arch" "/var/tmp/kiteline-mac-components-$kiteline_arch"
-# 在macOS构建源码目录安装开发依赖后组包：
-pnpm package agent "macos-$kiteline_arch" --macos-components="/var/tmp/kiteline-mac-components-$kiteline_arch"
-```
-
-macOS组包使用固定Node/pnpm、Git及系统tar，组件输入和文件摘要在组包入口再次核验。包名中的amd64对应Intel x86_64，arm64对应Apple Silicon。
-
-完整交付从相同源码构建五个agent。将macOS两架构生成的包及`.sha256`放入Linux源码侧`dist/releases/`，然后依次组装两个server和镜像：
-
-```sh
-pnpm package agent amd64
-pnpm package agent arm64
-pnpm package agent windows-amd64 --windows-components=/var/tmp/kiteline-win-components
-# 确认同源macOS两架构包及.sha256已放入dist/releases/。
-pnpm package server amd64
-pnpm package server arm64
-pnpm images amd64
-pnpm images arm64
-```
-
-各包根目录包含项目LICENSE；第三方许可位置见[随包材料](#随包材料)。构建后从各实际产物核对内容、来源、启动及受影响安装升级流程，区分原生、模拟和最低系统的验证结果。
+发布包和镜像的构建步骤见[构建交付物](../release/README.md)。
 
 ## Server 部署
 
-镜像按前节构建或导入后，启动 server。默认只发布宿主 `127.0.0.1:8080`，管理数据保存在 `server-data` 卷；不占用 80/443、不管理证书。
+构建或导入镜像后，启动 server。默认只发布宿主 `127.0.0.1:8080`，管理数据保存在 `server-data` 卷；不占用 80/443、不管理证书。
 
 ```sh
 export KITELINE_VERSION=$(node -p 'require("./shared/src/version.json").version')
@@ -79,7 +31,7 @@ docker compose -f deploy/compose.yaml up -d server
 
 已初始化后的密码恢复将中间命令换成 `reset-password`，按提示输入新密码（输入不回显，Enter提交，Ctrl+C取消）。使用原卷；原登录会话会失效。备份可停止 server 后备份整个 `server-data` 卷，agent 登记和凭据单独备份，项目文件沿原方式备份。
 
-原生 server：校验并解压完整 server 包到 `/opt/kiteline-server`，创建专用 `kiteline` 用户及归其所有的 `/var/lib/kiteline`，将 [unit](kiteline-server.service) 安装为 `/etc/systemd/system/kiteline-server.service`。创建 `/etc/kiteline-server.env`，默认可只写 `KITELINE_TRUST_PROXY_PROTO=0`；接 HTTPS 反代时改为1，需要局域网直连或自定义端口时设置 `KITELINE_LISTEN_ADDR=0.0.0.0:8443`。执行 `systemctl daemon-reload`、`systemctl enable --now kiteline-server`，查看 `journalctl -u kiteline-server` 取得初始化 token。
+原生 server：校验并解压完整 server 包到 `/opt/kiteline-server`，创建专用 `kiteline` 用户及归其所有的 `/var/lib/kiteline`，将 [unit](systemd/kiteline-server.service) 安装为 `/etc/systemd/system/kiteline-server.service`。创建 `/etc/kiteline-server.env`，默认可只写 `KITELINE_TRUST_PROXY_PROTO=0`；接 HTTPS 反代时改为1，需要局域网直连或自定义端口时设置 `KITELINE_LISTEN_ADDR=0.0.0.0:8443`。执行 `systemctl daemon-reload`、`systemctl enable --now kiteline-server`，查看 `journalctl -u kiteline-server` 取得初始化 token。
 
 未初始化而 token 过期或遗失时，以同一专用用户和原管理目录重新生成：
 
@@ -181,11 +133,11 @@ kiteline-agent attach SESSION_ID
 
 Linux/macOS CLI与运行进程共用`/etc/kiteline-agent.env`的目录项。KITELINE_AGENT_HOME和KITELINE_AGENT_RUN_DIR使用单行双引号绝对路径，不使用转义或尾部注释；默认状态在项目用户的`~/.local/share/kiteline-agent`，socket在其run目录。该文件由应用仅解析目录项，不自动加载PATH、SSH_AUTH_SOCK、LANG或代理。Windows默认状态在目标用户LocalAppData；自定义目录须让后台run与本机CLI一致。Web复制的接续命令带实际launcher与`--run-dir`；需要手工指定时使用`kiteline-agent attach SESSION_ID --run-dir '/实际运行目录'`，见[接续规则](#原生-agent)。doctor检查实际agent环境，认证以真实Git调用为准。
 
-常驻、自启动、运行身份、凭据与维护停启由用户配置外部管理器。Linux可人工编辑[systemd示例](kiteline-agent.service)，Windows使用自行安装的WinSW 2.12及[XML示例](kiteline-agent.xml)，将wrapper、XML和日志放程序树外。用户自行安装管理器并在Windows服务属性中设置同一项目账户及凭据，不能使用默认LocalSystem；修改示例的实际PowerShell/Git、profile、data/run目录，保留console、parent-first及足够的停止宽限。项目不生成、安装或删除管理器配置，不保存密码。先以前台run/check/doctor验证项目用户环境，再自行接线；停止须给真实agent足够收尾时间。正确后台部署后用户注销任务继续，重登可接回；直接在交互会话运行不提供这项保证。切换部署方式先正常停止，身份/workspace/任务数据保留，但旧运行任务不迁移。
+常驻、自启动、运行身份、凭据与维护停启由用户配置外部管理器。Linux可人工编辑[systemd示例](systemd/kiteline-agent.service)，Windows使用自行安装的WinSW 2.12及[XML示例](winsw/kiteline-agent.xml)，将wrapper、XML和日志放程序树外。用户自行安装管理器并在Windows服务属性中设置同一项目账户及凭据，不能使用默认LocalSystem；修改示例的实际PowerShell/Git、profile、data/run目录，保留console、parent-first及足够的停止宽限。项目不生成、安装或删除管理器配置，不保存密码。先以前台run/check/doctor验证项目用户环境，再自行接线；停止须给真实agent足够收尾时间。正确后台部署后用户注销任务继续，重登可接回；直接在交互会话运行不提供这项保证。切换部署方式先正常停止，身份/workspace/任务数据保留，但旧运行任务不迁移。
 
 WinSW 2.12的`stop`只提交停止请求；维护前使用wrapper的`stopwait`，或自行等待服务实际停止，再确认没有仍使用安装的本机attach或其他实例。停止超时不能当作正常收尾；升级仍会独立检查占用。
 
-macOS可将随包[LaunchDaemon示例](kiteline-agent.plist)复制到树外，按实际账户修改`YOUR_PROJECT_USER`及HOME、工作/数据/运行目录。先完成前台绑定和doctor，再正常停止前台实例；目录须与`/etc/kiteline-agent.env`一致。示例开机加载但不自动重启，日志位于项目用户状态目录：
+macOS可将随包[LaunchDaemon示例](launchd/kiteline-agent.plist)复制到树外，按实际账户修改`YOUR_PROJECT_USER`及HOME、工作/数据/运行目录。先完成前台绑定和doctor，再正常停止前台实例；目录须与`/etc/kiteline-agent.env`一致。示例开机加载但不自动重启，日志位于项目用户状态目录：
 
 ```sh
 sudo cp /opt/kiteline-agent/deploy/kiteline-agent.plist /Library/LaunchDaemons/com.kiteline.agent.plist
@@ -278,41 +230,3 @@ macOS 组件在匹配架构的 macOS 构建机上编译，需要 Command Line To
 ## 随包材料
 
 各包包含项目 LICENSE。Web 第三方材料位于 `licenses/`，原生材料位于 `native/licenses/`，Windows 对应源码位于 `native/sources/`；随实际组件保留其已有文件。
-
-## 终端补丁维护
-
-### xterm补丁再生成
-
-使用项目固定Node/pnpm，在隔离维护目录安装`esbuild@0.28.0`。取得同版本未修补的npm包，保留其`lib/xterm.mjs`及map原件；先按以下参数重生成未修补包的副本，逐字比对ESM。一致后，在`pnpm patch @xterm/xterm@6.1.0-beta.304`给出的编辑目录修改TS并重生成，还原`lib/xterm.mjs.map`原件，最后用`pnpm patch-commit <编辑目录>`更新现有补丁。
-
-将以下脚本放在安装esbuild的维护目录，以`node generate.mjs <生成目标目录> <未修补包目录>`执行；banner始终取自未修补原件。
-
-```js
-import { build } from "esbuild";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-
-const root = resolve(process.argv[2]);
-const original = readFileSync(
-  resolve(process.argv[3], "lib/xterm.mjs"),
-  "utf8",
-);
-await build({
-  absWorkingDir: root,
-  entryPoints: ["src/browser/public/Terminal.ts"],
-  outfile: "lib/xterm.mjs",
-  bundle: true,
-  format: "esm",
-  target: "es2021",
-  sourcemap: true,
-  treeShaking: true,
-  minify: true,
-  legalComments: "none",
-  banner: { js: original.slice(0, original.indexOf("var ")).trimEnd() },
-  tsconfigRaw: {
-    compilerOptions: { target: "es2021", experimentalDecorators: true },
-  },
-});
-```
-
-补丁保留可读TS修改和实际消费的ESM；升级后复核适配并执行受影响的类型和终端验证。生成工具仅用于隔离维护目录。

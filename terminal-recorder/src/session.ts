@@ -1,5 +1,4 @@
-import { limits } from "@kiteline/shared/protocol";
-import { AppError, asError } from "@kiteline/shared/protocol";
+import { AppError, asError, limits } from "@kiteline/shared/protocol";
 import { setTimeout as delay } from "node:timers/promises";
 import type {
   TerminalSource,
@@ -7,7 +6,7 @@ import type {
   RecorderConfig,
   RecorderMessage,
   TerminalFrame,
-} from "@kiteline/shared/ipc";
+} from "@kiteline/shared/protocol/ipc";
 import { tmux } from "@kiteline/shared/terminal/node";
 import { Control } from "./control.js";
 import { Model } from "./model.js";

@@ -5,5 +5,10 @@
     "declaration": false,
     "noEmit": true
   },
-  "include": ["agent/test/**/*.ts", "server/test/**/*.ts", "terminal-recorder/test/**/*.ts"]
+  "include": [
+    "agent/test/**/*.ts",
+    "server/test/**/*.ts",
+    "terminal-recorder/test/**/*.ts",
+    "scripts/**/*.ts"
+  ]
 }

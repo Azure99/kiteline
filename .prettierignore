@@ -1,7 +1,1 @@
-docs/
-work/
-.playwright-cli/
 pnpm-lock.yaml
-**/dist/
-node_modules/
-native/*.patch

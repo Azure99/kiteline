@@ -15,7 +15,7 @@ import {
   DialogTrigger,
 } from "./components/ui/dialog";
 
-export interface Session {
+export interface LoginSession {
   expiresAt: string;
 }
 

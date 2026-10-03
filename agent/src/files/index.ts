@@ -7,9 +7,9 @@ import {
   type FileListing,
   type FileInspection,
 } from "@kiteline/shared/protocol";
-import type { Directories } from "../directories.js";
+import type { Directories } from "./directories.js";
 import type { MetadataStore } from "../metadata.js";
-import { publish } from "../mutations.js";
+import { publish } from "./publish.js";
 import {
   entryInfo,
   entryName,

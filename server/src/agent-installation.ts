@@ -1,10 +1,23 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { readFileSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { AppError, appVersion } from "@kiteline/shared/protocol";
 import { finishRequest } from "./http.js";
 
+const connectionTemplate = readFileSync(
+  new URL("../../installer/connect.in.sh", import.meta.url),
+  "utf8",
+);
+const upgradeTemplate = readFileSync(
+  new URL("../../installer/upgrade.in.sh", import.meta.url),
+  "utf8",
+);
+const windowsTemplate = readFileSync(
+  new URL("../../installer/windows-entry.in.ps1", import.meta.url),
+  "utf8",
+);
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const psQuote = (value: string) => `'${value.replaceAll("'", "''")}'`;
 const windowsLauncher = "(Join-Path $env:ProgramData 'kiteline-agent/kiteline-agent.ps1')";
@@ -35,29 +48,16 @@ export function installationCommands(entryOrigin: string, code: string) {
 }
 
 function connectionScript(entryOrigin: string) {
-  return `#!/bin/sh
-set -eu
-
-connect() {
-    if [ "$#" -ne 2 ]; then
-        echo 'Usage: sh -s -- PLATFORM CODE' >&2
-        exit 1
-    fi
-    [ -n "$2" ] || { echo 'Missing binding code; generate a connection command in the web app' >&2; exit 1; }
-    for kiteline_tool in curl mktemp; do
-        command -v "$kiteline_tool" >/dev/null || { echo "Missing $kiteline_tool; install curl, CA certificates and core utilities using your system package manager, then run this command again" >&2; exit 1; }
-    done
-    kiteline_install=$(mktemp /var/tmp/kiteline-install.XXXXXX)
-    trap 'rm -f "$kiteline_install"' EXIT
-    trap 'exit 129' HUP
-    trap 'exit 130' INT
-    trap 'exit 143' TERM
-    ${curlCommand(entryOrigin)} ${quote(entryOrigin + "/install.sh")} -o "$kiteline_install"
-    sh "$kiteline_install" --server ${quote(entryOrigin)} --version ${quote(appVersion)} --platform "$1" --code "$2"
-}
-
-connect "$@"
-`;
+  const values: Record<string, string> = {
+    __KITELINE_CURL__: curlCommand(entryOrigin),
+    __KITELINE_INSTALL_URL__: quote(entryOrigin + "/install.sh"),
+    __KITELINE_ORIGIN__: quote(entryOrigin),
+    __KITELINE_VERSION__: quote(appVersion),
+  };
+  return connectionTemplate.replace(
+    /__KITELINE_(CURL|INSTALL_URL|ORIGIN|VERSION)__/g,
+    (token) => values[token]!,
+  );
 }
 
 export function upgradeCommand(entryOrigin: string) {
@@ -74,65 +74,29 @@ export function upgradeCommand(entryOrigin: string) {
 }
 
 function windowsScript(entryOrigin: string, mode: "Connect" | "Upgrade") {
-  return `param([string]$Version, [string]$Code)
-$ErrorActionPreference = 'Stop'
-if ($PSVersionTable.PSVersion.Major -lt 7 -or -not $IsWindows) { throw 'Use PowerShell 7 on Windows' }
-if ($Version -cne ${psQuote(appVersion)}) { throw 'The server release changed; obtain a new command from the web app' }
-$kitelineInstaller = Join-Path ([IO.Path]::GetTempPath()) ('kiteline-install-' + [Guid]::NewGuid().ToString('N') + '.ps1')
-$kitelinePolicy = Get-ExecutionPolicy -Scope Process
-try {
-    Set-ExecutionPolicy -Scope Process Bypass -Force
-    Invoke-WebRequest -Uri ${psQuote(entryOrigin + "/install.ps1")} -OutFile $kitelineInstaller
-    & $kitelineInstaller -Mode ${mode} -Server ${psQuote(entryOrigin)} -Version $Version -Code $Code
-} finally {
-    try { if ([IO.File]::Exists($kitelineInstaller)) { [IO.File]::Delete($kitelineInstaller) } }
-    finally { Set-ExecutionPolicy -Scope Process $kitelinePolicy -Force }
-}
-`;
+  const values: Record<string, string> = {
+    __KITELINE_VERSION__: psQuote(appVersion),
+    __KITELINE_INSTALL_URL__: psQuote(entryOrigin + "/install.ps1"),
+    __KITELINE_MODE__: mode,
+    __KITELINE_ORIGIN__: psQuote(entryOrigin),
+  };
+  return windowsTemplate.replace(
+    /__KITELINE_(VERSION|INSTALL_URL|MODE|ORIGIN)__/g,
+    (token) => values[token]!,
+  );
 }
 
 function upgradeScript(entryOrigin: string) {
-  return `#!/bin/sh
-set -eu
-[ "$#" -eq 4 ] && [ "$1" = --version ] && [ "$2" = ${quote(appVersion)} ] && [ "$3" = --platform ] || { echo 'The server release changed; obtain a new upgrade command from the web app' >&2; exit 1; }
-kiteline_platform=$4
-[ -t 0 ] || { echo 'Run this command in an interactive terminal or SSH session on the target device' >&2; exit 1; }
-for kiteline_tool in curl mktemp uname id; do
-  command -v "$kiteline_tool" >/dev/null || { echo "Missing $kiteline_tool; install curl, CA certificates and core utilities using your system package manager, then run this command again" >&2; exit 1; }
-done
-case "$kiteline_platform:$(uname -s)" in
-  linux:Linux|macos:Darwin) ;;
-  *) echo 'Selected platform does not match this device' >&2; exit 1 ;;
-esac
-case "$kiteline_platform:$(uname -m)" in
-  linux:x86_64|macos:x86_64) kiteline_arch=amd64 ;;
-  linux:aarch64|linux:arm64|macos:aarch64|macos:arm64) kiteline_arch=arm64 ;;
-  *) echo 'No agent archive is available for this architecture' >&2; exit 1 ;;
-esac
-[ -x /usr/local/bin/kiteline-agent ] || { echo 'Install and bind the agent before upgrading' >&2; exit 1; }
-if [ "$(id -u)" -ne 0 ]; then
-  command -v sudo >/dev/null || { echo 'The upgrade requires sudo or root' >&2; exit 1; }
-fi
-kiteline_upgrade=$(mktemp -d /var/tmp/kiteline-agent-upgrade.XXXXXX)
-trap 'rm -rf "$kiteline_upgrade"' EXIT
-kiteline_interrupted=0
-trap 'kiteline_interrupted=129' HUP
-trap 'kiteline_interrupted=130' INT
-trap 'kiteline_interrupted=143' TERM
-kiteline_name="kiteline-agent-${appVersion}-$kiteline_platform-$kiteline_arch.tar.gz"
-kiteline_base=${quote(entryOrigin + "/downloads/agent/" + appVersion + "/")}"$kiteline_name"
-${curlCommand(entryOrigin)} "$kiteline_base" -o "$kiteline_upgrade/$kiteline_name"
-${curlCommand(entryOrigin)} "$kiteline_base.sha256" -o "$kiteline_upgrade/$kiteline_name.sha256"
-[ "$kiteline_interrupted" -eq 0 ] || exit "$kiteline_interrupted"
-kiteline_result=0
-if [ "$(id -u)" -eq 0 ]; then
-  /usr/local/bin/kiteline-agent upgrade --archive "$kiteline_upgrade/$kiteline_name" || kiteline_result=$?
-else
-  sudo -- /usr/local/bin/kiteline-agent upgrade --archive "$kiteline_upgrade/$kiteline_name" || kiteline_result=$?
-fi
-[ "$kiteline_interrupted" -eq 0 ] || kiteline_result=$kiteline_interrupted
-exit "$kiteline_result"
-`;
+  const values: Record<string, string> = {
+    __KITELINE_VERSION__: quote(appVersion),
+    __KITELINE_ARCHIVE_VERSION__: appVersion,
+    __KITELINE_DOWNLOAD_URL__: quote(entryOrigin + "/downloads/agent/" + appVersion + "/"),
+    __KITELINE_CURL__: curlCommand(entryOrigin),
+  };
+  return upgradeTemplate.replace(
+    /__KITELINE_(VERSION|ARCHIVE_VERSION|DOWNLOAD_URL|CURL)__/g,
+    (token) => values[token]!,
+  );
 }
 
 export async function serveAgentInstallation(

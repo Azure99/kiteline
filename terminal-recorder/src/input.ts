@@ -1,8 +1,7 @@
-import { limits } from "@kiteline/shared/protocol";
-import { AppError, asError } from "@kiteline/shared/protocol";
+import { AppError, asError, limits } from "@kiteline/shared/protocol";
 import { normalizePaste } from "@kiteline/shared/terminal";
 import { tmux } from "@kiteline/shared/terminal/node";
-import type { RecorderConfig, TerminalFrame } from "@kiteline/shared/ipc";
+import type { RecorderConfig, TerminalFrame } from "@kiteline/shared/protocol/ipc";
 import type { Control } from "./control.js";
 import type { Model } from "./model.js";
 

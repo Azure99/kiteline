@@ -70,7 +70,7 @@ test("server recovery uses the selected state and retains devices through passwo
   try {
     await store.setup(setup.stdout().trim(), "initial-password");
     identity = store.bind(store.newBinding().code, "Existing device");
-    store.createSession(60_000);
+    store.createLogin(60_000);
   } finally {
     store.close();
   }

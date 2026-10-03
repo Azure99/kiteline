@@ -3,9 +3,17 @@ import { resolve, isAbsolute, dirname } from "node:path";
 import { readFile, writeFile, rename, rm, mkdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { AppError, integer, record, string } from "@kiteline/shared/protocol";
-import { installedPaths } from "./installation.js";
+import { installedPaths } from "./install/paths.js";
 import { windowsNative } from "@kiteline/shared/windows/native";
-import { windowsExecutable } from "./tool-checks.js";
+import { windowsExecutable } from "./tools.js";
+
+export const stateFiles = {
+  metadata: "agent.json",
+  connection: "connection.json",
+  config: "config.json",
+  temporaryFiles: "temporary-files.json",
+  tasks: "tasks",
+} as const;
 
 export interface AgentConfig {
   dataDir: string;
@@ -83,7 +91,7 @@ export async function agentConfig(): Promise<AgentConfig> {
   const { dataDir, runDir } = await agentPaths();
   let input: Record<string, unknown> = {};
   try {
-    input = record(await readJson(resolve(dataDir, "config.json")));
+    input = record(await readJson(resolve(dataDir, stateFiles.config)));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
@@ -112,7 +120,7 @@ async function powershell() {
 export async function readIdentity(config: AgentConfig): Promise<Identity> {
   let value: Record<string, unknown>;
   try {
-    value = record(await readJson(resolve(config.dataDir, "connection.json")));
+    value = record(await readJson(resolve(config.dataDir, stateFiles.connection)));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT")
       throw new AppError("not_found", "Device is not bound; run kiteline-agent bind");

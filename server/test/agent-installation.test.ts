@@ -39,10 +39,7 @@ test.runIf(process.platform === "linux")(
     cleanup.push(() => new Promise<void>((resolve) => server.close(() => resolve())));
     const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     const upgrade = await (await fetch(origin + "/upgrade.sh")).text();
-    const install = await readFile(
-      new URL("../../deploy/install-agent.sh", import.meta.url),
-      "utf8",
-    );
+    const install = await readFile(new URL("../../installer/install.sh", import.meta.url), "utf8");
     for (const [name, script, args] of [
       [
         "install",
