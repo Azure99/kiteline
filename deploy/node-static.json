@@ -1,0 +1,13 @@
+{
+  "recipeRevision": 1,
+  "archives": {
+    "amd64": {
+      "url": "https://github.com/Azure99/node-static-builds/releases/download/node-v22.23.3-r1/node-v22.23.3-r1-linux-amd64.tar.gz",
+      "sha256": "58abb65c2e6d343f2700537dbc4273838b492de3c689cfaa89c3a8ee4ecc22e5"
+    },
+    "arm64": {
+      "url": "https://github.com/Azure99/node-static-builds/releases/download/node-v22.23.3-r1/node-v22.23.3-r1-linux-arm64.tar.gz",
+      "sha256": "89eeb0c9aa18320e5d2b55c606c0eeea8dc70444145254cc46bd7b87aa123040"
+    }
+  }
+}

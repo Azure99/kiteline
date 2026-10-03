@@ -6,14 +6,6 @@ RUN xargs apk add --no-cache < /var/tmp/packages.txt \
     && apk info -vv | sort > /var/tmp/build-packages.txt
 WORKDIR /var/tmp/build
 
-FROM toolchain AS runtime
-ARG NODE_ARCH
-COPY node.tar.xz build-static-node.sh node-inputs.json ./
-RUN sh build-static-node.sh "$NODE_ARCH"
-COPY licenses/ /output/runtime/licenses/
-COPY --from=toolchain /var/tmp/build-packages.txt /output/runtime/build-packages.txt
-COPY node-inputs.json /output/runtime/inputs.json
-
 FROM toolchain AS native
 ARG NODE_ARCH
 COPY libevent* ncurses* tmux.tar.gz build-static-native.sh ./
@@ -24,8 +16,8 @@ COPY --from=toolchain /var/tmp/build-packages.txt /output/native/build-packages.
 COPY native-inputs.json /output/native/inputs.json
 
 FROM toolchain AS verified
-COPY --from=runtime /output/ /output/
 COPY --from=native /output/ /output/
+COPY runtime/ /output/runtime/
 RUN /output/runtime/bin/node --version \
     && /output/native/bin/tmux -V \
     && cd /output && find runtime native -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS

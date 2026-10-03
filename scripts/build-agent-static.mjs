@@ -18,6 +18,8 @@ export function buildStaticAgent(destination, architecture = "amd64") {
   const release = json("deploy/release.json");
   const nodeArchitecture = release.nodeArchives[architecture]?.architecture;
   if (!nodeArchitecture) throw new Error(`Unsupported static agent architecture: ${architecture}`);
+  const nodeRecipe = json("deploy/node-static.json");
+  const nodeArchive = nodeRecipe.archives[architecture];
   const recipe = json("deploy/agent-static.json");
   const cache = "/var/tmp/kiteline-release-cache/static-sources";
   const temporary = mkdtempSync("/var/tmp/kiteline-static-");
@@ -26,11 +28,19 @@ export function buildStaticAgent(destination, architecture = "amd64") {
   const cleanupErrors = [];
   try {
     mkdirSync(cache, { recursive: true });
-    const node = {
-      url: `https://nodejs.org/dist/v${release.node}/node-v${release.node}.tar.xz`,
-      sha256: recipe.nodeSourceSha256,
-    };
-    const sources = { "node.tar.xz": node, "tmux.tar.gz": recipe.tmux, ...recipe.sources };
+    const cachedNode = join(cache, nodeArchive.sha256);
+    fetchPinned(nodeArchive, cachedNode);
+    run("tar", ["-xzf", cachedNode, "-C", temporary]);
+    const nodeBuild = JSON.parse(readFileSync(join(temporary, "runtime/build.json"), "utf8"));
+    if (
+      nodeBuild.nodeVersion !== release.node ||
+      nodeBuild.recipeRevision !== nodeRecipe.recipeRevision ||
+      nodeBuild.architecture !== architecture
+    )
+      throw new Error(
+        `Static Node component must match Node ${release.node}, recipe revision ${nodeRecipe.recipeRevision} and architecture ${architecture}`,
+      );
+    const sources = { "tmux.tar.gz": recipe.tmux, ...recipe.sources };
     const downloads = {
       ...sources,
       ...Object.fromEntries(
@@ -47,7 +57,6 @@ export function buildStaticAgent(destination, architecture = "amd64") {
     const files = {
       Dockerfile: "deploy/Dockerfile.agent-static",
       "packages.txt": "deploy/agent-static-packages.txt",
-      "build-static-node.sh": "scripts/build-static-node.sh",
       "build-static-native.sh": "scripts/build-static-native.sh",
       "tmux-paste.patch": "native/tmux-paste.patch",
       "rename-noreplace.c": "native/rename-noreplace.c",
@@ -56,12 +65,6 @@ export function buildStaticAgent(destination, architecture = "amd64") {
     for (const [name, file] of Object.entries(files))
       cpSync(join(root, file), join(temporary, name));
     const toolchain = { image: recipe.alpine, packages: digest(join(temporary, "packages.txt")) };
-    const nodeInputs = {
-      architecture: nodeArchitecture,
-      node,
-      toolchain,
-      recipe: digest(join(temporary, "build-static-node.sh")),
-    };
     const nativeInputs = {
       architecture: nodeArchitecture,
       sources: { tmux: recipe.tmux, ...recipe.sources },
@@ -71,8 +74,10 @@ export function buildStaticAgent(destination, architecture = "amd64") {
       helper: digest(join(temporary, "rename-noreplace.c")),
       terminfo: digest(join(temporary, "tmux.terminfo")),
     };
-    for (const [name, inputs] of Object.entries({ node: nodeInputs, native: nativeInputs }))
-      writeFileSync(join(temporary, `${name}-inputs.json`), JSON.stringify(inputs, null, 2) + "\n");
+    writeFileSync(
+      join(temporary, "native-inputs.json"),
+      JSON.stringify(nativeInputs, null, 2) + "\n",
+    );
     const imageFile = join(temporary, "image-id");
     run("docker", [
       "build",
@@ -106,7 +111,7 @@ export function buildStaticAgent(destination, architecture = "amd64") {
           linkage: "static-musl",
           architecture: nodeArchitecture,
           image,
-          node: nodeInputs,
+          node: nodeArchive,
           native: nativeInputs,
           files: readFileSync(join(output, "SHA256SUMS"), "utf8"),
         },

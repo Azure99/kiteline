@@ -4,7 +4,7 @@
 
 ## 生成交付物
 
-使用[package.json](../package.json)固定的Node和pnpm。Linux构建机需要Docker BuildKit、binutils的readelf、libarchive-tools的bsdtar，以及Windows组包所需zip；可通过binfmt/QEMU执行另一架构的构建。基础镜像、Node、rg和Ubuntu证书包身份集中在[release.json](release.json)。用户运行发布包无需npm或编译器。
+使用[package.json](../package.json)固定的Node和pnpm。Linux构建机需要Docker BuildKit、binutils的readelf、libarchive-tools的bsdtar，以及Windows组包所需zip；可通过binfmt/QEMU执行另一架构的native构建。基础镜像、Node版本、rg和Ubuntu证书包身份集中在[release.json](release.json)，Linux静态Node归档固定于[node-static.json](node-static.json)。用户运行发布包无需npm或编译器。
 
 只构建Linux amd64及对应server的命令：
 
@@ -19,7 +19,7 @@ pnpm images amd64
 
 包及对应`.sha256`位于`dist/releases/`；产品版本来自[version.json](../shared/src/version.json)，镜像名为`kiteline-server:<版本>-<amd64|arm64>`。跨机器可用`docker save/load`搬运镜像。构建从干净commit开始，结束时再次核HEAD和工作区/index；清单记录sourceCommit、sourceDirty=false、平台及组件身份。组装server和构建镜像时核对当前来源、版本和目标，来源不一致须重建相应包；原生组件仍按实际输入闭包复用。
 
-`package agent amd64`和`package agent arm64`自动构建/复用对应静态组件；也可单独用`node scripts/build-agent-static.mjs amd64`或`arm64`构建到`dist/agent-static-<架构>/`，省略架构时使用amd64。来源与SHA在[agent-static.json](agent-static.json)，工具链包名在[agent-static-packages.txt](agent-static-packages.txt)，实际版本记录于输出build-packages.txt。首次构建需要数GiB内存和较长编译时间，Node固定3个编译任务，8GiB构建机应串行安排重负载。Docker分别缓存Node/native阶段；源码、脚本、工具链或构建输入模式变化可能使相关缓存失效。源下载缓存在`/var/tmp/kiteline-release-cache`并核验SHA。输出携带许可证、工具包清单、输入身份和文件校验，静态ELF检查拒绝动态加载器或库依赖。组件升级同步来源、工具链和对应环境验收。
+`package agent amd64`和`package agent arm64`下载对应静态Node并构建/复用native；也可单独用`node scripts/build-agent-static.mjs amd64`或`arm64`输出到`dist/agent-static-<架构>/`，省略架构时使用amd64。Node归档及SHA固定于[node-static.json](node-static.json)；Node版本与配方修订变更时，先在[node-static-builds](https://github.com/Azure99/node-static-builds)构建验证新组件，再更新本仓引用。native来源与SHA见[agent-static.json](agent-static.json)，工具链包名见[agent-static-packages.txt](agent-static-packages.txt)，实际版本随输出记录。下载缓存位于`/var/tmp/kiteline-release-cache`并核验SHA，native编译沿Docker缓存复用。产物记录及静态边界见[运行基线](#平台要求)。
 
 macOS原生组件使用[固定输入](agent-macos.json)及对应架构的macOS构建环境，需要 Command Line Tools 和 SDK，部署目标 14.0。分别对amd64、arm64执行以下步骤：先在源码目录准备输入，再将完整输入目录传至相应构建机；使用固定Node运行其中同一脚本，输出目录须不存在：
 
