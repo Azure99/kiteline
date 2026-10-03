@@ -79,7 +79,6 @@ export async function git(
   let error: unknown;
   let clipped = false;
   let stopping: Promise<void> | undefined;
-  let groupEnded = false;
   let groupFailure = false;
   const groupError = (reason: unknown) => {
     error ??= reason;
@@ -91,8 +90,15 @@ export async function git(
       child.terminate();
       return;
     }
-    if (child.pid && !groupEnded && !stopping)
-      stopping = stopGroup(child.pid, groupDone, 1000, groupError);
+    if (child.pid && !stopping) {
+      const pid = child.pid;
+      stopping = stopGroup(
+        pid,
+        exited.then(() => waitForGroup(pid, groupError)),
+        1000,
+        groupError,
+      );
+    }
   };
   const abort = () => stop();
   signal.addEventListener("abort", abort, { once: true });
@@ -103,15 +109,13 @@ export async function git(
           child.on("error", (reason) => {
             error ??= reason;
             if (!child.pid) resolve(null);
+            else stop();
           });
-          child.once("exit", resolve);
+          child.once("exit", (code) => {
+            if (code === null) stop();
+            resolve(code);
+          });
         });
-  const groupDone = (async () => {
-    await exited;
-    if (child instanceof JobChild) await child.empty;
-    else if (child.pid) await waitForGroup(child.pid, groupError);
-    groupEnded = true;
-  })();
   child.stdin!.on("error", (reason: NodeJS.ErrnoException) => {
     if (reason.code !== "EPIPE") {
       error = reason;
@@ -160,13 +164,12 @@ export async function git(
   else child.stdin!.end(options.input);
   if (signal.aborted) stop();
   const code = await exited;
-  await groupDone;
-  await stopping;
+  if (child instanceof JobChild) await child.empty;
   const drainTimer = setTimeout(() => {
     if (!child.stdout!.readableEnded || !child.stderr!.readableEnded) {
       error ??= new AppError(
         "io_error",
-        "Git output pipes did not close after the process group ended",
+        "Git output pipes did not close after the main process exited",
       );
       child.stdout!.destroy();
       child.stderr!.destroy();
@@ -179,6 +182,8 @@ export async function git(
     signal.removeEventListener("abort", abort);
     child.stdin!.destroy();
   }
+  // Cancellation or a stream error can start cleanup during output draining.
+  await stopping;
   const result = {
     stdout: stdout.text(),
     stderr: stderr.text(),

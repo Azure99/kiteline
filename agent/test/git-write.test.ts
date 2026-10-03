@@ -23,10 +23,18 @@ import { git } from "../src/git/process.js";
 import { commit, createBranch, changeBranch } from "../src/git/refs.js";
 import { observeIndex, headIdentity, status } from "../src/git/status.js";
 import { workingDiff } from "../src/git/diff.js";
+import { AppError } from "@kiteline/shared/protocol";
 
 const exec = promisify(execFile);
 const roots: string[] = [];
 const signal = () => new AbortController().signal;
+function killTestProcess(pid: number) {
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+  }
+}
 beforeEach(async () => {
   const home = await mkdtemp("/var/tmp/kiteline-git-env-");
   roots.push(home);
@@ -419,75 +427,216 @@ test("write queue cancellation is prompt, preserves ordering and bounded output 
   expect(await cli("log", "-1", "--format=%s")).toBe("base\n");
 });
 
-test("a hook escaping with output pipes reports unknown after the original group ends", async () => {
-  const { root, cli, repo, repos, workspace, write } = await setup();
-  let escaped: number | undefined;
+test("a newly started credential cache survives completion and releases the write queue", async () => {
+  const { root, cli, repo, repos, workspace } = await setup();
+  const socket = join(root, ".git/credential-cache/socket");
+  const input = "protocol=https\nhost=example.test\nusername=test\npassword=synthetic\n\n";
+  await cli("commit", "--allow-empty", "-m", "base");
+  const queue = new GitWriteQueue(repos);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(new Error("cache blocked completion")), 2000);
   try {
-    await write("file", "value");
-    await cli("add", "file");
-    await write(
-      ".git/hooks/post-commit",
-      "#!/bin/sh\nsetsid sh -c 'echo $$ > .git/escaped.pid; exec sleep 30' &\n",
+    const first = queue.run(workspace.id, repo.id, controller.signal, () =>
+      git(
+        root,
+        ["-c", `credential.helper=cache --timeout=30 --socket=${socket}`, "credential", "approve"],
+        controller.signal,
+        { write: true, input },
+      ),
     );
-    await chmod(join(root, ".git/hooks/post-commit"), 0o755);
-    const queue = new GitWriteQueue(repos);
-    const result = queue.run(workspace.id, repo.id, signal(), () =>
-      git(root, ["commit", "-m", "committed"], signal(), { write: true }),
+    const next = queue.run(workspace.id, repo.id, controller.signal, () =>
+      git(root, ["tag", "after-cache"], controller.signal, { write: true }),
     );
-    const rejected = expect(result).rejects.toMatchObject({
-      outcome: "unknown",
-      message: expect.stringContaining("pipes did not close"),
-    });
-    await expect
-      .poll(async () => {
-        escaped = Number(await readFile(join(root, ".git/escaped.pid"), "utf8"));
-        return escaped;
-      })
-      .toBeGreaterThan(0);
-    await rejected;
-    expect(await cli("log", "-1", "--format=%s")).toBe("committed\n");
-    await queue.run(workspace.id, repo.id, signal(), () =>
-      git(root, ["tag", "after-hook"], signal(), { write: true }),
+    await Promise.all([first, next]);
+    clearTimeout(timeout);
+    controller.abort(new Error("operation already completed"));
+    const credential = await git(
+      root,
+      ["credential-cache", `--socket=${socket}`, "get"],
+      signal(),
+      {
+        input: "protocol=https\nhost=example.test\n\n",
+      },
     );
-    expect(process.kill(escaped!, 0)).toBe(true);
+    expect(credential.text).toContain("password=synthetic");
+    expect(await cli("tag", "--list")).toBe("after-cache\n");
   } finally {
-    if (escaped) process.kill(-escaped, "SIGKILL");
+    clearTimeout(timeout);
+    await cli("credential-cache", `--socket=${socket}`, "exit");
   }
 });
 
-test("cancelling Git stops a detached-output hook before releasing the write queue", async () => {
-  const { root, repo, repos, workspace, cli, write } = await setup();
-  await write("base", "base");
-  await cli("add", ".");
-  await write(
-    ".git/hooks/pre-commit",
-    "#!/bin/sh\ntrap '' TERM\nexec >/dev/null 2>&1\necho ready >.git/hook-ready\nsleep 2\necho leaked >.git/hook-leaked\n",
+test("Git waits for a synchronous hook but leaves its background task running", async () => {
+  const { root, cli, repo, repos, workspace, write } = await setup();
+  let background: number | undefined;
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(new Error("background blocked completion")),
+    2500,
   );
-  await exec("chmod", ["+x", join(root, ".git/hooks/pre-commit")]);
-  const queue = new GitWriteQueue(repos),
-    controller = new AbortController();
-  const running = queue.run(workspace.id, repo.id, controller.signal, () =>
-    git(root, ["commit", "-m", "cancel"], controller.signal, { write: true }),
-  );
-  const assertion = expect(running).rejects.toMatchObject({ outcome: "unknown" });
-  for (let i = 0; ; i++) {
-    try {
-      await readFile(join(root, ".git/hook-ready"));
-      break;
-    } catch (error) {
-      if (i === 100) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
+  try {
+    await write(
+      ".git/hooks/post-commit",
+      "#!/bin/sh\nsleep 0.1\necho synchronous > .git/sync-done\nsleep 30 </dev/null >/dev/null 2>&1 &\necho $! > .git/background.pid\n",
+    );
+    await chmod(join(root, ".git/hooks/post-commit"), 0o755);
+    const queue = new GitWriteQueue(repos);
+    const first = queue.run(workspace.id, repo.id, controller.signal, () =>
+      git(root, ["commit", "--allow-empty", "-m", "hook"], controller.signal, { write: true }),
+    );
+    const next = queue.run(workspace.id, repo.id, controller.signal, async () => {
+      expect(await readFile(join(root, ".git/sync-done"), "utf8")).toBe("synchronous\n");
+      background = Number(await readFile(join(root, ".git/background.pid"), "utf8"));
+      expect(process.kill(background, 0)).toBe(true);
+      return git(root, ["tag", "after-background"], controller.signal, { write: true });
+    });
+    await Promise.all([first, next]);
+    expect(await cli("tag", "--list")).toBe("after-background\n");
+  } finally {
+    clearTimeout(timeout);
+    background ??= Number(await readFile(join(root, ".git/background.pid"), "utf8"));
+    killTestProcess(background);
   }
-  controller.abort(new Error("cancel hook"));
-  await assertion;
-  await rm(join(root, ".git/hooks/pre-commit"));
-  await queue.run(workspace.id, repo.id, signal(), () =>
-    git(root, ["commit", "-m", "next"], signal(), { write: true }),
+});
+
+test("Git collects delayed hook output within the output drain deadline", async () => {
+  const { root, write } = await setup();
+  await write(".git/hooks/post-commit", "#!/bin/sh\n(sleep 0.1; echo delayed-hook-output >&2) &\n");
+  await chmod(join(root, ".git/hooks/post-commit"), 0o755);
+  const result = await git(root, ["commit", "--allow-empty", "-m", "output"], signal(), {
+    write: true,
+  });
+  expect(result.stderr).toContain("delayed-hook-output");
+  expect(result.code).toBe(0);
+});
+
+test.each(["", "setsid "])(
+  "a background hook (%s) holding output pipes reports unknown",
+  async (prefix) => {
+    const { root, cli, repo, repos, workspace, write } = await setup();
+    let escaped: number | undefined;
+    try {
+      await write("file", "value");
+      await cli("add", "file");
+      await write(
+        ".git/hooks/post-commit",
+        `#!/bin/sh\n${prefix}sh -c 'echo $$ > .git/escaped.pid; exec sleep 30' &\n`,
+      );
+      await chmod(join(root, ".git/hooks/post-commit"), 0o755);
+      const queue = new GitWriteQueue(repos);
+      const result = queue.run(workspace.id, repo.id, signal(), () =>
+        git(root, ["commit", "-m", "committed"], signal(), { write: true }),
+      );
+      const rejected = expect(result).rejects.toMatchObject({
+        outcome: "unknown",
+        message: expect.stringContaining("pipes did not close"),
+      });
+      await expect
+        .poll(async () => {
+          escaped = Number(await readFile(join(root, ".git/escaped.pid"), "utf8"));
+          return escaped;
+        })
+        .toBeGreaterThan(0);
+      await rejected;
+      expect(await cli("log", "-1", "--format=%s")).toBe("committed\n");
+      await queue.run(workspace.id, repo.id, signal(), () =>
+        git(root, ["tag", "after-hook"], signal(), { write: true }),
+      );
+      expect(process.kill(escaped!, 0)).toBe(true);
+    } finally {
+      if (escaped) killTestProcess(escaped);
+    }
+  },
+);
+
+test.each(["cancelled", "timeout"] as const)(
+  "%s stops a detached-output hook before releasing the write queue",
+  async (reason) => {
+    const { root, repo, repos, workspace, cli, write } = await setup();
+    await write("base", "base");
+    await cli("add", ".");
+    await write(
+      ".git/hooks/pre-commit",
+      "#!/bin/sh\ntrap '' TERM\nexec >/dev/null 2>&1\necho ready >.git/hook-ready\nsleep 2\necho leaked >.git/hook-leaked\n",
+    );
+    await exec("chmod", ["+x", join(root, ".git/hooks/pre-commit")]);
+    const queue = new GitWriteQueue(repos),
+      controller = new AbortController();
+    const running = queue.run(workspace.id, repo.id, controller.signal, () =>
+      git(root, ["commit", "-m", "cancel"], controller.signal, { write: true }),
+    );
+    const assertion = expect(running).rejects.toMatchObject({ code: reason, outcome: "unknown" });
+    for (let i = 0; ; i++) {
+      try {
+        await readFile(join(root, ".git/hook-ready"));
+        break;
+      } catch (error) {
+        if (i === 100) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    }
+    controller.abort(new AppError(reason, "Stop test Git operation"));
+    await assertion;
+    await rm(join(root, ".git/hooks/pre-commit"));
+    await queue.run(workspace.id, repo.id, signal(), () =>
+      git(root, ["commit", "-m", "next"], signal(), { write: true }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    await expect(readFile(join(root, ".git/hook-leaked"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    expect(await cli("log", "-1", "--format=%s")).toBe("next\n");
+  },
+);
+
+test("cancellation during output drain still cleans the group before the next write", async () => {
+  const { root, repo, repos, workspace, write } = await setup();
+  await write(
+    ".git/hooks/post-commit",
+    "#!/bin/sh\necho $PPID > .git/git.pid\nsh -c 'trap \"\" TERM; echo $$ > .git/background.pid; exec sleep 30' &\n",
   );
-  await new Promise((resolve) => setTimeout(resolve, 1200));
-  await expect(readFile(join(root, ".git/hook-leaked"))).rejects.toMatchObject({ code: "ENOENT" });
-  expect(await cli("log", "-1", "--format=%s")).toBe("next\n");
+  await chmod(join(root, ".git/hooks/post-commit"), 0o755);
+  const queue = new GitWriteQueue(repos);
+  const controller = new AbortController();
+  const running = queue.run(workspace.id, repo.id, controller.signal, () =>
+    git(root, ["commit", "--allow-empty", "-m", "draining"], controller.signal, { write: true }),
+  );
+  const assertion = expect(running).rejects.toMatchObject({
+    code: "cancelled",
+    outcome: "unknown",
+  });
+  let group: number | undefined;
+  let background: number | undefined;
+  try {
+    await expect
+      .poll(async () => {
+        group = Number(await readFile(join(root, ".git/git.pid"), "utf8"));
+        background = Number(await readFile(join(root, ".git/background.pid"), "utf8"));
+        if (!group || !background) return false;
+        try {
+          process.kill(group, 0);
+          return false;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+          return true;
+        }
+      })
+      .toBe(true);
+    const next = queue.run(workspace.id, repo.id, signal(), async () => {
+      const state = await exec("ps", ["-p", String(background), "-o", "stat="]).catch((error) => {
+        if (error.code !== 1) throw error;
+        return { stdout: "" };
+      });
+      expect(state.stdout.trim()).toMatch(/^(Z.*)?$/);
+      return git(root, ["tag", "after-drain-cancel"], signal(), { write: true });
+    });
+    controller.abort(new AppError("cancelled", "cancel while draining"));
+    await Promise.all([assertion, next]);
+  } finally {
+    controller.abort(new AppError("cancelled", "Clean up test Git operation"));
+    await Promise.allSettled([running, assertion]);
+    if (group) killTestProcess(-group);
+  }
 });
 test("commit observes semantic index identity and commits every staged file", async () => {
   const { root, repo, cli, write, stage } = await setup();
