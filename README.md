@@ -1,70 +1,78 @@
 # Kiteline
 
-单人自托管的远程工作台，通过桌面或手机浏览器使用 Linux、Windows 和 macOS 设备上的终端、文件、Git 与定时任务。server 部署在 Linux。
+[English](README.en.md)
 
-## 安装与运行
+Kiteline 是一个单人自托管的远程工作台。在桌面或手机浏览器里，你可以使用多台 Linux、Windows 和 macOS 设备上的终端、文件、Git 和本地开发服务，并管理设备上的定时任务。
 
-server 部署、设备接入及后台运行见 [安装与运行](deploy/README.md)，发布包构建和CI入口见 [构建交付物](release/README.md)，平台要求见 [运行基线](deploy/README.md#平台要求)。后台服务由用户配置和管理。
+## 功能
 
-## 从源码开发
+- **终端**：真实 Shell 运行在设备上。关闭浏览器、断网或切换页面都不会结束会话；同一会话可以同时在网页和设备本机终端里使用。桌面支持分组和分屏，手机提供触控与按键辅助。
+- **文件**：浏览工作区目录，编辑文本，预览图片，按文件名或内容搜索，上传下载，复制、移动、重命名和删除。
+- **Git**：查看状态和 diff，暂存、提交、切换分支、查看历史，fetch、pull、push，处理冲突。使用设备上已有的 Git 配置和凭据。
+- **开发服务**：在浏览器中打开设备上监听本地端口的 HTTP 服务，支持 WebSocket 和热更新。
+- **定时任务**：在设备上按 cron 计划运行命令，在网页或命令行中管理。
+- **多设备、多工作区**：一个工作台管理多台设备；每台设备可以登记多个项目目录作为工作区。
+- **界面语言**：简体中文和英文。
 
-开发环境使用 [package.json](package.json) 指定的 Node 和 pnpm。Ubuntu 原生组件构建需要 `build-essential pkg-config libevent-dev libncurses-dev ncurses-bin bison curl patch`，terminfo使用仓内固定源；运行设备工具还需要 Git 2.23.0+ 和 Shell。两种Linux架构的组件准备都会取得固定rg到内部路径，不要求系统rg；目标环境见[运行基线](deploy/README.md#平台要求)。
+## 工作方式
 
-```sh
-pnpm install --frozen-lockfile
-pnpm native:build
-pnpm build
-KITELINE_DATA_DIR=/var/tmp/kiteline-dev/server pnpm dev
+```text
+浏览器 ──HTTP(S)/WebSocket──▶ server ◀──WebSocket（设备主动连接）── agent ── 设备上的 Shell、文件、Git
 ```
 
-`dev` 编译并监听 TypeScript，启动 server 与 Vite，退出时关闭启动的进程。打开 http://localhost:5173，使用 server 控制台的初始化凭据设置密码。源码 dev 不含发布下载资源；在网页生成接入命令，从“已安装，仅绑定”命令中取得绑定码，在下方 bind 提示时输入：
+- **server**（`kiteline-server`）运行在 Linux 上，提供网页、API 和设备连接。它只保存拥有者密码、登录会话、设备登记和定时任务摘要等管理信息；文件内容、终端输出和 Git 数据在设备上处理，经 server 转发但不保存。
+- **agent**（`kiteline-agent`）以你指定的操作系统账户运行在每台设备上，主动连接 server，设备不需要开放入站端口。
+- 工作台只有一个拥有者。登录后，拥有者能以 agent 运行账户（项目用户）的权限在设备上执行任何操作；工作区只是登记的目录，不是隔离边界。server 本身只提供 HTTP，公网访问时请放在 HTTPS 反向代理之后。
 
-```sh
-export KITELINE_AGENT_HOME=/var/tmp/kiteline-dev/agent
-pnpm agent bind --server http://localhost:5173
-pnpm agent run
-```
+## 支持的平台
 
-可选 HTTPS 开发：启动 `pnpm dev` 时增加 `KITELINE_TRUST_PROXY_PROTO=1`，再运行本地 Caddy：
+| 组件   | 平台                                                                   |
+| ------ | ---------------------------------------------------------------------- |
+| server | Linux amd64、arm64（Docker 镜像或原生发布包）                          |
+| agent  | Linux amd64、arm64（Ubuntu 24.04、Debian 12、Alpine 3.23、CentOS 7.9） |
+| agent  | Windows 11 x64                                                         |
+| agent  | macOS 14 及以上（Intel、Apple Silicon）                                |
+| 浏览器 | 桌面 Chrome、Android Chrome；最低 Chromium 97                          |
 
-```sh
-docker run --rm --name kiteline-dev-caddy --network host \
-  -v "$PWD/scripts/dev/Caddyfile:/etc/caddy/Caddyfile:ro" \
-  -v /var/tmp/kiteline-dev/caddy:/data caddy:2.10.2
-```
+设备需要自备 Git 2.23.0 及以上版本和项目使用的 Shell；Node.js、tmux、ripgrep 等运行组件已随 agent 发布包提供。各系统的完整要求见[接入设备](docs/guide/devices.md#支持的系统与准备)。
 
-打开 https://localhost:8443 并信任本地开发证书。使用该入口绑定 agent 时，绑定地址改为 `https://localhost:8443`，并在运行 bind/run 的 Shell 中设置相同的测试根证书：
+## 快速开始
 
-```sh
-export NODE_EXTRA_CA_CERTS=/var/tmp/kiteline-dev/caddy/caddy/pki/authorities/local/root.crt
-```
+1. 在一台 Linux 主机上用 Docker 启动 server（把 `0.2.5` 换成要部署的版本）：
 
-正式部署、密码恢复和代理环境见[安装与运行](deploy/README.md#server-部署)。原生组件及构建身份位于 `dist/native/`；临时编译目录和包缓存使用 `/var/tmp`。
+   ```sh
+   mkdir kiteline && cd kiteline
+   curl -fsSLO https://raw.githubusercontent.com/Azure99/kiteline/v0.2.5/deploy/compose.yaml
+   sed -i 's|kiteline-server:|ghcr.io/azure99/kiteline:|; s|-${KITELINE_ARCH:-amd64}||' compose.yaml
+   echo KITELINE_VERSION=0.2.5 > .env
+   docker compose up -d
+   docker compose logs server
+   ```
 
-## 访问设备上的开发服务
+   server 默认只监听本机的 `127.0.0.1:8080`。要从局域网中的其他机器访问，在 `.env` 中再加一行 `KITELINE_HTTP_BIND=0.0.0.0` 后重新执行 `docker compose up -d`。这会以明文 HTTP 开放端口，Docker 发布的端口也不受 ufw、firewalld 等主机防火墙限制，只在可信网络中这样做；HTTPS 和原生部署见[部署 server](docs/guide/server.md)。
 
-选定设备后，顶栏地球图标可输入端口，打开时读取一次监听端口建议。终端中的 `http://localhost:端口/` 链接可直接打开；手机选中完整链接后也有访问动作。服务需监听 agent 所在环境的 loopback 或 wildcard 地址。
+2. 在浏览器中打开 server 的地址（在 server 主机上是 `http://127.0.0.1:8080`），输入日志中的初始化 token（30 分钟内有效），设置拥有者密码。
+3. 在工作台点击“绑定设备”，选择设备的系统，点击“复制接入命令”，在设备上以日常使用的账户执行。命令会检查环境、安装 agent、完成绑定并在前台运行 agent。设备必须能访问你打开工作台时使用的地址：从 `127.0.0.1` 或 `localhost` 打开时生成的命令只能在 server 主机上使用。详见[接入设备](docs/guide/devices.md)。
+4. 设备上线后添加工作区，即可使用终端、文件和 Git。功能说明见[使用工作台](docs/guide/usage.md)。
 
-默认入口剥离代理前缀。Vite 项目使用“保留路径”，具体 `base`、Host 和 HMR 配置见 [开发服务](deploy/README.md#开发服务)。
+前台运行的 agent 会随终端关闭而停止，并结束它的终端会话。长期使用时按[后台运行](docs/guide/devices.md#后台运行)把 agent 配置为服务。
 
-## 检查
+## 文档
 
-```sh
-pnpm format:check
-pnpm lint
-pnpm typecheck
-pnpm test
-pnpm build
-```
+| 我想……                       | 阅读                                                                         |
+| ---------------------------- | ---------------------------------------------------------------------------- |
+| 部署和维护 server            | [部署 server](docs/guide/server.md)                                          |
+| 接入设备、后台运行、升级卸载 | [接入设备](docs/guide/devices.md)                                            |
+| 了解各项功能                 | [使用工作台](docs/guide/usage.md)、[定时任务](docs/guide/scheduled-tasks.md) |
+| 查命令、配置、限额和报错     | [参考](docs/guide/reference.md)                                              |
+| 从源码开发                   | [源码开发](docs/development/setup.md)                                        |
+| 构建发布包                   | [构建与发布](docs/development/release.md)                                    |
+| 理解架构和行为契约           | [文档地图](docs/README.md)                                                   |
 
-文件、Git和进程测试使用真实文件系统、Git及tmux，需要先构建原生组件。浏览器改动在当前Chrome与实际Chromium 97检查，覆盖桌面、手机布局和连续操作；输入法、软键盘、剪贴板和全屏另在Android真机核对。Windows文件与安装链使用Windows 11本地NTFS；各平台从最终包运行并检查受影响的安装升级流程，构建入口见[构建交付物](release/README.md)。
+## 参与开发
+
+开发环境、本地运行和提交前检查见[源码开发](docs/development/setup.md)。改动某个模块前，先阅读[文档地图](docs/README.md#改动代码前阅读)中对应的设计文档。
 
 ## 许可证
 
-项目使用 [Apache-2.0](LICENSE)。随包第三方组件保留各自的许可证和版权声明，位置见 [随包材料](deploy/README.md#随包材料)。
-
-## 终端适配
-
-Web 与 recorder 共用固定 xterm 适配，普通屏幕顶部的 CSI S 滚动参考 [xterm PR6011](https://github.com/xtermjs/xterm.js/pull/6011)，依赖固定版本内部接口。tmux 的粘贴补丁读取原任务的 `wp->base.mode`，使本机 copy-mode 不改变任务的括号粘贴模式；任务未开启此模式时，正文中的回车可能直接执行命令。
-
-重复与滚动次数分别受剩余列和滚动区高度限制，依据固定 tmux 3.4 的 [REP](https://github.com/tmux/tmux/blob/3.4/input.c#L1568) 和 [scrollup](https://github.com/tmux/tmux/blob/3.4/screen-write.c#L1456)。字形、宽度和换行仍由 xterm 处理。
+Kiteline 使用 [Apache-2.0](LICENSE) 许可证。发布包中的第三方组件保留各自的许可证，位置见[产物结构](docs/development/release.md#产物结构)。
