@@ -1,0 +1,205 @@
+name: Check and build deliveries
+
+on:
+  workflow_call:
+    inputs:
+      source:
+        required: true
+        type: string
+      full:
+        default: false
+        type: boolean
+      image-artifacts:
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      TMPDIR: /var/tmp
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+          package-manager-cache: false
+      - name: Check source
+        run: |
+          set -euo pipefail
+          echo "Product: $(git rev-parse HEAD); workflow: $GITHUB_SHA"
+          corepack enable pnpm
+          pnpm install --frozen-lockfile
+          pnpm format:check
+          pnpm lint
+          pnpm typecheck
+          pnpm --filter @kiteline/web build
+          pnpm test web/test agent/test/config.test.ts agent/test/state-records.test.ts
+
+  linux-amd64:
+    needs: checks
+    if: inputs.full
+    uses: ./.github/workflows/build-agent.yml
+    with:
+      source: ${{ inputs.source }}
+      target: linux-amd64
+      runner: ubuntu-24.04
+  linux-arm64:
+    needs: checks
+    if: inputs.full
+    uses: ./.github/workflows/build-agent.yml
+    with:
+      source: ${{ inputs.source }}
+      target: linux-arm64
+      runner: ubuntu-24.04-arm
+  macos-amd64:
+    needs: checks
+    if: inputs.full
+    uses: ./.github/workflows/build-agent.yml
+    with:
+      source: ${{ inputs.source }}
+      target: macos-amd64
+      runner: macos-15-intel
+  macos-arm64:
+    needs: checks
+    if: inputs.full
+    uses: ./.github/workflows/build-agent.yml
+    with:
+      source: ${{ inputs.source }}
+      target: macos-arm64
+      runner: macos-15
+
+  windows-tmux:
+    needs: checks
+    if: inputs.full
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+          package-manager-cache: false
+      - name: Prepare fixed inputs and build tmux
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $root = Join-Path $env:RUNNER_TEMP 'kiteline-ci'
+          New-Item -ItemType Directory $root | Out-Null
+          node scripts/build-windows-components.mjs prepare "$root/inputs"
+          node "$root/inputs/scripts/build-windows-components.mjs" tmux "$root/inputs" "$root/tmux"
+          $archive = Join-Path $env:RUNNER_TEMP 'windows-inputs.tar'
+          & "$env:SystemRoot/System32/tar.exe" -cf $archive -C $root inputs tmux
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-inputs
+          overwrite: true
+          path: ${{ runner.temp }}/windows-inputs.tar
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+
+  windows-package:
+    needs: windows-tmux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      TMPDIR: /var/tmp
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+          package-manager-cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-inputs
+          path: /var/tmp/kiteline-ci-transfer
+      - name: Addon, components and final ZIP
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends binutils libarchive-tools unzip zip zstd
+          mkdir /var/tmp/kiteline-ci
+          tar -xf /var/tmp/kiteline-ci-transfer/windows-inputs.tar -C /var/tmp/kiteline-ci
+          node scripts/build-windows-components.mjs addon /var/tmp/kiteline-ci/inputs /var/tmp/kiteline-ci/addon
+          node scripts/build-windows-components.mjs assemble /var/tmp/kiteline-ci/inputs /var/tmp/kiteline-ci/tmux /var/tmp/kiteline-ci/addon /var/tmp/kiteline-ci/components
+          corepack enable pnpm
+          pnpm install --frozen-lockfile
+          pnpm package agent windows-amd64 --windows-components=/var/tmp/kiteline-ci/components
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: delivery-agent-windows-amd64
+          overwrite: true
+          path: dist/releases/*.zip*
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+
+  windows-accept:
+    needs: windows-package
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+          package-manager-cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: delivery-agent-windows-amd64
+          path: dist/releases
+      - name: Verify and run the actual ZIP
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $version = node -p 'require("./shared/src/version.json").version'
+          $name = "kiteline-agent-$version-windows-amd64"
+          $archive = "dist/releases/$name.zip"
+          $root = Join-Path $env:RUNNER_TEMP 'kiteline-ci'
+          Expand-Archive -LiteralPath $archive -DestinationPath $root
+          $package = Join-Path $root $name
+          node scripts/verify-package.mjs agent windows-amd64 $archive $package
+          $env:KITELINE_AGENT_HOME = Join-Path $root 'check-state'
+          $env:KITELINE_AGENT_RUN_DIR = Join-Path $root 'check-run'
+          $actual = & pwsh -NoProfile -ExecutionPolicy Bypass -File "$package/bin/kiteline-agent.ps1" --version
+          if ($actual -ne $version) { throw "Version mismatch: $actual" }
+          & pwsh -NoProfile -ExecutionPolicy Bypass -File "$package/bin/kiteline-agent.ps1" check
+
+  server-amd64:
+    needs: [linux-amd64, linux-arm64, macos-amd64, macos-arm64, windows-package, windows-accept]
+    if: inputs.full
+    uses: ./.github/workflows/build-server.yml
+    with:
+      source: ${{ inputs.source }}
+      arch: amd64
+      runner: ubuntu-24.04
+      image-artifacts: ${{ inputs.image-artifacts }}
+  server-arm64:
+    needs: [linux-amd64, linux-arm64, macos-amd64, macos-arm64, windows-package, windows-accept]
+    if: inputs.full
+    uses: ./.github/workflows/build-server.yml
+    with:
+      source: ${{ inputs.source }}
+      arch: arm64
+      runner: ubuntu-24.04-arm
+      image-artifacts: ${{ inputs.image-artifacts }}

@@ -1,0 +1,80 @@
+name: Build agent
+
+on:
+  workflow_call:
+    inputs:
+      source:
+        required: true
+        type: string
+      target:
+        required: true
+        type: string
+      runner:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: ${{ startsWith(inputs.target, 'macos') && 15 || 20 }}
+    env:
+      TARGET: ${{ inputs.target }}
+      TMPDIR: /var/tmp
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+          package-manager-cache: false
+      - name: Build tools and dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /var/tmp/kiteline-ci
+          corepack enable pnpm
+          pnpm install --frozen-lockfile
+          if [[ "$TARGET" == linux-* ]]; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends binutils libarchive-tools
+          fi
+      - name: Build the actual package
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$TARGET" == macos-* ]]; then
+            arch=${TARGET#macos-}
+            node scripts/build-macos-components.mjs prepare "$arch" /var/tmp/kiteline-ci/inputs
+            node /var/tmp/kiteline-ci/inputs/scripts/build-macos-components.mjs build "$arch" /var/tmp/kiteline-ci/inputs /var/tmp/kiteline-ci/components
+            pnpm package agent "$TARGET" --macos-components=/var/tmp/kiteline-ci/components
+          else
+            pnpm package agent "$TARGET"
+          fi
+      - name: Verify and run the packaged agent
+        shell: bash
+        env:
+          KITELINE_AGENT_HOME: /var/tmp/kiteline-ci/check-state
+          KITELINE_AGENT_RUN_DIR: /var/tmp/kiteline-ci/check-run
+        run: |
+          set -euo pipefail
+          version=$(node -p 'require("./shared/src/version.json").version')
+          name="kiteline-agent-$version-$TARGET"
+          archive="dist/releases/$name.tar.gz"
+          tar -xf "$archive" -C /var/tmp/kiteline-ci
+          package="/var/tmp/kiteline-ci/$name"
+          node scripts/verify-package.mjs agent "$TARGET" "$archive" "$package"
+          test "$("$package/bin/kiteline-agent" --version)" = "$version"
+          "$package/bin/kiteline-agent" check
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: delivery-agent-${{ inputs.target }}
+          overwrite: true
+          path: dist/releases/*.tar.gz*
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error

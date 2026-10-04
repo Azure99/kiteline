@@ -1,6 +1,6 @@
 # Windows Agent组件
 
-构建输入固定于[agent-windows.json](agent-windows.json)和[共同输入](inputs.json)。构建使用准备目录内的固定MSYS2归档及软件包；PowerShell 7和原生Git由用户提供。
+构建输入固定于[agent-windows.json](agent-windows.json)和[共同输入](inputs.json)。构建使用准备目录内的固定MSYS2归档及软件包；Windows构建机提供原生Node、Git、PowerShell 7和安装在默认Program Files目录的7-Zip。7-Zip解开bootstrap的XZ压缩层，系统tar提取归档。
 
 Linux x64构建机需要共同输入指定的Node版本，以及Docker、curl、支持zstd的tar、unzip、Git和GNU objdump。在仓库根目录执行：
 

@@ -111,7 +111,14 @@ export function buildWindowsTmux(directory, destination) {
   const temporary = mkdtempSync(join(destination, "build-"));
   try {
     const tar = join(process.env.SystemRoot, "System32/tar.exe");
-    run(tar, ["-xf", join(directory, "msys2-base.tar.xz"), "-C", temporary]);
+    const bootstrap = join(temporary, "bootstrap");
+    run(join(process.env.ProgramFiles, "7-Zip/7z.exe"), [
+      "x",
+      "-y",
+      `-o${bootstrap}`,
+      join(directory, "msys2-base.tar.xz"),
+    ]);
+    run(tar, ["-xf", join(bootstrap, "msys2-base.tar"), "-C", temporary]);
     const msys = join(temporary, "msys64");
     for (const pkg of recipe.packages)
       run(tar, ["-xf", join(directory, "packages", `${pkg.name}.tar.zst`), "-C", msys]);

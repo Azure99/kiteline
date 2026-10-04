@@ -4,7 +4,7 @@
 
 ## 安装与运行
 
-server 部署、设备接入及后台运行见 [安装与运行](deploy/README.md)，发布包构建见 [构建交付物](release/README.md)，平台要求见 [运行基线](deploy/README.md#平台要求)。后台服务由用户配置和管理。
+server 部署、设备接入及后台运行见 [安装与运行](deploy/README.md)，发布包构建和CI入口见 [构建交付物](release/README.md)，平台要求见 [运行基线](deploy/README.md#平台要求)。后台服务由用户配置和管理。
 
 ## 从源码开发
 

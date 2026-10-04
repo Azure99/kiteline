@@ -1,0 +1,130 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Operation
+        type: choice
+        options: [checks, full, dev-image, publish]
+        default: checks
+      tag:
+        description: Existing candidate tag for publish
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}-${{ inputs.mode || github.event_name }}-${{ inputs.mode == 'publish' && inputs.tag || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    outputs:
+      source: ${{ steps.plan.outputs.source }}
+      mode: ${{ steps.plan.outputs.mode }}
+      tag: ${{ steps.plan.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: ${{ (github.ref_type == 'tag' || inputs.mode == 'publish') && '0' || '1' }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+          package-manager-cache: false
+      - id: plan
+        env:
+          CI_MODE: ${{ inputs.mode || (github.ref_type == 'tag' && 'candidate' || 'checks') }}
+          CI_TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name || '') }}
+        run: node scripts/ci-release.mjs plan >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: source
+    if: needs.source.outputs.mode != 'publish'
+    uses: ./.github/workflows/build.yml
+    with:
+      source: ${{ needs.source.outputs.source }}
+      full: ${{ needs.source.outputs.mode != 'checks' }}
+      image-artifacts: ${{ needs.source.outputs.mode == 'dev-image' || needs.source.outputs.mode == 'candidate' }}
+
+  distribute:
+    needs: [source, build]
+    if: >-
+      needs.source.outputs.mode == 'candidate' || needs.source.outputs.mode == 'dev-image'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      packages: write
+    concurrency:
+      group: distribute-${{ github.repository }}-${{ needs.source.outputs.tag || 'dev' }}
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CI_TAG: ${{ needs.source.outputs.tag }}
+      CI_MODE: ${{ needs.source.outputs.mode }}
+      TMPDIR: /var/tmp
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.source.outputs.source }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+          package-manager-cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: delivery-*
+          path: dist/releases
+          merge-multiple: true
+      - name: Log in to GHCR
+        run: |
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Distribute the verified files and image digests
+        run: node scripts/ci-release.mjs "$CI_MODE"
+      - name: Close registry session
+        if: always()
+        run: docker logout ghcr.io
+
+  publish:
+    needs: source
+    if: needs.source.outputs.mode == 'publish'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      packages: write
+    concurrency:
+      group: distribute-${{ github.repository }}-${{ needs.source.outputs.tag }}
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CI_SOURCE: ${{ needs.source.outputs.source }}
+      CI_TAG: ${{ needs.source.outputs.tag }}
+      TMPDIR: /var/tmp
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+          package-manager-cache: false
+      - name: Log in to GHCR
+        run: |
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Publish the existing candidate
+        run: node scripts/ci-release.mjs publish
+      - name: Close registry session
+        if: always()
+        run: docker logout ghcr.io

@@ -50,6 +50,38 @@ pnpm images arm64
 
 各包根目录包含项目LICENSE；第三方许可位置见[随包材料](../deploy/README.md#随包材料)。构建后从各实际产物核对内容、来源、启动及受影响安装升级流程，区分原生、模拟和最低系统的验证结果。部署步骤见[安装与运行](../deploy/README.md)。
 
+## GitHub Actions
+
+在仓库的 Actions 页面选择 `CI`：
+
+| 入口                         | 操作                                                                     |
+| ---------------------------- | ------------------------------------------------------------------------ |
+| PR、push main、手动 `checks` | 格式、lint、类型检查、Web 构建和选定单元测试                             |
+| 手动 `full`                  | 构建并验收同一源码的五个 Agent 包、两个 server 包和两镜像                |
+| main 手动 `dev-image`        | 完整构建验收后更新 GHCR 的 `dev-<commit>`；main 仍指向该提交时更新 `dev` |
+| `vX.Y.Z` tag                 | 完整构建验收后生成 Release 草稿及 GHCR 候选镜像                          |
+| main 手动 `publish`          | 指定候选 tag，核验已有附件并发布同一批附件和镜像 digest                  |
+
+仅接受 `vX.Y.Z` 稳定版本 tag，与该提交的 `shared/src/version.json` 一致，提交属于 main 历史。发布前补齐受影响目标环境的验证，再在 main 上手动执行 `publish`；该操作即发布确认。正式镜像为 `ghcr.io/azure99/kiteline:<版本>`，包含 Linux amd64 和 arm64。
+
+Linux 使用原生 x64/ARM runner；Mac 使用 `macos-15-intel` 和 `macos-15`，产品最低 macOS 14。Windows 依次完成原生 prepare/tmux、Linux addon/ZIP 组装、Windows 实包验收。每个包检查实际文件、校验值、源码和组件身份及所选材料，五个 Agent 运行包内 `--version` 和 `check`。server 包及镜像实际启动、检查 health 后正常停止；Linux amd64 另验证一次连接、shell 输入输出和正常退出。安装维护和最低系统验证按相关源码、组件输入或运行约束的变化补齐。
+
+Actions artifact 保留一天。`full` 提供七包及各自校验文件；分发 job 另接收已验收的镜像 tar。Release 草稿保存七包、各自校验文件、总 `SHA256SUMS` 及记录产品源码、总清单摘要和候选镜像 digest 的 `delivery.json`。`publish` 使用本次 main 的脚本核验原候选附件，直接提升已构建的镜像 digest。
+
+构建失败后重新发起完整构建，或选择 **Re-run all jobs**。候选缺少 `delivery.json` 时无法 `publish`，应重新发起完整构建；候选已完成而提升失败时，重新执行 `publish`。未发布的草稿允许替换附件，已发布的 Release 拒绝重建。正式版本镜像标签已指向不同 digest 时，提升失败。`dev-<commit>` 允许更新，固定镜像内容使用 digest。
+
+GHCR 已有同名 package 时，授予本仓库 Actions 访问权限；公开分发时将 package 设为 public，并核对匿名拉取。仓库与 package 的可见性分别设置。工作流使用 `GITHUB_TOKEN`。
+
+本地从已解开的实际包复跑验收，命令在相同源码的干净 checkout 中执行：
+
+```sh
+node scripts/verify-package.mjs agent linux-amd64 dist/releases/kiteline-agent-<版本>-linux-amd64.tar.gz /var/tmp/kiteline-agent-<版本>-linux-amd64
+node scripts/verify-package.mjs server linux-amd64 dist/releases/kiteline-server-<版本>-linux-amd64.tar.gz /var/tmp/kiteline-server-<版本>-linux-amd64
+node scripts/verify-server.mjs /var/tmp/kiteline-server-<版本>-linux-amd64 /var/tmp/kiteline-server-check
+```
+
+`verify-server` 的工作目录须为新目录；`--agent=包目录` 运行代表连接与 PTY，`--image=镜像引用` 检查已构建镜像的实际内容和启动。server 包内容核验需要本次完整五个 Agent 归档位于 `dist/releases/`。
+
 ## 终端补丁维护
 
 ### xterm补丁再生成
