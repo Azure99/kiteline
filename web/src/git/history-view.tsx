@@ -1,14 +1,7 @@
 import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import {
-  ArrowLeft,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  GitCommitHorizontal,
-  GitBranch,
-} from "lucide-react";
+import { ArrowLeft, ChevronDown, GitCommitHorizontal, GitBranch } from "lucide-react";
 import type { Commit, CommitFiles, GitHistory } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
 import { IconButton } from "../components/icon-button";
@@ -18,6 +11,7 @@ import { rpc } from "../lib/api";
 import { useMobile } from "../lib/use-mobile";
 import { DiffView, type DiffTarget } from "./diff-view";
 import { GitFilePath } from "./view-header";
+import { PageFooter } from "./page-footer";
 
 interface Props {
   deviceId: string;
@@ -145,38 +139,30 @@ export function HistoryView(props: Props) {
             </p>
           )}
         </div>
-        <div className="flex min-h-10 shrink-0 items-center gap-1 border-t border-border px-3 text-xs text-muted-foreground">
-          <span className="mr-auto">
-            {value?.commits.length
+        <PageFooter
+          summary={
+            value?.commits.length
               ? `${(offset + 1).toLocaleString(i18n.resolvedLanguage)}–${(offset + value.commits.length).toLocaleString(i18n.resolvedLanguage)}`
-              : "0"}
-          </span>
-          <IconButton
-            label={t(($) => $.git.previousHistory)}
-            disabled={!active || busy || offset === 0}
-            onClick={() =>
-              void load(
-                { anchor: position.current.anchor, offset: pages.current.at(-1) ?? 0 },
-                pages.current.slice(0, -1),
-              )
-            }
-          >
-            <ChevronLeft />
-          </IconButton>
-          <IconButton
-            label={t(($) => $.git.nextHistory)}
-            disabled={!active || busy || value?.nextOffset === undefined}
-            onClick={() => {
-              if (value?.nextOffset !== undefined)
-                void load({ anchor: position.current.anchor, offset: value.nextOffset }, [
-                  ...pages.current,
-                  offset,
-                ]);
-            }}
-          >
-            <ChevronRight />
-          </IconButton>
-        </div>
+              : "0"
+          }
+          previousLabel={t(($) => $.git.previousHistory)}
+          previousDisabled={!active || busy || offset === 0}
+          onPrevious={() =>
+            void load(
+              { anchor: position.current.anchor, offset: pages.current.at(-1) ?? 0 },
+              pages.current.slice(0, -1),
+            )
+          }
+          nextLabel={t(($) => $.git.nextHistory)}
+          nextDisabled={!active || busy || value?.nextOffset === undefined}
+          onNext={() => {
+            if (value?.nextOffset !== undefined)
+              void load({ anchor: position.current.anchor, offset: value.nextOffset }, [
+                ...pages.current,
+                offset,
+              ]);
+          }}
+        />
       </div>
       {selected && (
         <CommitView
@@ -407,7 +393,7 @@ function CommitView({
                 disabled={busy || !active}
                 onClick={() => void load(value.nextOffset)}
               >
-                {t(($) => $.git.loadMore)}
+                {t(($) => $.common.more)}
               </Button>
             )}
           </aside>

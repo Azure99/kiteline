@@ -1,40 +1,20 @@
 import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import {
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  FolderGit2,
-  GitBranch,
-  RefreshCw,
-  Plus,
-  Minus,
-  Undo2,
-} from "lucide-react";
-import type {
-  Device,
-  DiscardScope,
-  GitEntry,
-  Repo,
-  RepoDiscovery,
-  Workspace,
-} from "@kiteline/shared/protocol";
-import { IconButton } from "../components/icon-button";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ChevronDown, FolderGit2, GitBranch, RefreshCw } from "lucide-react";
+import type { Device, DiscardScope, GitEntry, Repo, Workspace } from "@kiteline/shared/protocol";
 import { ToolHeader, ToolSidebar } from "../components/tool-layout";
 import { Button } from "../components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
 import { ApiError } from "../lib/api";
-import { cursorRpc, releaseCursor } from "../lib/cursors";
 import { useMobile } from "../lib/use-mobile";
 import type { DraftStore } from "../files/drafts";
 import { showFile } from "../files/navigation";
 import { DiffView, type DiffTarget } from "./diff-view";
-import { inSide, selectionOf, type ChangeSide } from "./selection";
+import { selectionOf, type ChangeSide } from "./selection";
 import { useGitStatus } from "./use-status";
 import { HistoryView } from "./history-view";
 import { BranchesView } from "./branches-view";
-import { useWorkspaceRefresh } from "../lib/use-workspace-refresh";
 import {
   currentRoute,
   isWorkspaceRoute,
@@ -44,19 +24,16 @@ import {
 } from "../lib/navigation";
 import { childPath, parentPath } from "../files/paths";
 import { type GitActions, useGitActivity } from "./actions";
-import {
-  confirmDiskVersion,
-  DiscardDialog,
-  discardable,
-  RowActions,
-  stageable,
-} from "./change-actions";
+import { confirmDiskVersion, DiscardDialog } from "./change-actions";
 import { GitFeedback } from "./feedback";
 import { CommitBox } from "./commit-box";
 import { BranchDialog } from "./branch-dialog";
 import { RemoteActions } from "./remote-actions";
 import { OperationBar } from "./operation-bar";
-import { GitFilePath, GitViewHeader, type GitView } from "./view-header";
+import { GitViewHeader, type GitView } from "./view-header";
+import { useRepos } from "./use-repos";
+import { ChangeSection } from "./change-section";
+import { PageFooter } from "./page-footer";
 
 export function GitTool({
   device,
@@ -75,78 +52,8 @@ export function GitTool({
 
   const route = useRoute();
   const requestedRepo = route.query.repo;
-  const [repos, setRepos] = useState<Repo[]>([]);
-  const [scan, setScan] = useState<RepoDiscovery>();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<unknown>();
-  const request = useRef<AbortController>(undefined);
-  const scanCursor = useRef<string>(undefined);
-  const scanned = useRef(new Map<string, Repo>());
   const enabled = device.status === "online";
-  const discover = useCallback(async () => {
-    if (request.current) return;
-    const cursor = scanCursor.current;
-    if (!cursor) scanned.current.clear();
-    const controller = new AbortController();
-    request.current = controller;
-    setBusy(true);
-    setError(undefined);
-    try {
-      const read = (scanCursor?: string) =>
-        cursorRpc(
-          device.id,
-          "repos.discover",
-          { workspaceId: workspace.id, scanCursor },
-          controller.signal,
-        );
-      let found: RepoDiscovery;
-      try {
-        found = await read(cursor);
-      } catch (error) {
-        if (
-          !cursor ||
-          !(error instanceof ApiError) ||
-          error.code !== "conflict" ||
-          controller.signal.aborted
-        )
-          throw error;
-        scanCursor.current = undefined;
-        scanned.current.clear();
-        found = await read();
-      }
-      if (controller.signal.aborted) {
-        void releaseCursor(device.id, "repo", found.scanCursor);
-        return;
-      }
-      scanCursor.current = found.scanCursor;
-      for (const repo of found.repos) scanned.current.set(repo.id, repo);
-      setRepos((old) => {
-        const entries = new Map((found.complete ? [] : old).map((item) => [item.id, item]));
-        for (const repo of scanned.current.values()) entries.set(repo.id, repo);
-        const next = [...entries.values()].sort((a, b) => a.path.localeCompare(b.path));
-        return next;
-      });
-      setScan(found);
-    } catch (error) {
-      if (!controller.signal.aborted) {
-        setError(error);
-      }
-    } finally {
-      if (request.current === controller) {
-        request.current = undefined;
-        setBusy(false);
-      }
-    }
-  }, [device.id, workspace.id]);
-  useEffect(() => {
-    return () => {
-      request.current?.abort();
-      request.current = undefined;
-      void releaseCursor(device.id, "repo", scanCursor.current);
-      scanCursor.current = undefined;
-    };
-  }, [enabled, discover, device.id]);
-  useWorkspaceRefresh(device.id, workspace.id, enabled, "repos", discover);
+  const { repos, scan, busy, error, discover } = useRepos(device.id, workspace.id, enabled);
   const selectedRepoId = requestedRepo ?? repos.find((item) => item.available)?.id ?? repos[0]?.id;
   const repo = repos.find((item) => item.id === selectedRepoId);
   const activeRepoId = repo?.id;
@@ -482,184 +389,41 @@ function RepoView({
                   {t(($) => $.common.reading)}
                 </p>
               )}
-              {(
-                [
-                  ["conflict", t(($) => $.git.conflicts)],
-                  ["staged", t(($) => $.git.stagedChanges)],
-                  ["worktree", t(($) => $.git.worktreeChanges)],
-                ] as const
-              ).map(([side, label]) => {
-                if (!value) return null;
-                const entries = value.entries.filter((entry) => inSide(entry, side));
-                const chosen = entries.filter(
-                  (entry): entry is GitEntry & { path: string } =>
-                    entry.path !== undefined &&
-                    selected.some((item) => item.path === entry.path && item.side === side),
-                );
-                if (side === "conflict" && !entries.length) return null;
-                return (
-                  <div key={side}>
-                    <div className="flex items-center gap-2 bg-muted/65 px-3 py-2 text-xs">
-                      <ChevronDown size={13} />
-                      {label}
-                      <span className="ml-auto">
-                        {(side === "staged" ? value.stagedCount : entries.length).toLocaleString(
-                          i18n.resolvedLanguage,
-                        )}
-                      </span>
-                      {!!chosen.length && (
-                        <>
-                          <IconButton
-                            label={
-                              side === "staged"
-                                ? t(($) => $.git.unstageSelected)
-                                : t(($) => $.git.stageSelected)
-                            }
-                            disabled={
-                              disabled ||
-                              (side !== "staged" && chosen.some((entry) => !stageable(entry)))
-                            }
-                            onClick={() =>
-                              indexAction(
-                                chosen.flatMap((entry) =>
-                                  side === "staged" && entry.indexStatus === "R" && entry.oldPath
-                                    ? [entry.path, entry.oldPath]
-                                    : [entry.path],
-                                ),
-                                side === "staged" ? "unstage" : "stage",
-                              )
-                            }
-                          >
-                            {side === "staged" ? <Minus /> : <Plus />}
-                          </IconButton>
-                          <IconButton
-                            label={
-                              side !== "worktree"
-                                ? t(($) => $.git.discardSelectedAll)
-                                : t(($) => $.git.discardSelectedWorktree)
-                            }
-                            disabled={disabled || chosen.some((entry) => !discardable(entry))}
-                            onClick={() =>
-                              setDiscarding({
-                                paths: chosen.map((entry) => entry.path),
-                                scope: side !== "worktree" ? "all" : "worktree",
-                              })
-                            }
-                          >
-                            <Undo2 />
-                          </IconButton>
-                        </>
-                      )}
-                    </div>
-                    {entries.map((entry) =>
-                      entry.path === undefined ? (
-                        <div
-                          key={`invalid:${entry.pathError}`}
-                          className="border-b border-border/50 px-3 py-2 text-xs break-all text-muted-foreground"
-                        >
-                          <span className="mr-2 font-mono">
-                            {side === "staged" ? entry.indexStatus : entry.worktreeStatus}
-                          </span>
-                          {t(($) => $.git.invalidPath, { path: entry.pathError })}
-                        </div>
-                      ) : (
-                        <div
-                          key={`path:${entry.path}`}
-                          className={`flex min-h-8 items-center gap-1 border-b border-border/50 px-2 max-[959px]:min-h-11 ${target?.path === entry.path && (target.side === side || side === "conflict") ? "bg-primary-soft" : ""}`}
-                        >
-                          <label className="flex min-h-8 items-center justify-center max-[959px]:min-h-11 max-[959px]:min-w-11">
-                            <input
-                              type="checkbox"
-                              aria-label={t(($) => $.git.selectNamed, {
-                                area: label,
-                                path: entry.path,
-                              })}
-                              checked={selected.some(
-                                (item) => item.side === side && item.path === entry.path,
-                              )}
-                              onChange={() => select(entry, side)}
-                            />
-                          </label>
-                          <span
-                            className={`w-3 shrink-0 font-mono text-xs ${side === "staged" ? "text-green-700" : "text-amber-700"}`}
-                          >
-                            {side === "staged" ? entry.indexStatus : entry.worktreeStatus}
-                          </span>
-                          <button
-                            title={entry.path}
-                            onClick={() =>
-                              side === "conflict"
-                                ? onFile(entry.path)
-                                : selectTarget({
-                                    path: entry.path,
-                                    side: side === "staged" ? "staged" : "worktree",
-                                  })
-                            }
-                            className="flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left text-xs max-[959px]:min-h-11"
-                          >
-                            <GitFilePath path={entry.path} stacked />
-                            {entry.submodule && (
-                              <span className="shrink-0 text-[10px] text-muted-foreground">
-                                {t(($) =>
-                                  entry.submodule!.commitChanged
-                                    ? entry.submodule!.trackedDirty ||
-                                      entry.submodule!.untrackedDirty
-                                      ? $.git.submodulePointerDirty
-                                      : $.git.submodulePointer
-                                    : entry.submodule!.trackedDirty ||
-                                        entry.submodule!.untrackedDirty
-                                      ? $.git.submoduleDirty
-                                      : $.git.submodule,
-                                )}
-                              </span>
-                            )}
-                          </button>
-                          <RowActions
-                            entry={entry}
-                            side={side}
-                            disabled={disabled}
-                            onIndex={indexAction}
-                            onDiscard={(paths, scope) => setDiscarding({ paths, scope })}
-                            onFile={() => onFile(entry.path)}
-                          />
-                        </div>
-                      ),
-                    )}
-                    {!entries.length && (
-                      <p className="px-8 py-3 text-xs text-muted-foreground">
-                        {t(($) => $.git.noChanges)}
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
+              {value &&
+                (["conflict", "staged", "worktree"] as const).map((side) => (
+                  <ChangeSection
+                    key={side}
+                    status={value}
+                    side={side}
+                    selected={selected}
+                    target={target}
+                    disabled={disabled}
+                    onSelect={select}
+                    onIndex={indexAction}
+                    onDiscard={(paths, scope) => setDiscarding({ paths, scope })}
+                    onFile={onFile}
+                    onTarget={selectTarget}
+                  />
+                ))}
             </div>
-            <div className="flex min-h-10 shrink-0 items-center gap-1 border-t border-border px-3 text-xs text-muted-foreground">
-              <span className="mr-auto">
-                {value && (
+            <PageFooter
+              summary={
+                value && (
                   <>
                     {value.entries.length
                       ? `${(value.offset + 1).toLocaleString(i18n.resolvedLanguage)}–${(value.offset + value.entries.length).toLocaleString(i18n.resolvedLanguage)}`
                       : "0"}{" "}
                     / {value.totalCount.toLocaleString(i18n.resolvedLanguage)}
                   </>
-                )}
-              </span>
-              <IconButton
-                label={t(($) => $.git.previousPage)}
-                disabled={!value?.offset || state.busy}
-                onClick={state.previous}
-              >
-                <ChevronLeft />
-              </IconButton>
-              <IconButton
-                label={t(($) => $.git.nextPage)}
-                disabled={value?.nextOffset === undefined || state.busy}
-                onClick={state.next}
-              >
-                <ChevronRight />
-              </IconButton>
-            </div>
+                )
+              }
+              previousLabel={t(($) => $.git.previousPage)}
+              previousDisabled={!value?.offset || state.busy}
+              onPrevious={state.previous}
+              nextLabel={t(($) => $.git.nextPage)}
+              nextDisabled={value?.nextOffset === undefined || state.busy}
+              onNext={state.next}
+            />
             <CommitBox
               target={actionTarget}
               actions={actions}
