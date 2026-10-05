@@ -330,9 +330,12 @@ export class DraftStore {
       );
       const savedPath = saved.path;
       window.dispatchEvent(
-        new CustomEvent("kiteline:file-written", {
-          detail: { deviceId: draft.deviceId, workspaceId: draft.workspaceId, path: savedPath },
-        }),
+        new CustomEvent<WindowEventMap["kiteline:file-written"]["detail"]>(
+          "kiteline:file-written",
+          {
+            detail: { deviceId: draft.deviceId, workspaceId: draft.workspaceId, path: savedPath },
+          },
+        ),
       );
       if (!this.has(draft) || draft.request !== request) return false;
       if (draft.path !== sourcePath) {
@@ -463,7 +466,11 @@ export class DraftStore {
     )
       ? "duplicateDraft"
       : "diskMatches";
-    window.dispatchEvent(new CustomEvent("kiteline:file-written", { detail: disk.target }));
+    window.dispatchEvent(
+      new CustomEvent<WindowEventMap["kiteline:file-written"]["detail"]>("kiteline:file-written", {
+        detail: disk.target,
+      }),
+    );
   }
   private async checkMoved(draft: Draft, previous: Promise<void>) {
     const request = new AbortController();

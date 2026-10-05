@@ -2,7 +2,13 @@ import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { AppError, OperationError, limits, type SavedFile } from "@kiteline/shared/protocol";
+import {
+  AppError,
+  OperationError,
+  limits,
+  type FileReadPurpose,
+  type SavedFile,
+} from "@kiteline/shared/protocol";
 import { decodeText } from "@kiteline/shared/protocol/text";
 import { readFile, readExact, revisionOf, revisionDigest } from "./read.js";
 import type { AgentConfig } from "../config.js";
@@ -46,7 +52,7 @@ export class TextFiles {
     workspaceId: string,
     path: string,
     signal: AbortSignal,
-    purpose: "text" | "open" = "text",
+    purpose: Extract<FileReadPurpose, "text" | "open"> = "text",
   ) {
     const root = this.metadata.workspace(workspaceId).path;
     path = await logicalPath(root, path, false, signal);

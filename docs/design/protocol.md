@@ -164,7 +164,7 @@ server 为每个 HTTP 请求和 WebSocket 升级确定一个入口 origin（`req
 
 ### 控制连接
 
-1. agent 带 Bearer 和 `appVersion` 连接 `/api/agent/control`，握手期限为 `channelPairTimeout`。
+1. agent 带 Bearer 和 `appVersion` 连接 `/api/agent/control`，握手期限为 `interactionTimeout`。
 2. 连接打开后，agent 发送 `hello{snapshot, editorBytes, environment}`。
 3. server 在 30 秒内没有收到 hello 时，以 1008 `hello_timeout` 关闭连接；hello 不合法时以 1008 `invalid_control_message` 关闭，同一设备已有的连接不受影响。hello 合法时，server 以 4001 `connection_replaced` 关闭同一设备的旧连接，保存快照和 `lastSeenAt`，发送 `welcome{connectionId, serverVersion}`，再发送 `watch.set`。从这时起设备在线，RPC 和数据通道都关联这个 `connectionId`。
 4. agent 收到 welcome 后发送 `tasks.snapshot`。
@@ -244,14 +244,14 @@ agent 发往 server 的消息：`hello`、`metadata.snapshot`、`tasks.snapshot`
 - `file.write`：`purpose` 为 `save`、`upload`，由 `POST …/channels` 创建，浏览器用 `PUT /api/channels/:channelId/content` 发送。
 - `http.proxy`：由 `/proxy/`、`/absproxy/` 请求在内部创建；agent 处理代码为 `agent/src/http/channels.ts`。
 
-公开的 `POST …/channels` 只接受前三种。参数和 `meta` 的字段见 `shared/src/protocol/index.ts`。
+公开的 `POST …/channels` 只接受前三种。参数见 `shared/src/protocol/index.ts` 的 `ChannelParams`，`meta` 见同文件的 `TerminalMeta` 和 `FileMeta`；接收端仍按各自职责校验输入。
 
 ### 建立
 
 1. server 登记通道：设备必须在线，`channel.open` 不超过 `controlMessageBytes`，该连接的通道数少于 `channelsPerDevice`（从登记时开始计数）。通道绑定发起的登录、设备和当前 `connectionId`，然后发送 `channel.open`。
-2. agent 连接 `/api/agent/channels/:channelId`，准备完成后发送 `ready{meta}`，失败时发送 `error{code, message, details?}`。从登记到 `ready` 的期限为 `channelPairTimeout`。
+2. agent 连接 `/api/agent/channels/:channelId`，准备完成后发送 `ready{meta}`，失败时发送 `error{code, message, details?}`。从登记到 `ready` 的期限为 `interactionTimeout`。
 3. server 校验 `meta`：文件通道的 `size` 为非负整数，`targetPath` 为不含 `..` 的相对路径；`file.write` 的 `size` 必须等于声明的大小；`open` 和 `image` 的内容类型只允许 `image/png`、`image/jpeg`、`image/webp`、`image/gif`，`open` 另允许 `text/plain; charset=utf-8`。
-4. 由 POST 创建的通道：server 把 `{channelId, meta}` 作为 POST 的响应返回，浏览器必须在下一个 `channelPairTimeout` 内用同一登录加入一次。下载和代理请求本身就是接收方，没有这一步。
+4. 由 POST 创建的通道：server 把 `{channelId, meta}` 作为 POST 的响应返回，浏览器必须在下一个 `interactionTimeout` 内用同一登录加入一次。下载和代理请求本身就是接收方，没有这一步。
 5. 两侧就绪后，server 向 agent 发送 `start`，开始传输。
 
 ### 帧
@@ -304,7 +304,7 @@ agent 发往 server 的消息：`hello`、`metadata.snapshot`、`tasks.snapshot`
 agent 以 `node terminal-recorder/dist/main.js --agent <配置 JSON>` 启动 recorder，配置包含 `terminalInputBytes` 和 `terminalStallTimeout`；Windows 上 recorder 运行在 Job 对象中。消息类型见 `shared/src/protocol/ipc.ts`，终端行为见[终端](terminal.md)。
 
 - **传输**：agent 写 recorder 的 stdin，recorder 写 stdout，每行一条 JSON，每行不超过 `controlMessageBytes`（`shared/src/protocol/stdio.ts`）。发送队列按附着分别计量：某个附着的积压超过 `terminalPendingBytes` 时，发往该附着的新消息被拒绝（agent 一侧返回 `limit_exceeded`），其他附着不受影响。recorder 的 stderr 最多保留 8 KiB，用作退出原因。
-- **需要回复的请求**：`create`、`recover`、`cancelCreate`、`end`、`redraw`、`attach`，都带 `id`，recorder 以 `reply{reply}` 回复。agent 最多等待 `channelPairTimeout`，超时按 `timeout` 和结果未确认处理；recorder 退出时，所有等待中的请求以 `recording_unavailable` 和结果未确认结束。
+- **需要回复的请求**：`create`、`recover`、`cancelCreate`、`end`、`redraw`、`attach`，都带 `id`，recorder 以 `reply{reply}` 回复。agent 最多等待 `interactionTimeout`，超时按 `timeout` 和结果未确认处理；recorder 退出时，所有等待中的请求以 `recording_unavailable` 和结果未确认结束。
 - **不需要回复的消息**：`input{dataBase64}`、`paste{text}`、`resize{cols, rows}`、`consumed{bytes}`、`detach`，都带 `sessionId` 和 `attachmentId`。一次粘贴始终是一条 `paste` 消息。
 - **recorder 发往 agent**：`frame`（终端文本帧，agent 原样转发给浏览器）、`bytes`（终端输出，agent 转为二进制帧）、`fault{sessionId, error}`（该会话的记录丢失）、`ended{sessionId, exitCode}`。
 - **`cancelCreate{createId}`** 撤销 `id` 为 `createId` 的 `create`。成功回复表示这次创建不会再启动 tmux；得不到回复时，agent 停止整个 recorder。随后的查证规则见[会话生命周期](terminal.md#会话生命周期)。

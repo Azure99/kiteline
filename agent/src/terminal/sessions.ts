@@ -161,7 +161,7 @@ export class Sessions {
             historyLines: item.session.historyLines,
           };
           if (process.platform === "win32")
-            item.server = await startTerminalServer(options, limits.channelPairTimeout);
+            item.server = await startTerminalServer(options, limits.interactionTimeout);
           if (this.closing) throw new AppError("cancelled", "Agent is stopping");
           item.creationMayArrive = true;
           let identity: TerminalIdentity;

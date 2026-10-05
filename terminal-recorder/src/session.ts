@@ -51,7 +51,7 @@ export class RecordedSession {
         dead: (code) => this.finish(code),
         fault: (error) => this.fault(error),
       },
-      limits.channelPairTimeout,
+      limits.interactionTimeout,
     );
     this.input = new InputQueue(
       this.control,
@@ -96,11 +96,11 @@ export class RecordedSession {
     }));
     try {
       await this.control.resize(cols, rows + 1);
-      await this.model.waitForSize(cols, rows + 1, limits.channelPairTimeout);
+      await this.model.waitForSize(cols, rows + 1, limits.interactionTimeout);
       await delay(80);
     } finally {
       await this.control.resize(cols, rows);
-      await this.model.waitForSize(cols, rows, limits.channelPairTimeout);
+      await this.model.waitForSize(cols, rows, limits.interactionTimeout);
     }
   }
   private frame(id: string, frame: TerminalFrame) {
@@ -147,7 +147,7 @@ export class RecordedSession {
     try {
       display.unsubscribe = await this.model.attach(
         history,
-        limits.channelPairTimeout,
+        limits.interactionTimeout,
         (snapshot) => attachment.start(snapshot, this.options.historyLines, historyGap),
         attachment.output,
         abort.signal,
@@ -201,7 +201,7 @@ export class RecordedSession {
         this.options.socket,
         ["kill-server"],
         undefined,
-        AbortSignal.timeout(limits.channelPairTimeout),
+        AbortSignal.timeout(limits.interactionTimeout),
       );
     } catch (error) {
       this.fault(error instanceof Error ? error : new Error(String(error)));

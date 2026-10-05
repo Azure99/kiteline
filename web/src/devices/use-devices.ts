@@ -63,7 +63,11 @@ export function useDevices(
             invalidateReads();
             setDevices(message.devices);
           }
-          window.dispatchEvent(new CustomEvent("kiteline:event", { detail: message }));
+          window.dispatchEvent(
+            new CustomEvent<WindowEventMap["kiteline:event"]["detail"]>("kiteline:event", {
+              detail: message,
+            }),
+          );
         };
         socket.onclose = () => {
           setConnected(false);

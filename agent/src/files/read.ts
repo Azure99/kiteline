@@ -7,7 +7,7 @@ import { PNG } from "image-size/types/png";
 import { JPG } from "image-size/types/jpg";
 import { GIF } from "image-size/types/gif";
 import { WEBP } from "image-size/types/webp";
-import { AppError, limits, type FileMeta } from "@kiteline/shared/protocol";
+import { AppError, limits, type FileMeta, type FileReadPurpose } from "@kiteline/shared/protocol";
 import { decodeText, encodeText } from "@kiteline/shared/protocol/text";
 import type { AgentConfig } from "../config.js";
 import { realPath } from "./paths.js";
@@ -21,7 +21,7 @@ export interface FileRead {
 
 export async function readFile(
   path: string,
-  purpose: "open" | "text" | "image" | "download",
+  purpose: FileReadPurpose,
   capacity: AgentConfig["limits"],
   signal: AbortSignal,
 ): Promise<FileRead> {

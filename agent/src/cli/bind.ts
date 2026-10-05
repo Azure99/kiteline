@@ -54,7 +54,7 @@ export async function bindCli(args: string[]) {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ code, name: hostname() }),
-        signal: AbortSignal.timeout(limits.channelPairTimeout),
+        signal: AbortSignal.timeout(limits.interactionTimeout),
       });
       value = record(response.body);
       if (!response.ok)

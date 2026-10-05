@@ -1,4 +1,6 @@
 export const agentLimits = {
+  maxTimerDelay: 2_147_483_647,
+  localClientGraceMs: 1000,
   resultBytes: 512 * 1024,
   listPageEntries: 500,
   cursorLifetime: 60_000,

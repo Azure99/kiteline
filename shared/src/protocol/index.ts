@@ -17,7 +17,7 @@ export type {
 } from "./rpc.js";
 
 export const limits = {
-  channelPairTimeout: 30_000,
+  interactionTimeout: 30_000,
   controlMessageBytes: 1024 * 1024,
   dataChunkBytes: 64 * 1024,
   filePendingFrames: 256,
@@ -31,6 +31,7 @@ export const limits = {
   terminalSnapshotBytes: 16 * 1024 * 1024,
   terminalMaxCols: 500,
   terminalMaxRows: 200,
+  terminalHistoryLines: 50_000,
 } as const;
 
 export type Outcome = "succeeded" | "failed" | "partial" | "unknown";
@@ -291,7 +292,27 @@ export type WorkspaceEvent =
   | { type: "sessions.changed"; workspaceId: string }
   | { type: "watch.status"; workspaceId: string; status: "normal" | "degraded"; reason?: string };
 export type AgentEvent = WorkspaceEvent | ({ type: "request.progress"; id: string } & FileProgress);
-export type ChannelKind = "terminal.attach" | "file.read" | "file.write" | "http.proxy";
+export type FileReadPurpose = "open" | "text" | "image" | "download";
+export interface ChannelParams {
+  "terminal.attach": {
+    workspaceId: string;
+    sessionId: string;
+    history?: "retained" | "screen";
+  };
+  "file.read": { workspaceId: string; path: string; purpose: FileReadPurpose };
+  "file.write": {
+    workspaceId: string;
+    path: string;
+    size: number;
+    createOnly: boolean;
+  } & (
+    | { purpose: "save"; expectedRevision?: string }
+    | { purpose: "upload"; expectedTargetVersion?: string }
+  );
+  "http.proxy": { port: number };
+}
+export type ChannelKind = keyof ChannelParams;
+export type FileWritePurpose = ChannelParams["file.write"]["purpose"];
 export type AgentControlMessage =
   | AgentEvent
   | { type: "hello"; snapshot: Metadata; editorBytes: number; environment: AgentEnvironment }
@@ -321,7 +342,7 @@ export type BrowserEvent =
       deviceId: string;
       workspaceId: string;
       path: string;
-      purpose: "open" | "text" | "image" | "download";
+      purpose: FileReadPurpose;
       error: KitelineError;
       outcome: "failed";
     };
@@ -488,6 +509,6 @@ export function checkMetadata(value: unknown): Metadata {
     string(s.command, "command", 65536);
     checkShortcutIcon(s.icon);
   }
-  integer(record(data.settings).historyLines, "historyLines", 0, 50_000);
+  integer(record(data.settings).historyLines, "historyLines", 0, limits.terminalHistoryLines);
   return data as unknown as Metadata;
 }

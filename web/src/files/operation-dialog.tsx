@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
 import { Copy, FolderInput, Trash2 } from "lucide-react";
 import type {
-  BrowserEvent,
   CopyItem,
   Entry,
   FileInspection,
@@ -90,8 +89,8 @@ export function FileOperationDialog({
   const edited = useRef(false);
   useEffect(() => {
     alive.current = true;
-    const update = (event: Event) => {
-      const message = (event as CustomEvent<BrowserEvent>).detail;
+    const update = (event: WindowEventMap["kiteline:event"]) => {
+      const message = event.detail;
       if (
         message.type === "request.progress" &&
         message.deviceId === deviceId &&

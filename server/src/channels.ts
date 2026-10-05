@@ -12,6 +12,8 @@ import {
   type FileMeta,
   type ChannelReady,
   type ChannelKind,
+  type FileReadPurpose,
+  type FileWritePurpose,
   type ServerControlMessage,
 } from "@kiteline/shared/protocol";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -66,13 +68,16 @@ export class Channels {
     string(params.workspaceId);
     if (kind !== "terminal.attach") {
       string(params.path);
-      if (
-        !(
-          kind === "file.read"
-            ? ["open", "text", "image", ...(download ? ["download"] : [])]
-            : ["save", "upload"]
-        ).includes(String(params.purpose))
-      )
+      const purposes: readonly string[] =
+        kind === "file.read"
+          ? ([
+              "open",
+              "text",
+              "image",
+              ...(download ? ["download" as const] : []),
+            ] satisfies FileReadPurpose[])
+          : (["save", "upload"] satisfies FileWritePurpose[]);
+      if (!purposes.includes(String(params.purpose)))
         throw new AppError("unsupported", "Unsupported file purpose");
       if (kind === "file.write") integer(params.size, "size", 0, Number.MAX_SAFE_INTEGER);
     }
@@ -130,7 +135,7 @@ export class Channels {
     const ready = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(
         () => this.cancel(id, new AppError("timeout", "Channel pairing timed out")),
-        limits.channelPairTimeout,
+        limits.interactionTimeout,
       );
       item = {
         id,
@@ -220,7 +225,7 @@ export class Channels {
         else
           item.timer = setTimeout(
             () => this.cancel(id, new AppError("timeout", "Timed out waiting for browser pairing")),
-            limits.channelPairTimeout,
+            limits.interactionTimeout,
           );
         item.resolve();
       } catch (error) {
@@ -353,7 +358,7 @@ export class Channels {
       deviceId,
       workspaceId: params.workspaceId as string,
       path: params.path as string,
-      purpose: params.purpose as "open" | "text" | "image" | "download",
+      purpose: params.purpose as FileReadPurpose,
       error: asError(error),
       outcome: "failed",
     });

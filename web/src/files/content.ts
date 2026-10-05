@@ -1,7 +1,9 @@
 import type {
   ChannelReady,
+  ChannelParams,
   KitelineError,
   FileMeta,
+  FileReadPurpose,
   Reply,
   SavedFile,
   UploadedFile,
@@ -25,7 +27,13 @@ export interface DiskImage {
   blob: Blob;
   meta: FileMeta;
 }
-async function channel(target: FileTarget, kind: string, params: object, signal: AbortSignal) {
+type ContentParams<T> = T extends unknown ? Omit<T, "workspaceId" | "path"> : never;
+async function channel<K extends "file.read" | "file.write">(
+  target: FileTarget,
+  kind: K,
+  params: ContentParams<ChannelParams[K]>,
+  signal: AbortSignal,
+) {
   const ready = await post<ChannelReady<FileMeta>>(
     `/api/devices/${encodeURIComponent(target.deviceId)}/channels`,
     { kind, params: { workspaceId: target.workspaceId, path: target.path, ...params } },
@@ -50,7 +58,7 @@ async function check(response: Response) {
 }
 async function readContentBytes(
   target: FileTarget,
-  purpose: "open" | "text",
+  purpose: Extract<FileReadPurpose, "open" | "text">,
   signal: AbortSignal,
   onChannel?: (id: string) => void,
 ) {
@@ -141,7 +149,11 @@ export function downloadFile(target: FileTarget) {
   document.body.append(link);
   link.click();
   link.remove();
-  window.dispatchEvent(new CustomEvent("kiteline:download", { detail: target }));
+  window.dispatchEvent(
+    new CustomEvent<WindowEventMap["kiteline:download"]["detail"]>("kiteline:download", {
+      detail: target,
+    }),
+  );
 }
 
 export async function uploadFile(

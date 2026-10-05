@@ -174,7 +174,7 @@ export class Agent {
       socket = connectServerSocket(url, {
         headers: { authorization: `Bearer ${this.identity.deviceToken}` },
         maxPayload: limits.controlMessageBytes,
-        handshakeTimeout: limits.channelPairTimeout,
+        handshakeTimeout: limits.interactionTimeout,
       });
     } catch (error) {
       this.connectionError = asError(error).message;
@@ -542,7 +542,12 @@ export class Agent {
           string(params.sessionId),
         ) satisfies Promise<RpcResult<typeof method>>;
       case "settings.update": {
-        const historyLines = integer(params.historyLines, "historyLines", 0, 50_000);
+        const historyLines = integer(
+          params.historyLines,
+          "historyLines",
+          0,
+          limits.terminalHistoryLines,
+        );
         return this.metadata.update((metadata) => {
           metadata.settings.historyLines = historyLines;
           return metadata.settings;

@@ -206,7 +206,7 @@ export class Recorder {
         reject(
           new OperationError("timeout", "Recorder did not acknowledge the operation", "unknown"),
         );
-      }, limits.channelPairTimeout);
+      }, limits.interactionTimeout);
       instance.pending.set(id, { resolve: (value) => resolve(value as T), reject, timer });
       try {
         this.write(instance, { ...message, id } as RecorderRequest);
@@ -243,7 +243,7 @@ export class Recorder {
     return (instance.closing ??= (async () => {
       await instance.ready.catch(() => {});
       if (instance.finished) return;
-      const deadline = setTimeout(() => this.terminate(instance), limits.channelPairTimeout);
+      const deadline = setTimeout(() => this.terminate(instance), limits.interactionTimeout);
       instance.writer?.close();
       if (force) this.terminate(instance);
       else if (instance.job) instance.job.stdin!.end();

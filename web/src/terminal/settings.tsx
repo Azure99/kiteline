@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import { ErrorNotice } from "../components/error-notice";
 import { useState } from "react";
 import { Pencil, Plus, Save, Trash2, X } from "lucide-react";
-import { shortcutIcons, type Device, type RpcParams } from "@kiteline/shared/protocol";
+import { limits, shortcutIcons, type Device, type RpcParams } from "@kiteline/shared/protocol";
 import { rpc } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -69,7 +69,7 @@ export function TerminalSettings({ device, onClose }: { device: Device; onClose:
               <Input
                 type="number"
                 min={0}
-                max={50000}
+                max={limits.terminalHistoryLines}
                 step={1}
                 disabled={busy}
                 required

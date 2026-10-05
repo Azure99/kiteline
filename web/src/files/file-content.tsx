@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Download, RefreshCw } from "lucide-react";
-import type { BrowserEvent } from "@kiteline/shared/protocol";
 import { ErrorNotice } from "../components/error-notice";
 import { IconButton } from "../components/icon-button";
 import { ApiError } from "../lib/api";
@@ -33,8 +32,8 @@ export function FileContent({
     const target = { deviceId, workspaceId, path, deviceName, workspaceName };
     if (store.find(target)) return;
     let channelId: string | undefined, failure: ApiError | undefined;
-    const failed = (event: Event) => {
-      const message = (event as CustomEvent<BrowserEvent>).detail;
+    const failed = (event: WindowEventMap["kiteline:event"]) => {
+      const message = event.detail;
       if (message.type === "channel.failed" && message.channelId === channelId) {
         failure = new ApiError(
           message.error.code,

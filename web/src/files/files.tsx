@@ -40,9 +40,9 @@ import { useFileBrowser } from "./use-browser";
 import { DraftView } from "./draft-view";
 import { useDrafts, type Draft, type DraftStore } from "./drafts";
 import { showDraft, showFile } from "./navigation";
-import type { FileAction, FileOperationResult } from "./operation-dialog";
+import type { FileAction } from "./operation-dialog";
 import { FileContent } from "./file-content";
-import { downloadFile, type FileTarget } from "./content";
+import { downloadFile } from "./content";
 import { FileSearch } from "./file-search";
 import { useWorkspaceRefresh } from "../lib/use-workspace-refresh";
 
@@ -158,15 +158,14 @@ export function Files({
     if (visible && reveal) setListOpen(true);
   }, [visible, reveal]);
   useEffect(() => {
-    const written = (event: Event) => {
-      const target = (event as CustomEvent<{ deviceId: string; workspaceId: string; path: string }>)
-        .detail;
+    const written = (event: WindowEventMap["kiteline:file-written"]) => {
+      const target = event.detail;
       if (target.deviceId === device.id && target.workspaceId === workspace.id)
         void load(parentPath(target.path));
     };
     window.addEventListener("kiteline:file-written", written);
-    const downloaded = (event: Event) => {
-      const target = (event as CustomEvent<FileTarget>).detail;
+    const downloaded = (event: WindowEventMap["kiteline:download"]) => {
+      const target = event.detail;
       if (target.deviceId === device.id && target.workspaceId === workspace.id)
         setNotice({ kind: "downloadStarted", path: target.path });
     };
@@ -232,9 +231,8 @@ export function Files({
     setExpanded(next);
     for (const path of next) if (!expanded.has(path)) void load(path);
   }
-  const operated = useEffectEvent((event: Event) => {
-    const { deviceId, workspaceId, kind, items } = (event as CustomEvent<FileOperationResult>)
-      .detail;
+  const operated = useEffectEvent((event: WindowEventMap["kiteline:files-operated"]) => {
+    const { deviceId, workspaceId, kind, items } = event.detail;
     const route = currentRoute();
     if (deviceId !== device.id || workspaceId !== workspace.id || !isWorkspaceRoute(route, target))
       return;

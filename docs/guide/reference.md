@@ -275,7 +275,7 @@ agent 数据目录中的 `agent.json`、`connection.json`、`temporary-files.jso
 | 一般设备操作时限       | 30 秒                                           | `rpcTimeout`                    |
 | 每台设备同时处理的请求 | 32                                              | 固定 `pendingRequestsPerDevice` |
 | 每台设备的数据通道     | 128，终端显示、文件传输和开发服务请求合计       | 固定 `channelsPerDevice`        |
-| 数据通道建立           | 30 秒                                           | 固定 `channelPairTimeout`       |
+| 数据通道建立           | 30 秒                                           | 固定 `interactionTimeout`       |
 | 单条请求或结果         | 1 MiB；请求超出返回 413，结果超出时为结果未确认 | 固定 `controlMessageBytes`      |
 
 一般设备操作包括文件列表与重命名、Git 读取、定时任务管理和本机命令行请求。复制、移动和删除没有总时限。

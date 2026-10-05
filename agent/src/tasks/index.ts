@@ -1,4 +1,4 @@
-import { taskLimits } from "../limits.js";
+import { agentLimits, taskLimits } from "../limits.js";
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, open, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -475,7 +475,7 @@ export class ScheduledTasks {
           }
         }).catch((error: unknown) => console.error("Scheduled task:", asError(error).message));
       },
-      Math.min(milliseconds, 2_147_483_647),
+      Math.min(milliseconds, agentLimits.maxTimerDelay),
     );
     this.timers.set(id, timer);
   }

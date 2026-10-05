@@ -1,6 +1,26 @@
-import type { FileListing, RpcMethod, RpcResult } from "@kiteline/shared/protocol";
+import type { ChannelParams, FileListing, RpcMethod, RpcResult } from "@kiteline/shared/protocol";
 import { rpc, rpcReply } from "../src/lib/api";
 import { GitActions, type GitTarget } from "../src/git/actions";
+
+export function checkChannelParams() {
+  const target = { workspaceId: "w", path: "f" };
+  const save = {
+    ...target,
+    purpose: "save",
+    size: 0,
+    createOnly: true,
+  } satisfies ChannelParams["file.write"];
+  // @ts-expect-error file reads cannot use a write purpose
+  const read = { ...target, purpose: "upload" } satisfies ChannelParams["file.read"];
+  const wrongVersion = {
+    ...save,
+    // @ts-expect-error text saves use expectedRevision, not the upload target version
+    expectedTargetVersion: "v",
+  } satisfies ChannelParams["file.write"];
+  // @ts-expect-error terminal attach needs a session identity
+  const terminal = { workspaceId: "w" } satisfies ChannelParams["terminal.attach"];
+  void [save, read, wrongVersion, terminal];
+}
 
 // Compiled by typecheck, never executed. Each rejected call reproduces a contract mistake.
 export async function checkRpcContracts(deviceId: string, target: GitTarget, method: RpcMethod) {

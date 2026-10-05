@@ -102,7 +102,7 @@ recorder 为每个会话保存一个检查点和其后的完整尾段：
 | `terminalOutstandingBytes`        | 256 KiB              | `terminal-recorder/src/attachment.ts` | 每个显示已发送未确认的输出    |
 | `terminalPendingBytes`            | 1 MiB                | `shared/src/protocol/index.ts`        | 每个显示的待发队列和 IPC 积压 |
 | `dataChunkBytes`                  | 64 KiB               | `shared/src/protocol/index.ts`        | 输出分块、单个输入帧上限      |
-| `channelPairTimeout`              | 30 秒                | `shared/src/protocol/index.ts`        | recorder 应答和各种等待的期限 |
+| `interactionTimeout`              | 30 秒                | `shared/src/protocol/index.ts`        | recorder 应答和各种等待的期限 |
 | 存活查证间隔                      | 2 秒                 | `agent/src/terminal/sessions.ts`      | 记录不可用的会话              |
 | 重绘                              | 行数加 1，停留 80 ms | `terminal-recorder/src/session.ts`    | 见[恢复动作](#恢复动作)       |
 

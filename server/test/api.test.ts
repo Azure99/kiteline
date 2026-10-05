@@ -32,14 +32,14 @@ const webPath = (path: string) =>
   `${path}${path.includes("?") ? "&" : "?"}appVersion=${appVersion}`;
 
 const originalServerLimits = { ...serverLimits };
-const originalPairTimeout = limits.channelPairTimeout;
+const originalInteractionTimeout = limits.interactionTimeout;
 const cleanups: (() => Promise<unknown> | void)[] = [];
 afterEach(async () => {
   try {
     for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
   } finally {
     Object.assign(serverLimits, originalServerLimits);
-    Object.assign(limits, { channelPairTimeout: originalPairTimeout });
+    Object.assign(limits, { interactionTimeout: originalInteractionTimeout });
   }
 });
 async function fixture() {
@@ -1073,7 +1073,7 @@ test("logout before a streamed RPC body finishes prevents dispatch", async () =>
 
 test("terminal channel has separate pairing deadlines, stays with its login, and forwards one final outcome", async () => {
   const f = await fixture();
-  Object.assign(limits, { channelPairTimeout: 800 });
+  Object.assign(limits, { interactionTimeout: 800 });
   Object.assign(serverLimits, { channelsPerDevice: 1 });
   const peer = await f.device();
   const login = f.store.createLogin(60000);

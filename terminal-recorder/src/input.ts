@@ -101,7 +101,7 @@ export class InputQueue {
           item.resolve();
         } else if (item.type === "resize") {
           await this.control.resize(item.cols, item.rows);
-          await this.model.waitForSize(item.cols, item.rows, limits.channelPairTimeout);
+          await this.model.waitForSize(item.cols, item.rows, limits.interactionTimeout);
         } else {
           const identity = this.control.identity;
           if (!identity) throw new AppError("busy", "Terminal creation is not complete");
@@ -124,7 +124,7 @@ export class InputQueue {
               identity.paneId,
             ],
             item.data,
-            AbortSignal.any([this.abort.signal, AbortSignal.timeout(limits.channelPairTimeout)]),
+            AbortSignal.any([this.abort.signal, AbortSignal.timeout(limits.interactionTimeout)]),
           );
         }
       } catch (error) {
@@ -136,7 +136,7 @@ export class InputQueue {
             socket,
             ["delete-buffer", "-b", "kiteline-web-input"],
             undefined,
-            AbortSignal.timeout(limits.channelPairTimeout),
+            AbortSignal.timeout(limits.interactionTimeout),
           ).catch(() => {});
       } finally {
         this.bytes -= cost(item);

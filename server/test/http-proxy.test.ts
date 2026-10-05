@@ -25,14 +25,14 @@ import { Agent } from "../../agent/src/agent.js";
 import { defaultAgentLimits, privateDirectory } from "../../agent/src/config.js";
 
 const originalServerLimits = { ...serverLimits };
-const originalPairTimeout = limits.channelPairTimeout;
+const originalInteractionTimeout = limits.interactionTimeout;
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
   try {
     for (const close of cleanup.splice(0).reverse()) await close();
   } finally {
     Object.assign(serverLimits, originalServerLimits);
-    Object.assign(limits, { channelPairTimeout: originalPairTimeout });
+    Object.assign(limits, { interactionTimeout: originalInteractionTimeout });
   }
 });
 async function listen(server: Server, host = "127.0.0.1", port = 0) {
@@ -42,7 +42,7 @@ async function listen(server: Server, host = "127.0.0.1", port = 0) {
 }
 async function fixture(handler: RequestListener, channels = 128) {
   Object.assign(serverLimits, { channelsPerDevice: channels, channelIdleTimeout: 100 });
-  Object.assign(limits, { channelPairTimeout: 1000 });
+  Object.assign(limits, { interactionTimeout: 1000 });
   const root = await mkdtemp("/var/tmp/kiteline-http-");
   const keyFile = join(root, "key.pem"),
     certFile = join(root, "cert.pem");

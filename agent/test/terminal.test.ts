@@ -18,7 +18,7 @@ vi.mock("node:crypto", async (original) => {
   };
 });
 
-const originalPairTimeout = limits.channelPairTimeout;
+const originalInteractionTimeout = limits.interactionTimeout;
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
   candidateIds.length = 0;
@@ -32,7 +32,7 @@ afterEach(async () => {
       }
     }
   } finally {
-    Object.assign(limits, { channelPairTimeout: originalPairTimeout });
+    Object.assign(limits, { interactionTimeout: originalInteractionTimeout });
   }
   if (failures.length) throw new AggregateError(failures, "Terminal test cleanup failed");
 });
@@ -326,7 +326,7 @@ test("recovery restores the same task and pending Shell input, then redraw and e
 test("an unresponsive recorder cannot leave a phantom creation or block agent shutdown", async () => {
   const { agent, workspace, signal } = await fixture();
   await agent.sessions.create(workspace.id, undefined, undefined, signal);
-  Object.assign(limits, { channelPairTimeout: 200 });
+  Object.assign(limits, { interactionTimeout: 200 });
   process.kill(agent.sessions.recorder.pid!, "SIGSTOP");
   await expect(
     agent.sessions.create(workspace.id, undefined, undefined, signal),
@@ -343,14 +343,14 @@ test("an unresponsive recorder cannot leave a phantom creation or block agent sh
 test("a failed end does not permanently block recovery of a surviving task", async () => {
   const { agent, workspace, signal } = await fixture();
   const session = await agent.sessions.create(workspace.id, undefined, undefined, signal);
-  Object.assign(limits, { channelPairTimeout: 200 });
+  Object.assign(limits, { interactionTimeout: 200 });
   process.kill(agent.sessions.recorder.pid!, "SIGSTOP");
   await expect(agent.sessions.end(workspace.id, session.id)).rejects.toMatchObject({
     outcome: "unknown",
   });
   process.kill(agent.sessions.recorder.pid!, "SIGKILL");
   await until(() => agent.sessions.get(session.id).session.webStatus === "unavailable");
-  Object.assign(limits, { channelPairTimeout: 3000 });
+  Object.assign(limits, { interactionTimeout: 3000 });
   expect(agent.sessions.recover(workspace.id, session.id).webStatus).toBe("recovering");
   await until(() => agent.sessions.get(session.id).session.webStatus !== "recovering");
   expect(agent.sessions.get(session.id).session.webStatus).toBe("available");

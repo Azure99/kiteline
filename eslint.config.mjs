@@ -20,7 +20,11 @@ export default tseslint.config(
     },
   },
   {
-    files: ["web/src/**/*.{ts,tsx}"],
+    files: [
+      "web/src/**/*.{ts,tsx}",
+      "shared/src/protocol/{index,rpc,tasks,text}.ts",
+      "shared/src/terminal/index.ts",
+    ],
     rules: {
       "no-restricted-properties": [
         "error",
@@ -38,6 +42,30 @@ export default tseslint.config(
           property,
           message: "Not available in the supported Chromium 97 runtime.",
         })),
+      ],
+    },
+  },
+  {
+    files: ["web/src/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: [
+                "@kiteline/shared/protocol/stdio",
+                "@kiteline/shared/protocol/ws",
+                "@kiteline/shared/protocol/file-stream",
+                "@kiteline/shared/protocol/http-stream",
+                "@kiteline/shared/terminal/node",
+                "@kiteline/shared/terminal/windows",
+                "@kiteline/shared/windows/*",
+              ],
+              message: "The browser cannot use Node-only shared entry points.",
+            },
+          ],
+        },
       ],
     },
   },

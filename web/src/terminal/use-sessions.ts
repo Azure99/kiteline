@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { BrowserEvent, Device, Session } from "@kiteline/shared/protocol";
+import type { Device, Session } from "@kiteline/shared/protocol";
 import { ApiError, rpc } from "../lib/api";
 
 export function useSessions(device: Device, workspaceId: string) {
@@ -42,8 +42,8 @@ export function useSessions(device: Device, workspaceId: string) {
   useEffect(() => {
     alive.current = true;
     void refresh();
-    const changed = (event: Event) => {
-      const message = (event as CustomEvent<BrowserEvent>).detail;
+    const changed = (event: WindowEventMap["kiteline:event"]) => {
+      const message = event.detail;
       if (
         message.type === "sessions.changed" &&
         message.deviceId === device.id &&

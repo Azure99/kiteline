@@ -1,5 +1,10 @@
 import { join } from "node:path";
-import { AppError, OperationError, type UploadedFile } from "@kiteline/shared/protocol";
+import {
+  AppError,
+  OperationError,
+  type FileReadPurpose,
+  type UploadedFile,
+} from "@kiteline/shared/protocol";
 import type { AgentConfig } from "../config.js";
 import type { MetadataStore } from "../metadata.js";
 import { publish } from "./publish.js";
@@ -33,7 +38,7 @@ export class BinaryFiles {
   async read(
     workspaceId: string,
     path: string,
-    purpose: "image" | "download",
+    purpose: Extract<FileReadPurpose, "image" | "download">,
     signal: AbortSignal,
   ) {
     const root = this.metadata.workspace(workspaceId).path;

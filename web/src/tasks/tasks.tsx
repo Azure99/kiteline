@@ -1,12 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, Bot, CalendarClock, Plus, RefreshCw } from "lucide-react";
-import type {
-  BrowserEvent,
-  Device,
-  DeviceTaskSummary,
-  ScheduledTask,
-} from "@kiteline/shared/protocol";
+import type { Device, DeviceTaskSummary, ScheduledTask } from "@kiteline/shared/protocol";
 import { api } from "../lib/api";
 import { currentPath, navigate, tasksPath, type TasksRoute } from "../lib/navigation";
 import { webCompatible, useServerVersion } from "../lib/release";
@@ -66,8 +61,8 @@ export function TasksPage({
   }, [connected]);
   useEffect(() => {
     setFresh(false);
-    const changed = (event: Event) => {
-      const message = (event as CustomEvent<BrowserEvent>).detail;
+    const changed = (event: WindowEventMap["kiteline:event"]) => {
+      const message = event.detail;
       if (message.type === "tasks.changed" || message.type === "devices.changed") void refresh();
     };
     const visible = () => {

@@ -1,7 +1,6 @@
 import { newId } from "../lib/id";
 import { useSyncExternalStore } from "react";
 import type {
-  BrowserEvent,
   FileProgress,
   GitWriteArguments,
   GitWriteMethod,
@@ -96,8 +95,8 @@ export class GitActions {
     value.completed = undefined;
     value.result = undefined;
     this.notify();
-    const progress = (event: Event) => {
-      const message = (event as CustomEvent<BrowserEvent>).detail;
+    const progress = (event: WindowEventMap["kiteline:event"]) => {
+      const message = event.detail;
       if (
         message.type === "request.progress" &&
         message.id === request.id &&

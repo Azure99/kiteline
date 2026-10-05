@@ -19,6 +19,7 @@ import {
 } from "@kiteline/shared/protocol";
 import type { AgentConfig } from "./config.js";
 import { checkRunDir } from "./terminal/sessions.js";
+import { agentLimits } from "./limits.js";
 
 async function localEndpoint(runDir: string) {
   if (process.platform !== "win32") return join(runDir, "agent.sock");
@@ -143,7 +144,7 @@ export async function localRequest<T>(
   method: string,
   params: Record<string, unknown> = {},
 ): Promise<T> {
-  const signal = AbortSignal.timeout(config.limits.rpcTimeout + 1000);
+  const signal = AbortSignal.timeout(config.limits.rpcTimeout + agentLimits.localClientGraceMs);
   const endpoint = await localEndpoint(config.runDir);
   const socket =
     process.platform === "win32" ? await connectPrivatePipe(endpoint, signal) : undefined;

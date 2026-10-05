@@ -236,11 +236,11 @@ agent 的出站代理规则见[出站代理与证书](../guide/devices.md#出站
 1. 在 `shared/src/protocol/index.ts` 的 `AgentEvent` 或 `BrowserEvent` 中加入类型。
 2. agent 发往浏览器的事件必须在 `server/src/connections.ts` 中加分支，校验字段并转发。server 忽略不认识的消息类型，浏览器收不到；已知类型的字段不合法时，server 以 1008 关闭 agent 的控制连接。server 只转发白名单中的字段，给已有事件加字段也要改这里。
 3. 浏览器发往 server 的消息只接受 `watch.set`，其他消息使 server 以 1008 关闭事件连接；添加消息时修改 `Connections.acceptBrowser`。
-4. 工作台在 `kiteline:event` 监听中处理事件，并在 `web/test/events.typecheck.ts` 中补类型测试。
+4. 工作台在 `kiteline:event` 监听中处理事件。本地 window 事件的名称和载荷统一在 `web/src/lib/events.ts` 的 `WindowEventMap` 声明中维护，生产方引用对应的 detail 类型；在 `web/test/events.typecheck.ts` 中补类型测试。
 
 ### 添加数据通道种类
 
-1. 在 `shared/src/protocol/index.ts` 的 `ChannelKind` 中加入种类，定义参数和 `meta` 类型。
+1. 在 `shared/src/protocol/index.ts` 的 `ChannelParams` 中加入种类和参数，`ChannelKind` 从其键推导；同时定义对应的 `meta` 类型。静态参数类型不替代接收边界的运行时校验。
 2. 在 `server/src/channels.ts` 的 `create` 中接受该种类（种类和 `purpose` 都是白名单），在 `acceptAgent` 中校验 `meta`；浏览器需要加入时，在 `server/src/app.ts` 中加入口并选择单条消息上限。浏览器会直接显示内容时，更新内容类型白名单。
 3. 在 `agent/src/agent.ts` 处理 `channel.open` 的分派中加入处理类，提供 `open`、`cancel` 和 `close`。
 4. 通道自动计入 `channelsPerDevice`；文件类通道在 agent 端还计入 `transfersPerDevice`。

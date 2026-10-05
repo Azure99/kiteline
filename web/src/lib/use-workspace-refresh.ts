@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { limits, type BrowserEvent } from "@kiteline/shared/protocol";
+import { limits } from "@kiteline/shared/protocol";
 export function useWorkspaceRefresh(
   deviceId: string,
   workspaceId: string,
@@ -36,8 +36,8 @@ export function useWorkspaceRefresh(
     const schedule = () => {
       timer ??= setTimeout(() => void run(), limits.watchDebounce);
     };
-    const event = (event: Event) => {
-      const value = (event as CustomEvent<BrowserEvent>).detail;
+    const event = (event: WindowEventMap["kiteline:event"]) => {
+      const value = event.detail;
       if (
         value.type === "workspace.changed" &&
         value.deviceId === deviceId &&
@@ -69,8 +69,8 @@ export function useWatchStatus(deviceId: string, workspaceId: string) {
   const [reason, setReason] = useState<string>();
   useEffect(() => {
     setReason(undefined);
-    const event = (event: Event) => {
-      const value = (event as CustomEvent<BrowserEvent>).detail;
+    const event = (event: WindowEventMap["kiteline:event"]) => {
+      const value = event.detail;
       if (
         value.type === "watch.status" &&
         value.deviceId === deviceId &&

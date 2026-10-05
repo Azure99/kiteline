@@ -17,7 +17,7 @@ import {
   Files as FilesIcon,
   CalendarClock,
 } from "lucide-react";
-import type { BrowserEvent, Device } from "@kiteline/shared/protocol";
+import type { Device } from "@kiteline/shared/protocol";
 import type { LoginSession } from "./auth";
 import { ApiError, errorMessage, post } from "./lib/api";
 import { ErrorDetails } from "./components/error-notice";
@@ -54,11 +54,7 @@ import { DraftStore, isDirty } from "./files/drafts";
 import { DraftView } from "./files/draft-view";
 import { OpenFiles } from "./files/open-files";
 import { UploadDialog } from "./files/upload-dialog";
-import {
-  FileOperationDialog,
-  type FileAction,
-  type FileOperationResult,
-} from "./files/operation-dialog";
+import { FileOperationDialog, type FileAction } from "./files/operation-dialog";
 import { PortDialog } from "./devices/port-dialog";
 import { ReleaseNotice } from "./components/release-notice";
 import { AgentReleaseNotice } from "./devices/agent-release-notice";
@@ -162,8 +158,8 @@ export function Workbench({
         event.returnValue = "";
       }
     };
-    const failed = (event: Event) => {
-      const message = (event as CustomEvent<BrowserEvent>).detail;
+    const failed = (event: WindowEventMap["kiteline:event"]) => {
+      const message = event.detail;
       if (message.type === "channel.failed") {
         drafts.fileFailed(message.channelId, message.error);
         if (message.purpose === "download" && message.error.code !== "cancelled")
@@ -555,9 +551,12 @@ export function Workbench({
           }}
           onWritten={(path) =>
             window.dispatchEvent(
-              new CustomEvent("kiteline:file-written", {
-                detail: { deviceId: item.deviceId, workspaceId: item.workspaceId, path },
-              }),
+              new CustomEvent<WindowEventMap["kiteline:file-written"]["detail"]>(
+                "kiteline:file-written",
+                {
+                  detail: { deviceId: item.deviceId, workspaceId: item.workspaceId, path },
+                },
+              ),
             )
           }
         />
@@ -570,9 +569,12 @@ export function Workbench({
           onResult={(items) => {
             const { deviceId, workspaceId, action } = fileOperation;
             window.dispatchEvent(
-              new CustomEvent<FileOperationResult>("kiteline:files-operated", {
-                detail: { deviceId, workspaceId, kind: action.kind, items },
-              }),
+              new CustomEvent<WindowEventMap["kiteline:files-operated"]["detail"]>(
+                "kiteline:files-operated",
+                {
+                  detail: { deviceId, workspaceId, kind: action.kind, items },
+                },
+              ),
             );
           }}
         />

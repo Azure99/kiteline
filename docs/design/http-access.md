@@ -63,7 +63,7 @@ agent 只连接自己网络命名空间里的回环地址：先连 `127.0.0.1:<p
 
 ## 连接寿命
 
-- server 的 `requestTimeout` 为 0，代理请求没有总时长限制。唯一的时限在准备阶段：从创建通道到 agent 发出 `ready`，超过 `channelPairTimeout`（`shared/src/protocol/index.ts`）返回 504。
+- server 的 `requestTimeout` 为 0，代理请求没有总时长限制。唯一的时限在准备阶段：从创建通道到 agent 发出 `ready`，超过 `interactionTimeout`（`shared/src/protocol/index.ts`）返回 504。
 - 进入字节流阶段后，代理不设空闲超时，文件通道的空闲时限和终端的确认规则都不适用于它。没有数据往来的 WebSocket 和 SSE 可以一直保持。
 - server 对经过 Upgrade 的浏览器 socket、agent 对数据 WebSocket 和本地 TCP 连接开启 TCP keepalive，间隔为 `tcpKeepAliveDelayMs`（20 秒，`shared/src/protocol/index.ts`）。keepalive 只用于发现已经断开的对端，不会关闭安静但存活的连接。
 - 每个代理请求从创建通道到结束都占用设备的一个数据通道名额（`serverLimits.channelsPerDevice`，`server/src/limits.ts`），终端显示和文件读写的数据通道共用这个上限，长时间打开的 WebSocket 和 SSE 一直占用。名额用满时新请求返回 429，已有连接不受影响。数值见[限额](../guide/reference.md#限额)。

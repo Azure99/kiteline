@@ -6,6 +6,7 @@ import { AppError, integer, record, string } from "@kiteline/shared/protocol";
 import { installedPaths } from "./install/paths.js";
 import { windowsNative } from "@kiteline/shared/windows/native";
 import { windowsExecutable } from "./tools.js";
+import { agentLimits } from "./limits.js";
 
 export const stateFiles = {
   metadata: "agent.json",
@@ -41,10 +42,10 @@ export const defaultAgentLimits = {
 };
 const limitMaximums: Partial<Record<keyof typeof defaultAgentLimits, number>> = {
   tasksPerDevice: 300,
-  rpcTimeout: 2147482647,
-  searchTimeout: 2147483647,
-  gitWriteTimeout: 2147483647,
-  terminalStallTimeout: 2147483647,
+  rpcTimeout: agentLimits.maxTimerDelay - agentLimits.localClientGraceMs,
+  searchTimeout: agentLimits.maxTimerDelay,
+  gitWriteTimeout: agentLimits.maxTimerDelay,
+  terminalStallTimeout: agentLimits.maxTimerDelay,
 };
 export interface Identity {
   deviceId: string;

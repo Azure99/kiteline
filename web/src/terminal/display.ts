@@ -2,7 +2,13 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { deviceServiceLink } from "../lib/device-service";
-import { integer, limits, record, type TerminalMeta } from "@kiteline/shared/protocol";
+import {
+  integer,
+  limits,
+  record,
+  type ChannelParams,
+  type TerminalMeta,
+} from "@kiteline/shared/protocol";
 import {
   forwardUserInput,
   freezeMouse,
@@ -82,7 +88,7 @@ export class TerminalDisplay {
             workspaceId: this.workspaceId,
             sessionId: this.sessionId,
             history,
-          },
+          } satisfies ChannelParams["terminal.attach"],
         },
         this.abort.signal,
         false,
@@ -181,7 +187,9 @@ export class TerminalDisplay {
           // Font preferences are optional when browser storage is unavailable.
         }
         const terminal = new Terminal({
-          ...terminalOptions(integer(frame.historyLines, "historyLines", 0, 50000)),
+          ...terminalOptions(
+            integer(frame.historyLines, "historyLines", 0, limits.terminalHistoryLines),
+          ),
           cols: integer(frame.cols, "cols", 1, 10000),
           rows: integer(frame.rows, "rows", 1, 10000),
           fontFamily: "'Cascadia Code', 'DejaVu Sans Mono', monospace",
