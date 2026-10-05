@@ -249,7 +249,7 @@ test.each([
       release.resolve();
       expect(await saving).toBe(true);
       await store.renameFile({ ...target, path: paths.from }, paths.to);
-      await vi.waitFor(() => expect(draft.busy).toBeUndefined());
+      await vi.waitFor(() => expect(draft.operation).toBeUndefined());
       expect(draft.path).toBe(paths.final);
       expect(draft.baseRaw).toBe("sent");
       expect(draft.revision).toBe((await read({ ...target, path: paths.final })).meta.revision);
@@ -558,7 +558,7 @@ test("a late rename interrupts a later save but retains its fixed unknown snapsh
   reply.resolve(Response.json({ outcome: "succeeded", result: { from: "a.txt", to: "b.txt" } }));
   await renaming;
   expect(await saving).toBe(false);
-  await vi.waitFor(() => expect(draft.busy).toBeUndefined());
+  await vi.waitFor(() => expect(draft.operation).toBeUndefined());
   expect(draft.path).toBe("b.txt");
   expect(draft.unknownSave).toMatchObject({ target: { path: "copy.txt" }, raw: "base" });
   expect(isDirty(draft)).toBe(true);

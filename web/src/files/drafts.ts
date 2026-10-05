@@ -42,15 +42,16 @@ export interface Draft extends FileTarget {
   scrollTop: number;
   scrollLeft: number;
   location?: { line: number; range?: [number, number] };
-  busy?: "loading" | "saving" | "checking";
+  operation?: { request: AbortController } & (
+    | { kind: "loading" | "checking" }
+    | { kind: "saving"; snapshot: SaveSnapshot }
+  );
   error?: unknown; // Explicit operation failure, retained for the user's next action.
   observationError?: unknown; // Background observation failure; does not replace an operation error.
   notice?: DraftNotice;
-  pendingSave?: SaveSnapshot; // Target and raw bytes currently being published.
   unknownSave?: SaveSnapshot; // Unconfirmed publication checked against its original target.
   missing?: boolean;
   diskChanged?: boolean;
-  request?: AbortController;
   diskActivity: number; // Invalidates background reads when a foreground operation changes disk facts.
   sourceVersion: number; // Invalidates captured file changes after the draft adopts another source.
   readChannel?: string; // Associates channel failure events with the active foreground read.
@@ -90,7 +91,14 @@ export class DraftStore {
   private draftListeners = new WeakMap<Draft, Set<() => void>>();
   private draftVersions = new WeakMap<Draft, number>();
   private editorLimits = new Map<string, number>();
-  closing?: string;
+  private closingId?: string;
+  get closing() {
+    return this.closingId;
+  }
+  setClosing(id?: string) {
+    this.closingId = id;
+    this.changed();
+  }
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
     return () => {
@@ -123,11 +131,9 @@ export class DraftStore {
     return this.items.includes(draft);
   }
   private finish(draft: Draft, request: AbortController) {
-    if (draft.request === request) {
+    if (draft.operation?.request === request) {
       draft.diskActivity++;
-      draft.busy = undefined;
-      draft.request = undefined;
-      draft.pendingSave = undefined;
+      draft.operation = undefined;
     }
     if (this.has(draft)) this.changed();
   }
@@ -160,9 +166,8 @@ export class DraftStore {
       (draft) =>
         draft.deviceId === deviceId &&
         draft.workspaceId === workspaceId &&
-        draft.busy === "saving" &&
-        (isWithin(draft.path, path) ||
-          (!!draft.pendingSave && isWithin(draft.pendingSave.target.path, path))),
+        draft.operation?.kind === "saving" &&
+        (isWithin(draft.path, path) || isWithin(draft.operation.snapshot.target.path, path)),
     );
   }
   fileFailed(channelId: string, error: KitelineError) {
@@ -180,10 +185,10 @@ export class DraftStore {
         { deviceId: target.deviceId, workspaceId: target.workspaceId, path: target.path },
         request.signal,
         (id) => {
-          if (draft.request === request) draft.readChannel = id;
+          if (draft.operation?.request === request) draft.readChannel = id;
         },
       );
-      if (draft.request === request) draft.readChannel = undefined;
+      if (draft.operation?.request === request) draft.readChannel = undefined;
       return disk;
     } catch (error) {
       throw draft.readError ?? error;
@@ -201,7 +206,7 @@ export class DraftStore {
   }
   canSave(draft: Draft) {
     const limit = this.editorLimits.get(draft.deviceId);
-    return !!draft.state && limit !== undefined && draft.bytes <= limit && !draft.busy;
+    return !!draft.state && limit !== undefined && draft.bytes <= limit && !draft.operation;
   }
   overLimit(draft: Draft) {
     const limit = this.editorLimits.get(draft.deviceId);
@@ -296,20 +301,20 @@ export class DraftStore {
     this.changed();
   }
   async load(draft: Draft) {
-    if (!this.has(draft) || draft.busy) return;
+    if (!this.has(draft) || draft.operation) return;
     draft.diskActivity++;
     const request = new AbortController();
     const path = draft.path;
-    draft.request = request;
-    draft.busy = "loading";
+    draft.operation = { kind: "loading", request };
     draft.error = undefined;
     this.changed();
     try {
       const disk = await this.read(draft, { ...draft }, request);
-      if (this.has(draft) && draft.request === request && draft.path === path)
+      if (this.has(draft) && draft.operation?.request === request && draft.path === path)
         this.adopt(draft, disk);
     } catch (error) {
-      if (this.has(draft) && draft.request === request && draft.path === path) draft.error = error;
+      if (this.has(draft) && draft.operation?.request === request && draft.path === path)
+        draft.error = error;
     } finally {
       this.finish(draft, request);
     }
@@ -321,15 +326,13 @@ export class DraftStore {
     const bytes = encodeText(text, draft.format);
     const raw = new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes);
     const request = new AbortController();
-    draft.request = request;
-    draft.busy = "saving";
     const sourcePath = draft.path;
     const pending: SaveSnapshot = {
       target: { deviceId: draft.deviceId, workspaceId: draft.workspaceId, path },
       raw,
       replacesSource: path === draft.path && revision !== null,
     };
-    draft.pendingSave = pending;
+    draft.operation = { kind: "saving", request, snapshot: pending };
     draft.error = undefined;
     this.changed();
     try {
@@ -351,7 +354,7 @@ export class DraftStore {
           },
         ),
       );
-      if (!this.has(draft) || draft.request !== request) return false;
+      if (!this.has(draft) || draft.operation?.request !== request) return false;
       if (draft.path !== sourcePath) {
         draft.notice = "savedOldPath";
         return false;
@@ -369,7 +372,7 @@ export class DraftStore {
       draft.notice = duplicate ? "duplicateDraft" : undefined;
       return true;
     } catch (error) {
-      if (this.has(draft) && draft.request === request && draft.path === sourcePath) {
+      if (this.has(draft) && draft.operation?.request === request && draft.path === sourcePath) {
         draft.error = error;
         if (error instanceof ApiError && error.outcome === "unknown") draft.unknownSave = pending;
       }
@@ -379,29 +382,29 @@ export class DraftStore {
     }
   }
   async check(draft: Draft): Promise<DiskText | undefined> {
-    if (draft.busy || !this.has(draft)) return;
+    if (draft.operation || !this.has(draft)) return;
     draft.diskActivity++;
     const path = draft.path;
     const unknown = draft.unknownSave;
     const request = new AbortController();
-    draft.request = request;
-    draft.busy = "checking";
+    draft.operation = { kind: "checking", request };
     this.changed();
     try {
       const disk = await this.read(draft, unknown?.target ?? { ...draft }, request);
-      if (!this.has(draft) || draft.request !== request || draft.path !== path) return;
+      if (!this.has(draft) || draft.operation?.request !== request || draft.path !== path) return;
       if (unknown && disk.raw === unknown.raw) {
         this.confirmSave(draft, disk, unknown);
       }
       return disk;
     } catch (error) {
-      if (this.has(draft) && draft.request === request && draft.path === path) draft.error = error;
+      if (this.has(draft) && draft.operation?.request === request && draft.path === path)
+        draft.error = error;
     } finally {
       this.finish(draft, request);
     }
   }
   async observe(draft: Draft, signal: AbortSignal) {
-    if (draft.busy || !draft.state || !this.has(draft)) return;
+    if (draft.operation || !draft.state || !this.has(draft)) return;
     const activity = draft.diskActivity,
       path = draft.path;
     try {
@@ -463,15 +466,14 @@ export class DraftStore {
   }
   private async checkMoved(draft: Draft, previous: Promise<void>) {
     const request = new AbortController();
-    draft.request = request;
-    draft.busy = "checking";
+    draft.operation = { kind: "checking", request };
     draft.readChannel = undefined;
     draft.readError = undefined;
     const source = { deviceId: draft.deviceId, workspaceId: draft.workspaceId, path: draft.path };
     const activity = draft.diskActivity;
     const current = () =>
       this.has(draft) &&
-      draft.request === request &&
+      draft.operation?.request === request &&
       draft.diskActivity === activity &&
       draft.path === source.path;
     let sourceDisk: DiskText | undefined;
@@ -536,13 +538,10 @@ export class DraftStore {
     draft.notice = notice;
   }
   private interruptRequest(draft: Draft) {
-    if (draft.pendingSave) {
-      draft.unknownSave = draft.pendingSave;
-      draft.pendingSave = undefined;
-    }
-    draft.request?.abort();
-    draft.request = undefined;
-    draft.busy = undefined;
+    const operation = draft.operation;
+    if (operation?.kind === "saving") draft.unknownSave = operation.snapshot;
+    operation?.request.abort();
+    draft.operation = undefined;
   }
   deleted(
     deviceId: string,
@@ -580,15 +579,15 @@ export class DraftStore {
     }
   }
   close(draft: Draft) {
-    draft.request?.abort();
+    draft.operation?.request.abort();
     this.items = this.items.filter((item) => item !== draft);
-    if (this.closing === draft.id) this.closing = undefined;
+    if (this.closingId === draft.id) this.closingId = undefined;
     this.changed();
   }
   clear() {
-    for (const item of this.items) item.request?.abort();
+    for (const item of this.items) item.operation?.request.abort();
     this.items = [];
-    this.closing = undefined;
+    this.closingId = undefined;
     this.changed();
   }
 }

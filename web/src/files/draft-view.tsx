@@ -41,6 +41,7 @@ export function DraftView({
   const all = useDrafts(store);
   // Editing updates this draft without notifying the entire open-files list.
   useDraftVersion(store, draft);
+  const busy = draft.operation?.kind;
   const [disk, setDisk] = useState<DiskText>();
   const [saveAs, setSaveAs] = useState(false);
   const [path, setPath] = useState(draft.path);
@@ -145,14 +146,14 @@ export function DraftView({
         </IconButton>
         <IconButton
           label={t(($) => $.files.checkDisk)}
-          disabled={!!draft.busy || !!unavailable}
+          disabled={!!busy || !!unavailable}
           onClick={() => void check()}
         >
           <RefreshCw />
         </IconButton>
         <IconButton
           label={t(($) => $.files.saveAs)}
-          disabled={!draft.state || !!draft.busy || !!unavailable}
+          disabled={!draft.state || !!busy || !!unavailable}
           onClick={() => {
             setPath(draft.path);
             setError(undefined);
@@ -202,7 +203,7 @@ export function DraftView({
           ) && (
             <Button
               variant="outline"
-              disabled={!!draft.busy || !!unavailable}
+              disabled={!!busy || !!unavailable}
               onClick={() => void check()}
             >
               {t(($) => $.files.checkDisk)}
@@ -220,8 +221,8 @@ export function DraftView({
         />
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-4 text-sm text-muted-foreground">
-          {draft.busy ? t(($) => $.common.reading) : t(($) => $.files.noText)}
-          {!draft.busy && (
+          {busy ? t(($) => $.common.reading) : t(($) => $.files.noText)}
+          {!busy && (
             <Button
               variant="outline"
               disabled={!!unavailable}
@@ -236,9 +237,9 @@ export function DraftView({
       <div className="flex min-h-6 shrink-0 flex-wrap items-center justify-between gap-x-3 border-t border-border px-3 text-[11px] text-muted-foreground">
         <span className="flex gap-3">
           <span>
-            {draft.busy === "saving"
+            {busy === "saving"
               ? t(($) => $.files.saving)
-              : draft.busy === "checking"
+              : busy === "checking"
                 ? t(($) => $.files.checking)
                 : isDirty(draft)
                   ? t(($) => $.files.unsaved)
@@ -287,7 +288,7 @@ export function DraftView({
               </Button>
               <Button
                 variant="outline"
-                disabled={!!draft.busy}
+                disabled={!!busy}
                 onClick={() => {
                   if (isDirty(draft) && !window.confirm(t(($) => $.files.discardLoad))) return;
                   try {

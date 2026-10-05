@@ -111,10 +111,7 @@ export function OpenFiles({
       <Dialog
         open={!!closing}
         onOpenChange={(open) => {
-          if (!open) {
-            store.closing = undefined;
-            store.changed();
-          }
+          if (!open) store.setClosing();
         }}
       >
         {closing && (
@@ -131,13 +128,7 @@ export function OpenFiles({
               )}
             </div>
             <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  store.closing = undefined;
-                  store.changed();
-                }}
-              >
+              <Button variant="outline" onClick={() => store.setClosing()}>
                 {t(($) => $.common.cancel)}
               </Button>
               <Button variant="outline" onClick={() => closeDraft(store, closing)}>

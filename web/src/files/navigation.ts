@@ -54,8 +54,6 @@ export function closeDraft(store: DraftStore, draft: Draft) {
   store.close(draft);
 }
 export function requestCloseDraft(store: DraftStore, draft: Draft) {
-  if (isDirty(draft)) {
-    store.closing = draft.id;
-    store.changed();
-  } else closeDraft(store, draft);
+  if (isDirty(draft)) store.setClosing(draft.id);
+  else closeDraft(store, draft);
 }
