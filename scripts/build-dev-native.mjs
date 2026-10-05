@@ -4,7 +4,7 @@ import { prepareRipgrep } from "./prepare-ripgrep.mjs";
 import { digest, fetchPinned, run as execute } from "./release-inputs.mjs";
 
 const root = resolve(import.meta.dirname, "..");
-const destination = resolve(process.env.KITELINE_NATIVE_OUTPUT ?? resolve(root, "dist/native"));
+const destination = resolve(root, "dist/native");
 const directory = mkdtempSync("/var/tmp/kiteline-native-");
 const tarball = resolve(directory, "tmux.tar.gz");
 const { tmux } = JSON.parse(readFileSync(resolve(root, "release/inputs.json"), "utf8"));

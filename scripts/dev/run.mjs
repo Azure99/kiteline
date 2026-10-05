@@ -22,4 +22,9 @@ function stop() {
   }
 }
 for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, stop);
-for (const child of children) child.on("exit", stop);
+for (const child of children)
+  child.on("exit", (code) => {
+    if (stopping) return;
+    process.exitCode = code ?? 1;
+    stop();
+  });
