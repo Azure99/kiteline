@@ -9,7 +9,7 @@ import type {
   RecorderMessage,
   TerminalIdentity,
 } from "@kiteline/shared/protocol/ipc";
-import { exitCodeFormat, msysPath, tmux, tmuxServerMissing } from "@kiteline/shared/terminal/node";
+import { msysPath, tmux, tmuxServerMissing } from "@kiteline/shared/terminal/node";
 import { startTerminalServer } from "@kiteline/shared/terminal/windows";
 import type { AgentConfig } from "../config.js";
 import type { MetadataStore } from "../metadata.js";
@@ -337,27 +337,25 @@ export class Sessions {
           "list-panes",
           "-a",
           "-F",
-          `#{pane_id} #{window_id} #{pane_dead} ${exitCodeFormat}|#{pane_width} #{pane_height}`,
+          "#{pane_id} #{window_id} #{pane_dead} #{pane_width} #{pane_height}",
         ],
         undefined,
         AbortSignal.timeout(this.config.limits.rpcTimeout),
       );
       if (process.platform === "win32" && !output.trim())
-        return { alive: false, exitCode: null, cols: undefined, rows: undefined };
-      const result = /^(%\d+) (@\d+) ([01]) (\d*)\|(\d+) (\d+)\s*$/.exec(output);
+        return { alive: false, cols: undefined, rows: undefined };
+      const result = /^(%\d+) (@\d+) ([01]) (\d+) (\d+)\s*$/.exec(output);
       if (!result) throw new Error("Cannot verify the managed terminal identity");
       item.creationMayArrive = false;
       item.identity.paneId = result[1];
       item.identity.windowId = result[2];
       return {
         alive: result[3] === "0",
-        exitCode: result[4] ? Number(result[4]) : null,
-        cols: Number(result[5]),
-        rows: Number(result[6]),
+        cols: Number(result[4]),
+        rows: Number(result[5]),
       };
     } catch (error) {
-      if (tmuxServerMissing(error))
-        return { alive: false, exitCode: null, cols: undefined, rows: undefined };
+      if (tmuxServerMissing(error)) return { alive: false, cols: undefined, rows: undefined };
       throw error;
     }
   }

@@ -21,6 +21,9 @@ export interface Snapshot {
   historyLimited: boolean;
   tail: TerminalEvent[];
 }
+export function eventCost(event: TerminalEvent) {
+  return event.type === "output" ? Buffer.byteLength(event.data) : 32;
+}
 export class Model {
   readonly terminal: InstanceType<typeof Terminal>;
   private serializer = new SerializeAddon();
@@ -156,7 +159,7 @@ export class Model {
     }
   }
   private record(event: TerminalEvent) {
-    this.tailBytes += event.type === "output" ? Buffer.byteLength(event.data) : 32;
+    this.tailBytes += eventCost(event);
     if (this.checkpoint) this.tail.push(event);
     if (
       (this.tailBytes >= modelLimits.terminalCheckpointIntervalBytes || !this.checkpoint) &&

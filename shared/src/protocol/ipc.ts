@@ -31,6 +31,10 @@ export type TerminalSource =
 export type TerminalEvent =
   | { type: "output"; data: string }
   | { type: "resize"; cols: number; rows: number };
+export type BrowserTerminalInput =
+  | { type: "paste"; text: string }
+  | { type: "resize"; cols: number; rows: number }
+  | { type: "consumed"; bytes: number };
 export type TerminalFrame =
   | {
       type: "restore.begin";
@@ -59,10 +63,8 @@ export type RecorderRequest =
       history: "retained" | "screen";
     }
   | { type: "input"; sessionId: string; attachmentId: string; dataBase64: string }
-  | { type: "paste"; sessionId: string; attachmentId: string; text: string }
-  | { type: "resize"; sessionId: string; attachmentId: string; cols: number; rows: number }
-  | { type: "detach"; sessionId: string; attachmentId: string }
-  | { type: "consumed"; sessionId: string; attachmentId: string; bytes: number };
+  | (BrowserTerminalInput & { sessionId: string; attachmentId: string })
+  | { type: "detach"; sessionId: string; attachmentId: string };
 export type RecorderMessage =
   | { type: "reply"; reply: Reply }
   | { type: "frame"; sessionId: string; attachmentId: string; frame: TerminalFrame }

@@ -14,7 +14,8 @@ type Input =
       resolve: () => void;
       reject: (error: unknown) => void;
     };
-const cost = (item: Input) => ("data" in item ? item.data.length : 32);
+const inputCommandBytes = 32;
+const cost = (item: Input) => ("data" in item ? item.data.length : inputCommandBytes);
 export class InputQueue {
   private queue: Input[] = [];
   private bytes = 0;
@@ -55,12 +56,12 @@ export class InputQueue {
       last.cols = cols;
       last.rows = rows;
     } else {
-      if (this.bytes + 32 > this.config.terminalInputBytes) {
+      if (this.bytes + inputCommandBytes > this.config.terminalInputBytes) {
         this.reject(attachmentId, new AppError("busy", "Terminal input queue is full"), "failed");
         return;
       }
       this.queue.push({ type: "resize", attachmentId, cols, rows });
-      this.bytes += 32;
+      this.bytes += inputCommandBytes;
     }
     void this.run();
   }
@@ -74,11 +75,11 @@ export class InputQueue {
   redraw() {
     if (this.closed)
       return Promise.reject(new AppError("recording_unavailable", "Recording interrupted"));
-    if (this.bytes + 32 > this.config.terminalInputBytes)
+    if (this.bytes + inputCommandBytes > this.config.terminalInputBytes)
       return Promise.reject(new AppError("busy", "Terminal input queue is full"));
     return new Promise<void>((resolve, reject) => {
       this.queue.push({ type: "redraw", attachmentId: undefined, resolve, reject });
-      this.bytes += 32;
+      this.bytes += inputCommandBytes;
       void this.run();
     });
   }

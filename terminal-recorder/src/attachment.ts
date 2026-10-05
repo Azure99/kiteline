@@ -1,6 +1,6 @@
 import { AppError, limits } from "@kiteline/shared/protocol";
 import type { TerminalEvent, TerminalFrame } from "@kiteline/shared/protocol/ipc";
-import type { Snapshot } from "./model.js";
+import { eventCost, type Snapshot } from "./model.js";
 
 type Piece = Buffer | TerminalFrame;
 function* chunks(data: Buffer): Generator<Buffer> {
@@ -49,7 +49,7 @@ export class Attachment {
   }
   output = (event: TerminalEvent) => {
     if (this.closed) return;
-    const bytes = event.type === "output" ? Buffer.byteLength(event.data) : 32;
+    const bytes = eventCost(event);
     if (this.pendingBytes + bytes > limits.terminalPendingBytes) {
       this.fail(
         new AppError("limit_exceeded", "Display is receiving output too slowly; reconnect"),
@@ -96,7 +96,7 @@ export class Attachment {
     const event = this.pending.shift();
     if (!event) return;
     if (event.type === "ended") return event;
-    this.pieceCost = event.type === "output" ? Buffer.byteLength(event.data) : 32;
+    this.pieceCost = eventCost(event);
     this.pieces = eventPieces(event);
     return this.next();
   }

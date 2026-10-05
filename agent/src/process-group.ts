@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
 
-export async function groupRunning(pid: number) {
+async function groupRunning(pid: number) {
   try {
     process.kill(-pid, 0);
   } catch (error) {

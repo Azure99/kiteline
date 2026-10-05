@@ -2,6 +2,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { deviceServiceLink } from "../lib/device-service";
+import type { BrowserTerminalInput } from "@kiteline/shared/protocol/ipc";
 import {
   integer,
   limits,
@@ -305,7 +306,7 @@ export class TerminalDisplay {
     this.consumed += bytes.length;
     this.send({ type: "consumed", bytes: this.consumed });
   }
-  private send(value: object) {
+  private send(value: BrowserTerminalInput) {
     if (this.socket?.readyState !== WebSocket.OPEN) return;
     const text = JSON.stringify(value);
     if (
