@@ -39,11 +39,13 @@ export function DraftView({
   const { t } = useTranslation();
 
   const all = useDrafts(store);
+  // Editing updates this draft without notifying the entire open-files list.
   useDraftVersion(store, draft);
   const [disk, setDisk] = useState<DiskText>();
   const [saveAs, setSaveAs] = useState(false);
   const [path, setPath] = useState(draft.path);
   const [error, setError] = useState<unknown>();
+  const [copied, setCopied] = useState<string>();
   const generation = useRef(0);
   const tabStrip = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -138,10 +140,13 @@ export function DraftView({
           disabled={!draft.state}
           onPointerDown={(event) => event.preventDefault()}
           onClick={() => {
-            void copyText(draft.state!.doc.toString()).catch((reason: unknown) => {
-              draft.error = reason;
-              store.changed();
-            });
+            setCopied(undefined);
+            void copyText(draft.state!.doc.toString())
+              .then(() => setCopied(draft.id))
+              .catch((reason: unknown) => {
+                draft.error = reason;
+                store.changed();
+              });
           }}
         >
           <Copy />
@@ -231,16 +236,19 @@ export function DraftView({
         </div>
       )}
       <div className="flex min-h-6 shrink-0 flex-wrap items-center justify-between gap-x-3 border-t border-border px-3 text-[11px] text-muted-foreground">
-        <span>
-          {draft.busy === "saving"
-            ? t(($) => $.files.saving)
-            : draft.busy === "checking"
-              ? t(($) => $.files.checking)
-              : isDirty(draft)
-                ? t(($) => $.files.unsaved)
-                : draft.state
-                  ? t(($) => $.common.saved)
-                  : ""}
+        <span className="flex gap-3">
+          <span>
+            {draft.busy === "saving"
+              ? t(($) => $.files.saving)
+              : draft.busy === "checking"
+                ? t(($) => $.files.checking)
+                : isDirty(draft)
+                  ? t(($) => $.files.unsaved)
+                  : draft.state
+                    ? t(($) => $.common.saved)
+                    : ""}
+          </span>
+          <span role="status">{copied === draft.id ? t(($) => $.common.copied) : ""}</span>
         </span>
         {draft.state && (
           <span>

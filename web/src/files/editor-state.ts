@@ -12,7 +12,7 @@ import { searchKeymap } from "@codemirror/search";
 import { editorPhrases } from "./editor-locale";
 
 const theme = EditorView.theme({
-  "&": { height: "100%", fontSize: "13px", background: "var(--background)" },
+  "&": { height: "100%", background: "var(--background)" },
   "&.cm-focused": { outline: "none" },
   ".cm-scroller": { fontFamily: "var(--font-mono)", overflow: "auto" },
   ".cm-content": { padding: "12px 0", minHeight: "100%" },
@@ -22,9 +22,8 @@ const theme = EditorView.theme({
     color: "var(--muted-foreground)",
     border: "none",
   },
-  ".cm-activeLine, .cm-activeLineGutter": { background: "var(--muted)" },
+  ".cm-activeLineGutter": { background: "var(--muted)" },
   ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": { background: "#c7dce9" },
-  "@media (max-width: 959px)": { "&": { fontSize: "16px" } },
 });
 
 export function textState(

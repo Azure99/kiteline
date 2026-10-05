@@ -25,6 +25,7 @@ interface SaveSnapshot {
   replacesSource: boolean;
 }
 
+// Draft and disk ownership: docs/design/files.md.
 export interface Draft extends FileTarget {
   id: string;
   deviceName: string;
@@ -42,18 +43,18 @@ export interface Draft extends FileTarget {
   scrollLeft: number;
   location?: { line: number; range?: [number, number] };
   busy?: "loading" | "saving" | "checking";
-  error?: unknown;
-  observationError?: unknown;
+  error?: unknown; // Explicit operation failure, retained for the user's next action.
+  observationError?: unknown; // Background observation failure; does not replace an operation error.
   notice?: DraftNotice;
-  pendingSave?: SaveSnapshot;
-  unknownSave?: SaveSnapshot;
+  pendingSave?: SaveSnapshot; // Target and raw bytes currently being published.
+  unknownSave?: SaveSnapshot; // Unconfirmed publication checked against its original target.
   missing?: boolean;
   diskChanged?: boolean;
   request?: AbortController;
-  diskActivity: number;
-  sourceVersion: number;
-  readChannel?: string;
-  readError?: ApiError;
+  diskActivity: number; // Invalidates background reads when a foreground operation changes disk facts.
+  sourceVersion: number; // Invalidates captured file changes after the draft adopts another source.
+  readChannel?: string; // Associates channel failure events with the active foreground read.
+  readError?: ApiError; // Preserves the channel diagnostic when HTTP cannot deliver the body.
 }
 
 interface CapturedDraft {
@@ -120,6 +121,24 @@ export class DraftStore {
   }
   has(draft: Draft) {
     return this.items.includes(draft);
+  }
+  private finish(draft: Draft, request: AbortController) {
+    if (draft.request === request) {
+      draft.diskActivity++;
+      draft.busy = undefined;
+      draft.request = undefined;
+      draft.pendingSave = undefined;
+    }
+    if (this.has(draft)) this.changed();
+  }
+  private hasDuplicate(draft: Draft, path: string) {
+    return this.items.some(
+      (item) =>
+        item !== draft &&
+        item.deviceId === draft.deviceId &&
+        item.workspaceId === draft.workspaceId &&
+        item.path === path,
+    );
   }
   capture(deviceId: string, workspaceId: string, path: string): FileChange {
     const matches = (target: FileTarget) =>
@@ -292,12 +311,7 @@ export class DraftStore {
     } catch (error) {
       if (this.has(draft) && draft.request === request && draft.path === path) draft.error = error;
     } finally {
-      if (draft.request === request) {
-        draft.diskActivity++;
-        draft.busy = undefined;
-        draft.request = undefined;
-      }
-      if (this.has(draft)) this.changed();
+      this.finish(draft, request);
     }
   }
   async save(draft: Draft, path = draft.path, revision: string | null = draft.revision ?? null) {
@@ -342,13 +356,7 @@ export class DraftStore {
         draft.notice = "savedOldPath";
         return false;
       }
-      const duplicate = this.items.some(
-        (item) =>
-          item !== draft &&
-          item.deviceId === draft.deviceId &&
-          item.workspaceId === draft.workspaceId &&
-          item.path === savedPath,
-      );
+      const duplicate = this.hasDuplicate(draft, savedPath);
       if (!pending.replacesSource || draft.path !== savedPath) draft.sourceVersion++;
       draft.path = savedPath;
       draft.baseText = text;
@@ -367,13 +375,7 @@ export class DraftStore {
       }
       return false;
     } finally {
-      if (draft.request === request) {
-        draft.diskActivity++;
-        draft.busy = undefined;
-        draft.request = undefined;
-        draft.pendingSave = undefined;
-      }
-      if (this.has(draft)) this.changed();
+      this.finish(draft, request);
     }
   }
   async check(draft: Draft): Promise<DiskText | undefined> {
@@ -395,12 +397,7 @@ export class DraftStore {
     } catch (error) {
       if (this.has(draft) && draft.request === request && draft.path === path) draft.error = error;
     } finally {
-      if (draft.request === request) {
-        draft.diskActivity++;
-        draft.request = undefined;
-        draft.busy = undefined;
-      }
-      if (this.has(draft)) this.changed();
+      this.finish(draft, request);
     }
   }
   async observe(draft: Draft, signal: AbortSignal) {
@@ -457,15 +454,7 @@ export class DraftStore {
     draft.diskChanged = false;
     draft.error = undefined;
     draft.observationError = undefined;
-    draft.notice = this.items.some(
-      (item) =>
-        item !== draft &&
-        item.deviceId === draft.deviceId &&
-        item.workspaceId === draft.workspaceId &&
-        item.path === draft.path,
-    )
-      ? "duplicateDraft"
-      : "diskMatches";
+    draft.notice = this.hasDuplicate(draft, draft.path) ? "duplicateDraft" : "diskMatches";
     window.dispatchEvent(
       new CustomEvent<WindowEventMap["kiteline:file-written"]["detail"]>("kiteline:file-written", {
         detail: disk.target,
@@ -513,23 +502,8 @@ export class DraftStore {
         if (error instanceof ApiError && error.code === "not_found") draft.missing = true;
       }
     } finally {
-      if (
-        current() &&
-        this.items.some(
-          (item) =>
-            item !== draft &&
-            item.deviceId === draft.deviceId &&
-            item.workspaceId === draft.workspaceId &&
-            item.path === draft.path,
-        )
-      )
-        draft.notice = "duplicateDraft";
-      if (draft.request === request) {
-        draft.diskActivity++;
-        draft.request = undefined;
-        draft.busy = undefined;
-      }
-      if (this.has(draft)) this.changed();
+      if (current() && this.hasDuplicate(draft, draft.path)) draft.notice = "duplicateDraft";
+      this.finish(draft, request);
     }
   }
   async rename(

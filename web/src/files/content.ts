@@ -178,7 +178,9 @@ export async function uploadFile(
   try {
     return await new Promise<UploadedFile>((resolve, reject) => {
       const request = new XMLHttpRequest();
+      let cancelled = false;
       const cancel = () => {
+        cancelled = true;
         void release(ready.channelId);
       };
       signal.addEventListener("abort", cancel, { once: true });
@@ -192,6 +194,14 @@ export async function uploadFile(
         if (request.status === 401) window.dispatchEvent(new Event("kiteline:unauthenticated"));
         const reply = request.response as Reply<UploadedFile> | { error: KitelineError } | null;
         if (reply && "outcome" in reply && reply.outcome === "succeeded") resolve(reply.result);
+        else if (
+          cancelled &&
+          request.status === 404 &&
+          reply &&
+          "error" in reply &&
+          reply.error.code === "not_found"
+        )
+          reject(new ApiError("cancelled", "Upload cancelled", "failed"));
         else if (reply && "error" in reply)
           reject(
             apiError(
@@ -207,7 +217,10 @@ export async function uploadFile(
         reject(new ApiError("io_error", "The upload result is unconfirmed", "unknown"));
       };
       request.send(file);
-      onReady(() => api(`/api/channels/${ready.channelId}`, { method: "DELETE" }));
+      onReady(() => {
+        cancelled = true;
+        return api(`/api/channels/${ready.channelId}`, { method: "DELETE" });
+      });
       if (signal.aborted) cancel();
     });
   } finally {

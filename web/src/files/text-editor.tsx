@@ -107,7 +107,7 @@ export function TextEditor({
   return (
     <div
       ref={host}
-      className="min-h-0 min-w-0 flex-1 overflow-hidden"
+      className="min-h-0 min-w-0 flex-1 overflow-hidden text-[13px] max-[960px]:text-[16px]"
       aria-label={t(($) => $.files.editor)}
     />
   );

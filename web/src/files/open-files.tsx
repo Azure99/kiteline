@@ -27,8 +27,12 @@ export function OpenFiles({
 }) {
   const { t } = useTranslation();
   const [copyError, setCopyError] = useState<unknown>();
+  const [copied, setCopied] = useState<string>();
   useEffect(() => {
-    if (!open) setCopyError(undefined);
+    if (!open) {
+      setCopyError(undefined);
+      setCopied(undefined);
+    }
   }, [open]);
 
   const drafts = useDrafts(store);
@@ -87,12 +91,18 @@ export function OpenFiles({
                   </span>
                   {isDirty(draft) && <Circle size={7} fill="currentColor" />}
                 </Button>
+                <span role="status" className="shrink-0 text-xs text-muted-foreground">
+                  {copied === draft.id ? t(($) => $.common.copied) : ""}
+                </span>
                 <IconButton
                   label={t(($) => $.files.copyText)}
                   disabled={!draft.state}
                   onClick={() => {
                     setCopyError(undefined);
-                    void copyText(draft.state!.doc.toString()).catch(setCopyError);
+                    setCopied(undefined);
+                    void copyText(draft.state!.doc.toString())
+                      .then(() => setCopied(draft.id))
+                      .catch(setCopyError);
                   }}
                 >
                   <Copy size={13} />
