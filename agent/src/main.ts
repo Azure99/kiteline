@@ -9,6 +9,9 @@ import { installCli } from "./install/commands.js";
 import { checkPrerequisites } from "./prerequisites.js";
 import { lockAgentRuntime, lockAgentState } from "./state-lock.js";
 
+const usage =
+  "Usage: kiteline-agent install --user USER | upgrade --archive RELEASE.tar.gz | uninstall | check | bind --server HTTP_OR_HTTPS_ORIGIN [--if-unbound] | run | doctor | attach SESSION_ID [--run-dir DIR] | terminal | workspace | schedule";
+
 async function runAgent() {
   let stopping = false;
   let agent: Agent | undefined;
@@ -76,6 +79,14 @@ async function main() {
     await attachCli(process.argv.slice(3));
     return;
   }
+  if (command === "bind") {
+    await bindCli(process.argv.slice(3));
+    return;
+  }
+  if (command === "workspace" || command === "terminal") {
+    await terminalCli(await agentConfig(), process.argv.slice(2));
+    return;
+  }
   if (process.argv.includes("--version")) {
     console.log(appVersion);
     return;
@@ -85,9 +96,7 @@ async function main() {
     return;
   }
   if (command === "--help" || command === "-h" || command === undefined) {
-    console.log(
-      "Usage: kiteline-agent install | upgrade | uninstall | check | bind | run | doctor | attach | terminal | workspace | schedule\nAttach: kiteline-agent attach SESSION_ID [--run-dir DIR]\nScheduled Tasks: kiteline-agent schedule --help",
-    );
+    console.log(`${usage}\nScheduled Tasks: kiteline-agent schedule --help`);
     return;
   }
   if (command === "install" || command === "upgrade" || command === "uninstall") {
@@ -106,15 +115,7 @@ async function main() {
     await doctorCli();
     return;
   }
-  if (command === "workspace" || command === "terminal") {
-    await terminalCli(await agentConfig(), process.argv.slice(2));
-    return;
-  }
-  if (command !== "bind")
-    throw new Error(
-      "Usage: kiteline-agent install --user USER | upgrade --archive RELEASE.tar.gz | uninstall | check | bind --server HTTP_OR_HTTPS_ORIGIN [--if-unbound] | run | doctor | attach SESSION_ID [--run-dir DIR] | terminal | workspace | schedule",
-    );
-  await bindCli(process.argv.slice(3));
+  throw new Error(usage);
 }
 main().catch((error: unknown) => {
   console.error(error);

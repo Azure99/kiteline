@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { string, type Session, type Workspace } from "@kiteline/shared/protocol";
+import { optionalString, string, type Session, type Workspace } from "@kiteline/shared/protocol";
 import type { TerminalIdentity } from "@kiteline/shared/protocol/ipc";
 import {
   msysDirectory,
@@ -23,8 +23,7 @@ export async function attachCli(args: string[]) {
   });
   if (positionals.length !== 1)
     throw new Error("Usage: kiteline-agent attach SESSION_ID [--run-dir DIR]");
-  const override =
-    values["run-dir"] === undefined ? undefined : string(values["run-dir"], "run-dir");
+  const override = optionalString(values["run-dir"], "run-dir");
   const { runDir } = await agentPaths(override);
   await attachTerminal(
     { runDir, limits: defaultAgentLimits },
@@ -32,7 +31,7 @@ export async function attachCli(args: string[]) {
   );
 }
 
-export async function attachTerminal(config: Parameters<typeof localRequest>[0], id: string) {
+async function attachTerminal(config: Parameters<typeof localRequest>[0], id: string) {
   if (!process.stdin.isTTY || !process.stdout.isTTY)
     throw new Error("Attaching requires a local terminal");
   const identity = await localRequest<TerminalIdentity>(config, "terminal.attach", {
@@ -89,11 +88,8 @@ export async function attachTerminal(config: Parameters<typeof localRequest>[0],
 }
 
 export async function terminalCli(config: AgentConfig, args: string[]) {
-  function option(name: string) {
-    const index = args.indexOf(name);
-    return index < 0 ? undefined : string(args[index + 1], name);
-  }
   if (args[0] === "workspace" && args[1] === "list") {
+    parseArgs({ args: args.slice(2) });
     const result = await localRequest<{ workspaces: Workspace[] }>(config, "workspaces.list");
     for (const item of result.workspaces) console.log(`${item.id}\t${item.name}\t${item.path}`);
     return;
@@ -104,27 +100,47 @@ export async function terminalCli(config: AgentConfig, args: string[]) {
     );
   switch (args[1]) {
     case "list": {
+      const { values } = parseArgs({
+        args: args.slice(2),
+        options: { workspace: { type: "string" } },
+      });
       const result = await localRequest<{ sessions: Session[] }>(config, "sessions.list", {
-        workspaceId: option("--workspace"),
+        workspaceId: optionalString(values.workspace, "workspace"),
       });
       for (const item of result.sessions)
         console.log(`${item.id}\t${item.workspaceId}\t${item.state}\t${item.name}`);
       break;
     }
     case "new": {
-      if (!args.includes("--no-attach") && (!process.stdin.isTTY || !process.stdout.isTTY))
+      const { values } = parseArgs({
+        args: args.slice(2),
+        options: {
+          workspace: { type: "string" },
+          shortcut: { type: "string" },
+          "no-attach": { type: "boolean" },
+        },
+      });
+      const workspaceId = string(values.workspace, "workspace");
+      const shortcutId = optionalString(values.shortcut, "shortcut");
+      if (!values["no-attach"] && (!process.stdin.isTTY || !process.stdout.isTTY))
         throw new Error("Attaching requires a local terminal; use --no-attach to create only");
       const session = await localRequest<Session>(config, "sessions.create", {
-        workspaceId: string(option("--workspace"), "workspace"),
-        shortcutId: option("--shortcut"),
+        workspaceId,
+        shortcutId,
       });
       console.log(session.id);
-      if (!args.includes("--no-attach")) await attachTerminal(config, session.id);
+      if (!values["no-attach"]) await attachTerminal(config, session.id);
       break;
     }
-    case "end":
-      await localRequest(config, "sessions.end", { sessionId: string(args[2], "session id") });
+    case "end": {
+      const { positionals } = parseArgs({ args: args.slice(2), allowPositionals: true });
+      if (positionals.length !== 1)
+        throw new Error("Usage: kiteline-agent terminal end SESSION_ID");
+      await localRequest(config, "sessions.end", {
+        sessionId: string(positionals[0], "session id"),
+      });
       break;
+    }
     default:
       throw new Error(
         "Usage: kiteline-agent terminal list/new/end | attach SESSION_ID [--run-dir DIR]",

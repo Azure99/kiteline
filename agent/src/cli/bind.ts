@@ -2,6 +2,7 @@ import { createInterface } from "node:readline/promises";
 import { hostname } from "node:os";
 import { resolve } from "node:path";
 import { lstat } from "node:fs/promises";
+import { parseArgs } from "node:util";
 import { AppError, limits, record, string } from "@kiteline/shared/protocol";
 import { agentConfig, atomicJson, privateDirectory, stateFiles } from "../config.js";
 import { fetchServerJson } from "../network.js";
@@ -25,16 +26,19 @@ async function input(prompt: string) {
 }
 
 export async function bindCli(args: string[]) {
+  const { values } = parseArgs({
+    args,
+    options: { server: { type: "string" }, "if-unbound": { type: "boolean" } },
+  });
+  const server = new URL(string(values.server, "server"));
+  if (server.protocol !== "http:" && server.protocol !== "https:")
+    throw new AppError("invalid_argument", "server must use HTTP or HTTPS");
   const config = await agentConfig();
   let releaseState: (() => Promise<void>) | undefined;
   try {
     await privateDirectory(config.dataDir);
     releaseState = await lockAgentState(config.dataDir);
-    const index = args.indexOf("--server");
-    const server = new URL(string(index < 0 ? undefined : args[index + 1], "server"));
-    if (server.protocol !== "http:" && server.protocol !== "https:")
-      throw new AppError("invalid_argument", "server must use HTTP or HTTPS");
-    if (args.includes("--if-unbound")) {
+    if (values["if-unbound"]) {
       const exists = await lstat(resolve(config.dataDir, stateFiles.connection)).then(
         () => true,
         (error: NodeJS.ErrnoException) => {
