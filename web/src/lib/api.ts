@@ -70,6 +70,12 @@ export async function api<T>(
 export function post<T>(path: string, value: unknown = {}, signal?: AbortSignal, mutation = true) {
   return api<T>(path, { method: "POST", body: JSON.stringify(value), signal }, mutation);
 }
+export function cancelRequest(deviceId: string, requestId: string) {
+  return api(
+    `/api/devices/${encodeURIComponent(deviceId)}/requests/${encodeURIComponent(requestId)}`,
+    { method: "DELETE" },
+  );
+}
 export function rpcReply<A extends RpcArguments>(
   deviceId: string,
   id: string,

@@ -1,5 +1,5 @@
 import type { RpcArguments, RpcResult } from "@kiteline/shared/protocol";
-import { api, apiError, rpc, rpcReply } from "./api";
+import { apiError, cancelRequest, rpc, rpcReply } from "./api";
 import { newId } from "./id";
 
 type CursorArguments = RpcArguments<"directories.list" | "files.list" | "repos.discover">;
@@ -16,9 +16,7 @@ export async function cursorRpc<A extends CursorArguments>(
   if (signal?.aborted) throw new DOMException("The operation was aborted", "AbortError");
   const id = newId();
   const cancel = () => {
-    void api(`/api/devices/${encodeURIComponent(deviceId)}/requests/${id}`, {
-      method: "DELETE",
-    }).catch(() => {});
+    void cancelRequest(deviceId, id).catch(() => {});
   };
   signal?.addEventListener("abort", cancel, { once: true });
   try {

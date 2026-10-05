@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "./ui/button";
 import { ErrorNotice } from "./error-notice";
 import { ReleaseNotice } from "./release-notice";
-import { useServerVersion, webCompatible } from "../lib/release";
+import { useWebCompatible } from "../lib/release";
 
 function Loading() {
   const { t } = useTranslation();
@@ -16,12 +16,12 @@ function Loading() {
 }
 function Failure({ error, releaseNotice = false }: { error: unknown; releaseNotice?: boolean }) {
   const { t } = useTranslation();
-  useServerVersion();
+  const compatible = useWebCompatible();
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-4">
       {releaseNotice && <ReleaseNotice />}
       <ErrorNotice error={error} />
-      {webCompatible() && (
+      {compatible && (
         <>
           <p className="text-sm text-muted-foreground">{t(($) => $.release.reloadDrafts)}</p>
           <div className="flex flex-wrap gap-2">

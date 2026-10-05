@@ -47,7 +47,7 @@ import { DeviceActionDialog, type DeviceAction } from "./devices/device-actions"
 import { DeviceNavigation } from "./devices/device-navigation";
 import { Home, DeviceDetail } from "./devices/device-views";
 import { useRecentWorkspaces } from "./devices/recent-workspaces";
-import { WorkspaceView } from "./terminal/sessions";
+import { WorkspaceView } from "./terminal/workspace-view";
 import type { TerminalLayout } from "./terminal/groups";
 import { GitActions } from "./git/actions";
 import { DraftStore, isDirty } from "./files/drafts";
@@ -228,6 +228,114 @@ export function Workbench({
       setBinding(true);
     },
   };
+  function renderMain() {
+    if (!route.valid)
+      return (
+        <div className="p-6">
+          {t(($) => $.shell.pageMissing)}
+          <Button variant="ghost" onClick={() => choose("/devices")}>
+            {t(($) => $.shell.backDevices)}
+          </Button>
+        </div>
+      );
+    if (route.tasks)
+      return <TasksPage devices={devices} connected={connected} route={route.tasks} />;
+    if (!route.deviceId)
+      return (
+        <Home
+          devices={devices}
+          loaded={devicesLoaded}
+          connectionError={connectionError}
+          recents={recents}
+          onNavigate={choose}
+          onBind={() => setBinding(true)}
+        />
+      );
+    if (orphan)
+      return (
+        <ViewBoundary key={orphan.id} active>
+          <DraftView
+            store={drafts}
+            draft={orphan}
+            unavailable={
+              !device
+                ? t(($) => $.shell.missingDeviceDraft)
+                : t(($) => $.shell.missingWorkspaceDraft)
+            }
+          />
+        </ViewBoundary>
+      );
+    if (!device)
+      return (
+        <p className="p-6 text-muted-foreground">
+          {connected ? t(($) => $.shell.deviceMissing) : t(($) => $.shell.connectingDevice)}
+        </p>
+      );
+    if (route.workspaceId) {
+      if (!workspace)
+        return <p className="p-6 text-muted-foreground">{t(($) => $.shell.workspaceRemoved)}</p>;
+      return (
+        <>
+          <WorkspaceView
+            key={`${device.id}:${workspace.id}`}
+            device={device}
+            workspace={workspace}
+            visible={route.tool === "terminal"}
+            layouts={terminalLayouts.current}
+            focusMode={terminalFocus}
+          >
+            <Files
+              device={device}
+              workspace={workspace}
+              visible={route.tool === "files"}
+              store={drafts}
+              onOperation={(action, folder) =>
+                setFileOperation({
+                  deviceId: device.id,
+                  workspaceId: workspace.id,
+                  deviceName: device.name,
+                  workspaceName: workspace.name,
+                  folder,
+                  action,
+                })
+              }
+              onUpload={(files, folder) => {
+                const id = newId();
+                setUploads((old) => [
+                  ...old,
+                  {
+                    id,
+                    deviceId: device.id,
+                    workspaceId: workspace.id,
+                    folder,
+                    files,
+                    label: `${device.name} / ${workspace.name} / ${folder}`,
+                  },
+                ]);
+                setActiveUpload(id);
+              }}
+            />
+            <GitTool
+              device={device}
+              workspace={workspace}
+              visible={route.tool === "git"}
+              store={drafts}
+              actions={gitActions}
+            />
+          </WorkspaceView>
+        </>
+      );
+    }
+    return (
+      <DeviceDetail
+        key={device.id}
+        device={device}
+        onNavigate={choose}
+        onAdd={(device) => setDirectoryDevice({ device, origin: currentPath() })}
+        onAction={setAction}
+      />
+    );
+  }
   if (!session) return authentication;
   return (
     <>
@@ -423,103 +531,7 @@ export function Workbench({
                 )}
               </div>
             )}
-            {!route.valid ? (
-              <div className="p-6">
-                {t(($) => $.shell.pageMissing)}
-                <Button variant="ghost" onClick={() => choose("/devices")}>
-                  {t(($) => $.shell.backDevices)}
-                </Button>
-              </div>
-            ) : route.tasks ? (
-              <TasksPage devices={devices} connected={connected} route={route.tasks} />
-            ) : !route.deviceId ? (
-              <Home
-                devices={devices}
-                loaded={devicesLoaded}
-                connectionError={connectionError}
-                recents={recents}
-                onNavigate={choose}
-                onBind={() => setBinding(true)}
-              />
-            ) : orphan ? (
-              <ViewBoundary key={orphan.id} active>
-                <DraftView
-                  store={drafts}
-                  draft={orphan}
-                  unavailable={
-                    !device
-                      ? t(($) => $.shell.missingDeviceDraft)
-                      : t(($) => $.shell.missingWorkspaceDraft)
-                  }
-                />
-              </ViewBoundary>
-            ) : !device ? (
-              <p className="p-6 text-muted-foreground">
-                {connected ? t(($) => $.shell.deviceMissing) : t(($) => $.shell.connectingDevice)}
-              </p>
-            ) : route.workspaceId ? (
-              !workspace ? (
-                <p className="p-6 text-muted-foreground">{t(($) => $.shell.workspaceRemoved)}</p>
-              ) : (
-                <>
-                  <WorkspaceView
-                    key={`${device.id}:${workspace.id}`}
-                    device={device}
-                    workspace={workspace}
-                    visible={route.tool === "terminal"}
-                    layouts={terminalLayouts.current}
-                    focusMode={terminalFocus}
-                  >
-                    <Files
-                      device={device}
-                      workspace={workspace}
-                      visible={route.tool === "files"}
-                      store={drafts}
-                      onOperation={(action, folder) =>
-                        setFileOperation({
-                          deviceId: device.id,
-                          workspaceId: workspace.id,
-                          deviceName: device.name,
-                          workspaceName: workspace.name,
-                          folder,
-                          action,
-                        })
-                      }
-                      onUpload={(files, folder) => {
-                        const id = newId();
-                        setUploads((old) => [
-                          ...old,
-                          {
-                            id,
-                            deviceId: device.id,
-                            workspaceId: workspace.id,
-                            folder,
-                            files,
-                            label: `${device.name} / ${workspace.name} / ${folder}`,
-                          },
-                        ]);
-                        setActiveUpload(id);
-                      }}
-                    />
-                    <GitTool
-                      device={device}
-                      workspace={workspace}
-                      visible={route.tool === "git"}
-                      store={drafts}
-                      actions={gitActions}
-                    />
-                  </WorkspaceView>
-                </>
-              )
-            ) : (
-              <DeviceDetail
-                key={device.id}
-                device={device}
-                onNavigate={choose}
-                onAdd={(device) => setDirectoryDevice({ device, origin: currentPath() })}
-                onAction={setAction}
-              />
-            )}
+            {renderMain()}
           </main>
         </div>
       </div>
@@ -581,6 +593,7 @@ export function Workbench({
       )}
       {directoryDevice && (
         <DirectoryDialog
+          // Reconnect or environment changes restart browsing and release the old cursor.
           key={`${directoryTarget?.id}:${directoryTarget?.lastSeenAt}:${JSON.stringify(directoryEnvironment)}`}
           deviceId={directoryDevice.device.id}
           environment={directoryEnvironment}

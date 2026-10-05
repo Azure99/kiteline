@@ -86,7 +86,8 @@ export function WorkspaceView({
   const routeSession = route.query.session ?? null;
   const lastRouteSession = useRef<string | null | undefined>(undefined);
   const lastTool = useRef<string | undefined>(undefined);
-  const selection = useRef({ main: 0, dock: 0 });
+  // A later selection prevents a pending create from taking over that region.
+  const selectionEpoch = useRef({ main: 0, dock: 0 });
   const displays = useRef(new Map<string, TerminalActions>());
   const [capabilities, setCapabilities] = useState<
     Record<"main" | "dock", Record<string, TerminalCapabilities>>
@@ -188,13 +189,13 @@ export function WorkspaceView({
     const previous = lastRouteSession.current;
     if (routeSession) {
       if (!targetKnown) return;
-      selection.current.main++;
+      selectionEpoch.current.main++;
       lastRouteSession.current = routeSession;
       setLayout((old) => selectSession(old, routeSession));
     } else {
       lastRouteSession.current = routeSession;
       if (route.tool === "terminal" && previous !== undefined) {
-        selection.current.main++;
+        selectionEpoch.current.main++;
         setLayout((old) => ({ ...old, current: undefined }));
       }
     }
@@ -237,7 +238,7 @@ export function WorkspaceView({
   );
   // Explicit main-layout actions also publish their selected session to the URL.
   function applyMain(next: TerminalLayout, tool = route.tool, replace = false) {
-    selection.current.main++;
+    selectionEpoch.current.main++;
     setLayout(next);
     const id = currentGroup(next)?.active;
     lastRouteSession.current = id ?? null;
@@ -251,7 +252,7 @@ export function WorkspaceView({
   function choose(id: string, dock = false) {
     if (!find(id) && !(dock ? opened.dock.has(id) : opened.main.has(id))) return;
     if (dock) {
-      selection.current.dock++;
+      selectionEpoch.current.dock++;
       setLayout((old) => ({ ...old, dock: id, dockOpen: true }));
     } else applyMain(selectSession(layout, id));
   }
@@ -266,7 +267,7 @@ export function WorkspaceView({
       return { ...old, [region]: next };
     });
     if (dock) {
-      selection.current.dock++;
+      selectionEpoch.current.dock++;
       setLayout((old) => ({ ...old, dock: undefined }));
     } else applyMain(closeSession(layout, id));
   }
@@ -276,23 +277,27 @@ export function WorkspaceView({
   const drag = useTerminalDrag(move);
   function patchGroup(change: Partial<NonNullable<typeof group>>) {
     if (!group) return;
-    selection.current.main++;
+    selectionEpoch.current.main++;
     setLayout((old) => ({
       ...old,
       groups: old.groups.map((item) => (item.id === group.id ? { ...item, ...change } : item)),
     }));
   }
-  async function create(
+  async function create({
     dock = false,
-    shortcutId?: string,
-    split?: { groupId: string; anchor: string; direction: SplitDirection },
-  ) {
-    const intent = { ...selection.current };
+    shortcutId,
+    split,
+  }: {
+    dock?: boolean;
+    shortcutId?: string;
+    split?: { groupId: string; anchor: string; direction: SplitDirection };
+  } = {}) {
+    const intent = { ...selectionEpoch.current };
     const session = await remote.create(shortcutId);
     if (!session) return;
     const current = currentRoute();
     const activate =
-      selection.current[dock ? "dock" : "main"] === intent[dock ? "dock" : "main"] &&
+      selectionEpoch.current[dock ? "dock" : "main"] === intent[dock ? "dock" : "main"] &&
       (dock ||
         !isWorkspaceRoute(current, { deviceId: device.id, workspaceId: workspace.id }) ||
         (current.query.session ?? null) === routeSession);
@@ -317,7 +322,7 @@ export function WorkspaceView({
       }
       return {
         ...next,
-        dock: old.dock ?? (selection.current.dock === intent.dock ? session.id : undefined),
+        dock: old.dock ?? (selectionEpoch.current.dock === intent.dock ? session.id : undefined),
       };
     });
     if (!dock && activate) {
@@ -330,11 +335,7 @@ export function WorkspaceView({
   }
   function createSplit(id: string | undefined, direction: SplitDirection) {
     const owner = id ? groupFor(layout, id) : undefined;
-    void create(
-      false,
-      undefined,
-      owner && id ? { groupId: owner.id, anchor: id, direction } : undefined,
-    );
+    void create({ split: owner && id ? { groupId: owner.id, anchor: id, direction } : undefined });
   }
   function command(kind: SessionCommand, id: string, dock = false) {
     const display = (dock ? dockActions : displays).current.get(id);
@@ -347,7 +348,17 @@ export function WorkspaceView({
       setAction({ kind, session });
     }
   }
-  function menu(id?: string, dock = false, label?: string, includeSettings = true) {
+  function menu({
+    id,
+    dock = false,
+    label,
+    includeSettings = true,
+  }: {
+    id?: string;
+    dock?: boolean;
+    label?: string;
+    includeSettings?: boolean;
+  } = {}) {
     return (
       <SessionMenu
         id={id}
@@ -398,7 +409,7 @@ export function WorkspaceView({
         showLabel={showLabel}
         disabled={!enabled}
         shortcuts={device.snapshot?.shortcuts ?? []}
-        onCreate={(shortcut) => void create(dock, shortcut)}
+        onCreate={(shortcutId) => void create({ dock, shortcutId })}
       />
     );
   }
@@ -441,7 +452,7 @@ export function WorkspaceView({
             aria-expanded={layout.dockOpen}
             aria-controls="companion-terminal"
             onClick={() => {
-              selection.current.dock++;
+              selectionEpoch.current.dock++;
               setLayout((old) => ({ ...old, dockOpen: !old.dockOpen, dock: old.dock ?? selected }));
             }}
           >
@@ -571,7 +582,7 @@ export function WorkspaceView({
               <Scan />
             )}
           </IconButton>
-          {menu(split || targetPending ? undefined : selected)}
+          {menu({ id: split || targetPending ? undefined : selected })}
         </div>
         {targetPending && (
           <div className="flex min-h-0 flex-1 flex-col items-start gap-3 overflow-auto p-4 text-sm">
@@ -612,14 +623,13 @@ export function WorkspaceView({
               close,
               maximize: () => patchGroup({ maximized: !group?.maximized }),
               menu: (id) =>
-                menu(
+                menu({
                   id,
-                  false,
-                  t(($) => $.common.actionsNamed, {
+                  label: t(($) => $.common.actionsNamed, {
                     name: name(id),
                   }),
-                  false,
-                ),
+                  includeSettings: false,
+                }),
               drag,
             }}
           />
@@ -691,7 +701,7 @@ export function WorkspaceView({
                     </IconButton>
                   </>
                 )}
-                {menu(dockId, true)}
+                {menu({ id: dockId, dock: true })}
               </div>
               {[...opened.dock].map((id) => (
                 <div

@@ -7,7 +7,7 @@ import type {
   RpcArguments,
   RpcResult,
 } from "@kiteline/shared/protocol";
-import { api, apiError, ApiError, rpcReply } from "../lib/api";
+import { apiError, ApiError, cancelRequest, rpcReply } from "../lib/api";
 
 export interface GitTarget {
   deviceId: string;
@@ -138,7 +138,7 @@ export class GitActions {
     request.cancelling = true;
     this.notify();
     try {
-      await api(`/api/devices/${target.deviceId}/requests/${request.id}`, { method: "DELETE" });
+      await cancelRequest(target.deviceId, request.id);
     } catch (error) {
       if (value.request !== request) return;
       value.error = error instanceof Error ? error : new Error(String(error));

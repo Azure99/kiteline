@@ -1,8 +1,36 @@
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ErrorNotice } from "../components/error-notice";
 import { Button } from "../components/ui/button";
 import { ApiError } from "../lib/api";
 import { type GitActions, type GitTarget, useGitActivity } from "./actions";
+
+export function GitPathDetails({
+  error,
+  renderBlocked,
+}: {
+  error: unknown;
+  renderBlocked: (path: string) => ReactNode;
+}) {
+  const { t } = useTranslation();
+  const details =
+    error instanceof ApiError
+      ? (error.details as
+          | { blockedPaths?: string[]; invalidPaths?: string[]; truncated?: boolean }
+          | undefined)
+      : undefined;
+  return (
+    <>
+      {details?.blockedPaths?.map(renderBlocked)}
+      {details?.invalidPaths?.map((path) => (
+        <p key={path} className="break-all">
+          {t(($) => $.git.invalidPath, { path })}
+        </p>
+      ))}
+      {details?.truncated && <p>{t(($) => $.git.moreBlockedPaths)}</p>}
+    </>
+  );
+}
 
 export function GitFeedback({
   actions,
@@ -18,12 +46,6 @@ export function GitFeedback({
   const { t } = useTranslation();
 
   const value = useGitActivity(actions, target);
-  const details =
-    value.error instanceof ApiError
-      ? (value.error.details as
-          | { blockedPaths?: string[]; invalidPaths?: string[]; truncated?: boolean }
-          | undefined)
-      : undefined;
   const result = (value.error instanceof ApiError ? value.error.result : value.result) as
     | { changedPaths?: string[]; stdout?: string; stderr?: string; truncated?: boolean }
     | undefined;
@@ -98,21 +120,18 @@ export function GitFeedback({
           ))}
         </div>
       )}
-      {details?.blockedPaths?.map((path) => (
-        <button
-          key={path}
-          className="block min-h-9 max-w-full text-left break-all text-primary"
-          onClick={() => onLocate(path)}
-        >
-          {path}
-        </button>
-      ))}
-      {details?.invalidPaths?.map((path) => (
-        <p key={path} className="break-all">
-          {t(($) => $.git.invalidPath, { path })}
-        </p>
-      ))}
-      {details?.truncated && <p>{t(($) => $.git.moreBlockedPaths)}</p>}
+      <GitPathDetails
+        error={value.error}
+        renderBlocked={(path) => (
+          <button
+            key={path}
+            className="block min-h-9 max-w-full text-left break-all text-primary"
+            onClick={() => onLocate(path)}
+          >
+            {path}
+          </button>
+        )}
+      />
       {(result?.stdout || result?.stderr) && (
         <details className="mt-1">
           <summary className="cursor-pointer py-1">{t(($) => $.git.output)}</summary>

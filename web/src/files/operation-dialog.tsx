@@ -11,7 +11,7 @@ import type {
   FileProgress,
   RpcArguments,
 } from "@kiteline/shared/protocol";
-import { api, apiError, ApiError, rpc, rpcReply } from "../lib/api";
+import { apiError, ApiError, cancelRequest, rpc, rpcReply } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
 import {
@@ -454,9 +454,7 @@ export function FileOperationDialog({
                   const request = current.current;
                   if (!request) return;
                   setCancelling(true);
-                  void api(`/api/devices/${deviceId}/requests/${request.id}`, {
-                    method: "DELETE",
-                  }).catch((reason: unknown) => {
+                  void cancelRequest(deviceId, request.id).catch((reason: unknown) => {
                     if (alive.current) {
                       setError(reason);
                       setCancelling(false);

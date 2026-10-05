@@ -14,11 +14,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../components/ui/dialog";
-import { ApiError, rpc } from "../lib/api";
+import { rpc } from "../lib/api";
 import { type DraftStore, isDirty } from "../files/drafts";
 import { childPath } from "../files/paths";
 import type { ChangeSide } from "./selection";
 import type { GitActions, GitTarget } from "./actions";
+import { GitPathDetails } from "./feedback";
 
 export function stageable(entry: GitEntry) {
   if (entry.conflict && Object.values(entry.types).includes("gitlink")) return false;
@@ -166,12 +167,6 @@ export function DiscardDialog({
       });
     return () => controller.abort();
   }, [target.deviceId, target.workspaceId, target.repoId, paths, scope]);
-  const details =
-    error instanceof ApiError
-      ? (error.details as
-          | { blockedPaths?: string[]; invalidPaths?: string[]; truncated?: boolean }
-          | undefined)
-      : undefined;
   return (
     <Dialog
       open
@@ -201,26 +196,23 @@ export function DiscardDialog({
               <ErrorNotice error={error} />
             </div>
           )}
-          {details?.blockedPaths?.map((path) => (
-            <Button
-              key={path}
-              variant="ghost"
-              className="h-auto max-w-full justify-start break-all whitespace-pre-wrap"
-              onClick={() => {
-                onClose();
-                onLocate(path);
-              }}
-            >
-              <FolderOpen />
-              {path}
-            </Button>
-          ))}
-          {details?.invalidPaths?.map((path) => (
-            <p key={path} className="break-all">
-              {t(($) => $.git.invalidPath, { path })}
-            </p>
-          ))}
-          {details?.truncated && <p>{t(($) => $.git.moreBlockedPaths)}</p>}
+          <GitPathDetails
+            error={error}
+            renderBlocked={(path) => (
+              <Button
+                key={path}
+                variant="ghost"
+                className="h-auto max-w-full justify-start break-all whitespace-pre-wrap"
+                onClick={() => {
+                  onClose();
+                  onLocate(path);
+                }}
+              >
+                <FolderOpen />
+                {path}
+              </Button>
+            )}
+          />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>

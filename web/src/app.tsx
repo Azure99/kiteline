@@ -16,6 +16,7 @@ const Workbench = deferredView(async () => ({ default: (await import("./workbenc
 export function App() {
   const { t } = useTranslation();
   const [session, updateSession] = useState<LoginSession>();
+  // Keep Workbench's in-memory drafts while the user reauthenticates.
   const [entered, setEntered] = useState(false);
   const [initialized, setInitialized] = useState(true);
   const [loading, setLoading] = useState(true);

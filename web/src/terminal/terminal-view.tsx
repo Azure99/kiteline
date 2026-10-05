@@ -14,7 +14,7 @@ import { TerminalDisplay, type DisplayState } from "./display";
 import { IconButton } from "../components/icon-button";
 import { Button } from "../components/ui/button";
 import { api, ApiError, rpc } from "../lib/api";
-import { useServerVersion, webCompatible } from "../lib/release";
+import { useWebCompatible, webCompatible } from "../lib/release";
 import { Terminal } from "@xterm/xterm";
 import { ErrorNotice } from "../components/error-notice";
 import { TouchControls } from "./touch-controls";
@@ -57,7 +57,7 @@ export function TerminalView({
   onCapabilities?(id: string, value: TerminalCapabilities | undefined): void;
 }) {
   const { t } = useTranslation();
-  useServerVersion();
+  const compatible = useWebCompatible();
 
   const element = useRef<HTMLDivElement>(null);
   const display = useRef<TerminalDisplay>(undefined);
@@ -257,7 +257,7 @@ export function TerminalView({
             <>
               <Button
                 variant="ghost"
-                disabled={recovering || !webCompatible()}
+                disabled={recovering || !compatible}
                 onClick={() => (code === "recording_unavailable" ? void recover() : redisplay())}
               >
                 <RefreshCw />
