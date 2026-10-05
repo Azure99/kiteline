@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { chmod, mkdtemp, readdir, rm, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { createServer, type AddressInfo } from "node:net";
 import { appVersion } from "@kiteline/shared/protocol";
 import { Store } from "../src/store.js";
 
@@ -15,9 +16,9 @@ async function directory() {
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   return root;
 }
-function cli(root: string, args: string[], input = "") {
+function cli(root: string, args: string[], input = "", address = "127.0.0.1:0") {
   const child = spawn(process.execPath, [resolve("server/dist/main.js"), ...args], {
-    env: { ...process.env, KITELINE_DATA_DIR: root, KITELINE_LISTEN_ADDR: "127.0.0.1:0" },
+    env: { ...process.env, KITELINE_DATA_DIR: root, KITELINE_LISTEN_ADDR: address },
     stdio: ["pipe", "pipe", "pipe"],
   });
   let stdout = "",
@@ -36,6 +37,31 @@ function cli(root: string, args: string[], input = "") {
   });
   return { child, closed, stdout: () => stdout, stderr: () => stderr };
 }
+
+test("server CLI preserves a listen failure and releases state for the next start", async () => {
+  const root = await directory();
+  const holder = createServer();
+  await new Promise<void>((resolve) => holder.listen(0, "127.0.0.1", resolve));
+  const closeHolder = () =>
+    new Promise<void>((resolve, reject) => {
+      if (!holder.listening) return resolve();
+      holder.close((error) => (error ? reject(error) : resolve()));
+    });
+  cleanups.push(closeHolder);
+  const address = `127.0.0.1:${(holder.address() as AddressInfo).port}`;
+  const failed = cli(root, [], "", address);
+  expect((await failed.closed)[0]).toBe(1);
+  expect(failed.stderr()).toContain("EADDRINUSE");
+  expect(failed.stderr()).toContain(address);
+  expect(await readdir(root)).not.toContain("process.lock");
+
+  await closeHolder();
+  const serving = cli(root, [], "", address);
+  await expect.poll(serving.stdout).toContain(`Kiteline listening on http://${address}`);
+  serving.child.kill("SIGTERM");
+  expect((await serving.closed)[0]).toBe(0);
+  expect(await readdir(root)).not.toContain("process.lock");
+});
 
 test("server CLI validates arguments before accessing state and prints its version independently", async () => {
   const root = await directory();
