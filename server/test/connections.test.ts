@@ -7,17 +7,12 @@ import {
   apiFixture,
   agentEnvironment as environment,
   hello,
-  restoreServerLimits,
   webPath,
 } from "./fixture.js";
 
 const cleanups: (() => Promise<unknown> | void)[] = [];
 afterEach(async () => {
-  try {
-    for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
-  } finally {
-    restoreServerLimits();
-  }
+  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 async function fixture() {
   const base = await apiFixture();

@@ -13,7 +13,7 @@ import {
   type FileWritePurpose,
 } from "@kiteline/shared/protocol";
 import { consumeFileFrames, sendFileFrame } from "@kiteline/shared/protocol/file-stream";
-import { checkReply, parseReplyError, failure, finishRequest, json } from "./http.js";
+import { checkReply, parseReplyError, failure, closeIfBodyUnread, json } from "./http.js";
 
 interface FileTransferOptions {
   kind: "file.read" | "file.write";
@@ -95,7 +95,7 @@ export class FileTransfer {
   }
   private headers() {
     const { purpose, meta, response } = this.options;
-    finishRequest(response);
+    closeIfBodyUnread(response);
     response.writeHead(200, {
       "content-type":
         purpose === "image" || purpose === "open"

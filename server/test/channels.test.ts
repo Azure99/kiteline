@@ -29,7 +29,7 @@ async function fixture() {
   ) {
     const peer = await device();
     const login = store.createLogin(60_000);
-    const connection = app.connections.agents.get(peer.deviceId)!;
+    const connection = app.connections.online(peer.deviceId)!;
     const pending = app.channels.create(peer.deviceId, login, kind, {
       workspaceId: "workspace",
       path: "file",
@@ -161,7 +161,7 @@ test("channel preparation and transfer preserve empty and long diagnostics witho
   const f = await fixture();
   const peer = await f.device();
   const login = f.store.createLogin(60_000);
-  const connection = f.app.connections.agents.get(peer.deviceId)!;
+  const connection = f.app.connections.online(peer.deviceId)!;
   for (const stage of ["prepare", "transfer"]) {
     for (const message of ["", "x".repeat(5000), null]) {
       const pending = f.app.channels.create(peer.deviceId, login, "file.read", {

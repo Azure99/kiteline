@@ -1,15 +1,11 @@
 import { request } from "node:http";
 import { afterEach, expect, test } from "vitest";
 import { WebSocket } from "ws";
-import { apiFixture, restoreServerLimits, webPath } from "./fixture.js";
+import { apiFixture, webPath } from "./fixture.js";
 
 const cleanups: (() => Promise<unknown> | void)[] = [];
 afterEach(async () => {
-  try {
-    for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
-  } finally {
-    restoreServerLimits();
-  }
+  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 async function fixture() {
   const base = await apiFixture();

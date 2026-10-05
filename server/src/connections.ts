@@ -13,6 +13,7 @@ import {
   string,
   type ServerControlMessage,
   type BrowserEvent,
+  type BrowserControlMessage,
   type WorkspaceEvent,
   type Metadata,
   type Device,
@@ -31,6 +32,8 @@ export interface AgentConnection {
   environment?: Device["environment"];
   taskRevision?: number;
 }
+type OnlineAgentConnection = AgentConnection &
+  Required<Pick<AgentConnection, "snapshot" | "editorBytes" | "environment">>;
 interface Pending {
   loginId: string;
   connection: AgentConnection;
@@ -39,14 +42,14 @@ interface Pending {
 interface Browser {
   socket: WebSocket;
   login: Login;
-  targets: { deviceId: string; workspaceId: string }[];
+  targets: BrowserControlMessage["targets"];
 }
 
 export function send(socket: WebSocket, value: ServerControlMessage | BrowserEvent) {
   if (controlWritable(socket)) socket.send(JSON.stringify(value));
 }
 export class Connections {
-  readonly agents = new Map<string, AgentConnection>();
+  private readonly agents = new Map<string, OnlineAgentConnection>();
   private readonly handshakes = new Set<AgentConnection>();
   private readonly releases = new Map<string, NonNullable<Device["release"]>>();
   private readonly browsers = new Set<Browser>();
@@ -64,11 +67,14 @@ export class Connections {
     }, 1000);
     this.expiry.unref();
   }
+  online(deviceId: string) {
+    return this.agents.get(deviceId);
+  }
   devices() {
     return this.store.devices().map((device) => {
       const connection = this.agents.get(device.id);
       const known = { ...device, release: this.releases.get(device.id) };
-      return connection?.snapshot
+      return connection
         ? {
             ...known,
             status: "online" as const,
@@ -126,14 +132,11 @@ export class Connections {
         if (!this.handshakes.has(connection) && this.agents.get(id) !== connection) return;
         if (message.type === "hello") {
           if (connection.snapshot) throw new AppError("unsupported", "Invalid hello");
-          connection.environment = checkEnvironment(message.environment);
-          connection.editorBytes = integer(
-            message.editorBytes,
-            "editorBytes",
-            1,
-            Number.MAX_SAFE_INTEGER,
-          );
-          connection.snapshot = checkMetadata(message.snapshot);
+          const online = Object.assign(connection, {
+            environment: checkEnvironment(message.environment),
+            editorBytes: integer(message.editorBytes, "editorBytes", 1, Number.MAX_SAFE_INTEGER),
+            snapshot: checkMetadata(message.snapshot),
+          });
           clearTimeout(helloTimeout);
           this.handshakes.delete(connection);
           const previous = this.agents.get(id);
@@ -141,13 +144,13 @@ export class Connections {
             this.dropAgent(previous);
             previous.socket.close(controlCloseCodes.connectionReplaced, "connection_replaced");
           }
-          this.agents.set(id, connection);
+          this.agents.set(id, online);
           this.releases.set(id, {
             agentVersion: appVersion,
             serverVersion: appVersion,
             observedAt: new Date().toISOString(),
           });
-          this.store.saveSnapshot(id, connection.snapshot);
+          this.store.saveSnapshot(id, online.snapshot);
           this.store.recordConnectedAt(id);
           send(socket, {
             type: "welcome",
@@ -298,7 +301,7 @@ export class Connections {
   }
   private updateWatch(deviceId: string) {
     const connection = this.agents.get(deviceId);
-    if (!connection?.snapshot) return;
+    if (!connection) return;
     const workspaceIds = new Set<string>();
     for (const browser of this.browsers)
       for (const target of browser.targets)
@@ -320,7 +323,7 @@ export class Connections {
     params: Record<string, unknown>,
   ) {
     const connection = this.agents.get(deviceId);
-    if (!connection?.snapshot) throw this.unavailableError(deviceId);
+    if (!connection) throw this.unavailableError(deviceId);
     if (this.pending.has(requestId)) throw new AppError("conflict", "Request ID already exists");
     if (
       [...this.pending.values()].filter((p) => p.connection === connection).length >=

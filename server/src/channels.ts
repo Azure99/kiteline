@@ -111,12 +111,12 @@ export class Channels {
     http?: Channel["http"],
   ) {
     const id = randomUUID();
-    const connection = this.connections.agents.get(deviceId);
+    const connection = this.connections.online(deviceId);
     const unavailable = (error: AppError): never => {
       if (kind === "file.read") this.notifyFileFailure(id, login.id, deviceId, params, error);
       throw error;
     };
-    if (!connection?.snapshot) return unavailable(this.connections.unavailableError(deviceId));
+    if (!connection) return unavailable(this.connections.unavailableError(deviceId));
     const message = {
       type: "channel.open",
       channelId: id,
@@ -160,7 +160,7 @@ export class Channels {
       item.agent ||
       item.connection.id !== deviceId ||
       item.connection.connectionId !== connectionId ||
-      this.connections.agents.get(deviceId) !== item.connection
+      this.connections.online(deviceId) !== item.connection
     )
       throw new AppError("forbidden", "Data channel is no longer valid");
     return item.kind;

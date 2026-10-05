@@ -7,15 +7,11 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, expect, test } from "vitest";
 import { WebSocket } from "ws";
-import { agentPath, apiFixture, restoreServerLimits, serverFixture, webPath } from "./fixture.js";
+import { agentPath, apiFixture, serverFixture, webPath } from "./fixture.js";
 
 const cleanup: (() => Promise<unknown> | void)[] = [];
 afterEach(async () => {
-  try {
-    for (const close of cleanup.splice(0).reverse()) await close();
-  } finally {
-    restoreServerLimits();
-  }
+  for (const close of cleanup.splice(0).reverse()) await close();
 });
 
 async function fixture(trustProxyProto: boolean) {

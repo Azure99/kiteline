@@ -1,4 +1,5 @@
 import type { IncomingMessage, OutgoingHttpHeaders, ServerResponse } from "node:http";
+import type { Store } from "./store.js";
 import {
   AppError,
   appVersion,
@@ -9,11 +10,21 @@ import {
   type Reply,
 } from "@kiteline/shared/protocol";
 
-export function bearer(request: IncomingMessage) {
+function bearer(request: IncomingMessage) {
   const value = request.headers.authorization;
   if (!value?.startsWith("Bearer "))
     throw new AppError("unauthenticated", "Missing device credentials");
   return value.slice(7);
+}
+export function requireAgent(store: Store, request: IncomingMessage) {
+  const device = store.authenticateAgent(bearer(request));
+  if (!device) throw new AppError("unauthenticated", "Invalid device credentials");
+  return device;
+}
+export function requireLogin(store: Store, request: IncomingMessage, entryOrigin: string) {
+  const login = store.login(loginCookieToken(request, entryOrigin));
+  if (!login) throw new AppError("unauthenticated", "Please sign in");
+  return login;
 }
 
 export function rawHead(status: number, message: string, headers: OutgoingHttpHeaders) {
@@ -61,7 +72,7 @@ export function decodePath(value: string, message = "Invalid URL path") {
   }
 }
 
-export function finishRequest(response: ServerResponse) {
+export function closeIfBodyUnread(response: ServerResponse) {
   const request = response.req;
   if (
     !request.complete &&
@@ -72,7 +83,7 @@ export function finishRequest(response: ServerResponse) {
 }
 
 export function json(response: ServerResponse, status: number, value: unknown) {
-  finishRequest(response);
+  closeIfBodyUnread(response);
   response.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
@@ -124,7 +135,7 @@ export function loginCookie(entryOrigin: string, token: string, expiresAt: strin
   const expiry = token ? `Expires=${new Date(expiresAt).toUTCString()}` : "Max-Age=0";
   return `${cookieName(entryOrigin)}=${token}; Path=/; HttpOnly;${secure} SameSite=Strict; ${expiry}`;
 }
-export function loginCookieToken(request: IncomingMessage, entryOrigin: string) {
+function loginCookieToken(request: IncomingMessage, entryOrigin: string) {
   const prefix = cookieName(entryOrigin) + "=";
   return request.headers.cookie
     ?.split(";")
@@ -172,12 +183,13 @@ export class AttemptLimiter {
   private until = 0;
   check(source: string) {
     const now = Date.now();
+    const windowEnd = now + 60_000;
     if (now >= this.until) {
       this.count = 0;
-      this.until = now + 60_000;
+      this.until = windowEnd;
     }
     const previous = this.sources.get(source);
-    const current = previous && previous.until > now ? previous : { count: 0, until: now + 60_000 };
+    const current = previous && previous.until > now ? previous : { count: 0, until: windowEnd };
     if (this.count >= 30 || current.count >= 10)
       throw new AppError("busy", "Too many attempts; try again later");
     if (this.sources.size >= 1024 && !this.sources.has(source))

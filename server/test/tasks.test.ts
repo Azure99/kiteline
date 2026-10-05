@@ -221,7 +221,7 @@ test("startup storage faults replace active summaries without exposing local dia
         reply,
       ]),
     ).not.toMatch(/LOCAL_ONLY_SENTINEL|DEVICE_ONLY_SENTINEL|diagnostic|parameters/);
-    expect(f.app.connections.agents.has(f.identity.deviceId)).toBe(true);
+    expect(f.app.connections.online(f.identity.deviceId)).toBeDefined();
     await agent.close();
     await rm(path);
     agent = new Agent(config, { ...f.identity, server: f.origin });
@@ -304,7 +304,7 @@ test("summary DWORD results, ownership, revision and nested whitelist are indepe
     first.send(JSON.stringify({ ...snapshot, revision: 8, items: [] }));
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect((await f.summaries())[0]).toMatchObject({ observedAt, snapshot: { revision: 9 } });
-    const oldConnection = f.app.connections.agents.get(f.identity.deviceId)!;
+    const oldConnection = f.app.connections.online(f.identity.deviceId)!;
     const second = await connect();
     expect((await f.summaries())[0]).toMatchObject({ current: false, snapshot: { revision: 9 } });
     oldConnection.socket.emit(

@@ -8,13 +8,13 @@ import type { ServerConfig } from "./config.js";
 import { Store, password } from "./store.js";
 import {
   AttemptLimiter,
-  bearer,
+  requireAgent,
   body,
-  loginCookieToken,
+  requireLogin,
   decodePath,
   errorStatus,
   failure,
-  finishRequest,
+  closeIfBodyUnread,
   json,
   requireOrigin,
   rawHead,
@@ -38,15 +38,10 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
   const proxy = new HttpProxy(config, store, connections, channels);
   const bindingLimiter = new AttemptLimiter();
   const authenticationLimiter = new AttemptLimiter();
-  function requireLogin(request: IncomingMessage, entryOrigin: string) {
-    const login = store.login(loginCookieToken(request, entryOrigin));
-    if (!login) throw new AppError("unauthenticated", "Please sign in");
-    return login;
-  }
   async function loginBody(request: IncomingMessage, entryOrigin: string) {
     const input = record(await body(request));
     // Reading the body can outlive the login that admitted the request.
-    requireLogin(request, entryOrigin);
+    requireLogin(store, request, entryOrigin);
     return input;
   }
   function newLogin(response: ServerResponse, entryOrigin: string) {
@@ -89,7 +84,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
           throw new AppError("unauthenticated", "Incorrect password");
         return newLogin(response, entryOrigin);
       }
-      const login = requireLogin(request, entryOrigin);
+      const login = requireLogin(store, request, entryOrigin);
       if (path === "/api/session" && method === "GET")
         return json(response, 200, {
           expiresAt: login.expiresAt,
@@ -193,7 +188,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       throw new AppError("not_found", "API endpoint not found");
     }
     if (method !== "GET" && method !== "HEAD") {
-      finishRequest(response);
+      closeIfBodyUnread(response);
       response.writeHead(405, { allow: "GET, HEAD" }).end();
       return;
     }
@@ -225,7 +220,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       content = await readFile(resolve(config.webDir, "index.html"));
       type = "text/html; charset=utf-8";
     }
-    finishRequest(response);
+    closeIfBodyUnread(response);
     response.writeHead(200, {
       "content-type": type,
       "cache-control": "no-cache",
@@ -253,11 +248,16 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       }
       const entryOrigin = requestOrigin(request, config.trustProxyProto);
       const url = new URL(request.url ?? "/", entryOrigin);
+      function browserLogin() {
+        requireOrigin(request, entryOrigin);
+        const login = requireLogin(store, request, entryOrigin);
+        requireVersion(url.searchParams.get("appVersion"), "web");
+        return login;
+      }
       const agentChannel = /^\/api\/agent\/channels\/([^/]+)$/.exec(url.pathname);
       const browserChannel = /^\/api\/channels\/([^/]+)\/terminal$/.exec(url.pathname);
       if (agentChannel) {
-        const device = store.authenticateAgent(bearer(request));
-        if (!device) throw new AppError("unauthenticated", "Invalid device credentials");
+        const device = requireAgent(store, request);
         const id = decodePath(agentChannel[1]!);
         const kind = channels.checkAgent(
           id,
@@ -268,23 +268,18 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
           channels.acceptAgent(id, ws),
         );
       } else if (browserChannel) {
-        requireOrigin(request, entryOrigin);
-        const login = requireLogin(request, entryOrigin);
-        requireVersion(url.searchParams.get("appVersion"), "web");
+        const login = browserLogin();
         const id = decodePath(browserChannel[1]!);
         channels.checkBrowser(id, login.id);
         sockets.handleUpgrade(request, socket, head, (ws) => channels.acceptBrowser(id, ws));
       } else if (url.pathname === "/api/agent/control") {
-        const device = store.authenticateAgent(bearer(request));
-        if (!device) throw new AppError("unauthenticated", "Invalid device credentials");
+        const device = requireAgent(store, request);
         connections.checkAgentVersion(device.id, url.searchParams.get("appVersion"));
         sockets.handleUpgrade(request, socket, head, (ws) =>
           connections.acceptAgent(device.id, ws),
         );
       } else if (url.pathname === "/api/events") {
-        requireOrigin(request, entryOrigin);
-        const login = requireLogin(request, entryOrigin);
-        requireVersion(url.searchParams.get("appVersion"), "web");
+        const login = browserLogin();
         sockets.handleUpgrade(request, socket, head, (ws) => connections.acceptBrowser(ws, login));
       } else socket.end(rawHead(404, "Not Found", { Connection: "close" }), () => socket.destroy());
     } catch (cause) {

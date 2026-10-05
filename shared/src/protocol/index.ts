@@ -339,6 +339,10 @@ export type ServerControlMessage =
       params: Record<string, unknown>;
     }
   | { type: "channel.cancel"; channelId: string };
+export type BrowserControlMessage = {
+  type: "watch.set";
+  targets: { deviceId: string; workspaceId: string }[];
+};
 export type BrowserEvent =
   | { type: "devices.changed"; devices: Device[] }
   | { type: "tasks.changed"; deviceId: string }

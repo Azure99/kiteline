@@ -12,9 +12,9 @@ import type { Store, Login } from "./store.js";
 import type { Connections } from "./connections.js";
 import type { Channels } from "./channels.js";
 import {
-  loginCookieToken,
+  requireLogin,
   decodePath,
-  finishRequest,
+  closeIfBodyUnread,
   requireOrigin,
   rawHead,
   requestOrigin,
@@ -145,15 +145,14 @@ export class HttpProxy {
         throw new AppError("unsupported", "CONNECT is not supported");
       target = proxyTarget(request.url ?? "");
       const entryOrigin = requestOrigin(request, this.config.trustProxyProto);
-      const login = this.store.login(loginCookieToken(request, entryOrigin));
-      if (!login) throw new AppError("unauthenticated", "Please sign in");
+      const login = requireLogin(this.store, request, entryOrigin);
       if (head !== undefined || !["GET", "HEAD"].includes(request.method ?? "GET"))
         requireOrigin(request, entryOrigin);
       const device = this.connections.devices().find((value) => value.id === target!.deviceId);
       if (!device) throw new AppError("not_found", "Device not found");
       if (target.redirect) {
         if (destination instanceof ServerResponse) {
-          finishRequest(destination);
+          closeIfBodyUnread(destination);
           destination.writeHead(308, { location: target.redirect }).end();
         } else
           destination.end(
@@ -250,7 +249,7 @@ export class HttpProxy {
         });
         const headers = responseHeaders(result.headers, target.prefix, target.strip);
         if (response) {
-          finishRequest(response);
+          closeIfBodyUnread(response);
           response.writeHead(result.statusCode!, result.statusMessage, headers);
           response.flushHeaders();
           result.pipe(response);

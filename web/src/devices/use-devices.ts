@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { BrowserEvent, Device } from "@kiteline/shared/protocol";
+import type { BrowserControlMessage, BrowserEvent, Device } from "@kiteline/shared/protocol";
 import { api } from "../lib/api";
 import type { LoginSession } from "../auth";
 import { useServerVersion, versionedPath, webCompatible } from "../lib/release";
@@ -17,7 +17,7 @@ export function useDevices(
   const socketRef = useRef<WebSocket | null>(null);
   const readGeneration = useRef(0);
   const invalidateReads = useCallback(() => ++readGeneration.current, []);
-  const targets = useRef<{ deviceId: string; workspaceId: string }[]>([]);
+  const targets = useRef<BrowserControlMessage["targets"]>([]);
   const refresh = useCallback(async () => {
     const generation = invalidateReads();
     try {
@@ -32,7 +32,12 @@ export function useDevices(
   useEffect(() => {
     targets.current = deviceId && workspaceId ? [{ deviceId, workspaceId }] : [];
     if (socketRef.current?.readyState === WebSocket.OPEN)
-      socketRef.current.send(JSON.stringify({ type: "watch.set", targets: targets.current }));
+      socketRef.current.send(
+        JSON.stringify({
+          type: "watch.set",
+          targets: targets.current,
+        } satisfies BrowserControlMessage),
+      );
   }, [deviceId, workspaceId]);
   useEffect(() => {
     if (!active) return;
@@ -53,7 +58,12 @@ export function useDevices(
         socket.onopen = () => {
           setConnected(true);
           setError(undefined);
-          socket?.send(JSON.stringify({ type: "watch.set", targets: targets.current }));
+          socket?.send(
+            JSON.stringify({
+              type: "watch.set",
+              targets: targets.current,
+            } satisfies BrowserControlMessage),
+          );
           window.dispatchEvent(new Event("kiteline:connected"));
         };
         socket.onmessage = (event) => {
