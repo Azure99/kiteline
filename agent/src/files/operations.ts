@@ -48,6 +48,13 @@ interface ResultState {
   changing: boolean;
   error?: KitelineError;
 }
+interface OperationContext {
+  root: string;
+  signal: AbortSignal;
+  result: ResultState;
+  countCompleted: (path: string) => void;
+  reportBytes: (count: number) => void;
+}
 
 export class FileOperations {
   private executions = new Map<
@@ -185,10 +192,10 @@ export class FileOperations {
     const execution = (async () => {
       for (const [index, item] of items.entries()) {
         const state = states[index]!;
-        const complete = () => {
+        const markFinished = () => {
           state.finished = true;
         };
-        const done = (path: string) => {
+        const countCompleted = (path: string) => {
           state.completed++;
           report(path, 1);
         };
@@ -207,20 +214,21 @@ export class FileOperations {
             if (kind !== "copy") await protectRoot(root, source.path, source.info);
             return source;
           }, signal);
-          if (kind === "delete") await this.remove(root, source, signal, state, done, complete);
+          const context: OperationContext = {
+            root,
+            signal,
+            result: state,
+            countCompleted,
+            reportBytes: (count) => report(source.path, 0, count),
+          };
+          if (kind === "delete") await this.remove(context, source, markFinished);
           else
-            await this.copyMove(
-              root,
+            await this.copyMove(context, {
               source,
               item,
-              kind === "move",
-              signal,
-              state,
-              done,
-              (count) => report(source.path, 0, count),
-              undefined,
-              complete,
-            );
+              move: kind === "move",
+              markFinished,
+            });
         } catch (error) {
           fail(state, item.path, error);
         }
@@ -241,17 +249,15 @@ export class FileOperations {
   }
 
   private async remove(
-    root: string,
+    context: OperationContext,
     source: ObjectRef,
-    signal: AbortSignal,
-    result: ResultState,
-    done: (path: string) => void,
-    complete: () => void = () => {},
+    markFinished: () => void = () => {},
   ) {
+    const { root, signal, result, countCompleted } = context;
     signal.throwIfAborted();
     if (source.info.isDirectory()) {
       await this.children(root, source, signal, result, async (child) =>
-        this.remove(root, child, signal, result, done),
+        this.remove(context, child),
       );
     } else if (!source.info.isFile() && !source.info.isSymbolicLink()) {
       throw new AppError("unsupported", "Device nodes, sockets, and FIFOs cannot be deleted");
@@ -266,25 +272,30 @@ export class FileOperations {
             ? rmdir(current.location.absolute)
             : unlink(current.location.absolute),
         () => {
-          complete();
-          done(source.path);
+          markFinished();
+          countCompleted(source.path);
         },
       );
     }, signal);
   }
 
   private async copyMove(
-    root: string,
-    source: ObjectRef,
-    item: CopyItem,
-    move: boolean,
-    signal: AbortSignal,
-    result: ResultState,
-    done: (path: string) => void,
-    bytes: (count: number) => void,
-    expectedParent?: ObjectRef,
-    complete: () => void = () => {},
+    context: OperationContext,
+    {
+      source,
+      item,
+      move,
+      expectedParent,
+      markFinished = () => {},
+    }: {
+      source: ObjectRef;
+      item: CopyItem;
+      move: boolean;
+      expectedParent?: ObjectRef;
+      markFinished?: () => void;
+    },
   ) {
+    const { root, signal, result, countCompleted, reportBytes } = context;
     if (!source.info.isDirectory() && !source.info.isFile() && !source.info.isSymbolicLink())
       throw new AppError("unsupported", "Device nodes, sockets, and FIFOs cannot be copied");
     const target = await publish(async () => {
@@ -321,8 +332,8 @@ export class FileOperations {
                 ? renameReplace(source.location.absolute, current.absolute)
                 : renameNoReplace(source.location.absolute, current.absolute),
             () => {
-              complete();
-              done(source.path);
+              markFinished();
+              countCompleted(source.path);
             },
           );
         }, signal);
@@ -338,23 +349,18 @@ export class FileOperations {
           result,
           signal,
           () => mkdir(current.absolute, { mode: Number(source.info.mode & 0o777n) | 0o700 }),
-          () => done(item.targetPath),
+          () => countCompleted(item.targetPath),
         );
         return capture(root, item.targetPath);
       }, signal);
       await this.children(root, source, signal, result, async (child) => {
         const childTarget = posix.join(item.targetPath, child.location.name);
-        await this.copyMove(
-          root,
-          child,
-          { path: child.path, targetPath: childTarget, collision: "error" },
+        await this.copyMove(context, {
+          source: child,
+          item: { path: child.path, targetPath: childTarget, collision: "error" },
           move,
-          signal,
-          result,
-          done,
-          bytes,
-          created,
-        );
+          expectedParent: created,
+        });
       });
       await publish(async () => {
         await verify(root, created);
@@ -363,14 +369,14 @@ export class FileOperations {
           signal,
           () => chmod(created.location.absolute, Number(source.info.mode & 0o777n)),
           () => {
-            if (!move) complete();
+            if (!move) markFinished();
           },
         );
       }, signal);
       if (move)
         await publish(async () => {
           await verify(root, source);
-          await change(result, signal, () => rmdir(source.location.absolute), complete);
+          await change(result, signal, () => rmdir(source.location.absolute), markFinished);
         }, signal);
       return;
     }
@@ -412,7 +418,7 @@ export class FileOperations {
             if (!bytesRead) throw new AppError("conflict", "Source file shrank during copying");
             await this.temporary.write(output, block.subarray(0, bytesRead), position, signal);
             position += bytesRead;
-            bytes(bytesRead);
+            reportBytes(bytesRead);
           }
           const after = await file.stat({ bigint: true });
           if (!sameContentStat(info, after))
@@ -435,15 +441,15 @@ export class FileOperations {
               : renameNoReplace(temporary!.path, current.absolute),
           () => {
             published = true;
-            if (!move) complete();
-            done(item.targetPath);
+            if (!move) markFinished();
+            countCompleted(item.targetPath);
           },
         );
       }, signal);
       if (move)
         await publish(async () => {
           await verify(root, copied, true);
-          await change(result, signal, () => unlink(copied.location.absolute), complete);
+          await change(result, signal, () => unlink(copied.location.absolute), markFinished);
         }, signal);
     } finally {
       if (temporary) await this.temporary.release(temporary, { published });

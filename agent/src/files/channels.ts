@@ -11,10 +11,11 @@ import {
 import { consumeFileFrames, sendFileFrame } from "@kiteline/shared/protocol/file-stream";
 import type { AgentConfig, Identity } from "../config.js";
 import type { TextFiles, TextWrite } from "./text.js";
-import type { FileRead } from "./read.js";
+import { readWorkspaceFile, type FileRead } from "./read.js";
 import type { BinaryFiles, UploadWrite } from "./binary.js";
 import type { TemporaryFiles } from "./temporary.js";
 import { connectChannel } from "../network.js";
+import type { MetadataStore } from "../metadata.js";
 
 interface Channel {
   socket: WebSocket;
@@ -35,6 +36,7 @@ export class FileChannels {
     private files: TextFiles,
     private binaryFiles: BinaryFiles,
     private temporary: TemporaryFiles,
+    private metadata: MetadataStore,
     private config: AgentConfig,
     private identity: Identity,
     private changed: (workspaceId: string) => void = () => {},
@@ -129,14 +131,20 @@ export class FileChannels {
         const workspaceId = string(params.workspaceId);
         const path = string(params.path);
         let meta;
-        if (kind === "file.read" && (params.purpose === "text" || params.purpose === "open")) {
-          channel.read = await this.files.read(workspaceId, path, signal, params.purpose);
-          meta = channel.read.meta;
-        } else if (
+        if (
           kind === "file.read" &&
-          (params.purpose === "image" || params.purpose === "download")
+          (params.purpose === "text" ||
+            params.purpose === "open" ||
+            params.purpose === "image" ||
+            params.purpose === "download")
         ) {
-          channel.read = await this.binaryFiles.read(workspaceId, path, params.purpose, signal);
+          channel.read = await readWorkspaceFile(
+            this.metadata.workspace(workspaceId).path,
+            path,
+            params.purpose,
+            this.config.limits,
+            signal,
+          );
           meta = channel.read.meta;
         } else if (
           kind === "file.write" &&

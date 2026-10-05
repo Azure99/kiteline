@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { open, type FileHandle } from "node:fs/promises";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
 import { imageSize } from "image-size";
 import { PNG } from "image-size/types/png";
 import { JPG } from "image-size/types/jpg";
@@ -10,13 +10,26 @@ import { WEBP } from "image-size/types/webp";
 import { AppError, limits, type FileMeta, type FileReadPurpose } from "@kiteline/shared/protocol";
 import { decodeText, encodeText } from "@kiteline/shared/protocol/text";
 import type { AgentConfig } from "../config.js";
-import { realPath } from "./paths.js";
+import { logicalPath, realPath } from "./paths.js";
 
 export interface FileRead {
   meta: FileMeta;
   read(position: number, size: number): Promise<Buffer>;
   close(): Promise<void>;
   finish(): Promise<void>;
+}
+
+export async function readWorkspaceFile(
+  root: string,
+  path: string,
+  purpose: FileReadPurpose,
+  capacity: AgentConfig["limits"],
+  signal: AbortSignal,
+): Promise<FileRead> {
+  path = await logicalPath(root, path, false, signal);
+  const result = await readFile(join(root, path), purpose, capacity, signal);
+  result.meta.targetPath = path;
+  return result;
 }
 
 export async function readFile(

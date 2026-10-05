@@ -14,10 +14,11 @@ import {
   rm,
 } from "node:fs/promises";
 import { join } from "node:path";
-import { defaultAgentLimits } from "../src/config.js";
+import { testConfig } from "./support/config.js";
 import { MetadataStore } from "../src/metadata.js";
 import { TemporaryFiles } from "../src/files/temporary.js";
 import { BinaryFiles } from "../src/files/binary.js";
+import { readWorkspaceFile } from "../src/files/read.js";
 import { locate, versionOf } from "../src/files/paths.js";
 
 const roots: string[] = [];
@@ -29,12 +30,7 @@ async function setup() {
   roots.push(home);
   const root = join(home, "project");
   await mkdir(root);
-  const config = {
-    dataDir: home,
-    runDir: join(home, "run"),
-    shell: "/bin/sh",
-    limits: { ...defaultAgentLimits, editorBytes: 4 },
-  };
+  const config = testConfig(home, { limits: { editorBytes: 4 } });
   const metadata = new MetadataStore(config);
   const { id } = await metadata.add(root);
   const temporary = new TemporaryFiles(home);
@@ -133,9 +129,9 @@ test("upload cancellation and changed targets leave no published or temporary fi
 });
 
 test("download retains the initial handle and length while append, replace or late truncation is allowed", async () => {
-  const { root, id, files, signal } = await setup();
+  const { root, signal, config } = await setup();
   await writeFile(join(root, "log"), "abcdef");
-  const reading = await files.read(id, "log", "download", signal);
+  const reading = await readWorkspaceFile(root, "log", "download", config.limits, signal);
   await appendFile(join(root, "log"), "new tail");
   await rename(join(root, "log"), join(root, "old"));
   await writeFile(join(root, "log"), "replacement");
@@ -144,34 +140,44 @@ test("download retains the initial handle and length while append, replace or la
   expect((await reading.read(2, 4)).toString()).toBe("cdef");
   await truncate(join(root, "old"), 0);
   await reading.finish();
-  const short = await files.read(id, "log", "download", signal);
+  const short = await readWorkspaceFile(root, "log", "download", config.limits, signal);
   await truncate(join(root, "log"), 0);
   await expect(short.read(0, short.meta.size)).rejects.toMatchObject({ code: "io_error" });
   await short.close();
-  const empty = await files.read(id, "log", "download", signal);
+  const empty = await readWorkspaceFile(root, "log", "download", config.limits, signal);
   expect(empty.meta.size).toBe(0);
   await empty.finish();
 });
 
 test("image metadata and buffered bytes stay consistent after later disk changes", async () => {
-  const { root, id, files, signal, config } = await setup();
+  const { root, signal, config } = await setup();
   const png = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=",
     "base64",
   );
   await writeFile(join(root, "image.wrong-extension"), png);
-  const image = await files.read(id, "image.wrong-extension", "image", signal);
+  const image = await readWorkspaceFile(
+    root,
+    "image.wrong-extension",
+    "image",
+    config.limits,
+    signal,
+  );
   expect(image.meta).toMatchObject({ contentType: "image/png", width: 1, height: 1 });
   expect(await image.read(0, png.length)).toEqual(png);
   await appendFile(join(root, "image.wrong-extension"), "changed");
   expect(await image.read(0, image.meta.size)).toEqual(png);
   await image.finish();
   config.limits.imagePixels = 0;
-  await expect(files.read(id, "image.wrong-extension", "image", signal)).rejects.toMatchObject({
+  await expect(
+    readWorkspaceFile(root, "image.wrong-extension", "image", config.limits, signal),
+  ).rejects.toMatchObject({
     code: "limit_exceeded",
   });
   await writeFile(join(root, "fake.png"), "<svg></svg>");
-  await expect(files.read(id, "fake.png", "image", signal)).rejects.toMatchObject({
+  await expect(
+    readWorkspaceFile(root, "fake.png", "image", config.limits, signal),
+  ).rejects.toMatchObject({
     code: "unsupported",
   });
 });

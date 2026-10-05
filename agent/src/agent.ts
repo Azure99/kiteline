@@ -114,6 +114,7 @@ export class Agent {
       this.textFiles,
       new BinaryFiles(config, this.metadata, this.temporaryFiles),
       this.temporaryFiles,
+      this.metadata,
       config,
       identity,
       (workspaceId) => this.watches.changed(workspaceId, true),

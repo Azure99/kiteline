@@ -27,7 +27,7 @@ import { TemporaryFiles } from "../src/files/temporary.js";
 import { Files } from "../src/files/index.js";
 import { MetadataStore } from "../src/metadata.js";
 import { Directories } from "../src/files/directories.js";
-import { defaultAgentLimits } from "../src/config.js";
+import { testConfig } from "./support/config.js";
 import { BinaryFiles } from "../src/files/binary.js";
 import { TextFiles } from "../src/files/text.js";
 import { FileChannels } from "../src/files/channels.js";
@@ -45,12 +45,7 @@ async function setup() {
   cleanups.push(() => rm(data, { recursive: true, force: true }));
   const root = join(data, "workspace");
   await mkdir(root);
-  const config = {
-    dataDir: data,
-    runDir: join(data, "run"),
-    shell: "/bin/sh",
-    limits: { ...defaultAgentLimits },
-  };
+  const config = testConfig(data);
   const metadata = new MetadataStore(config);
   const workspace = await metadata.add(root);
   const temporary = new TemporaryFiles(data);
@@ -61,6 +56,7 @@ async function setup() {
   cleanups.push(() => operations.close());
   return {
     config,
+    metadata,
     root,
     data,
     temporary,
@@ -84,7 +80,7 @@ test("file channel sizes use the write owner's byte limit before creating tempor
   f.config.limits.transferBytes = 8;
   const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
   await once(server, "listening");
-  const channels = new FileChannels(f.text, f.binary, f.temporary, f.config, {
+  const channels = new FileChannels(f.text, f.binary, f.temporary, f.metadata, f.config, {
     deviceId: "test",
     deviceToken: "test",
     server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
