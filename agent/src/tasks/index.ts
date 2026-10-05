@@ -30,7 +30,6 @@ export class ScheduledTasks {
   private queue: Promise<unknown> = Promise.resolve();
   private closing = false;
   private loadError?: string;
-  private readonly reservedRuns = new Set<string>();
   private readonly pending = new Map<string, string>();
   private readonly residuals = new Set<string>();
   private readonly outputSizes = new Map<string, number>();
@@ -89,6 +88,10 @@ export class ScheduledTasks {
 
   private publish(record: TaskRecord) {
     this.records.set(record.task.id, record);
+    this.notify();
+  }
+
+  private notify() {
     this.revision++;
     try {
       this.onChange?.(this.snapshot());
@@ -101,9 +104,11 @@ export class ScheduledTasks {
     try {
       await this.save(record);
     } catch (error) {
-      this.pending.set(record.task.id, asError(error).message);
+      const detail = asError(error);
+      this.pending.set(record.task.id, detail.message);
       this.publish(record);
-      console.error("Scheduled task facts not persisted:", record.task.id, asError(error).message);
+      console.error("Scheduled task facts not persisted:", record.task.id, detail.message);
+      return detail;
     }
   }
 
@@ -185,7 +190,6 @@ export class ScheduledTasks {
     }
     for (const [file, bytes] of outputSizes) {
       const id = file.replace(/\.(stdout|stderr)$/, "");
-      this.reservedRuns.add(id);
       this.outputSize(id, bytes);
     }
     for (const candidate of candidates) this.records.set(candidate.task.id, candidate);
@@ -337,14 +341,7 @@ export class ScheduledTasks {
         record.task.onceStatus = parameters.schedule.kind === "once" ? "pending" : undefined;
       }
       Object.assign(record.task, parameters);
-      record.task.revision++;
-      await this.expireOnce(record);
-      this.nextTime(record);
-      signal.throwIfAborted();
-      await this.save(record);
-      await this.cleanup(() => this.prune(id));
-      this.arm(record);
-      return this.get(id);
+      return this.commitDefinition(record, signal);
     }, signal);
   }
 
@@ -357,13 +354,7 @@ export class ScheduledTasks {
           reviewRunId: record.task.reviewRunId,
         });
       record.task.state = paused ? "paused" : "active";
-      record.task.revision++;
-      await this.expireOnce(record);
-      this.nextTime(record);
-      await this.save(record);
-      await this.cleanup(() => this.prune(id));
-      this.arm(record);
-      return this.get(id);
+      return this.commitDefinition(record);
     }, signal);
   }
 
@@ -377,14 +368,19 @@ export class ScheduledTasks {
         });
       record.task.reviewRunId = undefined;
       record.task.state = "paused";
-      record.task.revision++;
-      await this.expireOnce(record);
-      this.nextTime(record);
-      await this.save(record);
-      await this.cleanup(() => this.prune(id));
-      this.arm(record);
-      return this.get(id);
+      return this.commitDefinition(record);
     }, signal);
+  }
+
+  private async commitDefinition(record: TaskRecord, signal?: AbortSignal) {
+    record.task.revision++;
+    await this.expireOnce(record);
+    this.nextTime(record);
+    signal?.throwIfAborted();
+    await this.save(record);
+    await this.cleanup(() => this.prune(record.task.id));
+    this.arm(record);
+    return this.get(record.task.id);
   }
 
   delete(id: string, acknowledgeRunId: string | undefined, signal: AbortSignal) {
@@ -405,12 +401,7 @@ export class ScheduledTasks {
       clearTimeout(this.timers.get(id));
       this.timers.delete(id);
       this.records.delete(id);
-      this.revision++;
-      try {
-        this.onChange?.(this.snapshot());
-      } catch (error) {
-        console.error("Scheduled task notification:", asError(error).message);
-      }
+      this.notify();
       try {
         for (const run of record.runs) this.residuals.add(run.id);
         for (const run of record.runs) await this.removeOutput(run.id);
@@ -524,7 +515,7 @@ export class ScheduledTasks {
       });
     const key = runId.toLowerCase();
     if (
-      [...this.reservedRuns].some((id) => id.toLowerCase() === key) ||
+      [...this.residuals].some((id) => id.toLowerCase() === key) ||
       [...this.records.values()].some((item) =>
         item.runs.some((run) => run.id.toLowerCase() === key),
       )
@@ -569,7 +560,6 @@ export class ScheduledTasks {
       await this.cleanup(() => this.prune(id));
       return structuredClone(run);
     }
-    this.reservedRuns.add(runId);
     let process: TaskProcess;
     try {
       process = await TaskProcess.start(
@@ -631,12 +621,8 @@ export class ScheduledTasks {
     saved.state = process.pid ? "running" : "starting";
     if (process.pid) saved.startedAt = new Date().toISOString();
     saved.pid = process.pid;
-    try {
-      await this.save(started);
-    } catch (error) {
-      const detail = asError(error);
-      this.pending.set(id, detail.message);
-      this.publish(started);
+    const detail = await this.saveKnown(started);
+    if (detail) {
       throw new OperationError(
         detail.code,
         detail.message,
@@ -659,12 +645,8 @@ export class ScheduledTasks {
       void stopped.catch((error: unknown) =>
         console.error("Scheduled task stop:", asError(error).message),
       );
-      try {
-        await this.save(record);
-      } catch (error) {
-        const detail = asError(error);
-        this.pending.set(record.task.id, detail.message);
-        this.publish(record);
+      const detail = await this.saveKnown(record);
+      if (detail) {
         throw new OperationError(
           detail.code,
           detail.message,
@@ -755,7 +737,6 @@ export class ScheduledTasks {
     }
     this.outputSize(id, -(this.outputSizes.get(id) ?? 0));
     this.residuals.delete(id);
-    this.reservedRuns.delete(id);
   }
 
   private async cleanResiduals() {

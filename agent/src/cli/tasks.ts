@@ -48,8 +48,10 @@ OR semantics for day and weekday. --at is a future ISO timestamp with Z or an ex
 offset. Missed occurrences are skipped, not replayed. The default saved timezone is
 the device timezone; it does not follow your browser or override the command's TZ.
 The default cwd is the agent user's HOME. --cwd must be an existing absolute directory.
-The configured Shell runs -c COMMAND, non-interactively with stdin closed, inheriting
-the agent's environment, credentials and PATH (not this CLI's environment or cwd).
+The configured Shell runs non-interactively with stdin closed, inheriting the agent's
+environment, credentials and PATH (not this CLI's environment or cwd).
+Linux/macOS use SHELL -c COMMAND. Windows uses PowerShell with
+-NoProfile -NonInteractive -Command COMMAND.
 There is no PTY, interactive approval, automatic retry or default runtime limit.
 
 create stores an active task. update changes only supplied fields, preserving running
@@ -57,9 +59,12 @@ commands. It reads the current revision unless --expected-revision is supplied;
 a conflict means read again and review before updating.
 run returns after acceptance, not completion. Same-task overlap and device capacity
 return busy. Closing this CLI, the browser or relay does not stop accepted commands.
-pause prevents future schedules but allows manual run. stop stops only that run,
-using TERM then KILL; poll status until it ends. Keep commands in the foreground.
-Normal agent stop/upgrade stops in-flight runs; saved definitions and results remain.
+pause prevents future schedules but allows manual run. stop stops only that run.
+Linux/macOS send TERM to the process group, then KILL if it has not stopped.
+Windows terminates the Job immediately. Poll status until it ends.
+Keep commands in the foreground. Normal agent stop stops in-flight runs;
+saved definitions and results remain. Stop the agent before upgrading;
+upgrades refuse an installation still in use.
 After an abnormal restart, unknown runs require review: reviewRunId blocks both
 automatic and manual runs. acknowledge --run-id confirms the displayed ID and keeps
 the task paused. Then use ordinary resume to enable its schedule.
@@ -80,7 +85,7 @@ or accepted, 1 confirmed management failure, 2 usage error, 3 unconfirmed outcom
 Neither run exit 0 nor status exit 0 means the command succeeded; inspect its state.
 On exit 3 query the printed taskId/runId. Never automatically replay a mutation.
 
-Examples:
+Examples (create examples below use Linux/macOS syntax):
   kiteline-agent schedule preview --cron '0 9 * * 1-5' --timezone Asia/Shanghai --json
   kiteline-agent schedule create --name 'Daily review' --cron '0 9 * * 1-5' --timezone Asia/Shanghai --cwd '/srv/My Project' --command './daily-review.sh' --json
   kiteline-agent schedule create --name 'One check' --at '2027-01-05T09:00:00+08:00' --command 'printf ready' --json
