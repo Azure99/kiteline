@@ -3,7 +3,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { finished } from "node:stream/promises";
-import { AppError, OperationError } from "@kiteline/shared/protocol";
+import { AppError, OperationError, asError } from "@kiteline/shared/protocol";
 import type {
   CreateTerminal,
   RecorderCall,
@@ -70,7 +70,7 @@ export class Recorder {
       };
       this.instance = instance;
       instance.ready = this.launch(instance).catch((error: unknown) => {
-        instance.stderr = error instanceof Error ? error.message : String(error);
+        instance.stderr = asError(error).message;
         this.exited(instance);
         throw error;
       });

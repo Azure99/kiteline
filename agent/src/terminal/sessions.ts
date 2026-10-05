@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { access, rm } from "node:fs/promises";
 import { constants, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { AppError, OperationError, limits, type Session } from "@kiteline/shared/protocol";
+import { AppError, OperationError, asError, limits, type Session } from "@kiteline/shared/protocol";
 import type {
   CreateTerminal,
   RecorderMessage,
@@ -200,7 +200,7 @@ export class Sessions {
           const state = await this.inspect(item).catch(() => undefined);
           if (state?.alive) {
             item.session.state = "running";
-            this.unavailable(item, error instanceof Error ? error.message : String(error));
+            this.unavailable(item, asError(error).message);
             return { ...item.session };
           }
           if (state && !state.alive && !item.creationMayArrive) {
@@ -298,7 +298,7 @@ export class Sessions {
           }
         } catch (error) {
           if (this.records.get(id) === item && !item.cleanup)
-            this.unavailable(item, error instanceof Error ? error.message : String(error));
+            this.unavailable(item, asError(error).message);
         } finally {
           item.recovery = undefined;
         }

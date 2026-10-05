@@ -1,7 +1,13 @@
 import type { Stats } from "node:fs";
 import { dirname, relative, sep } from "node:path";
 import { watch, type FSWatcher } from "chokidar";
-import { limits, type Repo, type Workspace, type WorkspaceEvent } from "@kiteline/shared/protocol";
+import {
+  asError,
+  limits,
+  type Repo,
+  type Workspace,
+  type WorkspaceEvent,
+} from "@kiteline/shared/protocol";
 
 const excluded = new Set(["node_modules", ".pnpm", ".venv", "dist", "build", "target"]);
 const gitTrees = new Set(["refs", "rebase-merge", "rebase-apply", "sequencer"]);
@@ -147,7 +153,7 @@ export class WorkspaceWatches {
       for (const id of entry.owners) this.report(id);
     });
     watcher.on("error", (error) => {
-      entry.error = error instanceof Error ? error.message : String(error);
+      entry.error = asError(error).message;
       for (const id of entry.owners) this.report(id);
     });
     return entry;
