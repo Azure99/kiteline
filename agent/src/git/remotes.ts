@@ -1,7 +1,7 @@
 import { agentLimits } from "../limits.js";
 import { AppError, type GitRemotes, type HeadIdentity, type Repo } from "@kiteline/shared/protocol";
 import { commandLine, git, utf8 } from "./process.js";
-import { headIdentity } from "./status.js";
+import { headIdentity } from "./observe.js";
 
 async function config(repo: Repo, name: string, signal: AbortSignal) {
   const result = await git(repo.rootPath, ["config", "--null", "--get-all", name], signal, {

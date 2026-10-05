@@ -4,7 +4,8 @@ import { once } from "node:events";
 import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { Agent } from "../src/agent.js";
-import { defaultAgentLimits, privateDirectory } from "../src/config.js";
+import { privateDirectory } from "../src/config.js";
+import { testConfig } from "./support/config.js";
 import { ScheduledTasks } from "../src/tasks/index.js";
 import { localRequest } from "../src/local.js";
 
@@ -13,7 +14,7 @@ test.runIf(process.platform !== "win32")(
   async () => {
     const root = await mkdtemp("/var/tmp/kiteline-runtime-owner-");
     const other = join(root, "other");
-    const config = { runDir: root, limits: defaultAgentLimits };
+    const config = testConfig(root, { runDir: root });
     const children: { child: ReturnType<typeof spawn>; ended: ReturnType<typeof once> }[] = [];
     function start(dataDir: string) {
       const child = spawn(process.execPath, [resolve("agent/dist/main.js"), "run"], {
@@ -68,12 +69,7 @@ test.runIf(process.platform !== "win32")(
 
 test("stopping during schedule load prevents late timers and local admission, and waits once", async () => {
   const root = await mkdtemp("/var/tmp/kiteline-startup-test-");
-  const config = {
-    dataDir: root,
-    runDir: join(root, "run"),
-    shell: "/bin/sh",
-    limits: defaultAgentLimits,
-  };
+  const config = testConfig(root);
   const saved = new ScheduledTasks(config);
   const agent = new Agent(config, {
     deviceId: "test",

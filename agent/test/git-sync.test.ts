@@ -5,10 +5,10 @@ import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { Repo } from "@kiteline/shared/protocol";
 import { MetadataStore } from "../src/metadata.js";
-import { CursorBudget } from "../src/cursor-budget.js";
-import { defaultAgentLimits } from "../src/config.js";
-import { Repositories } from "../src/git/repos.js";
-import { headIdentity, status } from "../src/git/status.js";
+import { testConfig } from "./support/config.js";
+import { gitRepoFixture, isolateGitEnvironment, workspaceFixture } from "./support/git.js";
+import { headIdentity } from "../src/git/observe.js";
+import { status } from "../src/git/status.js";
 import { finishOperation } from "../src/git/operation.js";
 import { remotes, syncRemote } from "../src/git/remotes.js";
 import { git } from "../src/git/process.js";
@@ -17,12 +17,7 @@ const exec = promisify(execFile),
   roots: string[] = [];
 const signal = () => new AbortController().signal;
 beforeEach(async () => {
-  const home = await mkdtemp("/var/tmp/kiteline-git-env-");
-  roots.push(home);
-  vi.stubEnv("HOME", home);
-  vi.stubEnv("XDG_CONFIG_HOME", join(home, ".config"));
-  vi.stubEnv("GIT_CONFIG_NOSYSTEM", "1");
-  vi.stubEnv("GIT_CONFIG_GLOBAL", undefined);
+  roots.push(await isolateGitEnvironment());
 });
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -33,20 +28,10 @@ async function setup() {
   roots.push(home);
   const root = join(home, "project");
   await mkdir(root);
-  const cli = async (...args: string[]) => (await exec("git", args, { cwd: root })).stdout;
-  await cli("init");
-  await cli("symbolic-ref", "HEAD", "refs/heads/main");
-  await cli("config", "user.name", "Kiteline Test");
-  await cli("config", "user.email", "kiteline@example.test");
-  const metadata = new MetadataStore({
-    dataDir: home,
-    runDir: join(home, "run"),
-    shell: "/bin/sh",
-    limits: { ...defaultAgentLimits },
-  });
-  const workspace = await metadata.add(root),
-    repos = new Repositories(metadata, new CursorBudget());
-  const repo = (await repos.discover(workspace.id, undefined, signal())).repos[0]!;
+  const run = await gitRepoFixture(root);
+  const cli = async (...args: string[]) => (await run(...args)).stdout;
+  const metadata = new MetadataStore(testConfig(home));
+  const { repo } = await workspaceFixture(root, metadata);
   const write = (path: string, text: string) => writeFile(join(root, path), text);
   await write("f", "base\n");
   await write("g", "base\n");

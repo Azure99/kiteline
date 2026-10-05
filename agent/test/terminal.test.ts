@@ -6,7 +6,7 @@ import { AppError, limits } from "@kiteline/shared/protocol";
 import { tmux } from "@kiteline/shared/terminal/node";
 import type { RecorderCall } from "@kiteline/shared/protocol/ipc";
 import { Agent } from "../src/agent.js";
-import { defaultAgentLimits } from "../src/config.js";
+import { testConfig } from "./support/config.js";
 
 const candidateIds = vi.hoisted(() => [] as string[]);
 vi.mock("node:crypto", async (original) => {
@@ -49,12 +49,7 @@ async function fixture() {
   const runDir = join(dataDir, "run");
   await mkdir(runDir);
   const agent = new Agent(
-    {
-      dataDir,
-      runDir,
-      shell: "/bin/bash",
-      limits: { ...defaultAgentLimits, terminalSessionsPerDevice: 3 },
-    },
+    testConfig(dataDir, { runDir, shell: "/bin/bash", limits: { terminalSessionsPerDevice: 3 } }),
     { deviceId: "terminal-test", deviceToken: "local", server: "https://localhost" },
   );
   cleanups.push(() => agent.close());

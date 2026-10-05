@@ -14,14 +14,14 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { MetadataStore } from "../src/metadata.js";
-import { CursorBudget } from "../src/cursor-budget.js";
-import { defaultAgentLimits } from "../src/config.js";
-import { Repositories } from "../src/git/repos.js";
+import { testConfig } from "./support/config.js";
+import { gitRepoFixture, isolateGitEnvironment, workspaceFixture } from "./support/git.js";
 import { changeIndex, reviewDiscard, discard } from "../src/git/changes.js";
 import { GitWriteQueue } from "../src/git/queue.js";
 import { git } from "../src/git/process.js";
 import { commit, createBranch, changeBranch } from "../src/git/refs.js";
-import { observeIndex, headIdentity, status } from "../src/git/status.js";
+import { observeIndex, headIdentity } from "../src/git/observe.js";
+import { status } from "../src/git/status.js";
 import { workingDiff } from "../src/git/diff.js";
 import { AppError } from "@kiteline/shared/protocol";
 
@@ -36,12 +36,7 @@ function killTestProcess(pid: number) {
   }
 }
 beforeEach(async () => {
-  const home = await mkdtemp("/var/tmp/kiteline-git-env-");
-  roots.push(home);
-  vi.stubEnv("HOME", home);
-  vi.stubEnv("XDG_CONFIG_HOME", join(home, ".config"));
-  vi.stubEnv("GIT_CONFIG_NOSYSTEM", "1");
-  vi.stubEnv("GIT_CONFIG_GLOBAL", undefined);
+  roots.push(await isolateGitEnvironment());
 });
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -50,22 +45,12 @@ afterEach(async () => {
 async function setup() {
   const root = await mkdtemp("/var/tmp/kiteline-git-write-");
   roots.push(root);
-  const cli = async (...args: string[]) => (await exec("git", args, { cwd: root })).stdout;
-  await cli("init");
-  await cli("symbolic-ref", "HEAD", "refs/heads/main");
-  await cli("config", "user.name", "Kiteline Test");
-  await cli("config", "user.email", "kiteline@example.test");
+  const run = await gitRepoFixture(root);
+  const cli = async (...args: string[]) => (await run(...args)).stdout;
   const home = await mkdtemp("/var/tmp/kiteline-git-write-meta-");
   roots.push(home);
-  const metadata = new MetadataStore({
-    dataDir: home,
-    runDir: join(home, "run"),
-    shell: "/bin/sh",
-    limits: { ...defaultAgentLimits },
-  });
-  const workspace = await metadata.add(root);
-  const repos = new Repositories(metadata, new CursorBudget());
-  const repo = (await repos.discover(workspace.id, undefined, signal())).repos[0]!;
+  const metadata = new MetadataStore(testConfig(home));
+  const { workspace, repos, repo } = await workspaceFixture(root, metadata);
   return {
     root,
     cli,

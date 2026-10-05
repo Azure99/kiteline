@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { Files } from "../src/files/index.js";
 import { Directories } from "../src/files/directories.js";
 import { MetadataStore } from "../src/metadata.js";
-import { defaultAgentLimits } from "../src/config.js";
+import { testConfig } from "./support/config.js";
 import { publish } from "../src/files/publish.js";
 
 const cleanups: (() => Promise<unknown>)[] = [];
@@ -25,12 +25,7 @@ async function setup() {
   cleanups.push(() => rm(data, { recursive: true, force: true }));
   const root = join(data, "workspace");
   await mkdir(root);
-  const metadata = new MetadataStore({
-    dataDir: data,
-    runDir: join(data, "run"),
-    shell: "/bin/sh",
-    limits: { ...defaultAgentLimits },
-  });
+  const metadata = new MetadataStore(testConfig(data));
   const workspace = await metadata.add(root);
   const directories = new Directories();
   cleanups.push(() => directories.close());

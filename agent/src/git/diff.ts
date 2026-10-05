@@ -10,7 +10,8 @@ import {
 } from "@kiteline/shared/protocol";
 import { relativePath } from "../files/paths.js";
 import { git, gitPath, gitPathKey, NulRecords } from "./process.js";
-import { diffOptions, readStatus } from "./status.js";
+import { diffOptions } from "./observe.js";
+import { readStatus } from "./status.js";
 
 export type RawChange = GitPath & {
   status: string;

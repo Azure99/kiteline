@@ -1,17 +1,20 @@
-import { afterEach, expect, test, vi } from "vitest";
-import { execFile } from "node:child_process";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { AppError, type RepoDiscovery, type GitReview } from "@kiteline/shared/protocol";
 import { Agent } from "../src/agent.js";
-import { defaultAgentLimits } from "../src/config.js";
+import { testConfig } from "./support/config.js";
+import { gitRepoFixture, isolateGitEnvironment } from "./support/git.js";
 
-const execute = promisify(execFile);
 const cleanups: (() => Promise<unknown>)[] = [];
+beforeEach(async () => {
+  const home = await isolateGitEnvironment();
+  cleanups.push(() => rm(home, { recursive: true, force: true }));
+});
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 async function setup() {
@@ -19,22 +22,16 @@ async function setup() {
   cleanups.push(() => rm(data, { recursive: true, force: true }));
   const root = join(data, "workspace");
   await mkdir(root);
-  const cli = async (...args: string[]) => (await execute("git", args, { cwd: root })).stdout;
-  await cli("init", "--initial-branch=main");
-  await cli("config", "user.name", "Kiteline Test");
-  await cli("config", "user.email", "kiteline@example.test");
+  const run = await gitRepoFixture(root);
+  const cli = async (...args: string[]) => (await run(...args)).stdout;
   await writeFile(join(root, "file.txt"), "original\n");
   await cli("add", "file.txt");
   await cli("commit", "-m", "base");
-  const agent = new Agent(
-    {
-      dataDir: data,
-      runDir: join(data, "run"),
-      shell: "/bin/sh",
-      limits: { ...defaultAgentLimits },
-    },
-    { deviceId: "test", deviceToken: "test", server: "https://localhost" },
-  );
+  const agent = new Agent(testConfig(data), {
+    deviceId: "test",
+    deviceToken: "test",
+    server: "https://localhost",
+  });
   cleanups.push(() => agent.close());
   const workspace = await agent.metadata.add(root);
   const signal = new AbortController().signal;

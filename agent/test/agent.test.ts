@@ -6,7 +6,8 @@ import type { AddressInfo, Socket } from "node:net";
 import { join } from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
 import { Agent } from "../src/agent.js";
-import { defaultAgentLimits, privateDirectory } from "../src/config.js";
+import { privateDirectory } from "../src/config.js";
+import { testConfig } from "./support/config.js";
 import { localRequest } from "../src/local.js";
 import {
   appVersion,
@@ -31,12 +32,7 @@ test.each([401, 426])(
     });
     server.listen(0, "127.0.0.1");
     await once(server, "listening");
-    const config = {
-      dataDir: root,
-      runDir: join(root, "run"),
-      shell: "/bin/sh",
-      limits: defaultAgentLimits,
-    };
+    const config = testConfig(root);
     const agent = new Agent(config, {
       deviceId: "test",
       deviceToken: "test",
@@ -127,14 +123,11 @@ test("control reconnects after handshake rejection, retains valid watches and sc
     });
     server.listen(0, "127.0.0.1");
     await once(server, "listening");
-    agent = new Agent(
-      { dataDir: root, runDir: join(root, "run"), shell: "/bin/bash", limits: defaultAgentLimits },
-      {
-        deviceId: "test",
-        deviceToken: "test",
-        server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
-      },
-    );
+    agent = new Agent(testConfig(root, { shell: "/bin/bash" }), {
+      deviceId: "test",
+      deviceToken: "test",
+      server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    });
     for (const name of ["removed", "active"]) await mkdir(join(root, name));
     const removed = await agent.metadata.add(join(root, "removed"));
     const active = await agent.metadata.add(join(root, "active"));
@@ -262,19 +255,11 @@ test("bulk file requests outlive the RPC timeout and still cancel while publicat
   const sockets = new WebSocketServer({ server });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
-  const agent = new Agent(
-    {
-      dataDir: root,
-      runDir: join(root, "run"),
-      shell: "/bin/sh",
-      limits: { ...defaultAgentLimits, rpcTimeout: 50 },
-    },
-    {
-      deviceId: "test",
-      deviceToken: "test",
-      server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
-    },
-  );
+  const agent = new Agent(testConfig(root, { limits: { rpcTimeout: 50 } }), {
+    deviceId: "test",
+    deviceToken: "test",
+    server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+  });
   let release: (() => void) | undefined;
   let held: Promise<void> | undefined;
   const hold = async () => {
@@ -364,14 +349,11 @@ test("control bounds replies without losing outcomes and ignores buffered reques
   const sockets = new WebSocketServer({ server });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
-  const agent = new Agent(
-    { dataDir: root, runDir: join(root, "run"), shell: "/bin/bash", limits: defaultAgentLimits },
-    {
-      deviceId: "test",
-      deviceToken: "test",
-      server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
-    },
-  );
+  const agent = new Agent(testConfig(root, { shell: "/bin/bash" }), {
+    deviceId: "test",
+    deviceToken: "test",
+    server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+  });
   try {
     const connection = once(sockets, "connection");
     for (const path of [agent.config.dataDir, agent.config.runDir]) await privateDirectory(path);

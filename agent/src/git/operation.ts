@@ -10,7 +10,7 @@ import {
   type Repo,
 } from "@kiteline/shared/protocol";
 import { commandLine, git } from "./process.js";
-import { observeIndex } from "./status.js";
+import { observeIndex } from "./observe.js";
 
 export async function readOperation(
   repo: Repo,

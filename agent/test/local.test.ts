@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { windowsNative } from "@kiteline/shared/windows/native";
-import { defaultAgentLimits } from "../src/config.js";
+import { testConfig } from "./support/config.js";
 import { LocalServer, localRequest } from "../src/local.js";
 
 test("local HTTP returns results and closing preserves unknown writes until sockets close", async () => {
@@ -13,7 +13,7 @@ test("local HTTP returns results and closing preserves unknown writes until sock
       ? join(tmpdir(), `kiteline-local-${randomUUID()}`)
       : await mkdtemp("/var/tmp/kiteline-local-");
   if (process.platform === "win32") windowsNative().privateDirectory(root);
-  const config = { dataDir: root, runDir: root, shell: "unused", limits: defaultAgentLimits };
+  const config = testConfig(root, { runDir: root, shell: "unused" });
   let accepted!: () => void;
   const writing = new Promise<void>((resolve) => {
     accepted = resolve;

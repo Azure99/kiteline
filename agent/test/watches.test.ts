@@ -8,7 +8,7 @@ import { WorkspaceWatches } from "../src/watches.js";
 import { Repositories } from "../src/git/repos.js";
 import { MetadataStore } from "../src/metadata.js";
 import { CursorBudget } from "../src/cursor-budget.js";
-import { defaultAgentLimits } from "../src/config.js";
+import { testConfig } from "./support/config.js";
 
 const run = promisify(execFile);
 const cleanups: (() => Promise<void>)[] = [];
@@ -247,12 +247,7 @@ test("discovery resolves a linked .git directory for external metadata watching"
   ]);
   await rename(join(project, ".git"), metadataPath);
   await symlink("../metadata", join(project, ".git"));
-  const metadata = new MetadataStore({
-    dataDir: join(root, "data"),
-    runDir: join(root, "run"),
-    shell: "/bin/sh",
-    limits: { ...defaultAgentLimits },
-  });
+  const metadata = new MetadataStore(testConfig(join(root, "data"), { runDir: join(root, "run") }));
   const repos = new Repositories(metadata, new CursorBudget());
   cleanups.push(() => repos.close());
   const repo = await repos.inspect(project, root, new AbortController().signal);

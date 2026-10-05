@@ -14,7 +14,8 @@ import {
 } from "@kiteline/shared/protocol";
 import { entryInfo, gitMetadataPath, relativePath } from "../files/paths.js";
 import { git, gitPath, NulRecords } from "./process.js";
-import { headIdentity, modeType, observeIndex, readStatus } from "./status.js";
+import { headIdentity, observeIndex } from "./observe.js";
+import { modeType, readStatus } from "./status.js";
 
 interface Leaf {
   mode: string;

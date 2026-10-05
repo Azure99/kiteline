@@ -6,10 +6,10 @@ import { mkdtemp, mkdir, writeFile, rm, rename, chmod, symlink } from "node:fs/p
 import { join } from "node:path";
 import { AppError } from "@kiteline/shared/protocol";
 import { MetadataStore } from "../src/metadata.js";
-import { CursorBudget } from "../src/cursor-budget.js";
-import { defaultAgentLimits } from "../src/config.js";
-import { Repositories } from "../src/git/repos.js";
-import { observeIndex, status } from "../src/git/status.js";
+import { testConfig } from "./support/config.js";
+import { gitRepoFixture, isolateGitEnvironment, workspaceFixture } from "./support/git.js";
+import { observeIndex } from "../src/git/observe.js";
+import { status } from "../src/git/status.js";
 import { workingDiff } from "../src/git/diff.js";
 import { branches, commitDiff, commitFiles, history } from "../src/git/history.js";
 
@@ -17,12 +17,7 @@ const run = promisify(execFile);
 const roots: string[] = [];
 const signals = () => new AbortController().signal;
 beforeEach(async () => {
-  const home = await mkdtemp("/var/tmp/kiteline-git-env-");
-  roots.push(home);
-  vi.stubEnv("HOME", home);
-  vi.stubEnv("XDG_CONFIG_HOME", join(home, ".config"));
-  vi.stubEnv("GIT_CONFIG_NOSYSTEM", "1");
-  vi.stubEnv("GIT_CONFIG_GLOBAL", undefined);
+  roots.push(await isolateGitEnvironment());
 });
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -33,21 +28,10 @@ async function setup() {
   roots.push(home);
   const root = join(home, "project");
   await mkdir(root);
-  const cli = (...args: string[]) => run("git", args, { cwd: root });
-  await cli("init");
-  await cli("symbolic-ref", "HEAD", "refs/heads/main");
-  await cli("config", "user.name", "Kiteline Test");
-  await cli("config", "user.email", "kiteline@example.test");
-  const metadata = new MetadataStore({
-    dataDir: home,
-    runDir: join(home, "run"),
-    shell: "/bin/sh",
-    limits: { ...defaultAgentLimits },
-  });
-  const workspace = await metadata.add(root);
-  const repos = new Repositories(metadata, new CursorBudget());
-  const found = await repos.discover(workspace.id, undefined, signals());
-  return { home, root, cli, metadata, workspace, repos, repo: found.repos[0]! };
+  const cli = await gitRepoFixture(root);
+  const metadata = new MetadataStore(testConfig(home));
+  const { workspace, repos, repo } = await workspaceFixture(root, metadata);
+  return { home, root, cli, metadata, workspace, repos, repo };
 }
 test("leaving a workspace cancels its active discovery without returning a dead cursor", async () => {
   const { workspace, repos } = await setup();

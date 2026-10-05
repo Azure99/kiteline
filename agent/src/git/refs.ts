@@ -7,7 +7,7 @@ import {
 } from "@kiteline/shared/protocol";
 import { commandLine, git } from "./process.js";
 import { commitOid } from "./history.js";
-import { headIdentity, observeIndex } from "./status.js";
+import { headIdentity, observeIndex } from "./observe.js";
 
 async function headAfter(repo: Repo, signal: AbortSignal, known: object) {
   try {

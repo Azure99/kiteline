@@ -14,7 +14,7 @@ import {
 import { relativePath } from "../files/paths.js";
 import { boundedDiff, numstatReader, selectedPatch, rawReader, type RawChange } from "./diff.js";
 import { commandLine, git, gitPathKey, NulRecords, utf8 } from "./process.js";
-import { diffOptions, headIdentity } from "./status.js";
+import { diffOptions, headIdentity } from "./observe.js";
 
 export async function commitOid(repo: Repo, oid: string, signal: AbortSignal) {
   if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(oid))

@@ -17,7 +17,8 @@ import {
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { taskRunActive, type ScheduledTask, type TaskRun } from "@kiteline/shared/protocol";
-import { defaultAgentLimits, privateDirectory } from "../src/config.js";
+import { privateDirectory } from "../src/config.js";
+import { testConfig } from "./support/config.js";
 import { ScheduledTasks } from "../src/tasks/index.js";
 import { checkSchedule, checkTimezone, nextOccurrence } from "../src/tasks/schedule.js";
 import { scheduleMethods, scheduleRpc, type ScheduleMethod } from "../src/tasks/rpc.js";
@@ -36,12 +37,7 @@ const input = (cwd: string, command = "printf '你好'; printf error >&2") => ({
 
 async function fixture(limits = {}) {
   const root = await mkdtemp("/var/tmp/kiteline-schedule-test-");
-  const config = {
-    dataDir: root,
-    runDir: join(root, "run"),
-    shell: "/bin/bash",
-    limits: { ...defaultAgentLimits, ...limits },
-  };
+  const config = testConfig(root, { shell: "/bin/bash", limits });
   const tasks = new ScheduledTasks(config);
   await tasks.load();
   return {
