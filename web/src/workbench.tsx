@@ -47,7 +47,7 @@ import { DeviceActionDialog, type DeviceAction } from "./devices/device-actions"
 import { DeviceNavigation } from "./devices/device-navigation";
 import { Home, DeviceDetail } from "./devices/device-views";
 import { useRecentWorkspaces } from "./devices/recent-workspaces";
-import { WorkspaceTerminal } from "./terminal/sessions";
+import { WorkspaceView } from "./terminal/sessions";
 import type { TerminalLayout } from "./terminal/groups";
 import { GitActions } from "./git/actions";
 import { DraftStore, isDirty } from "./files/drafts";
@@ -462,7 +462,7 @@ export function Workbench({
                 <p className="p-6 text-muted-foreground">{t(($) => $.shell.workspaceRemoved)}</p>
               ) : (
                 <>
-                  <WorkspaceTerminal
+                  <WorkspaceView
                     key={`${device.id}:${workspace.id}`}
                     device={device}
                     workspace={workspace}
@@ -508,7 +508,7 @@ export function Workbench({
                       store={drafts}
                       actions={gitActions}
                     />
-                  </WorkspaceTerminal>
+                  </WorkspaceView>
                 </>
               )
             ) : (

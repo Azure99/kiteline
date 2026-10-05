@@ -28,7 +28,13 @@ import { ToolLayout } from "../components/tool-layout";
 import type { TerminalActions, TerminalCapabilities } from "./terminal-view";
 import { TerminalView } from "./lazy-terminal-view";
 import { TerminalSettings } from "./settings";
-import { navigateWorkspace, updateWorkspaceQuery, useRoute } from "../lib/navigation";
+import {
+  currentRoute,
+  isWorkspaceRoute,
+  navigateWorkspace,
+  updateWorkspaceQuery,
+  useRoute,
+} from "../lib/navigation";
 import { useMobile } from "../lib/use-mobile";
 import { useSessions } from "./use-sessions";
 import {
@@ -54,7 +60,8 @@ import { SessionDialog, type SessionAction } from "./session-dialog";
 import { GroupTabs, useTerminalDrag } from "./group-tabs";
 import type { useTerminalFocus } from "./use-terminal-focus";
 
-export function WorkspaceTerminal({
+// Owns the shared main/dock layout while Files and Git occupy the tool region.
+export function WorkspaceView({
   device,
   workspace,
   visible,
@@ -79,6 +86,7 @@ export function WorkspaceTerminal({
   const routeSession = route.query.session ?? null;
   const lastRouteSession = useRef<string | null | undefined>(undefined);
   const lastTool = useRef<string | undefined>(undefined);
+  const selection = useRef({ main: 0, dock: 0 });
   const displays = useRef(new Map<string, TerminalActions>());
   const [capabilities, setCapabilities] = useState<
     Record<"main" | "dock", Record<string, TerminalCapabilities>>
@@ -164,6 +172,7 @@ export function WorkspaceTerminal({
   }, [sessions, remote.loaded, opened]);
   useEffect(() => {
     if (!remote.loaded && !targetKnown) return;
+    // Apply navigation to the main layout; explicit layout actions update the URL below.
     const returning = route.tool === "terminal" && lastTool.current !== "terminal";
     lastTool.current = route.tool;
     if (returning && !routeSession && selected) {
@@ -179,12 +188,15 @@ export function WorkspaceTerminal({
     const previous = lastRouteSession.current;
     if (routeSession) {
       if (!targetKnown) return;
+      selection.current.main++;
       lastRouteSession.current = routeSession;
       setLayout((old) => selectSession(old, routeSession));
     } else {
       lastRouteSession.current = routeSession;
-      if (route.tool === "terminal" && previous !== undefined)
+      if (route.tool === "terminal" && previous !== undefined) {
+        selection.current.main++;
         setLayout((old) => ({ ...old, current: undefined }));
+      }
     }
   }, [
     routeSession,
@@ -223,7 +235,9 @@ export function WorkspaceTerminal({
     (id: string, value: TerminalCapabilities | undefined) => reportCapabilities("dock", id, value),
     [reportCapabilities],
   );
+  // Explicit main-layout actions also publish their selected session to the URL.
   function applyMain(next: TerminalLayout, tool = route.tool, replace = false) {
+    selection.current.main++;
     setLayout(next);
     const id = currentGroup(next)?.active;
     lastRouteSession.current = id ?? null;
@@ -236,8 +250,10 @@ export function WorkspaceTerminal({
   }
   function choose(id: string, dock = false) {
     if (!find(id) && !(dock ? opened.dock.has(id) : opened.main.has(id))) return;
-    if (dock) setLayout((old) => ({ ...old, dock: id, dockOpen: true }));
-    else applyMain(selectSession(layout, id));
+    if (dock) {
+      selection.current.dock++;
+      setLayout((old) => ({ ...old, dock: id, dockOpen: true }));
+    } else applyMain(selectSession(layout, id));
   }
   function focus(id: string) {
     if (selected !== id) applyMain(selectSession(layout, id), route.tool, true);
@@ -249,8 +265,10 @@ export function WorkspaceTerminal({
       next.delete(id);
       return { ...old, [region]: next };
     });
-    if (dock) setLayout((old) => ({ ...old, dock: undefined }));
-    else applyMain(closeSession(layout, id));
+    if (dock) {
+      selection.current.dock++;
+      setLayout((old) => ({ ...old, dock: undefined }));
+    } else applyMain(closeSession(layout, id));
   }
   function move(id: string, target?: string, position?: MemberPosition) {
     applyMain(moveSession(layout, id, target, position));
@@ -258,6 +276,7 @@ export function WorkspaceTerminal({
   const drag = useTerminalDrag(move);
   function patchGroup(change: Partial<NonNullable<typeof group>>) {
     if (!group) return;
+    selection.current.main++;
     setLayout((old) => ({
       ...old,
       groups: old.groups.map((item) => (item.id === group.id ? { ...item, ...change } : item)),
@@ -268,16 +287,40 @@ export function WorkspaceTerminal({
     shortcutId?: string,
     split?: { groupId: string; anchor: string; direction: SplitDirection },
   ) {
+    const intent = { ...selection.current };
     const session = await remote.create(shortcutId);
     if (!session) return;
+    const current = currentRoute();
+    const activate =
+      selection.current[dock ? "dock" : "main"] === intent[dock ? "dock" : "main"] &&
+      (dock ||
+        !isWorkspaceRoute(current, { deviceId: device.id, workspaceId: workspace.id }) ||
+        (current.query.session ?? null) === routeSession);
     setLayout((old) => {
-      if (dock) return { ...old, dock: session.id, dockOpen: true };
+      if (dock) return activate ? { ...old, dock: session.id, dockOpen: true } : old;
       const next = split
         ? splitSession(old, session.id, split.groupId, split.anchor, split.direction)
         : selectSession(old, session.id);
-      return { ...next, dock: old.dock ?? session.id };
+      if (!activate) {
+        // Place the result at its original anchor without replacing a later selection.
+        const active = currentGroup(old)?.active;
+        for (const group of next.groups) {
+          const previous = old.groups.find((item) => item.id === group.id);
+          if (previous && groupMembers(group).includes(previous.active)) {
+            group.active = previous.active;
+            group.maximized = previous.maximized;
+          }
+        }
+        const current = active ? groupFor(next, active) : undefined;
+        next.current = current?.id;
+        if (current && active) current.active = active;
+      }
+      return {
+        ...next,
+        dock: old.dock ?? (selection.current.dock === intent.dock ? session.id : undefined),
+      };
     });
-    if (!dock) {
+    if (!dock && activate) {
       lastRouteSession.current = session.id;
       updateWorkspaceQuery(
         { deviceId: device.id, workspaceId: workspace.id },
@@ -397,9 +440,10 @@ export function WorkspaceTerminal({
             }
             aria-expanded={layout.dockOpen}
             aria-controls="companion-terminal"
-            onClick={() =>
-              setLayout((old) => ({ ...old, dockOpen: !old.dockOpen, dock: old.dock ?? selected }))
-            }
+            onClick={() => {
+              selection.current.dock++;
+              setLayout((old) => ({ ...old, dockOpen: !old.dockOpen, dock: old.dock ?? selected }));
+            }}
           >
             <PanelBottom />
           </IconButton>
