@@ -12,7 +12,7 @@ import {
   type TaskSchedule,
 } from "@kiteline/shared/protocol";
 
-export function taskId(value: unknown, name = "taskId") {
+export function checkFileId(value: unknown, name = "taskId") {
   const id = string(value, name, 128);
   if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new AppError("invalid_argument", `Invalid ${name}`);
   return id;
@@ -95,7 +95,7 @@ export function previewSchedule(input: unknown, timezone?: unknown) {
   return { timezone: zone, nextRunAts };
 }
 
-export function taskFields(value: unknown): Required<ScheduledTaskInput> {
+function taskFields(value: unknown): Required<ScheduledTaskInput> {
   const input = record(value);
   const name = text(input.name, "name", taskLimits.nameBytes);
   const command = text(input.command, "command", taskLimits.commandBytes);

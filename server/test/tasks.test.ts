@@ -161,7 +161,9 @@ test("real device CLI/RPC share tasks, snapshots persist only summaries, and rem
     });
     await expect.poll(() => f.store.taskSummaries()[0]?.snapshot?.items.length).toBe(2);
     f.app.connections.deleteDevice(f.identity.deviceId);
-    await expect.poll(() => agent.schedules.runs("after-delete").items[0]?.state).toBe("succeeded");
+    await expect
+      .poll(() => agent.schedules.listRuns("after-delete").items[0]?.state)
+      .toBe("succeeded");
     expect(f.app.connections.taskSummaries()).toEqual([]);
     expect(f.store.taskSummaries()).toEqual([]);
   } finally {

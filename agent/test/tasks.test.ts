@@ -52,8 +52,8 @@ async function fixture(limits = {}) {
 }
 
 async function finished(tasks: ScheduledTasks, id: string, timeout = 8000) {
-  await expect.poll(() => taskRunActive(tasks.run(id).state), { timeout }).toBe(false);
-  return tasks.run(id);
+  await expect.poll(() => taskRunActive(tasks.getRun(id).state), { timeout }).toBe(false);
+  return tasks.getRun(id);
 }
 
 test("case-equivalent identities are rejected while original IDs survive restart and deletion", async () => {
@@ -74,12 +74,12 @@ test("case-equivalent identities are rejected while original IDs survive restart
       code: "conflict",
     });
     expect(() => f.tasks.get("reviewtask")).toThrow("does not exist");
-    expect(() => f.tasks.run("reviewrun")).toThrow("does not exist");
+    expect(() => f.tasks.getRun("reviewrun")).toThrow("does not exist");
     await f.tasks.close();
     restored = new ScheduledTasks(f.config);
     await restored.load();
     expect(restored.get("ReviewTask").id).toBe("ReviewTask");
-    expect(restored.run("ReviewRun").taskId).toBe("ReviewTask");
+    expect(restored.getRun("ReviewRun").taskId).toBe("ReviewTask");
     expect((await restored.output("ReviewRun", "stdout", 0, 32, signal)).text).toBe("result");
     await restored.delete("ReviewTask", undefined, signal);
     await expect(readFile(path)).rejects.toMatchObject({ code: "ENOENT" });
@@ -133,17 +133,17 @@ test("scheduled command admission, pause, immutable parameters, revision and bou
       await f.tasks.start(task.id, id, signal);
       await finished(f.tasks, id);
     }
-    expect(f.tasks.runs(task.id).total).toBe(2);
-    expect(() => f.tasks.run("first")).toThrow("does not exist or has been cleaned up");
+    expect(f.tasks.listRuns(task.id).total).toBe(2);
+    expect(() => f.tasks.getRun("first")).toThrow("does not exist or has been cleaned up");
     expect(f.tasks.get(task.id).state).toBe("paused");
     await f.tasks.update(task.id, f.tasks.get(task.id).revision, { command: "true" }, signal);
     for (const id of ["empty-first", "empty-second", "empty-third"]) {
       await f.tasks.start(task.id, id, signal);
       await finished(f.tasks, id);
     }
-    expect(f.tasks.runs(task.id).total).toBe(2);
-    expect(() => f.tasks.run("empty-first")).toThrow("does not exist or has been cleaned up");
-    expect(f.tasks.run("empty-second").output.stdoutBytes).toBe(0);
+    expect(f.tasks.listRuns(task.id).total).toBe(2);
+    expect(() => f.tasks.getRun("empty-first")).toThrow("does not exist or has been cleaned up");
+    expect(f.tasks.getRun("empty-second").output.stdoutBytes).toBe(0);
     await f.tasks.delete(task.id, undefined, signal);
     expect(f.tasks.list().total).toBe(0);
   } finally {
@@ -165,7 +165,7 @@ test("stored task results retain full Windows DWORD process IDs and exit codes",
     await writeFile(path, JSON.stringify(record));
     reloaded = new ScheduledTasks(f.config);
     await reloaded.load();
-    expect(reloaded.run("wide-run")).toMatchObject({
+    expect(reloaded.getRun("wide-run")).toMatchObject({
       pid: 0xffffffff,
       exitCode: 0xc0000005,
       state: "failed",
@@ -187,7 +187,7 @@ test("real one-shot timers skip overlaps and persist consumption independently o
     );
     await f.tasks.start(task.id, "manual", signal);
     await expect.poll(() => f.tasks.get(task.id).onceStatus).toBe("consumed");
-    expect(f.tasks.runs(task.id).items).toEqual(
+    expect(f.tasks.listRuns(task.id).items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ state: "skipped", reasonCode: "overlap" }),
       ]),
@@ -248,7 +248,7 @@ test("management of expired paused one-shot tasks keeps skipped history bounded"
           { name: `Paused ${index}` },
           signal,
         );
-      expect(f.tasks.runs("paused")).toMatchObject({
+      expect(f.tasks.listRuns("paused")).toMatchObject({
         total: 1,
         items: [{ state: "skipped", reasonCode: "missed" }],
       });
@@ -302,7 +302,7 @@ test("manual admission does not erase an already-due timer callback", async () =
     }
     await f.tasks.start("due", "manual", signal);
     await expect.poll(() => f.tasks.get("due").onceStatus).toBe("consumed");
-    expect(f.tasks.runs("due").items).toEqual(
+    expect(f.tasks.listRuns("due").items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ state: "skipped", reasonCode: "overlap", scheduledAt: at }),
       ]),
@@ -330,7 +330,7 @@ test("output shares a finite budget across streams, drains after truncation and 
     const bad = await finished(f.tasks, "bad");
     expect(bad.state).toBe("succeeded");
     expect(bad.output.error).toContain("EEXIST");
-    expect(() => f.tasks.run("large")).toThrow();
+    expect(() => f.tasks.getRun("large")).toThrow();
   } finally {
     await f.close();
   }
@@ -349,7 +349,7 @@ test("explicit stop kills a TERM-ignoring foreground child before releasing the 
       code: "busy",
     });
     await f.tasks.stop("running", signal);
-    expect(f.tasks.run("running").state).toBe("stopping");
+    expect(f.tasks.getRun("running").state).toBe("stopping");
     await expect(f.tasks.start("stop", "before-cleanup", signal)).rejects.toMatchObject({
       code: "busy",
     });
@@ -379,7 +379,7 @@ test("a crashed Shell does not release a still-running foreground process group"
       .toMatch(/\d+/);
     process.kill(run.pid!, "SIGKILL");
     await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(taskRunActive(f.tasks.run(run.id).state)).toBe(true);
+    expect(taskRunActive(f.tasks.getRun(run.id).state)).toBe(true);
     await expect(f.tasks.start("group", "blocked", signal)).rejects.toMatchObject({ code: "busy" });
     await f.tasks.stop(run.id, signal);
     expect((await finished(f.tasks, run.id)).state).toBe("stopped");
@@ -444,7 +444,7 @@ test("stop queued by the terminal notification cannot change a completed run bac
     await f.tasks.start("task", "run", signal);
     await expect.poll(() => stopped).toBeDefined();
     expect(await stopped).toMatchObject({ state: "succeeded", exitCode: 0 });
-    expect(f.tasks.run("run").state).toBe("succeeded");
+    expect(f.tasks.getRun("run").state).toBe("succeeded");
     expect(
       JSON.parse(await readFile(join(f.root, "tasks", "task.json"), "utf8")).runs[0].state,
     ).toBe("succeeded");
@@ -459,13 +459,13 @@ test("lowered byte limits preserve old output; actual shortening resets reads", 
     await f.tasks.create("limits", input(f.root, "head -c 64 /dev/zero"), signal);
     await f.tasks.start("limits", "one", signal);
     await finished(f.tasks, "one");
-    expect(f.tasks.run("one").output.truncated).toBe(false);
+    expect(f.tasks.getRun("one").output.truncated).toBe(false);
     await f.tasks.close();
     await truncate(join(f.root, "tasks", "one.stdout"), 32);
     const shortened = new ScheduledTasks(f.config);
     try {
       await shortened.load();
-      expect(shortened.run("one").output).toMatchObject({ stdoutBytes: 32, truncated: true });
+      expect(shortened.getRun("one").output).toMatchObject({ stdoutBytes: 32, truncated: true });
       expect(await shortened.output("one", "stdout", 64, 32, signal)).toMatchObject({
         offset: 0,
         nextOffset: 32,
@@ -488,8 +488,8 @@ test("lowered byte limits preserve old output; actual shortening resets reads", 
     });
     try {
       await smaller.load();
-      expect(smaller.runs("limits").total).toBe(1);
-      expect(smaller.run("one").output).toMatchObject({ stdoutBytes: 32, truncated: true });
+      expect(smaller.listRuns("limits").total).toBe(1);
+      expect(smaller.getRun("one").output).toMatchObject({ stdoutBytes: 32, truncated: true });
       expect((await readFile(join(f.root, "tasks", "one.stdout"))).length).toBe(32);
     } finally {
       await smaller.close();
@@ -555,9 +555,9 @@ test("active output prevents eviction that cannot reclaim a full run budget", as
       state: "succeeded",
       output: { stdoutBytes: 16, truncated: true },
     });
-    expect(f.tasks.run("old")).toEqual(old);
+    expect(f.tasks.getRun("old")).toEqual(old);
     expect((await readFile(join(f.root, "tasks", "old.stdout"))).length).toBe(20);
-    expect(f.tasks.run("running").state).toBe("running");
+    expect(f.tasks.getRun("running").state).toBe("running");
   } finally {
     await f.close();
   }
@@ -664,7 +664,7 @@ test("historical parameters are read without revalidating execution", async () =
     restored = new ScheduledTasks(f.config);
     await restored.load();
     expect(restored.status().ready).toBe(true);
-    expect(restored.run("shared").parameters).toMatchObject({
+    expect(restored.getRun("shared").parameters).toMatchObject({
       cwd: "historical display only",
       schedule: { expression: "not an executable cron" },
     });
@@ -674,7 +674,9 @@ test("historical parameters are read without revalidating execution", async () =
     await writeFile(path, JSON.stringify(value));
     restored = new ScheduledTasks(f.config);
     await restored.load();
-    expect(restored.run("shared").parameters.schedule).toEqual(value.runs[0].parameters.schedule);
+    expect(restored.getRun("shared").parameters.schedule).toEqual(
+      value.runs[0].parameters.schedule,
+    );
     await expect(
       restored.update(
         "one",
@@ -709,7 +711,7 @@ test("an unchanged missing cwd remains editable and a failed starting write neve
     await expect(f.tasks.start("task", "failed-write", signal)).rejects.toMatchObject({
       code: "EISDIR",
     });
-    expect(f.tasks.runs("task").total).toBe(0);
+    expect(f.tasks.listRuns("task").total).toBe(0);
     expect(f.tasks.status().active).toBe(0);
     await expect(readFile(join(f.root, "marker"))).rejects.toMatchObject({ code: "ENOENT" });
     await rm(path, { recursive: true });
@@ -751,7 +753,7 @@ test.each(["starting", "running"] as const)(
           outcome: "unknown",
           result: { runId: "run" },
         });
-        expect(f.tasks.run("run").pid).toBeGreaterThan(0);
+        expect(f.tasks.getRun("run").pid).toBeGreaterThan(0);
         await expect(f.tasks.stop("run", signal)).rejects.toMatchObject({ outcome: "unknown" });
       } else await f.tasks.start("task", "run", signal);
       expect((await finished(f.tasks, "run")).state).toBe(
@@ -830,7 +832,7 @@ test.each([false, true])(
       await once(child, "close");
       await f.tasks.load();
       expect(f.tasks.get("crash")).toMatchObject({ state: "paused", reviewRunId: "unknown" });
-      expect(f.tasks.run("unknown").state).toBe("unknown");
+      expect(f.tasks.getRun("unknown").state).toBe("unknown");
       await expect(f.tasks.start("crash", "blocked", signal)).rejects.toMatchObject({
         code: "busy",
       });
@@ -853,7 +855,7 @@ test.each([false, true])(
         { command: "printf after-review" },
         signal,
       );
-      expect(f.tasks.run("unknown").state).toBe("unknown");
+      expect(f.tasks.getRun("unknown").state).toBe("unknown");
       if (group) {
         process.kill(-group, "SIGKILL");
         group = undefined;

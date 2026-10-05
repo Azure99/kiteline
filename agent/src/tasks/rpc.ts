@@ -4,29 +4,18 @@ import {
   integer,
   record,
   string,
+  rpcMutates,
+  type RpcMethod,
   type RpcResult,
   type ScheduledTaskInput,
 } from "@kiteline/shared/protocol";
 import { ScheduledTasks } from "./index.js";
-import { previewSchedule, taskId } from "./schedule.js";
+import { previewSchedule, checkFileId } from "./schedule.js";
 
-export const scheduleMethods = [
-  "tasks.list",
-  "tasks.get",
-  "tasks.preview",
-  "tasks.create",
-  "tasks.update",
-  "tasks.pause",
-  "tasks.resume",
-  "tasks.acknowledge",
-  "tasks.delete",
-  "tasks.run",
-  "runs.list",
-  "runs.get",
-  "runs.output",
-  "runs.stop",
-] as const;
-export type ScheduleMethod = (typeof scheduleMethods)[number];
+export type ScheduleMethod = Extract<RpcMethod, `tasks.${string}` | `runs.${string}`>;
+export const scheduleMethods = Object.keys(rpcMutates).filter(
+  (method): method is ScheduleMethod => method.startsWith("tasks.") || method.startsWith("runs."),
+);
 
 export function isScheduleMethod(method: string): method is ScheduleMethod {
   return scheduleMethods.some((candidate) => candidate === method);
@@ -44,16 +33,16 @@ export function scheduleRpc(
   const acknowledge = () =>
     params.acknowledgeRunId === undefined
       ? undefined
-      : taskId(params.acknowledgeRunId, "acknowledgeRunId");
+      : checkFileId(params.acknowledgeRunId, "acknowledgeRunId");
   switch (method) {
     case "tasks.list":
       return tasks.list(offset()) satisfies RpcResult<typeof method>;
     case "tasks.get":
-      return tasks.get(taskId(params.taskId)) satisfies RpcResult<typeof method>;
+      return tasks.get(checkFileId(params.taskId)) satisfies RpcResult<typeof method>;
     case "tasks.preview":
       return previewSchedule(params.schedule, params.timezone) satisfies RpcResult<typeof method>;
     case "tasks.create":
-      return tasks.create(taskId(params.taskId), params.input, signal) satisfies Promise<
+      return tasks.create(checkFileId(params.taskId), params.input, signal) satisfies Promise<
         RpcResult<typeof method>
       >;
     case "tasks.update": {
@@ -62,42 +51,44 @@ export function scheduleRpc(
         if (!["name", "command", "schedule", "cwd", "timezone"].includes(key))
           throw new AppError("invalid_argument", `Unknown task field: ${key}`);
       return tasks.update(
-        taskId(params.taskId),
+        checkFileId(params.taskId),
         integer(params.expectedRevision, "expectedRevision", 1, Number.MAX_SAFE_INTEGER),
         changes as Partial<ScheduledTaskInput>,
         signal,
       ) satisfies Promise<RpcResult<typeof method>>;
     }
     case "tasks.pause":
-      return tasks.setPaused(taskId(params.taskId), true, signal) satisfies Promise<
+      return tasks.setPaused(checkFileId(params.taskId), true, signal) satisfies Promise<
         RpcResult<typeof method>
       >;
     case "tasks.resume":
-      return tasks.setPaused(taskId(params.taskId), false, signal) satisfies Promise<
+      return tasks.setPaused(checkFileId(params.taskId), false, signal) satisfies Promise<
         RpcResult<typeof method>
       >;
     case "tasks.acknowledge":
       return tasks.acknowledge(
-        taskId(params.taskId),
-        taskId(params.runId, "runId"),
+        checkFileId(params.taskId),
+        checkFileId(params.runId, "runId"),
         signal,
       ) satisfies Promise<RpcResult<typeof method>>;
     case "tasks.delete":
-      return tasks.delete(taskId(params.taskId), acknowledge(), signal) satisfies Promise<
+      return tasks.delete(checkFileId(params.taskId), acknowledge(), signal) satisfies Promise<
         RpcResult<typeof method>
       >;
     case "tasks.run":
       return tasks.start(
-        taskId(params.taskId),
-        taskId(params.runId, "runId"),
+        checkFileId(params.taskId),
+        checkFileId(params.runId, "runId"),
         signal,
       ) satisfies Promise<RpcResult<typeof method>>;
     case "runs.list":
-      return tasks.runs(taskId(params.taskId), offset()) satisfies RpcResult<typeof method>;
+      return tasks.listRuns(checkFileId(params.taskId), offset()) satisfies RpcResult<
+        typeof method
+      >;
     case "runs.get":
-      return tasks.run(taskId(params.runId, "runId")) satisfies RpcResult<typeof method>;
+      return tasks.getRun(checkFileId(params.runId, "runId")) satisfies RpcResult<typeof method>;
     case "runs.stop":
-      return tasks.stop(taskId(params.runId, "runId"), signal) satisfies Promise<
+      return tasks.stop(checkFileId(params.runId, "runId"), signal) satisfies Promise<
         RpcResult<typeof method>
       >;
     case "runs.output": {
@@ -105,7 +96,7 @@ export function scheduleRpc(
       if (stream !== "stdout" && stream !== "stderr")
         throw new AppError("invalid_argument", "stream must be stdout or stderr");
       return tasks.output(
-        taskId(params.runId, "runId"),
+        checkFileId(params.runId, "runId"),
         stream,
         offset(),
         params.limit === undefined

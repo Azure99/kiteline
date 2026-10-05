@@ -19,6 +19,24 @@ import { checkTaskInput, nextOccurrence, previewSchedule } from "./schedule.js";
 import { TaskProcess } from "./process.js";
 import { taskRecord, type TaskRecord } from "./record.js";
 
+const outputSuffix = /\.(stdout|stderr)$/;
+
+function outputName(id: string, stream: "stdout" | "stderr") {
+  return `${id}.${stream}`;
+}
+
+function removableRuns(record: TaskRecord) {
+  return record.runs.filter(
+    (run) => !taskRunActive(run.state) && run.id !== record.task.reviewRunId,
+  );
+}
+
+function skipRun(run: TaskRun, reason: "missed" | "overlap" | "capacity") {
+  run.state = "skipped";
+  run.reasonCode = reason;
+  run.endedAt = new Date().toISOString();
+}
+
 export class ScheduledTasks {
   private readonly directory: string;
   private readonly records = new Map<string, TaskRecord>();
@@ -46,7 +64,7 @@ export class ScheduledTasks {
     return join(this.directory, `${id}.json`);
   }
   private outputPath(id: string, stream: "stdout" | "stderr") {
-    return join(this.directory, `${id}.${stream}`);
+    return join(this.directory, outputName(id, stream));
   }
 
   private serial<T>(action: () => Promise<T>, signal?: AbortSignal): Promise<T> {
@@ -151,7 +169,7 @@ export class ScheduledTasks {
         if (!(await lstat(source)).isFile()) throw new Error("Task state is not a regular file");
         candidates.push(taskRecord(await readJson(source), file));
       }
-      for (const file of files.filter((name) => /\.(stdout|stderr)$/.test(name))) {
+      for (const file of files.filter((name) => outputSuffix.test(name))) {
         source = join(this.directory, file);
         if (!(await lstat(source)).isFile()) throw new Error("Output is not a regular file");
         const output = await open(source, "r");
@@ -167,7 +185,7 @@ export class ScheduledTasks {
         for (const run of record.runs) {
           for (const stream of ["stdout", "stderr"] as const) {
             const key = stream === "stdout" ? "stdoutBytes" : "stderrBytes";
-            const bytes = outputSizes.get(`${run.id}.${stream}`) ?? 0;
+            const bytes = outputSizes.get(outputName(run.id, stream)) ?? 0;
             if (bytes < run.output[key]) run.output.truncated = true;
             run.output[key] = bytes;
           }
@@ -189,7 +207,7 @@ export class ScheduledTasks {
       return;
     }
     for (const [file, bytes] of outputSizes) {
-      const id = file.replace(/\.(stdout|stderr)$/, "");
+      const id = file.replace(outputSuffix, "");
       this.outputSize(id, bytes);
     }
     for (const candidate of candidates) this.records.set(candidate.task.id, candidate);
@@ -204,8 +222,8 @@ export class ScheduledTasks {
     for (const file of files) {
       if (file.endsWith(".tmp"))
         await this.cleanup(() => rm(join(this.directory, file), { force: true }));
-      if (/\.(stdout|stderr)$/.test(file)) {
-        const id = file.replace(/\.(stdout|stderr)$/, "");
+      if (outputSuffix.test(file)) {
+        const id = file.replace(outputSuffix, "");
         if (!retained.has(id)) this.residuals.add(id);
       }
     }
@@ -266,7 +284,7 @@ export class ScheduledTasks {
   get(id: string) {
     return structuredClone(this.record(id).task);
   }
-  runs(id: string, offset = 0) {
+  listRuns(id: string, offset = 0) {
     const runs = this.record(id).runs.toReversed();
     return {
       items: runs.slice(offset, offset + taskLimits.pageEntries).map(taskRunSummary),
@@ -274,7 +292,7 @@ export class ScheduledTasks {
       total: runs.length,
     };
   }
-  run(id: string): TaskRun {
+  getRun(id: string): TaskRun {
     const run = structuredClone(this.findRun(id).run);
     const active = this.executions.get(id);
     if (active) run.output = { ...active.process.output };
@@ -494,11 +512,7 @@ export class ScheduledTasks {
       return;
     record.task.onceStatus = "missed";
     const run = this.newRun(record, randomUUID(), record.task.schedule.at);
-    Object.assign(run, {
-      state: "skipped",
-      reasonCode: "missed",
-      endedAt: new Date().toISOString(),
-    });
+    skipRun(run, "missed");
     record.runs.push(run);
   }
 
@@ -546,12 +560,7 @@ export class ScheduledTasks {
       if (record.task.schedule.kind === "once")
         record.task.onceStatus = reason === "missed" ? "missed" : "consumed";
     }
-    if (reason)
-      Object.assign(run, {
-        state: "skipped",
-        reasonCode: reason,
-        endedAt: new Date().toISOString(),
-      });
+    if (reason) skipRun(run, reason);
     record.runs.push(run);
     if (scheduledAt) this.nextTime(record);
     await this.save(record);
@@ -588,7 +597,7 @@ export class ScheduledTasks {
         exitCode: null,
       });
       await this.saveKnown(record);
-      return this.run(runId);
+      return this.getRun(runId);
     }
     const finished = process.done
       .then((result) =>
@@ -631,7 +640,7 @@ export class ScheduledTasks {
         detail.details,
       );
     }
-    return this.run(runId);
+    return this.getRun(runId);
   }
 
   stop(id: string, signal: AbortSignal) {
@@ -639,7 +648,7 @@ export class ScheduledTasks {
       const record = structuredClone(this.findRun(id).record);
       const run = record.runs.find((item) => item.id === id)!;
       const active = this.executions.get(id);
-      if (!active || !taskRunActive(run.state)) return this.run(id);
+      if (!active || !taskRunActive(run.state)) return this.getRun(id);
       run.state = "stopping";
       const stopped = active.process.stop("requested_stop");
       void stopped.catch((error: unknown) =>
@@ -655,7 +664,7 @@ export class ScheduledTasks {
           detail.details,
         );
       }
-      return this.run(id);
+      return this.getRun(id);
     }, signal);
   }
 
@@ -667,7 +676,7 @@ export class ScheduledTasks {
     signal: AbortSignal,
   ): Promise<TaskOutput> {
     signal.throwIfAborted();
-    const run = this.run(id);
+    const run = this.getRun(id);
     const finished = !taskRunActive(run.state);
     let file;
     try {
@@ -753,9 +762,7 @@ export class ScheduledTasks {
 
   private async prune(id: string) {
     const record = this.record(id);
-    const ended = record.runs.filter(
-      (run) => !taskRunActive(run.state) && run.id !== record.task.reviewRunId,
-    );
+    const ended = removableRuns(record);
     for (const run of ended.slice(
       0,
       Math.max(0, ended.length - this.config.limits.taskHistoryRuns),
@@ -764,9 +771,7 @@ export class ScheduledTasks {
   }
 
   private async makeOutputRoom() {
-    const ended = [...this.records.values()].flatMap((record) =>
-      record.runs.filter((run) => !taskRunActive(run.state) && run.id !== record.task.reviewRunId),
-    );
+    const ended = [...this.records.values()].flatMap(removableRuns);
     const target = Math.min(
       this.config.limits.taskOutputBytes,
       this.config.limits.taskOutputTotalBytes,
