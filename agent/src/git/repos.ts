@@ -1,5 +1,5 @@
 import { agentLimits } from "../limits.js";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { isUtf8 } from "node:buffer";
 import type { Dir } from "node:fs";
 import { opendir, stat } from "node:fs/promises";
@@ -11,7 +11,7 @@ import {
   type Repo,
   type RepoDiscovery,
 } from "@kiteline/shared/protocol";
-import { CursorBudget } from "../cursor-budget.js";
+import { CursorBudget, CursorTable } from "../cursor-budget.js";
 import type { MetadataStore } from "../metadata.js";
 import { commandLine, git } from "./process.js";
 import { entryInfo, realPath, sameObject } from "../files/paths.js";
@@ -21,13 +21,7 @@ interface Scan {
   root: string;
   stack: { path: string; checked: boolean; directory?: Dir }[];
   pending?: Repo | PathError;
-  busy: boolean;
-  release: () => void;
-  timer: NodeJS.Timeout;
-  controller: AbortController;
   found: Set<string>;
-  reading?: Promise<void>;
-  closing?: Promise<void>;
 }
 async function exists(path: string) {
   try {
@@ -58,11 +52,23 @@ export class Repositories {
   onObserved?: (workspaceId: string, repo: Repo) => void;
   onComplete?: (workspaceId: string, repoIds: Set<string>) => void;
   private owners = new Map<string, Set<string>>();
-  private scans = new Map<string, Scan>();
+  private scans: CursorTable<Scan>;
   constructor(
     private metadata: MetadataStore,
-    private budget: CursorBudget,
-  ) {}
+    budget: CursorBudget,
+  ) {
+    this.scans = new CursorTable(
+      budget,
+      async (scan) => {
+        await Promise.all(scan.stack.map((frame) => frame.directory?.close().catch(() => {})));
+      },
+      {
+        expired: "Repository scan has expired; scan again",
+        busy: "Repository scan is running",
+        ended: "Repository scan has ended",
+      },
+    );
+  }
   async inspect(path: string, workspaceRoot: string, signal: AbortSignal): Promise<Repo> {
     const root = await realPath(path);
     const readPath = async (option: string) =>
@@ -118,33 +124,19 @@ export class Repositories {
     signal: AbortSignal,
   ): Promise<RepoDiscovery> {
     const root = this.metadata.workspace(workspaceId).path;
-    const id = token ?? randomUUID();
-    let scan = this.scans.get(id);
-    if (token && (!scan || scan.closing || scan.workspaceId !== workspaceId || scan.root !== root))
-      throw new AppError("conflict", "Repository scan has expired; scan again");
-    if (!scan) {
-      const release = this.budget.reserve();
-      scan = {
+    const page = this.scans.acquire(
+      token,
+      () => ({
         workspaceId,
         root,
         stack: [{ path: root, checked: false }],
-        busy: false,
-        release,
-        controller: new AbortController(),
         found: new Set(),
-        timer: setTimeout(() => {
-          void this.release(id);
-        }, agentLimits.cursorLifetime),
-      };
-      this.scans.set(id, scan);
-    }
-    if (scan.busy) throw new AppError("busy", "Repository scan is running");
-    scan.busy = true;
-    signal = AbortSignal.any([signal, scan.controller.signal]);
-    let finishRead!: () => void;
-    scan.reading = new Promise<void>((resolve) => {
-      finishRead = resolve;
-    });
+      }),
+      signal,
+      (scan) => scan.workspaceId === workspaceId && scan.root === root,
+    );
+    const { id, value: scan } = page;
+    signal = page.signal;
     let keep = false;
     const result: RepoDiscovery = { repos: [], issues: [], complete: false };
     let bytes = 256,
@@ -155,13 +147,13 @@ export class Repositories {
       if (size + 256 > agentLimits.resultBytes)
         throw new AppError("limit_exceeded", "Repository entry exceeds the size limit");
       if (bytes + size > agentLimits.resultBytes) {
-        scan!.pending = item;
+        scan.pending = item;
         return false;
       }
       bytes += size;
       if ("id" in item) result.repos.push(item);
       else result.issues.push(item);
-      scan!.pending = undefined;
+      scan.pending = undefined;
       return true;
     };
     try {
@@ -265,7 +257,6 @@ export class Repositories {
         }
       }
       signal.throwIfAborted();
-      scan.timer.refresh();
       result.complete = scan.stack.length === 0 && !scan.pending;
       if (result.complete) {
         this.owners.set(workspaceId, scan.found);
@@ -275,37 +266,22 @@ export class Repositories {
       keep = !result.complete;
       return result;
     } finally {
-      scan.busy = false;
-      finishRead();
-      if (!keep || signal.aborted) await this.release(id);
+      await page.finish(keep);
     }
   }
-  async release(id: string) {
-    const scan = this.scans.get(id);
-    if (!scan) return;
-    scan.controller.abort(new AppError("cancelled", "Repository scan has ended"));
-    clearTimeout(scan.timer);
-    scan.closing ??= (async () => {
-      await scan.reading;
-      await Promise.all(scan.stack.map((frame) => frame.directory?.close().catch(() => {})));
-      this.scans.delete(id);
-      scan.release();
-    })();
-    await scan.closing;
+  release(id: string) {
+    return this.scans.release(id);
   }
   async retain(workspaceIds: Set<string>) {
     for (const id of this.owners.keys()) if (!workspaceIds.has(id)) this.owners.delete(id);
     this.prune();
-    const closing = [...this.scans]
-      .filter(([, scan]) => !workspaceIds.has(scan.workspaceId))
-      .map(([id]) => this.release(id));
-    await Promise.all(closing);
+    await this.scans.close((scan) => !workspaceIds.has(scan.workspaceId));
   }
   async close() {
-    const closing = [...this.scans.keys()].map((id) => this.release(id));
+    const closing = this.scans.close();
     this.known.clear();
     this.owners.clear();
-    await Promise.all(closing);
+    await closing;
   }
   private remember(workspaceId: string, repo: Repo) {
     let owned = this.owners.get(workspaceId);

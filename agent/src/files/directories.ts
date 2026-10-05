@@ -1,41 +1,36 @@
 import { agentLimits } from "../limits.js";
-import { randomUUID } from "node:crypto";
 import { opendir, mkdir, stat } from "node:fs/promises";
 import type { BigIntStats, Dir, Dirent } from "node:fs";
 import { basename, dirname, join, posix } from "node:path";
 import { AppError, type DirectoryListing, type Entry } from "@kiteline/shared/protocol";
 import { publish } from "./publish.js";
 import { devicePath, entryName, readEntry, realPath, sameObject } from "./paths.js";
-import { CursorBudget } from "../cursor-budget.js";
+import { CursorBudget, CursorTable } from "../cursor-budget.js";
 
 interface Cursor {
   path: string;
   entryParent?: string;
   directory?: Dir;
   carry: Dirent | null;
-  timer: NodeJS.Timeout;
-  busy: boolean;
   info?: BigIntStats;
-  release: () => void;
-  controller: AbortController;
-  reading?: Promise<void>;
-  closing?: Promise<void>;
 }
 export class Directories {
-  private cursors = new Map<string, Cursor>();
-  constructor(private budget = new CursorBudget()) {}
-  async release(id: string) {
-    const cursor = this.cursors.get(id);
-    if (!cursor) return;
-    clearTimeout(cursor.timer);
-    cursor.controller.abort(new AppError("cancelled", "Directory listing has ended"));
-    cursor.closing ??= (async () => {
-      await cursor.reading;
-      await cursor.directory?.close().catch(() => {});
-      this.cursors.delete(id);
-      cursor.release();
-    })();
-    await cursor.closing;
+  private cursors: CursorTable<Cursor>;
+  constructor(budget = new CursorBudget()) {
+    this.cursors = new CursorTable(
+      budget,
+      async (cursor) => {
+        await cursor.directory?.close().catch(() => {});
+      },
+      {
+        expired: "Directory listing has changed or expired; refresh",
+        busy: "This directory page is being read",
+        ended: "Directory listing has ended",
+      },
+    );
+  }
+  release(id: string) {
+    return this.cursors.release(id);
   }
   async list(
     path: string,
@@ -46,31 +41,9 @@ export class Directories {
     devicePath(path);
     const relativeEntries = entryParent !== undefined;
     signal?.throwIfAborted();
-    const id = token ?? randomUUID();
-    let cursor = this.cursors.get(id);
-    if (token && (!cursor || cursor.closing))
-      throw new AppError("conflict", "Directory listing has changed or expired; refresh");
-    if (!cursor) {
-      const release = this.budget.reserve();
-      cursor = {
-        path,
-        entryParent,
-        carry: null,
-        busy: false,
-        release,
-        controller: new AbortController(),
-        timer: setTimeout(() => void this.release(id), agentLimits.cursorLifetime),
-      };
-      this.cursors.set(id, cursor);
-    }
-    if (cursor.busy) throw new AppError("busy", "This directory page is being read");
-    cursor.busy = true;
-    cursor.timer.refresh();
-    signal = AbortSignal.any([cursor.controller.signal, ...(signal ? [signal] : [])]);
-    let finishRead!: () => void;
-    cursor.reading = new Promise<void>((resolve) => {
-      finishRead = resolve;
-    });
+    const page = this.cursors.acquire(token, () => ({ path, entryParent, carry: null }), signal);
+    const { id, value: cursor } = page;
+    signal = page.signal;
     let more = false;
     const items: Entry[] = [];
     try {
@@ -133,9 +106,7 @@ export class Directories {
       signal.throwIfAborted();
       more = !!cursor.carry;
     } finally {
-      cursor.busy = false;
-      finishRead();
-      if (!more || signal.aborted) await this.release(id);
+      await page.finish(more);
     }
     items.sort(
       (a, b) =>
@@ -158,7 +129,7 @@ export class Directories {
       return { path: target };
     }, signal);
   }
-  async close() {
-    await Promise.all([...this.cursors.keys()].map((id) => this.release(id)));
+  close() {
+    return this.cursors.close();
   }
 }
