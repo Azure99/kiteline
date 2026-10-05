@@ -19,6 +19,7 @@ import { Terminal } from "@xterm/xterm";
 import { ErrorNotice } from "../components/error-notice";
 import { TouchControls } from "./touch-controls";
 import { useMobile } from "../lib/use-mobile";
+import { cn } from "../lib/utils";
 import { terminalKeyboard } from "./keyboard-input";
 import { releasedModifiers, type Modifiers } from "./auxiliary-input";
 import { TerminalSearch } from "./terminal-search";
@@ -284,11 +285,17 @@ export function TerminalView({
           )}
         </div>
       )}
-      <div className="terminal-viewport relative flex min-h-0 flex-1">
+      <div
+        className={cn(
+          "terminal-viewport relative flex min-h-0 flex-1",
+          state.status === "ended" && "flex-col",
+        )}
+      >
         <div ref={element} className="terminal-canvas min-h-0 min-w-0 flex-1" />
         {searchOpen && (
           <TerminalSearch
             terminal={terminal}
+            ended={state.status === "ended"}
             inputRef={searchInput}
             onClose={() => {
               setSearchOpen(false);

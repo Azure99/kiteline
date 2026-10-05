@@ -6,13 +6,16 @@ import type { Terminal } from "@xterm/xterm";
 import { IconButton } from "../components/icon-button";
 import { Input } from "../components/ui/input";
 import { revealTerminalSelection } from "./viewport";
+import { cn } from "../lib/utils";
 
 export function TerminalSearch({
   terminal,
+  ended,
   inputRef,
   onClose,
 }: {
   terminal?: Terminal;
+  ended: boolean;
   inputRef: RefObject<HTMLInputElement | null>;
   onClose(): void;
 }) {
@@ -73,7 +76,12 @@ export function TerminalSearch({
     <div
       role="search"
       aria-label={t(($) => $.terminal.search)}
-      className="absolute top-1 right-1 z-20 w-[calc(100%_-_8px)] max-w-sm rounded border border-border bg-background p-1 text-foreground shadow-md"
+      className={cn(
+        "z-20 max-w-sm rounded border border-border bg-background p-1 text-foreground shadow-md",
+        ended
+          ? "order-first w-full shrink-0 self-end"
+          : "absolute top-1 right-1 w-[calc(100%_-_8px)]",
+      )}
     >
       <div className="flex items-center">
         <Input
