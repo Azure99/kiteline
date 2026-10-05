@@ -54,7 +54,7 @@ docker run --privileged --rm tonistiigi/binfmt --install arm64
 
 只有 Windows 组件中的 tmux 步骤需要 Windows x64 主机：
 
-- x64 版 Node 22.23.3。
+- x64 版 Node，版本使用 [`package.json`](../../package.json) 的 `engines.node`。
 - 7-Zip，安装在默认位置 `%ProgramFiles%\7-Zip\7z.exe`，用于解开 MSYS2 引导归档的 XZ 压缩层。
 - 系统自带的 `%SystemRoot%\System32\tar.exe`，用于解开归档。
 
@@ -63,7 +63,7 @@ docker run --privileged --rm tonistiigi/binfmt --install arm64
 ### macOS
 
 - Command Line Tools for Xcode：`xcode-select --install`。构建脚本检查 `com.apple.pkg.CLTools_Executables` 安装记录，只安装 Xcode 时构建失败。
-- 与目标架构一致的 Node 22.23.3（Apple Silicon 上使用 arm64 版 Node），以及 pnpm 和 Git。
+- 与目标架构一致的 Node（Apple Silicon 上使用 arm64 版），版本使用 [`package.json`](../../package.json) 的 `engines.node`；另需 pnpm 和 Git。
 
 ### 缓存与清理
 
@@ -164,11 +164,7 @@ Windows 组件目录包含 Node、Windows 原生 addon `kiteline-windows.node`�
 
 ### 何时重建
 
-Windows 组件的输入记录包含以下文件的 SHA-256，其中任何一个变化都要重新执行 `prepare`、`addon`、`tmux` 和 `assemble`：
-
-- `release/inputs.json`（整个文件，包括只影响 Linux 的字段）、`release/agent-windows.json`、`release/ubuntu.sources`、`release/Dockerfile.windows-native`
-- `scripts/build-windows-components.mjs`、`scripts/release-inputs.mjs`、`scripts/build-windows-tmux.sh`、`scripts/build-windows-addon.sh`、`scripts/prepare-windows-notices.mjs`、`scripts/windows-components.ts`
-- `native/tmux/paste.patch`、`native/tmux/cygwin-outfd.patch`、`native/tmux/tmux.terminfo`、`native/windows/` 下的 `.cc`、`.hpp`、`.def` 文件
+Windows 组件的输入记录由 [`scripts/build-windows-components.mjs`](../../scripts/build-windows-components.mjs) 的 `inputs()` 和 `sourceFiles` 定义，其中 `release/inputs.json` 按整个文件计入摘要。输入记录变化后，重新执行 `prepare`、`addon`、`tmux` 和 `assemble`。
 
 ## 构建 macOS 组件
 
@@ -193,7 +189,7 @@ pnpm package agent "macos-$ARCH" --macos-components="/var/tmp/kiteline-mac-compo
 
 ### 何时重建
 
-macOS 组件的输入记录包含 `release/inputs.json` 中的 `node`、对应架构的 `nodeArchives.*.architecture`、`tmux`、`libevent` 和 `ripgrep.version`，以及以下文件的 SHA-256：`release/agent-macos.json`、`scripts/build-macos-components.mjs`、`scripts/release-inputs.mjs`、`scripts/build-macos-native.sh`、`native/macos/rename-noreplace.c`、`native/macos/entry-name.c`、`native/tmux/paste.patch`、`native/tmux/tmux.terminfo`。只修改 `inputs.json` 的其他字段不会使 macOS 组件过期。
+macOS 组件的输入记录由 [`scripts/build-macos-components.mjs`](../../scripts/build-macos-components.mjs) 的 `sharedInputs()`、`inputs()` 和 `sourceFiles` 定义。`release/inputs.json` 只计入实际消费的字段，修改其他字段不会使组件过期；输入记录变化后重新执行 `prepare` 和 `build`。
 
 ## 完整发布构建
 
@@ -372,7 +368,7 @@ git push origin v0.2.6
 
 ## 发布流程
 
-1. 在 PR 中把 `shared/src/version.json` 的 `version` 设为新版本（例如 `0.2.6`），合并到 main。
+1. 在 PR 中把 `shared/src/version.json` 的 `version` 设为新版本（例如 `0.2.6`），同时更新 `README.md` 和 `README.en.md` 快速开始中的示例版本，合并到 main。
 2. 在 main 的该提交上建立并推送 tag。tag 必须是 `vX.Y.Z` 形式，与该提交的 `version.json` 一致，且提交属于 main 的历史：
 
    ```sh
@@ -383,8 +379,9 @@ git push origin v0.2.6
 
 3. 等待 tag 触发的 `CI` 运行完成。成功后 Release 草稿包含全部附件和 `delivery.json`，GHCR 上有 `candidate-v0.2.6-<运行 ID>` 镜像。
 4. 用草稿中的发布包和候选镜像，按[手工验证](setup.md#手工验证)在受影响的目标环境中测试。发现问题时修复并提交，然后按[失败后的处理](#失败后的处理)重新生成候选（tag 需要指向新的提交）。
-5. 在 Actions 页面对 main 运行 `CI`，`mode` 选 `publish`，`tag` 填 `v0.2.6`。运行成功即完成发布。
-6. 确认 Release 已公开，并检查镜像：
+5. 最终候选验证完成后，在 Release 草稿现有的 Source 和 Build 信息下填写本版本的变更说明，至少列出 `deploy/` 文件、环境变量、配置的变化，以及升级需要的手工步骤。重新生成候选会重置草稿正文；重新验证后再填写说明。
+6. 在 Actions 页面对 main 运行 `CI`，`mode` 选 `publish`，`tag` 填 `v0.2.6`。运行成功即完成发布。
+7. 确认 Release 已公开，并检查镜像：
 
    ```sh
    docker buildx imagetools inspect ghcr.io/azure99/kiteline:0.2.6
@@ -495,6 +492,10 @@ rg 版本必须在三处保持相同：`release/inputs.json` 的 `ripgrep.versio
 ### xterm.js
 
 工作台使用打过补丁的 `@xterm/xterm`。补丁文件是 `web/patches/@xterm__xterm@6.1.0-beta.304.patch`，在 `pnpm-workspace.yaml` 的 `patchedDependencies` 中登记，包含可读的 TypeScript 修改和工作台加载的 `lib/xterm.mjs`。recorder 使用 `@xterm/headless` 和 `@xterm/addon-serialize`，`shared` 使用 `@xterm/addon-unicode11`，这些版本在组包时写入 agent 的 `identity.json`。升级时把 xterm.js 相关的包作为一组升级，重新生成补丁，并重新测试终端的显示、选择、恢复和输入。
+
+当前 `@xterm/xterm@6.1.0-beta.304` 与 `@xterm/headless@6.1.0-beta.303` 来自同一上游源码提交。升级时联合核对两端及 addon 的配套，并检查 [`shared/src/terminal/index.ts`](../../shared/src/terminal/index.ts) 使用的 `_core`、buffer、输入处理器、解析器和鼠标状态成员，以及 [`web/src/terminal/auxiliary-input.ts`](../../web/src/terminal/auxiliary-input.ts) 引用的私有键盘编码；具体适配见[终端组件](../design/terminal.md#组件)。
+
+补丁中的 `DomRenderer.ts` 和 `WidthCache.ts` 修改按设备像素比测量字形宽度。`Event.ts` 的非空断言只用于类型检查：辅助输入导入 xterm 私有源码后，项目的 `noUncheckedIndexedAccess` 也会检查这些源码。重做补丁时同时核对此项；它与 DPR 的运行时修改是两项独立内容。
 
 重新生成补丁的步骤：
 
