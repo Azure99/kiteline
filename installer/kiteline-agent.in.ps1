@@ -245,7 +245,7 @@ __KITELINE_NATIVE_SOURCE__
     function Invoke-KitelineNode([string]$Directory, [string[]]$NodeArguments) {
         $rootJson = ConvertTo-Json $Directory -Compress
         $saved = @{}
-        foreach ($key in @('NODE_OPTIONS','NODE_PATH','NODE_EXTRA_CA_CERTS','NODE_ICU_DATA','NODE_REDIRECT_WARNINGS','NODE_V8_COVERAGE','OPENSSL_CONF')) {
+        foreach ($key in __KITELINE_NODE_ENVIRONMENT_KEYS__) {
             $value = [Environment]::GetEnvironmentVariable($key)
             if ($null -ne $value) { $saved[$key] = $value }
         }
@@ -372,11 +372,11 @@ import(url.pathToFileURL(process.argv[1]).href).catch(error=>{console.error(erro
                     [IO.File]::Delete($recordFile)
                     if ($options['--purge-state'] -and $null -ne $state) {
                         # Match the explicit uninstall policy in agent/src/install/commands.ts; names live in agent/src/config.ts.
-                        foreach ($name in @('agent.json', 'connection.json', 'config.json', 'temporary-files.json', 'tasks')) {
+                        foreach ($name in __KITELINE_STATE_FILES__) {
                             $path = Join-Path $installation.dataDir $name
                             if (-not (Test-KitelineExists $path)) { continue }
                             Assert-KitelineNoReparse $path
-                            if ($name -eq 'tasks') { Remove-KitelineTree $path } else { [IO.File]::Delete($path) }
+                            if ($name -eq __KITELINE_TASKS_DIRECTORY__) { Remove-KitelineTree $path } else { [IO.File]::Delete($path) }
                         }
                     }
                     Remove-KitelineTree $previous

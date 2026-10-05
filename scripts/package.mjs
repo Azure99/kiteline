@@ -322,7 +322,13 @@ try {
   mkdirSync(join(destination, "bin"));
   const launcher = join(destination, "bin", `kiteline-${kind}${windowsAgent ? ".ps1" : ""}`);
   if (windowsAgent) {
-    const launchers = windowsAgentLaunchers(windowsRuntimeFiles.map(windowsComponentPath));
+    const { stateFiles } = await import("../agent/dist/config.js");
+    const { nodeEnvironmentKeys } = await import("../shared/dist/terminal/node.js");
+    const launchers = windowsAgentLaunchers({
+      runtimeFiles: windowsRuntimeFiles.map(windowsComponentPath),
+      stateFiles,
+      nodeEnvironmentKeys,
+    });
     writeFileSync(launcher, launchers.portable);
     writeFileSync(join(destination, "bin/kiteline-agent-installed.ps1"), launchers.installed);
   } else if (kind === "agent") {

@@ -2,6 +2,16 @@
 
 本文写给修改 `native/`、`installer/`、`shared/src/windows/` 或平台分支代码的人，说明 agent 在 Linux、macOS 和 Windows 上使用的组件和实现差异；三个平台共用的安装、锁和运行规则见 [agent 安装与运行](agent-lifecycle.md)。支持的系统见[接入设备](../guide/devices.md#支持的系统与准备)，组件的构建见[构建与发布](../development/release.md)。
 
+## 安装入口的生成
+
+`installer/` 中的文件按以下三种方式进入运行环境：
+
+| 类别     | 文件                                                              | 渲染者、时机与去向                                                                                                                                                                                                              |
+| -------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 组包模板 | `kiteline-agent.in.sh`、`kiteline-agent.in.ps1`、`launcher.in.cs` | [`scripts/agent-launcher.ts`](../../scripts/agent-launcher.ts) 在组包时生成 portable/installed 两个 agent 入口；C# 内嵌在 PowerShell 中，在入口运行时由 `Add-Type` 编译。Windows 的状态文件和 Node 环境键来自构建后的现有模块。 |
+| 请求模板 | `connect.in.sh`、`upgrade.in.sh`、`windows-entry.in.ps1`          | [`server/src/agent-installation.ts`](../../server/src/agent-installation.ts) 在请求时填入版本、入口地址与模式，返回 `/connect.sh`、`/upgrade.sh`、`/connect.ps1` 或 `/upgrade.ps1`。                                            |
+| 原样分发 | `install.sh`、`install.ps1`、`kiteline-server`                    | [`scripts/package.mjs`](../../scripts/package.mjs) 将安装器复制到 server 的 downloads，供 `/install.sh`、`/install.ps1` 分发；`kiteline-server` 复制到 server 包的 `bin/kiteline-server`。                                      |
+
 ## Linux
 
 ### 随包组件

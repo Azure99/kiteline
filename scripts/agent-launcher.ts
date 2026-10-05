@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
-// The shell parses the whole function before maintenance replaces or removes the launcher.
 const template = readFileSync(
   new URL("../installer/kiteline-agent.in.sh", import.meta.url),
   "utf8",
@@ -33,7 +32,15 @@ export function agentLauncher(
   );
 }
 
-export function windowsAgentLaunchers(runtimeFiles: readonly string[]) {
+export function windowsAgentLaunchers({
+  runtimeFiles,
+  stateFiles,
+  nodeEnvironmentKeys,
+}: {
+  runtimeFiles: readonly string[];
+  stateFiles: Record<string, string> & { tasks: string };
+  nodeEnvironmentKeys: readonly string[];
+}) {
   const nativeSource = readFileSync(
     new URL("../installer/launcher.in.cs", import.meta.url),
     "utf8",
@@ -56,12 +63,16 @@ export function windowsAgentLaunchers(runtimeFiles: readonly string[]) {
     "dist/native/identity.json",
     ...runtimeFiles,
   ];
-  const list = "@(" + required.map((value) => `'${value.replaceAll("'", "''")}'`).join(",") + ")";
+  const literal = (value: string) => `'${value.replaceAll("'", "''")}'`;
+  const list = (values: readonly string[]) => "@(" + values.map(literal).join(",") + ")";
   const template = readFileSync(
     new URL("../installer/kiteline-agent.in.ps1", import.meta.url),
     "utf8",
   )
-    .replace("__KITELINE_REQUIRED_FILES__", list)
+    .replace("__KITELINE_REQUIRED_FILES__", list(required))
+    .replace("__KITELINE_STATE_FILES__", list(Object.values(stateFiles)))
+    .replace("__KITELINE_TASKS_DIRECTORY__", literal(stateFiles.tasks))
+    .replace("__KITELINE_NODE_ENVIRONMENT_KEYS__", list(nodeEnvironmentKeys))
     .replace("__KITELINE_NATIVE_SOURCE__", nativeSource)
     .replaceAll("__KITELINE_LAUNCHER_TYPE__", type);
   return {

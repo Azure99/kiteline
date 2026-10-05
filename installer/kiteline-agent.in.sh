@@ -1,4 +1,5 @@
 #!/bin/sh
+# The shell parses the whole function before maintenance replaces or removes the launcher.
 kiteline_main() {
   __KITELINE_ROOT__
   kiteline_flock=__KITELINE_FLOCK__

@@ -25,15 +25,19 @@ export function msysPath(path: string) {
 export function shellWords(args: string[]) {
   return args.map((value) => "'" + value.replaceAll("'", "'\\''") + "'").join(" ");
 }
+export const nodeEnvironmentKeys = [
+  "NODE_OPTIONS",
+  "NODE_PATH",
+  "NODE_EXTRA_CA_CERTS",
+  "NODE_ICU_DATA",
+  "NODE_REDIRECT_WARNINGS",
+  "NODE_V8_COVERAGE",
+  "OPENSSL_CONF",
+];
 export function internalNodeEnvironment() {
   const environment = { ...process.env };
   for (const key of Object.keys(environment))
-    if (
-      /^(NODE_OPTIONS|NODE_PATH|NODE_EXTRA_CA_CERTS|NODE_ICU_DATA|NODE_REDIRECT_WARNINGS|NODE_V8_COVERAGE|OPENSSL_CONF)$/i.test(
-        key,
-      )
-    )
-      delete environment[key];
+    if (nodeEnvironmentKeys.includes(key.toUpperCase())) delete environment[key];
   return environment;
 }
 export function tmuxEnvironment() {
