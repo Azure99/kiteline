@@ -284,27 +284,63 @@
   "sources": {
     "bash-5.3.020-1.src.tar.zst": {
       "url": "https://repo.msys2.org/msys/sources/bash-5.3.020-1.src.tar.zst",
-      "sha256": "92c9edc67b962374cb79868fefa4ef26d8327f679cd0d5460834651c5939ee2d"
+      "sha256": "92c9edc67b962374cb79868fefa4ef26d8327f679cd0d5460834651c5939ee2d",
+      "notice": {
+        "name": "bash",
+        "archive": "bash-5.3.tar.gz",
+        "prefix": "bash-5.3",
+        "paths": ["COPYING"]
+      }
     },
     "coreutils-8.32-5.src.tar.zst": {
       "url": "https://repo.msys2.org/msys/sources/coreutils-8.32-5.src.tar.zst",
-      "sha256": "2b8689413bc50367a9995adf50ea84cd3caaff0ec68a8f32d8328842c3f83835"
+      "sha256": "2b8689413bc50367a9995adf50ea84cd3caaff0ec68a8f32d8328842c3f83835",
+      "notice": {
+        "name": "coreutils",
+        "archive": "coreutils-8.32.tar.xz",
+        "prefix": "coreutils-8.32",
+        "paths": ["COPYING"]
+      }
     },
     "util-linux-2.40.2-2.src.tar.zst": {
       "url": "https://repo.msys2.org/msys/sources/util-linux-2.40.2-2.src.tar.zst",
-      "sha256": "ea018e116866c0e2d9a3d6cee3f0d09801e6725789b6f99fd1979dfc7a68b703"
+      "sha256": "ea018e116866c0e2d9a3d6cee3f0d09801e6725789b6f99fd1979dfc7a68b703",
+      "notice": {
+        "name": "util-linux",
+        "archive": "util-linux-2.40.2.tar.xz",
+        "prefix": "util-linux-2.40.2",
+        "paths": ["COPYING"]
+      }
     },
     "gettext-0.22.5-1.src.tar.zst": {
       "url": "https://repo.msys2.org/msys/sources/gettext-0.22.5-1.src.tar.zst",
-      "sha256": "e07a0b3e6716aae86dc0edd2dcdc8864731d56051345592b53659a3840ccfbd8"
+      "sha256": "e07a0b3e6716aae86dc0edd2dcdc8864731d56051345592b53659a3840ccfbd8",
+      "notice": {
+        "name": "gettext",
+        "archive": "gettext-0.22.5.tar.gz",
+        "prefix": "gettext-0.22.5",
+        "paths": ["COPYING", "gettext-runtime/intl/COPYING.LIB"]
+      }
     },
     "libiconv-1.19-1.src.tar.zst": {
       "url": "https://repo.msys2.org/msys/sources/libiconv-1.19-1.src.tar.zst",
-      "sha256": "5a8bcd3242e2be94fffd9f03fadcda8d9fd64047430050c5cbd214cd3bf7f0a7"
+      "sha256": "5a8bcd3242e2be94fffd9f03fadcda8d9fd64047430050c5cbd214cd3bf7f0a7",
+      "notice": {
+        "name": "libiconv",
+        "archive": "libiconv-1.19.tar.gz",
+        "prefix": "libiconv-1.19",
+        "paths": ["COPYING", "COPYING.LIB"]
+      }
     },
     "readline-8.3.006-1.src.tar.zst": {
       "url": "https://repo.msys2.org/msys/sources/readline-8.3.006-1.src.tar.zst",
-      "sha256": "9ddb3eb989f6ad7d696ce5a2d92322b33a20056b293e3c4fc4f6cc568a320640"
+      "sha256": "9ddb3eb989f6ad7d696ce5a2d92322b33a20056b293e3c4fc4f6cc568a320640",
+      "notice": {
+        "name": "readline",
+        "archive": "readline-8.3.tar.gz",
+        "prefix": "readline-8.3",
+        "paths": ["COPYING"]
+      }
     },
     "msys2-runtime-3.6.10-4.src.tar.zst": {
       "url": "https://repo.msys2.org/msys/sources/msys2-runtime-3.6.10-4.src.tar.zst",

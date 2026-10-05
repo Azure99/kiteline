@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
-import { digest, releaseMatches, sourceCommit } from "./release-inputs.mjs";
+import {
+  agentTargets,
+  digest,
+  expectedRelease,
+  packageNames,
+  releaseMatches,
+  sourceCommit,
+} from "./release-inputs.mjs";
 
 const [kind, target, archivePath, directoryPath, extra] = process.argv.slice(2);
 if (!archivePath || !directoryPath || extra || !["agent", "server"].includes(kind))
@@ -17,21 +24,14 @@ const { version } = json(join(source, "shared/src/version.json"));
 const [platform, arch] = target.split("-");
 assert.ok(["linux", "macos", "windows"].includes(platform) && inputs.nodeArchives[arch]);
 assert.ok(kind === "agent" || platform === "linux");
-const name = `kiteline-${kind}-${version}-${target}`;
+const { name, archive: filename } = packageNames(kind, version, target);
 assert.equal(basename(directory), name);
-assert.equal(basename(archive), `${name}.${platform === "windows" ? "zip" : "tar.gz"}`);
+assert.equal(basename(archive), filename);
 const archiveSha = digest(archive);
 assert.equal(readFileSync(archive + ".sha256", "utf8"), `${archiveSha}  ${basename(archive)}\n`);
 const release = json(join(directory, "release.json"));
 assert.ok(
-  releaseMatches(release, {
-    kind,
-    platform,
-    version,
-    architecture: inputs.nodeArchives[arch].architecture,
-    node: inputs.node,
-    sourceCommit: sourceCommit(source),
-  }),
+  releaseMatches(release, expectedRelease(inputs, version, kind, target, sourceCommit(source))),
   "Package does not match this checkout, version or target",
 );
 assert.equal(release.lockfile, digest(join(source, "pnpm-lock.yaml")));
@@ -119,14 +119,8 @@ if (kind === "agent") {
   }
 } else {
   assert.ok(readFileSync(join(directory, "web/dist/licenses/dependencies.md"), "utf8").trim());
-  for (const target of [
-    "linux-amd64",
-    "linux-arm64",
-    "macos-amd64",
-    "macos-arm64",
-    "windows-amd64",
-  ]) {
-    const file = `kiteline-agent-${version}-${target}.${target.startsWith("windows") ? "zip" : "tar.gz"}`;
+  for (const target of agentTargets) {
+    const { archive: file } = packageNames("agent", version, target);
     for (const suffix of ["", ".sha256"])
       same(`downloads/${file}${suffix}`, join(source, "dist/releases", file + suffix));
   }

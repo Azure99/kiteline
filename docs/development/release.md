@@ -455,7 +455,7 @@ git push origin v0.2.6
 - `release/agent-windows.json` 的 `nodeArchiveSha256`（`win-x64.zip`）和 `nodeHeadersSha256`（`headers.tar.gz`）。
 - `release/agent-macos.json` 中两个架构的 `nodeArchiveSha256`（`darwin-*.tar.xz`）。
 
-没有脚本检查 `package.json` 与 `release/inputs.json` 的 Node 版本一致，修改时保持两者相同。Node 22 的官方维护期到 2027-04-30 结束，在此之前把运行时升级到新的 LTS 版本，并按本节修改全部位置。升级 Node 后同时重新测试代理行为（见 [Undici 与代理](#undici-与代理)）。
+`pnpm package` 在创建临时目录和开始构建前检查 `package.json` 的 `engines.node` 与 `release/inputs.json` 的 `node` 是同一精确版本，不一致时直接失败。Node 22 的官方维护期到 2027-04-30 结束，在此之前把运行时升级到新的 LTS 版本，并按本节修改全部位置。升级 Node 后同时重新测试代理行为（见 [Undici 与代理](#undici-与代理)）。
 
 ### pnpm
 
@@ -469,7 +469,7 @@ rg 版本必须在三处保持相同：`release/inputs.json` 的 `ripgrep.versio
 
 - `release/inputs.json` 的 `tmux` 供全部平台和 `pnpm native:build` 使用，`libevent` 只供 Linux 和 macOS 组件构建使用（开发构建链接系统的 libevent）；`release/agent-macos.json` 的 `libeventVersion` 是写入 `identity.json` 的版本标签。
 - Linux 构建使用的 libevent 和 ncurses 的 Ubuntu 补丁包在 `release/agent-linux.json` 中。
-- Windows 的 tmux 用 `inputs.json` 的源码在 MSYS2 中编译，libevent 和 ncurses 来自 MSYS2 包；运行库的 DLL 名称变化时同时修改 `scripts/windows-components.ts` 和 `agent-windows.json` 的 `runtimeFiles`。
+- Windows 的 tmux 用 `inputs.json` 的源码在 MSYS2 中编译，libevent 和 ncurses 来自 MSYS2 包；运行库的 DLL 名称在 `agent-windows.json` 的 `runtimeFiles` 中维护，组件提取和所需文件清单共用它。
 - `native/tmux/paste.patch` 和 `native/tmux/cygwin-outfd.patch` 必须能应用到新版本。终端机制见[终端](../design/terminal.md)，升级后重新测试终端的输入、粘贴、恢复和本机接续。
 
 ### Ubuntu 镜像与快照
@@ -486,7 +486,7 @@ rg 版本必须在三处保持相同：`release/inputs.json` 的 `ripgrep.versio
 
 ### MSYS2
 
-`release/agent-windows.json` 固定 MSYS2 引导归档（`bootstrap`）、45 个软件包（`packages`）和 7 个 GPL 与 LGPL 组件的源码包（`sources`）。[`scripts/prepare-windows-notices.mjs`](../../scripts/prepare-windows-notices.mjs) 按名称写死了 bash、readline、coreutils、util-linux、gettext、libiconv 的源码包版本（如 `bash-5.3.020-1`）、上游源码归档名和许可文件路径。升级这些包时必须同时修改该脚本，否则 `assemble` 读取源码包时失败。
+`release/agent-windows.json` 固定 MSYS2 引导归档（`bootstrap`）、软件包（`packages`）和 GPL 与 LGPL 组件的源码包（`sources`）。升级源码包时，在对应 `sources` 条目中一起更新归档地址、SHA-256 和 `notice` 中的上游归档名、目录及许可路径；[`scripts/prepare-windows-notices.mjs`](../../scripts/prepare-windows-notices.mjs) 从这些条目提取许可和复制源码包。libevent、ncurses 和 msys2-runtime 的许可仍从对应安装包提取。
 
 ### macOS 组件
 

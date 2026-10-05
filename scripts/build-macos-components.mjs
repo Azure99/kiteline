@@ -1,24 +1,22 @@
-import { createHash } from "node:crypto";
-import {
-  cpSync,
-  lstatSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { digest, fetchPinned, run } from "./release-inputs.mjs";
+import {
+  copy,
+  digest,
+  files,
+  hash,
+  json,
+  prepareInputs,
+  run,
+  verifyComponentFiles,
+  verifyPreparedInputs,
+  writeJson,
+} from "./release-inputs.mjs";
 
 const root = resolve(import.meta.dirname, "..");
-const json = (file) => JSON.parse(readFileSync(file, "utf8"));
 const release = json(join(root, "release/inputs.json"));
 const recipe = json(join(root, "release/agent-macos.json"));
-const hash = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const sourceFiles = [
   "release/inputs.json",
   "release/agent-macos.json",
@@ -51,13 +49,7 @@ const binaries = [
 ];
 const capture = (command, args) =>
   run(command, args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).trim();
-function copy(source, destination) {
-  mkdirSync(dirname(destination), { recursive: true });
-  cpSync(source, destination);
-}
-function writeJson(file, value) {
-  writeFileSync(file, JSON.stringify(value, null, 2) + "\n");
-}
+// macOS hashes only the shared inputs it consumes; Windows hashes the complete input file.
 function sharedInputs(value, architecture) {
   return {
     node: value.node,
@@ -79,26 +71,8 @@ function inputs(architecture) {
     ),
   };
 }
-function files(directory, prefix = "") {
-  const entries = {};
-  for (const name of readdirSync(directory).sort()) {
-    const file = join(directory, name);
-    const key = prefix + name;
-    const stat = lstatSync(file);
-    if (stat.isDirectory()) Object.assign(entries, files(file, key + "/"));
-    else if (stat.isFile()) entries[key] = digest(file);
-    else throw new Error(`Unexpected component link: ${file}`);
-  }
-  return entries;
-}
-
 export function prepareMacosInputs(directory, architecture) {
-  const expected = inputs(architecture);
-  mkdirSync(directory, { recursive: true });
-  for (const [file, input] of Object.entries(expected.downloads))
-    fetchPinned(input, join(directory, file));
-  for (const file of sourceFiles) copy(join(root, file), join(directory, file));
-  writeJson(join(directory, "inputs.json"), expected);
+  prepareInputs(directory, root, sourceFiles, inputs(architecture));
 }
 
 function macho(file, architecture) {
@@ -131,14 +105,7 @@ export function buildMacosComponents(directory, destination, architecture) {
     throw new Error(
       `The macOS ${architecture} component builder requires a Darwin ${nodeArchitecture} build host`,
     );
-  if (hash(json(join(directory, "inputs.json"))) !== hash(expected))
-    throw new Error("macOS component inputs do not match this source; prepare them again");
-  for (const [file, input] of Object.entries(expected.downloads))
-    if (digest(join(directory, file)) !== input.sha256)
-      throw new Error(`macOS component input checksum mismatch: ${file}`);
-  for (const [file, sha256] of Object.entries(expected.files))
-    if (digest(join(directory, file)) !== sha256)
-      throw new Error(`macOS component recipe checksum mismatch: ${file}`);
+  verifyPreparedInputs(directory, expected, "macOS");
   const receipt = run(
     "/usr/sbin/pkgutil",
     ["--pkg-info-plist", "com.apple.pkg.CLTools_Executables"],
@@ -221,11 +188,12 @@ export function verifyMacosComponents(directory, architecture) {
     hash(identity.inputs) !== hash(expected)
   )
     throw new Error("macOS components do not match this source; rebuild them");
-  const actual = files(directory);
-  delete actual["native/identity.json"];
-  for (const file of [...binaries, "runtime/LICENSE", "native/share/terminfo/74/tmux-256color"])
-    if (!actual[file]) throw new Error(`Missing macOS component: ${file}`);
-  if (hash(actual) !== hash(identity.files)) throw new Error("macOS component checksum mismatch");
+  verifyComponentFiles(
+    directory,
+    identity,
+    [...binaries, "runtime/LICENSE", "native/share/terminfo/74/tmux-256color"],
+    "macOS",
+  );
   return identity;
 }
 

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { digest, run, sourceCommit } from "./release-inputs.mjs";
+import { agentTargets, digest, packageNames, run, sourceCommit } from "./release-inputs.mjs";
 
 const [mode, extra] = process.argv.slice(2);
 if (extra || !["plan", "candidate", "dev-image", "publish"].includes(mode))
@@ -97,18 +97,10 @@ function platforms(index) {
 
 function packageFiles(directory) {
   return [
-    ["agent", "linux-amd64"],
-    ["agent", "linux-arm64"],
-    ["agent", "macos-amd64"],
-    ["agent", "macos-arm64"],
-    ["agent", "windows-amd64"],
+    ...agentTargets.map((target) => ["agent", target]),
     ["server", "linux-amd64"],
     ["server", "linux-arm64"],
-  ].map(([kind, target]) => {
-    const name = `kiteline-${kind}-${version}-${target}`;
-    const suffix = target.startsWith("windows") ? "zip" : "tar.gz";
-    return join(directory, `${name}.${suffix}`);
-  });
+  ].map(([kind, target]) => join(directory, packageNames(kind, version, target).archive));
 }
 function checksum(file) {
   return `${digest(file)}  ${basename(file)}\n`;

@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
@@ -20,8 +21,11 @@ import { buildLinuxComponents } from "./build-linux-components.mjs";
 import { verifyWindowsComponents } from "./build-windows-components.mjs";
 import { verifyMacosComponents } from "./build-macos-components.mjs";
 import {
+  agentTargets as allAgentTargets,
   digest,
+  expectedRelease,
   fetchPinned,
+  packageNames,
   releaseMatches,
   run as execute,
   sourceCommit as readSourceCommit,
@@ -31,6 +35,11 @@ import { agentLauncher, windowsAgentLaunchers } from "./agent-launcher.ts";
 
 const root = resolve(import.meta.dirname, "..");
 const release = JSON.parse(readFileSync(join(root, "release/inputs.json"), "utf8"));
+assert.equal(
+  JSON.parse(readFileSync(join(root, "package.json"), "utf8")).engines.node,
+  release.node,
+  "package.json engines.node and release/inputs.json node must pin the same version",
+);
 const { positionals, values } = parseArgs({
   allowPositionals: true,
   options: {
@@ -50,13 +59,6 @@ const arch = windowsAgent
     : target;
 const windowsComponents = values["windows-components"];
 const macosComponents = values["macos-components"];
-const allAgentTargets = [
-  "linux-amd64",
-  "linux-arm64",
-  "windows-amd64",
-  "macos-amd64",
-  "macos-arm64",
-];
 const agentTargets = values["agent-target"]?.split(",") ?? allAgentTargets;
 if (
   positionals.length !== 2 ||
@@ -86,10 +88,8 @@ function text(command, args) {
 async function agentArchives(sourceCommit) {
   const agents = [];
   for (const target of agentTargets) {
-    const [platform, architecture] = target.split("-");
-    const windows = platform === "windows";
-    const name = `kiteline-agent-${version}-${target}`;
-    const archive = join(output, `${name}.${windows ? "zip" : "tar.gz"}`);
+    const { name, archive: filename } = packageNames("agent", version, target);
+    const archive = join(output, filename);
     const checksum = archive + ".sha256";
     if (!existsSync(archive) || !existsSync(checksum))
       throw new Error(`Build agent ${target} first`);
@@ -99,16 +99,7 @@ async function agentArchives(sourceCommit) {
     if (entries.some((entry) => entry !== name && !entry.startsWith(name + "/")))
       throw new Error(`Unexpected agent archive roots: ${target}`);
     const manifest = JSON.parse(text("bsdtar", ["-xOf", archive, name + "/release.json"]));
-    if (
-      !releaseMatches(manifest, {
-        kind: "agent",
-        platform,
-        version,
-        architecture: release.nodeArchives[architecture].architecture,
-        node: release.node,
-        sourceCommit,
-      })
-    )
+    if (!releaseMatches(manifest, expectedRelease(release, version, "agent", target, sourceCommit)))
       throw new Error(
         `Agent ${target} must match this source/version/platform/architecture; rebuild it`,
       );
@@ -292,7 +283,7 @@ try {
     );
   }
   const platform = windowsAgent ? "windows" : macosAgent ? "macos" : "linux";
-  const name = `kiteline-${kind}-${version}-${platform}-${arch}`;
+  const { name, archive: filename } = packageNames(kind, version, `${platform}-${arch}`);
   const destination = join(temporary, name);
   mkdirSync(destination);
   cpSync(join(root, "LICENSE"), join(destination, "LICENSE"));
@@ -356,12 +347,7 @@ try {
     join(destination, "release.json"),
     JSON.stringify(
       {
-        version,
-        kind,
-        platform,
-        architecture: node.architecture,
-        node: release.node,
-        sourceCommit,
+        ...expectedRelease(release, version, kind, `${platform}-${arch}`, sourceCommit),
         sourceDirty: false,
         lockfile: digest(join(root, "pnpm-lock.yaml")),
         ...(windowsBuild
@@ -382,9 +368,8 @@ try {
     ) + "\n",
   );
   checksums(destination);
-  const extension = windowsAgent ? "zip" : "tar.gz";
-  const tarball = join(output, `${name}.${extension}`);
-  const staged = join(temporary, `${name}.${extension}`);
+  const tarball = join(output, filename);
+  const staged = join(temporary, filename);
   if (windowsAgent) run("zip", ["-q", "-r", staged, name], { cwd: temporary });
   else run("tar", ["-czf", staged, "-C", temporary, name]);
   if (readSourceCommit(root) !== sourceCommit)
@@ -393,7 +378,7 @@ try {
   try {
     // Publish beside the destination so rename also works across cache filesystems.
     cpSync(staged, pending);
-    writeFileSync(`${pending}.sha256`, `${digest(staged)}  ${name}.${extension}\n`);
+    writeFileSync(`${pending}.sha256`, `${digest(staged)}  ${filename}\n`);
     renameSync(pending, tarball);
     renameSync(`${pending}.sha256`, `${tarball}.sha256`);
   } finally {

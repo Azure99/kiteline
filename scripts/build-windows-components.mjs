@@ -1,26 +1,25 @@
-import { createHash } from "node:crypto";
-import {
-  cpSync,
-  lstatSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { prepareWindowsNotices } from "./prepare-windows-notices.mjs";
 import { windowsRuntimeFiles } from "./windows-components.ts";
-import { digest, fetchPinned, run } from "./release-inputs.mjs";
+import {
+  copy,
+  digest,
+  files,
+  hash,
+  json,
+  prepareInputs,
+  run,
+  verifyComponentFiles,
+  verifyPreparedInputs,
+  writeJson,
+} from "./release-inputs.mjs";
 
 const root = resolve(import.meta.dirname, "..");
-const json = (file) => JSON.parse(readFileSync(file, "utf8"));
 const release = json(join(root, "release/inputs.json"));
 const recipe = json(join(root, "release/agent-windows.json"));
 const { tmux } = release;
-const hash = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const sourceFiles = [
   "release/inputs.json",
   "release/agent-windows.json",
@@ -57,13 +56,6 @@ const downloads = {
     Object.entries(recipe.sources).map(([name, input]) => [`sources/${name}`, input]),
   ),
 };
-function copy(source, destination) {
-  mkdirSync(dirname(destination), { recursive: true });
-  cpSync(source, destination);
-}
-function writeJson(file, value) {
-  writeFileSync(file, JSON.stringify(value, null, 2) + "\n");
-}
 function inputs() {
   return {
     downloads,
@@ -71,35 +63,11 @@ function inputs() {
   };
 }
 function verifyInputs(directory) {
-  const expected = inputs();
-  if (hash(json(join(directory, "inputs.json"))) !== hash(expected))
-    throw new Error("Windows component inputs do not match this source; prepare them again");
-  for (const [file, input] of Object.entries(downloads))
-    if (digest(join(directory, file)) !== input.sha256)
-      throw new Error(`Windows component input checksum mismatch: ${file}`);
-  for (const [file, sha256] of Object.entries(expected.files))
-    if (digest(join(directory, file)) !== sha256)
-      throw new Error(`Windows component recipe checksum mismatch: ${file}`);
-  return expected;
-}
-function files(directory, prefix = "") {
-  const entries = {};
-  for (const name of readdirSync(directory).sort()) {
-    const file = join(directory, name);
-    const key = prefix + name;
-    const stat = lstatSync(file);
-    if (stat.isDirectory()) Object.assign(entries, files(file, key + "/"));
-    else if (stat.isFile()) entries[key] = digest(file);
-    else throw new Error(`Windows components cannot contain links: ${file}`);
-  }
-  return entries;
+  return verifyPreparedInputs(directory, inputs(), "Windows");
 }
 
 export function prepareWindowsInputs(directory) {
-  mkdirSync(directory, { recursive: true });
-  for (const [file, input] of Object.entries(downloads)) fetchPinned(input, join(directory, file));
-  for (const file of sourceFiles) copy(join(root, file), join(directory, file));
-  writeJson(join(directory, "inputs.json"), inputs());
+  prepareInputs(directory, root, sourceFiles, inputs());
 }
 
 export function buildWindowsTmux(directory, destination) {
@@ -221,11 +189,7 @@ export function verifyWindowsComponents(directory) {
   const identity = json(join(directory, "native/identity.json"));
   if (hash(identity.inputs) !== hash(inputs()))
     throw new Error("Windows components do not match this source; rebuild them");
-  const actual = files(directory);
-  delete actual["native/identity.json"];
-  for (const file of windowsRuntimeFiles)
-    if (!actual[file]) throw new Error(`Missing Windows component: ${file}`);
-  if (hash(actual) !== hash(identity.files)) throw new Error("Windows component checksum mismatch");
+  verifyComponentFiles(directory, identity, windowsRuntimeFiles, "Windows");
   return identity;
 }
 

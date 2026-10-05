@@ -1,7 +1,13 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
-import { releaseMatches, run, sourceCommit as readSourceCommit } from "./release-inputs.mjs";
+import {
+  expectedRelease,
+  packageNames,
+  releaseMatches,
+  run,
+  sourceCommit as readSourceCommit,
+} from "./release-inputs.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const release = JSON.parse(readFileSync(resolve(root, "release/inputs.json"), "utf8"));
@@ -9,11 +15,12 @@ const { version } = JSON.parse(readFileSync(resolve(root, "shared/src/version.js
 const arch = process.argv[2];
 if (!Object.hasOwn(release.nodeArchives, arch ?? ""))
   throw new Error("Usage: pnpm images amd64|arm64");
-const name = `kiteline-server-${version}-linux-${arch}`;
+const target = `linux-${arch}`;
+const { name, archive } = packageNames("server", version, target);
 const sourceCommit = readSourceCommit(root);
 const manifest = spawnSync(
   "tar",
-  ["-xOf", resolve(root, "dist/releases", `${name}.tar.gz`), `${name}/release.json`],
+  ["-xOf", resolve(root, "dist/releases", archive), `${name}/release.json`],
   {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "inherit"],
@@ -22,14 +29,10 @@ const manifest = spawnSync(
 if (manifest.error) throw manifest.error;
 if (manifest.status !== 0) throw new Error(`Cannot read server ${arch} release manifest`);
 if (
-  !releaseMatches(JSON.parse(manifest.stdout), {
-    kind: "server",
-    platform: "linux",
-    version,
-    architecture: release.nodeArchives[arch].architecture,
-    node: release.node,
-    sourceCommit,
-  })
+  !releaseMatches(
+    JSON.parse(manifest.stdout),
+    expectedRelease(release, version, "server", target, sourceCommit),
+  )
 )
   throw new Error(
     `Server ${arch} must match this source/version/platform/architecture; rebuild it`,
