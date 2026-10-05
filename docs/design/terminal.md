@@ -30,7 +30,7 @@ agent 处理 `sessions.create`（网页或 `kiteline-agent terminal new`）的�
 3. 启动 tmux 之前登记会话：名称（参数、快捷方式名称或 `Shell`）、创建时间、当时的 `historyLines`，状态 `starting`。
 4. 让 recorder 创建会话（Windows 先由 agent 启动空的 tmux server，见[平台实现](platforms.md#windows)）。成功后状态变为 `running`，记录可用。
 
-程序的工作目录是工作区目录，通过进程 cwd 传给 tmux，不用会展开格式字符串的 `-c`。Linux 和 macOS 上普通终端运行 `<Shell> -l`，快捷方式运行 `<Shell> -lc <命令>`，Windows 见[平台实现](platforms.md#windows)；Shell 的选择见 [agent 配置文件](../guide/reference.md#agent-配置文件)。tmux 把参数末尾的 `;` 当作命令分隔符，recorder 构造 `new-session` 时因此在末尾分号前加 `\`。初始尺寸 80×24（`agent/src/limits.ts` 的 `terminalInitialCols`、`terminalInitialRows`），之后由附着的入口调整。
+程序的工作目录是工作区目录，通过进程 cwd 传给 tmux，不用会展开格式字符串的 `-c`。Linux 和 macOS 上普通终端运行 `<Shell> -l`，快捷方式运行 `<Shell> -lc <命令>`，Windows 见[平台实现](platforms.md#windows)；Shell 的选择见 [agent 配置文件](../guide/reference.md#agent-配置文件)。tmux 把参数末尾的 `;` 当作命令分隔符，recorder 构造 `new-session` 时因此在末尾分号前加 `\`。初始尺寸 80×24（`agent/src/limits.ts` 的 `terminalInitialCols`、`terminalInitialRows`），之后由附着的客户端调整。
 
 ### 创建结果不确定时
 
@@ -44,7 +44,7 @@ agent 处理 `sessions.create`（网页或 `kiteline-agent terminal new`）的�
 
 | 事件                                           | 会话                                     |
 | ---------------------------------------------- | ---------------------------------------- |
-| 网页刷新、关闭、断网，或没有任何入口附着       | 继续                                     |
+| 网页刷新、关闭、断网，或没有任何客户端附着     | 继续                                     |
 | server 重启、控制连接重连、退出登录、删除设备  | 继续                                     |
 | 本机客户端断开或退出                           | 继续                                     |
 | 控制客户端故障、recorder 退出                  | 继续                                     |
@@ -153,7 +153,7 @@ agent 发往该显示的帧依次为：`restore.begin`（尺寸、`historyLines`
 - 注入失败时网页收到结果未确认的 `input.error`，recorder 只删除自己的 `kiteline-web-input` 缓冲。输入不自动重试；网页在断开和恢复期间不缓存输入。
 - 网页输入不经过 tmux 键表，网页中的 Ctrl-b 直接交给程序。本机客户端使用 tmux 键表：`Ctrl-b d` 断开，`Ctrl-b Ctrl-b` 发送 Ctrl-b。
 - 手机辅助键和待用修饰键用 xterm.js 的键盘编码函数生成，读取程序当前的应用光标键模式；虚拟 Alt 按 Meta 处理。
-- 多个入口同时输入时按到达顺序交错写入。
+- 多个客户端同时输入时按到达顺序交错写入。
 
 ## 尺寸
 
@@ -178,7 +178,7 @@ agent 发往该显示的帧依次为：`restore.begin`（尺寸、`historyLines`
 - 重新连接：确认登录仍有效后关闭当前显示，新建显示并以 `retained` 重新附着。不触及 recorder、共享历史和程序。
 - 恢复终端：调用 `sessions.recover`，`recovering` 期间每 500 ms 读取一次会话列表，变为可用后重新附着（见[记录故障后的恢复](#记录故障后的恢复)）。
 - 减少历史后重试：以 `screen` 重新附着，只省略本次的较早滚屏；检查点和 `historyLines` 不变，之后的附着仍取完整历史。
-- 重绘程序：调用 `sessions.redraw`，在输入队列中排队，把行数加 1，等实际尺寸生效后停留 80 ms，再恢复原尺寸并等待生效。要求记录可用。程序会向所有入口重画，其他入口的画面和选区可能改变；请求完成只表示尺寸已恢复。
+- 重绘程序：调用 `sessions.redraw`，在输入队列中排队，把行数加 1，等实际尺寸生效后停留 80 ms，再恢复原尺寸并等待生效。要求记录可用。程序会向所有客户端重画，其他客户端的画面和选区可能改变；请求完成只表示尺寸已恢复。
 
 关闭显示后再打开会新建附着，原显示的选区和本地历史随之释放。程序输出未结束的 OSC 或 DCS 序列时解析器一直不空闲，尾段超过 `terminalRecoveryTailBytes` 后新的附着只能返回 `busy`；以上动作都无法纠正，需要程序输出结束序列或结束会话。
 

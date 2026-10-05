@@ -1,6 +1,6 @@
 # 平台实现
 
-本文写给修改 `native/`、`installer/`、`shared/src/windows/` 或平台分支代码的人，说明 agent 在 Linux、macOS 和 Windows 上使用的组件和实现差异；三个平台共用的安装、锁和运行规则见 [agent 安装与运行](agent-lifecycle.md)。支持的系统见[接入设备](../guide/devices.md#支持的系统与准备)，组件的构建见[构建与发布](../development/release.md)。
+本文说明 agent 在 Linux、macOS 和 Windows 上使用的组件和实现差异，代码阅读范围见[文档地图](../README.md#改动代码前阅读)。三个平台共用的安装、锁和运行规则见[agent 安装与运行](agent-lifecycle.md)。支持的系统见[接入设备](../guide/devices.md#支持的系统与准备)，组件的构建见[构建与发布](../development/release.md)。
 
 ## 安装入口的生成
 

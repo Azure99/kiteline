@@ -1,6 +1,6 @@
 # agent 安装与运行
 
-本文写给修改 `agent/src/install/`、`installer/`、`agent/src/cli/`、`agent/src/main.ts` 或 `agent/src/state-lock.ts` 的人，说明 agent 安装、升级、卸载和运行的机制与不变量。操作步骤见[接入设备](../guide/devices.md)，命令、目录和文件位置见[参考](../guide/reference.md)。
+本文说明 agent 安装、升级、卸载和运行的机制与不变量，代码阅读范围见[文档地图](../README.md#改动代码前阅读)。操作步骤见[接入设备](../guide/devices.md)，命令、目录和文件位置见[参考](../guide/reference.md)。
 
 ## 安装布局
 

@@ -37,7 +37,7 @@ flowchart LR
 
 ```text
 server/src/              kiteline-server
-  app.ts                 HTTP 路由和 WebSocket 升级入口；路由的先后顺序决定它经过哪些检查
+  app.ts                 HTTP 路由和 WebSocket 升级处理；路由的先后顺序决定它经过哪些检查
   http.ts                入口 origin、Cookie、Origin 检查、错误状态码、尝试次数限制
   connections.ts         agent 控制连接、浏览器事件连接、RPC 转发
   channels.ts            数据通道；file-transfer.ts 转发文件内容
@@ -77,7 +77,7 @@ deploy/                  Compose、systemd、launchd、WinSW 示例
 .github/workflows/       CI 与发布
 ```
 
-根目录有 `package.json`（脚本、Node 22.23.3）、`pnpm-workspace.yaml`（五个包、依赖覆盖和补丁）、`tsconfig*.json`、`eslint.config.mjs`、`vitest.config.ts` 和 `.prettierrc.json`。检查命令见[源码开发](../development/setup.md#检查与测试)，构建输入见 [release/README.md](../../release/README.md)。
+根目录有 `package.json`（脚本和 Node 版本）、`pnpm-workspace.yaml`（五个包、依赖覆盖和补丁）、`tsconfig*.json`、`eslint.config.mjs`、`vitest.config.ts` 和 `.prettierrc.json`。检查命令见[源码开发](../development/setup.md#检查与测试)，构建输入见 [release/README.md](../../release/README.md)。
 
 `shared` 按入口导出（`@kiteline/shared/protocol`、`/protocol/ws`、`/terminal/node`、`/windows/pipe` 等）。工作台只导入不依赖 Node 的 `protocol`、`protocol/text` 和 `terminal`。
 
@@ -122,32 +122,12 @@ agent 的 JSON 状态文件以原子替换写入，不调用 fsync，见[目录�
 
 ## 请求流程
 
-### RPC
-
-1. 工作台的 `rpc()`（`web/src/lib/api.ts`）生成请求 ID，发送 `POST /api/devices/:deviceId/rpc`。
-2. `server/src/app.ts` 按路由位置执行检查，`Connections.rpc`（`server/src/connections.ts`）经控制连接发送 `rpc.request`；检查项见 [RPC](protocol.md#rpc)。
-3. `agent/src/agent.ts` 按方法设置期限，由 `perform` 分派到工具模块，完成后发送 `rpc.result`。
-4. server 把 `Reply` 作为 HTTP 200 的响应返回，含义见[结果语义](protocol.md#结果语义)。
-
-### 数据通道
-
-1. 工作台发送 `POST /api/devices/:deviceId/channels`，`Channels.create`（`server/src/channels.ts`）登记通道并发送 `channel.open`。
-2. agent 的 `TerminalChannels` 或 `FileChannels`（`agent/src/terminal/channels.ts`、`agent/src/files/channels.ts`）连接 `/api/agent/channels/:channelId`，准备好后发送 `ready`；server 把其中的 `meta` 作为 POST 的响应返回。
-3. 工作台用 `GET` 或 `PUT /api/channels/:channelId/content` 传输文件内容（`server/src/file-transfer.ts`），或用 WebSocket `/api/channels/:channelId/terminal` 附着终端（`web/src/terminal/display.ts`）。server 向 agent 发送 `start` 后开始传输。终端附着时，agent 向 recorder 发送 `attach` 恢复画面。
-
-文件下载由 `GET /api/devices/:deviceId/download` 一次完成，server 在请求内部创建通道。
-
-### 开发服务代理
-
-浏览器的 `/proxy/`、`/absproxy/` 请求由 `HttpProxy.handle`（`server/src/http-proxy.ts`）检查后建立 `http.proxy` 通道，agent 的 `HttpChannels`（`agent/src/http/channels.ts`）连接本机端口，步骤见[请求转发](http-access.md#请求转发)。
-
-### 本机命令
-
-1. `kiteline-agent terminal new`（`agent/src/cli/terminal.ts`）经 `localRequest`（`agent/src/local.ts`）发送 `sessions.create`。
-2. `Sessions.create`（`agent/src/terminal/sessions.ts`）登记会话，向 recorder 发送 `create`；recorder 运行 `tmux -S <socket> -C new-session -s kiteline …`（`terminal-recorder/src/control.ts`），由此启动该会话的 tmux server。
-3. 附着时，命令行用 `terminal.attach` 取得 tmux socket，再直接运行 `tmux -S <socket> attach-session -E -t kiteline`，之后的输入输出不经过 agent。
-
-`kiteline-agent schedule`（`agent/src/cli/tasks.ts`）以同样方式调用定时任务方法。
+| 流程                   | 入口文件                                                                                                                 | 行为契约                                                                                                             |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| RPC                    | `web/src/lib/api.ts`、`server/src/app.ts`、`agent/src/agent.ts`                                                          | [RPC](protocol.md#rpc)、[结果语义](protocol.md#结果语义)                                                             |
+| 数据通道与文件下载     | `server/src/channels.ts`、`server/src/file-transfer.ts`、`agent/src/files/channels.ts`、`agent/src/terminal/channels.ts` | [数据通道](protocol.md#数据通道)、[网页附着](terminal.md#网页附着)                                                   |
+| 开发服务代理           | `server/src/http-proxy.ts`、`agent/src/http/channels.ts`                                                                 | [请求转发](http-access.md#请求转发)                                                                                  |
+| 本机终端与定时任务命令 | `agent/src/cli/terminal.ts`、`agent/src/cli/tasks.ts`、`agent/src/local.ts`                                              | [本机 IPC](protocol.md#本机-ipc)、[本机附着](terminal.md#本机附着)、[任务命令行](../guide/scheduled-tasks.md#命令行) |
 
 ## 协调与失败边界
 
@@ -208,7 +188,7 @@ agent 的出站代理规则见[出站代理与证书](../guide/devices.md#出站
 
 - **构建目标**：`web/vite.config.ts` 把 `build.target` 和 `build.cssTarget` 设为 `chrome97`，JavaScript 语法和 CSS 都转换到 Chromium 97 可用的形式。
 - **CSS layer**：Chromium 97 不支持 `@layer`，构建时 `@csstools/postcss-cascade-layers` 把 layer 展开为选择器权重。展开后，Tailwind 的 `base` 重置和应用的 `kiteline-editor-reset` 重置权重变高，会覆盖 CodeMirror 运行时注入的无 layer 样式。`web/postcss/editor-reset-compat.ts` 在转换前把这两类重置拆开：编辑器外保留原规则；编辑器内改用 `:where(.cm-editor, .cm-editor *)` 限定的低权重副本，放在样式表末尾，CodeMirror 的样式因此仍然生效。`!important` 声明保持原规则的作用范围。
-- **运行时补充**：`web/src/lib/browser-compat.ts` 在 `main.tsx` 中最先导入，补上 Chromium 97 缺少的 `structuredClone`。`eslint.config.mjs` 对 `web/src` 禁用 Chromium 97 没有的 API，如 `toSorted`、`Promise.withResolvers`、`AbortSignal.timeout`。
+- **运行时补充**：`web/src/lib/browser-compat.ts` 在 `main.tsx` 中最先导入，补上 Chromium 97 缺少的 `structuredClone`。`eslint.config.mjs` 对 Web 及其消费的 shared 入口禁用 Chromium 97 不可用的 API，并限制 Web 导入仅能在 Node 运行的 shared 入口。
 - **视口高度**：Chromium 97 没有 `dvh`，`web/src/lib/viewport.ts` 此时用 `visualViewport` 测得的像素高度设置 `--app-height`，规则见[输入与焦点](interaction.md#输入与焦点)。
 
 以下改动后要在 Chromium 97 和当前 Chrome 中重新检查：
@@ -224,9 +204,9 @@ agent 的出站代理规则见[出站代理与证书](../guide/devices.md#出站
 ### 添加 RPC 方法
 
 1. 在 `shared/src/protocol/rpc.ts` 的 `RpcMethods` 中加入方法和类型，在 `rpcMutates` 中标明是否为写操作。Git 写方法还要加入 `gitWriteMethods`（决定 `gitWriteTimeout`、完成后立即发送的 `workspace.changed` 和工作台的 Git 操作类型），并在 `agent/src/git/rpc.ts` 中通过 `GitWriteQueue.run` 执行。
-2. 在 `agent/src/agent.ts` 的 `perform` 中加入分支（`never` 检查保证不遗漏）并校验参数；server 只检查参数是对象。
-3. 需要特殊期限时，修改 `agent.ts` 处理 `rpc.request` 时的期限选择。
-4. 本机命令行需要调用时，加入 `agent.ts` 中本机 IPC 的白名单。
+2. 定时任务在 `agent/src/tasks/rpc.ts` 的 `scheduleMethods` 和 `scheduleRpc` 中加入方法；Git 在 `agent/src/git/rpc.ts` 的 `gitRpc` 中加入分支；它们由 `isScheduleMethod`、`isGitMethod` 分流。其他方法在 `agent/src/agent.ts` 的 `perform` 中加入分支。各分支校验参数并保留 `never` 穷尽检查；server 只检查参数是对象。
+3. 需要特殊期限时，修改 `agent.ts` 的 `unboundedMethods` 或 `specializedTimeouts`。
+4. 本机 IPC 通过 `localSessionMethods` 和 `isScheduleMethod` 选择允许的方法；需要增加本机调用时修改对应集合。
 5. 方法改变工作区内容时，确保完成后发送 `workspace.changed`（`dispatch` 对文件创建、改名和 Git 写方法自动发送）。
 6. 工作台用 `rpc()` 调用，按[结果语义](protocol.md#结果语义)处理失败和结果未确认。
 7. 在 `agent/test/` 和 `web/test/rpc.typecheck.ts` 中补测试，更新 [RPC](protocol.md#rpc) 一节和负责该工具的 design 文档。
@@ -241,13 +221,13 @@ agent 的出站代理规则见[出站代理与证书](../guide/devices.md#出站
 ### 添加数据通道种类
 
 1. 在 `shared/src/protocol/index.ts` 的 `ChannelParams` 中加入种类和参数，`ChannelKind` 从其键推导；同时定义对应的 `meta` 类型。静态参数类型不替代接收边界的运行时校验。
-2. 在 `server/src/channels.ts` 的 `create` 中接受该种类（种类和 `purpose` 都是白名单），在 `acceptAgent` 中校验 `meta`；浏览器需要加入时，在 `server/src/app.ts` 中加入口并选择单条消息上限。浏览器会直接显示内容时，更新内容类型白名单。
+2. 在 `server/src/channels.ts` 的 `create` 中接受该种类（种类和 `purpose` 都是白名单），在 `acceptAgent` 中校验 `meta`；浏览器需要加入时，在 `server/src/app.ts` 中加接口并选择单条消息上限。浏览器会直接显示内容时，更新内容类型白名单。
 3. 在 `agent/src/agent.ts` 处理 `channel.open` 的分派中加入处理类，提供 `open`、`cancel` 和 `close`。
 4. 通道自动计入 `channelsPerDevice`；文件类通道在 agent 端还计入 `transfersPerDevice`。
 
 ### 添加 HTTP 路由
 
-1. 在 `server/src/app.ts` 中按位置加入。判断顺序为：开发服务代理、安装资源、`/healthz`、`/api/agent/bind`、`/api/*`、静态文件；`/api/*` 内依次是非 GET 请求的 Origin 检查、初始化与登录、登录检查、不检查版本的入口、版本检查、其余接口。路由所在的位置决定它要经过哪些检查。
+1. 在 `server/src/app.ts` 中按位置加入。判断顺序为：开发服务代理、安装资源、`/healthz`、`/api/agent/bind`、`/api/*`、静态文件；`/api/*` 内依次是非 GET 请求的 Origin 检查、初始化与登录、登录检查、不检查版本的接口、版本检查、其余接口。路由所在的位置决定它要经过哪些检查。
 2. 需要已有登录的 JSON 路由用 `loginBody()` 读取并在读取后复核登录；初始化、登录和 agent 绑定用 `body()`。读取均有大小和时间限制。用 `json()` 返回，用 `AppError` 表示错误；状态码映射在 `server/src/http.ts`。
 3. 路径不在 `/api/` 下时，在 `web/vite.config.ts` 的 `server.proxy` 中加入前缀，开发服务器才会转发到 server。
 4. 在 `server/test/` 中补测试，并更新 [HTTP 接口](protocol.md#http-接口)。

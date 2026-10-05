@@ -18,7 +18,7 @@ server 和 agent 中的实现位置见[仓库结构](architecture.md#仓库结�
 server、agent 和工作台使用同一个产品版本 `appVersion`，版本必须完全相同，不同版本之间没有兼容适配。
 
 - agent 连接控制 WebSocket 时带 `?appVersion=`。版本不同时，server 返回 HTTP 426 和 `version_mismatch`，`details` 为 `{component: "agent", clientVersion, serverVersion}`。agent 记录原因并按退避间隔继续重连；server 记下观察到的 agent 版本（`Device.release`），工作台据此提示[升级 agent](../guide/devices.md#升级-agent)。最近一次观察的版本不同时，发往该设备的 RPC 和数据通道返回 `version_mismatch`，不返回 `offline`。
-- 工作台的每个 `/api/` 请求、事件连接和终端连接都带 `?appVersion=`。版本检查之后的接口在版本不同时返回 426（`component: "web"`）；登录和升级引导用到的入口不检查版本，见 [HTTP 接口](#http-接口)。
+- 工作台的每个 `/api/` 请求、事件连接和终端连接都带 `?appVersion=`。版本检查之后的接口在版本不同时返回 426（`component: "web"`）；登录和升级引导用到的接口不检查版本，见 [HTTP 接口](#http-接口)。
 - 入口地址解析成功后的普通 `/api/` HTTP 响应（包括错误响应）带 `X-Kiteline-Version: <server 版本>`。工作台发现它与自身版本不同时，停止事件连接并显示版本提示。
 - agent 的数据通道连接不检查版本，它属于已经通过检查的控制连接。
 
@@ -99,7 +99,7 @@ server 为每个 HTTP 请求和 WebSocket 升级确定一个入口 origin（`req
 
 ### 设备认证
 
-- `POST /api/agent/bind` 接收 `{code, name}`，返回 `{deviceId, deviceToken}`。绑定码的消费和设备的创建在同一个事务中完成；绑定码无效、过期或已经使用时返回 403。这个入口不需要登录，也不检查 Origin。
+- `POST /api/agent/bind` 接收 `{code, name}`，返回 `{deviceId, deviceToken}`。绑定码的消费和设备的创建在同一个事务中完成；绑定码无效、过期或已经使用时返回 403。这个接口不需要登录，也不检查 Origin。
 - `deviceToken` 是 32 字节随机值，server 只保存摘要，agent 把它保存在 `connection.json`。
 - agent 的所有连接都发送 `Authorization: Bearer <deviceToken>`。令牌无效时返回 401，agent 随后停止重连。
 - `POST /api/bindings` 生成绑定码，有效期为 `bindingLifetime`。`GET /api/bindings/:bindingId` 返回 `pending`、`consumed` 或 `expired`，`consumed` 时带 `deviceId`；已消费的记录随设备一起删除。绑定结果不明时的处理见[重新绑定](../guide/devices.md#重新绑定)。

@@ -12,7 +12,7 @@
 - 仓库根目录在工作区之外时不被采用。工作区是外部仓库的子目录时，父仓库不会成为操作对象；linked worktree 只有位于工作区内才会被发现，它的 gitDir 和 commonDir 可以在工作区外。
 - 无法读取的目录、无效的 gitfile 和名称不是 UTF-8 的目录作为 `issues` 单独返回，扫描继续。
 - 裸仓库标记为 `available: false`，不进入其子目录，对它的读写返回 `unsupported`。
-- 每次调用最多访问 10,000 个目录（`discoveryDirectories`）、运行 2 秒（`discoverySlice`），返回内容不超过结果上限，常量在 `agent/src/limits.ts`。本文的“结果上限”都指 `resultBytes`（512 KiB）。未完成时返回 `scanCursor`，下一次调用从同一位置继续；只有 `complete` 为 true 才表示扫描完成。扫描游标与目录列表共用游标名额和空闲期限（见[文件](files.md#路径与列表)），过期后返回 `conflict`，浏览器从根目录重新扫描。
+- 每次调用最多访问 10,000 个目录（`discoveryDirectories`）、运行 2 秒（`discoverySlice`），返回内容不超过结果上限，常量在 `agent/src/limits.ts`。本文的“结果上限”都指 `resultBytes`（512 KiB）。未完成时返回 `scanCursor`，下一次调用从同一位置继续；只有 `complete` 为 true 才表示扫描完成。扫描游标与目录列表共用游标名额和存活期限（见[文件](files.md#路径与列表)），过期后返回 `conflict`，浏览器从根目录重新扫描。
 - 浏览器为每个活跃工作区保留一轮扫描，每次刷新推进一步，直到完成；完成后的下一次刷新才开始新一轮，并以新一轮的结果替换仓库列表。仓库按路径排序；地址中没有指定仓库时，浏览器自动选择第一个可用仓库。
 
 ### 仓库身份与路径
@@ -41,7 +41,7 @@
 
 ### token
 
-- `indexToken = SHA-256(repoId, HEAD 身份, SHA-256(git diff --cached --raw -z --no-abbrev --no-renames <HEAD 或空树>), 有冲突时的 SHA-256(git ls-files --unmerged -z))`（`agent/src/git/status.ts` 的 `observeIndex`）。没有 HEAD 时，基准是本仓库对象格式的空树，用 `git hash-object -t tree --stdin` 计算，不写入对象。
+- `indexToken = SHA-256(repoId, HEAD 身份, SHA-256(git diff --cached --raw -z --no-abbrev --no-renames <HEAD 或空树>), 有冲突时的 SHA-256(git ls-files --unmerged -z))`（`agent/src/git/observe.ts` 的 `observeIndex`）。没有 HEAD 时，基准是本仓库对象格式的空树，用 `git hash-object -t tree --stdin` 计算，不写入对象。
 - indexToken 只取决于 HEAD、可提交的内容和冲突，不取决于 index 文件的 mtime 或 inode；工作树变化不改变它，内容相同的 index 重建也不产生冲突。存在冲突时 status 不返回 indexToken。
 - `listToken = SHA-256(repoId, indexToken, SHA-256(status 原始输出))`。原始输出包含 `# branch.ab` 行，所以 ahead 或 behind 变化也会改变 listToken。
 - status 在读取 porcelain 之前计算 indexToken。读取期间的外部修改可能让条目与 token 不一致，因此写操作执行前都会重新检查。

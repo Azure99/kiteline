@@ -22,7 +22,7 @@
 
 - `files.list` 和 `directories.list` 都由 `Directories`（`agent/src/files/directories.ts`）分页读取。每页最多 `listPageEntries` 项，且不超过 512 KiB（`resultBytes`，`agent/src/limits.ts`）；单个条目超过上限时返回 `limit_exceeded`。
 - 每页内目录排在前面，文件、链接和其他类型按名称（`localeCompare`）混排。浏览器把已加载的各页合并后按同一规则重排，所以大目录只对已加载部分排序。还有下一页时 `truncated` 为 true，界面标明列表未读完。
-- 首页创建游标，后续页通过 `nextCursor` 续读。游标空闲 60 秒（`cursorLifetime`）后被回收，每读一页重新计时，读完最后一页立即释放。同一游标同时只允许一个读取，否则返回 `busy`。每台设备最多同时存在 16 个游标（`cursorsPerDevice`，`agent/src/cursor-budget.ts`），与 Git 仓库发现的扫描游标共用。
+- 首页创建游标，后续页通过 `nextCursor` 续读。游标的 60 秒存活期（`cursorLifetime`）从每次取得读取权时重新计时，到期后回收，读完最后一页立即释放。同一游标同时只允许一个读取，否则返回 `busy`。每台设备最多同时存在 16 个游标（`cursorsPerDevice`，`agent/src/limits.ts`），与 Git 仓库发现的扫描游标共用。
 - 续页时目录的 `dev`、`ino` 或 `mtime` 已变化，或游标已过期、已释放，agent 返回 `conflict`；浏览器从首页重读，不拼接两次读取的结果。刷新时浏览器至少重读到此前已显示的条目数。
 - 浏览器放弃一次浏览时用 `cursors.release` 归还游标。agent 释放游标时先停止后续读取，等进行中的读取结束并关闭目录句柄，再归还名额。
 

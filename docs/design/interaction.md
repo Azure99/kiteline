@@ -119,7 +119,7 @@
 - **插值与复数。** 插值写作 `{{name}}`，数字用 `{{count, number}}` 按当前语言格式化。复数使用 i18next 的后缀键，例如 `shell.uploadStatus_one` 和 `shell.uploadStatus_other`。i18next 的转义关闭（`escapeValue: false`），由 React 负责转义，路径和用户输入原样显示。
 - **渲染时翻译。** 文案在渲染时生成，组件通过 `useTranslation()` 订阅语言变化。错误对象只保存错误码、原始消息和附加数据，`errorMessage()` 在显示时才翻译，所以切换语言后已经显示的错误也会更新。切换语言只触发重新渲染，不重新挂载终端、编辑器或其他视图，草稿、撤销历史、选区和终端内容都保留。
 - **不翻译的内容。** 文件内容、路径、用户起的名称、提交消息、命令输出、来自 server 和 agent 的原始诊断（英文）保持原样。开发服务代理的错误页由 server 生成，只有英文，见[错误响应](http-access.md#错误响应)。
-- **第三方组件。** CodeMirror 的界面文字来自 `editor` 资源组：`editorPhrases()` 返回当前语言的短语，切换语言时通过 Compartment 重新配置 `EditorState.phrases`，不重建编辑器状态（`web/src/files/editor-state.ts`、`text-editor.tsx`）。xterm.js 的无障碍文字通过 `Terminal.strings.promptLabel` 和 `Terminal.strings.tooMuchOutput` 设置，并同步终端输入框的 `aria-label`（`web/src/terminal/terminal-view.tsx`）。
+- **第三方组件。** CodeMirror 的界面文字来自 `editor` 资源组：`editorPhrases()`（`web/src/files/editor-locale.ts`）返回当前语言的短语，切换语言时通过 Compartment 重新配置 `EditorState.phrases`，不重建编辑器状态（`web/src/files/editor-state.ts`、`text-editor.tsx`）。xterm.js 的无障碍文字通过 `Terminal.strings.promptLabel` 和 `Terminal.strings.tooMuchOutput` 设置，并同步终端输入框的 `aria-label`（`web/src/terminal/terminal-view.tsx`）。
 - **尺寸稳定。** 工作台提示行和终端提示行固定高度为 4rem（`.workbench-notice`、`.terminal-notice`），译文长短不同也不会改变终端尺寸，从而不会清除终端选区。
 
 ## 视觉

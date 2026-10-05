@@ -8,7 +8,7 @@
 
 | 工具             | 要求                                                                                    |
 | ---------------- | --------------------------------------------------------------------------------------- |
-| Node             | 22.23.3，取自 [`package.json`](../../package.json) 的 `engines.node`                    |
+| Node             | 使用 [`package.json`](../../package.json) 的 `engines.node` 指定版本。                  |
 | pnpm             | 11.25.0，取自 `package.json` 的 `packageManager`，通过 Corepack 启用                    |
 | 原生组件构建     | C 编译器、`make`、`pkg-config`、libevent 与 ncurses 开发文件、`tic`、bison、curl、patch |
 | 源码运行的 agent | 与设备相同的前置条件，见[支持的系统与准备](../guide/devices.md#支持的系统与准备)        |
@@ -152,18 +152,7 @@ KITELINE_DATA_DIR=/var/tmp/kiteline-dev/server pnpm server setup-token
 
 ### CI 中的检查
 
-PR、推送到 main 和手动运行的 `checks` 模式执行同一组检查（[`.github/workflows/build.yml`](../../.github/workflows/build.yml) 的 `checks` 任务）：
-
-```sh
-pnpm install --frozen-lockfile
-pnpm format:check
-pnpm lint
-pnpm typecheck
-pnpm --filter @kiteline/web build
-pnpm test web/test agent/test/config.test.ts agent/test/state-records.test.ts
-```
-
-这组检查只运行不需要原生组件的测试，提交前在本机运行完整的 `pnpm test`。CI 的完整构建与发布包检查见 [GitHub Actions](release.md#github-actions)。
+PR、推送到 main 和手动运行的 `checks` 模式执行 [`.github/workflows/build.yml`](../../.github/workflows/build.yml) 的 `checks` 任务，包含格式、lint、类型、Web 构建及不需要原生组件的测试。提交前仍在本机运行完整的 `pnpm test`；CI 的完整构建与发布包检查见[GitHub Actions](release.md#github-actions)。
 
 ## 手工验证
 
