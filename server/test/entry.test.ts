@@ -1,41 +1,26 @@
-import { afterEach, expect, test } from "vitest";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { once } from "node:events";
-import { join } from "node:path";
-import { request, type OutgoingHttpHeaders } from "node:http";
-import { connect, type AddressInfo } from "node:net";
-import { WebSocket } from "ws";
 import { appVersion } from "@kiteline/shared/protocol";
-import { createKitelineServer } from "../src/app.js";
-import { Store } from "../src/store.js";
+import { once } from "node:events";
+import { writeFile } from "node:fs/promises";
+import { Agent as HttpAgent, request, type OutgoingHttpHeaders } from "node:http";
+import { connect } from "node:net";
+import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+import { afterEach, expect, test } from "vitest";
+import { WebSocket } from "ws";
+import { agentPath, apiFixture, restoreServerLimits, serverFixture, webPath } from "./fixture.js";
 
-const cleanup: (() => Promise<void>)[] = [];
+const cleanup: (() => Promise<unknown> | void)[] = [];
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
+  try {
+    for (const close of cleanup.splice(0).reverse()) await close();
+  } finally {
+    restoreServerLimits();
+  }
 });
 
 async function fixture(trustProxyProto: boolean) {
-  const root = await mkdtemp("/var/tmp/kiteline-entries-");
-  const store = new Store(root);
-  const app = createKitelineServer(
-    {
-      dataDir: root,
-      hostname: "127.0.0.1",
-      port: 0,
-      trustProxyProto,
-      webDir: root,
-      downloadsDir: root,
-    },
-    store,
-  );
-  app.server.listen(0, "127.0.0.1");
-  await once(app.server, "listening");
-  const port = (app.server.address() as AddressInfo).port;
-  cleanup.push(async () => {
-    await app.close();
-    store.close();
-    await rm(root, { recursive: true, force: true });
-  });
+  const { dataDir: root, store, app, port, close } = await serverFixture(trustProxyProto);
+  cleanup.push(close);
   function call(
     path: string,
     headers: OutgoingHttpHeaders | string[],
@@ -369,4 +354,230 @@ test("HTTP and HTTPS use separate cookies and logout closes only the selected lo
   const httpsClosed = once(httpsEvents, "close");
   expect((await f.call("/api/logout", { ...httpsHeaders, cookie }, "POST")).status).toBe(200);
   await httpsClosed;
+});
+
+async function httpFixture() {
+  const base = await apiFixture();
+  cleanup.push(base.close);
+  return base;
+}
+
+test("WebSocket handshake distinguishes version, authentication, origin and missing channel", async () => {
+  const f = await httpFixture();
+  const login = f.store.createLogin(60_000);
+  const device = f.store.bind(f.store.newBinding().code, "Protocol check");
+  for (const [path, headers, status] of [
+    ["/api/agent/control", { authorization: `Bearer ${device.deviceToken}` }, 426],
+    ["/api/agent/control", {}, 401],
+    [agentPath, {}, 401],
+    ["/api/events", { origin: "https://other.test" }, 403],
+    [
+      webPath("/api/channels/missing/terminal"),
+      { origin: f.origin, cookie: `kiteline_session_http=${login.token}` },
+      404,
+    ],
+  ] as const) {
+    const socket = new WebSocket(f.origin.replace("http:", "ws:") + path, { headers });
+    socket.on("error", () => {});
+    const response = await new Promise<number>((resolve) =>
+      socket.on("unexpected-response", (_request, response) => {
+        response.resume();
+        socket.terminate();
+        resolve(response.statusCode!);
+      }),
+    );
+    expect(response).toBe(status);
+    await expect.poll(() => socket.readyState).toBe(WebSocket.CLOSED);
+  }
+});
+
+test("malformed static URL encoding returns a client error", async () => {
+  const f = await httpFixture();
+  const response = await f.call("/devices/%");
+  expect(response.status).toBe(400);
+  expect(await response.json()).toMatchObject({ error: { code: "invalid_argument" } });
+});
+
+test("stale Web releases cannot use business endpoints but can read recovery information", async () => {
+  const f = await httpFixture();
+  const login = f.store.createLogin(60_000);
+  const headers = { cookie: `kiteline_session_http=${login.token}`, origin: f.origin };
+  for (const version of [undefined, "0.1.9-test"]) {
+    const suffix = version ? `?appVersion=${version}` : "";
+    for (const [path, method] of [
+      ["/api/bindings", "POST"],
+      ["/api/devices/d", "PATCH"],
+      ["/api/devices/d", "DELETE"],
+      ["/api/devices/d/rpc", "POST"],
+      ["/api/devices/d/channels", "POST"],
+      ["/api/devices/d/download", "GET"],
+      ["/api/channels/c/content", "GET"],
+      ["/api/channels/c/content", "PUT"],
+    ]) {
+      const response = await fetch(f.origin + path + suffix, { method, headers });
+      expect(response.status).toBe(426);
+      expect(response.headers.get("x-kiteline-version")).toBe(appVersion);
+      expect(await response.json()).toMatchObject({
+        error: {
+          code: "version_mismatch",
+          details: { component: "web", clientVersion: version ?? null, serverVersion: appVersion },
+        },
+      });
+    }
+    for (const path of ["/api/session", "/api/devices"]) {
+      const response = await fetch(f.origin + path + suffix, { headers });
+      expect(response.status).toBe(200);
+      expect(response.headers.get("x-kiteline-version")).toBe(appVersion);
+      await response.arrayBuffer();
+    }
+    for (const path of ["/api/events", "/api/channels/c/terminal"]) {
+      const ws = new WebSocket(f.origin.replace("http:", "ws:") + path + suffix, { headers });
+      ws.on("error", () => {});
+      const status = await new Promise<number>((resolve) => {
+        ws.on("unexpected-response", (_request, response) => {
+          response.resume();
+          ws.terminate();
+          resolve(response.statusCode!);
+        });
+      });
+      expect(status).toBe(426);
+      await expect.poll(() => ws.readyState).toBe(WebSocket.CLOSED);
+    }
+  }
+});
+
+test("binding returns versioned installation commands from the current request origin", async () => {
+  const f = await httpFixture();
+  const login = f.store.createLogin(60_000);
+  const response = await f.call(
+    "/api/bindings",
+    "POST",
+    {},
+    `kiteline_session_http=${login.token}`,
+  );
+  expect(response.status).toBe(200);
+  const value = await response.json();
+  expect(value.commands.linux.install).toContain(`${f.origin}/connect.sh`);
+  expect(value.commands.macos.install).toContain(`| sh -s -- macos '${value.code}'`);
+  expect(Object.keys(value.commands).sort()).toEqual(["linux", "macos", "windows"]);
+  expect(Object.keys(value.commands.linux).sort()).toEqual(["bind", "install"]);
+  expect(Object.keys(value.commands.windows).sort()).toEqual(["bind", "install"]);
+  expect(value.commands.linux.bind).toContain(`bind --server '${f.origin}' --if-unbound`);
+  expect(value.commands.linux.bind).toContain(value.code);
+  expect(value.commands.macos.bind).toBe(value.commands.linux.bind);
+  expect(f.store.binding(value.bindingId).status).toBe("pending");
+  expect(value.commands.windows.install).toContain(`${f.origin}/connect.ps1`);
+  expect(value.commands.windows.install).toContain(`-Code '${value.code}'`);
+  expect(value.commands.windows.bind).toContain(`'${value.code}' | &`);
+  expect(value.commands.windows.bind).toContain(`bind --server '${f.origin}' --if-unbound`);
+});
+
+test("server stop closes a request whose JSON body has not finished", async () => {
+  const f = await httpFixture();
+  const login = f.store.createLogin(60_000);
+  const received = once(f.app.server, "request");
+  const client = request(f.origin + webPath("/api/devices/test/rpc"), {
+    method: "POST",
+    headers: {
+      origin: f.origin,
+      cookie: `kiteline_session_http=${login.token}`,
+      "content-type": "application/json",
+      "content-length": 1024,
+    },
+  });
+  client.on("error", () => {});
+  client.write("{");
+  await received;
+  const stopping = f.close();
+  try {
+    expect(await Promise.race([stopping.then(() => true), delay(1000, false)])).toBe(true);
+  } finally {
+    client.destroy();
+    await stopping;
+  }
+});
+
+test("static resources keep their content and GET/HEAD types while navigation retains HTML", async () => {
+  const f = await httpFixture();
+  const text = Buffer.from("Sample text\n");
+  const html = Buffer.from("<!doctype html><main>Kiteline</main>");
+  const files = [
+    ["sample.txt", text, "text/plain; charset=utf-8"],
+    ["sample.md", text, "text/plain; charset=utf-8"],
+    ["index.html", html, "text/html; charset=utf-8"],
+    ["main.js", Buffer.from("console.log('kiteline')"), "text/javascript"],
+    ["main.css", Buffer.from("body { color: black; }"), "text/css"],
+    ["resource.bin", Buffer.from([0, 1, 2]), "application/octet-stream"],
+  ] as const;
+  for (const [name, bytes, type] of files) {
+    await writeFile(join(f.config.webDir, name), bytes);
+    for (const method of ["GET", "HEAD"]) {
+      const response = await f.call(`/${name}`, method);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe(type);
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(Buffer.from(await response.arrayBuffer())).toEqual(
+        method === "HEAD" ? Buffer.alloc(0) : bytes,
+      );
+    }
+  }
+  for (const path of ["/", "/devices"]) {
+    const response = await f.call(path);
+    expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(html);
+  }
+  expect((await f.call("/assets/missing.js")).status).toBe(404);
+  const post = await f.call("/sample.txt", "POST");
+  expect(post.status).toBe(405);
+  expect(post.headers.get("allow")).toBe("GET, HEAD");
+});
+
+test("bodyless resources and complete JSON requests reuse their HTTP connection", async () => {
+  const f = await httpFixture();
+  const client = new HttpAgent({ keepAlive: true, maxSockets: 1 });
+  cleanup.push(() => client.destroy());
+  const sockets = new Set<unknown>();
+  const call = (path: string, method = "GET", body?: unknown) =>
+    new Promise<{ status: number; text: string }>((resolve, reject) => {
+      const payload = body === undefined ? undefined : JSON.stringify(body);
+      const req = request(
+        f.origin + path,
+        {
+          agent: client,
+          method,
+          headers: {
+            origin: f.origin,
+            ...(payload === undefined
+              ? {}
+              : {
+                  "content-type": "application/json",
+                  "content-length": Buffer.byteLength(payload),
+                }),
+          },
+        },
+        (response) => {
+          let text = "";
+          response.setEncoding("utf8");
+          response.on("data", (chunk: string) => (text += chunk));
+          response.on("error", reject);
+          response.on("end", () => resolve({ status: response.statusCode!, text }));
+        },
+      );
+      req.on("socket", (socket) => sockets.add(socket));
+      req.on("error", reject);
+      req.end(payload);
+    });
+  expect((await call("/connect.sh")).status).toBe(200);
+  expect(await call("/connect.sh", "HEAD")).toEqual({ status: 200, text: "" });
+  expect((await call("/healthz")).status).toBe(200);
+  expect(
+    (
+      await call("/api/setup", "POST", {
+        setupToken: f.store.newSetupToken(),
+        password: "test-password",
+      })
+    ).status,
+  ).toBe(200);
+  expect((await call("/api/bootstrap")).text).toBe('{"initialized":true}');
+  expect(sockets.size).toBe(1);
 });

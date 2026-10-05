@@ -12,27 +12,22 @@ import { createServer as secureServer } from "node:https";
 import { getCACertificates, setDefaultCACertificates } from "node:tls";
 import { once } from "node:events";
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
 import { connect, type AddressInfo, type Socket } from "node:net";
 import { WebSocket, WebSocketServer } from "ws";
-import { createKitelineServer } from "../src/app.js";
-import { Store } from "../src/store.js";
-import type { ServerConfig } from "../src/config.js";
+import { restoreServerLimits, serverFixture } from "./fixture.js";
 import { Agent } from "../../agent/src/agent.js";
 import { defaultAgentLimits, privateDirectory } from "../../agent/src/config.js";
 
-const originalServerLimits = { ...serverLimits };
-const originalInteractionTimeout = limits.interactionTimeout;
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
   try {
     for (const close of cleanup.splice(0).reverse()) await close();
   } finally {
-    Object.assign(serverLimits, originalServerLimits);
-    Object.assign(limits, { interactionTimeout: originalInteractionTimeout });
+    restoreServerLimits();
   }
 });
 async function listen(server: Server, host = "127.0.0.1", port = 0) {
@@ -43,7 +38,7 @@ async function listen(server: Server, host = "127.0.0.1", port = 0) {
 async function fixture(handler: RequestListener, channels = 128) {
   Object.assign(serverLimits, { channelsPerDevice: channels, channelIdleTimeout: 100 });
   Object.assign(limits, { interactionTimeout: 1000 });
-  const root = await mkdtemp("/var/tmp/kiteline-http-");
+  const { dataDir: root, app: kiteline, store, config, port, close } = await serverFixture(true);
   const keyFile = join(root, "key.pem"),
     certFile = join(root, "cert.pem");
   await promisify(execFile)("openssl", [
@@ -69,17 +64,6 @@ async function fixture(handler: RequestListener, channels = 128) {
     cert = await readFile(certFile);
   const originalCA = getCACertificates();
   setDefaultCACertificates([...originalCA, cert]);
-  const store = new Store(root);
-  const config: ServerConfig = {
-    dataDir: root,
-    trustProxyProto: true,
-    hostname: "127.0.0.1",
-    port: 0,
-    webDir: root,
-    downloadsDir: root,
-  };
-  const kiteline = createKitelineServer(config, store);
-  const port = await listen(kiteline.server);
   const tls = secureServer({ key, cert }, (req, res) => {
     req.headers["x-forwarded-proto"] = "https";
     kiteline.server.emit("request", req, res);
@@ -113,9 +97,8 @@ async function fixture(handler: RequestListener, channels = 128) {
     upstream.closeAllConnections();
     await new Promise<void>((resolve) => tls.close(() => resolve()));
     await new Promise<void>((resolve) => upstream.close(() => resolve()));
-    store.close();
     setDefaultCACertificates(originalCA);
-    await rm(root, { recursive: true, force: true });
+    await close();
   });
   for (const path of [agent.config.dataDir, agent.config.runDir]) await privateDirectory(path);
   await agent.start();

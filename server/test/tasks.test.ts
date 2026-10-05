@@ -1,9 +1,8 @@
 import { expect, test } from "vitest";
 import { once } from "node:events";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 import { WebSocket } from "ws";
 import {
   appVersion,
@@ -15,26 +14,11 @@ import {
 import { Agent } from "../../agent/src/agent.js";
 import { defaultAgentLimits, privateDirectory } from "../../agent/src/config.js";
 import { localRequest } from "../../agent/src/local.js";
-import { createKitelineServer } from "../src/app.js";
+import { agentEnvironment, hello, serverFixture } from "./fixture.js";
 import { Store } from "../src/store.js";
 
 async function fixture() {
-  const root = await mkdtemp("/var/tmp/kiteline-schedule-relay-");
-  const store = new Store(root);
-  const app = createKitelineServer(
-    {
-      dataDir: root,
-      trustProxyProto: false,
-      hostname: "127.0.0.1",
-      port: 0,
-      webDir: root,
-      downloadsDir: root,
-    },
-    store,
-  );
-  app.server.listen(0, "127.0.0.1");
-  await once(app.server, "listening");
-  const origin = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
+  const { dataDir: root, store, app, origin, close } = await serverFixture();
   const identity = store.bind(store.newBinding().code, "Scheduled Linux");
   const login = store.createLogin(60000);
   const cookie = `kiteline_session_http=${login.token}`;
@@ -54,7 +38,6 @@ async function fixture() {
     ).json()) as Reply<T>;
   const summaries = async () =>
     ((await (await call("/api/tasks")).json()) as { devices: DeviceTaskSummary[] }).devices;
-  let closed = false;
   return {
     root,
     store,
@@ -66,13 +49,7 @@ async function fixture() {
     call,
     rpc,
     summaries,
-    async close() {
-      if (closed) return;
-      closed = true;
-      await app.close();
-      store.close();
-      await rm(root, { recursive: true, force: true });
-    },
+    close,
   };
 }
 
@@ -273,22 +250,16 @@ test("summary DWORD results, ownership, revision and nested whitelist are indepe
     const welcome = once(socket, "message");
     socket.send(
       JSON.stringify({
-        type: "hello",
+        ...hello(),
         environment: {
-          os: "linux",
-          homePath: "/home/project",
-          rootPaths: ["/"],
-          cliPath: "/usr/local/bin/kiteline-agent",
+          ...agentEnvironment,
           dataDir: "/var/tmp/state",
           runDir: "/var/tmp/run",
         },
         editorBytes: 1000,
         snapshot: {
-          schemaVersion: 1,
+          ...hello().snapshot,
           revision: 1,
-          workspaces: [],
-          shortcuts: [],
-          settings: { historyLines: 1000 },
         },
       }),
     );
