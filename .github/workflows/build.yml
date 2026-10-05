@@ -43,38 +43,26 @@ jobs:
           pnpm --filter @kiteline/web build
           pnpm test web/test agent/test/config.test.ts agent/test/state-records.test.ts
 
-  linux-amd64:
+  agent:
     needs: checks
     if: inputs.full
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-amd64
+            runner: ubuntu-24.04
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+          - target: macos-amd64
+            runner: macos-15-intel
+          - target: macos-arm64
+            runner: macos-15
     uses: ./.github/workflows/build-agent.yml
     with:
       source: ${{ inputs.source }}
-      target: linux-amd64
-      runner: ubuntu-24.04
-  linux-arm64:
-    needs: checks
-    if: inputs.full
-    uses: ./.github/workflows/build-agent.yml
-    with:
-      source: ${{ inputs.source }}
-      target: linux-arm64
-      runner: ubuntu-24.04-arm
-  macos-amd64:
-    needs: checks
-    if: inputs.full
-    uses: ./.github/workflows/build-agent.yml
-    with:
-      source: ${{ inputs.source }}
-      target: macos-amd64
-      runner: macos-15-intel
-  macos-arm64:
-    needs: checks
-    if: inputs.full
-    uses: ./.github/workflows/build-agent.yml
-    with:
-      source: ${{ inputs.source }}
-      target: macos-arm64
-      runner: macos-15
+      target: ${{ matrix.target }}
+      runner: ${{ matrix.runner }}
 
   windows-tmux:
     needs: checks
@@ -185,21 +173,20 @@ jobs:
           if ($actual -ne $version) { throw "Version mismatch: $actual" }
           & pwsh -NoProfile -ExecutionPolicy Bypass -File "$package/bin/kiteline-agent.ps1" check
 
-  server-amd64:
-    needs: [linux-amd64, linux-arm64, macos-amd64, macos-arm64, windows-package, windows-accept]
+  server:
+    needs: [agent, windows-package, windows-accept]
     if: inputs.full
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     uses: ./.github/workflows/build-server.yml
     with:
       source: ${{ inputs.source }}
-      arch: amd64
-      runner: ubuntu-24.04
-      image-artifacts: ${{ inputs.image-artifacts }}
-  server-arm64:
-    needs: [linux-amd64, linux-arm64, macos-amd64, macos-arm64, windows-package, windows-accept]
-    if: inputs.full
-    uses: ./.github/workflows/build-server.yml
-    with:
-      source: ${{ inputs.source }}
-      arch: arm64
-      runner: ubuntu-24.04-arm
+      arch: ${{ matrix.arch }}
+      runner: ${{ matrix.runner }}
       image-artifacts: ${{ inputs.image-artifacts }}

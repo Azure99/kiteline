@@ -3,12 +3,12 @@ import { readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import {
   agentTargets,
-  digest,
   expectedRelease,
   packageNames,
   releaseMatches,
   sourceCommit,
-} from "./release-inputs.mjs";
+} from "./release-artifacts.mjs";
+import { digest } from "./release-inputs.mjs";
 
 const [kind, target, archivePath, directoryPath, extra] = process.argv.slice(2);
 if (!archivePath || !directoryPath || extra || !["agent", "server"].includes(kind))

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { agentTargets, digest, packageNames, run, sourceCommit } from "./release-inputs.mjs";
+import { agentTargets, packageNames, sourceCommit } from "./release-artifacts.mjs";
+import { digest, run } from "./release-inputs.mjs";
 
 const [mode, extra] = process.argv.slice(2);
 if (extra || !["plan", "candidate", "dev-image", "publish"].includes(mode))

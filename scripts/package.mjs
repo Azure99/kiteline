@@ -22,14 +22,12 @@ import { verifyWindowsComponents } from "./build-windows-components.mjs";
 import { verifyMacosComponents } from "./build-macos-components.mjs";
 import {
   agentTargets as allAgentTargets,
-  digest,
   expectedRelease,
-  fetchPinned,
   packageNames,
   releaseMatches,
-  run as execute,
   sourceCommit as readSourceCommit,
-} from "./release-inputs.mjs";
+} from "./release-artifacts.mjs";
+import { digest, fetchPinned, run as execute } from "./release-inputs.mjs";
 import { windowsRuntimeFiles, windowsComponentPath } from "./windows-components.ts";
 import { agentLauncher, windowsAgentLaunchers } from "./agent-launcher.ts";
 
@@ -49,21 +47,17 @@ const { positionals, values } = parseArgs({
   },
 });
 const [kind, target] = positionals;
-const windowsAgent = kind === "agent" && target === "windows-amd64";
-const macosAgent = kind === "agent" && ["macos-amd64", "macos-arm64"].includes(target);
-const linuxAgent = kind === "agent" && ["linux-amd64", "linux-arm64"].includes(target);
-const arch = windowsAgent
-  ? "amd64"
-  : macosAgent || linuxAgent
-    ? target.slice(target.indexOf("-") + 1)
-    : target;
+const [platform, arch] = kind === "agent" ? (target ?? "").split("-") : ["linux", target];
+const windowsAgent = kind === "agent" && platform === "windows";
+const macosAgent = kind === "agent" && platform === "macos";
+const linuxAgent = kind === "agent" && platform === "linux";
 const windowsComponents = values["windows-components"];
 const macosComponents = values["macos-components"];
 const agentTargets = values["agent-target"]?.split(",") ?? allAgentTargets;
 if (
   positionals.length !== 2 ||
   !["server", "agent"].includes(kind) ||
-  (kind === "agent" && !windowsAgent && !macosAgent && !linuxAgent) ||
+  (kind === "agent" && !allAgentTargets.includes(target)) ||
   !Object.hasOwn(release.nodeArchives, arch ?? "") ||
   (values["agent-target"] !== undefined && kind !== "server") ||
   agentTargets.some((target) => !allAgentTargets.includes(target)) ||
@@ -282,7 +276,6 @@ try {
       ) + "\n",
     );
   }
-  const platform = windowsAgent ? "windows" : macosAgent ? "macos" : "linux";
   const { name, archive: filename } = packageNames(kind, version, `${platform}-${arch}`);
   const destination = join(temporary, name);
   mkdirSync(destination);

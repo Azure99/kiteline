@@ -5,9 +5,9 @@ import {
   expectedRelease,
   packageNames,
   releaseMatches,
-  run,
   sourceCommit as readSourceCommit,
-} from "./release-inputs.mjs";
+} from "./release-artifacts.mjs";
+import { run } from "./release-inputs.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const release = JSON.parse(readFileSync(resolve(root, "release/inputs.json"), "utf8"));
