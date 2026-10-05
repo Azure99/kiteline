@@ -9,21 +9,11 @@ import { useCopyFeedback } from "../lib/use-copy-feedback";
 export function UninstallInstructions({ initialPlatform }: { initialPlatform?: AgentPlatform }) {
   const { t } = useTranslation();
   const [platform, setPlatform] = useState<AgentPlatform>(initialPlatform ?? "linux");
-  const { copied, error, copy: copyCommand, reset } = useCopyFeedback();
-  const [pending, setPending] = useState(false);
+  const { copied, error, copy, pending } = useCopyFeedback();
   const command =
     platform === "windows"
       ? '& "$PSHOME\\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\\kiteline-agent\\kiteline-agent.ps1" uninstall'
       : "sudo /usr/local/bin/kiteline-agent uninstall";
-  async function copy() {
-    setPending(true);
-    reset();
-    try {
-      await copyCommand(command);
-    } finally {
-      setPending(false);
-    }
-  }
   return (
     <div className="space-y-3 text-sm">
       <h2 className="font-medium">{t(($) => $.devices.uninstallAgent)}</h2>
@@ -38,13 +28,13 @@ export function UninstallInstructions({ initialPlatform }: { initialPlatform?: A
           label={copied === command ? t(($) => $.common.copied) : t(($) => $.devices.copyUninstall)}
           disabled={pending}
           onPointerDown={(event) => event.preventDefault()}
-          onClick={() => void copy()}
+          onClick={() => void copy(command)}
         >
           {copied === command ? <Check /> : <Copy />}
         </IconButton>
       </div>
       <p className="text-muted-foreground">{t(($) => $.devices.uninstallKeepsData)}</p>
-      {error?.text === command && (
+      {error?.id === command && (
         <div role="alert" className="break-words text-destructive">
           <ErrorNotice error={error.error} />
         </div>

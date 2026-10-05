@@ -13,7 +13,7 @@ import {
 } from "../components/ui/dialog";
 import { IconButton } from "../components/icon-button";
 import { ApiError } from "../lib/api";
-import { copyText } from "../lib/clipboard";
+import { useCopyFeedback } from "../lib/use-copy-feedback";
 import {
   draftError,
   isDirty,
@@ -45,7 +45,7 @@ export function DraftView({
   const [saveAs, setSaveAs] = useState(false);
   const [path, setPath] = useState(draft.path);
   const [error, setError] = useState<unknown>();
-  const [copied, setCopied] = useState<string>();
+  const { copied, error: copyError, copy } = useCopyFeedback();
   const generation = useRef(0);
   const tabStrip = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -139,15 +139,7 @@ export function DraftView({
           label={t(($) => $.files.copyText)}
           disabled={!draft.state}
           onPointerDown={(event) => event.preventDefault()}
-          onClick={() => {
-            setCopied(undefined);
-            void copyText(draft.state!.doc.toString())
-              .then(() => setCopied(draft.id))
-              .catch((reason: unknown) => {
-                draft.error = reason;
-                store.changed();
-              });
-          }}
+          onClick={() => void copy(draft.state!.doc.toString(), draft.id)}
         >
           <Copy />
         </IconButton>
@@ -182,6 +174,7 @@ export function DraftView({
         draft.notice ||
         draft.diskChanged ||
         draftError(draft) ||
+        copyError ||
         draft.format.mixedLineEndings) && (
         <div className="shrink-0 space-y-1 border-b border-border px-3 py-2 text-xs">
           {unavailable && <p role="status">{unavailable}</p>}
@@ -196,6 +189,11 @@ export function DraftView({
           {draftError(draft) && (
             <div role="alert" className="break-words text-destructive">
               <ErrorNotice error={draft.error ?? draft.observationError} />
+            </div>
+          )}
+          {copyError && (
+            <div role="alert" className="break-words text-destructive">
+              <ErrorNotice error={copyError.error} />
             </div>
           )}
           {!!(

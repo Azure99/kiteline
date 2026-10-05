@@ -3,19 +3,27 @@ import { copyText } from "./clipboard";
 
 export function useCopyFeedback() {
   const [copied, setCopied] = useState("");
-  const [error, setError] = useState<{ text: string; error: unknown }>();
-  const copy = useCallback(async (text: string) => {
-    try {
-      await copyText(text);
-      setCopied(text);
-      setError(undefined);
-    } catch (error) {
-      setError({ text, error });
-    }
-  }, []);
+  const [error, setError] = useState<{ id: string; error: unknown }>();
+  const [pending, setPending] = useState(false);
   const reset = useCallback(() => {
     setCopied("");
     setError(undefined);
   }, []);
-  return { copied, error, copy, reset };
+  const copy = useCallback(
+    async (text: string, id = text) => {
+      reset();
+      setPending(true);
+      try {
+        await copyText(text);
+        setCopied(id);
+        setError(undefined);
+      } catch (error) {
+        setError({ id, error });
+      } finally {
+        setPending(false);
+      }
+    },
+    [reset],
+  );
+  return { copied, error, pending, copy, reset };
 }

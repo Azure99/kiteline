@@ -26,8 +26,7 @@ export function UpgradeDialog({
   const [upgrade, setUpgrade] = useState<Upgrade>();
   const [platform, setPlatform] = useState<AgentPlatform>("linux");
   const [error, setError] = useState<unknown>();
-  const { copied, error: copyError, copy: copyCommand, reset } = useCopyFeedback();
-  const [pending, setPending] = useState(false);
+  const { copied, error: copyError, copy, pending } = useCopyFeedback();
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
@@ -44,17 +43,7 @@ export function UpgradeDialog({
   }, [attempt]);
 
   const command = upgrade?.commands[platform];
-  const visibleCopyError = copyError?.text === command ? copyError?.error : undefined;
-  async function copy() {
-    if (!command) return;
-    reset();
-    setPending(true);
-    try {
-      await copyCommand(command);
-    } finally {
-      setPending(false);
-    }
-  }
+  const visibleCopyError = copyError?.id === command ? copyError?.error : undefined;
   return (
     <Dialog
       open
@@ -79,7 +68,7 @@ export function UpgradeDialog({
                 variant="outline"
                 disabled={pending}
                 onPointerDown={(event) => event.preventDefault()}
-                onClick={() => void copy()}
+                onClick={() => void copy(command!)}
               >
                 {copied === command ? <Check /> : <Copy />}
                 {copied === command ? t(($) => $.common.copied) : t(($) => $.devices.copyUpgrade)}

@@ -29,12 +29,8 @@ export function SessionDialog({
   const { t } = useTranslation();
 
   const [name, setName] = useState(action.session.name);
-  const { copied: copiedCommand, error, copy: copyCommand } = useCopyFeedback();
+  const { copied: copiedCommand, error, copy } = useCopyFeedback();
   const command = environment && localCommand(environment, action.session.id);
-  async function copy() {
-    if (!command) return;
-    await copyCommand(command);
-  }
   return (
     <Dialog
       open
@@ -84,7 +80,7 @@ export function SessionDialog({
             <Button
               disabled={!command}
               onPointerDown={(event) => event.preventDefault()}
-              onClick={() => void copy()}
+              onClick={() => void copy(command!)}
             >
               <Copy />
               {command && copiedCommand === command

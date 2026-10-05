@@ -41,7 +41,7 @@ export function BindingDialog({
   const [binding, setBinding] = useState<Binding>();
   const [result, setResult] = useState<Result>();
   const [error, setError] = useState<unknown>();
-  const { copied, error: copyError, copy: copyCommand, reset } = useCopyFeedback();
+  const { copied, error: copyError, copy, reset } = useCopyFeedback();
   const [platform, setPlatform] = useState<AgentPlatform>("linux");
   const [busy, setBusy] = useState(true);
   const [queryStopped, setQueryStopped] = useState(false);
@@ -107,15 +107,11 @@ export function BindingDialog({
   const commands = binding?.commands[platform];
   const command = commands?.install;
   const visibleCopyError =
-    copyError && (copyError.text === command || copyError.text === commands?.bind)
+    copyError && (copyError.id === command || copyError.id === commands?.bind)
       ? copyError.error
       : undefined;
   const device = devices.find((entry) => entry.id === result?.deviceId);
   const online = connected && device?.status === "online";
-  const copy = (text: string) => {
-    reset();
-    void copyCommand(text);
-  };
   return (
     <DialogContent>
       <DialogHeader>
@@ -166,7 +162,7 @@ export function BindingDialog({
                   }
                   disabled={!canCopy}
                   onPointerDown={(event) => event.preventDefault()}
-                  onClick={() => copy(command!)}
+                  onClick={() => void copy(command!)}
                 >
                   {copied === command ? <Check /> : <Copy />}
                 </IconButton>
@@ -191,7 +187,7 @@ export function BindingDialog({
                   }
                   disabled={!canCopy}
                   onPointerDown={(event) => event.preventDefault()}
-                  onClick={() => copy(commands!.bind)}
+                  onClick={() => void copy(commands!.bind)}
                 >
                   {copied === commands!.bind ? <Check /> : <Copy />}
                 </IconButton>

@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { ErrorNotice } from "../components/error-notice";
 import { Circle, Copy, X } from "lucide-react";
 import { Button } from "../components/ui/button";
@@ -14,7 +14,7 @@ import {
 import { draftError, isDirty, useDrafts, type DraftStore } from "./drafts";
 import { closeDraft, requestCloseDraft, showDraft, syncDraftPath } from "./navigation";
 import { useRoute } from "../lib/navigation";
-import { copyText } from "../lib/clipboard";
+import { useCopyFeedback } from "../lib/use-copy-feedback";
 
 export function OpenFiles({
   store,
@@ -26,14 +26,10 @@ export function OpenFiles({
   onOpenChange(open: boolean): void;
 }) {
   const { t } = useTranslation();
-  const [copyError, setCopyError] = useState<unknown>();
-  const [copied, setCopied] = useState<string>();
+  const { copied, error: copyError, copy, reset } = useCopyFeedback();
   useEffect(() => {
-    if (!open) {
-      setCopyError(undefined);
-      setCopied(undefined);
-    }
-  }, [open]);
+    if (!open) reset();
+  }, [open, reset]);
 
   const drafts = useDrafts(store);
   const closing = drafts.find((item) => item.id === store.closing);
@@ -57,7 +53,7 @@ export function OpenFiles({
           </DialogHeader>
           {!!copyError && (
             <div role="alert" className="px-4 text-sm text-destructive">
-              <ErrorNotice error={copyError} />
+              <ErrorNotice error={copyError.error} />
             </div>
           )}
           <div className="scroll-area overflow-auto p-2">
@@ -97,13 +93,7 @@ export function OpenFiles({
                 <IconButton
                   label={t(($) => $.files.copyText)}
                   disabled={!draft.state}
-                  onClick={() => {
-                    setCopyError(undefined);
-                    setCopied(undefined);
-                    void copyText(draft.state!.doc.toString())
-                      .then(() => setCopied(draft.id))
-                      .catch(setCopyError);
-                  }}
+                  onClick={() => void copy(draft.state!.doc.toString(), draft.id)}
                 >
                   <Copy size={13} />
                 </IconButton>

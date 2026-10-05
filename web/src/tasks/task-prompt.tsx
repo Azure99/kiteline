@@ -12,7 +12,7 @@ import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
 import { ErrorNotice } from "../components/error-notice";
 import { browserLanguage, type Language } from "../i18n";
-import { copyText } from "../lib/clipboard";
+import { useCopyFeedback } from "../lib/use-copy-feedback";
 
 export function TaskPrompt({
   onClose,
@@ -25,23 +25,8 @@ export function TaskPrompt({
   const [language, setLanguage] = useState<Language>(() =>
     browserLanguage(i18n.resolvedLanguage ?? "en"),
   );
-  const [notice, setNotice] = useState<
-    { text: string } & ({ kind: "copied" } | { kind: "error"; error: unknown })
-  >();
-  const [pending, setPending] = useState(false);
+  const { copied, error, pending, copy } = useCopyFeedback();
   const text = t(($) => $.schedules.promptTemplate, { lng: language });
-  async function copy() {
-    setPending(true);
-    setNotice(undefined);
-    try {
-      await copyText(text);
-      setNotice({ text, kind: "copied" });
-    } catch (error) {
-      setNotice({ text, kind: "error", error });
-    } finally {
-      setPending(false);
-    }
-  }
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent finalFocus={trigger}>
@@ -77,20 +62,20 @@ export function TaskPrompt({
             aria-label={t(($) => $.schedules.promptText)}
             className="min-h-28 resize-none bg-muted/40 p-3"
           />
-          {notice?.text === text && notice.kind === "error" && (
+          {error?.id === text && (
             <p role="alert" className="break-words text-sm text-destructive">
-              {t(($) => $.schedules.promptCopyFailed)} <ErrorNotice error={notice.error} />
+              {t(($) => $.schedules.promptCopyFailed)} <ErrorNotice error={error.error} />
             </p>
           )}
         </div>
         <DialogFooter>
           <span role="status" className="min-w-0 flex-1 text-sm">
-            {notice?.text === text && notice.kind === "copied" ? t(($) => $.common.copied) : ""}
+            {copied === text ? t(($) => $.common.copied) : ""}
           </span>
           <Button
             disabled={pending}
             onPointerDown={(event) => event.preventDefault()}
-            onClick={() => void copy()}
+            onClick={() => void copy(text)}
           >
             <Copy />
             {t(($) => $.schedules.copyPrompt)}
