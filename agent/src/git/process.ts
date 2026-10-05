@@ -245,6 +245,9 @@ export function gitPath(bytes: Buffer, old?: Buffer): GitPath {
 export function gitPathKey(path: GitPath) {
   return JSON.stringify([path.path, path.oldPath, path.pathError]);
 }
+export function literalPathspec(path: string) {
+  return `:(top,literal)${path}`;
+}
 export function commandLine(bytes: Buffer) {
   return utf8(bytes.at(-1) === 10 ? bytes.subarray(0, -1) : bytes);
 }

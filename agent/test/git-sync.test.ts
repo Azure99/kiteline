@@ -9,7 +9,7 @@ import { testConfig } from "./support/config.js";
 import { gitRepoFixture, isolateGitEnvironment, workspaceFixture } from "./support/git.js";
 import { headIdentity } from "../src/git/observe.js";
 import { status } from "../src/git/status.js";
-import { finishOperation } from "../src/git/operation.js";
+import { finishOperation } from "../src/git/in-progress.js";
 import { remotes, syncRemote } from "../src/git/remotes.js";
 import { git } from "../src/git/process.js";
 

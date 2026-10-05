@@ -11,7 +11,7 @@ import {
 } from "@kiteline/shared/protocol";
 import { git, gitPath, NulRecords, utf8 } from "./process.js";
 import { observeIndex } from "./observe.js";
-import { readOperation } from "./operation.js";
+import { readOperation } from "./in-progress.js";
 
 export function modeType(mode: string): GitType {
   if (mode === "000000") return "absent";

@@ -21,15 +21,15 @@ export async function headIdentity(root: string, signal: AbortSignal): Promise<H
     oid: commit.code === 0 ? commandLine(commit.bytes) : null,
   };
 }
+export async function emptyTree(root: string, signal: AbortSignal) {
+  // Use this repository's object format without writing the tree.
+  return commandLine(
+    (await git(root, ["hash-object", "-t", "tree", "--stdin"], signal, { input: "" })).bytes,
+  );
+}
 export async function observeIndex(repo: Repo, signal: AbortSignal) {
   const head = await headIdentity(repo.rootPath, signal);
-  // An unborn branch needs an empty tree in this repository's object format, without writing it.
-  const base =
-    head.oid ??
-    commandLine(
-      (await git(repo.rootPath, ["hash-object", "-t", "tree", "--stdin"], signal, { input: "" }))
-        .bytes,
-    );
+  const base = head.oid ?? (await emptyTree(repo.rootPath, signal));
   const changed = createHash("sha256");
   let header = true,
     hasConflicts = false,

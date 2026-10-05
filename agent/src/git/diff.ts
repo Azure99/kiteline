@@ -9,7 +9,7 @@ import {
   type Repo,
 } from "@kiteline/shared/protocol";
 import { relativePath } from "../files/paths.js";
-import { git, gitPath, gitPathKey, NulRecords } from "./process.js";
+import { git, gitPath, gitPathKey, literalPathspec, NulRecords } from "./process.js";
 import { diffOptions } from "./observe.js";
 import { readStatus } from "./status.js";
 
@@ -76,7 +76,7 @@ export function numstatReader(each: (path: GitPath, binary: boolean) => void) {
     },
   };
 }
-export function binaryPaths(bytes: Buffer) {
+function binaryPaths(bytes: Buffer) {
   const paths = new Set<string>();
   const reader = numstatReader((path, binary) => {
     if (binary) paths.add(gitPathKey(path));
@@ -101,13 +101,13 @@ export function boundedDiff(patch: string, summary: DiffSummary, truncated: bool
   return { patch, summary, truncated };
 }
 // The parser needs the context prefix even on blank lines to avoid silently losing them.
-export const patchConfig = ["-c", "core.quotePath=true", "-c", "diff.suppressBlankEmpty=false"];
+const patchConfig = ["-c", "core.quotePath=true", "-c", "diff.suppressBlankEmpty=false"];
 function leafPathspecs(paths: string[]) {
   return paths.flatMap((path) => {
     const escaped = path.replace(/[\\*?[\]]/g, "\\$&");
     // Git 2.23 otherwise treats the plain prefix as the gitlink itself.
     const prefix = escaped.startsWith("\\") ? escaped : `\\${escaped}`;
-    return [`:(top,literal)${path}`, `:(top,glob,exclude)${prefix}/**`];
+    return [literalPathspec(path), `:(top,glob,exclude)${prefix}/**`];
   });
 }
 export async function selectedPatch(
@@ -187,7 +187,7 @@ export async function workingDiff(
     side === "staged" && selected.indexStatus === "R" && selected.oldPath
       ? [selected.oldPath, path]
       : [path];
-  const pathspecs = paths.map((path) => `:(top,literal)${path}`);
+  const pathspecs = paths.map(literalPathspec);
   const args = [
     "diff",
     ...(side === "staged" ? ["--cached"] : []),
