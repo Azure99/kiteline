@@ -34,16 +34,16 @@ Docker 镜像的 `ENTRYPOINT` 是 `kiteline-server`，默认参数是 `serve`，
 
 ## kiteline-agent 命令
 
-Linux 和 macOS 的命令入口是 `/usr/local/bin/kiteline-agent`；用 `sudo` 执行时写这个绝对路径。Windows 的命令入口是 `%ProgramData%\kiteline-agent\kiteline-agent.ps1`，在 PowerShell 7 中有两种写法，作用相同：
+Linux 和 macOS 的命令入口是 `/usr/local/bin/kiteline-agent`；用 `sudo` 执行时写这个绝对路径。Windows 的命令入口是 `%ProgramData%\kiteline-agent\kiteline-agent.ps1`，在 PowerShell 7 中有两种调用方式：
 
 ```powershell
-# 短写法：PowerShell 的执行策略允许运行本地脚本时可用（PowerShell 7 的默认策略允许）
+# 短写法
 & "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" doctor
-# 完整写法：仅当前进程使用 Bypass，组策略仍优先
+# 完整写法
 & "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" doctor
 ```
 
-网页的“本机接续命令”使用短写法，“已安装，仅绑定”命令和卸载命令使用完整写法。文档中的 `kiteline-agent <子命令>` 在 Windows 上换成其中任一写法。
+在真实控制台中直接交互时可用短写法，执行策略须允许运行本地脚本。需要变量捕获、PowerShell 管道或重定向时使用完整写法；短写法的程序输出不进入 PowerShell 对象管道。完整写法中的 `Bypass` 仅作用于当前进程，组策略仍优先。文档中的 `kiteline-agent <子命令>` 在 Windows 上按用途替换为相应写法。
 
 不带参数或带 `--help` 执行 `kiteline-agent` 会打印子命令概要，`--version` 打印版本号。只有 `schedule` 及其子命令提供 `--help`；其他子命令没有 `--help`，参数以下表为准。
 

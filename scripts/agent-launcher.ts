@@ -9,7 +9,7 @@ const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
 export function agentLauncher(
   source: string | undefined,
-  paths: { directory: string; management: string; use: string },
+  paths: { directory: string; management: string; managementFd: number; use: string },
   platform: NodeJS.Platform = process.platform,
 ) {
   const macos = platform === "darwin";
@@ -24,10 +24,11 @@ export function agentLauncher(
     __KITELINE_FLOCK__: macos ? '"$kiteline_root/dist/native/bin/flock"' : "flock",
     __KITELINE_INSTALLED__: quote(paths.directory),
     __KITELINE_MANAGEMENT__: quote(paths.management),
+    __KITELINE_MANAGEMENT_FD__: String(paths.managementFd),
     __KITELINE_USE__: quote(paths.use),
   };
   return template.replace(
-    /__KITELINE_(ROOT|FLOCK|INSTALLED|MANAGEMENT|USE)__/g,
+    /__KITELINE_(ROOT|FLOCK|INSTALLED|MANAGEMENT|MANAGEMENT_FD|USE)__/g,
     (token) => values[token]!,
   );
 }

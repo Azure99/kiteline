@@ -20,6 +20,7 @@ import {
   installationManagementFile,
   installationUseFile,
   lockFileDescriptor,
+  managementLockFd,
 } from "../src/install/paths.js";
 import { replaceProgram } from "../src/install/commands.js";
 import { lockAgentState } from "../src/state-lock.js";
@@ -28,6 +29,7 @@ const cleanups: (() => Promise<unknown>)[] = [];
 const installedPaths = {
   directory: installDirectory,
   management: installationManagementFile,
+  managementFd: managementLockFd,
   use: installationUseFile,
 };
 afterEach(async () => {
@@ -59,6 +61,7 @@ async function launcher(root: string, main: string) {
     directory: join(root, "program"),
     use: join(root, "use.lock"),
     management: join(root, "public/management.lock"),
+    managementFd: managementLockFd,
   };
   await mkdir(join(paths.directory, "runtime/bin"), { recursive: true });
   await mkdir(join(paths.directory, "agent/dist"), { recursive: true });
@@ -150,7 +153,7 @@ test.runIf(process.getuid?.() === 0).each([false, true])(
     const fs = require('node:fs');
     const { spawnSync } = require('node:child_process');
     process.on('SIGTERM', () => {});
-    if (spawnSync('flock', ['--exclusive', '--nonblock', '3'], {stdio:['ignore','ignore','ignore',9]}).status !== 0) throw Error('management ownership lost');
+    if (spawnSync('flock', ['--exclusive', '--nonblock', '3'], {stdio:['ignore','ignore','ignore',${managementLockFd}]}).status !== 0) throw Error('management ownership lost');
     fs.unlinkSync(process.env.TEST_LAUNCHER);
     console.log('stdin=' + fs.readFileSync(0, 'utf8'));
     console.log('ready ' + __dirname);

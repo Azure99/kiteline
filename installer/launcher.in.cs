@@ -5,6 +5,15 @@ using System.Text;
 using System.Threading;
 
 public sealed class __KITELINE_LAUNCHER_TYPE__ : IDisposable {
+    const uint GENERIC_READ=0x80000000, GENERIC_WRITE=0x40000000;
+    const uint FILE_LIST_DIRECTORY=1, FILE_READ_ATTRIBUTES=0x80;
+    const uint FILE_SHARE_READ=1, FILE_SHARE_WRITE=2, OPEN_EXISTING=3;
+    const uint LOCKFILE_FAIL_IMMEDIATELY=1, LOCKFILE_EXCLUSIVE_LOCK=2;
+    const uint FILE_FLAG_BACKUP_SEMANTICS=0x02000000, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE=0x2000;
+    const int JobObjectBasicAccountingInformation=1, JobObjectExtendedLimitInformation=9;
+    const uint DUPLICATE_SAME_ACCESS=2;
+    const int PROC_THREAD_ATTRIBUTE_HANDLE_LIST=0x20002, PROC_THREAD_ATTRIBUTE_JOB_LIST=0x2000d;
+    const uint STARTF_USESTDHANDLES=0x100, EXTENDED_STARTUPINFO_PRESENT=0x80000, CREATE_SUSPENDED=4;
     [StructLayout(LayoutKind.Sequential)] struct Security { public int length; public IntPtr descriptor; public int inherit; }
     [StructLayout(LayoutKind.Sequential)] struct Overlap { public IntPtr a,b; public uint low,high; public IntPtr evt; }
     [StructLayout(LayoutKind.Sequential)] struct Startup {
@@ -53,7 +62,7 @@ public sealed class __KITELINE_LAUNCHER_TYPE__ : IDisposable {
     }
     static bool Empty(IntPtr job) {
         Accounting members;
-        CheckJob(QueryInformationJobObject(job,1,out members,(uint)Marshal.SizeOf<Accounting>(),IntPtr.Zero),"query launcher process set");
+        CheckJob(QueryInformationJobObject(job,JobObjectBasicAccountingInformation,out members,(uint)Marshal.SizeOf<Accounting>(),IntPtr.Zero),"query launcher process set");
         return members.active==0;
     }
     static void StopJob(IntPtr job) {
@@ -110,10 +119,10 @@ public sealed class __KITELINE_LAUNCHER_TYPE__ : IDisposable {
     }
     public Lease Lock(string path,bool shared) {
         var security=new Security(); security.length=Marshal.SizeOf<Security>();
-        IntPtr handle=CreateFileW(path,shared ? 0x80000000u : 0xc0000000u,3,ref security,3,0,IntPtr.Zero);
+        IntPtr handle=CreateFileW(path,shared ? GENERIC_READ : GENERIC_READ|GENERIC_WRITE,FILE_SHARE_READ|FILE_SHARE_WRITE,ref security,OPEN_EXISTING,0,IntPtr.Zero);
         Check(Valid(handle),"open installation lock");
         var overlap=new Overlap();
-        if(!LockFileEx(handle,shared ? 1u : 3u,0,1,0,ref overlap)) {
+        if(!LockFileEx(handle,shared ? LOCKFILE_FAIL_IMMEDIATELY : LOCKFILE_FAIL_IMMEDIATELY|LOCKFILE_EXCLUSIVE_LOCK,0,1,0,ref overlap)) {
             int error=Marshal.GetLastWin32Error(); CloseHandle(handle);
             throw new Win32Exception(error,"Installation is busy; no running process was stopped");
         }
@@ -122,7 +131,8 @@ public sealed class __KITELINE_LAUNCHER_TYPE__ : IDisposable {
     public int Run(string executable,string bootstrap,string[] arguments,string directory) {
         if(Interrupted!=0) return Interrupted;
         var security=new Security(); security.length=Marshal.SizeOf<Security>();
-        IntPtr pin=CreateFileW(directory,0x81,3,ref security,3,0x02000000,IntPtr.Zero);
+        // Omitting FILE_SHARE_DELETE prevents directory replacement while this handle is held.
+        IntPtr pin=CreateFileW(directory,FILE_LIST_DIRECTORY|FILE_READ_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE,ref security,OPEN_EXISTING,FILE_FLAG_BACKUP_SEMANTICS,IntPtr.Zero);
         Check(Valid(pin),"pin installation directory");
         security.inherit=1;
         IntPtr attrs=IntPtr.Zero,handleList=IntPtr.Zero,job=IntPtr.Zero,jobList=IntPtr.Zero;
@@ -131,27 +141,28 @@ public sealed class __KITELINE_LAUNCHER_TYPE__ : IDisposable {
         Exception failure=null;
         try {
             job=CreateJobObjectW(IntPtr.Zero,null); Check(Valid(job),"create launcher Job");
-            var limits=new JobLimit(); limits.basic.flags=0x2000;
-            Check(SetInformationJobObject(job,9,ref limits,(uint)Marshal.SizeOf<JobLimit>()),"protect launcher process set");
+            var limits=new JobLimit(); limits.basic.flags=JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            Check(SetInformationJobObject(job,JobObjectExtendedLimitInformation,ref limits,(uint)Marshal.SizeOf<JobLimit>()),"protect launcher process set");
             for(int i=0;i<3;i++) {
                 var original=GetStdHandle(-10-i);
-                if(Valid(original)) Check(DuplicateHandle(GetCurrentProcess(),original,GetCurrentProcess(),out streams[i],0,true,2),"inherit console handle");
-                else { streams[i]=CreateFileW("NUL",i==0 ? 0x80000000u : 0x40000000u,3,ref security,3,0,IntPtr.Zero); Check(Valid(streams[i]),"open console fallback"); }
+                if(Valid(original)) Check(DuplicateHandle(GetCurrentProcess(),original,GetCurrentProcess(),out streams[i],0,true,DUPLICATE_SAME_ACCESS),"inherit console handle");
+                else { streams[i]=CreateFileW("NUL",i==0 ? GENERIC_READ : GENERIC_WRITE,FILE_SHARE_READ|FILE_SHARE_WRITE,ref security,OPEN_EXISTING,0,IntPtr.Zero); Check(Valid(streams[i]),"open console fallback"); }
             }
             IntPtr size=IntPtr.Zero; InitializeProcThreadAttributeList(IntPtr.Zero,2,0,ref size);
             attrs=Marshal.AllocHGlobal(size);
             Check(InitializeProcThreadAttributeList(attrs,2,0,ref size),"initialize launch attributes"); initialized=true;
             handleList=Marshal.AllocHGlobal(IntPtr.Size*3);
             for(int i=0;i<3;i++) Marshal.WriteIntPtr(handleList,i*IntPtr.Size,streams[i]);
-            Check(UpdateProcThreadAttribute(attrs,0,new IntPtr(0x20002),handleList,new IntPtr(IntPtr.Size*3),IntPtr.Zero,IntPtr.Zero),"restrict inherited handles");
+            // See native/windows/job.cc for the corresponding atomic Job and handle-list setup.
+            Check(UpdateProcThreadAttribute(attrs,0,new IntPtr(PROC_THREAD_ATTRIBUTE_HANDLE_LIST),handleList,new IntPtr(IntPtr.Size*3),IntPtr.Zero,IntPtr.Zero),"restrict inherited handles");
             jobList=Marshal.AllocHGlobal(IntPtr.Size); Marshal.WriteIntPtr(jobList,job);
-            Check(UpdateProcThreadAttribute(attrs,0,new IntPtr(0x2000d),jobList,new IntPtr(IntPtr.Size),IntPtr.Zero,IntPtr.Zero),"set atomic launcher Job");
-            var startup=new StartupEx(); startup.start.cb=(uint)Marshal.SizeOf<StartupEx>(); startup.attributes=attrs; startup.start.flags=0x100;
+            Check(UpdateProcThreadAttribute(attrs,0,new IntPtr(PROC_THREAD_ATTRIBUTE_JOB_LIST),jobList,new IntPtr(IntPtr.Size),IntPtr.Zero,IntPtr.Zero),"set atomic launcher Job");
+            var startup=new StartupEx(); startup.start.cb=(uint)Marshal.SizeOf<StartupEx>(); startup.attributes=attrs; startup.start.flags=STARTF_USESTDHANDLES;
             startup.start.input=streams[0]; startup.start.output=streams[1]; startup.start.error=streams[2];
             var command=new StringBuilder(Quote(executable)).Append(" -e ").Append(Quote(bootstrap)).Append(" --");
             foreach(string argument in arguments) command.Append(' ').Append(Quote(argument));
             if(Interrupted!=0) return Interrupted;
-            Check(CreateProcessW(executable,command,IntPtr.Zero,IntPtr.Zero,true,0x80004,IntPtr.Zero,null,ref startup,out process),"start native Node");
+            Check(CreateProcessW(executable,command,IntPtr.Zero,IntPtr.Zero,true,EXTENDED_STARTUPINFO_PRESENT|CREATE_SUSPENDED,IntPtr.Zero,null,ref startup,out process),"start native Node");
             if(Interrupted!=0) Check(TerminateProcess(process.process,(uint)Interrupted),"cancel early startup");
             else Check(ResumeThread(process.thread)!=0xffffffff,"resume native Node");
             Check(WaitForSingleObject(process.process,0xffffffff)==0,"wait for native Node");

@@ -3,7 +3,7 @@ import { resolve, isAbsolute, dirname } from "node:path";
 import { readFile, writeFile, rename, rm, mkdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { AppError, integer, record, string } from "@kiteline/shared/protocol";
-import { installedPaths } from "./install/paths.js";
+import { applicationPaths, installedPaths } from "./install/paths.js";
 import { windowsNative } from "@kiteline/shared/windows/native";
 import { windowsExecutable } from "./tools.js";
 import { agentLimits } from "./limits.js";
@@ -71,16 +71,14 @@ export async function agentPaths(runDirOverride?: string) {
   const explicitRunDir = runDirOverride === undefined ? undefined : resolve(runDirOverride);
   const installed = await installedPaths(explicitRunDir);
   if (installed) return installed;
-  const dataDir = resolve(
+  return applicationPaths(
+    homedir(),
     process.env.KITELINE_AGENT_HOME ??
       (process.platform === "win32"
         ? resolve(windowsNative().identity().localAppData, "kiteline-agent")
-        : resolve(homedir(), ".local/share/kiteline-agent")),
+        : undefined),
+    explicitRunDir ?? process.env.KITELINE_AGENT_RUN_DIR,
   );
-  const runDir = resolve(
-    explicitRunDir ?? process.env.KITELINE_AGENT_RUN_DIR ?? resolve(dataDir, "run"),
-  );
-  return { dataDir, runDir };
 }
 export async function privateDirectory(path: string) {
   if (process.platform === "win32") {

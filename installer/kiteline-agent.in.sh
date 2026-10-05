@@ -11,8 +11,8 @@ kiteline_main() {
       [ "$(id -u)" -eq 0 ] || { echo 'Installation changes require sudo or root' >&2; return 1; }
       umask 077
       (umask 022; mkdir -p -- "$(dirname -- "$kiteline_management")") || return
-      exec 9>>"$kiteline_management" || return
-      "$kiteline_flock" --exclusive --nonblock 9 || { echo 'Another installation operation is running' >&2; return 1; }
+      exec __KITELINE_MANAGEMENT_FD__>>"$kiteline_management" || return
+      "$kiteline_flock" --exclusive --nonblock __KITELINE_MANAGEMENT_FD__ || { echo 'Another installation operation is running' >&2; return 1; }
       if [ "$kiteline_root" = "$kiteline_installed" ]; then
         exec 8<"$kiteline_use" || return
         "$kiteline_flock" --shared --nonblock 8 || { echo 'Agent installation is being changed' >&2; return 1; }

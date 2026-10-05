@@ -132,7 +132,11 @@ agent 启动时无法读取 `tasks/` 中的文件时，该设备的任务功能�
 
 `kiteline-agent schedule` 在设备本机管理同一份任务。它通过本机 socket 或命名管道连接正在运行的 agent，因此必须由运行 agent 的同一操作系统用户执行，并解析到相同的运行目录。它不会启动 agent；agent 未运行时，除 `--help` 外的命令都会报错退出。`--help` 随时可用，内容包括完整的规则和示例。
 
-Windows 上在 PowerShell 7 中写成 `& "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" schedule …`（两种写法见 [kiteline-agent 命令](reference.md#kiteline-agent-命令)）。
+Windows 上的调用方式见 [kiteline-agent 命令](reference.md#kiteline-agent-命令)。在 PowerShell 7 中读取 JSON 列表：
+
+```powershell
+& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" schedule list --json | ConvertFrom-Json
+```
 
 | 子命令                                | 作用                                                       |
 | ------------------------------------- | ---------------------------------------------------------- |

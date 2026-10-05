@@ -19,6 +19,7 @@ import { parseArgs, promisify, type ParseArgsOptionsConfig } from "node:util";
 import { lockAgentState } from "../state-lock.js";
 import { atomicJson, stateFiles } from "../config.js";
 import {
+  applicationPaths,
   environmentFile,
   installationFile,
   installationManagementFile,
@@ -147,7 +148,7 @@ async function account(name: string): Promise<Installation> {
     throw new Error("Specify an existing project user");
   return { user: fields[0]!, uid, gid, home };
 }
-async function stoppedInstallation(installation: Installation, purge = false) {
+async function acquireInstallationLocks(installation: Installation, purge = false) {
   const use = await lockInstallation("exclusive");
   let state: (() => Promise<void>) | undefined;
   try {
@@ -229,7 +230,7 @@ async function installProgram(user: string, protectSignals: () => void) {
   try {
     await writeFile(
       environmentFile,
-      `# Application directories only; background environment belongs to your process manager.\nKITELINE_AGENT_HOME=${JSON.stringify(join(installation.home, ".local/share/kiteline-agent"))}\n`,
+      `# Application directories only; background environment belongs to your process manager.\nKITELINE_AGENT_HOME=${JSON.stringify(applicationPaths(installation.home).dataDir)}\n`,
       { flag: "wx", mode: 0o640 },
     );
   } catch (error) {
@@ -269,13 +270,14 @@ async function upgrade(
   protectSignals: () => void,
   signal: AbortSignal,
 ) {
-  await (await stoppedInstallation(installation)).close();
+  // Report busy before preparation; reacquire for the actual transaction below.
+  await (await acquireInstallationLocks(installation)).close();
   const source = resolve(archive);
   const temporary = await mkdtemp(join(dirname(installDirectory), ".kiteline-upgrade-"));
   const replacement = join(temporary, "new"),
     previous = join(temporary, "previous");
   const path = join(temporary, "input.tar.gz");
-  let use: Awaited<ReturnType<typeof stoppedInstallation>> | undefined;
+  let use: Awaited<ReturnType<typeof acquireInstallationLocks>> | undefined;
   let completion: string | undefined;
   const errors: unknown[] = [];
   try {
@@ -308,7 +310,7 @@ async function upgrade(
       signal,
     );
     protectSignals();
-    use = await stoppedInstallation(installation);
+    use = await acquireInstallationLocks(installation);
     await command("chown", ["-h", "-R", "-P", "0:0", replacement]);
     await replaceProgram(
       installDirectory,
@@ -348,7 +350,8 @@ async function uninstall(
   protectSignals: () => void,
   signal: AbortSignal,
 ) {
-  await (await stoppedInstallation(installation, purge)).close();
+  // Report busy before confirmation; reacquire for the actual transaction below.
+  await (await acquireInstallationLocks(installation, purge)).close();
   const { dataDir } = await installationPaths(installation);
   await confirm(
     `Remove the agent program? ${purge ? `Delete its state JSON and tasks at ${dataDir}.` : `Retain state and tasks at ${dataDir}.`} Workspaces and external manager configuration are not removed.`,
@@ -356,17 +359,9 @@ async function uninstall(
     signal,
   );
   protectSignals();
-  const use = await stoppedInstallation(installation, purge);
+  const use = await acquireInstallationLocks(installation, purge);
   const purgePaths =
-    purge && use.stateLocked
-      ? [
-          stateFiles.metadata,
-          stateFiles.connection,
-          stateFiles.config,
-          stateFiles.temporaryFiles,
-          stateFiles.tasks,
-        ].map((name) => join(dataDir, name))
-      : [];
+    purge && use.stateLocked ? Object.values(stateFiles).map((name) => join(dataDir, name)) : [];
   const errors: unknown[] = [];
   try {
     await rm(launcherFile, { force: true });

@@ -132,7 +132,11 @@ If the agent cannot read files under `tasks/` at startup, the device's task feat
 
 `kiteline-agent schedule` manages the same tasks locally on the device. It connects to the running agent through a local socket or named pipe, so it must run as the same operating-system user and resolve to the same runtime directory. It does not start the agent. When the agent is not running, every command except `--help` exits with an error. `--help` is always available and includes the complete rules and examples.
 
-On Windows in PowerShell 7, use `& "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" schedule …` (see [kiteline-agent commands](reference.en.md#kiteline-agent-commands) for both forms).
+See [kiteline-agent commands](reference.en.md#kiteline-agent-commands) for Windows invocation forms. To read the JSON list in PowerShell 7:
+
+```powershell
+& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" schedule list --json | ConvertFrom-Json
+```
 
 | Subcommand                            | Purpose                                                                     |
 | ------------------------------------- | --------------------------------------------------------------------------- |

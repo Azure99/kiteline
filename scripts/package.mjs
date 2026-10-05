@@ -325,12 +325,12 @@ try {
     writeFileSync(launcher, launchers.portable);
     writeFileSync(join(destination, "bin/kiteline-agent-installed.ps1"), launchers.installed);
   } else if (kind === "agent") {
-    const { installDirectory, installationManagementFile, installationUseFile } = await import(
-      "../agent/dist/install/paths.js"
-    );
+    const { installDirectory, installationManagementFile, installationUseFile, managementLockFd } =
+      await import("../agent/dist/install/paths.js");
     const paths = {
       directory: installDirectory,
       management: installationManagementFile,
+      managementFd: managementLockFd,
       use: installationUseFile,
     };
     const platform = macosAgent ? "darwin" : "linux";

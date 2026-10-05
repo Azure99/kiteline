@@ -6,6 +6,7 @@ import { parseEnv } from "node:util";
 import { windowsNative } from "@kiteline/shared/windows/native";
 
 export const packageDirectory = resolve(import.meta.dirname, "../../..");
+export const managementLockFd = 9;
 const windows = process.platform === "win32";
 const windowsManagement = windows ? resolve(process.env.ProgramData!, "kiteline-agent") : "";
 export const installDirectory = windows
@@ -83,12 +84,12 @@ export async function lockInstallationManagement() {
   });
   let inherited;
   try {
-    inherited = fstatSync(9);
+    inherited = fstatSync(managementLockFd);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EBADF") throw error;
   }
   if (expected && inherited?.dev === expected.dev && inherited.ino === expected.ino) {
-    return { close: async () => closeSync(9) };
+    return { close: async () => closeSync(managementLockFd) };
   }
   throw new Error("Management lock was not inherited; use the public kiteline-agent launcher");
 }
@@ -118,6 +119,10 @@ export async function readInstallation(): Promise<Installation | undefined> {
       );
   }
 }
+export function applicationPaths(home: string, dataOverride?: string, runOverride?: string) {
+  const dataDir = resolve(dataOverride ?? resolve(home, ".local/share/kiteline-agent"));
+  return { dataDir, runDir: resolve(runOverride ?? resolve(dataDir, "run")) };
+}
 export async function installationPaths(
   installation: Installation,
   overrides: { KITELINE_AGENT_HOME?: string; KITELINE_AGENT_RUN_DIR?: string } = {},
@@ -143,17 +148,11 @@ export async function installationPaths(
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
-  const dataDir = resolve(
-    overrides.KITELINE_AGENT_HOME ??
-      environment.KITELINE_AGENT_HOME ??
-      resolve(installation.home, ".local/share/kiteline-agent"),
+  return applicationPaths(
+    installation.home,
+    overrides.KITELINE_AGENT_HOME ?? environment.KITELINE_AGENT_HOME,
+    overrides.KITELINE_AGENT_RUN_DIR ?? environment.KITELINE_AGENT_RUN_DIR,
   );
-  const runDir = resolve(
-    overrides.KITELINE_AGENT_RUN_DIR ??
-      environment.KITELINE_AGENT_RUN_DIR ??
-      resolve(dataDir, "run"),
-  );
-  return { dataDir, runDir };
 }
 export async function installedPaths(runDirOverride?: string) {
   if (!installedProgram) return;

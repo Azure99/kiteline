@@ -34,16 +34,16 @@ The Docker image's `ENTRYPOINT` is `kiteline-server`, with default argument `ser
 
 ## kiteline-agent commands
 
-On Linux and macOS, the public launcher is `/usr/local/bin/kiteline-agent`; use this absolute path with `sudo`. On Windows it is `%ProgramData%\kiteline-agent\kiteline-agent.ps1`. PowerShell 7 supports two equivalent forms:
+On Linux and macOS, the public launcher is `/usr/local/bin/kiteline-agent`; use this absolute path with `sudo`. On Windows it is `%ProgramData%\kiteline-agent\kiteline-agent.ps1`. PowerShell 7 supports two invocation forms:
 
 ```powershell
-# Short form: available when execution policy allows local scripts (PowerShell 7's default does)
+# Short form
 & "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" doctor
-# Full form: Bypass for this process only; Group Policy still takes precedence
+# Full form
 & "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" doctor
 ```
 
-The web app's "Local attach command" uses the short form. "Already installed: bind only" and uninstall commands use the full form. Replace `kiteline-agent <subcommand>` in these guides with either form on Windows.
+Use the short form for direct interaction in a real console, with an execution policy that allows local scripts. Use the full form for variable capture, PowerShell pipelines or redirection; program output from the short form does not enter the PowerShell object pipeline. The full form's `Bypass` applies only to that process, and Group Policy still takes precedence. Replace `kiteline-agent <subcommand>` in these guides with the form appropriate to its use on Windows.
 
 Running `kiteline-agent` with no arguments or with `--help` prints a subcommand summary; `--version` prints its version. Only `schedule` and its subcommands provide `--help`. Other subcommands have no `--help`; their arguments are listed below.
 

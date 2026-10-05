@@ -142,7 +142,7 @@ kiteline-agent terminal end SESSION_ID
 
 `workspace list` gives workspace IDs. `terminal new` creates a session and immediately attaches. See [kiteline-agent commands](reference.en.md#kiteline-agent-commands) for output and options.
 
-On Windows in PowerShell 7, replace `kiteline-agent` with `& "$env:ProgramData\kiteline-agent\kiteline-agent.ps1"` (see both forms in [kiteline-agent commands](reference.en.md#kiteline-agent-commands)). Local commands and the agent must resolve to the same runtime directory (see [Agent environment variables](reference.en.md#agent-environment-variables)). If `KITELINE_AGENT_RUN_DIR` is set only in service configuration, set it for local commands too. `attach` also accepts `--run-dir`, included in the copied web command. For containers, see [Run in a container](devices.en.md#run-in-a-container).
+For this section's interactive commands in a Windows PowerShell 7 console, replace `kiteline-agent` with `& "$env:ProgramData\kiteline-agent\kiteline-agent.ps1"`; see [kiteline-agent commands](reference.en.md#kiteline-agent-commands) for choosing the invocation form. Local commands and the agent must resolve to the same runtime directory (see [Agent environment variables](reference.en.md#agent-environment-variables)). If `KITELINE_AGENT_RUN_DIR` is set only in service configuration, set it for local commands too. `attach` also accepts `--run-dir`, included in the copied web command. For containers, see [Run in a container](devices.en.md#run-in-a-container).
 
 ## Files
 
