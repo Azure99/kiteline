@@ -21,7 +21,7 @@ import {
   requestOrigin,
   requireVersion,
   serverError,
-  sessionCookie,
+  loginCookie,
 } from "./http.js";
 import { Connections } from "./connections.js";
 import { Channels } from "./channels.js";
@@ -43,9 +43,15 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
     if (!login) throw new AppError("unauthenticated", "Please sign in");
     return login;
   }
+  async function loginBody(request: IncomingMessage, entryOrigin: string) {
+    const input = record(await body(request));
+    // Reading the body can outlive the login that admitted the request.
+    requireLogin(request, entryOrigin);
+    return input;
+  }
   function newLogin(response: ServerResponse, entryOrigin: string) {
     const login = store.createLogin(serverLimits.loginLifetime);
-    response.setHeader("set-cookie", sessionCookie(entryOrigin, login.token, login.expiresAt));
+    response.setHeader("set-cookie", loginCookie(entryOrigin, login.token, login.expiresAt));
     json(response, 200, { expiresAt: login.expiresAt });
   }
   async function route(request: IncomingMessage, response: ServerResponse) {
@@ -91,7 +97,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       if (path === "/api/logout" && method === "POST") {
         store.logout(login.id);
         connections.closeLogin(login.id);
-        response.setHeader("set-cookie", sessionCookie(entryOrigin, "", ""));
+        response.setHeader("set-cookie", loginCookie(entryOrigin, "", ""));
         return json(response, 200, {});
       }
       if (path === "/api/devices" && method === "GET")
@@ -145,8 +151,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
           return;
         }
         if (suffix === "/channels" && method === "POST") {
-          const input = record(await body(request));
-          requireLogin(request, entryOrigin);
+          const input = await loginBody(request, entryOrigin);
           const pending = channels.create(id, login, string(input.kind), record(input.params));
           response.on("close", () => {
             if (!response.writableFinished)
@@ -155,8 +160,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
           return json(response, 200, await pending.ready);
         }
         if (!suffix && method === "PATCH") {
-          const input = record(await body(request));
-          requireLogin(request, entryOrigin);
+          const input = await loginBody(request, entryOrigin);
           store.renameDevice(id, string(input.name, "device name", 256));
           connections.broadcastDevices();
           return json(response, 200, {});
@@ -166,8 +170,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
           return json(response, 200, {});
         }
         if (suffix === "/rpc" && method === "POST") {
-          const input = record(await body(request));
-          requireLogin(request, entryOrigin);
+          const input = await loginBody(request, entryOrigin);
           const requestId = string(input.id, "request id", 128);
           const pending = connections.rpc(
             id,

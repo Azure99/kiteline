@@ -47,6 +47,17 @@ export class Store {
       throw error;
     }
   }
+  private transaction<T>(run: () => T): T {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = run();
+      this.db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
   initialized() {
     return !!this.db.prepare("SELECT id FROM owner WHERE id=1").get();
   }
@@ -65,8 +76,7 @@ export class Store {
   }
   async setup(token: string, value: string) {
     const hash = await bcrypt.hash(password(value), 12);
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    this.transaction(() => {
       const setup = this.db.prepare("SELECT hash,expiresAt FROM setup WHERE id=1").get() as
         | { hash: string; expiresAt: string }
         | undefined;
@@ -74,11 +84,8 @@ export class Store {
       if (!setup || setup.hash !== digest(token) || setup.expiresAt <= new Date().toISOString())
         throw new AppError("forbidden", "Setup credentials are invalid or expired");
       this.db.prepare("INSERT INTO owner VALUES(1,?)").run(hash);
-      this.db.exec("DELETE FROM setup; COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+      this.db.exec("DELETE FROM setup");
+    });
   }
   async verifyPassword(value: string) {
     const row = this.db.prepare("SELECT password FROM owner WHERE id=1").get() as
@@ -109,14 +116,10 @@ export class Store {
   async resetPassword(value: string) {
     if (!this.initialized()) throw new AppError("conflict", "Not initialized");
     const hash = await bcrypt.hash(password(value), 12);
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    this.transaction(() => {
       this.db.prepare("UPDATE owner SET password=? WHERE id=1").run(hash);
-      this.db.exec("DELETE FROM sessions; COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+      this.db.exec("DELETE FROM sessions");
+    });
   }
   newBinding() {
     const bindingId = randomUUID();
@@ -147,8 +150,7 @@ export class Store {
     };
   }
   bind(code: string, name: string) {
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    return this.transaction(() => {
       const row = this.db
         .prepare(
           "SELECT id FROM bindings WHERE hash=? AND consumedDeviceId IS NULL AND expiresAt>?",
@@ -162,12 +164,8 @@ export class Store {
         .prepare("INSERT INTO devices(id,name,tokenHash) VALUES(?,?,?)")
         .run(deviceId, name, digest(deviceToken));
       this.db.prepare("UPDATE bindings SET consumedDeviceId=? WHERE id=?").run(deviceId, row.id);
-      this.db.exec("COMMIT");
       return { deviceId, deviceToken };
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+    });
   }
   authenticateAgent(token: string) {
     return this.db.prepare("SELECT id FROM devices WHERE tokenHash=?").get(digest(token)) as
@@ -192,17 +190,12 @@ export class Store {
       throw new AppError("not_found", "Device not found");
   }
   deleteDevice(id: string) {
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    this.transaction(() => {
       this.db.prepare("DELETE FROM bindings WHERE consumedDeviceId=?").run(id);
       this.db.prepare("DELETE FROM taskSummaries WHERE deviceId=?").run(id);
       if (!this.db.prepare("DELETE FROM devices WHERE id=?").run(id).changes)
         throw new AppError("not_found", "Device not found");
-      this.db.exec("COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+    });
   }
   saveSnapshot(id: string, snapshot: Metadata) {
     this.db.prepare("UPDATE devices SET snapshot=? WHERE id=?").run(JSON.stringify(snapshot), id);

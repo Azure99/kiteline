@@ -24,7 +24,7 @@ export function rawHead(status: number, message: string, headers: OutgoingHttpHe
   return lines.join("\r\n") + "\r\n\r\n";
 }
 
-export function replyError(value: unknown) {
+export function parseReplyError(value: unknown) {
   const error = record(value);
   const code = string(error.code);
   if (typeof error.message !== "string")
@@ -38,7 +38,7 @@ export function checkReply(reply: Record<string, unknown>): Reply {
     !["succeeded", "failed", "partial", "unknown"].includes(reply.outcome)
   )
     throw new AppError("invalid_argument", "Invalid reply");
-  if (reply.outcome !== "succeeded") replyError(reply.error);
+  if (reply.outcome !== "succeeded") parseReplyError(reply.error);
   return reply as unknown as Reply;
 }
 
@@ -115,11 +115,11 @@ export function requestOrigin(request: IncomingMessage, trustProxyProto: boolean
     throw new AppError("invalid_argument", "Invalid Host header");
   }
 }
-export const sessionCookieNames = ["kiteline_session", "kiteline_session_http"] as const;
+export const loginCookieNames = ["kiteline_session", "kiteline_session_http"] as const;
 function cookieName(entryOrigin: string) {
-  return entryOrigin.startsWith("https:") ? sessionCookieNames[0] : sessionCookieNames[1];
+  return entryOrigin.startsWith("https:") ? loginCookieNames[0] : loginCookieNames[1];
 }
-export function sessionCookie(entryOrigin: string, token: string, expiresAt: string) {
+export function loginCookie(entryOrigin: string, token: string, expiresAt: string) {
   const secure = entryOrigin.startsWith("https:") ? " Secure;" : "";
   const expiry = token ? `Expires=${new Date(expiresAt).toUTCString()}` : "Max-Age=0";
   return `${cookieName(entryOrigin)}=${token}; Path=/; HttpOnly;${secure} SameSite=Strict; ${expiry}`;

@@ -248,7 +248,7 @@ agent 的出站代理规则见[出站代理与证书](../guide/devices.md#出站
 ### 添加 HTTP 路由
 
 1. 在 `server/src/app.ts` 中按位置加入。判断顺序为：开发服务代理、安装资源、`/healthz`、`/api/agent/bind`、`/api/*`、静态文件；`/api/*` 内依次是非 GET 请求的 Origin 检查、初始化与登录、登录检查、不检查版本的入口、版本检查、其余接口。路由所在的位置决定它要经过哪些检查。
-2. 用 `body()` 读取 JSON（带大小和时间限制），用 `json()` 返回，用 `AppError` 表示错误；状态码映射在 `server/src/http.ts`。
+2. 需要已有登录的 JSON 路由用 `loginBody()` 读取并在读取后复核登录；初始化、登录和 agent 绑定用 `body()`。读取均有大小和时间限制。用 `json()` 返回，用 `AppError` 表示错误；状态码映射在 `server/src/http.ts`。
 3. 路径不在 `/api/` 下时，在 `web/vite.config.ts` 的 `server.proxy` 中加入前缀，开发服务器才会转发到 server。
 4. 在 `server/test/` 中补测试，并更新 [HTTP 接口](protocol.md#http-接口)。
 

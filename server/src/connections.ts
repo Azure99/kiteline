@@ -18,7 +18,7 @@ import {
   type Reply,
 } from "@kiteline/shared/protocol";
 import type { Login, Store } from "./store.js";
-import { checkReply, requireVersion, versionMismatch } from "./http.js";
+import { checkReply, requireVersion, serverError, versionMismatch } from "./http.js";
 import { projectTaskSnapshot } from "./task-summary.js";
 
 export interface AgentConnection {
@@ -235,7 +235,8 @@ export class Connections {
             if (browser.targets.some((t) => t.deviceId === id && t.workspaceId === workspaceId))
               send(browser.socket, { ...event, deviceId: id });
         }
-      } catch {
+      } catch (error) {
+        serverError(error);
         socket.close(1008, "invalid_control_message");
       }
     });

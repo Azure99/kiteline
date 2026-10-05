@@ -1,7 +1,7 @@
 import type { IncomingHttpHeaders } from "node:http";
-import { sessionCookieNames } from "./http.js";
+import { loginCookieNames } from "./http.js";
 
-const loginCookies = new Set<string>(sessionCookieNames);
+const loginCookies = new Set<string>(loginCookieNames);
 
 function endToEnd(headers: IncomingHttpHeaders): IncomingHttpHeaders {
   const excluded = new Set([

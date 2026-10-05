@@ -23,7 +23,7 @@ import { httpStream } from "@kiteline/shared/protocol/http-stream";
 import type { Login } from "./store.js";
 import { send, type AgentConnection, type Connections } from "./connections.js";
 import { FileTransfer } from "./file-transfer.js";
-import { replyError } from "./http.js";
+import { parseReplyError } from "./http.js";
 
 interface Channel {
   id: string;
@@ -186,7 +186,7 @@ export class Channels {
         if (binary || item.meta)
           throw new AppError("invalid_argument", "Channel has not been paired");
         const message = record(JSON.parse(raw.toString()));
-        if (message.type === "error") throw replyError(message);
+        if (message.type === "error") throw parseReplyError(message);
         if (message.type !== "ready")
           throw new AppError("invalid_argument", "Expected a channel ready message");
         if (item.http) {
@@ -269,17 +269,17 @@ export class Channels {
     if (request.method !== (item.kind === "file.read" ? "GET" : "PUT"))
       throw new AppError("invalid_argument", "File request method mismatch");
     clearTimeout(item.timer);
-    item.file = new FileTransfer(
-      item.kind,
-      item.meta as FileMeta,
-      item.agent,
+    item.file = new FileTransfer({
+      kind: item.kind,
+      meta: item.meta as FileMeta,
+      socket: item.agent,
       request,
       response,
-      (error) => this.cancel(id, error),
-      () => this.release(id),
+      fail: (error) => this.cancel(id, error),
+      release: () => this.release(id),
       id,
-      String(item.params.purpose),
-    );
+      purpose: String(item.params.purpose) as FileReadPurpose | FileWritePurpose,
+    });
     void item.file.start();
   }
   private release(id: string) {
