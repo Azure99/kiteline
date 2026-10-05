@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronRight, Pause, Pencil, Play, RefreshCw, Trash2 } from "lucide-react";
 import type { ScheduledTask, TaskRunSummary } from "@kiteline/shared/protocol";
@@ -37,6 +37,21 @@ export function TaskDetail({
   const [refresh, setRefresh] = useState(0);
   const alive = useRef(true);
   const readRequest = useRef<AbortController>(undefined);
+  const readHistory = useEffectEvent(async (signal: AbortSignal) => {
+    const loaded = runs?.items.length ?? 0;
+    const history = await rpc(deviceId, "runs.list", { taskId }, signal);
+    while (history.items.length < Math.min(loaded, history.total)) {
+      const page = await rpc(
+        deviceId,
+        "runs.list",
+        { taskId, offset: history.items.length },
+        signal,
+      );
+      history.items.push(...page.items);
+      history.total = page.total;
+    }
+    return history;
+  });
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -53,7 +68,7 @@ export function TaskDetail({
       try {
         const [definition, history] = await Promise.all([
           rpc(deviceId, "tasks.get", { taskId }, abort.signal),
-          rpc(deviceId, "runs.list", { taskId }, abort.signal),
+          readHistory(abort.signal),
         ]);
         if (abort.signal.aborted) return;
         setTask(definition);
@@ -88,7 +103,7 @@ export function TaskDetail({
     } catch (error) {
       if (!abort.signal.aborted) setReadError(error);
     } finally {
-      if (alive.current) setLoadingMore(false);
+      setLoadingMore(false);
     }
   }
   async function act(kind: "run" | "pause" | "resume" | "acknowledge" | "delete") {
@@ -117,15 +132,12 @@ export function TaskDetail({
         await rpc(deviceId, "tasks.delete", { taskId, acknowledgeRunId: task.reviewRunId });
         if (alive.current) onDelete();
       }
-      if (alive.current) setRefresh((n) => n + 1);
+      setRefresh((n) => n + 1);
     } catch (error) {
-      if (alive.current) {
-        setActionError(error);
-        if (runId && error instanceof ApiError && error.outcome === "unknown")
-          setUncertainRun(runId);
-      }
+      setActionError(error);
+      if (runId && error instanceof ApiError && error.outcome === "unknown") setUncertainRun(runId);
     } finally {
-      if (alive.current) setBusy(false);
+      setBusy(false);
     }
   }
   return (

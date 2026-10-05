@@ -37,13 +37,6 @@ export function RunDetail({
     stderr: { chunks: [], nextOffset: 0 },
   });
   const [output, setOutput] = useState(outputs.current);
-  const alive = useRef(true);
-  useEffect(() => {
-    alive.current = true;
-    return () => {
-      alive.current = false;
-    };
-  }, []);
   useEffect(() => {
     if (!online) return;
     let disposed = false,
@@ -134,12 +127,10 @@ export function RunDetail({
     try {
       await rpc(deviceId, "runs.stop", { runId });
     } catch (cause) {
-      if (alive.current) setActionError(cause);
+      setActionError(cause);
     } finally {
-      if (alive.current) {
-        setBusy(false);
-        setRefresh((n) => n + 1);
-      }
+      setBusy(false);
+      setRefresh((n) => n + 1);
     }
   }
   async function copy() {

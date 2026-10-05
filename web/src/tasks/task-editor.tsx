@@ -137,20 +137,17 @@ export function TaskEditor({
       else await rpc(deviceId, "tasks.create", { taskId, input });
       if (alive.current) onSaved(deviceId, taskId);
     } catch (cause) {
-      if (alive.current) {
-        setError(cause);
-        if (cause instanceof ApiError && cause.outcome === "unknown") setUncertain(true);
-        if (cause instanceof ApiError && cause.code === "conflict") setConflict(true);
-      }
+      setError(cause);
+      if (cause instanceof ApiError && cause.outcome === "unknown") setUncertain(true);
+      if (cause instanceof ApiError && cause.code === "conflict") setConflict(true);
     } finally {
-      if (alive.current) setBusy(false);
+      setBusy(false);
     }
   }
   async function readCurrent() {
     setBusy(true);
     try {
       const result = await rpc(deviceId, "tasks.get", { taskId });
-      if (!alive.current) return;
       setBaseline(result);
       setCurrent(result);
       if (!baseline) {
@@ -161,9 +158,9 @@ export function TaskEditor({
       setConflict(false);
       setError(undefined);
     } catch (cause) {
-      if (alive.current) setError(cause);
+      setError(cause);
     } finally {
-      if (alive.current) setBusy(false);
+      setBusy(false);
     }
   }
   return (
