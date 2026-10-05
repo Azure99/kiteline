@@ -24,7 +24,7 @@ kiteline-server --version
 - `reset-password` 提示 `New password: `，在终端中输入不回显，按 Enter 提交；也可以从标准输入传入一行密码。初始化之前执行会报错 `Not initialized`。成功时打印 `Password updated. All web login sessions have been invalidated.`
 - 除 `--version` 外，每个命令都会把 server 数据目录的权限设为 `0700` 并占用其中的 `process.lock`。server 运行时执行 `setup-token` 或 `reset-password` 会报错 `Lock file is already being held`，因此必须先停止 server。Docker 与原生部署的完整步骤见[重置初始化 token 与密码](server.md#重置初始化-token-与密码)。
 
-Docker 镜像的 `ENTRYPOINT` 是 `kiteline-server`，默认参数是 `serve`，所以 `docker compose run` 之后直接写子命令。在 `compose.yaml` 所在目录执行，并设置与启动时相同的 `KITELINE_VERSION`（原版配置还需相同的 `KITELINE_ARCH`）。
+Docker 镜像的 `ENTRYPOINT` 是 `kiteline-server`，默认参数是 `serve`，所以 `docker compose run` 之后直接写子命令。在 `compose.yaml` 所在目录执行，并使用与启动时相同的 `KITELINE_VERSION` 和 `KITELINE_IMAGE` 配置。
 
 ### 健康检查
 
@@ -100,15 +100,15 @@ Linux 和 macOS 的命令入口是 `/usr/local/bin/kiteline-agent`；用 `sudo` 
 
 仓库原版 `deploy/compose.yaml` 另外读取以下变量：
 
-| 变量                         | 默认值      | 说明                                            |
-| ---------------------------- | ----------- | ----------------------------------------------- |
-| `KITELINE_VERSION`           | 无          | 本地镜像 `kiteline-server:<版本>-<架构>` 的版本 |
-| `KITELINE_ARCH`              | `amd64`     | 本地镜像的架构，取 `amd64` 或 `arm64`           |
-| `KITELINE_HTTP_BIND`         | `127.0.0.1` | 主机上发布端口所用的地址                        |
-| `KITELINE_HTTP_PORT`         | `8080`      | 主机上发布的端口，映射到容器内的 8080           |
-| `KITELINE_TRUST_PROXY_PROTO` | `0`         | 传给容器内的 server                             |
+| 变量                         | 默认值                     | 说明                                                     |
+| ---------------------------- | -------------------------- | -------------------------------------------------------- |
+| `KITELINE_VERSION`           | 无                         | 镜像标签，官方镜像为发布版本，本地构建为 `<版本>-<架构>` |
+| `KITELINE_IMAGE`             | `ghcr.io/azure99/kiteline` | 镜像路径，可改为本地 `kiteline-server` 或 fork 镜像      |
+| `KITELINE_HTTP_BIND`         | `127.0.0.1`                | 主机上发布端口所用的地址                                 |
+| `KITELINE_HTTP_PORT`         | `8080`                     | 主机上发布的端口，映射到容器内的 8080                    |
+| `KITELINE_TRUST_PROXY_PROTO` | `0`                        | 传给容器内的 server                                      |
 
-必须设置 `KITELINE_VERSION`，否则 Compose 报错 `Set KITELINE_VERSION to the release version`。按部署步骤改为 GHCR 镜像的副本使用 `ghcr.io/azure99/kiteline:<版本>`，不读取 `KITELINE_ARCH`。
+必须设置 `KITELINE_VERSION`，否则 Compose 报错 `Set KITELINE_VERSION to the release version`。Compose 使用 `KITELINE_IMAGE:KITELINE_VERSION`，不读取 `KITELINE_ARCH`；原生包下载示例中的 `KITELINE_ARCH` 仍用于选择归档。
 
 ## agent 环境变量
 

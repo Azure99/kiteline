@@ -25,7 +25,6 @@ server 的环境变量见[参考](reference.md#server-环境变量)。
    KITELINE_VERSION=0.2.5  # 替换为要部署的版本
    mkdir -p ~/kiteline && cd ~/kiteline
    curl -fsSLO "https://raw.githubusercontent.com/Azure99/kiteline/v$KITELINE_VERSION/deploy/compose.yaml"
-   sed -i 's|kiteline-server:|ghcr.io/azure99/kiteline:|; s|-${KITELINE_ARCH:-amd64}||' compose.yaml
    printf 'KITELINE_VERSION=%s\n' "$KITELINE_VERSION" > .env
    ```
 
@@ -52,7 +51,7 @@ server 的环境变量见[参考](reference.md#server-环境变量)。
 
 `.env` 中还可以设置 `KITELINE_HTTP_BIND`、`KITELINE_HTTP_PORT` 和 `KITELINE_TRUST_PROXY_PROTO`，用法见[局域网访问与端口](#局域网访问与端口)和 [HTTPS 与反向代理](#https-与反向代理)，默认值见[参考](reference.md#server-环境变量)。修改 `.env` 后再次执行 `docker compose up -d`，Compose 会用新设置重建容器。
 
-使用自己构建的镜像时，改用未作上述 GHCR 替换的仓库原版 `deploy/compose.yaml`，并设置 `KITELINE_VERSION=0.2.5` 和 `KITELINE_ARCH=amd64`（`pnpm images` 生成的本地标签为 `kiteline-server:0.2.5-amd64`，见[构建与发布](../development/release.md#构建-linux-包与镜像)）。
+Compose 默认使用官方 GHCR 镜像，Docker 自动选择主机架构。使用自己构建的镜像时，在 `.env` 中设置 `KITELINE_IMAGE=kiteline-server` 和 `KITELINE_VERSION=0.2.5-amd64`（ARM64 改为 `0.2.5-arm64`）；这与 `pnpm images` 生成的标签一致，见[构建与发布](../development/release.md#构建-linux-包与镜像)。使用 fork 镜像时，把 `KITELINE_IMAGE` 设为它的镜像路径，`KITELINE_VERSION` 设为对应标签。
 
 容器内的 server 以 `kiteline` 用户（UID 1000、GID 1000）运行，数据目录 `/var/lib/kiteline` 位于 Compose 卷 `server-data` 中。Compose 项目名是 `kiteline`，所以 Docker 中的实际卷名是 `kiteline_server-data`。`docker compose down` 保留这个卷；`docker compose down -v` 会删除卷和全部 server 数据。把卷换成宿主机目录挂载时，该目录的属主必须是 `1000:1000`。
 
@@ -299,7 +298,6 @@ Docker 部署在部署目录中执行下面的命令。其中的 `curl` 用新�
 ```sh
 KITELINE_VERSION=0.2.6  # 替换为新版本
 curl -fsSLO "https://raw.githubusercontent.com/Azure99/kiteline/v$KITELINE_VERSION/deploy/compose.yaml"
-sed -i 's|kiteline-server:|ghcr.io/azure99/kiteline:|; s|-${KITELINE_ARCH:-amd64}||' compose.yaml
 sed -i "s/^KITELINE_VERSION=.*/KITELINE_VERSION=$KITELINE_VERSION/" .env
 docker compose pull
 docker compose up -d

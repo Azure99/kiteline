@@ -1,7 +1,7 @@
 name: kiteline
 services:
   server:
-    image: kiteline-server:${KITELINE_VERSION:?Set KITELINE_VERSION to the release version}-${KITELINE_ARCH:-amd64}
+    image: ${KITELINE_IMAGE:-ghcr.io/azure99/kiteline}:${KITELINE_VERSION:?Set KITELINE_VERSION to the release version}
     restart: unless-stopped
     init: true
     stop_grace_period: 45s

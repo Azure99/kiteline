@@ -109,7 +109,7 @@ docker save --output kiteline-server-0.2.5-amd64.tar kiteline-server:0.2.5-amd64
 docker load --input kiteline-server-0.2.5-amd64.tar
 ```
 
-用 Compose 运行本地镜像时，使用未改为 GHCR 的仓库原版 `deploy/compose.yaml`，设置 `KITELINE_VERSION=<版本>` 和 `KITELINE_ARCH=<架构>`，见[使用 Docker 部署](../guide/server.md#使用-docker-部署)。
+用 Compose 运行本地镜像时，使用 `deploy/compose.yaml`，设置 `KITELINE_IMAGE=kiteline-server` 和 `KITELINE_VERSION=<版本>-<架构>`，见[使用 Docker 部署](../guide/server.md#使用-docker-部署)。
 
 ### 单独构建 Linux 组件
 

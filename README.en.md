@@ -40,13 +40,13 @@ Devices must provide Git 2.23.0 or later and the shells your projects use. Node.
 
 ## Quick start
 
-1. Start the server with Docker on a Linux host (replace `0.2.5` with the version you deploy):
+1. Start the server with Docker on a Linux host:
 
    ```sh
    mkdir kiteline && cd kiteline
-   curl -fsSLO https://raw.githubusercontent.com/Azure99/kiteline/v0.2.5/deploy/compose.yaml
-   sed -i 's|kiteline-server:|ghcr.io/azure99/kiteline:|; s|-${KITELINE_ARCH:-amd64}||' compose.yaml
-   echo KITELINE_VERSION=0.2.5 > .env
+   KITELINE_VERSION=0.2.5 # Replace with the version you deploy
+   curl -fsSLO "https://raw.githubusercontent.com/Azure99/kiteline/v$KITELINE_VERSION/deploy/compose.yaml"
+   printf 'KITELINE_VERSION=%s\n' "$KITELINE_VERSION" > .env
    docker compose up -d
    docker compose logs server
    ```

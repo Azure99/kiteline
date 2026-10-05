@@ -38,13 +38,13 @@ Kiteline 是一个单人自托管的远程工作台。在桌面或手机浏览�
 
 ## 快速开始
 
-1. 在一台 Linux 主机上用 Docker 启动 server（把 `0.2.5` 换成要部署的版本）：
+1. 在一台 Linux 主机上用 Docker 启动 server：
 
    ```sh
    mkdir kiteline && cd kiteline
-   curl -fsSLO https://raw.githubusercontent.com/Azure99/kiteline/v0.2.5/deploy/compose.yaml
-   sed -i 's|kiteline-server:|ghcr.io/azure99/kiteline:|; s|-${KITELINE_ARCH:-amd64}||' compose.yaml
-   echo KITELINE_VERSION=0.2.5 > .env
+   KITELINE_VERSION=0.2.5 # 替换为要部署的版本
+   curl -fsSLO "https://raw.githubusercontent.com/Azure99/kiteline/v$KITELINE_VERSION/deploy/compose.yaml"
+   printf 'KITELINE_VERSION=%s\n' "$KITELINE_VERSION" > .env
    docker compose up -d
    docker compose logs server
    ```
