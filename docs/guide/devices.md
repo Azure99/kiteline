@@ -1,5 +1,7 @@
 # 接入设备
 
+[English](devices.en.md)
+
 本文面向部署者，说明如何把 Linux、macOS 和 Windows 机器接入工作台，并让 agent 长期运行。开始前先按[部署 server](server.md) 完成部署并登录工作台。
 
 ## 支持的系统与准备
@@ -210,7 +212,7 @@ agent 数据目录默认为项目用户的 `%LOCALAPPDATA%\kiteline-agent`，运
 
 服务的运行环境与你的登录 Shell 不同：
 
-- 服务不读取 Shell 配置文件。agent、终端、Git 和定时任务使用的 `PATH`、locale 和代理变量都来自服务配置，要在服务配置中写全；`/etc/kiteline-agent.env` 只提供数据目录和运行目录的位置。
+- 服务直接启动 agent，不读取 Shell 配置文件。agent、工作台 Git 和定时任务需要的 `PATH`、locale 和代理变量应写在服务配置中；`/etc/kiteline-agent.env` 只提供数据目录和运行目录的位置。交互终端继承 agent 环境后，其 Shell 还可能读取自己的配置文件，具体启动参数见[Shell 参考](reference.md#shell)。
 - 需要交互解锁的 Git 凭据（例如只加载在桌面会话 SSH agent 中、带口令的密钥）在服务中不可用，要改用无需交互的认证方式。
 - 服务启动后，以项目用户执行 `kiteline-agent doctor`（Windows 上把启动命令中的 `run` 换成 `doctor`），查看正在运行的 agent 的实际环境；再在工作台的 Git 中执行一次 Fetch，确认认证可用。
 

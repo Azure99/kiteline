@@ -1,5 +1,7 @@
 # 定时任务
 
+[English](scheduled-tasks.en.md)
+
 定时任务保存在设备上，由该设备的 agent 按计划在后台执行非交互命令，例如定期运行脚本或 AI CLI。本文面向拥有者，说明如何在网页和设备本机的 `kiteline-agent schedule` 中管理同一份任务；机制见[定时任务契约](../design/scheduled-tasks.md)。
 
 ## 创建与编辑

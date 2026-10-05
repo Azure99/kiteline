@@ -1,5 +1,7 @@
 # 部署 server
 
+[English](server.en.md)
+
 本文面向部署者，说明如何部署和维护 server（`kiteline-server`，提供工作台网页、API、设备连接和开发服务代理）。部署完成后，按[接入设备](devices.md)接入第一台设备。
 
 ## 运行环境
@@ -291,7 +293,7 @@ sudo systemctl start kiteline-server
 
 ## 升级 server
 
-先升级 server，再升级各设备的 agent。升级前建议先[备份](#备份与恢复)。停止和重启 server 不影响设备上的终端和定时任务；server 恢复后，版本相同的 agent 自动重新连接。
+先阅读[目标版本的 Release 说明](https://github.com/Azure99/kiteline/releases)，核对部署文件、环境变量、配置的变化和需要的手工步骤。先升级 server，再升级各设备的 agent；升级前建议先[备份](#备份与恢复)。停止和重启 server 不影响设备上的终端和定时任务；server 恢复后，版本相同的 agent 自动重新连接。
 
 Docker 部署在部署目录中执行下面的命令。其中的 `curl` 用新版本覆盖 `compose.yaml`；如果你修改过它（例如改用宿主机目录挂载），改为先下载到 `compose.yaml.new`（`curl -fsSL -o compose.yaml.new …`），把修改合并进去后替换 `compose.yaml`，再执行其余命令。直接覆盖时修改会丢失，例如 server 改用命名卷 `server-data` 启动，读不到原来的数据。
 

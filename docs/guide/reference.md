@@ -1,5 +1,7 @@
 # 参考
 
+[English](reference.en.md)
+
 本文供部署者查找 `kiteline-server` 与 `kiteline-agent` 的命令行接口、配置、限额数值和报错处理。操作步骤见[部署 server](server.md)、[接入设备](devices.md)和[使用工作台](usage.md)。
 
 ## kiteline-server 命令

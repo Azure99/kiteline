@@ -487,7 +487,7 @@ rg 版本必须在三处保持相同：`release/inputs.json` 的 `ripgrep.versio
 
 ### macOS 组件
 
-`release/agent-macos.json` 固定 flock 的源码和最低系统版本 `deploymentTarget`。修改最低系统版本时，同时更新[支持的系统与准备](../guide/devices.md#支持的系统与准备)中的 macOS 版本。
+`release/agent-macos.json` 固定 flock 的源码和最低系统版本 `deploymentTarget`。修改最低系统版本时，同时更新两个 README、[接入设备](../guide/devices.md#支持的系统与准备)及其[英文版](../guide/devices.en.md#supported-systems-and-prerequisites)、[平台实现](../design/platforms.md#macos)，以及本文[构建 macOS 组件](#构建-macos-组件)中的系统版本。
 
 ### xterm.js
 
