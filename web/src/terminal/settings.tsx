@@ -6,6 +6,7 @@ import { limits, shortcutIcons, type Device, type RpcParams } from "@kiteline/sh
 import { rpc } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
+import { Textarea } from "../components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -156,7 +157,7 @@ export function TerminalSettings({ device, onClose }: { device: Device; onClose:
                         type="button"
                         label={t(($) => $.shortcutIcons[icon])}
                         aria-pressed={(editing.icon ?? "terminal") === icon}
-                        className="aria-pressed:border-primary aria-pressed:bg-accent aria-pressed:text-primary"
+                        className="aria-pressed:border-primary aria-pressed:bg-primary-soft aria-pressed:text-primary"
                         onClick={() => editShortcut({ ...editing, icon })}
                       >
                         <ShortcutIcon icon={icon} />
@@ -177,8 +178,8 @@ export function TerminalSettings({ device, onClose }: { device: Device; onClose:
                 </label>
                 <label className="block space-y-1 text-sm">
                   <span>{t(($) => $.terminal.command)}</span>
-                  <textarea
-                    className="min-h-24 w-full rounded border border-border bg-background px-3 py-2 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring max-[959px]:text-base"
+                  <Textarea
+                    className="min-h-24 px-3 py-2 font-mono max-[959px]:min-h-24"
                     value={editing.command ?? ""}
                     required
                     maxLength={65536}

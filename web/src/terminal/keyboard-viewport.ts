@@ -1,5 +1,5 @@
 import type { Terminal } from "@xterm/xterm";
-import { listenTerminalScroll, scrollClippedScreen } from "./readonly-viewport";
+import { listenTerminalScroll, scrollClippedScreen } from "./viewport";
 
 // The xterm grid stays intact; only the visible slice moves while the keyboard is open.
 export class KeyboardViewport {

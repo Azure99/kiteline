@@ -4,27 +4,22 @@ import { Check, Copy } from "lucide-react";
 import { AgentPlatformChoice, type AgentPlatform } from "./agent-platform";
 import { IconButton } from "../components/icon-button";
 import { ErrorNotice } from "../components/error-notice";
-import { copyText } from "../lib/clipboard";
+import { useCopyFeedback } from "../lib/use-copy-feedback";
 
 export function UninstallInstructions({ initialPlatform }: { initialPlatform?: AgentPlatform }) {
   const { t } = useTranslation();
   const [platform, setPlatform] = useState<AgentPlatform>(initialPlatform ?? "linux");
-  const [copied, setCopied] = useState("");
+  const { copied, error, copy: copyCommand, reset } = useCopyFeedback();
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<{ command: string; cause: unknown }>();
   const command =
     platform === "windows"
       ? '& "$PSHOME\\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\\kiteline-agent\\kiteline-agent.ps1" uninstall'
       : "sudo /usr/local/bin/kiteline-agent uninstall";
   async function copy() {
     setPending(true);
-    setCopied("");
-    setError(undefined);
+    reset();
     try {
-      await copyText(command);
-      setCopied(command);
-    } catch (cause) {
-      setError({ command, cause });
+      await copyCommand(command);
     } finally {
       setPending(false);
     }
@@ -49,9 +44,9 @@ export function UninstallInstructions({ initialPlatform }: { initialPlatform?: A
         </IconButton>
       </div>
       <p className="text-muted-foreground">{t(($) => $.devices.uninstallKeepsData)}</p>
-      {error?.command === command && (
+      {error?.text === command && (
         <div role="alert" className="break-words text-destructive">
-          <ErrorNotice error={error.cause} />
+          <ErrorNotice error={error.error} />
         </div>
       )}
       <details>

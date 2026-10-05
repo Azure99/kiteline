@@ -65,7 +65,7 @@ export function FileOperationDialog({
   onResult: (items: FileItemResult[]) => void;
 }) {
   const { t } = useTranslation();
-  useDrafts(store);
+  useDrafts(store); // Re-render when save state changes the permitted file operations.
 
   const [rows, setRows] = useState<Row[]>(() =>
     action.entries.map((entry) => ({

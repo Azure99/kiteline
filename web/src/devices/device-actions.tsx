@@ -138,7 +138,7 @@ export function DeviceActionDialog({
               </DialogClose>
               <Button type="submit" variant={renaming ? "default" : "destructive"} disabled={busy}>
                 {busy
-                  ? t(($) => $.auth.processing)
+                  ? t(($) => $.common.processing)
                   : renaming
                     ? t(($) => $.common.save)
                     : action.type === "delete"

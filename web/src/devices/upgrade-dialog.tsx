@@ -2,7 +2,7 @@ import { useEffect, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, Copy, RefreshCw } from "lucide-react";
 import { api } from "../lib/api";
-import { copyText } from "../lib/clipboard";
+import { useCopyFeedback } from "../lib/use-copy-feedback";
 import { ErrorNotice } from "../components/error-notice";
 import { Button } from "../components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
@@ -26,8 +26,7 @@ export function UpgradeDialog({
   const [upgrade, setUpgrade] = useState<Upgrade>();
   const [platform, setPlatform] = useState<AgentPlatform>("linux");
   const [error, setError] = useState<unknown>();
-  const [copied, setCopied] = useState("");
-  const [copyError, setCopyError] = useState<{ text: string; error: unknown }>();
+  const { copied, error: copyError, copy: copyCommand, reset } = useCopyFeedback();
   const [pending, setPending] = useState(false);
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
@@ -48,14 +47,10 @@ export function UpgradeDialog({
   const visibleCopyError = copyError?.text === command ? copyError?.error : undefined;
   async function copy() {
     if (!command) return;
-    setCopied("");
-    setCopyError(undefined);
+    reset();
     setPending(true);
     try {
-      await copyText(command);
-      setCopied(command);
-    } catch (error) {
-      setCopyError({ text: command, error });
+      await copyCommand(command);
     } finally {
       setPending(false);
     }

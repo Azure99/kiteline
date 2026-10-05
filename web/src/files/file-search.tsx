@@ -160,7 +160,7 @@ export function FileSearch({
           <button
             key={index}
             onClick={() => onOpen(match)}
-            className="block w-full border-b border-border px-4 py-3 text-left hover:bg-accent"
+            className="block w-full border-b border-border px-4 py-3 text-left hover:bg-muted"
           >
             <span className="flex items-start gap-2 text-xs">
               <File className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />

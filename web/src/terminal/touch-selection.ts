@@ -1,5 +1,5 @@
 import type { IBufferCellPosition, Terminal } from "@xterm/xterm";
-import { scrollTerminalLines } from "./readonly-viewport";
+import { scrollTerminalLines } from "./viewport";
 
 type Cell = IBufferCellPosition;
 type Point = { x: number; y: number };

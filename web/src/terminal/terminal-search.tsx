@@ -5,7 +5,7 @@ import { SearchAddon } from "@xterm/addon-search";
 import type { Terminal } from "@xterm/xterm";
 import { IconButton } from "../components/icon-button";
 import { Input } from "../components/ui/input";
-import { revealTerminalSelection } from "./readonly-viewport";
+import { revealTerminalSelection } from "./viewport";
 
 export function TerminalSearch({
   terminal,

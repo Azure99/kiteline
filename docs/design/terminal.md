@@ -17,7 +17,7 @@ tmux 使用会话目录下的 `tmux.conf`，不加载用户的 tmux 配置或插
 依赖固定 xterm 版本内部行为的代码集中在两处，升级 xterm 时要逐项复核：
 
 - `shared/src/terminal/index.ts`（网页和 recorder 共用，保证两端解析一致）：Unicode 11 初始化、终端选项（关闭 `win32InputMode` 和 `kittyKeyboard`）、CSI S/T/L/M 与 REP 的计数适配、解析器空闲判断、鼠标编码补齐、用户输入转发、结束后冻结鼠标、粘贴规范化。
-- `web/src/terminal/`：`touch-selection.ts`（触控选择）、`readonly-viewport.ts`（只读视口）、`auxiliary-input.ts`（辅助按键编码，直接导入 xterm.js 私有源码 `src/common/input/Keyboard`）。
+- `web/src/terminal/`：`touch-selection.ts`（触控选择）、`viewport.ts`（滚动、搜索定位及结束后的视口保留）、`auxiliary-input.ts`（辅助按键编码，直接导入 xterm.js 私有源码 `src/common/input/Keyboard`）。
 
 ## 会话生命周期
 

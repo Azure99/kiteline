@@ -21,11 +21,9 @@
   --background: var(--color-background);
   --foreground: var(--color-foreground);
   --primary: var(--color-primary);
-  --primary-soft: var(--color-primary-soft);
   --border: var(--color-border);
   --muted: var(--color-muted);
   --muted-foreground: var(--color-muted-foreground);
-  --destructive: var(--color-destructive);
   --terminal: #20242b;
   --terminal-foreground: #d6dce5;
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
@@ -281,7 +279,7 @@ body {
   border-color: #39414c;
 }
 .terminal-pane-header {
-  background: #f6f7f9;
+  background: var(--muted);
   border-bottom: 1px solid var(--border);
 }
 .terminal-pane[data-active="true"] > .terminal-pane-header {
@@ -355,7 +353,7 @@ body {
   height: 22px;
   border: 2px solid #d6e5ff;
   border-radius: 2px 2px 50% 50%;
-  background: #426aad;
+  background: var(--primary);
 }
 .terminal-selection-menu {
   position: fixed;
@@ -391,7 +389,7 @@ body {
 }
 .terminal-aux .aux-key[aria-pressed="true"],
 .terminal-aux .aux-key:active {
-  background: #426aad;
+  background: var(--primary);
 }
 @media (max-width: 959px) {
   .dialog-content {

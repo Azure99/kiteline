@@ -71,7 +71,7 @@ export function FileExplorer({
         return (
           <div key={entry.path ?? `invalid-${index}`}>
             <div
-              className={`file-row group flex min-h-8 items-center pr-1 max-[959px]:min-h-11 ${currentFile === entry.path ? "bg-primary-soft" : "hover:bg-muted"}`}
+              className={`flex min-h-8 items-center pr-1 max-[959px]:min-h-11 ${currentFile === entry.path ? "bg-primary-soft" : "hover:bg-muted"}`}
               style={{ paddingLeft: 8 + depth * 14 }}
             >
               {selecting && (

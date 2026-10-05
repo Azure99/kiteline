@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import type { Device } from "@kiteline/shared/protocol";
 import { api, ApiError, post } from "../lib/api";
-import { copyText } from "../lib/clipboard";
+import { useCopyFeedback } from "../lib/use-copy-feedback";
 import {
   DialogContent,
   DialogFooter,
@@ -41,12 +41,11 @@ export function BindingDialog({
   const [binding, setBinding] = useState<Binding>();
   const [result, setResult] = useState<Result>();
   const [error, setError] = useState<unknown>();
-  const [copyError, setCopyError] = useState<{ text: string; error: unknown }>();
+  const { copied, error: copyError, copy: copyCommand, reset } = useCopyFeedback();
   const [platform, setPlatform] = useState<AgentPlatform>("linux");
   const [busy, setBusy] = useState(true);
   const [queryStopped, setQueryStopped] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  const [copied, setCopied] = useState("");
   const boundDevicePresent = result?.deviceId
     ? devices.some((device) => device.id === result.deviceId)
     : undefined;
@@ -54,18 +53,17 @@ export function BindingDialog({
     setBinding(undefined);
     setResult(undefined);
     setError(undefined);
-    setCopyError(undefined);
+    reset();
     setBusy(true);
     try {
       setBinding(await post<Binding>("/api/bindings"));
       setResult({ status: "pending" });
-      setCopied("");
     } catch (error) {
       setError(error);
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [reset]);
   const started = useRef(false);
   useEffect(() => {
     if (started.current) return;
@@ -115,11 +113,8 @@ export function BindingDialog({
   const device = devices.find((entry) => entry.id === result?.deviceId);
   const online = connected && device?.status === "online";
   const copy = (text: string) => {
-    setCopyError(undefined);
-    setCopied("");
-    void copyText(text)
-      .then(() => setCopied(text))
-      .catch((error: unknown) => setCopyError({ text, error }));
+    reset();
+    void copyCommand(text);
   };
   return (
     <DialogContent>

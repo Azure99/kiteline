@@ -80,7 +80,7 @@ export function Auth({ initialized, onLogin }: { initialized: boolean; onLogin: 
           )}
           <Button type="submit" disabled={busy} className="w-full">
             {busy
-              ? t(($) => $.auth.processing)
+              ? t(($) => $.common.processing)
               : initialized
                 ? t(($) => $.auth.login)
                 : t(($) => $.auth.initialize)}

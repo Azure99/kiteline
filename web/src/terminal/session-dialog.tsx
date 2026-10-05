@@ -6,11 +6,11 @@ import type { AgentEnvironment, Session } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
-import { copyText } from "../lib/clipboard";
+import { useCopyFeedback } from "../lib/use-copy-feedback";
 import { localCommand } from "./local-command";
 
 export interface SessionAction {
-  kind: "rename" | "end" | "copy";
+  kind: "rename" | "end" | "attach";
   session: Session;
 }
 export function SessionDialog({
@@ -29,18 +29,11 @@ export function SessionDialog({
   const { t } = useTranslation();
 
   const [name, setName] = useState(action.session.name);
-  const [copiedCommand, setCopiedCommand] = useState<string>();
+  const { copied: copiedCommand, error, copy: copyCommand } = useCopyFeedback();
   const command = environment && localCommand(environment, action.session.id);
-  const [error, setError] = useState<unknown>();
   async function copy() {
     if (!command) return;
-    try {
-      await copyText(command);
-      setCopiedCommand(command);
-      setError(undefined);
-    } catch (error) {
-      setError(error);
-    }
+    await copyCommand(command);
   }
   return (
     <Dialog
@@ -54,7 +47,7 @@ export function SessionDialog({
           <DialogTitle>
             {action.kind === "rename"
               ? t(($) => $.terminal.rename)
-              : action.kind === "copy"
+              : action.kind === "attach"
                 ? t(($) => $.terminal.localAttach)
                 : t(($) => $.terminal.endSession)}
           </DialogTitle>
@@ -67,7 +60,7 @@ export function SessionDialog({
             onChange={(event) => setName(event.target.value)}
             autoFocus
           />
-        ) : action.kind === "copy" ? (
+        ) : action.kind === "attach" ? (
           <>
             <Input aria-label={t(($) => $.terminal.localCommand)} readOnly value={command ?? ""} />
             <p className="text-sm text-muted-foreground">{t(($) => $.terminal.detachHint)}</p>
@@ -80,14 +73,14 @@ export function SessionDialog({
         )}
         {!!error && (
           <div role="alert" className="text-sm text-destructive">
-            <ErrorNotice error={error} />
+            <ErrorNotice error={error.error} />
           </div>
         )}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" disabled={busy} onClick={onClose}>
-            {action.kind === "copy" ? t(($) => $.common.close) : t(($) => $.common.cancel)}
+            {action.kind === "attach" ? t(($) => $.common.close) : t(($) => $.common.cancel)}
           </Button>
-          {action.kind === "copy" ? (
+          {action.kind === "attach" ? (
             <Button
               disabled={!command}
               onPointerDown={(event) => event.preventDefault()}
@@ -103,7 +96,7 @@ export function SessionDialog({
               variant={action.kind === "end" ? "destructive" : "default"}
               disabled={busy || (action.kind === "rename" && !name.trim())}
               onClick={() => {
-                if (action.kind !== "copy")
+                if (action.kind !== "attach")
                   void onChange(action.kind, action.session.id, name).then((done) => {
                     if (done) onClose();
                   });

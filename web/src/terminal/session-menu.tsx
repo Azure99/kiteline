@@ -27,7 +27,14 @@ import {
   type TerminalLayout,
 } from "./groups";
 
-export type SessionCommand = "rename" | "end" | "copy" | "redraw" | "larger" | "smaller" | "close";
+export type SessionCommand =
+  | "rename"
+  | "end"
+  | "attach"
+  | "redraw"
+  | "larger"
+  | "smaller"
+  | "close";
 export function SessionMenu({
   id,
   session,
@@ -155,7 +162,7 @@ export function SessionMenu({
                   <Pencil />
                   {t(($) => $.common.rename)}
                 </MenuItem>
-                <MenuItem onClick={() => onCommand("copy", id)}>
+                <MenuItem onClick={() => onCommand("attach", id)}>
                   <Copy />
                   {t(($) => $.terminal.localCommand)}
                 </MenuItem>

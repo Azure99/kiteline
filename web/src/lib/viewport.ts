@@ -1,3 +1,5 @@
+import { isMobile } from "./use-mobile";
+
 interface KeyboardGeometry extends EventTarget {
   readonly boundingRect: DOMRectReadOnly;
   show(): void;
@@ -45,7 +47,7 @@ export function trackViewport() {
     } else if (fullscreen !== nextFullscreen) {
       fullHeight = fullHeights.get(nextFullscreen) ?? fullHeight;
     }
-    const mobile = window.matchMedia("(max-width: 959px)").matches;
+    const mobile = isMobile();
     keyboardOpen =
       mobile &&
       (occluded ||

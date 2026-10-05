@@ -6,5 +6,8 @@ function subscribe(listener: () => void) {
   return () => query.removeEventListener("change", listener);
 }
 export function useMobile() {
-  return useSyncExternalStore(subscribe, () => query.matches);
+  return useSyncExternalStore(subscribe, isMobile);
+}
+export function isMobile() {
+  return query.matches;
 }

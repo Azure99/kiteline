@@ -19,7 +19,8 @@ import {
 } from "@kiteline/shared/terminal";
 import { ApiError, api, post } from "../lib/api";
 import { i18n } from "../i18n";
-import { retainReadonlyViewport } from "./readonly-viewport";
+import { retainReadonlyViewport } from "./viewport";
+import { isMobile } from "../lib/use-mobile";
 import { versionedPath } from "../lib/release";
 import { isKeyboardOpen } from "../lib/viewport";
 import { KeyboardViewport } from "./keyboard-viewport";
@@ -193,10 +194,7 @@ export class TerminalDisplay {
           cols: integer(frame.cols, "cols", 1, 10000),
           rows: integer(frame.rows, "rows", 1, 10000),
           fontFamily: "'Cascadia Code', 'DejaVu Sans Mono', monospace",
-          fontSize: Math.max(
-            10,
-            Math.min(24, savedFontSize || (matchMedia("(max-width: 959px)").matches ? 12 : 13)),
-          ),
+          fontSize: Math.max(10, Math.min(24, savedFontSize || (isMobile() ? 12 : 13))),
           lineHeight: 1.2,
           cursorBlink: true,
           disableStdin: true,
