@@ -1,0 +1,22 @@
+diff --git a/dist/index.js b/dist/index.js
+index 207a134b355710a6367fe290126a17cc24c34be9..eb544d64d19b722cfa5d11747574d601068f701d 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -111,7 +111,7 @@ export class HttpsProxyAgent extends Agent {
+                 // this socket connection to a TLS connection.
+                 debug('Upgrading socket connection to TLS');
+                 return tls.connect({
+-                    ...omit(setServernameFromNonIpHost(opts), 'host', 'path', 'port'),
++                    ...omit(setServernameFromNonIpHost(opts), 'path', 'port'),
+                     socket,
+                 });
+             }
+@@ -199,7 +199,7 @@ export class HttpsProxyAgent extends Agent {
+             if (opts.secureEndpoint) {
+                 debug('Upgrading socket connection to TLS');
+                 return tls.connect({
+-                    ...omit(setServernameFromNonIpHost(opts), 'host', 'path', 'port'),
++                    ...omit(setServernameFromNonIpHost(opts), 'path', 'port'),
+                     socket,
+                 });
+             }

@@ -22,6 +22,7 @@ async function fixture({
   secureProxy = false,
   secureTarget = true,
   credentials = "user:pass",
+  ipOnlyCertificate = false,
 } = {}) {
   for (const name of ["http_proxy", "https_proxy", "all_proxy", "no_proxy"])
     for (const key of [name, name.toUpperCase()]) vi.stubEnv(key, "");
@@ -41,9 +42,9 @@ async function fixture({
       "-days",
       "1",
       "-subj",
-      "/CN=localhost",
+      ipOnlyCertificate ? "/CN=127.0.0.1" : "/CN=localhost",
       "-addext",
-      "subjectAltName=IP:127.0.0.1,DNS:localhost",
+      `subjectAltName=IP:127.0.0.1${ipOnlyCertificate ? "" : ",DNS:localhost"}`,
       "-keyout",
       keyFile,
       "-out",
@@ -194,6 +195,21 @@ test.each([
     await expect.poll(() => f.proxyPeers.size).toBe(0);
   },
 );
+
+test("IP-only HTTPS targets retain their identity through CONNECT", async () => {
+  const f = await fixture({ ipOnlyCertificate: true });
+  expect((await fetchServerJson(f.url, {})).ok).toBe(true);
+  const socket = connectServerSocket(f.wsUrl, { handshakeTimeout: 2000 });
+  await once(socket, "open");
+  const message = once(socket, "message");
+  socket.send("IP target connected");
+  expect((await message)[0].toString()).toBe("IP target connected");
+  expect(f.requests.map((request) => request.target)).toEqual([f.url.host, f.url.host]);
+  const closed = once(socket, "close");
+  socket.close();
+  await closed;
+  await expect.poll(() => f.proxyPeers.size).toBe(0);
+});
 
 test.each(["token:", ":password", "to%3Aken:"])(
   "binding and WSS authenticate with partial proxy credentials (%s)",

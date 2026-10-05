@@ -9,6 +9,7 @@ overrides:
 
 patchedDependencies:
   '@xterm/xterm@6.1.0-beta.304': cd15b063331ceabb091b060fa980fcfbffa957b1b251ae8d31824c1a69ca21a5
+  https-proxy-agent@9.1.0: fdfac9eda01004a9695c7008fdf63694acaf498dda4b1ff93cdd421faf637afd
 
 importers:
 
@@ -64,7 +65,7 @@ importers:
         version: 10.0.1
       https-proxy-agent:
         specifier: 9.1.0
-        version: 9.1.0(supports-color@7.2.0)
+        version: 9.1.0(patch_hash=fdfac9eda01004a9695c7008fdf63694acaf498dda4b1ff93cdd421faf637afd)(supports-color@7.2.0)
       image-size:
         specifier: 2.0.4
         version: 2.0.4
@@ -2952,7 +2953,7 @@ snapshots:
 
   html-parse-stringify@4.0.1: {}
 
-  https-proxy-agent@9.1.0(supports-color@7.2.0):
+  https-proxy-agent@9.1.0(patch_hash=fdfac9eda01004a9695c7008fdf63694acaf498dda4b1ff93cdd421faf637afd)(supports-color@7.2.0):
     dependencies:
       agent-base: 9.0.0
       debug: 4.4.3(supports-color@7.2.0)

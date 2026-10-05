@@ -16,3 +16,4 @@ overrides:
 
 patchedDependencies:
   "@xterm/xterm@6.1.0-beta.304": web/patches/@xterm__xterm@6.1.0-beta.304.patch
+  https-proxy-agent@9.1.0: agent/patches/https-proxy-agent@9.1.0.patch
