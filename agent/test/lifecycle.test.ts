@@ -1,13 +1,41 @@
 import { expect, test, vi } from "vitest";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { Agent } from "../src/agent.js";
 import { privateDirectory } from "../src/config.js";
 import { testConfig } from "./support/config.js";
 import { ScheduledTasks } from "../src/tasks/index.js";
 import { localRequest } from "../src/local.js";
+
+test("agent shutdown waits for an accepted workspace publication", async () => {
+  const dataDir = await mkdtemp("/var/tmp/kiteline-workspace-publication-");
+  const agent = new Agent(testConfig(dataDir), {
+    deviceId: "test",
+    deviceToken: "test",
+    server: "https://localhost",
+  });
+  try {
+    const operation = agent.dispatch(
+      "workspaces.add",
+      { absolutePath: dataDir },
+      new AbortController().signal,
+    );
+    await agent.close();
+    await expect(operation).resolves.toMatchObject({ path: dataDir });
+    const value = JSON.parse(await readFile(join(dataDir, "agent.json"), "utf8")) as {
+      workspaces: { path: string }[];
+    };
+    expect(value.workspaces[0]?.path).toBe(dataDir);
+    await expect(
+      agent.dispatch("workspaces.add", { absolutePath: dataDir }, new AbortController().signal),
+    ).rejects.toMatchObject({ code: "cancelled" });
+  } finally {
+    await agent.close();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
 
 test.runIf(process.platform !== "win32")(
   "real main owns its runtime directory until normal cleanup completes",

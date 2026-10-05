@@ -5,10 +5,12 @@ import {
   appVersion,
   asError,
   checkShortcutIcon,
+  controlCloseCodes,
   errorReply,
   gitWriteMethods,
   integer,
   limits,
+  optionalString,
   record,
   rpcMutates,
   string,
@@ -61,17 +63,17 @@ function knownRpcMethod(method: string): RpcMethod {
 
 export class Agent {
   readonly metadata: MetadataStore;
-  readonly cursorBudget = new CursorBudget();
-  readonly directories = new Directories(this.cursorBudget);
-  readonly repos: Repositories;
+  private readonly cursorBudget = new CursorBudget();
+  private readonly directories = new Directories(this.cursorBudget);
+  private readonly repos: Repositories;
   readonly watches: WorkspaceWatches;
   readonly gitWrites: GitWriteQueue;
   readonly sessions: Sessions;
-  readonly files: Files;
-  readonly textFiles: TextFiles;
+  private readonly files: Files;
+  private readonly textFiles: TextFiles;
   readonly schedules: ScheduledTasks;
   private readonly temporaryFiles: TemporaryFiles;
-  readonly fileOperations: FileOperations;
+  private readonly fileOperations: FileOperations;
   private readonly local: LocalServer;
   private readonly terminalChannels: TerminalChannels;
   private readonly fileChannels: FileChannels;
@@ -79,7 +81,7 @@ export class Agent {
   readonly requests = new Map<string, AbortController>();
   private readonly inflight = new Set<Promise<unknown>>();
   socket?: WebSocket;
-  connectionId?: string;
+  private connectionId?: string;
   private serverVersion?: string;
   private connectionError?: string;
   private reconnect?: NodeJS.Timeout;
@@ -89,7 +91,7 @@ export class Agent {
   private delay = 1000;
   constructor(
     readonly config: AgentConfig,
-    readonly identity: Identity,
+    private readonly identity: Identity,
   ) {
     this.metadata = new MetadataStore(config);
     this.schedules = new ScheduledTasks(config);
@@ -122,33 +124,40 @@ export class Agent {
     this.httpChannels = new HttpChannels(identity);
     this.sessions.onChanged = (workspaceId) =>
       this.send({ type: "sessions.changed", workspaceId } satisfies AgentEvent);
-    this.local = new LocalServer(config, (method, params, signal) => {
-      if (this.stopped) throw new AppError("cancelled", "Agent is stopping");
-      if (method === "doctor")
-        return diagnose(this.config, signal, {
-          server: this.identity.server,
-          connected: this.socket?.readyState === WebSocket.OPEN && !!this.connectionId,
-          serverVersion: this.serverVersion,
-          connectionError: this.connectionError,
-          revision: this.metadata.value.revision,
-          shell: this.config.shell,
-          recorderPid: this.sessions.recorder.pid,
-          sessions: this.sessions.list().sessions,
-          schedules: this.schedules.status(),
-        });
-      if (method === "workspaces.list")
-        return Promise.resolve({ workspaces: this.metadata.value.workspaces });
-      if (method === "terminal.attach") {
-        const item = this.sessions.get(string(params.sessionId));
-        if (item.session.state !== "running")
-          throw new AppError("busy", "Terminal is still being created");
-        return Promise.resolve(item.identity);
-      }
-      if (method === "sessions.end") return this.sessions.end(undefined, string(params.sessionId));
-      if (!localSessionMethods.has(method) && !isScheduleMethod(method))
-        throw new AppError("unsupported", "Unsupported local operation");
-      return this.dispatch(method, params, signal);
-    });
+    this.local = new LocalServer(config, (method, params, signal) =>
+      this.handleLocal(method, params, signal),
+    );
+  }
+  private handleLocal(
+    method: string,
+    params: Record<string, unknown>,
+    signal: AbortSignal,
+  ): Promise<unknown> {
+    if (this.stopped) throw new AppError("cancelled", "Agent is stopping");
+    if (method === "doctor")
+      return diagnose(this.config, signal, {
+        server: this.identity.server,
+        connected: this.socket?.readyState === WebSocket.OPEN && !!this.connectionId,
+        serverVersion: this.serverVersion,
+        connectionError: this.connectionError,
+        revision: this.metadata.value.revision,
+        shell: this.config.shell,
+        recorderPid: this.sessions.recorder.pid,
+        sessions: this.sessions.list().sessions,
+        schedules: this.schedules.status(),
+      });
+    if (method === "workspaces.list")
+      return Promise.resolve({ workspaces: this.metadata.value.workspaces });
+    if (method === "terminal.attach") {
+      const item = this.sessions.get(string(params.sessionId));
+      if (item.session.state !== "running")
+        throw new AppError("busy", "Terminal is still being created");
+      return Promise.resolve(item.identity);
+    }
+    if (method === "sessions.end") return this.sessions.end(undefined, string(params.sessionId));
+    if (!localSessionMethods.has(method) && !isScheduleMethod(method))
+      throw new AppError("unsupported", "Unsupported local operation");
+    return this.dispatch(method, params, signal);
   }
   async start() {
     if (this.stopped) return;
@@ -165,7 +174,7 @@ export class Agent {
     await this.local.start();
     this.connect();
   }
-  send(message: AgentControlMessage) {
+  private send(message: AgentControlMessage) {
     const text = JSON.stringify(message);
     if (Buffer.byteLength(text) > limits.controlMessageBytes)
       throw new AppError("limit_exceeded", "Control message exceeds the size limit");
@@ -235,45 +244,7 @@ export class Agent {
       try {
         if (binary) throw new AppError("invalid_argument", "Expected JSON");
         const message = record(JSON.parse(raw.toString()));
-        if (message.type === "welcome") {
-          this.serverVersion = string(message.serverVersion);
-          this.connectionId = string(message.connectionId);
-          this.connectionError = undefined;
-          this.delay = 1000;
-          this.send({ type: "tasks.snapshot", ...this.schedules.snapshot() });
-        } else if (message.type === "channel.open") {
-          if (message.connectionId !== this.connectionId)
-            throw new AppError("conflict", "Stale control connection");
-          const channels =
-            message.kind === "terminal.attach"
-              ? this.terminalChannels
-              : message.kind === "http.proxy"
-                ? this.httpChannels
-                : this.fileChannels;
-          channels.open(
-            string(message.channelId),
-            string(message.connectionId),
-            string(message.kind),
-            record(message.params),
-          );
-        } else if (message.type === "channel.cancel") {
-          this.terminalChannels.cancel(string(message.channelId));
-          this.fileChannels.cancel(string(message.channelId));
-          this.httpChannels.cancel(string(message.channelId));
-        } else if (message.type === "rpc.request") {
-          this.handleRpcRequest(socket, message);
-        } else if (message.type === "rpc.cancel")
-          this.requests
-            .get(string(message.id))
-            ?.abort(new AppError("cancelled", "Operation cancelled"));
-        else if (message.type === "watch.set") {
-          if (!Array.isArray(message.workspaceIds))
-            throw new AppError("invalid_argument", "Invalid watches");
-          const ids = new Set(message.workspaceIds.map((id) => string(id)));
-          const workspaces = this.metadata.value.workspaces.filter((item) => ids.has(item.id));
-          void this.repos.retain(new Set(workspaces.map((workspace) => workspace.id)));
-          this.watches.set(workspaces);
-        }
+        this.handleControlMessage(socket, message);
       } catch (error) {
         console.error(asError(error).message);
         socket.close(1008, "invalid_control_message");
@@ -293,12 +264,57 @@ export class Agent {
       this.httpChannels.close();
       void this.directories.close();
       if (this.stopped) return;
-      if (unauthorized || code === 4001 || code === 4003) {
+      if (
+        unauthorized ||
+        code === controlCloseCodes.connectionReplaced ||
+        code === controlCloseCodes.accessRevoked
+      ) {
         console.error(`Remote connection stopped: ${this.connectionError}`);
         return;
       }
       this.scheduleReconnect();
     });
+  }
+  private handleControlMessage(socket: WebSocket, message: Record<string, unknown>) {
+    if (message.type === "welcome") {
+      this.serverVersion = string(message.serverVersion);
+      this.connectionId = string(message.connectionId);
+      this.connectionError = undefined;
+      this.delay = 1000;
+      this.send({ type: "tasks.snapshot", ...this.schedules.snapshot() });
+    } else if (message.type === "channel.open") {
+      if (message.connectionId !== this.connectionId)
+        throw new AppError("conflict", "Stale control connection");
+      const channels =
+        message.kind === "terminal.attach"
+          ? this.terminalChannels
+          : message.kind === "http.proxy"
+            ? this.httpChannels
+            : this.fileChannels;
+      channels.open(
+        string(message.channelId),
+        string(message.connectionId),
+        string(message.kind),
+        record(message.params),
+      );
+    } else if (message.type === "channel.cancel") {
+      this.terminalChannels.cancel(string(message.channelId));
+      this.fileChannels.cancel(string(message.channelId));
+      this.httpChannels.cancel(string(message.channelId));
+    } else if (message.type === "rpc.request") {
+      this.handleRpcRequest(socket, message);
+    } else if (message.type === "rpc.cancel")
+      this.requests
+        .get(string(message.id))
+        ?.abort(new AppError("cancelled", "Operation cancelled"));
+    else if (message.type === "watch.set") {
+      if (!Array.isArray(message.workspaceIds))
+        throw new AppError("invalid_argument", "Invalid watches");
+      const ids = new Set(message.workspaceIds.map((id) => string(id)));
+      const workspaces = this.metadata.value.workspaces.filter((item) => ids.has(item.id));
+      void this.repos.retain(new Set(workspaces.map((workspace) => workspace.id)));
+      this.watches.set(workspaces);
+    }
   }
   private handleRpcRequest(socket: WebSocket, message: Record<string, unknown>) {
     const id = string(message.id, "request id", 128);
@@ -411,7 +427,7 @@ export class Agent {
         const result = await this.files.list(
           string(params.workspaceId),
           string(params.path),
-          params.cursor === undefined ? undefined : string(params.cursor),
+          optionalString(params.cursor),
           signal,
         );
         return result satisfies RpcResult<typeof method>;
@@ -440,7 +456,7 @@ export class Agent {
       case "directories.list":
         return this.directories.list(
           string(params.absolutePath),
-          params.cursor === undefined ? undefined : string(params.cursor),
+          optionalString(params.cursor),
           signal,
         ) satisfies Promise<RpcResult<typeof method>>;
       case "cursors.release": {
@@ -458,13 +474,13 @@ export class Agent {
       case "workspaces.add":
         return this.metadata.add(
           string(params.absolutePath),
-          params.name === undefined ? undefined : string(params.name, "name", 256),
+          optionalString(params.name, "name", limits.nameLength),
           signal,
         ) satisfies Promise<RpcResult<typeof method>>;
       case "workspaces.rename":
         return this.metadata.rename(
           string(params.workspaceId),
-          string(params.name, "name", 256),
+          string(params.name, "name", limits.nameLength),
           signal,
         ) satisfies Promise<RpcResult<typeof method>>;
       case "workspaces.remove": {
@@ -476,23 +492,22 @@ export class Agent {
         ) satisfies Promise<RpcResult<typeof method>>;
       }
       case "sessions.list": {
-        const workspaceId =
-          params.workspaceId === undefined ? undefined : string(params.workspaceId);
+        const workspaceId = optionalString(params.workspaceId);
         if (workspaceId) this.metadata.workspace(workspaceId);
         return this.sessions.list(workspaceId) satisfies RpcResult<typeof method>;
       }
       case "sessions.create":
         return this.sessions.create(
           string(params.workspaceId),
-          params.name === undefined ? undefined : string(params.name, "name", 256),
-          params.shortcutId === undefined ? undefined : string(params.shortcutId),
+          optionalString(params.name, "name", limits.nameLength),
+          optionalString(params.shortcutId),
           signal,
         ) satisfies Promise<RpcResult<typeof method>>;
       case "sessions.rename":
         return this.sessions.rename(
           string(params.workspaceId),
           string(params.sessionId),
-          string(params.name, "name", 256),
+          string(params.name, "name", limits.nameLength),
         ) satisfies RpcResult<typeof method>;
       case "sessions.end":
         return this.sessions.end(
@@ -517,9 +532,9 @@ export class Agent {
       case "shortcuts.put":
         return this.metadata.putShortcut(
           {
-            id: params.id === undefined ? undefined : string(params.id),
-            name: string(params.name, "name", 256),
-            command: string(params.command, "command", 65536),
+            id: optionalString(params.id),
+            name: string(params.name, "name", limits.nameLength),
+            command: string(params.command, "command", limits.shortcutCommandLength),
             icon: checkShortcutIcon(params.icon),
           },
           signal,

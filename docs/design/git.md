@@ -1,6 +1,6 @@
 # Git
 
-本文写给修改 `agent/src/git/` 或 `web/src/git/` 的人，说明 Git 工具的机制和必须保持的不变量。agent 调用设备上的原生 Git（最低版本由 `agent/src/tools.ts` 的 `toolRequirements` 检查）。界面操作见[使用工作台](../guide/usage.md#git)，限额数值见[限额](../guide/reference.md#限额)。
+本文写给修改 `agent/src/git/` 或 `web/src/git/` 的人，说明 Git 工具的机制和必须保持的不变量。agent 调用设备上的原生 Git（最低版本由 `agent/src/prerequisites.ts` 的 `gitRequirement` 检查）。界面操作见[使用工作台](../guide/usage.md#git)，限额数值见[限额](../guide/reference.md#限额)。
 
 ## 仓库发现
 

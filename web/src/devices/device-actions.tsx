@@ -1,7 +1,7 @@
 import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import type { Device, Workspace } from "@kiteline/shared/protocol";
+import { limits, type Device, type Workspace } from "@kiteline/shared/protocol";
 import { api, rpc } from "../lib/api";
 import { UninstallInstructions } from "./uninstall-instructions";
 import { Button } from "../components/ui/button";
@@ -112,7 +112,7 @@ export function DeviceActionDialog({
                     value={name}
                     onChange={(event) => setName(event.target.value)}
                     required
-                    maxLength={256}
+                    maxLength={limits.nameLength}
                     autoFocus
                   />
                 </label>

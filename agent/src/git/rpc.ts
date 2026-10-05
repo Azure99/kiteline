@@ -2,6 +2,7 @@ import {
   AppError,
   integer,
   limits,
+  optionalString,
   record,
   string,
   type FileProgress,
@@ -50,7 +51,7 @@ export async function gitRpc(
             repo,
             method.slice(4) as "fetch" | "pull" | "push",
             {
-              remote: params.remote === undefined ? undefined : string(params.remote),
+              remote: optionalString(params.remote),
               expectedHead: method === "git.fetch" ? undefined : expectedHead(params.expectedHead),
             },
             signal,
@@ -100,7 +101,7 @@ export async function gitRpc(
           createBranch(
             repo,
             string(params.name),
-            params.startOid === undefined ? undefined : string(params.startOid),
+            optionalString(params.startOid),
             params.switch === true,
             signal,
           ),
@@ -158,7 +159,7 @@ export async function gitRpc(
     case "repos.discover":
       return repos.discover(
         string(params.workspaceId),
-        params.scanCursor === undefined ? undefined : string(params.scanCursor),
+        optionalString(params.scanCursor),
         signal,
       ) satisfies Promise<RpcResult<typeof method>>;
     case "git.status":
@@ -167,7 +168,7 @@ export async function gitRpc(
         params.offset === undefined
           ? 0
           : integer(params.offset, "offset", 0, Number.MAX_SAFE_INTEGER),
-        params.expectedListToken === undefined ? undefined : string(params.expectedListToken),
+        optionalString(params.expectedListToken),
         signal,
       ) satisfies Promise<RpcResult<typeof method>>;
     case "git.diff": {
@@ -176,7 +177,7 @@ export async function gitRpc(
         return commitDiff(
           repo,
           string(params.commitOid),
-          params.parentOid === undefined ? undefined : string(params.parentOid),
+          optionalString(params.parentOid),
           string(params.path),
           signal,
         ) satisfies Promise<RpcResult<typeof method>>;
@@ -189,7 +190,7 @@ export async function gitRpc(
     case "git.history":
       return history(
         await repos.resolve(string(params.workspaceId), string(params.repoId), signal),
-        params.anchorOid === undefined ? undefined : string(params.anchorOid),
+        optionalString(params.anchorOid),
         params.offset === undefined
           ? 0
           : integer(params.offset, "offset", 0, Number.MAX_SAFE_INTEGER),
@@ -199,7 +200,7 @@ export async function gitRpc(
       return commitFiles(
         await repos.resolve(string(params.workspaceId), string(params.repoId), signal),
         string(params.commitOid),
-        params.parentOid === undefined ? undefined : string(params.parentOid),
+        optionalString(params.parentOid),
         params.offset === undefined
           ? 0
           : integer(params.offset, "offset", 0, Number.MAX_SAFE_INTEGER),

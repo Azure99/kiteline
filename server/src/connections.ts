@@ -6,6 +6,7 @@ import {
   appVersion,
   checkMetadata,
   checkEnvironment,
+  controlCloseCodes,
   integer,
   limits,
   record,
@@ -138,7 +139,7 @@ export class Connections {
           const previous = this.agents.get(id);
           if (previous) {
             this.dropAgent(previous);
-            previous.socket.close(4001, "connection_replaced");
+            previous.socket.close(controlCloseCodes.connectionReplaced, "connection_replaced");
           }
           this.agents.set(id, connection);
           this.releases.set(id, {
@@ -351,7 +352,8 @@ export class Connections {
   closeLogin(loginId: string) {
     this.onLoginClosed?.(loginId);
     for (const browser of this.browsers)
-      if (browser.login.id === loginId) browser.socket.close(4003, "session_expired");
+      if (browser.login.id === loginId)
+        browser.socket.close(controlCloseCodes.accessRevoked, "session_expired");
     for (const [id, pending] of this.pending)
       if (pending.loginId === loginId) this.cancel(pending.connection.id, id, loginId);
   }
@@ -361,12 +363,12 @@ export class Connections {
     for (const candidate of this.handshakes)
       if (candidate.id === deviceId) {
         this.handshakes.delete(candidate);
-        candidate.socket.close(4003, "device_deleted");
+        candidate.socket.close(controlCloseCodes.accessRevoked, "device_deleted");
       }
     const connection = this.agents.get(deviceId);
     if (connection) {
       this.dropAgent(connection);
-      connection.socket.close(4003, "device_deleted");
+      connection.socket.close(controlCloseCodes.accessRevoked, "device_deleted");
     } else this.broadcastDevices();
   }
   close() {

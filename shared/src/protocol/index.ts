@@ -17,6 +17,8 @@ export type {
 } from "./rpc.js";
 
 export const limits = {
+  nameLength: 256,
+  shortcutCommandLength: 65536,
   interactionTimeout: 30_000,
   controlMessageBytes: 1024 * 1024,
   dataChunkBytes: 64 * 1024,
@@ -32,6 +34,11 @@ export const limits = {
   terminalMaxCols: 500,
   terminalMaxRows: 200,
   terminalHistoryLines: 50_000,
+} as const;
+
+export const controlCloseCodes = {
+  connectionReplaced: 4001,
+  accessRevoked: 4003,
 } as const;
 
 export type Outcome = "succeeded" | "failed" | "partial" | "unknown";
@@ -433,6 +440,9 @@ export function string(value: unknown, name = "value", max = 4096): string {
     throw new AppError("invalid_argument", `Invalid ${name}`);
   return value;
 }
+export function optionalString(value: unknown, name = "value", max = 4096): string | undefined {
+  return value === undefined ? undefined : string(value, name, max);
+}
 export function integer(value: unknown, name: string, min: number, max: number): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < min || value > max)
     throw new AppError("invalid_argument", `Invalid ${name}`);
@@ -499,14 +509,14 @@ export function checkMetadata(value: unknown): Metadata {
   for (const item of data.workspaces) {
     const w = record(item);
     string(w.id, "workspace id", 128);
-    string(w.name, "workspace name", 256);
+    string(w.name, "workspace name", limits.nameLength);
     string(w.path, "workspace path");
   }
   for (const item of data.shortcuts) {
     const s = record(item);
     string(s.id, "shortcut id", 128);
-    string(s.name, "shortcut name", 256);
-    string(s.command, "command", 65536);
+    string(s.name, "shortcut name", limits.nameLength);
+    string(s.command, "command", limits.shortcutCommandLength);
     checkShortcutIcon(s.icon);
   }
   integer(record(data.settings).historyLines, "historyLines", 0, limits.terminalHistoryLines);

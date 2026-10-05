@@ -3,6 +3,7 @@ import { closeSync, fstatSync } from "node:fs";
 import { open, readFile, stat } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { parseEnv } from "node:util";
+import { asError } from "@kiteline/shared/protocol";
 import { windowsNative } from "@kiteline/shared/windows/native";
 
 export const packageDirectory = resolve(import.meta.dirname, "../../..");
@@ -113,10 +114,7 @@ export async function readInstallation(): Promise<Installation | undefined> {
     return value as Installation;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT")
-      throw new Error(
-        `${installationFile}: ${error instanceof Error ? error.message : String(error)}`,
-        { cause: error },
-      );
+      throw new Error(`${installationFile}: ${asError(error).message}`, { cause: error });
   }
 }
 export function applicationPaths(home: string, dataOverride?: string, runOverride?: string) {

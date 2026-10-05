@@ -1,4 +1,4 @@
-import { readFile, stat } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { absolutePath } from "@kiteline/shared/protocol";
 import { execFile } from "node:child_process";
@@ -8,14 +8,11 @@ import { spawnJob } from "@kiteline/shared/windows/job";
 import { BytePrefix } from "./buffers.js";
 import { packageDirectory } from "./install/paths.js";
 
-type Command = (file: string, args: string[]) => Promise<string>;
-
 export const ripgrepBinary = join(
   packageDirectory,
   "dist/native/bin",
   process.platform === "win32" ? "rg.exe" : "rg",
 );
-export const toolRequirements = [{ file: "git", major: 2, minor: 23 }];
 
 export async function windowsExecutable(file: string, env = process.env) {
   const fullPath = (value: string) => {
@@ -120,41 +117,4 @@ export async function toolCommand(
       code: result.code,
     });
   return stdout.text().trim();
-}
-
-export async function checkBundledRipgrep(command: Command) {
-  const identity = JSON.parse(
-    await readFile(join(packageDirectory, "dist/native/identity.json"), "utf8"),
-  );
-  const { ripgrep } = identity;
-  const line = (await command(ripgrepBinary, ["--version"])).split("\n")[0]!;
-  const version = /^ripgrep (\S+)/.exec(line)?.[1];
-  if (!version || version !== ripgrep?.version)
-    throw new Error(`Bundled ripgrep version mismatch: ${line}`);
-  return `${ripgrepBinary}; ${line}`;
-}
-
-export async function checkToolVersion(
-  { file, major, minor }: { file: string; major: number; minor: number },
-  command: Command,
-) {
-  const line = (await command(file, ["--version"])).split("\n")[0]!;
-  const version = /(\d+)\.(\d+)/.exec(line);
-  if (
-    !version ||
-    Number(version[1]) < major ||
-    (Number(version[1]) === major && Number(version[2]) < minor)
-  )
-    throw new Error(`Requires >= ${major}.${minor}.0; current: ${line}`);
-  return line;
-}
-
-export async function checkFileHelper(path: string, command: Command) {
-  try {
-    await command(path, []);
-  } catch (error) {
-    if ((error as { code?: number }).code === 2) return "Loadable; usage exit code 2";
-    throw error;
-  }
-  throw new Error("Helper did not return the expected usage status");
 }

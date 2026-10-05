@@ -1,3 +1,4 @@
+import { asError } from "@kiteline/shared/protocol";
 import { agentConfig, agentPaths, defaultAgentLimits } from "../config.js";
 import { diagnose, type DoctorReport } from "../doctor.js";
 import { localRequest } from "../local.js";
@@ -15,13 +16,13 @@ export async function doctorCli() {
       report.items.push({
         name: "Configuration on disk",
         status: "error",
-        detail: error instanceof Error ? error.message : String(error),
+        detail: asError(error).message,
       });
     }
     report.items.unshift({
       name: "Local connection",
       status: "warn",
-      detail: error instanceof Error ? error.message : String(error),
+      detail: asError(error).message,
     });
   }
   for (const item of report.items) console.log(`[${item.status}] ${item.name}: ${item.detail}`);

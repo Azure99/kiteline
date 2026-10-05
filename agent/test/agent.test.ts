@@ -11,6 +11,7 @@ import { testConfig } from "./support/config.js";
 import { localRequest } from "../src/local.js";
 import {
   appVersion,
+  checkMetadata,
   limits,
   OperationError,
   type Reply,
@@ -19,6 +20,52 @@ import {
 } from "@kiteline/shared/protocol";
 import type { DoctorReport } from "../src/doctor.js";
 import { publish } from "../src/files/publish.js";
+
+test("shortcut icons round-trip through RPC and metadata, and omitting one clears the old value", async () => {
+  const dataDir = await mkdtemp("/var/tmp/kiteline-shortcut-rpc-");
+  const agent = new Agent(testConfig(dataDir), {
+    deviceId: "test",
+    deviceToken: "test",
+    server: "https://localhost",
+  });
+  try {
+    const signal = new AbortController().signal;
+    await agent.dispatch(
+      "shortcuts.put",
+      { id: "claude", name: "Custom", command: "echo custom", icon: "rocket" },
+      signal,
+    );
+    const read = async () =>
+      checkMetadata(JSON.parse(await readFile(join(dataDir, "agent.json"), "utf8")));
+    expect((await read()).shortcuts[0]).toMatchObject({
+      name: "Custom",
+      command: "echo custom",
+      icon: "rocket",
+    });
+    await expect(
+      agent.dispatch(
+        "shortcuts.put",
+        { id: "claude", name: "Custom", command: "echo custom", icon: "other" },
+        signal,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
+    const result = await agent.dispatch(
+      "shortcuts.put",
+      { id: "claude", name: "Custom", command: "echo custom" },
+      signal,
+    );
+    expect(result).not.toHaveProperty("icon", "rocket");
+    expect((await read()).shortcuts[0]).toEqual({
+      id: "claude",
+      name: "Custom",
+      command: "echo custom",
+    });
+    expect(agent.metadata.hello().snapshot.shortcuts[0]?.icon).toBeUndefined();
+  } finally {
+    await agent.close();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
 
 test.each([401, 426])(
   "HTTP %i preserves local tasks with the expected reconnect behavior",

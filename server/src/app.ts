@@ -70,7 +70,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       const input = record(await body(request));
       const result = store.bind(
         string(input.code, "binding code", 128),
-        string(input.name, "device name", 256),
+        string(input.name, "device name", limits.nameLength),
       );
       connections.broadcastDevices();
       return json(response, 200, result);
@@ -161,7 +161,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
         }
         if (!suffix && method === "PATCH") {
           const input = await loginBody(request, entryOrigin);
-          store.renameDevice(id, string(input.name, "device name", 256));
+          store.renameDevice(id, string(input.name, "device name", limits.nameLength));
           connections.broadcastDevices();
           return json(response, 200, {});
         }

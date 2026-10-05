@@ -1,21 +1,54 @@
-import { access, stat } from "node:fs/promises";
+import { access, readFile, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { join } from "node:path";
 import { terminfoDirectory, tmuxBinary, tmuxEnvironment } from "@kiteline/shared/terminal/node";
 import { windowsNative } from "@kiteline/shared/windows/native";
+import { asError } from "@kiteline/shared/protocol";
 import { agentConfig, privateDirectory } from "./config.js";
 import { packageDirectory } from "./install/paths.js";
 import { checkRunDir } from "./terminal/sessions.js";
-import {
-  checkBundledRipgrep,
-  checkFileHelper,
-  checkToolVersion,
-  toolRequirements,
-  toolCommand,
-} from "./tools.js";
+import { ripgrepBinary, toolCommand } from "./tools.js";
 
 type Command = (file: string, args: string[], env?: NodeJS.ProcessEnv) => Promise<string>;
 type Check = (name: string, action: () => Promise<string>) => Promise<void>;
+const gitRequirement = { file: "git", major: 2, minor: 23 };
+
+async function checkBundledRipgrep(command: Command) {
+  const identity = JSON.parse(
+    await readFile(join(packageDirectory, "dist/native/identity.json"), "utf8"),
+  );
+  const { ripgrep } = identity;
+  const line = (await command(ripgrepBinary, ["--version"])).split("\n")[0]!;
+  const version = /^ripgrep (\S+)/.exec(line)?.[1];
+  if (!version || version !== ripgrep?.version)
+    throw new Error(`Bundled ripgrep version mismatch: ${line}`);
+  return `${ripgrepBinary}; ${line}`;
+}
+
+async function checkToolVersion(
+  { file, major, minor }: { file: string; major: number; minor: number },
+  command: Command,
+) {
+  const line = (await command(file, ["--version"])).split("\n")[0]!;
+  const version = /(\d+)\.(\d+)/.exec(line);
+  if (
+    !version ||
+    Number(version[1]) < major ||
+    (Number(version[1]) === major && Number(version[2]) < minor)
+  )
+    throw new Error(`Requires >= ${major}.${minor}.0; current: ${line}`);
+  return line;
+}
+
+async function checkFileHelper(path: string, command: Command) {
+  try {
+    await command(path, []);
+  } catch (error) {
+    if ((error as { code?: number }).code === 2) return "Loadable; usage exit code 2";
+    throw error;
+  }
+  throw new Error("Helper did not return the expected usage status");
+}
 
 export async function checkComponents(check: Check, command: Command) {
   const windows = process.platform === "win32";
@@ -38,8 +71,7 @@ export async function checkComponents(check: Check, command: Command) {
 
 export async function checkHostEnvironment(shell: string, check: Check, command: Command) {
   const windows = process.platform === "win32";
-  for (const tool of toolRequirements)
-    await check(tool.file, () => checkToolVersion(tool, command));
+  await check(gitRequirement.file, () => checkToolVersion(gitRequirement, command));
   if (!windows)
     await check("SSH", async () => {
       await command("ssh", ["-V"]);
@@ -60,7 +92,7 @@ export async function checkHostEnvironment(shell: string, check: Check, command:
         return `${encoding}; LANG=${process.env.LANG ?? ""}; LC_ALL=${process.env.LC_ALL ?? ""}; LC_CTYPE=${process.env.LC_CTYPE ?? ""}`;
       } catch (error) {
         throw new Error(
-          `${error instanceof Error ? error.message : String(error)}\nChoose an installed UTF-8 locale (locale -a). Current LANG=${process.env.LANG ?? ""}; LC_ALL=${process.env.LC_ALL ?? ""}; LC_CTYPE=${process.env.LC_CTYPE ?? ""}. LC_ALL overrides LC_CTYPE and LANG. Correct the launching Shell or your external process manager's environment.`,
+          `${asError(error).message}\nChoose an installed UTF-8 locale (locale -a). Current LANG=${process.env.LANG ?? ""}; LC_ALL=${process.env.LC_ALL ?? ""}; LC_CTYPE=${process.env.LC_CTYPE ?? ""}. LC_ALL overrides LC_CTYPE and LANG. Correct the launching Shell or your external process manager's environment.`,
           { cause: error },
         );
       }
@@ -85,7 +117,7 @@ export async function checkPrerequisites() {
     try {
       await action();
     } catch (error) {
-      failures.push(`${name}: ${error instanceof Error ? error.message : String(error)}`);
+      failures.push(`${name}: ${asError(error).message}`);
     }
   }
   const command = (file: string, args: string[], env = process.env) =>
@@ -106,12 +138,12 @@ export async function checkPrerequisites() {
       );
     if (macos)
       throw new Error(
-        `Setup checks failed:\n${failures.join("\n")}\nProvide Git >= 2.23, an executable Shell and a UTF-8 locale in the launching environment. Reinstall the matching complete package for bundled component failures.`,
+        `Setup checks failed:\n${failures.join("\n")}\nProvide Git >= ${gitRequirement.major}.${gitRequirement.minor}, an executable Shell and a UTF-8 locale in the launching environment. Reinstall the matching complete package for bundled component failures.`,
       );
     throw new Error(
       `Setup checks failed:
 ${failures.join("\n")}
-Provide ${toolRequirements.map(({ file, major, minor }) => `${file} >= ${major}.${minor}.0`).join(" and ")}, SSH, an executable Shell, a UTF-8 locale, infocmp and flock in the launching environment. Reinstall the matching complete package for bundled component failures.`,
+Provide ${gitRequirement.file} >= ${gitRequirement.major}.${gitRequirement.minor}.0, SSH, an executable Shell, a UTF-8 locale, infocmp and flock in the launching environment. Reinstall the matching complete package for bundled component failures.`,
     );
   }
   console.log("Setup checks passed.");

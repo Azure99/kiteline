@@ -5,6 +5,7 @@ import {
   errorReply,
   integer,
   limits,
+  optionalString,
   record,
   string,
 } from "@kiteline/shared/protocol";
@@ -166,7 +167,7 @@ export class FileChannels {
                 path,
                 size,
                 params.createOnly,
-                params.expectedRevision === undefined ? undefined : string(params.expectedRevision),
+                optionalString(params.expectedRevision),
                 signal,
               ),
             };
@@ -180,9 +181,7 @@ export class FileChannels {
                 path,
                 size,
                 params.createOnly,
-                params.expectedTargetVersion === undefined
-                  ? undefined
-                  : string(params.expectedTargetVersion),
+                optionalString(params.expectedTargetVersion),
                 signal,
               ),
             };

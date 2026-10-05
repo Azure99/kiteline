@@ -1,15 +1,14 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Directories } from "../src/files/directories.js";
-import { Agent } from "../src/agent.js";
 import { MetadataStore } from "../src/metadata.js";
 import { testConfig as config } from "./support/config.js";
 import { gitRepoFixture } from "./support/git.js";
 import { CursorBudget } from "../src/cursor-budget.js";
 import { Repositories } from "../src/git/repos.js";
 import { agentLimits } from "../src/limits.js";
-import { absolutePath, checkMetadata, limits, windowsName } from "@kiteline/shared/protocol";
+import { absolutePath, windowsName } from "@kiteline/shared/protocol";
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -192,162 +191,4 @@ test("repository continuation renews on acquisition and a busy reader cannot ren
     vi.useRealTimers();
     Object.assign(agentLimits, saved);
   }
-});
-
-test("workspace registration deduplicates canonical paths and failed budgets do not publish", async () => {
-  const dataDir = await directory();
-  const project = join(dataDir, "project");
-  await mkdir(project);
-  await symlink(project, join(dataDir, "alias"));
-  const metadata = new MetadataStore(config(dataDir));
-  await metadata.load();
-  const workspace = await metadata.add(project);
-  expect(await metadata.add(join(dataDir, "alias"))).toEqual(workspace);
-  const before = await readFile(join(dataDir, "agent.json"), "utf8");
-  const revision = metadata.value.revision;
-  await expect(
-    metadata.update((candidate) => {
-      candidate.shortcuts = Array.from({ length: 20 }, (_, id) => ({
-        id: String(id),
-        name: String(id),
-        command: "x".repeat(65_536),
-      }));
-    }),
-  ).rejects.toMatchObject({ code: "limit_exceeded" });
-  expect(metadata.value.revision).toBe(revision);
-  expect(await readFile(join(dataDir, "agent.json"), "utf8")).toBe(before);
-  const restored = new MetadataStore(config(dataDir));
-  await restored.load();
-  expect(restored.value.workspaces).toEqual([workspace]);
-});
-
-test("agent shutdown waits for an accepted workspace publication", async () => {
-  const dataDir = await directory();
-  const agent = new Agent(config(dataDir), {
-    deviceId: "test",
-    deviceToken: "test",
-    server: "https://localhost",
-  });
-  const operation = agent.dispatch(
-    "workspaces.add",
-    { absolutePath: dataDir },
-    new AbortController().signal,
-  );
-  await agent.close();
-  await expect(operation).resolves.toMatchObject({ path: dataDir });
-  const value = JSON.parse(await readFile(join(dataDir, "agent.json"), "utf8")) as {
-    workspaces: { path: string }[];
-  };
-  expect(value.workspaces[0]?.path).toBe(dataDir);
-  await expect(
-    agent.dispatch("workspaces.add", { absolutePath: dataDir }, new AbortController().signal),
-  ).rejects.toMatchObject({ code: "cancelled" });
-});
-
-test("an unreachable old workspace does not block a valid new registration", async () => {
-  const dataDir = await directory();
-  const old = join(dataDir, "old");
-  const next = join(dataDir, "next");
-  await mkdir(old);
-  await mkdir(next);
-  const metadata = new MetadataStore(config(dataDir));
-  await metadata.add(old);
-  await rm(old, { recursive: true });
-  await symlink("old", old);
-  expect(await metadata.add(next)).toMatchObject({ path: next });
-  await expect(metadata.add(old)).rejects.toMatchObject({ code: "ELOOP" });
-});
-
-test("environment counts towards hello before metadata is committed", async () => {
-  const dataDir = await directory();
-  const metadata = new MetadataStore(config(dataDir));
-  await metadata.add(dataDir);
-  const before = await readFile(join(dataDir, "agent.json"), "utf8");
-  const candidate = structuredClone(metadata.value);
-  candidate.shortcuts = Array.from({ length: 16 }, (_, index) => ({
-    id: String(index),
-    name: "x",
-    command: "x",
-  }));
-  const bare = { type: "hello", snapshot: candidate, editorBytes: metadata.hello().editorBytes };
-  let remaining = limits.controlMessageBytes - Buffer.byteLength(JSON.stringify(bare)) - 1;
-  for (const shortcut of candidate.shortcuts) {
-    const size = Math.min(remaining, 65_535);
-    shortcut.command += "x".repeat(size);
-    remaining -= size;
-  }
-  expect(remaining).toBe(0);
-  expect(checkMetadata(candidate)).toEqual(candidate);
-  expect(Buffer.byteLength(JSON.stringify(bare))).toBeLessThan(limits.controlMessageBytes);
-  await expect(
-    metadata.update((value) => {
-      value.shortcuts = candidate.shortcuts;
-    }),
-  ).rejects.toMatchObject({ code: "limit_exceeded" });
-  expect(await readFile(join(dataDir, "agent.json"), "utf8")).toBe(before);
-});
-
-test("new device shortcuts do not replace saved customizations or restore deleted defaults", async () => {
-  const dataDir = await directory();
-  const metadata = new MetadataStore(config(dataDir));
-  await metadata.load();
-  expect(metadata.value.shortcuts.map(({ name, command }) => [name, command])).toEqual([
-    ["Claude Code", "claude"],
-    ["Codex", "codex"],
-    ["OpenCode", "opencode"],
-  ]);
-  await metadata.update((value) => {
-    value.shortcuts = [{ id: "custom", name: "Project", command: "./project.sh" }];
-  });
-  const restored = new MetadataStore(config(dataDir));
-  await restored.load();
-  expect(restored.value.shortcuts).toEqual(metadata.value.shortcuts);
-  await restored.update((value) => {
-    value.shortcuts = [];
-  });
-  const empty = new MetadataStore(config(dataDir));
-  await empty.load();
-  expect(empty.value.shortcuts).toEqual([]);
-});
-
-test("shortcut icons round-trip through RPC and metadata, and omitting one clears the old value", async () => {
-  const dataDir = await directory();
-  const agent = new Agent(config(dataDir), {
-    deviceId: "test",
-    deviceToken: "test",
-    server: "https://localhost",
-  });
-  cleanups.push(() => agent.close());
-  const signal = new AbortController().signal;
-  await agent.dispatch(
-    "shortcuts.put",
-    { id: "claude", name: "Custom", command: "echo custom", icon: "rocket" },
-    signal,
-  );
-  const read = async () =>
-    checkMetadata(JSON.parse(await readFile(join(dataDir, "agent.json"), "utf8")));
-  expect((await read()).shortcuts[0]).toMatchObject({
-    name: "Custom",
-    command: "echo custom",
-    icon: "rocket",
-  });
-  await expect(
-    agent.dispatch(
-      "shortcuts.put",
-      { id: "claude", name: "Custom", command: "echo custom", icon: "other" },
-      signal,
-    ),
-  ).rejects.toMatchObject({ code: "invalid_argument" });
-  const result = await agent.dispatch(
-    "shortcuts.put",
-    { id: "claude", name: "Custom", command: "echo custom" },
-    signal,
-  );
-  expect(result).not.toHaveProperty("icon", "rocket");
-  expect((await read()).shortcuts[0]).toEqual({
-    id: "claude",
-    name: "Custom",
-    command: "echo custom",
-  });
-  expect(agent.metadata.hello().snapshot.shortcuts[0]?.icon).toBeUndefined();
 });

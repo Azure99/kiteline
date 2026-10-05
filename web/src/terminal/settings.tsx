@@ -169,7 +169,7 @@ export function TerminalSettings({ device, onClose }: { device: Device; onClose:
                   <span>{t(($) => $.common.name)}</span>
                   <Input
                     value={editing.name ?? ""}
-                    maxLength={256}
+                    maxLength={limits.nameLength}
                     disabled={busy}
                     required
                     onChange={(event) => editShortcut({ ...editing, name: event.target.value })}
@@ -182,7 +182,7 @@ export function TerminalSettings({ device, onClose }: { device: Device; onClose:
                     className="min-h-24 px-3 py-2 font-mono max-[959px]:min-h-24"
                     value={editing.command ?? ""}
                     required
-                    maxLength={65536}
+                    maxLength={limits.shortcutCommandLength}
                     disabled={busy}
                     onChange={(event) => editShortcut({ ...editing, command: event.target.value })}
                   />

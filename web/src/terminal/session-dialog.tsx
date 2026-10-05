@@ -2,7 +2,7 @@ import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
 import { useState } from "react";
 import { Copy } from "lucide-react";
-import type { AgentEnvironment, Session } from "@kiteline/shared/protocol";
+import { limits, type AgentEnvironment, type Session } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
@@ -56,7 +56,7 @@ export function SessionDialog({
           <Input
             aria-label={t(($) => $.terminal.name)}
             value={name}
-            maxLength={256}
+            maxLength={limits.nameLength}
             onChange={(event) => setName(event.target.value)}
             autoFocus
           />
