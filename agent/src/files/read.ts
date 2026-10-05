@@ -32,7 +32,7 @@ export async function readWorkspaceFile(
   return result;
 }
 
-export async function readFile(
+async function readFile(
   path: string,
   purpose: FileReadPurpose,
   capacity: AgentConfig["limits"],

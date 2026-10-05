@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { testConfig } from "./support/config.js";
 import { MetadataStore } from "../src/metadata.js";
 import { TemporaryFiles } from "../src/files/temporary.js";
-import { BinaryFiles } from "../src/files/binary.js";
+import { BinaryFiles } from "../src/files/upload.js";
 import { readWorkspaceFile } from "../src/files/read.js";
 import { locate, versionOf } from "../src/files/paths.js";
 

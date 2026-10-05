@@ -28,7 +28,7 @@ import {
   sameObject,
 } from "./paths.js";
 import { checkTarget, targetAgain } from "./destination.js";
-import { renameNoReplace, renameReplace } from "./rename.js";
+import { renameEntry } from "./rename.js";
 import { TemporaryFiles, type TrackedTemporary } from "./temporary.js";
 
 interface ObjectRef {
@@ -85,32 +85,7 @@ export class FileOperations {
     if (this.closing) throw new AppError("cancelled", "Agent is stopping");
     if (this.executions.size >= limits.pendingRequestsPerDevice)
       throw new AppError("busy", "File operations are still finishing; try again later");
-    if (!Array.isArray(inputs) || !inputs.length || inputs.length > agentLimits.listPageEntries)
-      throw new AppError("invalid_argument", "Select a limited number of files");
-    const items: CopyItem[] = inputs.map((input: unknown) => {
-      if (kind === "delete")
-        return { path: relativePath(input), targetPath: "", collision: "error" };
-      const item = record(input);
-      if (item.collision !== "error" && item.collision !== "replace")
-        throw new AppError("invalid_argument", "Invalid name conflict action");
-      if (
-        item.collision === "replace"
-          ? typeof item.expectedTargetVersion !== "string"
-          : item.expectedTargetVersion !== undefined
-      )
-        throw new AppError("invalid_argument", "Replacement requires the confirmed target version");
-      return {
-        path: relativePath(item.path),
-        targetPath: relativePath(item.targetPath),
-        collision: item.collision,
-        expectedTargetVersion: item.expectedTargetVersion as string | undefined,
-      };
-    });
-    if (Buffer.byteLength(JSON.stringify(items)) > agentLimits.resultBytes / 2)
-      throw new AppError(
-        "limit_exceeded",
-        "Selected paths exceed the operation limit; process them in batches",
-      );
+    const items = parseItems(kind, inputs);
     const root = this.metadata.workspace(workspaceId).path;
     const controller = new AbortController();
     signal = AbortSignal.any([signal, controller.signal]);
@@ -148,27 +123,9 @@ export class FileOperations {
       if (settled) return;
       settled = true;
       signal.removeEventListener("abort", cancel);
-      const results = items.map((item, index): FileItemResult => {
-        const state = { ...states[index]!, failures: [...states[index]!.failures] };
-        if (!state.finished && cancellation) {
-          if (state.changing) state.unknown = true;
-          fail(state, item.path, cancellation);
-        }
-        return {
-          path: item.path,
-          ...(kind !== "delete" ? { targetPath: item.targetPath } : {}),
-          outcome: state.unknown
-            ? "unknown"
-            : state.failed
-              ? state.completed
-                ? "partial"
-                : "failed"
-              : "succeeded",
-          completedItems: state.completed,
-          ...(state.error ? { error: state.error } : {}),
-          ...(state.failed ? { failures: state.failures, truncated: state.truncated } : {}),
-        };
-      });
+      const results = items.map((item, index) =>
+        itemResult(item, states[index]!, kind, cancellation),
+      );
       const result = { items: results };
       if (results.every((item) => item.outcome === "succeeded")) return resolve(result);
       const outcome = results.some((item) => item.outcome === "unknown")
@@ -328,9 +285,9 @@ export class FileOperations {
             result,
             signal,
             () =>
-              item.collision === "replace"
-                ? renameReplace(source.location.absolute, current.absolute)
-                : renameNoReplace(source.location.absolute, current.absolute),
+              renameEntry(source.location.absolute, current.absolute, {
+                replace: item.collision === "replace",
+              }),
             () => {
               markFinished();
               countCompleted(source.path);
@@ -436,9 +393,9 @@ export class FileOperations {
           result,
           signal,
           () =>
-            item.collision === "replace"
-              ? renameReplace(temporary!.path, current.absolute)
-              : renameNoReplace(temporary!.path, current.absolute),
+            renameEntry(temporary!.path, current.absolute, {
+              replace: item.collision === "replace",
+            }),
           () => {
             published = true;
             if (!move) markFinished();
@@ -489,6 +446,62 @@ export class FileOperations {
       await directory.close();
     }
   }
+}
+
+function parseItems(kind: "copy" | "move" | "delete", inputs: unknown): CopyItem[] {
+  if (!Array.isArray(inputs) || !inputs.length || inputs.length > agentLimits.listPageEntries)
+    throw new AppError("invalid_argument", "Select a limited number of files");
+  const items: CopyItem[] = inputs.map((input: unknown) => {
+    if (kind === "delete") return { path: relativePath(input), targetPath: "", collision: "error" };
+    const item = record(input);
+    if (item.collision !== "error" && item.collision !== "replace")
+      throw new AppError("invalid_argument", "Invalid name conflict action");
+    if (
+      item.collision === "replace"
+        ? typeof item.expectedTargetVersion !== "string"
+        : item.expectedTargetVersion !== undefined
+    )
+      throw new AppError("invalid_argument", "Replacement requires the confirmed target version");
+    return {
+      path: relativePath(item.path),
+      targetPath: relativePath(item.targetPath),
+      collision: item.collision,
+      expectedTargetVersion: item.expectedTargetVersion as string | undefined,
+    };
+  });
+  if (Buffer.byteLength(JSON.stringify(items)) > agentLimits.resultBytes / 2)
+    throw new AppError(
+      "limit_exceeded",
+      "Selected paths exceed the operation limit; process them in batches",
+    );
+  return items;
+}
+
+function itemResult(
+  item: CopyItem,
+  source: ResultState,
+  kind: "copy" | "move" | "delete",
+  cancellation?: unknown,
+): FileItemResult {
+  const state = { ...source, failures: [...source.failures] };
+  if (!state.finished && cancellation) {
+    if (state.changing) state.unknown = true;
+    fail(state, item.path, cancellation);
+  }
+  return {
+    path: item.path,
+    ...(kind !== "delete" ? { targetPath: item.targetPath } : {}),
+    outcome: state.unknown
+      ? "unknown"
+      : state.failed
+        ? state.completed
+          ? "partial"
+          : "failed"
+        : "succeeded",
+    completedItems: state.completed,
+    ...(state.error ? { error: state.error } : {}),
+    ...(state.failed ? { failures: state.failures, truncated: state.truncated } : {}),
+  };
 }
 
 async function change<T>(

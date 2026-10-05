@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { open, symlink, unlink, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
-import { AppError } from "@kiteline/shared/protocol";
+import { AppError, OperationError } from "@kiteline/shared/protocol";
 import { atomicJson, readJson, stateFiles } from "../config.js";
 import { publish } from "./publish.js";
+import { renameEntry } from "./rename.js";
 
 interface TemporaryRecord {
   name: string;
@@ -14,6 +15,20 @@ export interface TrackedTemporary extends TemporaryRecord {
 }
 export interface Temporary extends TrackedTemporary {
   handle: FileHandle;
+}
+
+export async function publishTemporary(
+  item: { temporary: TrackedTemporary; published: boolean; uncertain: boolean },
+  target: string,
+  replace: boolean,
+) {
+  try {
+    await renameEntry(item.temporary.path, target, { replace });
+    item.published = true;
+  } catch (error) {
+    if (error instanceof OperationError && error.outcome === "unknown") item.uncertain = true;
+    throw error;
+  }
 }
 
 export class TemporaryFiles {

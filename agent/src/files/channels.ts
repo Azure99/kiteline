@@ -11,9 +11,9 @@ import {
 } from "@kiteline/shared/protocol";
 import { consumeFileFrames, sendFileFrame } from "@kiteline/shared/protocol/file-stream";
 import type { AgentConfig, Identity } from "../config.js";
-import type { TextFiles, TextWrite } from "./text.js";
+import type { TextFiles, TextWrite } from "./save.js";
 import { readWorkspaceFile, type FileRead } from "./read.js";
-import type { BinaryFiles, UploadWrite } from "./binary.js";
+import type { BinaryFiles, UploadWrite } from "./upload.js";
 import type { TemporaryFiles } from "./temporary.js";
 import { connectChannel } from "../network.js";
 import type { MetadataStore } from "../metadata.js";
@@ -83,6 +83,7 @@ export class FileChannels {
               await send(await channel.read.read(offset, end - offset));
               offset = end;
             }
+            // Receiving exactly size bytes means success, so verify before sending the last block.
             const tail = await channel.read.read(last, size - last);
             await channel.read.finish();
             if (size) {

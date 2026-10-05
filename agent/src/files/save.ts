@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { AppError, OperationError, limits, type SavedFile } from "@kiteline/shared/protocol";
+import { AppError, limits, type SavedFile } from "@kiteline/shared/protocol";
 import { decodeText } from "@kiteline/shared/protocol/text";
 import { readExact, revisionOf, revisionDigest } from "./read.js";
 import type { AgentConfig } from "../config.js";
@@ -17,8 +17,7 @@ import {
   relativePath,
   versionOf,
 } from "./paths.js";
-import { renameNoReplace, renameReplace } from "./rename.js";
-import type { TemporaryFiles, Temporary } from "./temporary.js";
+import { publishTemporary, type TemporaryFiles, type Temporary } from "./temporary.js";
 
 export interface TextWrite {
   path: string;
@@ -145,14 +144,7 @@ export class TextFiles {
         await prepared.close();
       }
       signal.throwIfAborted();
-      try {
-        if (item.createOnly) await renameNoReplace(item.temporary.path, target);
-        else await renameReplace(item.temporary.path, target);
-        item.published = true;
-      } catch (error) {
-        if (error instanceof OperationError && error.outcome === "unknown") item.uncertain = true;
-        throw error;
-      }
+      await publishTemporary(item, target, !item.createOnly);
       const result = {
         path: item.path,
         size: item.size,

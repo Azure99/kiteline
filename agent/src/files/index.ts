@@ -20,7 +20,7 @@ import {
   relativePath,
   versionOf,
 } from "./paths.js";
-import { renameNoReplace } from "./rename.js";
+import { renameEntry } from "./rename.js";
 
 export class Files {
   constructor(
@@ -122,7 +122,7 @@ export class Files {
       if (actual === to)
         throw new AppError("invalid_argument", "New name is the same as the original name");
       signal?.throwIfAborted();
-      await renameNoReplace(source.absolute, join(source.parent, name));
+      await renameEntry(source.absolute, join(source.parent, name), { replace: false });
       return { from: path, to };
     }, signal);
   }

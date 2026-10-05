@@ -1,11 +1,10 @@
-import { AppError, OperationError, type UploadedFile } from "@kiteline/shared/protocol";
+import { AppError, type UploadedFile } from "@kiteline/shared/protocol";
 import type { AgentConfig } from "../config.js";
 import type { MetadataStore } from "../metadata.js";
 import { publish } from "./publish.js";
 import { checkTarget, targetAgain } from "./destination.js";
 import { locate, logicalPath } from "./paths.js";
-import { renameNoReplace, renameReplace } from "./rename.js";
-import type { Temporary, TemporaryFiles } from "./temporary.js";
+import { publishTemporary, type Temporary, type TemporaryFiles } from "./temporary.js";
 
 export interface UploadWrite {
   workspaceId: string;
@@ -79,15 +78,7 @@ export class BinaryFiles {
       );
       await this.temporary.closeFile(item.temporary);
       signal.throwIfAborted();
-      try {
-        if (item.collision === "replace")
-          await renameReplace(item.temporary.path, current.absolute);
-        else await renameNoReplace(item.temporary.path, current.absolute);
-        item.published = true;
-      } catch (error) {
-        if (error instanceof OperationError && error.outcome === "unknown") item.uncertain = true;
-        throw error;
-      }
+      await publishTemporary(item, current.absolute, item.collision === "replace");
       return { path: item.path, size: item.size };
     }, signal);
   }

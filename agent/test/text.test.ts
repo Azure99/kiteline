@@ -14,7 +14,7 @@ import {
 import { join } from "node:path";
 import { MetadataStore } from "../src/metadata.js";
 import { testConfig } from "./support/config.js";
-import { TextFiles } from "../src/files/text.js";
+import { TextFiles } from "../src/files/save.js";
 import { readWorkspaceFile } from "../src/files/read.js";
 import { TemporaryFiles } from "../src/files/temporary.js";
 import { decodeText, encodeText } from "@kiteline/shared/protocol/text";

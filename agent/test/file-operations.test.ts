@@ -28,8 +28,8 @@ import { Files } from "../src/files/index.js";
 import { MetadataStore } from "../src/metadata.js";
 import { Directories } from "../src/files/directories.js";
 import { testConfig } from "./support/config.js";
-import { BinaryFiles } from "../src/files/binary.js";
-import { TextFiles } from "../src/files/text.js";
+import { BinaryFiles } from "../src/files/upload.js";
+import { TextFiles } from "../src/files/save.js";
 import { FileChannels } from "../src/files/channels.js";
 
 const exec = promisify(execFile);
@@ -177,6 +177,8 @@ test.each([1, 2])(
       await gate;
       await cleanup(...args);
     });
+    let snapshot: unknown;
+    let captured: unknown;
     try {
       const result = operations.run(
         "copy",
@@ -188,6 +190,8 @@ test.each([1, 2])(
         })),
         controller.signal,
       );
+      snapshot = await result.catch((error: OperationError) => error.result);
+      captured = structuredClone(snapshot);
       if (count === 1)
         await expect(result).resolves.toMatchObject({ items: [{ outcome: "succeeded" }] });
       else
@@ -202,6 +206,7 @@ test.each([1, 2])(
       release();
       await operations.close();
     }
+    expect(snapshot).toEqual(captured);
   },
 );
 
