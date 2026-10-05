@@ -4,7 +4,7 @@ import { WebSocket } from "ws";
 import { AppError, asError, integer, limits, record } from "@kiteline/shared/protocol";
 import { httpStream } from "@kiteline/shared/protocol/http-stream";
 import type { Identity } from "../config.js";
-import { connectServerSocket } from "../network.js";
+import { connectChannel } from "../network.js";
 
 interface Channel {
   socket: WebSocket;
@@ -17,11 +17,7 @@ export class HttpChannels {
   private entries = new Map<string, Channel>();
   constructor(private identity: Identity) {}
   open(id: string, connectionId: string, _kind: string, params: Record<string, unknown>) {
-    const url = new URL(`/api/agent/channels/${encodeURIComponent(id)}`, this.identity.server);
-    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-    url.searchParams.set("connectionId", connectionId);
-    const socket = connectServerSocket(url, {
-      headers: { authorization: `Bearer ${this.identity.deviceToken}` },
+    const socket = connectChannel(this.identity, id, connectionId, {
       maxPayload: limits.dataChunkBytes,
       finishRequest(request) {
         request.setSocketKeepAlive(true, limits.tcpKeepAliveDelayMs);

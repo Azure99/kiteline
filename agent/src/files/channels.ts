@@ -14,7 +14,7 @@ import type { TextFiles, TextWrite } from "./text.js";
 import type { FileRead } from "./read.js";
 import type { BinaryFiles, UploadWrite } from "./binary.js";
 import type { TemporaryFiles } from "./temporary.js";
-import { connectServerSocket } from "../network.js";
+import { connectChannel } from "../network.js";
 
 interface Channel {
   socket: WebSocket;
@@ -44,11 +44,7 @@ export class FileChannels {
   }
   open(id: string, connectionId: string, kind: string, params: Record<string, unknown>) {
     const admitted = this.count < this.config.limits.transfersPerDevice;
-    const url = new URL(`/api/agent/channels/${encodeURIComponent(id)}`, this.identity.server);
-    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-    url.searchParams.set("connectionId", connectionId);
-    const socket = connectServerSocket(url, {
-      headers: { authorization: `Bearer ${this.identity.deviceToken}` },
+    const socket = connectChannel(this.identity, id, connectionId, {
       maxPayload: limits.controlMessageBytes,
     });
     const controller = new AbortController();

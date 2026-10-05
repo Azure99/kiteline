@@ -4,7 +4,7 @@ import type { RecorderMessage, RecorderRequest } from "@kiteline/shared/protocol
 import { heartbeat, sendFrame } from "@kiteline/shared/protocol/ws";
 import type { AgentConfig, Identity } from "../config.js";
 import type { Sessions } from "./sessions.js";
-import { connectServerSocket } from "../network.js";
+import { connectChannel } from "../network.js";
 
 interface Channel {
   id: string;
@@ -23,11 +23,7 @@ export class TerminalChannels {
   }
   open(id: string, connectionId: string, kind: string, params: Record<string, unknown>) {
     if (this.entries.has(id)) throw new AppError("conflict", "Channel already exists");
-    const url = new URL(`/api/agent/channels/${encodeURIComponent(id)}`, this.identity.server);
-    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-    url.searchParams.set("connectionId", connectionId);
-    const socket = connectServerSocket(url, {
-      headers: { authorization: `Bearer ${this.identity.deviceToken}` },
+    const socket = connectChannel(this.identity, id, connectionId, {
       maxPayload: limits.controlMessageBytes,
     });
     const channel: Channel = {

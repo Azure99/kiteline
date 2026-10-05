@@ -28,6 +28,10 @@ export const scheduleMethods = [
 ] as const;
 export type ScheduleMethod = (typeof scheduleMethods)[number];
 
+export function isScheduleMethod(method: string): method is ScheduleMethod {
+  return scheduleMethods.some((candidate) => candidate === method);
+}
+
 export function scheduleRpc(
   tasks: ScheduledTasks,
   method: ScheduleMethod,
@@ -109,6 +113,10 @@ export function scheduleRpc(
           : integer(params.limit, "limit", 4, taskLimits.outputReadBytes),
         signal,
       ) satisfies Promise<RpcResult<typeof method>>;
+    }
+    default: {
+      const unhandled: never = method;
+      throw new AppError("unsupported", `Unsupported operation: ${unhandled}`);
     }
   }
 }

@@ -1,6 +1,5 @@
 import { WebSocket } from "ws";
 import { controlWritable, heartbeat } from "@kiteline/shared/protocol/ws";
-import { randomUUID } from "node:crypto";
 import {
   AppError,
   appVersion,
@@ -36,16 +35,23 @@ import { CursorBudget } from "./cursor-budget.js";
 import { Repositories } from "./git/repos.js";
 import { WorkspaceWatches } from "./watches.js";
 import { GitWriteQueue } from "./git/queue.js";
-import { gitRpc } from "./git/rpc.js";
+import { gitRpc, isGitMethod } from "./git/rpc.js";
 import { HttpChannels } from "./http/channels.js";
 import { listeningPorts } from "./http/ports.js";
 import { diagnose } from "./doctor.js";
 import { TemporaryFiles } from "./files/temporary.js";
-import { connectServerSocket } from "./network.js";
+import { connectServer } from "./network.js";
 import { ScheduledTasks } from "./tasks/index.js";
-import { scheduleMethods, scheduleRpc } from "./tasks/rpc.js";
+import { isScheduleMethod, scheduleRpc } from "./tasks/rpc.js";
 
 const gitWrites = new Set<string>(gitWriteMethods);
+const unboundedMethods = new Set(["files.copy", "files.move", "files.delete"]);
+const specializedTimeouts = new Map<string, "searchTimeout" | "gitWriteTimeout">([
+  ["files.search", "searchTimeout"],
+  ...gitWriteMethods.map((method) => [method, "gitWriteTimeout"] as const),
+]);
+const notifiedFileMethods = new Set(["files.create", "files.rename"]);
+const localSessionMethods = new Set(["sessions.list", "sessions.create"]);
 
 function knownRpcMethod(method: string): RpcMethod {
   if (!Object.hasOwn(rpcMutates, method))
@@ -71,7 +77,7 @@ export class Agent {
   private readonly fileChannels: FileChannels;
   private readonly httpChannels: HttpChannels;
   readonly requests = new Map<string, AbortController>();
-  private readonly tasks = new Set<Promise<unknown>>();
+  private readonly inflight = new Set<Promise<unknown>>();
   socket?: WebSocket;
   connectionId?: string;
   private serverVersion?: string;
@@ -138,7 +144,7 @@ export class Agent {
         return Promise.resolve(item.identity);
       }
       if (method === "sessions.end") return this.sessions.end(undefined, string(params.sessionId));
-      if (!["sessions.list", "sessions.create", ...scheduleMethods].includes(method))
+      if (!localSessionMethods.has(method) && !isScheduleMethod(method))
         throw new AppError("unsupported", "Unsupported local operation");
       return this.dispatch(method, params, signal);
     });
@@ -166,16 +172,17 @@ export class Agent {
   }
   private connect() {
     if (this.stopped) return;
-    const url = new URL("/api/agent/control", this.identity.server);
-    url.searchParams.set("appVersion", appVersion);
-    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     let socket: WebSocket;
     try {
-      socket = connectServerSocket(url, {
-        headers: { authorization: `Bearer ${this.identity.deviceToken}` },
-        maxPayload: limits.controlMessageBytes,
-        handshakeTimeout: limits.interactionTimeout,
-      });
+      socket = connectServer(
+        this.identity,
+        "/api/agent/control",
+        { appVersion },
+        {
+          maxPayload: limits.controlMessageBytes,
+          handshakeTimeout: limits.interactionTimeout,
+        },
+      );
     } catch (error) {
       this.connectionError = asError(error).message;
       console.error("Control connection:", this.connectionError);
@@ -253,55 +260,7 @@ export class Agent {
           this.fileChannels.cancel(string(message.channelId));
           this.httpChannels.cancel(string(message.channelId));
         } else if (message.type === "rpc.request") {
-          const id = string(message.id, "request id", 128);
-          if (this.requests.has(id)) throw new AppError("conflict", "Duplicate request");
-          const controller = new AbortController();
-          const method = string(message.method);
-          const params = record(message.params);
-          this.requests.set(id, controller);
-          const timeout = ["files.copy", "files.move", "files.delete"].includes(method)
-            ? undefined
-            : setTimeout(
-                () => controller.abort(new AppError("timeout", "Operation timed out")),
-                method === "files.search"
-                  ? this.config.limits.searchTimeout
-                  : gitWrites.has(method)
-                    ? this.config.limits.gitWriteTimeout
-                    : this.config.limits.rpcTimeout,
-              );
-          void this.dispatch(method, params, controller.signal, (progress) => {
-            if (this.socket === socket)
-              this.send({ type: "request.progress", id, ...progress } satisfies AgentEvent);
-          })
-            .then(
-              (result) => ({ id, outcome: "succeeded", result }) as Reply,
-              (error: unknown) => errorReply(id, error),
-            )
-            .then((reply) => {
-              if (this.socket === socket && socket.readyState === WebSocket.OPEN) {
-                if (
-                  Buffer.byteLength(JSON.stringify({ type: "rpc.result", reply })) >
-                  limits.controlMessageBytes
-                )
-                  this.send({
-                    type: "rpc.result",
-                    reply: {
-                      id,
-                      outcome: reply.outcome === "succeeded" ? "unknown" : reply.outcome,
-                      error: {
-                        code: "limit_exceeded",
-                        message: "Operation result exceeds the size limit; refresh to verify",
-                      },
-                    },
-                  });
-                else this.send({ type: "rpc.result", reply });
-              }
-            })
-            .catch((error: unknown) => console.error(asError(error).message))
-            .finally(() => {
-              clearTimeout(timeout);
-              if (this.requests.get(id) === controller) this.requests.delete(id);
-            });
+          this.handleRpcRequest(socket, message);
         } else if (message.type === "rpc.cancel")
           this.requests
             .get(string(message.id))
@@ -340,6 +299,53 @@ export class Agent {
       this.scheduleReconnect();
     });
   }
+  private handleRpcRequest(socket: WebSocket, message: Record<string, unknown>) {
+    const id = string(message.id, "request id", 128);
+    if (this.requests.has(id)) throw new AppError("conflict", "Duplicate request");
+    const controller = new AbortController();
+    const method = string(message.method);
+    const params = record(message.params);
+    this.requests.set(id, controller);
+    const timeout = unboundedMethods.has(method)
+      ? undefined
+      : setTimeout(
+          () => controller.abort(new AppError("timeout", "Operation timed out")),
+          this.config.limits[specializedTimeouts.get(method) ?? "rpcTimeout"],
+        );
+    void this.dispatch(method, params, controller.signal, (progress) => {
+      if (this.socket === socket)
+        this.send({ type: "request.progress", id, ...progress } satisfies AgentEvent);
+    })
+      .then(
+        (result) => ({ id, outcome: "succeeded", result }) as Reply,
+        (error: unknown) => errorReply(id, error),
+      )
+      .then((reply) => {
+        if (this.socket === socket && socket.readyState === WebSocket.OPEN) {
+          if (
+            Buffer.byteLength(JSON.stringify({ type: "rpc.result", reply })) >
+            limits.controlMessageBytes
+          )
+            this.send({
+              type: "rpc.result",
+              reply: {
+                id,
+                outcome: reply.outcome === "succeeded" ? "unknown" : reply.outcome,
+                error: {
+                  code: "limit_exceeded",
+                  message: "Operation result exceeds the size limit; refresh to verify",
+                },
+              },
+            });
+          else this.send({ type: "rpc.result", reply });
+        }
+      })
+      .catch((error: unknown) => console.error(asError(error).message))
+      .finally(() => {
+        clearTimeout(timeout);
+        if (this.requests.get(id) === controller) this.requests.delete(id);
+      });
+  }
   private scheduleReconnect() {
     this.reconnect = setTimeout(() => this.connect(), this.delay + Math.random() * 300);
     this.delay = Math.min(30_000, this.delay * 2);
@@ -352,13 +358,13 @@ export class Agent {
   ): Promise<unknown> {
     const operation = this.perform(method, params, signal, progress).finally(() => {
       if (
-        (["files.create", "files.rename"].includes(method) || gitWrites.has(method)) &&
+        (notifiedFileMethods.has(method) || gitWrites.has(method)) &&
         typeof params.workspaceId === "string"
       )
         this.watches.changed(params.workspaceId, true);
     });
-    this.tasks.add(operation);
-    void operation.finally(() => this.tasks.delete(operation)).catch(() => {});
+    this.inflight.add(operation);
+    void operation.finally(() => this.inflight.delete(operation)).catch(() => {});
     return operation;
   }
   private async perform(
@@ -370,45 +376,12 @@ export class Agent {
     if (this.stopped) throw new AppError("cancelled", "Agent is stopping");
     signal.throwIfAborted();
     const method = knownRpcMethod(rawMethod);
+    if (isScheduleMethod(method)) return scheduleRpc(this.schedules, method, params, signal);
+    if (isGitMethod(method))
+      return gitRpc(this.repos, this.gitWrites, method, params, signal, progress);
     switch (method) {
-      case "tasks.list":
-      case "tasks.get":
-      case "tasks.preview":
-      case "tasks.create":
-      case "tasks.update":
-      case "tasks.pause":
-      case "tasks.resume":
-      case "tasks.acknowledge":
-      case "tasks.delete":
-      case "tasks.run":
-      case "runs.list":
-      case "runs.get":
-      case "runs.output":
-      case "runs.stop":
-        return scheduleRpc(this.schedules, method, params, signal);
       case "ports.list":
         return listeningPorts(signal) satisfies Promise<RpcResult<typeof method>>;
-      case "git.remotes":
-      case "git.fetch":
-      case "git.pull":
-      case "git.push":
-      case "git.continue":
-      case "git.abort":
-      case "git.commit":
-      case "git.branch.create":
-      case "git.branch.switch":
-      case "git.branch.delete":
-      case "git.stage":
-      case "git.unstage":
-      case "git.discard":
-      case "git.review":
-      case "repos.discover":
-      case "git.status":
-      case "git.diff":
-      case "git.history":
-      case "git.commitFiles":
-      case "git.branches":
-        return gitRpc(this.repos, this.gitWrites, method, params, signal, progress);
       case "files.search": {
         if (
           (params.mode !== "name" && params.mode !== "content") ||
@@ -487,25 +460,19 @@ export class Agent {
           params.name === undefined ? undefined : string(params.name, "name", 256),
           signal,
         ) satisfies Promise<RpcResult<typeof method>>;
-      case "workspaces.rename": {
-        const id = string(params.workspaceId);
-        const name = string(params.name, "name", 256);
-        return this.metadata.update((metadata) => {
-          const workspace = metadata.workspaces.find((w) => w.id === id);
-          if (!workspace) throw new AppError("not_found", "Workspace does not exist");
-          workspace.name = name;
-          return workspace;
-        }, signal) satisfies Promise<RpcResult<typeof method>>;
-      }
+      case "workspaces.rename":
+        return this.metadata.rename(
+          string(params.workspaceId),
+          string(params.name, "name", 256),
+          signal,
+        ) satisfies Promise<RpcResult<typeof method>>;
       case "workspaces.remove": {
         const id = string(params.workspaceId);
-        this.metadata.workspace(id);
-        return this.metadata.update((metadata) => {
-          if (this.sessions.list(id).sessions.length)
-            throw new AppError("busy", "End the terminal sessions in the workspace first");
-          metadata.workspaces = metadata.workspaces.filter((w) => w.id !== id);
-          return { removed: true };
-        }, signal) satisfies Promise<RpcResult<typeof method>>;
+        return this.metadata.remove(
+          id,
+          () => this.sessions.list(id).sessions.length > 0,
+          signal,
+        ) satisfies Promise<RpcResult<typeof method>>;
       }
       case "sessions.list": {
         const workspaceId =
@@ -541,40 +508,25 @@ export class Agent {
           string(params.workspaceId),
           string(params.sessionId),
         ) satisfies Promise<RpcResult<typeof method>>;
-      case "settings.update": {
-        const historyLines = integer(
-          params.historyLines,
-          "historyLines",
-          0,
-          limits.terminalHistoryLines,
-        );
-        return this.metadata.update((metadata) => {
-          metadata.settings.historyLines = historyLines;
-          return metadata.settings;
-        }, signal) satisfies Promise<RpcResult<typeof method>>;
-      }
-      case "shortcuts.put": {
-        const id = params.id === undefined ? randomUUID() : string(params.id);
-        const name = string(params.name, "name", 256);
-        const command = string(params.command, "command", 65536);
-        const icon = checkShortcutIcon(params.icon);
-        return this.metadata.update((metadata) => {
-          const previous = metadata.shortcuts.find((item) => item.id === id);
-          if (params.id !== undefined && !previous)
-            throw new AppError("not_found", "Shortcut does not exist");
-          const shortcut = { id, name, command, icon };
-          if (previous) Object.assign(previous, shortcut);
-          else metadata.shortcuts.push(shortcut);
-          return shortcut;
-        }, signal) satisfies Promise<RpcResult<typeof method>>;
-      }
-      case "shortcuts.remove": {
-        const id = string(params.id);
-        return this.metadata.update((metadata) => {
-          metadata.shortcuts = metadata.shortcuts.filter((item) => item.id !== id);
-          return { removed: true };
-        }, signal) satisfies Promise<RpcResult<typeof method>>;
-      }
+      case "settings.update":
+        return this.metadata.updateSettings(
+          integer(params.historyLines, "historyLines", 0, limits.terminalHistoryLines),
+          signal,
+        ) satisfies Promise<RpcResult<typeof method>>;
+      case "shortcuts.put":
+        return this.metadata.putShortcut(
+          {
+            id: params.id === undefined ? undefined : string(params.id),
+            name: string(params.name, "name", 256),
+            command: string(params.command, "command", 65536),
+            icon: checkShortcutIcon(params.icon),
+          },
+          signal,
+        ) satisfies Promise<RpcResult<typeof method>>;
+      case "shortcuts.remove":
+        return this.metadata.removeShortcut(string(params.id), signal) satisfies Promise<
+          RpcResult<typeof method>
+        >;
       default: {
         const unhandled: never = method;
         throw new AppError("unsupported", `Unsupported operation: ${unhandled}`);
@@ -608,7 +560,7 @@ export class Agent {
       finish(() => this.schedules.close()),
       finish(() => this.fileChannels.close()),
       finish(() => this.fileOperations.close()),
-      Promise.allSettled([...this.tasks]),
+      Promise.allSettled([...this.inflight]),
     ]);
     await finish(() => this.temporaryFiles.close());
     await Promise.all([

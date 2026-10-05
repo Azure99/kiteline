@@ -20,6 +20,10 @@ import { finishOperation } from "./operation.js";
 
 type GitMethod = Extract<RpcMethod, `git.${string}` | "repos.discover">;
 
+export function isGitMethod(method: RpcMethod): method is GitMethod {
+  return method === "repos.discover" || method.startsWith("git.");
+}
+
 export async function gitRpc(
   repos: Repositories,
   writes: GitWriteQueue,

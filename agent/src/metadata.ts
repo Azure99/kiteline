@@ -10,6 +10,7 @@ import {
   type AgentEnvironment,
   type AgentControlMessage,
   type Metadata,
+  type Shortcut,
 } from "@kiteline/shared/protocol";
 import { atomicJson, readJson, stateFiles, type AgentConfig } from "./config.js";
 import { windowsNative } from "@kiteline/shared/windows/native";
@@ -111,5 +112,51 @@ export class MetadataStore {
     const workspace = this.value.workspaces.find((w) => w.id === id);
     if (!workspace) throw new AppError("not_found", "Workspace does not exist");
     return workspace;
+  }
+
+  rename(id: string, name: string, signal?: AbortSignal) {
+    return this.update((metadata) => {
+      const workspace = metadata.workspaces.find((item) => item.id === id);
+      if (!workspace) throw new AppError("not_found", "Workspace does not exist");
+      workspace.name = name;
+      return workspace;
+    }, signal);
+  }
+
+  remove(id: string, hasSessions: () => boolean, signal?: AbortSignal) {
+    this.workspace(id);
+    return this.update((metadata) => {
+      if (hasSessions())
+        throw new AppError("busy", "End the terminal sessions in the workspace first");
+      metadata.workspaces = metadata.workspaces.filter((item) => item.id !== id);
+      return { removed: true };
+    }, signal);
+  }
+
+  updateSettings(historyLines: number, signal?: AbortSignal) {
+    return this.update((metadata) => {
+      metadata.settings.historyLines = historyLines;
+      return metadata.settings;
+    }, signal);
+  }
+
+  putShortcut(input: Omit<Shortcut, "id"> & { id?: string }, signal?: AbortSignal) {
+    const id = input.id ?? randomUUID();
+    return this.update((metadata) => {
+      const previous = metadata.shortcuts.find((item) => item.id === id);
+      if (input.id !== undefined && !previous)
+        throw new AppError("not_found", "Shortcut does not exist");
+      const shortcut = { ...input, id };
+      if (previous) Object.assign(previous, shortcut);
+      else metadata.shortcuts.push(shortcut);
+      return shortcut;
+    }, signal);
+  }
+
+  removeShortcut(id: string, signal?: AbortSignal) {
+    return this.update((metadata) => {
+      metadata.shortcuts = metadata.shortcuts.filter((item) => item.id !== id);
+      return { removed: true };
+    }, signal);
   }
 }

@@ -5,6 +5,7 @@ import { getProxyForUrl } from "proxy-from-env";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { Agent, Pool, ProxyAgent } from "undici";
 import { WebSocket, type ClientOptions } from "ws";
+import type { Identity } from "./config.js";
 
 function proxyFor(target: string | URL) {
   const url = new URL(target);
@@ -44,6 +45,35 @@ export async function fetchServerJson(url: URL, options: RequestInit) {
     controller.abort();
     await dispatcher.destroy();
   }
+}
+
+export function connectServer(
+  identity: Identity,
+  path: string,
+  query: Record<string, string>,
+  options: Omit<ClientOptions, "headers">,
+) {
+  const url = new URL(path, identity.server);
+  for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return connectServerSocket(url, {
+    ...options,
+    headers: { authorization: `Bearer ${identity.deviceToken}` },
+  });
+}
+
+export function connectChannel(
+  identity: Identity,
+  channelId: string,
+  connectionId: string,
+  options: Omit<ClientOptions, "headers">,
+) {
+  return connectServer(
+    identity,
+    `/api/agent/channels/${encodeURIComponent(channelId)}`,
+    { connectionId },
+    options,
+  );
 }
 
 export function connectServerSocket(url: URL, options: ClientOptions) {
