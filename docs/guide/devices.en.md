@@ -19,7 +19,7 @@ The agent runs on the device as the project user: the operating-system account y
 The package includes Node, tmux, the terminal recorder, terminfo, ripgrep and file-operation helpers. The macOS package also includes flock; the Windows package includes a private MSYS2 runtime. You do not need to install these, npm or a compiler. The device must provide:
 
 - Git 2.23.0 or later.
-- The project user's shell: the account's login shell on Linux and macOS, PowerShell 7 on Windows.
+- The project user's shell: the account's login shell on Linux and macOS, PowerShell on Windows. See [Shell](reference.en.md#shell) for the default selection.
 - Linux and macOS: an SSH client (`ssh`) and a UTF-8 locale.
 - Linux: `flock` (util-linux), `infocmp` (ncurses), `curl`, `tar`, `gzip`, `sha256sum` and `getent`; sudo access is also required when the project user is not root.
 - Tools used by your projects, such as compilers and AI CLIs.
@@ -66,14 +66,13 @@ This installs Command Line Tools, including Git. You can also use Git 2.23.0 or 
 
 ### Windows
 
-PowerShell 7 and Git for Windows are required. You can install them with winget:
+Windows PowerShell 5.1 and PowerShell 7.x starting at 7.4 are supported. Git for Windows is also required; install it with winget:
 
 ```powershell
-winget install --id Microsoft.PowerShell --source winget
 winget install --id Git.Git --source winget
 ```
 
-After installation, open a new PowerShell 7 window (`pwsh`) and check that `git --version` runs. Use PowerShell 7 for all subsequent agent commands, not Windows PowerShell 5.1, cmd or WSL. The project user must have signed in to Windows at least once and have a user profile. If the project user is a standard user, enter an administrator's account and password at the installation UAC prompt.
+After installation, open a new PowerShell window and check that `git --version` runs. Use PowerShell for subsequent agent commands. The project user must have signed in to Windows at least once and have a user profile. If the project user is a standard user, enter an administrator's account and password at the installation UAC prompt.
 
 ### UTF-8 locale
 
@@ -88,7 +87,7 @@ Choose one line. `LC_ALL` and `LC_CTYPE` override `LANG`; change them too if set
 
 ## Connect using the web command
 
-Choose the device's system in "Connect device", copy the install command, and run it on the device as the project user. On Windows, use a regular, non-administrator PowerShell 7 window; an administrator window is rejected. The command contains a single-use binding code and must run before it expires (see [Limits](reference.en.md#limits)).
+Choose the device's system in "Connect device", copy the install command, and run it on the device as the project user. On Windows, use a regular, non-administrator PowerShell window; an administrator window is rejected. The command contains a single-use binding code and must run before it expires (see [Limits](reference.en.md#limits)).
 
 The server address in the command is the browser's current origin, which the device must be able to reach. If you opened the workbench through `127.0.0.1`, `localhost` or SSH forwarding, reopen it at an address the device can reach before generating the command. Commands generated from an HTTPS origin download only over HTTPS.
 
@@ -106,7 +105,7 @@ kiteline-agent run
 ```
 
 ```powershell
-& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" run
+& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" run
 ```
 
 See [kiteline-agent commands](reference.en.md#kiteline-agent-commands) for Windows invocation forms and execution-policy prerequisites.
@@ -163,28 +162,28 @@ Installing the same version again for the same user reports that it is already i
 
 ### Windows
 
-Download, verify and check in the project user's regular PowerShell 7 window:
+Download, verify and check in the project user's regular PowerShell window:
 
 ```powershell
 $server = 'https://YOUR_SERVER'  # Replace with the workbench address
 $version = 'X.Y.Z'               # Replace with the server version
 $package = "kiteline-agent-$version-windows-amd64"
 Set-Location "$HOME\Downloads"
-Invoke-WebRequest "$server/downloads/agent/$version/$package.zip" -OutFile "$package.zip"
-Invoke-WebRequest "$server/downloads/agent/$version/$package.zip.sha256" -OutFile "$package.zip.sha256"
+Invoke-WebRequest -UseBasicParsing "$server/downloads/agent/$version/$package.zip" -OutFile "$package.zip"
+Invoke-WebRequest -UseBasicParsing "$server/downloads/agent/$version/$package.zip.sha256" -OutFile "$package.zip.sha256"
 $expected = (Get-Content "$package.zip.sha256" -Raw).Trim().Split(' ')[0]
 if ((Get-FileHash "$package.zip" -Algorithm SHA256).Hash -ine $expected) { throw 'Checksum mismatch' }
 Expand-Archive -LiteralPath "$package.zip" -DestinationPath .
-& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File ".\$package\bin\kiteline-agent.ps1" check
+& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File ".\$package\bin\kiteline-agent.ps1" check
 whoami
 ```
 
-`whoami` prints the project user's account name, such as `desktop-1234\alice`. Open PowerShell 7 as administrator (right-click and choose "Run as administrator"), go to the same download directory and install, using that account name for `--user`:
+`whoami` prints the project user's account name, such as `desktop-1234\alice`. Open PowerShell as administrator (right-click and choose "Run as administrator"), go to the same download directory and install, using that account name for `--user`:
 
 ```powershell
 # Replace X.Y.Z with the version downloaded above
 Set-Location 'C:\Users\PROJECT_USER\Downloads'
-& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File '.\kiteline-agent-X.Y.Z-windows-amd64\bin\kiteline-agent.ps1' install --user 'COMPUTER\PROJECT_USER'
+& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File '.\kiteline-agent-X.Y.Z-windows-amd64\bin\kiteline-agent.ps1' install --user 'COMPUTER\PROJECT_USER'
 ```
 
 Close the administrator window after installation. Back in the project user's window, run the web app's [bind-only command](#bind-only-command), then the Windows startup command in [Connect using the web command](#connect-using-the-web-command).
@@ -275,13 +274,13 @@ sudo launchctl bootstrap system /Library/LaunchDaemons/com.kiteline.agent.plist
 
 ### WinSW
 
-On Windows, use WinSW 2.12 to register the agent as a Windows service. Run these commands in administrator PowerShell 7. Place the service directory under the project user's home so only that user and administrators can modify its programs:
+On Windows, use WinSW 2.12 to register the agent as a Windows service. Run these commands in administrator PowerShell. Place the service directory under the project user's home so only that user and administrators can modify its programs:
 
 ```powershell
 $projectUser = 'PROJECT_USER'  # Replace with the project user's directory name under C:\Users
 $service = "C:\Users\$projectUser\kiteline-service"
 New-Item -ItemType Directory -Force -Path $service
-Invoke-WebRequest 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe' -OutFile "$service\kiteline-agent.exe"
+Invoke-WebRequest -UseBasicParsing 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe' -OutFile "$service\kiteline-agent.exe"
 (Get-Content "$env:ProgramFiles\kiteline-agent\deploy\kiteline-agent.xml" -Raw).Replace('PROJECT_USER', $projectUser) |
   Set-Content "$service\kiteline-agent.xml" -Encoding utf8
 notepad "$service\kiteline-agent.xml"
@@ -289,7 +288,7 @@ notepad "$service\kiteline-agent.xml"
 
 WinSW finds configuration by its own filename, so `kiteline-agent.exe` and `kiteline-agent.xml` must share a basename and directory. Check in Notepad:
 
-- `PATH`: include PowerShell 7, Git's `cmd` directory and your project tools.
+- `PATH`: include Git's `cmd` directory and your project tools; include the PS7 directory when using it.
 - `KITELINE_AGENT_HOME` and `KITELINE_AGENT_RUN_DIR`: use the actual `dataDir` and `runDir` values from `%ProgramData%\kiteline-agent\installation.json`, respectively.
 - Proxy: add lines such as `<env name="HTTPS_PROXY" value="http://proxy.example.com:3128" />` as needed.
 - Keep `<hidewindow>false</hidewindow>`, `<stopparentprocessfirst>true</stopparentprocessfirst>` and `<stoptimeout>45sec</stoptimeout>`. WinSW relies on them to send Ctrl-C to the agent when stopping the service and allow enough time to end terminal sessions and scheduled-task runs.
@@ -341,7 +340,7 @@ kiteline-agent run
 
 ```powershell
 $env:HTTPS_PROXY = 'http://proxy.example.com:3128'
-& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" run
+& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" run
 ```
 
 Install and upgrade commands download with curl, or PowerShell on Windows. curl recognizes only lowercase `http_proxy`, so HTTP origins need that lowercase variable; the example sets both types. On Windows, the agent reads environment variables only and does not use system proxy settings, so set the variables above for the agent too.
@@ -443,7 +442,7 @@ Stopping the agent ends its terminal sessions and scheduled-task runs. Binding, 
 
 Choose the platform in "Upgrade agent" on the device page, copy the upgrade command, and run it in an interactive terminal or SSH session on the device.
 
-On Linux and macOS, the command downloads the agent matching the server from the current origin, verifies it, then upgrades with sudo. On Windows, run it in PowerShell 7 and confirm UAC; upgrading happens in a new administrator window. At `Type yes to continue:`, enter `yes`. The command includes the server version at generation time. If it subsequently changes, the command stops with `The server release changed`; copy a new command from the web app.
+On Linux and macOS, the command downloads the agent matching the server from the current origin, verifies it, then upgrades with sudo. On Windows, run it in PowerShell and confirm UAC; upgrading happens in a new administrator window. At `Type yes to continue:`, enter `yes`. The command includes the server version at generation time. If it subsequently changes, the command stops with `The server release changed`; copy a new command from the web app.
 
 Upgrading does not change the binding or saved server address. The agent does not start automatically after a successful upgrade (the output includes `not started`). Start it as usual, either in the foreground or through its service.
 
@@ -456,8 +455,8 @@ sudo /usr/local/bin/kiteline-agent upgrade --archive "$PWD/kiteline-agent-X.Y.Z-
 ```
 
 ```powershell
-# Run in administrator PowerShell 7
-& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" upgrade --archive 'C:\Users\PROJECT_USER\Downloads\kiteline-agent-X.Y.Z-windows-amd64.zip'
+# Run in administrator PowerShell
+& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" upgrade --archive 'C:\Users\PROJECT_USER\Downloads\kiteline-agent-X.Y.Z-windows-amd64.zip'
 ```
 
 Adjust the version and filename to the downloaded package. Add `--yes` to skip confirmation.
@@ -470,7 +469,7 @@ First stop all users of the installation as in [Upgrade the agent](#upgrade-the-
 
 - systemd: run `sudo systemctl disable --now kiteline-agent`, remove `/etc/systemd/system/kiteline-agent.service`, then run `sudo systemctl daemon-reload`.
 - launchd: run `bootout` from the [stop commands](#launchd), then remove `/Library/LaunchDaemons/com.kiteline.agent.plist`.
-- WinSW: run `stopwait` and `uninstall` on the service executable in administrator PowerShell 7, then remove the service directory.
+- WinSW: run `stopwait` and `uninstall` on the service executable in administrator PowerShell, then remove the service directory.
 
 Uninstall the program. On Linux and macOS:
 
@@ -478,10 +477,10 @@ Uninstall the program. On Linux and macOS:
 sudo /usr/local/bin/kiteline-agent uninstall
 ```
 
-On Windows, in administrator PowerShell 7:
+On Windows, in administrator PowerShell:
 
 ```powershell
-& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" uninstall
+& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" uninstall
 ```
 
 Enter `yes` at `Type yes to continue:`, or add `--yes` to skip confirmation. Uninstall removes the installation directory, public launcher and installation record. By default, it keeps the agent data directory and project files, so reinstalling on the same device does not require rebinding.
@@ -502,9 +501,9 @@ These files remain after uninstall and can be removed manually when no longer ne
 - Windows: `C:\ProgramData\kiteline-agent` (lock files) and the data directory.
 
   ```powershell
-  # Administrator PowerShell 7
+  # Administrator PowerShell
   Remove-Item -Recurse -Force "$env:ProgramData\kiteline-agent"
-  # Project user's PowerShell 7
+  # Project user's PowerShell
   Remove-Item -Recurse -Force "$env:LOCALAPPDATA\kiteline-agent"
   ```
 

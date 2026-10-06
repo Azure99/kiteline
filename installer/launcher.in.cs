@@ -49,6 +49,8 @@ public sealed class __KITELINE_LAUNCHER_TYPE__ : IDisposable {
     [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
     [DllImport("kernel32.dll")] static extern IntPtr GetStdHandle(int kind);
     [DllImport("kernel32.dll", SetLastError=true)] static extern bool CloseHandle(IntPtr handle);
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern bool MoveFileExW(string source,string destination,uint flags);
+    public static void PublishFile(string source,string destination,bool overwrite) { Check(MoveFileExW(source,destination,overwrite ? 1u : 0u),"publish installation file"); }
     static void Check(bool ok,string operation) { if(!ok) throw new Win32Exception(Marshal.GetLastWin32Error(),operation); }
     static bool Valid(IntPtr handle) { return handle!=IntPtr.Zero && handle!=new IntPtr(-1); }
     // Reserved for launcher ownership failure in the download script's managed command boundary.

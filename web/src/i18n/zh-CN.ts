@@ -273,7 +273,7 @@ export const zhCN = {
     deviceDeleted: "设备已删除",
     uninstallAgent: "本机卸载 agent",
     uninstallStop: "先停止 agent、本机接续及外部自动重启，再在目标设备执行。",
-    uninstallWindows: "使用管理员 PowerShell 7。",
+    uninstallWindows: "使用管理员 PowerShell。",
     uninstallKeepsData: "卸载默认保留状态和项目文件。",
     copyUninstall: "复制卸载命令",
     containerDeployment: "容器部署",

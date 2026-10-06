@@ -12,7 +12,7 @@ export function UninstallInstructions({ initialPlatform }: { initialPlatform?: A
   const { copied, error, copy, pending } = useCopyFeedback();
   const command =
     platform === "windows"
-      ? '& "$PSHOME\\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\\kiteline-agent\\kiteline-agent.ps1" uninstall'
+      ? `& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\\kiteline-agent\\kiteline-agent.ps1" uninstall`
       : "sudo /usr/local/bin/kiteline-agent uninstall";
   return (
     <div className="space-y-3 text-sm">

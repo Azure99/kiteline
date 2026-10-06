@@ -56,7 +56,7 @@ server 升级后，已打开的页面显示 Web 和 Server 的版本并暂停远
 
 ### 新建会话与快捷方式
 
-新会话在工作区目录启动，继承 agent 的环境变量（agent 作为服务运行时来自服务配置，见[后台运行](devices.md#后台运行)）。Linux 和 macOS 使用项目用户的登录 Shell，Windows 使用 PowerShell 7，可在 [agent 配置文件](reference.md#agent-配置文件)中更换。
+新会话在工作区目录启动，继承 agent 的环境变量（agent 作为服务运行时来自服务配置，见[后台运行](devices.md#后台运行)）。Linux 和 macOS 使用项目用户的登录 Shell，Windows 使用 PowerShell，默认选择和配置见 [shell](reference.md#shell)。
 
 快捷方式在登录 Shell 中运行一条命令，命令退出时会话结束。新设备预置的 AI CLI 程序需要自行安装。
 
@@ -109,7 +109,7 @@ kiteline-agent terminal end SESSION_ID
 
 `workspace list` 给出工作区 ID，`terminal new` 创建会话后立即附着。各命令的输出和选项见 [kiteline-agent 命令](reference.md#kiteline-agent-命令)。
 
-Windows 上在 PowerShell 7 控制台中执行本节交互命令时，把 `kiteline-agent` 换成 `& "$env:ProgramData\kiteline-agent\kiteline-agent.ps1"`；调用方式的选择见 [kiteline-agent 命令](reference.md#kiteline-agent-命令)。本机命令和 agent 必须解析到同一个运行目录（见 [agent 环境变量](reference.md#agent-环境变量)）；只在服务配置中设置了 `KITELINE_AGENT_RUN_DIR` 时，本机命令也要设置同样的变量，`attach` 也可以用 `--run-dir`（网页复制的命令已包含）。容器见[在容器中运行](devices.md#在容器中运行)。
+Windows 上在 PowerShell 控制台中执行本节交互命令时，把 `kiteline-agent` 换成 `& "$env:ProgramData\kiteline-agent\kiteline-agent.ps1"`；调用方式的选择见 [kiteline-agent 命令](reference.md#kiteline-agent-命令)。本机命令和 agent 必须解析到同一个运行目录（见 [agent 环境变量](reference.md#agent-环境变量)）；只在服务配置中设置了 `KITELINE_AGENT_RUN_DIR` 时，本机命令也要设置同样的变量，`attach` 也可以用 `--run-dir`（网页复制的命令已包含）。容器见[在容器中运行](devices.md#在容器中运行)。
 
 ## 文件
 

@@ -23,11 +23,7 @@ export function AgentPlatformChoice({
             onChange={() => onChange(platform)}
             className="size-4 accent-primary"
           />
-          {platform === "linux"
-            ? "Linux"
-            : platform === "macos"
-              ? "macOS"
-              : "Windows (PowerShell 7)"}
+          {platform === "linux" ? "Linux" : platform === "macos" ? "macOS" : "Windows (PowerShell)"}
         </label>
       ))}
     </fieldset>

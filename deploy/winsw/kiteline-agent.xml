@@ -5,7 +5,7 @@
   <id>kiteline-agent</id>
   <name>Kiteline Agent</name>
   <description>User-managed Kiteline agent process</description>
-  <executable>C:\Program Files\PowerShell\7\pwsh.exe</executable>
+  <executable>C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe</executable>
   <arguments>-NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\kiteline-agent\kiteline-agent.ps1" run</arguments>
   <workingdirectory>C:\Users\PROJECT_USER</workingdirectory>
   <env name="USERPROFILE" value="C:\Users\PROJECT_USER" />

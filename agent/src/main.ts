@@ -6,7 +6,7 @@ import { attachCli, attachUsage, terminalCli } from "./cli/terminal.js";
 import { scheduleCli } from "./cli/tasks.js";
 import { doctorCli } from "./cli/doctor.js";
 import { installCli } from "./install/commands.js";
-import { checkPrerequisites } from "./prerequisites.js";
+import { checkPrerequisites, checkWindowsShell } from "./prerequisites.js";
 import { lockAgentRuntime, lockAgentState } from "./state-lock.js";
 
 const usage = `Usage: kiteline-agent install --user USER | upgrade --archive RELEASE.tar.gz | uninstall | check | bind --server HTTP_OR_HTTPS_ORIGIN [--if-unbound] | run | doctor | ${attachUsage} | terminal | workspace | schedule`;
@@ -42,6 +42,10 @@ async function runAgent() {
   const initialization = (async () => {
     const config = await agentConfig();
     if (stopping) return;
+    if (process.platform === "win32") {
+      await checkWindowsShell(config.shell);
+      if (stopping) return;
+    }
     await privateDirectory(config.dataDir);
     if (stopping) return;
     releaseState = await lockAgentState(config.dataDir);

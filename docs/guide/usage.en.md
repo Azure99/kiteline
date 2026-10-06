@@ -56,7 +56,7 @@ Terminal sessions run on the device. Closing the page, losing the network, signi
 
 ### Create sessions and shortcuts
 
-New sessions start in the workspace directory and inherit the agent's environment (from service configuration when running as a service; see [Run in the background](devices.en.md#run-in-the-background)). Linux and macOS use the project user's login shell; Windows uses PowerShell 7. Change it in the [agent configuration file](reference.en.md#agent-configuration-file).
+New sessions start in the workspace directory and inherit the agent's environment (from service configuration when running as a service; see [Run in the background](devices.en.md#run-in-the-background)). Linux and macOS use the project user's login shell; Windows uses PowerShell. See [Shell](reference.en.md#shell) for defaults and configuration.
 
 Shortcuts run one command in the login shell; the session ends when that command exits. Install the AI CLI programs used by the default shortcuts yourself.
 
@@ -109,7 +109,7 @@ kiteline-agent terminal end SESSION_ID
 
 `workspace list` gives workspace IDs. `terminal new` creates a session and immediately attaches. See [kiteline-agent commands](reference.en.md#kiteline-agent-commands) for output and options.
 
-For this section's interactive commands in a Windows PowerShell 7 console, replace `kiteline-agent` with `& "$env:ProgramData\kiteline-agent\kiteline-agent.ps1"`; see [kiteline-agent commands](reference.en.md#kiteline-agent-commands) for choosing the invocation form. Local commands and the agent must resolve to the same runtime directory (see [Agent environment variables](reference.en.md#agent-environment-variables)). If `KITELINE_AGENT_RUN_DIR` is set only in service configuration, set it for local commands too. `attach` also accepts `--run-dir`, included in the copied web command. For containers, see [Run in a container](devices.en.md#run-in-a-container).
+For this section's interactive commands in a Windows PowerShell console, replace `kiteline-agent` with `& "$env:ProgramData\kiteline-agent\kiteline-agent.ps1"`; see [kiteline-agent commands](reference.en.md#kiteline-agent-commands) for choosing the invocation form. Local commands and the agent must resolve to the same runtime directory (see [Agent environment variables](reference.en.md#agent-environment-variables)). If `KITELINE_AGENT_RUN_DIR` is set only in service configuration, set it for local commands too. `attach` also accepts `--run-dir`, included in the copied web command. For containers, see [Run in a container](devices.en.md#run-in-a-container).
 
 ## Files
 

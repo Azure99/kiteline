@@ -21,6 +21,8 @@ const windowsTemplate = readFileSync(
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const psQuote = (value: string) => `'${value.replaceAll("'", "''")}'`;
 const windowsLauncher = "(Join-Path $env:ProgramData 'kiteline-agent/kiteline-agent.ps1')";
+const windowsShell =
+  "(Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' }))";
 function powershellCommand(url: string, arguments_: string) {
   return `& ([scriptblock]::Create((irm ${psQuote(url)} -ErrorAction Stop))) ${arguments_}`;
 }
@@ -49,7 +51,7 @@ export function installationCommands(entryOrigin: string, code: string) {
         entryOrigin + "/connect.ps1",
         `-Version ${psQuote(appVersion)} -Code ${psQuote(code)}`,
       ),
-      bind: `& (Join-Path $PSHOME 'pwsh.exe') -NoProfile -ExecutionPolicy Bypass -File ${windowsLauncher} check; if ($LASTEXITCODE -eq 0) { ${psQuote(code)} | & (Join-Path $PSHOME 'pwsh.exe') -NoProfile -ExecutionPolicy Bypass -File ${windowsLauncher} bind --server ${psQuote(entryOrigin)} --if-unbound }`,
+      bind: `& ${windowsShell} -NoProfile -ExecutionPolicy Bypass -File ${windowsLauncher} check; if ($LASTEXITCODE -eq 0) { ${psQuote(code)} | & ${windowsShell} -NoProfile -ExecutionPolicy Bypass -File ${windowsLauncher} bind --server ${psQuote(entryOrigin)} --if-unbound }`,
     },
   };
 }

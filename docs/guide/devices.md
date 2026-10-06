@@ -19,7 +19,7 @@ agent 在设备上以项目用户运行。项目用户是你日常使用、拥�
 发布包自带 Node、tmux、终端记录器（recorder）、terminfo、ripgrep 和文件操作辅助程序（macOS 包另带 flock，Windows 包另带私有的 MSYS2 运行时），设备上不需要安装这些程序，也不需要 npm 或编译器。设备需要自己提供：
 
 - Git 2.23.0 或更高版本。
-- 项目用户的 Shell：Linux 和 macOS 使用账户的登录 Shell，Windows 使用 PowerShell 7。
+- 项目用户的 Shell：Linux 和 macOS 使用账户的登录 Shell，Windows 使用 PowerShell，默认选择见 [shell](reference.md#shell)。
 - Linux 和 macOS：SSH 客户端（`ssh`）和 UTF-8 locale。
 - Linux：`flock`（util-linux）、`infocmp`（ncurses）、`curl`、`tar`、`gzip`、`sha256sum`、`getent`；项目用户不是 root 时还需要能使用 `sudo`。
 - 项目实际使用的工具，例如编译器和 AI CLI。
@@ -66,14 +66,13 @@ xcode-select --install
 
 ### Windows
 
-需要 PowerShell 7 和 Git for Windows，可以用 winget 安装：
+支持 Windows 自带的 PowerShell 5.1 或 PowerShell 7.4 及以上 7.x 版本。另需 Git for Windows，可用 winget 安装：
 
 ```powershell
-winget install --id Microsoft.PowerShell --source winget
 winget install --id Git.Git --source winget
 ```
 
-安装后打开新的 PowerShell 7 窗口（`pwsh`），确认 `git --version` 可以执行。后续 agent 命令都在 PowerShell 7 中执行，不使用 Windows PowerShell 5.1、cmd 或 WSL。项目用户需要已经登录过一次 Windows（已有用户配置文件）。项目用户是标准用户时，安装过程中的 UAC 提示需要输入管理员的账户和密码。
+安装后打开新的 PowerShell 窗口，确认 `git --version` 可以执行。后续 agent 命令都在 PowerShell 中执行。项目用户需要已经登录过一次 Windows（已有用户配置文件）。项目用户是标准用户时，安装过程中的 UAC 提示需要输入管理员的账户和密码。
 
 ### UTF-8 locale
 
@@ -88,7 +87,7 @@ export LANG=en_US.UTF-8  # CentOS 7、macOS
 
 ## 用网页命令接入
 
-在工作台的“绑定设备”中选择设备的系统，复制接入命令，在设备上以项目用户执行。Windows 上使用普通（非管理员）的 PowerShell 7 窗口；在管理员窗口中执行会被拒绝。命令包含一次性绑定码，应在到期前执行（有效期见[限额](reference.md#限额)）。
+在工作台的“绑定设备”中选择设备的系统，复制接入命令，在设备上以项目用户执行。Windows 上使用普通（非管理员）的 PowerShell 窗口；在管理员窗口中执行会被拒绝。命令包含一次性绑定码，应在到期前执行（有效期见[限额](reference.md#限额)）。
 
 命令中的 server 地址就是浏览器当前使用的入口，设备必须能访问这个地址。如果你通过 `127.0.0.1`、`localhost` 或 SSH 端口转发打开工作台，先改用设备能访问的地址打开工作台，再生成命令。用 HTTPS 入口生成的命令只通过 HTTPS 下载。
 
@@ -106,7 +105,7 @@ kiteline-agent run
 ```
 
 ```powershell
-& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" run
+& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" run
 ```
 
 Windows 调用方式和执行策略前提见 [kiteline-agent 命令](reference.md#kiteline-agent-命令)。
@@ -163,28 +162,28 @@ sudo "./$name/bin/kiteline-agent" install --user "$(id -un)"
 
 ### Windows
 
-在项目用户的普通 PowerShell 7 窗口中下载、校验并检查：
+在项目用户的普通 PowerShell 窗口中下载、校验并检查：
 
 ```powershell
 $server = 'https://YOUR_SERVER'  # 替换为工作台地址
 $version = 'X.Y.Z'               # 替换为 server 的版本
 $package = "kiteline-agent-$version-windows-amd64"
 Set-Location "$HOME\Downloads"
-Invoke-WebRequest "$server/downloads/agent/$version/$package.zip" -OutFile "$package.zip"
-Invoke-WebRequest "$server/downloads/agent/$version/$package.zip.sha256" -OutFile "$package.zip.sha256"
+Invoke-WebRequest -UseBasicParsing "$server/downloads/agent/$version/$package.zip" -OutFile "$package.zip"
+Invoke-WebRequest -UseBasicParsing "$server/downloads/agent/$version/$package.zip.sha256" -OutFile "$package.zip.sha256"
 $expected = (Get-Content "$package.zip.sha256" -Raw).Trim().Split(' ')[0]
 if ((Get-FileHash "$package.zip" -Algorithm SHA256).Hash -ine $expected) { throw 'Checksum mismatch' }
 Expand-Archive -LiteralPath "$package.zip" -DestinationPath .
-& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File ".\$package\bin\kiteline-agent.ps1" check
+& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File ".\$package\bin\kiteline-agent.ps1" check
 whoami
 ```
 
-`whoami` 输出项目用户的账户名，例如 `desktop-1234\alice`。然后以管理员身份打开 PowerShell 7（右键“以管理员身份运行”），进入同一个下载目录并安装，`--user` 填上面的账户名：
+`whoami` 输出项目用户的账户名，例如 `desktop-1234\alice`。然后以管理员身份打开 PowerShell（右键“以管理员身份运行”），进入同一个下载目录并安装，`--user` 填上面的账户名：
 
 ```powershell
 # 把 X.Y.Z 换成上一步下载的版本
 Set-Location 'C:\Users\PROJECT_USER\Downloads'
-& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File '.\kiteline-agent-X.Y.Z-windows-amd64\bin\kiteline-agent.ps1' install --user 'COMPUTER\PROJECT_USER'
+& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File '.\kiteline-agent-X.Y.Z-windows-amd64\bin\kiteline-agent.ps1' install --user 'COMPUTER\PROJECT_USER'
 ```
 
 安装完成后关闭管理员窗口，回到项目用户的窗口，执行网页上的[仅绑定命令](#仅绑定命令)，再用[用网页命令接入](#用网页命令接入)中的 Windows 启动命令运行 agent。
@@ -275,13 +274,13 @@ sudo launchctl bootstrap system /Library/LaunchDaemons/com.kiteline.agent.plist
 
 ### WinSW
 
-Windows 上使用 WinSW 2.12 把 agent 注册为 Windows 服务。以下命令在管理员 PowerShell 7 中执行。服务目录放在项目用户的主目录下，这样只有项目用户和管理员能修改服务程序：
+Windows 上使用 WinSW 2.12 把 agent 注册为 Windows 服务。以下命令在管理员 PowerShell 中执行。服务目录放在项目用户的主目录下，这样只有项目用户和管理员能修改服务程序：
 
 ```powershell
 $projectUser = 'PROJECT_USER'  # 替换为 C:\Users 下项目用户的目录名
 $service = "C:\Users\$projectUser\kiteline-service"
 New-Item -ItemType Directory -Force -Path $service
-Invoke-WebRequest 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe' -OutFile "$service\kiteline-agent.exe"
+Invoke-WebRequest -UseBasicParsing 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe' -OutFile "$service\kiteline-agent.exe"
 (Get-Content "$env:ProgramFiles\kiteline-agent\deploy\kiteline-agent.xml" -Raw).Replace('PROJECT_USER', $projectUser) |
   Set-Content "$service\kiteline-agent.xml" -Encoding utf8
 notepad "$service\kiteline-agent.xml"
@@ -289,7 +288,7 @@ notepad "$service\kiteline-agent.xml"
 
 WinSW 按自身文件名查找配置，所以程序名 `kiteline-agent.exe` 必须与 `kiteline-agent.xml` 同名并放在同一目录。在记事本中检查：
 
-- `PATH`：包含 PowerShell 7、Git 的 `cmd` 目录和项目工具所在的目录。
+- `PATH`：包含 Git 的 `cmd` 目录和项目工具所在的目录；使用 PS7 时也包含它的目录。
 - `KITELINE_AGENT_HOME` 和 `KITELINE_AGENT_RUN_DIR`：分别使用 `%ProgramData%\kiteline-agent\installation.json` 中 `dataDir` 和 `runDir` 的实际值。
 - 代理：需要时加入 `<env name="HTTPS_PROXY" value="http://proxy.example.com:3128" />` 等行。
 - 保留 `<hidewindow>false</hidewindow>`、`<stopparentprocessfirst>true</stopparentprocessfirst>` 和 `<stoptimeout>45sec</stoptimeout>`。停止服务时，WinSW 依靠它们把 Ctrl-C 送到 agent，并给 agent 足够的时间结束终端会话和定时任务运行。
@@ -341,7 +340,7 @@ kiteline-agent run
 
 ```powershell
 $env:HTTPS_PROXY = 'http://proxy.example.com:3128'
-& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" run
+& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" run
 ```
 
 接入和升级命令中的下载由 curl（Windows 上由 PowerShell）完成。curl 只识别小写的 `http_proxy`，所以 HTTP 入口要设置小写变量，上例两种都设置了。Windows 上 agent 只读取环境变量，不使用系统的代理设置，所以也要为 agent 设置上述环境变量。
@@ -443,7 +442,7 @@ agent 的版本必须与 server 相同。先[升级 server](server.md#升级-ser
 
 在设备页的“升级 agent”中选择平台，复制升级命令，到设备上的交互式终端或 SSH 会话执行。
 
-Linux 和 macOS 上，命令从当前入口下载与 server 版本相同的发布包并校验，然后用 sudo 执行升级。Windows 上，在 PowerShell 7 中执行命令，确认 UAC 提示后，升级在新的管理员窗口中进行。升级前会提示 `Type yes to continue:`，输入 `yes` 继续。命令中写有生成时的 server 版本；server 版本之后又变化时，命令提示 `The server release changed` 并停止，重新在网页复制即可。
+Linux 和 macOS 上，命令从当前入口下载与 server 版本相同的发布包并校验，然后用 sudo 执行升级。Windows 上，在 PowerShell 中执行命令，确认 UAC 提示后，升级在新的管理员窗口中进行。升级前会提示 `Type yes to continue:`，输入 `yes` 继续。命令中写有生成时的 server 版本；server 版本之后又变化时，命令提示 `The server release changed` 并停止，重新在网页复制即可。
 
 升级不改变绑定和保存的 server 地址。升级成功后 agent 不会自动启动（输出中有 `not started`），按平时的方式启动：前台执行启动命令，或启动服务。
 
@@ -456,8 +455,8 @@ sudo /usr/local/bin/kiteline-agent upgrade --archive "$PWD/kiteline-agent-X.Y.Z-
 ```
 
 ```powershell
-# 在管理员 PowerShell 7 中执行
-& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" upgrade --archive 'C:\Users\PROJECT_USER\Downloads\kiteline-agent-X.Y.Z-windows-amd64.zip'
+# 在管理员 PowerShell 中执行
+& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" upgrade --archive 'C:\Users\PROJECT_USER\Downloads\kiteline-agent-X.Y.Z-windows-amd64.zip'
 ```
 
 版本号和文件名按实际下载的发布包修改。加 `--yes` 跳过确认。
@@ -470,7 +469,7 @@ sudo /usr/local/bin/kiteline-agent upgrade --archive "$PWD/kiteline-agent-X.Y.Z-
 
 - systemd：执行 `sudo systemctl disable --now kiteline-agent`，删除 `/etc/systemd/system/kiteline-agent.service`，再执行 `sudo systemctl daemon-reload`。
 - launchd：执行[停止命令](#launchd)中的 `bootout`，再删除 `/Library/LaunchDaemons/com.kiteline.agent.plist`。
-- WinSW：在管理员 PowerShell 7 中对服务程序执行 `stopwait` 和 `uninstall`，再删除服务目录。
+- WinSW：在管理员 PowerShell 中对服务程序执行 `stopwait` 和 `uninstall`，再删除服务目录。
 
 然后卸载程序。Linux 和 macOS：
 
@@ -478,10 +477,10 @@ sudo /usr/local/bin/kiteline-agent upgrade --archive "$PWD/kiteline-agent-X.Y.Z-
 sudo /usr/local/bin/kiteline-agent uninstall
 ```
 
-Windows（管理员 PowerShell 7）：
+Windows（管理员 PowerShell）：
 
 ```powershell
-& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" uninstall
+& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" uninstall
 ```
 
 命令提示 `Type yes to continue:`，输入 `yes` 继续；加 `--yes` 跳过确认。卸载删除程序目录、命令入口和安装记录。默认保留 agent 数据目录和项目文件，之后重新安装同一设备时不需要重新绑定。
@@ -502,9 +501,9 @@ Windows（管理员 PowerShell 7）：
 - Windows：`C:\ProgramData\kiteline-agent`（锁文件）和数据目录。
 
   ```powershell
-  # 管理员 PowerShell 7
+  # 管理员 PowerShell
   Remove-Item -Recurse -Force "$env:ProgramData\kiteline-agent"
-  # 项目用户的 PowerShell 7
+  # 项目用户的 PowerShell
   Remove-Item -Recurse -Force "$env:LOCALAPPDATA\kiteline-agent"
   ```
 

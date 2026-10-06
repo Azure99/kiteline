@@ -109,10 +109,10 @@ export async function agentConfig(): Promise<AgentConfig> {
   return { dataDir, runDir, shell, limits: defaults };
 }
 async function powershell() {
-  return windowsExecutable("pwsh").catch(() => {
-    throw new AppError(
-      "not_found",
-      "PowerShell 7 is required; add pwsh.exe to PATH or configure an absolute shell path",
+  return windowsExecutable("pwsh").catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") throw error;
+    return windowsExecutable(
+      resolve(process.env.SystemRoot!, "System32/WindowsPowerShell/v1.0/powershell.exe"),
     );
   });
 }

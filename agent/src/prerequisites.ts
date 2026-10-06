@@ -40,6 +40,33 @@ async function checkToolVersion(
   return line;
 }
 
+export async function checkWindowsShell(
+  shell: string,
+  command: Command = (file, args) => toolCommand(file, args, { timeout: 5000 }),
+) {
+  const { version, edition } = JSON.parse(
+    await command(shell, [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "@{version=$PSVersionTable.PSVersion.ToString();edition=$PSVersionTable.PSEdition} | ConvertTo-Json -Compress",
+    ]),
+  ) as { version: string; edition: string };
+  const match = /^(\d+)\.(\d+)\./.exec(version);
+  const major = Number(match?.[1]),
+    minor = Number(match?.[2]);
+  if (
+    !(
+      (major === 5 && minor === 1 && edition === "Desktop") ||
+      (major === 7 && minor >= 4 && edition === "Core")
+    )
+  )
+    throw new Error(
+      `Requires Windows PowerShell 5.1 Desktop or PowerShell 7.4 or later in the 7.x series; current: ${version} (${edition})`,
+    );
+  return `PowerShell ${version} (${edition})`;
+}
+
 async function checkFileHelper(path: string, command: Command) {
   try {
     await command(path, []);
@@ -80,9 +107,7 @@ export async function checkHostEnvironment(shell: string, check: Check, command:
   if (process.platform === "linux") await check("flock", () => command("flock", ["--version"]));
   await check("Shell", async () => {
     await access(shell, constants.X_OK);
-    return windows
-      ? `${shell}; ${await checkToolVersion({ file: shell, major: 7, minor: 4 }, command)}`
-      : shell;
+    return windows ? `${shell}; ${await checkWindowsShell(shell, command)}` : shell;
   });
   if (!windows)
     await check("UTF-8 locale", async () => {
@@ -134,7 +159,7 @@ export async function checkPrerequisites() {
   if (failures.length) {
     if (windows)
       throw new Error(
-        `Setup checks failed:\n${failures.join("\n")}\nProvide PowerShell 7.4 or later and native Git in the launching environment. Reinstall the matching complete package for bundled component failures.`,
+        `Setup checks failed:\n${failures.join("\n")}\nProvide Windows PowerShell 5.1 or PowerShell 7.4+ and native Git in the launching environment. Reinstall the matching complete package for bundled component failures.`,
       );
     if (macos)
       throw new Error(

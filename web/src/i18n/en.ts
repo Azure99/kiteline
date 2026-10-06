@@ -278,7 +278,7 @@ export const en = {
     uninstallAgent: "Uninstall the local agent",
     uninstallStop:
       "Stop the agent, local attach sessions and external restart policies, then run this on the device.",
-    uninstallWindows: "Use an administrator PowerShell 7 console.",
+    uninstallWindows: "Use an administrator PowerShell console.",
     uninstallKeepsData: "Uninstall keeps application state and project files by default.",
     copyUninstall: "Copy uninstall command",
     containerDeployment: "Container deployment",

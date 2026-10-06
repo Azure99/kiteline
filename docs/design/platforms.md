@@ -75,7 +75,7 @@ agent 启动 tmux 时设置 `TERMINFO_DIRS`，依次为随包现代目录、随�
 
 agent、recorder 和 pane 的启动脚本运行在随包的原生 Windows Node 中。私有 MSYS2 运行时只供 tmux 使用，不修改用户的 `PATH`，也不使用用户 Git 自带的 MSYS；文件与进程等系统能力由 `native/windows/` 的原生 addon 提供。ripgrep 使用随包的原生 Windows 版本。
 
-私有 MSYS2 运行时中的 tmux 应用 `paste.patch` 和 `cygwin-outfd.patch`，后者让 Cygwin 构建重新打开客户端终端后同时更新输出描述符，控制模式的输出依赖它。文件清单见 [`scripts/windows-components.ts`](../../scripts/windows-components.ts)，所属软件包的来源、版本、校验值和源码归档固定在 [`release/agent-windows.json`](../../release/agent-windows.json)；包内不带 pacman 或编译器。用户需要自备 PowerShell 7 和原生 Git。
+私有 MSYS2 运行时中的 tmux 应用 `paste.patch` 和 `cygwin-outfd.patch`，后者让 Cygwin 构建重新打开客户端终端后同时更新输出描述符，控制模式的输出依赖它。文件清单见 [`scripts/windows-components.ts`](../../scripts/windows-components.ts)，所属软件包的来源、版本、校验值和源码归档固定在 [`release/agent-windows.json`](../../release/agent-windows.json)；包内不带 pacman 或编译器。宿主需要原生 Git，以及系统 Windows PowerShell 5.1 Desktop 或 PowerShell 7.4 及以上 7.x 版本。
 
 原生模块提供 Job 对象中的进程管理、私有命名管道、当前用户身份与私有目录、`LockFileEx` 锁、文件属性与两种重命名，以及 TCP 监听表快照。
 
@@ -93,7 +93,7 @@ agent 和 recorder 在 Windows 上启动的每个进程（tmux server 和每次 
 
 - agent 先在独立 Job 中启动空的 tmux server，工作目录为工作区目录；确认 server 可以应答后才让 recorder 创建会话。
 - recorder 用私有的 `script` 提供 PTY，在原始模式下运行 tmux control 客户端。所有 tmux 客户端都带 `-N`，不启动新的 server。
-- pane 中运行原生 Node 的 `shared/dist/terminal/pane.js`，从会话目录的 `pane.json` 读取启动信息，以参数数组和继承的标准输入输出启动 PowerShell 7。普通终端加载用户 profile，快捷方式执行给定命令。PowerShell 退出后将 32 位退出码发布到 tmux pane；启动失败、被信号结束或发布失败时退出码为空。启动脚本忽略 Ctrl-C 和 Ctrl-Break，由 PowerShell 处理。
+- pane 中运行原生 Node 的 `shared/dist/terminal/pane.js`，从会话目录的 `pane.json` 读取启动信息，以参数数组和继承的标准输入输出启动配置的 PowerShell。普通终端加载用户 profile，快捷方式执行给定命令。PowerShell 退出后将 32 位退出码发布到 tmux pane；启动失败、被信号结束或发布失败时退出码为空。启动脚本忽略 Ctrl-C 和 Ctrl-Break，由 PowerShell 处理。
 - `kiteline-agent attach` 在自己的 Job 中通过 bash 的前台作业运行 `script` 和 tmux 附着客户端；它忽略 Ctrl-C 和 Ctrl-Break，让这两个键交给 tmux。
 - 定时任务的启动参数见 [agent 配置文件](../guide/reference.md#agent-配置文件)，进程管理见[定时任务契约](scheduled-tasks.md#执行与停止)。
 
@@ -115,7 +115,7 @@ agent 和 recorder 在 Windows 上启动的每个进程（tmux server 和每次 
 ### 安装与目录
 
 - 程序目录和 `%ProgramData%\kiteline-agent\`（命令入口、安装记录和两个锁文件，见[文件位置](../guide/reference.md#文件位置)）的属主为 Administrators，SYSTEM 和 Administrators 完全控制，项目用户只读和执行。`%ProgramData%\kiteline-agent` 的属主不是 SYSTEM 或 Administrators，或允许其他账户写入时，维护命令拒绝执行。
-- 安装、升级和卸载需要提升权限的 PowerShell 7；其他命令以项目用户身份运行，agent 核对 SID。
+- 安装、升级和卸载需要提升权限的 PowerShell；其他命令以项目用户身份运行，agent 核对 SID。
 - 项目用户必须已有初始化的 Windows 配置文件（登录过一次）。agent 数据目录默认是该用户的 `%LOCALAPPDATA%\kiteline-agent`：为当前用户安装时直接读取；为其他用户安装时从该用户的注册表配置读取，读不到（例如该用户当前没有登录）时安装拒绝，需要用 `--data-dir`（以及可选的 `--run-dir`）指定绝对路径。会话 socket 路径按 MSYS 形式计算长度，运行目录太长时用 `--run-dir` 指定一个较短的目录。
 - 安装、状态和程序目录的路径中不能经过重解析点；ZIP 发布包必须只有一个 `kiteline-agent-<版本>-windows-amd64` 根目录，不含链接，文件名符合 Windows 规则，文件集合与 `SHA256SUMS` 完全一致。
 - 维护在 `%ProgramFiles%\.kiteline-maintenance-<GUID>` 中准备新目录并设置 ACL，然后用目录移动完成替换和回退，与 Linux 的两次重命名相同（见[安装升级与卸载](agent-lifecycle.md#安装升级与卸载)）。

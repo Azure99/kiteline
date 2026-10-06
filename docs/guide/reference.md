@@ -34,13 +34,13 @@ Docker 镜像的 `ENTRYPOINT` 是 `kiteline-server`，默认参数是 `serve`，
 
 ## kiteline-agent 命令
 
-Linux 和 macOS 的命令入口是 `/usr/local/bin/kiteline-agent`；用 `sudo` 执行时写这个绝对路径。Windows 的命令入口是 `%ProgramData%\kiteline-agent\kiteline-agent.ps1`，在 PowerShell 7 中有两种调用方式：
+Linux 和 macOS 的命令入口是 `/usr/local/bin/kiteline-agent`；用 `sudo` 执行时写这个绝对路径。Windows 的命令入口是 `%ProgramData%\kiteline-agent\kiteline-agent.ps1`，在 PowerShell 中有两种调用方式：
 
 ```powershell
 # 短写法
 & "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" doctor
 # 完整写法
-& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" doctor
+& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" doctor
 ```
 
 在真实控制台中直接交互时可用短写法，执行策略须允许运行本地脚本。需要变量捕获、PowerShell 管道或重定向时使用完整写法；短写法的程序输出不进入 PowerShell 对象管道。完整写法中的 `Bypass` 仅作用于当前进程，组策略仍优先。文档中的 `kiteline-agent <子命令>` 在 Windows 上按用途替换为相应写法。
@@ -166,7 +166,9 @@ KITELINE_AGENT_RUN_DIR="/srv/kiteline/run"
 
 ### shell
 
-`shell` 是终端会话和定时任务使用的 Shell，必须是绝对路径。默认值：Linux 和 macOS 取项目用户在系统账户数据库中的登录 Shell，取不到时用 `/bin/sh`；Windows 在 `PATH` 中查找 `pwsh.exe`，找不到时报错 `PowerShell 7 is required; add pwsh.exe to PATH or configure an absolute shell path`。
+`shell` 是终端会话和定时任务使用的 Shell，必须是绝对路径。默认值：Linux 和 macOS 取项目用户在系统账户数据库中的登录 Shell，取不到时用 `/bin/sh`；Windows 优先使用 `PATH` 中的 `pwsh.exe`，只有找不到时才使用系统 Windows PowerShell 5.1。找到但版本不支持或无法运行的 `pwsh.exe` 会报错，显式配置的 Shell 也不会回退。
+
+未配置 `shell` 时，安装或移除 `PATH` 中的 pwsh 会在 agent 重启后改变默认 Shell 和任务语义。需要固定时，在此配置绝对路径。
 
 | 用途     | Linux、macOS        | Windows                                             |
 | -------- | ------------------- | --------------------------------------------------- |
@@ -174,7 +176,7 @@ KITELINE_AGENT_RUN_DIR="/srv/kiteline/run"
 | 快捷方式 | `SHELL -lc COMMAND` | `SHELL -NoLogo -Command COMMAND`                    |
 | 定时任务 | `SHELL -c COMMAND`  | `SHELL -NoProfile -NonInteractive -Command COMMAND` |
 
-Windows 上的 Shell 需要接受这些 PowerShell 参数，`check` 要求它是 PowerShell 7.4 及以上版本。定时任务的执行环境见[执行环境](scheduled-tasks.md#执行环境)。
+Windows 上支持 Windows PowerShell 5.1 Desktop 和 PowerShell 7.4 及以上 7.x 版本，`check` 和 agent 启动时都会核对。定时任务的执行环境见[执行环境](scheduled-tasks.md#执行环境)。
 
 ### limits
 
@@ -399,7 +401,7 @@ fi
 
 `kill-server` 会结束会话中的程序；脚本只在确认 server 已不存在（`no server running`）时才删除会话目录。没有 `tmux.sock` 的会话目录可以直接删除。需要保留某个会话中的程序时，先用 `"$TMUX_BIN" -S <socket> attach-session -t kiteline` 附着进去处理，再执行脚本。
 
-Windows 上以项目用户在 PowerShell 7 中执行，删除运行目录中的会话目录：
+Windows 上以项目用户在 PowerShell 中执行，删除运行目录中的会话目录：
 
 ```powershell
 $RunDir = "$env:LOCALAPPDATA\kiteline-agent\run"   # 替换为实际运行目录

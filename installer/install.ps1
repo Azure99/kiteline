@@ -6,8 +6,11 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-if (-not $IsWindows -or $PSVersionTable.PSVersion -lt [version]'7.4' -or
-    [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -ne 'X64') { throw 'Windows x64 and PowerShell 7.4 or later are required' }
+if ([Environment]::OSVersion.Platform -ne 'Win32NT' -or
+    -not (($PSVersionTable.PSVersion.Major -eq 5 -and $PSVersionTable.PSVersion.Minor -eq 1 -and $PSVersionTable.PSEdition -eq 'Desktop') -or
+        ($PSVersionTable.PSVersion.Major -eq 7 -and $PSVersionTable.PSVersion -ge [version]'7.4')) -or
+    [System.Runtime.InteropServices.RuntimeInformation,mscorlib]::ProcessArchitecture -ne 'X64') { throw 'Windows x64 and Windows PowerShell 5.1 or PowerShell 7.4+ are required' }
+if ($PSVersionTable.PSVersion.Major -eq 5) { Add-Type -AssemblyName System.IO.Compression.FileSystem }
 $origin = [Uri]$Server
 if (-not $origin.IsAbsoluteUri -or $origin.Scheme -notin @('http', 'https') -or
     $origin.UserInfo -or $origin.AbsolutePath -ne '/' -or $origin.Query -or $origin.Fragment) { throw 'An HTTP or HTTPS server origin is required' }
@@ -18,7 +21,7 @@ if ($env:KITELINE_AGENT_HOME -or $env:KITELINE_AGENT_RUN_DIR) { throw 'The conne
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $administrator = [Security.Principal.WindowsPrincipal]::new($identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if ($Mode -eq 'Connect' -and $administrator) { throw 'Run the connection command in a non-elevated PowerShell window as your project user; only installation requests administrator approval' }
-$pwsh = Join-Path $PSHOME 'pwsh.exe'
+$powershell = Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })
 $management = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'kiteline-agent'
 $public = Join-Path $management 'kiteline-agent.ps1'
 $recordFile = Join-Path $management 'installation.json'
@@ -89,7 +92,7 @@ public static class __KITELINE_DOWNLOAD_WAIT__ {
     $command = '$ErrorActionPreference = ''Stop''; & ' + (Quote-Kiteline $Script) + ' ' + (($Arguments | ForEach-Object { Quote-Kiteline $_ }) -join ' ') + '; exit $LASTEXITCODE'
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
     try {
-        $result = ($typeName -as [type])::Run($pwsh, $encoded)
+        $result = ($typeName -as [type])::Run($powershell, $encoded)
         if ($result -ne 0) { throw "Elevated maintenance failed or was cancelled (exit $result); the process has finished" }
     } finally {
         if (($typeName -as [type])::RetainInput) { $script:retainTemporary = $true }
@@ -100,8 +103,8 @@ function Get-KitelineArchive {
     $name = "kiteline-agent-$Version-windows-amd64.zip"
     $archive = Join-Path $temporary $name
     $url = "$Server/downloads/agent/$Version/$name"
-    Invoke-WebRequest -Uri $url -OutFile $archive
-    Invoke-WebRequest -Uri "$url.sha256" -OutFile "$archive.sha256"
+    Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $archive
+    Invoke-WebRequest -UseBasicParsing -Uri "$url.sha256" -OutFile "$archive.sha256"
     $sum = [IO.File]::ReadAllText("$archive.sha256").Trim()
     if ($sum -cnotmatch ('^([a-f0-9]{64})  ' + [Regex]::Escape($name) + '$')) { throw 'Invalid archive checksum record' }
     if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -cne $Matches[1]) { throw 'Archive checksum mismatch' }
@@ -120,7 +123,7 @@ function Expand-KitelineDownload([string]$Archive) {
             $kind = ($entry.ExternalAttributes -shr 16) -band 0xf000
             if (($entry.ExternalAttributes -band 0x400) -or $kind -notin @(0, 0x4000, 0x8000)) { throw 'ZIP links are not allowed' }
         }
-        [IO.Compression.ZipFileExtensions]::ExtractToDirectory($zip, $temporary, $false)
+        [IO.Compression.ZipFileExtensions]::ExtractToDirectory($zip, $temporary)
     } finally { $zip.Dispose() }
     $package = Join-Path $temporary $name
     $release = [IO.File]::ReadAllText((Join-Path $package 'release.json')) | ConvertFrom-Json
@@ -138,18 +141,18 @@ try {
             $null = Get-Command git.exe -CommandType Application
             $package = Expand-KitelineDownload (Get-KitelineArchive)
             $launcher = Join-Path $package 'bin/kiteline-agent.ps1'
-            & $pwsh -NoProfile -ExecutionPolicy Bypass -File $launcher check
+            & $powershell -NoProfile -ExecutionPolicy Bypass -File $launcher check
             Assert-KitelineExit 'Package check'
             Invoke-KitelineElevated $launcher @('install', '--user', $identity.Name)
         }
         $record = [IO.File]::ReadAllText($recordFile) | ConvertFrom-Json
         if ($record.sid -cne $identity.User.Value) { throw 'This installation belongs to another project user' }
-        $installedVersion = & $pwsh -NoProfile -ExecutionPolicy Bypass -File $public --version
+        $installedVersion = & $powershell -NoProfile -ExecutionPolicy Bypass -File $public --version
         Assert-KitelineExit 'Installed version check'
         if ($installedVersion -cne $Version) { throw 'A different version is installed; explicitly upgrade before connecting' }
-        & $pwsh -NoProfile -ExecutionPolicy Bypass -File $public check
+        & $powershell -NoProfile -ExecutionPolicy Bypass -File $public check
         Assert-KitelineExit 'Installed check'
-        $Code | & $pwsh -NoProfile -ExecutionPolicy Bypass -File $public bind --server $Server --if-unbound
+        $Code | & $powershell -NoProfile -ExecutionPolicy Bypass -File $public bind --server $Server --if-unbound
         Assert-KitelineExit 'Binding'
     }
 } finally {
@@ -160,6 +163,6 @@ try {
 }
 if ($Mode -eq 'Connect') {
     Write-Host 'The agent runs here in the foreground. Ctrl-C stops it and ends managed terminal tasks. Background deployment belongs to your external process manager.'
-    & $pwsh -NoProfile -ExecutionPolicy Bypass -File $public run
+    & $powershell -NoProfile -ExecutionPolicy Bypass -File $public run
     Assert-KitelineExit 'Agent run'
 }

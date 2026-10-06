@@ -34,13 +34,13 @@ The Docker image's `ENTRYPOINT` is `kiteline-server`, with default argument `ser
 
 ## kiteline-agent commands
 
-On Linux and macOS, the public launcher is `/usr/local/bin/kiteline-agent`; use this absolute path with `sudo`. On Windows it is `%ProgramData%\kiteline-agent\kiteline-agent.ps1`. PowerShell 7 supports two invocation forms:
+On Linux and macOS, the public launcher is `/usr/local/bin/kiteline-agent`; use this absolute path with `sudo`. On Windows it is `%ProgramData%\kiteline-agent\kiteline-agent.ps1`. PowerShell supports two invocation forms:
 
 ```powershell
 # Short form
 & "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" doctor
 # Full form
-& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" doctor
+& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" doctor
 ```
 
 Use the short form for direct interaction in a real console, with an execution policy that allows local scripts. Use the full form for variable capture, PowerShell pipelines or redirection; program output from the short form does not enter the PowerShell object pipeline. The full form's `Bypass` applies only to that process, and Group Policy still takes precedence. Replace `kiteline-agent <subcommand>` in these guides with the form appropriate to its use on Windows.
@@ -166,7 +166,9 @@ Terminal sessions and scheduled tasks inherit the agent process's environment. R
 
 ### Shell
 
-`shell` is the shell for terminal sessions and scheduled tasks, and must be an absolute path. Linux/macOS default to the project user's login shell in the system account database, falling back to `/bin/sh` if unavailable. Windows searches `PATH` for `pwsh.exe`; if absent it reports `PowerShell 7 is required; add pwsh.exe to PATH or configure an absolute shell path`.
+`shell` is the shell for terminal sessions and scheduled tasks, and must be an absolute path. Linux/macOS default to the project user's login shell in the system account database, falling back to `/bin/sh` if unavailable. Windows prefers `pwsh.exe` from `PATH` and uses system Windows PowerShell 5.1 only when pwsh is absent. An unsupported or broken pwsh reports an error; an explicitly configured shell never falls back.
+
+Without a `shell` setting, installing or removing pwsh from `PATH` changes the default shell and task semantics after the agent restarts. Set an absolute path here to keep the selection fixed.
 
 | Use              | Linux/macOS         | Windows                                             |
 | ---------------- | ------------------- | --------------------------------------------------- |
@@ -174,7 +176,7 @@ Terminal sessions and scheduled tasks inherit the agent process's environment. R
 | Shortcut         | `SHELL -lc COMMAND` | `SHELL -NoLogo -Command COMMAND`                    |
 | Scheduled task   | `SHELL -c COMMAND`  | `SHELL -NoProfile -NonInteractive -Command COMMAND` |
 
-On Windows the shell must accept these PowerShell arguments; `check` requires PowerShell 7.4 or later. See [Execution environment](scheduled-tasks.en.md#execution-environment) for scheduled tasks.
+Windows PowerShell 5.1 Desktop and PowerShell 7.x starting at 7.4 are supported. Both `check` and agent startup verify this. See [Execution environment](scheduled-tasks.en.md#execution-environment) for scheduled tasks.
 
 ### Limit settings
 
@@ -399,7 +401,7 @@ fi
 
 `kill-server` ends the programs in the session. The script removes a session directory only after confirming the server is absent (`no server running`). Session directories without `tmux.sock` can be removed directly. To preserve programs in a session, first attach with `"$TMUX_BIN" -S <socket> attach-session -t kiteline` and handle them, then run the script.
 
-On Windows, run in PowerShell 7 as the project user to delete session directories inside the runtime directory:
+On Windows, run in PowerShell as the project user to delete session directories inside the runtime directory:
 
 ```powershell
 $RunDir = "$env:LOCALAPPDATA\kiteline-agent\run"   # Replace with the actual runtime directory

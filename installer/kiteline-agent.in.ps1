@@ -5,9 +5,13 @@ Set-StrictMode -Version Latest
 
 function Invoke-KitelineAgent {
     param([string[]]$Arguments)
-    if (-not $IsWindows -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -ne 'X64' -or $PSVersionTable.PSVersion -lt [version]'7.4') {
-        throw 'Windows x64 and PowerShell 7.4 or later are required'
+    if ([Environment]::OSVersion.Platform -ne 'Win32NT' -or
+        -not (($PSVersionTable.PSVersion.Major -eq 5 -and $PSVersionTable.PSVersion.Minor -eq 1 -and $PSVersionTable.PSEdition -eq 'Desktop') -or
+            ($PSVersionTable.PSVersion.Major -eq 7 -and $PSVersionTable.PSVersion -ge [version]'7.4')) -or
+        [System.Runtime.InteropServices.RuntimeInformation,mscorlib]::ProcessArchitecture -ne 'X64') {
+        throw 'Windows x64 and Windows PowerShell 5.1 or PowerShell 7.4+ are required'
     }
+    if ($PSVersionTable.PSVersion.Major -eq 5) { Add-Type -AssemblyName System.IO.Compression.FileSystem }
     $program = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'kiteline-agent'
     $management = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'kiteline-agent'
     $root = __KITELINE_PACKAGE_ROOT__
@@ -34,6 +38,19 @@ __KITELINE_NATIVE_SOURCE__
         catch [IO.FileNotFoundException] { return $false }
         catch [IO.DirectoryNotFoundException] { return $false }
     }
+    function Test-KitelineAbsolute([string]$Path) {
+        if ($Path.Length -lt 2) { return $false }
+        if ($Path[0] -in @('\','/')) { return $Path[1] -in @('\','/','?') }
+        return $Path.Length -ge 3 -and $Path[0] -match '^[A-Za-z]$' -and $Path[1] -eq ':' -and $Path[2] -in @('\','/')
+    }
+    function New-KitelineDirectoryAcl([string]$Path, $Acl) {
+        if ($PSVersionTable.PSVersion.Major -eq 5) { [IO.DirectoryInfo]::new($Path).Create($Acl) }
+        else { [IO.FileSystemAclExtensions]::Create([IO.DirectoryInfo]::new($Path), $Acl) }
+    }
+    function Set-KitelineObjectAcl($Item, $Acl) {
+        if ($PSVersionTable.PSVersion.Major -eq 5) { $Item.SetAccessControl($Acl) }
+        else { [IO.FileSystemAclExtensions]::SetAccessControl($Item, $Acl) }
+    }
     function Assert-KitelineNoReparse([string]$Path) {
         for ($item = [IO.Path]::GetFullPath($Path); $item; $item = [IO.Path]::GetDirectoryName($item)) {
             if ((Test-KitelineExists $item) -and ([IO.File]::GetAttributes($item) -band [IO.FileAttributes]::ReparsePoint)) {
@@ -59,7 +76,7 @@ __KITELINE_NATIVE_SOURCE__
                 if ($attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Links are not allowed in this tree: $path" }
                 if ($attributes -band [IO.FileAttributes]::Directory) { $pending.Push($path) }
                 else {
-                    $key = [IO.Path]::GetRelativePath($Directory, $path).Replace('\', '/')
+                    $key = $path.Substring($Directory.TrimEnd('\','/').Length + 1).Replace('\', '/')
                     Assert-KitelineRelative $key
                     $files.Add($key, $path)
                 }
@@ -89,9 +106,9 @@ __KITELINE_NATIVE_SOURCE__
                 throw "Package checksum mismatch: $name"
             }
         }
-        $release = [IO.File]::ReadAllText((Join-Path $Directory 'release.json')) | ConvertFrom-Json -AsHashtable
-        $identity = [IO.File]::ReadAllText((Join-Path $Directory 'dist/native/identity.json')) | ConvertFrom-Json -AsHashtable
-        $application = [IO.File]::ReadAllText((Join-Path $Directory 'shared/dist/version.json')) | ConvertFrom-Json -AsHashtable
+        $release = [IO.File]::ReadAllText((Join-Path $Directory 'release.json')) | ConvertFrom-Json
+        $identity = [IO.File]::ReadAllText((Join-Path $Directory 'dist/native/identity.json')) | ConvertFrom-Json
+        $application = [IO.File]::ReadAllText((Join-Path $Directory 'shared/dist/version.json')) | ConvertFrom-Json
         if ($release.kind -cne 'agent' -or $release.platform -cne 'windows' -or $release.architecture -cne 'x64' -or
             $release.version -cne $application.version -or $release.version -notmatch '^[0-9A-Za-z.+-]+$' -or
             $identity.linkage -cne 'windows-msys' -or $identity.architecture -cne 'x64' -or $identity.node -cne "v$($release.node)") {
@@ -158,12 +175,12 @@ __KITELINE_NATIVE_SOURCE__
     function New-KitelinePrivateDirectory([string]$Path) {
         Assert-KitelineNoReparse ([IO.Path]::GetDirectoryName($Path))
         if (Test-KitelineExists $Path) { throw "Preparation directory already exists: $Path" }
-        [IO.FileSystemAclExtensions]::Create([IO.DirectoryInfo]::new($Path), (New-KitelineAcl $true ''))
+        New-KitelineDirectoryAcl $Path (New-KitelineAcl $true '')
     }
     function Assert-KitelineManagement {
         Assert-KitelineNoReparse $management
         if (-not (Test-KitelineExists $management)) {
-            [IO.FileSystemAclExtensions]::Create([IO.DirectoryInfo]::new($management), (New-KitelineAcl $true ''))
+            New-KitelineDirectoryAcl $management (New-KitelineAcl $true '')
         }
         $acl = Get-Acl -LiteralPath $management
         if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin @('S-1-5-18', 'S-1-5-32-544')) { throw "Untrusted installation directory owner: $management" }
@@ -176,27 +193,27 @@ __KITELINE_NATIVE_SOURCE__
     }
     function Set-KitelineTreeAcl([string]$Path, [string]$Sid) {
         $files = Get-KitelineTree $Path
-        [IO.FileSystemAclExtensions]::SetAccessControl([IO.DirectoryInfo]::new($Path), (New-KitelineAcl $true $Sid))
+        Set-KitelineObjectAcl ([IO.DirectoryInfo]::new($Path)) (New-KitelineAcl $true $Sid)
         foreach ($file in $files.Values) {
-            [IO.FileSystemAclExtensions]::SetAccessControl([IO.FileInfo]::new($file), (New-KitelineAcl $false $Sid))
+            Set-KitelineObjectAcl ([IO.FileInfo]::new($file)) (New-KitelineAcl $false $Sid)
         }
         foreach ($directory in [IO.Directory]::EnumerateDirectories($Path, '*', [IO.SearchOption]::AllDirectories)) {
-            [IO.FileSystemAclExtensions]::SetAccessControl([IO.DirectoryInfo]::new($directory), (New-KitelineAcl $true $Sid))
+            Set-KitelineObjectAcl ([IO.DirectoryInfo]::new($directory)) (New-KitelineAcl $true $Sid)
         }
     }
     function Write-KitelineAtomic([string]$Path, [string]$Contents, [bool]$Overwrite = $true) {
         $pending = "$Path.$([Guid]::NewGuid().ToString('N')).pending"
         try {
             [IO.File]::WriteAllText($pending, $Contents)
-            [IO.File]::Move($pending, $Path, $Overwrite)
+            [__KITELINE_LAUNCHER_TYPE__]::PublishFile($pending, $Path, $Overwrite)
         } finally { if ([IO.File]::Exists($pending)) { [IO.File]::Delete($pending) } }
     }
     function Read-KitelineInstallation {
         if (-not (Test-KitelineExists $recordFile)) { return $null }
-        $value = [IO.File]::ReadAllText($recordFile) | ConvertFrom-Json -AsHashtable
+        $value = [IO.File]::ReadAllText($recordFile) | ConvertFrom-Json
         $null = [Security.Principal.SecurityIdentifier]::new($value.sid)
         foreach ($key in @('home', 'dataDir', 'runDir')) {
-            if (-not [IO.Path]::IsPathFullyQualified($value[$key])) { throw "Invalid installation $key" }
+            if (-not (Test-KitelineAbsolute $value.$key)) { throw "Invalid installation $key" }
         }
         if (-not $value.user) { throw 'Invalid installation user' }
         return $value
@@ -207,7 +224,7 @@ __KITELINE_NATIVE_SOURCE__
         $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey("SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$sid")
         if (-not $key) { throw 'The project user must have an initialized Windows profile' }
         try { $profile = [string]$key.GetValue('ProfileImagePath') } finally { $key.Dispose() }
-        if (-not [IO.Path]::IsPathFullyQualified($profile) -or -not [IO.Directory]::Exists($profile)) { throw 'The recorded project profile is unavailable' }
+        if (-not (Test-KitelineAbsolute $profile) -or -not [IO.Directory]::Exists($profile)) { throw 'The recorded project profile is unavailable' }
         if (-not $Data) {
             if ($sid -eq [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) { $local = [Environment]::GetFolderPath('LocalApplicationData') }
             else {
@@ -215,14 +232,14 @@ __KITELINE_NATIVE_SOURCE__
                 if (-not $userKey) { throw 'Target LocalAppData is unavailable; specify --data-dir and --run-dir explicitly' }
                 try { $local = [string]$userKey.GetValue('Local AppData', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) }
                 finally { $userKey.Dispose() }
-                $local = $local.Replace('%USERPROFILE%', $profile, [StringComparison]::OrdinalIgnoreCase)
+                $local = [Regex]::Replace($local, '%USERPROFILE%', [Text.RegularExpressions.MatchEvaluator]{ param($match) $profile }, [Text.RegularExpressions.RegexOptions]::IgnoreCase)
             }
-            if (-not [IO.Path]::IsPathFullyQualified($local) -or $local.Contains('%')) { throw 'Target LocalAppData is unresolved; specify --data-dir explicitly' }
+            if (-not (Test-KitelineAbsolute $local) -or $local.Contains('%')) { throw 'Target LocalAppData is unresolved; specify --data-dir explicitly' }
             $Data = Join-Path $local 'kiteline-agent'
         }
-        if (-not [IO.Path]::IsPathFullyQualified($Data)) { throw '--data-dir must be absolute' }
+        if (-not (Test-KitelineAbsolute $Data)) { throw '--data-dir must be absolute' }
         if (-not $Run) { $Run = Join-Path $Data 'run' }
-        if (-not [IO.Path]::IsPathFullyQualified($Run)) { throw '--run-dir must be absolute' }
+        if (-not (Test-KitelineAbsolute $Run)) { throw '--run-dir must be absolute' }
         Assert-KitelineNoReparse $Data; Assert-KitelineNoReparse $Run
         return [ordered]@{ user = $User; sid = $sid; home = $profile; dataDir = [IO.Path]::GetFullPath($Data); runDir = [IO.Path]::GetFullPath($Run) }
     }
@@ -328,7 +345,7 @@ import(url.pathToFileURL(process.argv[1]).href).catch(error=>{console.error(erro
                     New-KitelinePrivateDirectory $replacement
                     $sourceFiles = Get-KitelineTree $root
                     foreach ($directory in [IO.Directory]::EnumerateDirectories($root, '*', [IO.SearchOption]::AllDirectories)) {
-                        $null = [IO.Directory]::CreateDirectory((Join-Path $replacement ([IO.Path]::GetRelativePath($root, $directory))))
+                        $null = [IO.Directory]::CreateDirectory((Join-Path $replacement ($directory.Substring($root.TrimEnd('\','/').Length + 1))))
                     }
                     foreach ($name in $sourceFiles.Keys) {
                         Test-KitelineCancellation
