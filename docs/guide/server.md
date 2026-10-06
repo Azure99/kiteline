@@ -24,7 +24,7 @@ server 的环境变量见[参考](reference.md#server-环境变量)。
 1. 创建部署目录，从对应版本的仓库 tag 取得 `compose.yaml`，并把版本写入 `.env`：
 
    ```sh
-   KITELINE_VERSION=0.2.5  # 替换为要部署的版本
+   KITELINE_VERSION=X.Y.Z  # 替换为要部署的版本
    mkdir -p ~/kiteline && cd ~/kiteline
    curl -fsSLO "https://raw.githubusercontent.com/Azure99/kiteline/v$KITELINE_VERSION/deploy/compose.yaml"
    printf 'KITELINE_VERSION=%s\n' "$KITELINE_VERSION" > .env
@@ -47,13 +47,13 @@ server 的环境变量见[参考](reference.md#server-环境变量)。
    curl -fsS http://127.0.0.1:8080/healthz
    ```
 
-   输出类似 `{"status":"ok","version":"0.2.5"}`。
+   响应格式见[健康检查](reference.md#健康检查)。
 
 4. 打开 `http://127.0.0.1:8080`，按[初始化拥有者](#初始化拥有者)设置密码。
 
 `.env` 中还可以设置 `KITELINE_HTTP_BIND`、`KITELINE_HTTP_PORT` 和 `KITELINE_TRUST_PROXY_PROTO`，用法见[局域网访问与端口](#局域网访问与端口)和 [HTTPS 与反向代理](#https-与反向代理)，默认值见[参考](reference.md#server-环境变量)。修改 `.env` 后再次执行 `docker compose up -d`，Compose 会用新设置重建容器。
 
-Compose 默认使用官方 GHCR 镜像，Docker 自动选择主机架构。使用自己构建的镜像时，在 `.env` 中设置 `KITELINE_IMAGE=kiteline-server` 和 `KITELINE_VERSION=0.2.5-amd64`（ARM64 改为 `0.2.5-arm64`）；这与 `pnpm images` 生成的标签一致，见[构建与发布](../development/release.md#构建-linux-包与镜像)。使用 fork 镜像时，把 `KITELINE_IMAGE` 设为它的镜像路径，`KITELINE_VERSION` 设为对应标签。
+Compose 默认使用官方 GHCR 镜像，Docker 自动选择主机架构。使用自己构建的镜像时，在 `.env` 中设置 `KITELINE_IMAGE=kiteline-server` 和 `KITELINE_VERSION=X.Y.Z-amd64`（ARM64 改为 `X.Y.Z-arm64`）；这与 `pnpm images` 生成的标签一致，见[构建与发布](../development/release.md#构建-linux-包与镜像)。使用 fork 镜像时，把 `KITELINE_IMAGE` 设为它的镜像路径，`KITELINE_VERSION` 设为对应标签。
 
 容器内的 server 以 `kiteline` 用户（UID 1000、GID 1000）运行，数据目录 `/var/lib/kiteline` 位于 Compose 卷 `server-data` 中。Compose 项目名是 `kiteline`，所以 Docker 中的实际卷名是 `kiteline_server-data`。`docker compose down` 保留这个卷；`docker compose down -v` 会删除卷和全部 server 数据。把卷换成宿主机目录挂载时，该目录的属主必须是 `1000:1000`。
 
@@ -64,7 +64,7 @@ Compose 默认使用官方 GHCR 镜像，Docker 自动选择主机架构。使�
 1. 安装运行库，下载发布包和校验文件并校验：
 
    ```sh
-   KITELINE_VERSION=0.2.5  # 替换为要部署的版本
+   KITELINE_VERSION=X.Y.Z  # 替换为要部署的版本
    KITELINE_ARCH=amd64     # ARM64 主机改为 arm64
    name="kiteline-server-$KITELINE_VERSION-linux-$KITELINE_ARCH"
    sudo apt-get update && sudo apt-get install -y curl libstdc++6 libatomic1
@@ -107,14 +107,11 @@ Compose 默认使用官方 GHCR 镜像，Docker 自动选择主机架构。使�
 
 ## 初始化拥有者
 
-工作台只有一个账户，即拥有者，登录时只输入密码。
-
-1. 在浏览器打开任一入口，页面显示“设置拥有者”。
-2. 在“初始化凭据”中填入日志里的初始化 token，在“密码”中填入新密码，点击“初始化”。完成后浏览器已登录。
+工作台只有一个账户，即拥有者。在浏览器打开任一入口，用日志中的初始化 token 设置密码。
 
 初始化 token 只在 server 第一次启动时打印一次，有效期有限（见[限额](reference.md#限额)）。重启 server 不会再次打印。token 过期或丢失时，按[重置初始化 token 与密码](#重置初始化-token-与密码)生成新 token。
 
-密码长度按 UTF-8 字节计算（一个汉字通常占 3 字节），长度范围和登录有效期见[限额](reference.md#限额)；登录到期后重新登录。主机名或协议不同的入口需要分别登录：同一台电脑先后从 `http://192.168.1.10:8080` 和 `https://kiteline.example.com` 打开工作台，要登录两次。同一主机和协议的不同端口共用登录，但语言等偏好按入口（含端口）分别保存在浏览器中。
+密码长度按 UTF-8 字节计算（一个汉字通常占 3 字节），长度范围和登录有效期见[限额](reference.md#限额)，登录作用域见[登录与语言](usage.md#登录与语言)。
 
 server 在远程主机上、又只监听 `127.0.0.1` 时，可以先用 SSH 端口转发完成初始化：在自己的电脑上执行 `ssh -L 8080:127.0.0.1:8080 USER@SERVER_HOST`，然后打开 `http://127.0.0.1:8080`。这个地址只有你的电脑能访问；接入设备时要从设备也能访问的入口打开工作台，见[用网页命令接入](devices.md#用网页命令接入)。
 
@@ -217,7 +214,7 @@ Caddy 自动申请证书、原样转发 `Host`、用实际协议覆盖 `X-Forwar
 
 ### 多个入口
 
-同一个 server 可以同时有多个入口，例如内网的 `http://192.168.1.10:8080` 和公网的 `https://kiteline.example.com`。给反向代理增加多个站点即可，server 不需要登记入口。登录范围见[初始化拥有者](#初始化拥有者)；设备只连接它绑定时使用的入口。HTTP 到 HTTPS 的重定向只对浏览器有效，设备绑定时要直接使用 `https://` 地址。
+同一个 server 可以同时有多个入口，例如内网的 `http://192.168.1.10:8080` 和公网的 `https://kiteline.example.com`。给反向代理增加多个站点即可，server 不需要登记入口。登录范围见[登录与语言](usage.md#登录与语言)；设备只连接它绑定时使用的入口。HTTP 到 HTTPS 的重定向只对浏览器有效，设备绑定时要直接使用 `https://` 地址。
 
 ### 常见错误
 
@@ -298,7 +295,7 @@ sudo systemctl start kiteline-server
 Docker 部署在部署目录中执行下面的命令。其中的 `curl` 用新版本覆盖 `compose.yaml`；如果你修改过它（例如改用宿主机目录挂载），改为先下载到 `compose.yaml.new`（`curl -fsSL -o compose.yaml.new …`），把修改合并进去后替换 `compose.yaml`，再执行其余命令。直接覆盖时修改会丢失，例如 server 改用命名卷 `server-data` 启动，读不到原来的数据。
 
 ```sh
-KITELINE_VERSION=0.2.6  # 替换为新版本
+KITELINE_VERSION=X.Y.Z  # 替换为新版本
 curl -fsSLO "https://raw.githubusercontent.com/Azure99/kiteline/v$KITELINE_VERSION/deploy/compose.yaml"
 sed -i "s/^KITELINE_VERSION=.*/KITELINE_VERSION=$KITELINE_VERSION/" .env
 docker compose pull
@@ -308,7 +305,7 @@ docker compose up -d
 原生：
 
 ```sh
-KITELINE_VERSION=0.2.6  # 替换为新版本
+KITELINE_VERSION=X.Y.Z  # 替换为新版本
 KITELINE_ARCH=amd64     # ARM64 主机改为 arm64
 name="kiteline-server-$KITELINE_VERSION-linux-$KITELINE_ARCH"
 curl -fLO "https://github.com/Azure99/kiteline/releases/download/v$KITELINE_VERSION/$name.tar.gz"

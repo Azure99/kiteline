@@ -88,9 +88,7 @@ export LANG=en_US.UTF-8  # CentOS 7、macOS
 
 ## 用网页命令接入
 
-1. 在工作台的设备列表点击“绑定设备”，在“设备平台”中选择设备的系统。对话框生成一次性绑定码，并显示它的到期时间（有效期见[限额](reference.md#限额)）。
-2. 点击“复制接入命令”。
-3. 在设备上以项目用户打开终端，粘贴并执行命令。Windows 上打开普通（非管理员）的 PowerShell 7 窗口执行；在管理员窗口中执行会被拒绝。
+在工作台的“绑定设备”中选择设备的系统，复制接入命令，在设备上以项目用户执行。Windows 上使用普通（非管理员）的 PowerShell 7 窗口；在管理员窗口中执行会被拒绝。命令包含一次性绑定码，应在到期前执行（有效期见[限额](reference.md#限额)）。
 
 命令中的 server 地址就是浏览器当前使用的入口，设备必须能访问这个地址。如果你通过 `127.0.0.1`、`localhost` 或 SSH 端口转发打开工作台，先改用设备能访问的地址打开工作台，再生成命令。用 HTTPS 入口生成的命令只通过 HTTPS 下载。
 
@@ -100,8 +98,6 @@ export LANG=en_US.UTF-8  # CentOS 7、macOS
 
 - Linux 和 macOS：用 sudo 安装到 `/opt/kiteline-agent`，命令入口为 `/usr/local/bin/kiteline-agent`。sudo 会询问密码；以 root 执行时直接安装。
 - Windows：安装前弹出 UAC 提示，确认后由一个新的管理员 PowerShell 窗口安装到 `C:\Program Files\kiteline-agent`，命令入口为 `C:\ProgramData\kiteline-agent\kiteline-agent.ps1`；绑定和运行仍在原窗口中进行。命令只为本次进程临时放宽 PowerShell 执行策略。
-
-绑定成功后，对话框显示“设备已在线”，点击“查看设备”进入设备页。agent 在终端输出 `Agent <设备 ID> connecting to <server 地址>`。
 
 agent 在前台运行时，按 Ctrl-C 会停止 agent，并结束它管理的终端会话和正在执行的定时任务运行；Linux 和 macOS 上关闭终端也是如此。Windows 上直接关闭 PowerShell 窗口或注销会强制结束 agent，不做清理：正在执行的定时任务运行在下次启动时需要核查（见 [agent 重启后的核查](scheduled-tasks.md#agent-重启后的核查)），留下的会话目录按[清理遗留的终端会话](reference.md#清理遗留的终端会话)删除。以后再次启动，以项目用户执行：
 
@@ -113,7 +109,7 @@ kiteline-agent run
 & "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" run
 ```
 
-Windows 上的这种写法仅为当前进程设置 `Bypass`，组策略仍优先，本文的 PowerShell 命令都这样写；较短的写法见 [kiteline-agent 命令](reference.md#kiteline-agent-命令)。
+Windows 调用方式和执行策略前提见 [kiteline-agent 命令](reference.md#kiteline-agent-命令)。
 
 再次启动不需要重新绑定。要让 agent 在关闭终端或注销后继续运行，见[后台运行](#后台运行)。
 
@@ -128,7 +124,7 @@ Windows 上的这种写法仅为当前进程设置 `Bypass`，组策略仍优先
 
 ### 仅绑定命令
 
-展开对话框中的“已安装，仅绑定”，点击“复制绑定命令”，得到仅绑定命令。它先执行 `check`，再用绑定码绑定，不安装也不启动 agent。用于已经手工安装、或重新绑定的设备；绑定后用上面的启动命令运行 agent。设备已有绑定时，这条命令同样提示 `This installation is already bound` 并停止。
+绑定对话框也提供仅绑定命令，先执行 `check`，再用绑定码绑定，不安装也不启动 agent。用于已经手工安装、或重新绑定的设备；绑定后用上面的启动命令运行 agent。设备已有绑定时，这条命令同样提示 `This installation is already bound` 并停止。
 
 ## 手工安装
 
@@ -142,7 +138,7 @@ agent 版本必须与 server 版本相同，否则设备无法连接。用 `curl
 
 ```sh
 KITELINE_SERVER=https://YOUR_SERVER  # 替换为工作台地址
-KITELINE_VERSION=0.2.5               # 替换为 server 的版本
+KITELINE_VERSION=X.Y.Z               # 替换为 server 的版本
 KITELINE_PLATFORM=linux              # macOS 改为 macos
 KITELINE_ARCH=amd64                  # ARM64 和 Apple 芯片改为 arm64
 name="kiteline-agent-$KITELINE_VERSION-$KITELINE_PLATFORM-$KITELINE_ARCH"
@@ -171,7 +167,7 @@ sudo "./$name/bin/kiteline-agent" install --user "$(id -un)"
 
 ```powershell
 $server = 'https://YOUR_SERVER'  # 替换为工作台地址
-$version = '0.2.5'               # 替换为 server 的版本
+$version = 'X.Y.Z'               # 替换为 server 的版本
 $package = "kiteline-agent-$version-windows-amd64"
 Set-Location "$HOME\Downloads"
 Invoke-WebRequest "$server/downloads/agent/$version/$package.zip" -OutFile "$package.zip"
@@ -186,9 +182,9 @@ whoami
 `whoami` 输出项目用户的账户名，例如 `desktop-1234\alice`。然后以管理员身份打开 PowerShell 7（右键“以管理员身份运行”），进入同一个下载目录并安装，`--user` 填上面的账户名：
 
 ```powershell
-# 把 0.2.5 换成上一步下载的版本
+# 把 X.Y.Z 换成上一步下载的版本
 Set-Location 'C:\Users\PROJECT_USER\Downloads'
-& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File '.\kiteline-agent-0.2.5-windows-amd64\bin\kiteline-agent.ps1' install --user 'COMPUTER\PROJECT_USER'
+& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File '.\kiteline-agent-X.Y.Z-windows-amd64\bin\kiteline-agent.ps1' install --user 'COMPUTER\PROJECT_USER'
 ```
 
 安装完成后关闭管理员窗口，回到项目用户的窗口，执行网页上的[仅绑定命令](#仅绑定命令)，再用[用网页命令接入](#用网页命令接入)中的 Windows 启动命令运行 agent。
@@ -197,7 +193,7 @@ agent 数据目录默认为项目用户的 `%LOCALAPPDATA%\kiteline-agent`，运
 
 ## 添加工作区
 
-设备在线后，在设备页的工作区列表点击“添加”，在“添加工作区”对话框中浏览到项目目录或输入绝对路径，点击“选择此目录”。对话框的其他选项和工作区的管理见[设备与工作区](usage.md#设备与工作区)，之后可以在网页或设备本机创建终端会话，见[终端](usage.md#终端)。
+设备在线后，按[设备与工作区](usage.md#设备与工作区)登记项目目录，即可在网页或设备本机创建[终端会话](usage.md#终端)。
 
 ## 后台运行
 
@@ -396,7 +392,7 @@ services:
       context: .
       args:
         KITELINE_SERVER: https://YOUR_SERVER
-        KITELINE_VERSION: "0.2.5"
+        KITELINE_VERSION: "X.Y.Z"
     init: true
     restart: unless-stopped
     stop_grace_period: 45s
@@ -445,9 +441,7 @@ agent 的版本必须与 server 相同。先[升级 server](server.md#升级-ser
 
 ### 用网页命令升级
 
-1. 在工作台进入设备页，在“设备操作”菜单中点击“升级 agent”（版本不匹配时，提示中的“查看升级命令”打开同一个对话框）。
-2. 选择设备平台，点击“复制升级命令”。
-3. 在设备上的交互式终端或 SSH 会话中执行。
+在设备页的“升级 agent”中选择平台，复制升级命令，到设备上的交互式终端或 SSH 会话执行。
 
 Linux 和 macOS 上，命令从当前入口下载与 server 版本相同的发布包并校验，然后用 sudo 执行升级。Windows 上，在 PowerShell 7 中执行命令，确认 UAC 提示后，升级在新的管理员窗口中进行。升级前会提示 `Type yes to continue:`，输入 `yes` 继续。命令中写有生成时的 server 版本；server 版本之后又变化时，命令提示 `The server release changed` 并停止，重新在网页复制即可。
 
@@ -458,12 +452,12 @@ Linux 和 macOS 上，命令从当前入口下载与 server 版本相同的发�
 把新版本的发布包和对应的 `.sha256` 文件下载到同一目录（下载方法同[手工安装](#手工安装)），然后执行：
 
 ```sh
-sudo /usr/local/bin/kiteline-agent upgrade --archive "$PWD/kiteline-agent-0.2.6-linux-amd64.tar.gz"
+sudo /usr/local/bin/kiteline-agent upgrade --archive "$PWD/kiteline-agent-X.Y.Z-linux-amd64.tar.gz"
 ```
 
 ```powershell
 # 在管理员 PowerShell 7 中执行
-& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" upgrade --archive 'C:\Users\PROJECT_USER\Downloads\kiteline-agent-0.2.6-windows-amd64.zip'
+& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" upgrade --archive 'C:\Users\PROJECT_USER\Downloads\kiteline-agent-X.Y.Z-windows-amd64.zip'
 ```
 
 版本号和文件名按实际下载的发布包修改。加 `--yes` 跳过确认。

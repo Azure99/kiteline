@@ -16,7 +16,7 @@
 | 定时任务页 | 左侧列表，右侧详情                                                     | 列表、任务、运行详情逐层进入                                   |
 | 对话框     | 居中模态框，最宽 560 像素                                              | 贴底全宽面板，底部留出安全区                                   |
 
-工具导航固定为终端、文件、Git 三项（`web/src/terminal/workspace-view.tsx`），定时任务和开发服务访问是顶栏入口，不是工作区工具。终端面板（`terminal.expandDock`、`terminal.collapseDock`）只在桌面的文件和 Git 视图中出现，是一个单会话终端，“在终端展开”（`terminal.expandTerminal`）切到终端工具中该会话所在的组。分组和分屏的操作见[终端](../guide/usage.md#终端)，终端尺寸的计算见[尺寸](terminal.md#尺寸)。
+工具导航固定为终端、文件、Git 三项（`web/src/terminal/workspace-view.tsx`），定时任务和开发服务访问是顶栏入口，不是工作区工具。终端面板（`terminal.expandDock`、`terminal.collapseDock`）只在桌面的文件和 Git 视图中出现，是一个单会话终端，“在终端展开”（`terminal.expandTerminal`）切到终端工具中该会话所在的组。终端尺寸的计算见[尺寸](terminal.md#尺寸)。
 
 文件和 Git 视图通过 `web/src/components/tool-layout.tsx` 把标题行和侧栏放进工具的固定区域；手机上侧栏内容直接显示在主区域中。终端专注模式会收起顶栏、设备侧栏和工具导航，见[输入与焦点](#输入与焦点)。
 

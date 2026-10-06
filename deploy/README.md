@@ -12,6 +12,6 @@
 
 每个 agent 发布包只含对应平台的一个示例，位于包内和程序目录的 `deploy/` 中（安装后的路径见[文件位置](../docs/guide/reference.md#文件位置)）。
 
-server 发布包和镜像不含本目录的文件。`compose.yaml` 和 server 的 unit 从与部署版本相同的仓库 tag 下载，例如 `https://raw.githubusercontent.com/Azure99/kiteline/v0.2.5/deploy/compose.yaml`。
+server 发布包和镜像不含本目录的文件。`compose.yaml` 和 server 的 unit 从与部署版本相同的仓库 tag 下载，命令见[部署 server](../docs/guide/server.md)。
 
 示例中的 `YOUR_PROJECT_USER`、`PROJECT_USER` 等占位符需要替换为实际值。agent 的程序目录在升级时整体替换，修改示例前先把它复制到程序目录之外。

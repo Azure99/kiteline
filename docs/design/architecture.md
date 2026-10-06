@@ -204,9 +204,9 @@ agent 的出站代理规则见[出站代理与证书](../guide/devices.md#出站
 ### 添加 RPC 方法
 
 1. 在 `shared/src/protocol/rpc.ts` 的 `RpcMethods` 中加入方法和类型，在 `rpcMutates` 中标明是否为写操作。Git 写方法还要加入 `gitWriteMethods`（决定 `gitWriteTimeout`、完成后立即发送的 `workspace.changed` 和工作台的 Git 操作类型），并在 `agent/src/git/rpc.ts` 中通过 `GitWriteQueue.run` 执行。
-2. 定时任务在 `agent/src/tasks/rpc.ts` 的 `scheduleMethods` 和 `scheduleRpc` 中加入方法；Git 在 `agent/src/git/rpc.ts` 的 `gitRpc` 中加入分支；它们由 `isScheduleMethod`、`isGitMethod` 分流。其他方法在 `agent/src/agent.ts` 的 `perform` 中加入分支。各分支校验参数并保留 `never` 穷尽检查；server 只检查参数是对象。
+2. 定时任务在 `agent/src/tasks/rpc.ts` 的 `scheduleRpc` 中加入方法；Git 在 `agent/src/git/rpc.ts` 的 `gitRpc` 中加入分支；它们由 `isScheduleMethod`、`isGitMethod` 分流。其他方法在 `agent/src/agent.ts` 的 `perform` 中加入分支。各分支校验参数并保留 `never` 穷尽检查；server 只检查参数是对象。
 3. 需要特殊期限时，修改 `agent.ts` 的 `unboundedMethods` 或 `specializedTimeouts`。
-4. 本机 IPC 通过 `localSessionMethods` 和 `isScheduleMethod` 选择允许的方法；需要增加本机调用时修改对应集合。
+4. 本机 IPC 通过 `localSessionMethods` 和 `isScheduleMethod` 选择允许的方法。
 5. 方法改变工作区内容时，确保完成后发送 `workspace.changed`（`dispatch` 对文件创建、改名和 Git 写方法自动发送）。
 6. 工作台用 `rpc()` 调用，按[结果语义](protocol.md#结果语义)处理失败和结果未确认。
 7. 在 `agent/test/` 和 `web/test/rpc.typecheck.ts` 中补测试，更新 [RPC](protocol.md#rpc) 一节和负责该工具的 design 文档。

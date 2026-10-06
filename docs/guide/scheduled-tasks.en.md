@@ -6,36 +6,17 @@ Scheduled tasks are stored on a device and executed by its agent. They run nonin
 
 ## Create and edit tasks
 
-Open “Scheduled Tasks” from the top bar, home page or device details. Tasks are listed by device. The device selector at the top can show one device or “All devices”. For an offline device, the list shows the latest summary saved by the server (“Last observed {{time}}. Current state is unavailable.”). Tasks cannot be edited or run while the device is offline.
+Create tasks in “Scheduled Tasks”. The owning device cannot change after saving. For an offline device, the list contains only the latest summary saved by the server; tasks cannot be edited or run.
 
-Click “New task” to open the form:
-
-| Field                | Description                                                                                            |
-| -------------------- | ------------------------------------------------------------------------------------------------------ |
-| “Device”             | The device that owns the task; cannot change after saving                                              |
-| “Name”               | Required                                                                                               |
-| “Schedule”           | “Once”, “Every hour”, “Daily”, “Weekly” or “Cron (five fields)”; see [Schedule rules](#schedule-rules) |
-| “Command”            | Required; command text passed to the shell                                                             |
-| “Working directory”  | Defaults to “Device HOME” when empty; “Choose workspace directory” fills in a workspace's path         |
-| “Schedule time zone” | Defaults to “Device time zone” when empty                                                              |
-
-“Working directory” and “Schedule time zone” are inside the collapsed “Working directory and schedule time zone” section. Common intervals are converted to Cron expressions in the schedule time zone:
-
-| Interval     | Meaning                                        | Expression  |
-| ------------ | ---------------------------------------------- | ----------- |
-| “Every hour” | Minute 0 of every hour                         | `0 * * * *` |
-| “Daily”      | The specified “Time” each day                  | `M H * * *` |
-| “Weekly”     | The specified “Time” on the selected “Weekday” | `M H * * D` |
-
-“Next runs · browser local” below the form shows the next 3 run times calculated by the device, displayed in the browser's time zone with the offset. Preview and save use the same rules: if the preview reports an error, saving will also fail.
+Common intervals are converted to Cron expressions in the schedule time zone; see [Schedule rules](#schedule-rules). Previewed run times use the browser's time zone, which may differ from the schedule time zone.
 
 The working directory must already exist on the device. It is checked when creating a task or changing that directory. If it is later deleted or moved, the run fails with “Command could not start”.
 
 ### Edit and delete
 
-Click “Edit task” in task details. Saving submits only changed fields. An active run keeps the command and working directory it started with; edits take effect on the next run.
+Saving submits only changed fields. An active run keeps the command and working directory it started with; edits take effect on the next run.
 
-If another browser or the command line changes the task after you open the form, saving fails with “The task changed elsewhere. Read the current definition before saving your edits.” Your input is kept. Click “Read current definition” to view “Current definition”, check it, and save again. If a connection interruption leaves the save result unclear, the form shows “Task ID” and a “Check result” button. Use it to check whether the task was saved instead of submitting again.
+If another client changes the task after you open the form, saving fails and keeps your input. Read and check the current definition before saving again. If a connection interruption leaves the save result unclear, query the task ID provided in the form instead of submitting again.
 
 Click “Delete” and confirm to delete the task definition and its retained run records. Files written by the command remain. A task cannot be deleted while a run is unfinished; stop that run first.
 
@@ -81,47 +62,40 @@ Exit code 0 produces “Succeeded”. A nonzero exit produces “Failed” with 
 
 ## Run and stop
 
-- **Run now.** Click “Run now” in task details. Once the device accepts it, the run details open. A successful request means only that the run was accepted. Closing the browser or CLI does not stop it.
+- **Run now.** A successful request means only that the run was accepted. Closing the browser or CLI does not stop it.
 - **Concurrency.** Each task can have only one run at a time, and each device has a simultaneous-run limit (see [Limits](reference.en.md#limits)). If these conditions are not met, “Run now” reports “The resource is busy.” Scheduled runs are not queued; they are recorded as “Skipped” with “Previous run was still active” or “Device run capacity was reached”.
 - **Pause and resume.** “Pause schedule” stops future scheduled runs without affecting an active run. “Run now” remains available while paused. “Resume schedule” recalculates the next occurrence from the current time.
-- **Stop.** In run details, click “Stop run” and confirm “Stop this run? Changes already made by the command will remain.” Linux and macOS send `SIGTERM` to the entire process group, then `SIGKILL` if it has not ended after the stop grace period (see [Limits](reference.en.md#limits)). Windows immediately terminates the whole Job. The run moves through “Stopping” to “Stopped”, with “Stop requested”.
+- **Stop.** Stopping a run does not roll back changes already made by the command. Linux and macOS send `SIGTERM` to the entire process group, then `SIGKILL` if it has not ended after the stop grace period (see [Limits](reference.en.md#limits)). Windows immediately terminates the whole Job.
 - **Normal agent shutdown.** When the agent stops through Ctrl-C, a service manager or before an upgrade, active runs stop in the same way and are recorded as “Stopped” with “Agent stopped”. Definitions and records remain, and scheduling continues when the agent starts again.
 - **No automatic retries.** Failed or skipped runs are not retried. The next scheduled occurrence proceeds normally.
 
-If the result of “Run now” is unclear, the page shows “Run ID” and a “Check result” button. First use it to check whether the run started, then decide whether to run again. See [Result semantics (Chinese)](../design/protocol.md#结果语义).
+If the result of “Run now” is unclear, first query the run ID provided on the page to check whether it started, then decide whether to run again. See [Result semantics (Chinese)](../design/protocol.md#结果语义).
 
 ## Run records and output
 
-“Recent runs” in task details lists records newest first. Run details show:
-
-- Status, trigger (“Manual” or “Scheduled”), reason, “Exit code” or “Signal”;
-- “Accepted”, “Started” and “Ended” times;
-- “Command and environment”: the command, working directory and PID used for this run;
-- stdout and stderr separately, without a shared chronological order between them.
-
-While run details are visible, the web app reads new output every 2 seconds. Reading earlier output does not pull you back to the bottom.
+stdout and stderr are stored separately, without a shared chronological order between them.
 
 Output and records have retention limits; see [Limits](reference.en.md#limits) for values:
 
-- Each run has a combined stdout and stderr limit. Excess output is not saved, the command keeps running, and details show “Output is incomplete or exceeds retention limits.”
+- Each run has a combined stdout and stderr limit. Excess output is not saved and the command keeps running.
 - Each task retains only its latest `taskHistoryRuns` finished records, including “Skipped” records.
 - Total output on a device is limited. Before a new run, if remaining capacity is less than one run's output allowance, the agent deletes finished records containing output, oldest first, until enough space is available. If deleting all eligible records would still be insufficient, it deletes none and truncates the new run's output earlier. Active runs and runs needing review are not deleted.
 
-Records are stored under `tasks/` in the agent data directory (see [File locations](reference.en.md#file-locations)), survive restarts and upgrades, and are deleted by `uninstall --purge-state`. Opening a cleared record shows “Run not found or already cleared. Check the previous execution before running again.” A missing record does not prove the command never ran. Files written by the command remain where it wrote them; files inside a workspace can be viewed in “Files”.
+Records are stored under `tasks/` in the agent data directory (see [File locations](reference.en.md#file-locations)), survive restarts and upgrades, and are deleted by `uninstall --purge-state`. A missing record does not prove the command never ran; check the previous execution before running again. Files written by the command remain where it wrote them.
 
 ## Review after an agent restart
 
 If the agent ends unexpectedly (killed process, crash or power loss), active runs have no trustworthy final result. At its next startup, the agent:
 
 1. Marks those runs “Unknown”, with “Previous result is unconfirmed”;
-2. Pauses their tasks, showing “Needs review” and “Check the previous process. Confirming the review keeps this task paused.”;
+2. Pauses their tasks and marks them as needing review;
 3. Rejects scheduled runs and “Run now” for each task until review is complete. The previous run continues to occupy a device run slot.
 
 To review:
 
 1. Open the run ID in the notice and inspect the command and PID in “Command and environment”. On Linux and macOS, the command runs in a separate process group and may survive the agent. Check the PID and command to determine whether it is still running, and stop it yourself if needed. On Windows, its Job and all processes end with the agent.
 2. Check any effects the command already produced, such as partially written files.
-3. Click “Confirm review” and confirm “I have checked run … and confirmed that no previous process remains. Continue?” The task stays paused and the record remains “Unknown”.
+3. Once you have confirmed that no previous process remains, use “Confirm review”. The task stays paused and the record remains “Unknown”.
 4. Click “Resume schedule” when you want scheduling to continue.
 
 You can also delete a task that needs review. Its deletion confirmation includes the same review confirmation.
@@ -187,4 +161,4 @@ Exit code 0 from `run` or `status` does not mean the command succeeded; inspect 
 
 ### Let an AI CLI manage tasks
 
-“Agent prompt” on the “Scheduled Tasks” page provides a prompt template. Choose “中文” or “English”, then click “Copy prompt”. Give it and your request to an AI CLI in the device terminal. It will read `kiteline-agent schedule --help` first, then create and manage tasks through the command line.
+Give the scheduled-task page's prompt template and your request to an AI CLI in the device terminal. Have it read `kiteline-agent schedule --help` before creating and managing tasks through the command line.

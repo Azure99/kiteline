@@ -18,7 +18,29 @@
 - 构建结果写入仓库的 `dist/releases/`，每个压缩包旁有一个同名的 `.sha256` 文件。
 - server 包在 `downloads/` 中携带 agent 发布包，网页生成的接入命令和升级命令从这里下载。所以先构建 agent 包，再构建 server 包，最后构建镜像。
 - `pnpm package` 和 `pnpm images` 只在 Git 工作树干净（没有改动，也没有未跟踪文件）时运行，并把当前提交写入 `release.json` 的 `sourceCommit`。组装 server 包时，每个 agent 包的提交、版本、平台、架构和 Node 版本都必须与当前源码一致；构建镜像时对 server 包做同样的检查。因此任何新提交（包括只改文档的提交）之后，都要重新构建全部发布包。
-- Windows 和 macOS 的原生组件先构建成组件目录（含 `runtime/` 和 `native/`），再由 `pnpm package` 打进发布包。组件目录按构建输入的 SHA-256 检查，输入不变时可以跨提交复用。Linux 的原生组件在每次组包时于 Docker 中重新构建，未变化的步骤直接使用 Docker 层缓存。
+- Windows 和 macOS 的原生组件先构建成组件目录（含 `runtime/` 和 `native/`），再由 `pnpm package` 打进发布包。组件目录按构建输入的 SHA-256 检查，输入不变时可以跨提交复用。Windows 将整个 `release/inputs.json` 计入摘要，macOS 只计入实际消费的字段；完整输入以 [Windows 构建脚本](../../scripts/build-windows-components.mjs)和 [macOS 构建脚本](../../scripts/build-macos-components.mjs)为准。输入变化后，重新执行对应的[Windows](#构建-windows-组件)或[macOS](#构建-macos-组件)构建步骤。Linux 的原生组件在每次组包时于 Docker 中重新构建，未变化的步骤直接使用 Docker 层缓存。
+
+## 发布流程
+
+1. 在 PR 中把 `shared/src/version.json` 的 `version` 设为新版本，同时更新 `README.md` 和 `README.en.md` 快速开始中的示例版本，合并到 main。
+2. 在 main 的该提交上建立并推送 tag。tag 必须是 `vX.Y.Z` 形式，与该提交的 `version.json` 一致，且提交属于 main 的历史。以下命令在同一个 Shell 中执行：
+
+   ```sh
+   KITELINE_VERSION=X.Y.Z # 替换为已合并到 origin/main 的目标版本
+   git fetch origin
+   git tag "v$KITELINE_VERSION" origin/main
+   git push origin "v$KITELINE_VERSION"
+   ```
+
+3. 等待 tag 触发的 `CI` 运行完成。成功后 Release 草稿包含全部附件和 `delivery.json`，GHCR 上有 `candidate-vX.Y.Z-<运行 ID>` 镜像。
+4. 用草稿中的发布包和候选镜像，按[手工验证](setup.md#手工验证)在受影响的目标环境中测试。发现问题时修复并提交，然后按[失败后的处理](#失败后的处理)重新生成候选（tag 需要指向新的提交）。
+5. 最终候选验证完成后，在 Release 草稿现有的 Source 和 Build 信息下填写本版本的变更说明，至少列出 `deploy/` 文件、环境变量、配置的变化，以及升级需要的手工步骤。重新生成候选会重置草稿正文；重新验证后再填写说明。
+6. 在 Actions 页面对 main 运行 `CI`，`mode` 选 `publish`，`tag` 填本次的 `vX.Y.Z`。运行成功即完成发布。
+7. 确认 Release 已公开，并检查镜像：
+
+   ```sh
+   docker buildx imagetools inspect "ghcr.io/azure99/kiteline:$KITELINE_VERSION"
+   ```
 
 ## 构建机准备
 
@@ -104,9 +126,10 @@ pnpm package server amd64|arm64 [--agent-target=TARGET,...]
 把镜像复制到另一台机器：
 
 ```sh
-docker save --output kiteline-server-0.2.5-amd64.tar kiteline-server:0.2.5-amd64
-# 在目标机器上：
-docker load --input kiteline-server-0.2.5-amd64.tar
+KITELINE_VERSION=$(node -p "require('./shared/src/version.json').version")
+docker save --output "kiteline-server-$KITELINE_VERSION-amd64.tar" "kiteline-server:$KITELINE_VERSION-amd64"
+# 在目标机器上，将 X.Y.Z 换成归档版本：
+docker load --input kiteline-server-X.Y.Z-amd64.tar
 ```
 
 用 Compose 运行本地镜像时，使用 `deploy/compose.yaml`，设置 `KITELINE_IMAGE=kiteline-server` 和 `KITELINE_VERSION=<版本>-<架构>`，见[使用 Docker 部署](../guide/server.md#使用-docker-部署)。
@@ -162,10 +185,6 @@ Windows 组件目录包含 Node、Windows 原生 addon `kiteline-windows.node`�
 
 最终 ZIP 不含符号链接（依赖以平铺的 `node_modules` 安装），解压和安装不需要开启 Windows 开发者模式。
 
-### 何时重建
-
-Windows 组件的输入记录由 [`scripts/build-windows-components.mjs`](../../scripts/build-windows-components.mjs) 的 `inputs()` 和 `sourceFiles` 定义，其中 `release/inputs.json` 按整个文件计入摘要。输入记录变化后，重新执行 `prepare`、`addon`、`tmux` 和 `assemble`。
-
 ## 构建 macOS 组件
 
 macOS 组件目录包含官方 Node 和原生组件（见[产物结构](#产物结构)），tmux 静态链接 libevent，最低系统版本为 `release/agent-macos.json` 的 `deploymentTarget`（14.0）。构建检查每个 Mach-O 文件的架构和最低系统版本，并要求它只依赖 `/usr/lib` 或 `/System/Library` 下的系统库。
@@ -187,15 +206,11 @@ pnpm package agent "macos-$ARCH" --macos-components="/var/tmp/kiteline-mac-compo
 
 把 `dist/releases/kiteline-agent-<版本>-macos-<架构>.tar.gz` 和对应的 `.sha256` 复制到 Linux 构建机的 `dist/releases/`，用于组装 server。
 
-### 何时重建
-
-macOS 组件的输入记录由 [`scripts/build-macos-components.mjs`](../../scripts/build-macos-components.mjs) 的 `sharedInputs()`、`inputs()` 和 `sourceFiles` 定义。`release/inputs.json` 只计入实际消费的字段，修改其他字段不会使组件过期；输入记录变化后重新执行 `prepare` 和 `build`。
-
 ## 完整发布构建
 
 完整发布从同一个干净提交构建五个 agent 包，再组装两个 server 包和两个镜像：
 
-1. 按[构建 Windows 组件](#构建-windows-组件)准备 `/var/tmp/kiteline-win-components`；构建输入未变时可以复用已有的组件目录。
+1. 按[构建 Windows 组件](#构建-windows-组件)准备 `/var/tmp/kiteline-win-components`。
 2. 在两台 Mac 上按[构建 macOS 组件](#构建-macos-组件)构建两个 macOS 包，复制到 Linux 构建机的 `dist/releases/`。
 3. 在 Linux 构建机的仓库根目录执行：
 
@@ -232,7 +247,7 @@ arm64 的命令可以在注册了 QEMU 的 x64 构建机上运行，但模拟执
 完整发布构建之后，在 Linux amd64 构建机的仓库根目录验证本机构建的包：
 
 ```sh
-KITELINE_VERSION=0.2.5 # 替换为实际版本
+KITELINE_VERSION=$(node -p "require('./shared/src/version.json').version")
 CHECK=$(mktemp -d /var/tmp/kiteline-check-XXXXXX)
 tar -xzf "dist/releases/kiteline-agent-$KITELINE_VERSION-linux-amd64.tar.gz" -C "$CHECK"
 tar -xzf "dist/releases/kiteline-server-$KITELINE_VERSION-linux-amd64.tar.gz" -C "$CHECK"
@@ -278,7 +293,7 @@ macOS 包在构建它的 Mac 上验证，命令与 Linux agent 相同（`tar -xz
 Windows ZIP 在 Windows 上验证。在已关闭换行转换的同一提交 checkout 中，把 ZIP 及其 `.sha256` 放入 `dist\releases\`，用 PowerShell 7 在仓库根目录执行：
 
 ```powershell
-$Version = '0.2.5' # 替换为实际版本
+$Version = (Get-Content shared/src/version.json -Raw | ConvertFrom-Json).version
 $Name = "kiteline-agent-$Version-windows-amd64"
 Expand-Archive -LiteralPath "dist/releases/$Name.zip" -DestinationPath C:\kiteline-check
 node scripts/verify-package.mjs agent windows-amd64 "dist/releases/$Name.zip" "C:\kiteline-check\$Name"
@@ -306,21 +321,7 @@ $env:KITELINE_AGENT_RUN_DIR = 'C:\kiteline-check\agent-run'
 
 手动运行在仓库的 Actions 页面选择 `CI`，点击 “Run workflow”，选择分支、`mode` 和 `tag`（只有 `publish` 使用）。`candidate` 不能手动选择，只由推送 tag 触发。同一 PR 或推送到 main 的新运行会取消同类的较早运行；手动运行和 tag 触发的运行不会被取消。同一 tag 的 `distribute` 与 `publish` 任务排队执行。
 
-### 构建任务
-
-| 任务                           | Runner                             | 内容                                                                                                                                        |
-| ------------------------------ | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `checks`                       | `ubuntu-24.04`                     | 见[检查与测试](setup.md#检查与测试)                                                                                                         |
-| `linux-amd64`、`linux-arm64`   | `ubuntu-24.04`、`ubuntu-24.04-arm` | `pnpm package agent`，`verify-package`，运行包中的 `kiteline-agent --version` 和 `check`                                                    |
-| `macos-amd64`、`macos-arm64`   | `macos-15-intel`、`macos-15`       | 在同一台机器上 `prepare`、`build`、`pnpm package`，然后执行与 Linux 相同的检查                                                              |
-| `windows-tmux`                 | `windows-2022`                     | 关闭换行转换，`prepare` 和 `tmux`                                                                                                           |
-| `windows-package`              | `ubuntu-24.04`                     | `addon`、`assemble`、`pnpm package agent windows-amd64`                                                                                     |
-| `windows-accept`               | `windows-2022`                     | 解开 ZIP，`verify-package`，用 PowerShell 7 运行 `--version` 和 `check`                                                                     |
-| `server-amd64`、`server-arm64` | `ubuntu-24.04`、`ubuntu-24.04-arm` | 等待全部 agent 任务；`pnpm package server`、`verify-package`、`verify-server`（amd64 带 `--agent`）、`pnpm images`、`verify-server --image` |
-
-`ci.yml` 中另有三个任务，都在 `ubuntu-24.04` 上运行：`source` 确定模式和源码提交；`distribute` 在 `candidate` 和 `dev-image` 模式下上传 Release 附件、推送镜像；`publish` 发布已有的候选。
-
-任务之间通过保留 1 天的 Actions artifact 传递文件。server 任务失败时上传日志 artifact `server-diagnostics-<架构>`。
+构建任务及依赖关系见 [`build.yml`](../../.github/workflows/build.yml)。server 任务失败时上传日志 artifact `server-diagnostics-<架构>`，重跑注意下文的 artifact 保留期限。
 
 ### Release 与镜像
 
@@ -357,35 +358,15 @@ $env:KITELINE_AGENT_RUN_DIR = 'C:\kiteline-check\agent-run'
 | `Version image … already differs`                        | `X.Y.Z` 镜像标签已指向其他 digest，`publish` 停止。不要覆盖已发布的标签，发布一个新版本                          |
 | `dev-image` 报 `main advanced`                           | `dev-<提交>` 已推送，`dev` 未更新。在新的 main 上再运行一次 `dev-image`                                          |
 
-在新提交上重新创建 tag（版本号不变，示例为 `0.2.6`）：
+在新提交上重新创建 tag（版本号不变）：
 
 ```sh
+KITELINE_VERSION=X.Y.Z # 替换为尚未正式发布的目标版本
 git fetch origin
-git push --delete origin v0.2.6
-git tag -f v0.2.6 origin/main
-git push origin v0.2.6
+git push --delete origin "v$KITELINE_VERSION"
+git tag -f "v$KITELINE_VERSION" origin/main
+git push origin "v$KITELINE_VERSION"
 ```
-
-## 发布流程
-
-1. 在 PR 中把 `shared/src/version.json` 的 `version` 设为新版本（例如 `0.2.6`），同时更新 `README.md` 和 `README.en.md` 快速开始中的示例版本，合并到 main。
-2. 在 main 的该提交上建立并推送 tag。tag 必须是 `vX.Y.Z` 形式，与该提交的 `version.json` 一致，且提交属于 main 的历史：
-
-   ```sh
-   git fetch origin
-   git tag v0.2.6 origin/main
-   git push origin v0.2.6
-   ```
-
-3. 等待 tag 触发的 `CI` 运行完成。成功后 Release 草稿包含全部附件和 `delivery.json`，GHCR 上有 `candidate-v0.2.6-<运行 ID>` 镜像。
-4. 用草稿中的发布包和候选镜像，按[手工验证](setup.md#手工验证)在受影响的目标环境中测试。发现问题时修复并提交，然后按[失败后的处理](#失败后的处理)重新生成候选（tag 需要指向新的提交）。
-5. 最终候选验证完成后，在 Release 草稿现有的 Source 和 Build 信息下填写本版本的变更说明，至少列出 `deploy/` 文件、环境变量、配置的变化，以及升级需要的手工步骤。重新生成候选会重置草稿正文；重新验证后再填写说明。
-6. 在 Actions 页面对 main 运行 `CI`，`mode` 选 `publish`，`tag` 填 `v0.2.6`。运行成功即完成发布。
-7. 确认 Release 已公开，并检查镜像：
-
-   ```sh
-   docker buildx imagetools inspect ghcr.io/azure99/kiteline:0.2.6
-   ```
 
 ## 产物结构
 
@@ -469,13 +450,13 @@ rg 版本必须在三处保持相同：`release/inputs.json` 的 `ripgrep.versio
 - Windows 的 tmux 用 `inputs.json` 的源码在 MSYS2 中编译，libevent 和 ncurses 来自 MSYS2 包；运行库的 DLL 名称在 `agent-windows.json` 的 `runtimeFiles` 中维护，组件提取和所需文件清单共用它。
 - `native/tmux/paste.patch` 和 `native/tmux/cygwin-outfd.patch` 必须能应用到新版本。终端机制见[终端](../design/terminal.md)，升级后重新测试终端的输入、粘贴、恢复和本机接续。
 
+修改 `release/inputs.json` 中的 `tmux` 后，重新运行 `pnpm native:build`。
+
 ### Ubuntu 镜像与快照
 
 - `release/inputs.json` 的 `ubuntu` 是 server 镜像和 Windows addon 构建所用的 Ubuntu 镜像 digest。
 - `release/ubuntu.sources` 指向 `snapshot.ubuntu.com` 的一个快照时间点，镜像中的 apt 软件包从这里安装。
 - 同一快照日期也出现在 `inputs.json` 的 `caCertificates`、`libevent` 地址和 `agent-linux.json` 的源码地址中。更换快照时一起更新这些地址和 SHA-256。
-
-修改这些文件后重建 Windows 组件目录；`libevent` 地址变化时还要重建两个 macOS 组件目录（见[构建 Windows 组件](#构建-windows-组件)和[构建 macOS 组件](#构建-macos-组件)中的“何时重建”）。
 
 ### Alpine 与 Linux 工具链
 

@@ -19,31 +19,6 @@
 
 `agent-linux-packages.txt` 由 `xargs apk add` 直接读取，每行一个包名，不能写注释。文件的 SHA-256 记录在 Linux 原生组件的构建记录中。包版本不固定，跟随所选 Alpine 版本的软件源；每个 Linux agent 包的 `dist/native/build-packages.txt` 记录构建时安装的包和版本。
 
-## 修改后的重建
-
-每个发布包都记录构建它的提交，新提交之后所有发布包都要重新构建（见[概览](../docs/development/release.md#概览)）。下表列出修改各文件后还需要额外重建的部分：
-
-| 修改的文件                                                          | 额外重建                                                                                                     |
-| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `inputs.json`                                                       | Windows 组件目录；部分字段还影响两个 macOS 组件目录；修改 `tmux` 或 `ripgrep` 后重新运行 `pnpm native:build` |
-| `agent-windows.json`、`Dockerfile.windows-native`、`ubuntu.sources` | Windows 组件目录                                                                                             |
-| `agent-macos.json`                                                  | 两个 macOS 组件目录                                                                                          |
-| 其他文件                                                            | 无。Linux 原生组件在每次组包时于 Docker 中重新构建，变化的步骤不使用缓存                                     |
-
-使组件目录过期的完整输入列表见[构建 Windows 组件](../docs/development/release.md#构建-windows-组件)和[构建 macOS 组件](../docs/development/release.md#构建-macos-组件)中的“何时重建”。
-
 ## 更新方法
 
-修改下载地址时，同时填写新文件的 SHA-256；脚本下载后核对 SHA-256，不一致时停止构建。一个依赖往往分布在多个文件中，要一起修改。下表列出各文件对应[升级固定依赖](../docs/development/release.md#升级固定依赖)中的哪些小节：
-
-| 文件                       | 对应小节                                                    |
-| -------------------------- | ----------------------------------------------------------- |
-| `inputs.json`              | Node、rg、tmux 与 libevent、Ubuntu 镜像与快照               |
-| `node-static.json`         | Node                                                        |
-| `agent-linux.json`         | Alpine 与 Linux 工具链、tmux 与 libevent、Ubuntu 镜像与快照 |
-| `agent-linux-packages.txt` | Alpine 与 Linux 工具链                                      |
-| `agent-macos.json`         | Node、rg、tmux 与 libevent、macOS 组件                      |
-| `agent-windows.json`       | Node、rg、tmux 与 libevent、MSYS2                           |
-| `ubuntu.sources`           | Ubuntu 镜像与快照                                           |
-
-三个 Dockerfile 直接修改，修改后按上一节重建。
+修改下载地址时，同时填写新文件的 SHA-256；脚本下载后核对 SHA-256，不一致时停止构建。一个依赖往往分布在多个文件中，配套修改见[升级固定依赖](../docs/development/release.md#升级固定依赖)，组件复用与重建规则见[概览](../docs/development/release.md#概览)。

@@ -76,7 +76,7 @@ Linux 和 macOS 的命令入口是 `/usr/local/bin/kiteline-agent`；用 `sudo` 
 
 ### 绑定与运行
 
-- `check` 检查随包组件、Git 2.23.0 及以上版本、Shell（Windows 上要求 PowerShell 7）、Linux 和 macOS 上的 SSH、UTF-8 locale 与 terminfo、Linux 上的 `flock`，以及 agent 数据目录和运行目录是否可写、运行目录是否过长。全部通过时打印 `Setup checks passed.`，否则列出失败项并以非零状态退出。各项要求见[支持的系统与准备](devices.md#支持的系统与准备)。
+- `check` 检查随包组件、[系统前提](devices.md#支持的系统与准备)、数据及运行目录是否可写，以及运行目录的路径长度。全部通过时打印 `Setup checks passed.`，否则列出失败项并以非零状态退出。
 - `bind --server URL` 用一次性绑定码把这台机器登记为设备。绑定码在终端中由 `Binding code: ` 提示输入，或从标准输入读入一行。`URL` 必须是 `http://` 或 `https://` 地址，agent 只保存其中的协议、主机和端口；设备名取主机名。`--if-unbound` 在已经绑定时报错退出，不改动已有身份。
 - `run` 在前台运行 agent，连接 server 并开始执行定时任务。Linux 和 macOS 收到 `SIGINT`、`SIGTERM` 或 `SIGHUP` 时停止，Windows 收到 Ctrl-C 或 Ctrl-Break 时停止。正常停止会结束全部终端会话和正在运行的定时任务（见[会话生命周期](../design/terminal.md#会话生命周期)）。后台常驻见[后台运行](devices.md#后台运行)。
 - `doctor` 输出 `[ok]`、`[warn]`、`[error]` 三类检查结果，有 `[error]` 时以状态 1 退出。agent 正在运行时，它报告 agent 实际的环境：版本、server 连接、recorder、定时任务、Git 配置来源和 `SSH_AUTH_SOCK`；agent 未运行时只检查安装和配置文件，并提示 `Runtime environment has not been checked`。

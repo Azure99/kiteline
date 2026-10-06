@@ -88,9 +88,7 @@ Choose one line. `LC_ALL` and `LC_CTYPE` override `LANG`; change them too if set
 
 ## Connect using the web command
 
-1. In the workbench device list, click "Connect device" and choose the device's system under "Device platform". The dialog generates a single-use binding code and shows its expiry time (see [Limits](reference.en.md#limits) for its lifetime).
-2. Click "Copy install command".
-3. Open a terminal on the device as the project user, paste the command and run it. On Windows, use a regular, non-administrator PowerShell 7 window; an administrator window is rejected.
+Choose the device's system in "Connect device", copy the install command, and run it on the device as the project user. On Windows, use a regular, non-administrator PowerShell 7 window; an administrator window is rejected. The command contains a single-use binding code and must run before it expires (see [Limits](reference.en.md#limits)).
 
 The server address in the command is the browser's current origin, which the device must be able to reach. If you opened the workbench through `127.0.0.1`, `localhost` or SSH forwarding, reopen it at an address the device can reach before generating the command. Commands generated from an HTTPS origin download only over HTTPS.
 
@@ -100,8 +98,6 @@ The command checks the system, architecture and basic tools, downloads the agent
 
 - Linux and macOS: installation uses sudo to write to `/opt/kiteline-agent`, with the public launcher at `/usr/local/bin/kiteline-agent`. sudo prompts for a password; root installs directly.
 - Windows: confirm the UAC prompt before installation. A new administrator PowerShell window installs to `C:\Program Files\kiteline-agent`, with the public launcher at `C:\ProgramData\kiteline-agent\kiteline-agent.ps1`. Binding and running still happen in the original window. The command relaxes PowerShell execution policy temporarily for this process only.
-
-After binding succeeds, the dialog shows "Device online". Click "View device" to open its page. The agent prints `Agent <device ID> connecting to <server address>` in the terminal.
 
 For a foreground agent, Ctrl-C stops the agent and ends its terminal sessions and active scheduled-task runs. Closing the terminal also does this on Linux and macOS. On Windows, closing the PowerShell window directly or signing out forcibly ends the agent without cleanup: active scheduled-task runs require review at the next startup (see [Review after an agent restart](scheduled-tasks.en.md#review-after-an-agent-restart)). Remove leftover session directories as described in [Clean up leftover terminal sessions](reference.en.md#clean-up-leftover-terminal-sessions). To start again later, run as the project user:
 
@@ -113,7 +109,7 @@ kiteline-agent run
 & "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" run
 ```
 
-This Windows form sets `Bypass` for the current process only; Group Policy still takes precedence. All PowerShell commands in this guide use this form. For a shorter form, see [kiteline-agent commands](reference.en.md#kiteline-agent-commands).
+See [kiteline-agent commands](reference.en.md#kiteline-agent-commands) for Windows invocation forms and execution-policy prerequisites.
 
 You do not need to bind again when restarting. To keep the agent running after closing the terminal or signing out, see [Run in the background](#run-in-the-background).
 
@@ -128,7 +124,7 @@ Running the install command again on an already installed and bound device stops
 
 ### Bind-only command
 
-Expand "Already installed: bind only" in the dialog and click "Copy binding command". This command runs `check` and binds using the code, without installing or starting the agent. Use it for a manually installed device or when binding again, then start the agent with the command above. On an already bound device, this command also stops with `This installation is already bound`.
+The binding dialog also provides a bind-only command. It runs `check` and binds using the code, without installing or starting the agent. Use it for a manually installed device or when binding again, then start the agent with the command above. On an already bound device, this command also stops with `This installation is already bound`.
 
 ## Manual installation
 
@@ -142,7 +138,7 @@ Run as the project user:
 
 ```sh
 KITELINE_SERVER=https://YOUR_SERVER  # Replace with the workbench address
-KITELINE_VERSION=0.2.5               # Replace with the server version
+KITELINE_VERSION=X.Y.Z               # Replace with the server version
 KITELINE_PLATFORM=linux              # Use macos for macOS
 KITELINE_ARCH=amd64                  # Use arm64 for ARM64 and Apple Silicon
 name="kiteline-agent-$KITELINE_VERSION-$KITELINE_PLATFORM-$KITELINE_ARCH"
@@ -171,7 +167,7 @@ Download, verify and check in the project user's regular PowerShell 7 window:
 
 ```powershell
 $server = 'https://YOUR_SERVER'  # Replace with the workbench address
-$version = '0.2.5'               # Replace with the server version
+$version = 'X.Y.Z'               # Replace with the server version
 $package = "kiteline-agent-$version-windows-amd64"
 Set-Location "$HOME\Downloads"
 Invoke-WebRequest "$server/downloads/agent/$version/$package.zip" -OutFile "$package.zip"
@@ -186,9 +182,9 @@ whoami
 `whoami` prints the project user's account name, such as `desktop-1234\alice`. Open PowerShell 7 as administrator (right-click and choose "Run as administrator"), go to the same download directory and install, using that account name for `--user`:
 
 ```powershell
-# Replace 0.2.5 with the version downloaded above
+# Replace X.Y.Z with the version downloaded above
 Set-Location 'C:\Users\PROJECT_USER\Downloads'
-& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File '.\kiteline-agent-0.2.5-windows-amd64\bin\kiteline-agent.ps1' install --user 'COMPUTER\PROJECT_USER'
+& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File '.\kiteline-agent-X.Y.Z-windows-amd64\bin\kiteline-agent.ps1' install --user 'COMPUTER\PROJECT_USER'
 ```
 
 Close the administrator window after installation. Back in the project user's window, run the web app's [bind-only command](#bind-only-command), then the Windows startup command in [Connect using the web command](#connect-using-the-web-command).
@@ -197,7 +193,7 @@ The data directory defaults to the project user's `%LOCALAPPDATA%\kiteline-agent
 
 ## Add a workspace
 
-When the device is online, click "Add" in the workspace list on its page. In "Add workspace", browse to a project directory or enter an absolute path, then click "Select this directory". See [Devices and workspaces](usage.en.md#devices-and-workspaces) for the dialog's other options and workspace management. You can then create terminal sessions in the web app or locally on the device; see [Terminal](usage.en.md#terminal).
+Once the device is online, register a project directory as described in [Devices and workspaces](usage.en.md#devices-and-workspaces), then create [terminal sessions](usage.en.md#terminal) in the web app or locally on the device.
 
 ## Run in the background
 
@@ -396,7 +392,7 @@ services:
       context: .
       args:
         KITELINE_SERVER: https://YOUR_SERVER
-        KITELINE_VERSION: "0.2.5"
+        KITELINE_VERSION: "X.Y.Z"
     init: true
     restart: unless-stopped
     stop_grace_period: 45s
@@ -445,9 +441,7 @@ Stopping the agent ends its terminal sessions and scheduled-task runs. Binding, 
 
 ### Upgrade using the web command
 
-1. Open the device page and choose "Upgrade agent" from "Device actions". When versions differ, "View update command" in the notice opens the same dialog.
-2. Choose the device platform and click "Copy upgrade command".
-3. Run it in an interactive terminal or SSH session on the device.
+Choose the platform in "Upgrade agent" on the device page, copy the upgrade command, and run it in an interactive terminal or SSH session on the device.
 
 On Linux and macOS, the command downloads the agent matching the server from the current origin, verifies it, then upgrades with sudo. On Windows, run it in PowerShell 7 and confirm UAC; upgrading happens in a new administrator window. At `Type yes to continue:`, enter `yes`. The command includes the server version at generation time. If it subsequently changes, the command stops with `The server release changed`; copy a new command from the web app.
 
@@ -458,12 +452,12 @@ Upgrading does not change the binding or saved server address. The agent does no
 Download the new package and its `.sha256` file into the same directory (as in [Manual installation](#manual-installation)), then run:
 
 ```sh
-sudo /usr/local/bin/kiteline-agent upgrade --archive "$PWD/kiteline-agent-0.2.6-linux-amd64.tar.gz"
+sudo /usr/local/bin/kiteline-agent upgrade --archive "$PWD/kiteline-agent-X.Y.Z-linux-amd64.tar.gz"
 ```
 
 ```powershell
 # Run in administrator PowerShell 7
-& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" upgrade --archive 'C:\Users\PROJECT_USER\Downloads\kiteline-agent-0.2.6-windows-amd64.zip'
+& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" upgrade --archive 'C:\Users\PROJECT_USER\Downloads\kiteline-agent-X.Y.Z-windows-amd64.zip'
 ```
 
 Adjust the version and filename to the downloaded package. Add `--yes` to skip confirmation.
