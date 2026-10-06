@@ -51,6 +51,7 @@ agent 在运行但计时器晚于计划时刻且超过迟到容差（见[限额]
 命令由 agent 配置的 Shell 以非交互方式执行（Linux、macOS 为 `SHELL -c COMMAND`，Windows 为 PowerShell 7 的 `-Command`），Shell 的默认值和完整参数见 [shell](reference.md#shell)。
 
 - Shell 既不是登录 Shell，也不是交互 Shell。命令依赖的设置若来自 `~/.bashrc`、`~/.profile` 或 PowerShell profile，请把它们写进命令，或放进 agent 的启动环境。
+- Windows 任务的文本输出使用 UTF-8；外部程序的输出编码也应设为 UTF-8。
 - 标准输入已关闭，也没有终端（PTY）。需要终端或等待人工确认的程序会失败或立即读到输入结束，AI CLI 需要使用它的非交互方式运行。
 - 命令以 agent 的操作系统用户运行，继承 agent 进程的环境，包括 `HOME`、`PATH`、代理变量、SSH agent 和 Git 凭据。它不继承执行 `kiteline-agent schedule` 的那个 Shell 的环境和当前目录。agent 作为后台服务运行时，环境由服务配置提供，见[后台运行](devices.md#后台运行)。
 - 默认工作目录是项目用户的 HOME（Windows 上是用户配置文件目录）。

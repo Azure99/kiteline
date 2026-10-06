@@ -174,7 +174,7 @@ KITELINE_AGENT_RUN_DIR="/srv/kiteline/run"
 | 快捷方式 | `SHELL -lc COMMAND` | `SHELL -NoLogo -Command COMMAND`                    |
 | 定时任务 | `SHELL -c COMMAND`  | `SHELL -NoProfile -NonInteractive -Command COMMAND` |
 
-Windows 上的 Shell 需要接受这些 PowerShell 参数，`check` 要求它是 PowerShell 7.0 及以上版本。定时任务的执行环境见[执行环境](scheduled-tasks.md#执行环境)。
+Windows 上的 Shell 需要接受这些 PowerShell 参数，`check` 要求它是 PowerShell 7.4 及以上版本。定时任务的执行环境见[执行环境](scheduled-tasks.md#执行环境)。
 
 ### limits
 

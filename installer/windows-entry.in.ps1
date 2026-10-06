@@ -1,6 +1,6 @@
 param([string]$Version, [string]$Code)
 $ErrorActionPreference = 'Stop'
-if ($PSVersionTable.PSVersion.Major -lt 7 -or -not $IsWindows) { throw 'Use PowerShell 7 on Windows' }
+if ($PSVersionTable.PSVersion -lt [version]'7.4' -or -not $IsWindows) { throw 'Use PowerShell 7.4 or later on Windows' }
 if ($Version -cne __KITELINE_VERSION__) { throw 'The server release changed; obtain a new command from the web app' }
 $kitelineInstaller = Join-Path ([IO.Path]::GetTempPath()) ('kiteline-install-' + [Guid]::NewGuid().ToString('N') + '.ps1')
 $kitelinePolicy = Get-ExecutionPolicy -Scope Process

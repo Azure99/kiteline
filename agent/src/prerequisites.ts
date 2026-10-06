@@ -81,7 +81,7 @@ export async function checkHostEnvironment(shell: string, check: Check, command:
   await check("Shell", async () => {
     await access(shell, constants.X_OK);
     return windows
-      ? `${shell}; ${await checkToolVersion({ file: shell, major: 7, minor: 0 }, command)}`
+      ? `${shell}; ${await checkToolVersion({ file: shell, major: 7, minor: 4 }, command)}`
       : shell;
   });
   if (!windows)
@@ -134,7 +134,7 @@ export async function checkPrerequisites() {
   if (failures.length) {
     if (windows)
       throw new Error(
-        `Setup checks failed:\n${failures.join("\n")}\nProvide PowerShell 7 and native Git in the launching environment. Reinstall the matching complete package for bundled component failures.`,
+        `Setup checks failed:\n${failures.join("\n")}\nProvide PowerShell 7.4 or later and native Git in the launching environment. Reinstall the matching complete package for bundled component failures.`,
       );
     if (macos)
       throw new Error(

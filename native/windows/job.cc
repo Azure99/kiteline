@@ -27,9 +27,12 @@ struct Attributes {
 };
 static napi_value start(napi_env env, napi_callback_info info) {
   return call(env, [&] {
-    auto args = arguments(env, info, 5);
+    auto args = arguments(env, info, 6);
     auto executable = string(env, args[0]), command = string(env, args[1]);
     auto cwd = string(env, args[2]), environment = string(env, args[3]);
+    bool privateConsole;
+    if (napi_get_value_bool(env, args[5], &privateConsole) != napi_ok)
+      throw std::invalid_argument("Private console option must be a boolean");
     Fd parent[3], child[3];
     Handle other[3];
     HANDLE inherited[3];
@@ -69,10 +72,14 @@ static napi_value start(napi_env env, napi_callback_info info) {
     STARTUPINFOEXW startup{};
     startup.StartupInfo.cb = sizeof(startup); startup.lpAttributeList = attributes.list;
     startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    if (privateConsole) {
+      startup.StartupInfo.dwFlags |= STARTF_USESHOWWINDOW;
+      startup.StartupInfo.wShowWindow = SW_HIDE;
+    }
     startup.StartupInfo.hStdInput = inherited[0]; startup.StartupInfo.hStdOutput = inherited[1]; startup.StartupInfo.hStdError = inherited[2];
     PROCESS_INFORMATION process{};
     check(CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr, TRUE,
-      EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
+      EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | (privateConsole ? CREATE_NEW_CONSOLE : 0),
       environment.data(), cwd.empty() ? nullptr : cwd.c_str(), &startup.StartupInfo, &process), "create process in Job");
     value->process.reset(process.hProcess); value->thread.reset(process.hThread);
     napi_value result, fds;
@@ -136,8 +143,16 @@ static napi_value releaseFd(napi_env env, napi_callback_info info) {
     closeFd(fd); return nothing(env);
   });
 }
+static napi_value outputUtf8(napi_env env, napi_callback_info info) {
+  return call(env, [&] {
+    (void)info;
+    check(SetConsoleOutputCP(CP_UTF8), "set console output to UTF-8");
+    return nothing(env);
+  });
+}
 void exportJobs(napi_env env, napi_value exports) {
   napi_property_descriptor properties[] = {
+    {"setConsoleOutputUtf8", nullptr, outputUtf8, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"jobStart", nullptr, start, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"jobResume", nullptr, resume, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"jobInspect", nullptr, inspect, nullptr, nullptr, nullptr, napi_default, nullptr},

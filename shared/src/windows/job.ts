@@ -7,6 +7,7 @@ interface JobOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   stdio?: [JobStdio, JobStdio, JobStdio];
+  privateConsole?: boolean;
 }
 
 function quote(value: string) {
@@ -99,6 +100,7 @@ export async function spawnJob(executable: string, args: string[], options: JobO
     options.cwd ?? "",
     environmentBlock(options.env ?? process.env),
     modes.map((mode) => ["pipe", "inherit", "ignore"].indexOf(mode)),
+    options.privateConsole ?? false,
   );
   const streams: (Socket | undefined)[] = [];
   const unowned = new Set(child.fds.filter((fd) => fd >= 0));

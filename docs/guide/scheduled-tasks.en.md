@@ -51,6 +51,7 @@ If the agent is running but its timer fires later than the lateness tolerance (s
 Commands run noninteractively using the agent's configured shell: `SHELL -c COMMAND` on Linux and macOS, and PowerShell 7 with `-Command` on Windows. See [Shell](reference.en.md#shell) for defaults and complete arguments.
 
 - The shell is neither a login shell nor an interactive shell. If your command depends on settings from `~/.bashrc`, `~/.profile` or a PowerShell profile, include them in the command or the agent's startup environment.
+- Windows task text output uses UTF-8; configure external programs to output UTF-8 as well.
 - Standard input is closed and there is no terminal (PTY). Programs requiring a terminal or human confirmation fail or immediately reach end of input. Use your AI CLI's noninteractive mode.
 - The command runs as the agent's operating-system user and inherits its environment, including `HOME`, `PATH`, proxy variables, SSH agent and Git credentials. It does not inherit the environment or current directory of the shell that runs `kiteline-agent schedule`. For an agent running as a background service, the service configuration supplies the environment; see [Run in the background](devices.en.md#run-in-the-background).
 - The default working directory is the project user's HOME (the user profile directory on Windows).

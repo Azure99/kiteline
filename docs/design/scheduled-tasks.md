@@ -65,7 +65,7 @@ ID 直接用作文件名，因此唯一性按 ASCII 大小写不敏感判断：�
 
 命令由 agent 配置的 Shell 以非交互方式执行（`agent/src/tasks/process.ts`），Shell 的选择和参数见 [agent 配置文件](../guide/reference.md#agent-配置文件)。标准输入为空，标准输出和标准错误分别通过管道读取，没有 PTY，也不进入 tmux 或 recorder。命令继承 agent 进程的用户、环境变量和凭据。用户需要知道的影响见[执行环境](../guide/scheduled-tasks.md#执行环境)。
 
-**进程集合。** Linux 和 macOS 上命令以新进程组启动（`detached`），进程组 ID 等于 Shell 的 PID。Windows 上命令在新建的 Job 对象中运行。怎样判断进程组或 Job 已空见[平台实现](platforms.md)（`agent/src/process-group.ts`）。
+**进程集合。** Linux 和 macOS 上命令以新进程组启动（`detached`），进程组 ID 等于 Shell 的 PID。Windows 上 Job 的根进程是固定 Node 启动器，在私有隐藏控制台中先将输出代码页设为 UTF-8，再按原参数启动 PowerShell；这样在 Shell writer 初始化前确定编码，且不改变父进程或其他任务的控制台。输入代码页和 `$OutputEncoding` 保持 Shell 原生行为。怎样判断进程组或 Job 已空见[平台实现](platforms.md)（`agent/src/process-group.ts`）。
 
 **结束判定。** 一次运行在三个条件都满足后才结束：Shell 已退出；进程集合已空；两条输出管道已关闭。
 

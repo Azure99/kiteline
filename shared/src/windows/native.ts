@@ -22,12 +22,14 @@ interface WindowsNative {
     cwd: string,
     environment: string,
     stdio: number[],
+    privateConsole: boolean,
   ): { handle: NativeHandle; pid: number; fds: [number, number, number] };
   jobResume(handle: NativeHandle): void;
   jobInspect(handle: NativeHandle): { active: number; code?: number };
   jobTerminate(handle: NativeHandle): void;
   jobRelease(handle: NativeHandle): void;
   closeFd(fd: number): void;
+  setConsoleOutputUtf8(): void;
   pipeStart(name: string): NativeHandle;
   pipePoll(handle: NativeHandle): number | undefined;
   pipeStop(handle: NativeHandle): boolean;

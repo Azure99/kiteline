@@ -5,8 +5,8 @@ Set-StrictMode -Version Latest
 
 function Invoke-KitelineAgent {
     param([string[]]$Arguments)
-    if (-not $IsWindows -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -ne 'X64' -or $PSVersionTable.PSVersion.Major -lt 7) {
-        throw 'Windows x64 and PowerShell 7 are required'
+    if (-not $IsWindows -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -ne 'X64' -or $PSVersionTable.PSVersion -lt [version]'7.4') {
+        throw 'Windows x64 and PowerShell 7.4 or later are required'
     }
     $program = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'kiteline-agent'
     $management = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'kiteline-agent'

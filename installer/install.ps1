@@ -6,8 +6,8 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-if (-not $IsWindows -or $PSVersionTable.PSVersion.Major -lt 7 -or
-    [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -ne 'X64') { throw 'Windows x64 and PowerShell 7 are required' }
+if (-not $IsWindows -or $PSVersionTable.PSVersion -lt [version]'7.4' -or
+    [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -ne 'X64') { throw 'Windows x64 and PowerShell 7.4 or later are required' }
 $origin = [Uri]$Server
 if (-not $origin.IsAbsoluteUri -or $origin.Scheme -notin @('http', 'https') -or
     $origin.UserInfo -or $origin.AbsolutePath -ne '/' -or $origin.Query -or $origin.Fragment) { throw 'An HTTP or HTTPS server origin is required' }

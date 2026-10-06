@@ -174,7 +174,7 @@ Terminal sessions and scheduled tasks inherit the agent process's environment. R
 | Shortcut         | `SHELL -lc COMMAND` | `SHELL -NoLogo -Command COMMAND`                    |
 | Scheduled task   | `SHELL -c COMMAND`  | `SHELL -NoProfile -NonInteractive -Command COMMAND` |
 
-On Windows the shell must accept these PowerShell arguments; `check` requires PowerShell 7.0 or later. See [Execution environment](scheduled-tasks.en.md#execution-environment) for scheduled tasks.
+On Windows the shell must accept these PowerShell arguments; `check` requires PowerShell 7.4 or later. See [Execution environment](scheduled-tasks.en.md#execution-environment) for scheduled tasks.
 
 ### Limit settings
 

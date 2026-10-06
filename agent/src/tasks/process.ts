@@ -2,9 +2,11 @@ import { taskLimits } from "../limits.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { open, type FileHandle } from "node:fs/promises";
 import type { Readable } from "node:stream";
+import { fileURLToPath } from "node:url";
 import { asError, type TaskRun } from "@kiteline/shared/protocol";
 import { stopGroup, waitForGroup } from "../process-group.js";
 import { JobChild, spawnJob } from "@kiteline/shared/windows/job";
+import { internalNodeEnvironment, nodeEnvironmentKeys } from "@kiteline/shared/terminal/node";
 
 function diagnostic(error: unknown) {
   return Buffer.from(asError(error).message).subarray(0, taskLimits.diagnosticBytes).toString();
@@ -35,11 +37,27 @@ export class TaskProcess {
     const child =
       process.platform === "win32"
         ? await spawnJob(
-            shell,
-            ["-NoProfile", "-NonInteractive", "-Command", run.parameters.command],
+            process.execPath,
+            [
+              fileURLToPath(new URL("./windows-bootstrap.js", import.meta.url)),
+              JSON.stringify(
+                Object.fromEntries(
+                  Object.entries(process.env).filter(([key]) =>
+                    nodeEnvironmentKeys.includes(key.toUpperCase()),
+                  ),
+                ),
+              ),
+              shell,
+              "-NoProfile",
+              "-NonInteractive",
+              "-Command",
+              run.parameters.command,
+            ],
             {
               cwd: run.parameters.cwd,
+              env: internalNodeEnvironment(),
               stdio: ["ignore", "pipe", "pipe"],
+              privateConsole: true,
             },
           )
         : spawn(shell, ["-c", run.parameters.command], {
