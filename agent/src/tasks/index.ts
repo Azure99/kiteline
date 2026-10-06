@@ -592,31 +592,7 @@ export class ScheduledTasks {
       await this.saveKnown(record);
       return this.getRun(runId);
     }
-    const finished = process.done
-      .then((result) =>
-        this.serial(async () => {
-          const latest = structuredClone(this.record(id));
-          const saved = latest.runs.find((item) => item.id === runId)!;
-          Object.assign(saved, result, {
-            output: { ...process.output },
-            endedAt: new Date().toISOString(),
-            state: process.stopReason ? "stopped" : result.exitCode === 0 ? "succeeded" : "failed",
-            reasonCode:
-              process.stopReason ??
-              (!process.pid && result.diagnostic
-                ? "start_failed"
-                : result.exitCode === 0
-                  ? undefined
-                  : "exit_nonzero"),
-          });
-          await this.saveKnown(latest);
-          await this.cleanup(() => this.prune(id));
-        }),
-      )
-      .catch((error: unknown) => {
-        console.error("Scheduled task result:", asError(error).message);
-      })
-      .finally(() => this.executions.delete(runId));
+    const finished = this.finishRun(id, runId, process);
     this.executions.set(runId, { process, finished });
     const started = structuredClone(this.record(id));
     const saved = started.runs.find((item) => item.id === runId)!;
@@ -628,6 +604,34 @@ export class ScheduledTasks {
       throw OperationError.from(detail, "unknown", { taskId: id, runId });
     }
     return this.getRun(runId);
+  }
+
+  private async finishRun(id: string, runId: string, process: TaskProcess) {
+    try {
+      const result = await process.done;
+      await this.serial(async () => {
+        const latest = structuredClone(this.record(id));
+        const saved = latest.runs.find((item) => item.id === runId)!;
+        Object.assign(saved, result, {
+          output: { ...process.output },
+          endedAt: new Date().toISOString(),
+          state: process.stopReason ? "stopped" : result.exitCode === 0 ? "succeeded" : "failed",
+          reasonCode:
+            process.stopReason ??
+            (!process.pid && result.diagnostic
+              ? "start_failed"
+              : result.exitCode === 0
+                ? undefined
+                : "exit_nonzero"),
+        });
+        await this.saveKnown(latest);
+        await this.cleanup(() => this.prune(id));
+      });
+    } catch (error) {
+      console.error("Scheduled task result:", asError(error).message);
+    } finally {
+      this.executions.delete(runId);
+    }
   }
 
   stop(id: string, signal: AbortSignal) {

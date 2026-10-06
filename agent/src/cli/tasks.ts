@@ -11,6 +11,7 @@ import {
 } from "@kiteline/shared/protocol";
 import { agentConfig } from "../config.js";
 import { localRequest } from "../local.js";
+import { taskLimits } from "../limits.js";
 
 const usage = {
   list: "list [--offset N]",
@@ -73,7 +74,7 @@ active runs first; unresolved unknown runs also require --acknowledge-run. --yes
 is required without an interactive terminal.
 
 Results: list and runs return bounded pages with offset/total; use --offset for more.
-status includes the command's exitCode/signal. output --limit accepts 4 to 32768 bytes.
+status includes the command's exitCode/signal. output --limit accepts 4 to ${taskLimits.outputReadBytes} bytes.
 It reads bounded UTF-8 text from
 stdout or stderr; offset/nextOffset are bytes. Follow nextOffset to read further.
 Output and records have finite retention: truncated means a retained prefix only.

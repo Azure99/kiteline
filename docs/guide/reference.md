@@ -264,11 +264,8 @@ agent 数据目录中的 `agent.json`、`connection.json`、`temporary-files.jso
 | 任务名称                 | 256 字节（UTF-8）            | 固定 `nameBytes`       |
 | 命令                     | 16 KiB                       | 固定 `commandBytes`    |
 | Cron 表达式              | 256 个字符                   | 固定                   |
-| 任务 ID、运行 ID         | 1 至 128 个字符              | 固定                   |
 | 计划时刻的迟到容差       | 5 秒                         | 固定 `lateToleranceMs` |
 | 停止时从 TERM 到 KILL    | 5 秒                         | 固定 `stopGraceMs`     |
-| 每次读取输出             | 4 字节至 32 KiB              | 固定 `outputReadBytes` |
-| 任务列表和运行记录每页   | 50 项                        | 固定 `pageEntries`     |
 
 ### 连接与请求
 

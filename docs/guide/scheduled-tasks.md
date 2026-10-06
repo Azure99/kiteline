@@ -2,7 +2,7 @@
 
 [English](scheduled-tasks.en.md)
 
-定时任务保存在设备上，由该设备的 agent 按计划在后台执行非交互命令，例如定期运行脚本或 AI CLI。本文面向拥有者，说明如何在网页和设备本机的 `kiteline-agent schedule` 中管理同一份任务；机制见[定时任务契约](../design/scheduled-tasks.md)。
+定时任务保存在设备上，由该设备的 agent 按计划在后台执行非交互命令，例如定期运行脚本或 AI CLI。本文面向拥有者，说明如何在网页和设备本机的 `kiteline-agent schedule` 中管理同一份任务。
 
 ## 创建与编辑
 
@@ -62,14 +62,14 @@ agent 在运行但计时器晚于计划时刻且超过迟到容差（见[限额]
 
 ## 运行与停止
 
-- **立即运行。** 请求成功只表示运行已被接受；关闭浏览器或命令行不会停止它。
+- **立即运行。** 关闭浏览器或命令行不会停止运行。
 - **并发。** 同一任务同时只有一次运行，每台设备同时运行的数量有上限（见[限额](reference.md#限额)）。条件不满足时，“立即运行”报“资源正忙。”；定时执行不排队，直接记为“已跳过”，原因是“上次运行仍未结束”或“设备运行数量已达上限”。
 - **暂停与恢复。** “暂停计划”停止之后的定时执行，正在执行的运行不受影响，暂停期间仍可“立即运行”。“恢复计划”从当前时间重新计算下一次执行。
 - **停止。** 停止运行不回滚命令已经完成的改动。Linux 和 macOS 向整个进程组发送 `SIGTERM`，等待停止宽限（见[限额](reference.md#限额)）后仍未结束则发送 `SIGKILL`；Windows 立即结束整个 Job。
 - **agent 正常停止。** 用 Ctrl-C、服务管理器或升级前停止 agent 时，正在执行的运行按同样方式停止，记为“已停止”，原因是“Agent 已停止”。任务定义和记录保留，agent 再次启动后继续按计划执行。
 - **不自动重试。** 失败或跳过的执行不会重试，下一次计划照常执行。
 
-“立即运行”的结果不明时，先按页面给出的运行 ID 查询是否已经开始，再决定是否重新运行。结果语义见[结果语义](../design/protocol.md#结果语义)。
+“立即运行”的结果不明时，先按页面给出的运行 ID 查询是否已经开始，再决定是否重新运行。
 
 ## 运行记录与输出
 
@@ -79,7 +79,7 @@ stdout 和 stderr 分开保存，两者之间没有统一的时间顺序。
 
 - 每次运行的 stdout 和 stderr 合计有上限。超出部分不保存，命令继续运行。
 - 每个任务只保留最近 `taskHistoryRuns` 条已结束的记录，“已跳过”的记录也计入。
-- 设备上的输出总量有上限。开始新运行时，如果剩余空间不足一次运行的输出上限，agent 从最早的已结束记录起删除带输出的记录，直到空间足够；删除全部可删记录仍不够时，不删除任何记录，新运行的输出会更早被截断。正在执行和待核查的运行不会被删除。
+- 设备上的输出总量有上限。开始新运行时，agent 可能从最早的已结束记录起删除带输出的记录。正在执行和待核查的运行不会被删除；剩余空间不足时，新运行的输出可能更早被截断。
 
 记录保存在 agent 数据目录的 `tasks/` 中（见[文件位置](reference.md#文件位置)），agent 重启和升级后仍在，`uninstall --purge-state` 会删除它们。记录不存在不能证明命令从未执行，再次运行前应核查此前的执行情况。命令自己写出的文件留在原处。
 
@@ -104,29 +104,16 @@ agent 启动时无法读取 `tasks/` 中的文件时，该设备的任务功能�
 
 ## 命令行
 
-`kiteline-agent schedule` 在设备本机管理同一份任务。它通过本机 socket 或命名管道连接正在运行的 agent，因此必须由运行 agent 的同一操作系统用户执行，并解析到相同的运行目录。它不会启动 agent；agent 未运行时，除 `--help` 外的命令都会报错退出。`--help` 随时可用，内容包括完整的规则和示例。
+`kiteline-agent schedule` 在设备本机管理同一份任务。管理任务需要 agent 已运行；命令必须由运行 agent 的同一操作系统用户执行，并解析到相同的运行目录。命令不会启动 agent。
 
-Windows 上的调用方式见 [kiteline-agent 命令](reference.md#kiteline-agent-命令)。在 PowerShell 7 中读取 JSON 列表：
+完整子命令、参数和输出格式见现有英文帮助；查看帮助不需要配置或运行 agent：
 
-```powershell
-& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" schedule list --json | ConvertFrom-Json
+```sh
+kiteline-agent schedule --help
+kiteline-agent schedule update --help
 ```
 
-| 子命令                                | 作用                                                       |
-| ------------------------------------- | ---------------------------------------------------------- |
-| `list [--offset N]`                   | 分页列出任务                                               |
-| `show TASK_ID`                        | 查看任务定义                                               |
-| `create`                              | 新建任务，必填 `--name`、`--command` 和 `--cron` 或 `--at` |
-| `update TASK_ID`                      | 只修改给出的字段                                           |
-| `preview`                             | 按 `--cron` 或 `--at` 和 `--timezone` 计算接下来的执行时间 |
-| `run TASK_ID [--run-id ID]`           | 立即运行                                                   |
-| `pause TASK_ID`、`resume TASK_ID`     | 暂停或恢复计划                                             |
-| `acknowledge TASK_ID --run-id RUN_ID` | 确认核查                                                   |
-| `runs TASK_ID [--offset N]`           | 分页列出运行记录                                           |
-| `status RUN_ID`                       | 查看一次运行的状态、退出码和信号                           |
-| `output RUN_ID`                       | 读取输出                                                   |
-| `stop RUN_ID`                         | 停止一次运行                                               |
-| `delete TASK_ID`                      | 删除任务及其记录                                           |
+例如，先预览计划、创建任务，再运行并查看状态和输出。把 `TASK_ID`、`RUN_ID` 换成前一步结果中的 ID：
 
 ```sh
 kiteline-agent schedule preview --cron '0 9 * * 1-5' --timezone Asia/Shanghai --json
@@ -136,28 +123,13 @@ kiteline-agent schedule status RUN_ID --json
 kiteline-agent schedule output RUN_ID --stream stdout --offset 0 --json
 ```
 
-### 参数与输出
+任务和运行 ID 在各自记录的生命周期内不变；保留结果中的 ID，用于查询、停止和核查。退出码为 3 表示结果未确认，应按输出中的 `taskId` 或 `runId` 查询，不要直接重发同一操作。
 
-- `create` 和 `update` 的字段：`--name`、`--command`、`--cron EXPR` 或 `--at ISO_DATE`（二选一）、`--cwd PATH`（已存在的绝对路径）、`--timezone IANA_ZONE`。
-- `update` 默认先读取任务当前的修订号再提交；用 `--expected-revision N` 指定修订号时，任务在此之后被改过则报冲突，需要重新读取并核对后再更新。
-- `output` 的 `--stream` 取 `stdout`（默认）或 `stderr`；`--offset` 是字节偏移；`--limit` 是本次读取的字节数，范围见[限额](reference.md#限额)。结果中的 `nextOffset` 是下一次读取的起点。
-- `delete` 在终端中询问确认，没有终端时必须加 `--yes`；任务待核查时还要加 `--acknowledge-run RUN_ID`。
-- `--json` 让标准输出只有一个 JSON 对象：成功时为 `{"outcome":"succeeded","result":…}`，失败时为 `{"outcome":…,"error":{…},"taskId":…,"runId":…}`。诊断信息写到标准错误。不加 `--json` 时打印缩进后的结果 JSON。
+Windows 上的调用方式见 [kiteline-agent 命令](reference.md#kiteline-agent-命令)。在 PowerShell 7 中读取 JSON 列表：
 
-### ID
-
-任务 ID 和运行 ID 由字母、数字、`_` 和 `-` 组成，长度上限见[限额](reference.md#限额)，不区分大小写地唯一。`create --task-id` 和 `run --run-id` 可以由调用方指定 ID，省略时自动生成。ID 在任务和记录的整个生命周期内不变，查询、停止和核查都用它。
-
-### 退出码
-
-| 退出码 | 含义                                                               |
-| ------ | ------------------------------------------------------------------ |
-| 0      | 管理操作成功，或运行已被接受                                       |
-| 1      | 管理操作确定失败，例如资源正忙、修订冲突、对象不存在、agent 未运行 |
-| 2      | 用法错误或参数无效，例如 Cron 表达式不合法、工作目录不是目录       |
-| 3      | 结果未确认：请求已发出但没有收到结果                               |
-
-`run` 或 `status` 以 0 退出不代表命令执行成功，要查看运行的状态和退出码。退出码为 3 时，按输出中的 `taskId` 或 `runId` 查询结果，不要直接重发同一操作。
+```powershell
+& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" schedule list --json | ConvertFrom-Json
+```
 
 ### 让 AI CLI 管理任务
 

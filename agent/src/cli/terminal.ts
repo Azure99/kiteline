@@ -15,14 +15,16 @@ import { spawnJob, type JobChild } from "@kiteline/shared/windows/job";
 import { agentPaths, defaultAgentLimits, type AgentConfig } from "../config.js";
 import { localRequest } from "../local.js";
 
+export const attachUsage = "attach SESSION_ID [--run-dir DIR]";
+const terminalUsage = `terminal list/new/end | ${attachUsage}`;
+
 export async function attachCli(args: string[]) {
   const { positionals, values } = parseArgs({
     args,
     allowPositionals: true,
     options: { "run-dir": { type: "string" } },
   });
-  if (positionals.length !== 1)
-    throw new Error("Usage: kiteline-agent attach SESSION_ID [--run-dir DIR]");
+  if (positionals.length !== 1) throw new Error(`Usage: kiteline-agent ${attachUsage}`);
   const override = optionalString(values["run-dir"], "run-dir");
   const { runDir } = await agentPaths(override);
   await attachTerminal(
@@ -95,9 +97,7 @@ export async function terminalCli(config: AgentConfig, args: string[]) {
     return;
   }
   if (args[0] !== "terminal")
-    throw new Error(
-      "Usage: kiteline-agent workspace list | terminal list/new/end | attach SESSION_ID [--run-dir DIR]",
-    );
+    throw new Error(`Usage: kiteline-agent workspace list | ${terminalUsage}`);
   switch (args[1]) {
     case "list": {
       const { values } = parseArgs({
@@ -142,8 +142,6 @@ export async function terminalCli(config: AgentConfig, args: string[]) {
       break;
     }
     default:
-      throw new Error(
-        "Usage: kiteline-agent terminal list/new/end | attach SESSION_ID [--run-dir DIR]",
-      );
+      throw new Error(`Usage: kiteline-agent ${terminalUsage}`);
   }
 }

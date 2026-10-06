@@ -2,15 +2,14 @@ import { appVersion } from "@kiteline/shared/protocol";
 import { agentConfig, privateDirectory, readIdentity } from "./config.js";
 import { Agent } from "./agent.js";
 import { bindCli } from "./cli/bind.js";
-import { attachCli, terminalCli } from "./cli/terminal.js";
+import { attachCli, attachUsage, terminalCli } from "./cli/terminal.js";
 import { scheduleCli } from "./cli/tasks.js";
 import { doctorCli } from "./cli/doctor.js";
 import { installCli } from "./install/commands.js";
 import { checkPrerequisites } from "./prerequisites.js";
 import { lockAgentRuntime, lockAgentState } from "./state-lock.js";
 
-const usage =
-  "Usage: kiteline-agent install --user USER | upgrade --archive RELEASE.tar.gz | uninstall | check | bind --server HTTP_OR_HTTPS_ORIGIN [--if-unbound] | run | doctor | attach SESSION_ID [--run-dir DIR] | terminal | workspace | schedule";
+const usage = `Usage: kiteline-agent install --user USER | upgrade --archive RELEASE.tar.gz | uninstall | check | bind --server HTTP_OR_HTTPS_ORIGIN [--if-unbound] | run | doctor | ${attachUsage} | terminal | workspace | schedule`;
 
 async function runAgent() {
   let stopping = false;

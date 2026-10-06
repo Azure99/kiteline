@@ -2,7 +2,7 @@
 
 [中文](scheduled-tasks.md)
 
-Scheduled tasks are stored on a device and executed by its agent. They run noninteractive commands in the background according to a schedule, such as periodically running a script or AI CLI. This guide explains how the owner can manage the same tasks in the web app and with `kiteline-agent schedule` on the device. For the underlying behavior, see [Scheduled-task contract (Chinese)](../design/scheduled-tasks.md).
+Scheduled tasks are stored on a device and executed by its agent. They run noninteractive commands in the background according to a schedule, such as periodically running a script or AI CLI. This guide explains how the owner can manage the same tasks in the web app and with `kiteline-agent schedule` on the device.
 
 ## Create and edit tasks
 
@@ -62,14 +62,14 @@ Exit code 0 produces “Succeeded”. A nonzero exit produces “Failed” with 
 
 ## Run and stop
 
-- **Run now.** A successful request means only that the run was accepted. Closing the browser or CLI does not stop it.
+- **Run now.** Closing the browser or CLI does not stop the run.
 - **Concurrency.** Each task can have only one run at a time, and each device has a simultaneous-run limit (see [Limits](reference.en.md#limits)). If these conditions are not met, “Run now” reports “The resource is busy.” Scheduled runs are not queued; they are recorded as “Skipped” with “Previous run was still active” or “Device run capacity was reached”.
 - **Pause and resume.** “Pause schedule” stops future scheduled runs without affecting an active run. “Run now” remains available while paused. “Resume schedule” recalculates the next occurrence from the current time.
 - **Stop.** Stopping a run does not roll back changes already made by the command. Linux and macOS send `SIGTERM` to the entire process group, then `SIGKILL` if it has not ended after the stop grace period (see [Limits](reference.en.md#limits)). Windows immediately terminates the whole Job.
 - **Normal agent shutdown.** When the agent stops through Ctrl-C, a service manager or before an upgrade, active runs stop in the same way and are recorded as “Stopped” with “Agent stopped”. Definitions and records remain, and scheduling continues when the agent starts again.
 - **No automatic retries.** Failed or skipped runs are not retried. The next scheduled occurrence proceeds normally.
 
-If the result of “Run now” is unclear, first query the run ID provided on the page to check whether it started, then decide whether to run again. See [Result semantics (Chinese)](../design/protocol.md#结果语义).
+If the result of “Run now” is unclear, first query the run ID provided on the page to check whether it started, then decide whether to run again.
 
 ## Run records and output
 
@@ -79,7 +79,7 @@ Output and records have retention limits; see [Limits](reference.en.md#limits) f
 
 - Each run has a combined stdout and stderr limit. Excess output is not saved and the command keeps running.
 - Each task retains only its latest `taskHistoryRuns` finished records, including “Skipped” records.
-- Total output on a device is limited. Before a new run, if remaining capacity is less than one run's output allowance, the agent deletes finished records containing output, oldest first, until enough space is available. If deleting all eligible records would still be insufficient, it deletes none and truncates the new run's output earlier. Active runs and runs needing review are not deleted.
+- Total output on a device is limited. Before a new run, the agent may delete finished records containing output, oldest first. Active runs and runs needing review are protected; if capacity is insufficient, the new run's output may be truncated earlier.
 
 Records are stored under `tasks/` in the agent data directory (see [File locations](reference.en.md#file-locations)), survive restarts and upgrades, and are deleted by `uninstall --purge-state`. A missing record does not prove the command never ran; check the previous execution before running again. Files written by the command remain where it wrote them.
 
@@ -104,29 +104,16 @@ If the agent cannot read files under `tasks/` at startup, the device's task feat
 
 ## Command line
 
-`kiteline-agent schedule` manages the same tasks locally on the device. It connects to the running agent through a local socket or named pipe, so it must run as the same operating-system user and resolve to the same runtime directory. It does not start the agent. When the agent is not running, every command except `--help` exits with an error. `--help` is always available and includes the complete rules and examples.
+`kiteline-agent schedule` manages the same tasks locally on the device. Managing tasks requires a running agent. Run commands as the same operating-system user and resolve to the same runtime directory as the agent. Commands do not start the agent.
 
-See [kiteline-agent commands](reference.en.md#kiteline-agent-commands) for Windows invocation forms. To read the JSON list in PowerShell 7:
+The existing English help covers all subcommands, arguments and output formats. Help does not require a configured or running agent:
 
-```powershell
-& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" schedule list --json | ConvertFrom-Json
+```sh
+kiteline-agent schedule --help
+kiteline-agent schedule update --help
 ```
 
-| Subcommand                            | Purpose                                                                     |
-| ------------------------------------- | --------------------------------------------------------------------------- |
-| `list [--offset N]`                   | List tasks in pages                                                         |
-| `show TASK_ID`                        | View a task definition                                                      |
-| `create`                              | Create a task; requires `--name`, `--command` and either `--cron` or `--at` |
-| `update TASK_ID`                      | Change only the supplied fields                                             |
-| `preview`                             | Calculate upcoming times from `--cron` or `--at` and `--timezone`           |
-| `run TASK_ID [--run-id ID]`           | Run now                                                                     |
-| `pause TASK_ID`, `resume TASK_ID`     | Pause or resume scheduling                                                  |
-| `acknowledge TASK_ID --run-id RUN_ID` | Confirm review                                                              |
-| `runs TASK_ID [--offset N]`           | List run records in pages                                                   |
-| `status RUN_ID`                       | View a run's status, exit code and signal                                   |
-| `output RUN_ID`                       | Read output                                                                 |
-| `stop RUN_ID`                         | Stop a run                                                                  |
-| `delete TASK_ID`                      | Delete a task and its records                                               |
+For example, preview a schedule, create a task, then run it and read its status and output. Replace `TASK_ID` and `RUN_ID` with IDs from the preceding results:
 
 ```sh
 kiteline-agent schedule preview --cron '0 9 * * 1-5' --timezone Asia/Shanghai --json
@@ -136,28 +123,13 @@ kiteline-agent schedule status RUN_ID --json
 kiteline-agent schedule output RUN_ID --stream stdout --offset 0 --json
 ```
 
-### Arguments and output
+Task and run IDs stay unchanged throughout their records' lifetimes. Keep IDs from results for queries, stopping and review. Exit code 3 means the outcome is unconfirmed. Query the `taskId` or `runId` in the output instead of immediately resending the operation.
 
-- Fields for `create` and `update`: `--name`, `--command`, either `--cron EXPR` or `--at ISO_DATE`, `--cwd PATH` (an existing absolute directory path), and `--timezone IANA_ZONE`.
-- By default, `update` reads the task's current revision before submitting. With `--expected-revision N`, a change since that revision produces a conflict. Read and check the task again before updating.
-- `output --stream` accepts `stdout` (default) or `stderr`. `--offset` is a byte offset, and `--limit` is the number of bytes to read (range in [Limits](reference.en.md#limits)). The result's `nextOffset` is the starting point for the next read.
-- `delete` asks for confirmation in a terminal; without a terminal, `--yes` is required. A task needing review also requires `--acknowledge-run RUN_ID`.
-- With `--json`, standard output contains exactly one JSON object: `{"outcome":"succeeded","result":…}` on success, or `{"outcome":…,"error":{…},"taskId":…,"runId":…}` on failure. Diagnostics go to standard error. Without `--json`, the result JSON is pretty-printed.
+See [kiteline-agent commands](reference.en.md#kiteline-agent-commands) for Windows invocation forms. To read the JSON list in PowerShell 7:
 
-### IDs
-
-Task and run IDs contain letters, digits, `_` and `-`, have a length limit (see [Limits](reference.en.md#limits)), and are unique without regard to case. Callers can supply IDs with `create --task-id` and `run --run-id`; omitted IDs are generated automatically. An ID stays unchanged throughout the task or record's lifetime and is used for queries, stopping and review.
-
-### Exit codes
-
-| Exit code | Meaning                                                                                                                                                         |
-| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0         | The management operation succeeded, or the run was accepted                                                                                                     |
-| 1         | The management operation definitely failed, for example because the resource is busy, the revision conflicts, the object is missing or the agent is not running |
-| 2         | Incorrect usage or invalid arguments, such as an invalid Cron expression or a working directory that is not a directory                                         |
-| 3         | Result unconfirmed: the request was sent but no result was received                                                                                             |
-
-Exit code 0 from `run` or `status` does not mean the command succeeded; inspect the run's status and exit code. For exit code 3, query the `taskId` or `runId` in the output instead of immediately resending the operation.
+```powershell
+& "$PSHOME\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" schedule list --json | ConvertFrom-Json
+```
 
 ### Let an AI CLI manage tasks
 

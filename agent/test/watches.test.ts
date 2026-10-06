@@ -15,13 +15,7 @@ const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
-async function until(check: () => boolean) {
-  const end = Date.now() + 5000;
-  while (!check()) {
-    if (Date.now() > end) throw new Error("watch event did not arrive");
-    await new Promise((resolve) => setTimeout(resolve, 30));
-  }
-}
+const pollOptions = { timeout: 5000, interval: 30 };
 async function setup() {
   const root = await mkdtemp("/var/tmp/kiteline-watch-");
   cleanups.push(() => rm(root, { recursive: true, force: true }));
@@ -35,21 +29,31 @@ test("directory replacement remains watched and deactivation stops events", asyn
   const { root, watches, events, workspace } = await setup();
   await mkdir(join(root, "child"));
   watches.set([workspace("a", root)]);
-  await until(() => events.some((event) => event.status === "normal"));
+  await expect
+    .poll(() => events.some((event) => event.status === "normal"), pollOptions)
+    .toBe(true);
   events.length = 0;
   await rename(join(root, "child"), join(root, "old"));
   await mkdir(join(root, "child"));
-  await until(() => events.some((event) => event.type === "workspace.changed"));
+  await expect
+    .poll(() => events.some((event) => event.type === "workspace.changed"), pollOptions)
+    .toBe(true);
   events.length = 0;
   await writeFile(join(root, "child", "new"), "new content");
-  await until(() => events.some((event) => event.type === "workspace.changed"));
+  await expect
+    .poll(() => events.some((event) => event.type === "workspace.changed"), pollOptions)
+    .toBe(true);
   events.length = 0;
   await writeFile(join(root, "replacement"), "atomic replacement");
   await rename(join(root, "replacement"), join(root, "child", "new"));
-  await until(() => events.some((event) => event.type === "workspace.changed"));
+  await expect
+    .poll(() => events.some((event) => event.type === "workspace.changed"), pollOptions)
+    .toBe(true);
   events.length = 0;
   await appendFile(join(root, "child", "new"), "after replacement");
-  await until(() => events.some((event) => event.type === "workspace.changed"));
+  await expect
+    .poll(() => events.some((event) => event.type === "workspace.changed"), pollOptions)
+    .toBe(true);
   await watches.close();
   events.length = 0;
   await writeFile(join(root, "child", "new"), "after close");
@@ -87,25 +91,34 @@ test("shared Git metadata invalidates both active worktrees", async () => {
   });
   watches.repo("a", repo("a", a, join(a, ".git")));
   watches.repo("b", repo("b", b, join(a, ".git", "worktrees", "b")));
-  await until(
-    () =>
-      new Set(events.filter((event) => event.status === "normal").map((event) => event.workspaceId))
-        .size === 2,
-  );
+  await expect
+    .poll(
+      () =>
+        new Set(
+          events.filter((event) => event.status === "normal").map((event) => event.workspaceId),
+        ).size === 2,
+      pollOptions,
+    )
+    .toBe(true);
   events.length = 0;
   await git("update-ref", "refs/heads/probe", "HEAD");
-  await until(
-    () =>
-      new Set(
-        events
-          .filter((event) => event.type === "workspace.changed")
-          .map((event) => event.workspaceId),
-      ).size === 2,
-  );
+  await expect
+    .poll(
+      () =>
+        new Set(
+          events
+            .filter((event) => event.type === "workspace.changed")
+            .map((event) => event.workspaceId),
+        ).size === 2,
+      pollOptions,
+    )
+    .toBe(true);
   watches.set([workspace("b", b)]);
   events.length = 0;
   await git("update-ref", "refs/heads/after-unsubscribe", "HEAD");
-  await until(() => events.some((event) => event.type === "workspace.changed"));
+  await expect
+    .poll(() => events.some((event) => event.type === "workspace.changed"), pollOptions)
+    .toBe(true);
   expect(
     events.filter((event) => event.type === "workspace.changed").map((event) => event.workspaceId),
   ).toEqual(["b"]);
@@ -117,7 +130,9 @@ test("dependencies stay ignored while repositories join metadata watching before
   await mkdir(nested, { recursive: true });
   await run("git", ["init", nested]);
   watches.set([workspace("a", root)]);
-  await until(() => events.some((event) => event.status === "normal"));
+  await expect
+    .poll(() => events.some((event) => event.status === "normal"), pollOptions)
+    .toBe(true);
   events.length = 0;
   await writeFile(join(nested, "ignored"), "no recursive subscription");
   await new Promise((resolve) => setTimeout(resolve, 450));
@@ -132,20 +147,28 @@ test("dependencies stay ignored while repositories join metadata watching before
     available: true,
     linked: false,
   });
-  await until(() => events.some((event) => event.status === "normal"));
+  await expect
+    .poll(() => events.some((event) => event.status === "normal"), pollOptions)
+    .toBe(true);
   events.length = 0;
   await run("git", ["-C", nested, "symbolic-ref", "HEAD", "refs/heads/next"]);
-  await until(() => events.some((event) => event.type === "workspace.changed"));
+  await expect
+    .poll(() => events.some((event) => event.type === "workspace.changed"), pollOptions)
+    .toBe(true);
   events.length = 0;
   await mkdir(join(gitDir, "objects", "aa"));
   await writeFile(join(gitDir, "objects", "aa", "object"), "not watched");
   await new Promise((resolve) => setTimeout(resolve, 450));
   expect(events).toEqual([]);
   await mkdir(join(root, "new-project"));
-  await until(() => events.some((event) => event.type === "workspace.changed"));
+  await expect
+    .poll(() => events.some((event) => event.type === "workspace.changed"), pollOptions)
+    .toBe(true);
   events.length = 0;
   await run("git", ["init", join(root, "new-project")]);
-  await until(() => events.some((event) => event.type === "workspace.changed"));
+  await expect
+    .poll(() => events.some((event) => event.type === "workspace.changed"), pollOptions)
+    .toBe(true);
   watches.reposComplete("a", new Set());
   events.length = 0;
   await run("git", ["-C", nested, "symbolic-ref", "HEAD", "refs/heads/removed"]);
@@ -169,14 +192,20 @@ test("an external Git root resumes after replacement and excludes its object tre
   };
   watches.set([workspace("a", project)]);
   watches.repo("a", repo);
-  await until(() => events.some((event) => event.status === "normal"));
+  await expect
+    .poll(() => events.some((event) => event.status === "normal"), pollOptions)
+    .toBe(true);
   await cp(gitDir, join(root, "replacement"), { recursive: true });
   await rename(gitDir, join(root, "old"));
   await rename(join(root, "replacement"), gitDir);
-  await until(() => events.some((event) => event.type === "workspace.changed"));
+  await expect
+    .poll(() => events.some((event) => event.type === "workspace.changed"), pollOptions)
+    .toBe(true);
   events.length = 0;
   await run("git", ["-C", project, "symbolic-ref", "HEAD", "refs/heads/replaced"]);
-  await until(() => events.some((event) => event.type === "workspace.changed"));
+  await expect
+    .poll(() => events.some((event) => event.type === "workspace.changed"), pollOptions)
+    .toBe(true);
   events.length = 0;
   await mkdir(join(gitDir, "objects", "bb"));
   await writeFile(join(gitDir, "objects", "bb", "object"), "ignored");
@@ -191,17 +220,23 @@ test("a replaced non-Git workspace root resumes without subscribing to its sibli
   await mkdir(project);
   await mkdir(sibling);
   watches.set([workspace("a", project)]);
-  await until(() => events.some((event) => event.status === "normal"));
+  await expect
+    .poll(() => events.some((event) => event.status === "normal"), pollOptions)
+    .toBe(true);
   events.length = 0;
   await writeFile(join(sibling, "unrelated"), "ignored");
   await new Promise((resolve) => setTimeout(resolve, 450));
   expect(events).toEqual([]);
   await rename(project, join(root, "old"));
   await mkdir(project);
-  await until(() => events.some((event) => event.type === "workspace.changed"));
+  await expect
+    .poll(() => events.some((event) => event.type === "workspace.changed"), pollOptions)
+    .toBe(true);
   events.length = 0;
   await writeFile(join(project, "new"), "reattached");
-  await until(() => events.some((event) => event.type === "workspace.changed"));
+  await expect
+    .poll(() => events.some((event) => event.type === "workspace.changed"), pollOptions)
+    .toBe(true);
 });
 
 test("a bare workspace watches Git state without recursively watching objects", async () => {
@@ -217,10 +252,14 @@ test("a bare workspace watches Git state without recursively watching objects", 
     available: false,
     linked: false,
   });
-  await until(() => events.some((event) => event.status === "normal"));
+  await expect
+    .poll(() => events.some((event) => event.status === "normal"), pollOptions)
+    .toBe(true);
   events.length = 0;
   await run("git", ["--git-dir", root, "symbolic-ref", "HEAD", "refs/heads/next"]);
-  await until(() => events.some((event) => event.type === "workspace.changed"));
+  await expect
+    .poll(() => events.some((event) => event.type === "workspace.changed"), pollOptions)
+    .toBe(true);
   events.length = 0;
   await mkdir(join(root, "objects", "cc"));
   await writeFile(join(root, "objects", "cc", "object"), "ignored");
@@ -254,8 +293,12 @@ test("discovery resolves a linked .git directory for external metadata watching"
   expect(repo.commonDir).toBe(metadataPath);
   watches.set([workspace("a", project)]);
   watches.repo("a", repo);
-  await until(() => events.some((event) => event.status === "normal"));
+  await expect
+    .poll(() => events.some((event) => event.status === "normal"), pollOptions)
+    .toBe(true);
   events.length = 0;
   await run("git", ["-C", project, "update-ref", "refs/heads/external", "HEAD"]);
-  await until(() => events.some((event) => event.type === "workspace.changed"));
+  await expect
+    .poll(() => events.some((event) => event.type === "workspace.changed"), pollOptions)
+    .toBe(true);
 });

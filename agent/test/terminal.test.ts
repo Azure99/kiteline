@@ -1,7 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { mkdtemp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import { AppError, limits } from "@kiteline/shared/protocol";
 import { tmux } from "@kiteline/shared/terminal/node";
 import type { RecorderCall } from "@kiteline/shared/protocol/ipc";
@@ -36,13 +35,7 @@ afterEach(async () => {
   }
   if (failures.length) throw new AggregateError(failures, "Terminal test cleanup failed");
 });
-async function until(check: () => boolean | Promise<boolean>, timeout = 5000) {
-  const deadline = Date.now() + timeout;
-  while (!(await check())) {
-    if (Date.now() >= deadline) throw new Error("Expected terminal state did not arrive");
-    await delay(20);
-  }
-}
+const pollOptions = { timeout: 5000, interval: 20 };
 async function fixture() {
   const dataDir = await mkdtemp("/var/tmp/kiteline-term-");
   cleanups.push(() => rm(dataDir, { recursive: true, force: true }));
@@ -113,7 +106,7 @@ test("real recorder captures Shell output, restores history and pastes while nat
     historyGap: false,
     history: "retained",
   });
-  await until(() => ready.has("first"));
+  await expect.poll(() => ready.has("first"), pollOptions).toBe(true);
   const input = (data: string) =>
     agent.sessions.recorder.send({
       type: "input",
@@ -122,7 +115,7 @@ test("real recorder captures Shell output, restores history and pastes while nat
       dataBase64: Buffer.from(data).toString("base64"),
     });
   input("printf 'FIRST-OUTPUT\\n'\r");
-  await until(() => output.includes("FIRST-OUTPUT\r\n"));
+  await expect.poll(() => output.includes("FIRST-OUTPUT\r\n"), pollOptions).toBe(true);
   const identity = agent.sessions.get(session.id).identity;
   await tmux(identity.socket, ["copy-mode", "-t", identity.paneId!]);
   agent.sessions.recorder.send({
@@ -132,10 +125,13 @@ test("real recorder captures Shell output, restores history and pastes while nat
     text: "printf '你好\\n' > result.txt\nprintf 'SECOND\\n' >> result.txt",
   });
   input("\r");
-  await until(
-    async () =>
-      (await readFile(join(dataDir, "result.txt"), "utf8").catch(() => "")) === "你好\nSECOND\n",
-  );
+  await expect
+    .poll(
+      async () =>
+        (await readFile(join(dataDir, "result.txt"), "utf8").catch(() => "")) === "你好\nSECOND\n",
+      pollOptions,
+    )
+    .toBe(true);
   expect(
     (
       await tmux(identity.socket, [
@@ -156,7 +152,7 @@ test("real recorder captures Shell output, restores history and pastes while nat
     historyGap: false,
     history: "retained",
   });
-  await until(() => ready.has("second"));
+  await expect.poll(() => ready.has("second"), pollOptions).toBe(true);
   expect(output).toContain("FIRST-OUTPUT");
   await agent.sessions.end(workspace.id, session.id);
   expect(agent.sessions.list().sessions).toEqual([]);
@@ -179,7 +175,9 @@ test("recorder death keeps the same task, and agent stop only ends its registere
     ]);
   const before = await pane();
   process.kill(agent.sessions.recorder.pid!, "SIGKILL");
-  await until(() => agent.sessions.get(session.id).session.webStatus === "unavailable");
+  await expect
+    .poll(() => agent.sessions.get(session.id).session.webStatus === "unavailable", pollOptions)
+    .toBe(true);
   expect(await pane()).toBe(before);
   expect(agent.sessions.get(session.id).session.historyGap).toBe(true);
   await agent.close();
@@ -205,7 +203,7 @@ test("creation cancellation remains queryable, immediate end cleans up, and shor
   await agent.sessions.create(workspace.id, undefined, "short", signal).catch((error: unknown) => {
     expect(error).toMatchObject({ outcome: "unknown" });
   });
-  await until(() => agent.sessions.list().sessions.length === 0);
+  await expect.poll(() => agent.sessions.list().sessions.length === 0, pollOptions).toBe(true);
   const results = await Promise.allSettled(
     Array.from({ length: 5 }, () =>
       agent.sessions.create(workspace.id, undefined, undefined, signal),
@@ -252,10 +250,14 @@ test("recovery restores the same task and pending Shell input, then redraw and e
   ]);
   const before = await pane();
   process.kill(agent.sessions.recorder.pid!, "SIGKILL");
-  await until(() => agent.sessions.get(session.id).session.webStatus === "unavailable");
+  await expect
+    .poll(() => agent.sessions.get(session.id).session.webStatus === "unavailable", pollOptions)
+    .toBe(true);
   expect(agent.sessions.recover(workspace.id, session.id).webStatus).toBe("recovering");
   expect(agent.sessions.recover(workspace.id, session.id).webStatus).toBe("recovering");
-  await until(() => agent.sessions.get(session.id).session.webStatus !== "recovering");
+  await expect
+    .poll(() => agent.sessions.get(session.id).session.webStatus !== "recovering", pollOptions)
+    .toBe(true);
   expect(agent.sessions.get(session.id).session).toMatchObject({
     webStatus: "available",
     historyGap: true,
@@ -289,7 +291,7 @@ test("recovery restores the same task and pending Shell input, then redraw and e
     historyGap: true,
     history: "retained",
   });
-  await until(() => ready);
+  await expect.poll(() => ready, pollOptions).toBe(true);
   expect(output).toContain("recovered.txt");
   agent.sessions.recorder.send({
     type: "input",
@@ -297,10 +299,13 @@ test("recovery restores the same task and pending Shell input, then redraw and e
     attachmentId: "recovered",
     dataBase64: Buffer.from("\r").toString("base64"),
   });
-  await until(
-    async () =>
-      (await readFile(join(dataDir, "recovered.txt"), "utf8").catch(() => "")) === "RECOVERED",
-  );
+  await expect
+    .poll(
+      async () =>
+        (await readFile(join(dataDir, "recovered.txt"), "utf8").catch(() => "")) === "RECOVERED",
+      pollOptions,
+    )
+    .toBe(true);
   await agent.sessions.redraw(workspace.id, session.id);
   expect(await pane()).toBe(before);
   const clients = await tmux(identity.socket, [
@@ -310,9 +315,13 @@ test("recovery restores the same task and pending Shell input, then redraw and e
   ]);
   const controlPid = Number(clients.trim().split(" ")[0]);
   process.kill(controlPid, "SIGTERM");
-  await until(() => agent.sessions.get(session.id).session.webStatus === "unavailable");
+  await expect
+    .poll(() => agent.sessions.get(session.id).session.webStatus === "unavailable", pollOptions)
+    .toBe(true);
   agent.sessions.recover(workspace.id, session.id);
-  await until(() => agent.sessions.get(session.id).session.webStatus !== "recovering");
+  await expect
+    .poll(() => agent.sessions.get(session.id).session.webStatus !== "recovering", pollOptions)
+    .toBe(true);
   expect(agent.sessions.get(session.id).session.webStatus).toBe("available");
   await agent.sessions.end(workspace.id, session.id);
   expect(agent.sessions.list().sessions).toEqual([]);
@@ -328,7 +337,7 @@ test("an unresponsive recorder cannot leave a phantom creation or block agent sh
   ).rejects.toMatchObject({ outcome: "unknown" });
   expect(agent.sessions.list().sessions.some((item) => item.state === "starting")).toBe(true);
   process.kill(agent.sessions.recorder.pid!, "SIGKILL");
-  await until(() => agent.sessions.list().sessions.length === 1);
+  await expect.poll(() => agent.sessions.list().sessions.length === 1, pollOptions).toBe(true);
   await agent.sessions.create(workspace.id, undefined, undefined, signal);
   process.kill(agent.sessions.recorder.pid!, "SIGSTOP");
   await agent.close();
@@ -344,10 +353,14 @@ test("a failed end does not permanently block recovery of a surviving task", asy
     outcome: "unknown",
   });
   process.kill(agent.sessions.recorder.pid!, "SIGKILL");
-  await until(() => agent.sessions.get(session.id).session.webStatus === "unavailable");
+  await expect
+    .poll(() => agent.sessions.get(session.id).session.webStatus === "unavailable", pollOptions)
+    .toBe(true);
   Object.assign(limits, { interactionTimeout: 3000 });
   expect(agent.sessions.recover(workspace.id, session.id).webStatus).toBe("recovering");
-  await until(() => agent.sessions.get(session.id).session.webStatus !== "recovering");
+  await expect
+    .poll(() => agent.sessions.get(session.id).session.webStatus !== "recovering", pollOptions)
+    .toBe(true);
   expect(agent.sessions.get(session.id).session.webStatus).toBe("available");
 }, 10000);
 
@@ -420,7 +433,9 @@ test("a failed tmux kill marks the session unavailable and can recover the same 
   });
   expect(await pane()).toBe(before);
   expect(agent.sessions.recover(workspace.id, session.id).webStatus).toBe("recovering");
-  await until(() => agent.sessions.get(session.id).session.webStatus !== "recovering");
+  await expect
+    .poll(() => agent.sessions.get(session.id).session.webStatus !== "recovering", pollOptions)
+    .toBe(true);
   expect(agent.sessions.get(session.id).session.webStatus).toBe("available");
   expect(await pane()).toBe(before);
   let ready = false;
@@ -447,18 +462,21 @@ test("a failed tmux kill marks the session unavailable and can recover the same 
     historyGap: true,
     history: "retained",
   });
-  await until(() => ready);
+  await expect.poll(() => ready, pollOptions).toBe(true);
   agent.sessions.recorder.send({
     type: "input",
     sessionId: session.id,
     attachmentId: "after-kill",
     dataBase64: Buffer.from("printf 'AFTER-KILL\\n' | tee survived.txt\r").toString("base64"),
   });
-  await until(
-    async () =>
-      output.includes("AFTER-KILL\r\n") &&
-      (await readFile(join(dataDir, "survived.txt"), "utf8").catch(() => "")) === "AFTER-KILL\n",
-  );
+  await expect
+    .poll(
+      async () =>
+        output.includes("AFTER-KILL\r\n") &&
+        (await readFile(join(dataDir, "survived.txt"), "utf8").catch(() => "")) === "AFTER-KILL\n",
+      pollOptions,
+    )
+    .toBe(true);
   await agent.sessions.end(workspace.id, session.id);
   expect(agent.sessions.list().sessions).toEqual([]);
 }, 15000);

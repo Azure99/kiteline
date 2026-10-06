@@ -264,11 +264,8 @@ Writes include stage, unstage, discard, commit, branch operations, fetch, pull, 
 | Task name                          | 256 bytes (UTF-8)                        | Fixed `nameBytes`       |
 | Command                            | 16 KiB                                   | Fixed `commandBytes`    |
 | Cron expression                    | 256 characters                           | Fixed                   |
-| Task ID and run ID                 | 1 to 128 characters                      | Fixed                   |
 | Scheduled-time lateness tolerance  | 5 seconds                                | Fixed `lateToleranceMs` |
 | TERM-to-KILL stop grace period     | 5 seconds                                | Fixed `stopGraceMs`     |
-| One output read                    | 4 bytes to 32 KiB                        | Fixed `outputReadBytes` |
-| Task-list and run-record page      | 50 entries                               | Fixed `pageEntries`     |
 
 ### Connections and requests
 
