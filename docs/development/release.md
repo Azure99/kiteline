@@ -118,7 +118,7 @@ sudo apt-get install -y git curl xz-utils zstd zip unzip binutils libarchive-too
 
 ### 构建 Windows 组件
 
-CI 在 Windows x64 上准备输入并编译 tmux，再传到 Linux x64 编译 addon、组装和打包，步骤见 [`build.yml`](../../.github/workflows/build.yml)，组件入口见 [`build-windows-components.mjs`](../../scripts/build-windows-components.mjs)。Windows 需要匹配版本的 x64 Node、默认位置的 7-Zip 和系统 `tar.exe`；验证最终 ZIP 使用 PowerShell 7。
+CI 在 Windows x64 上准备输入并编译 tmux，再传到 Linux x64 编译 addon、组装和打包，步骤见 [`build.yml`](../../.github/workflows/build.yml)，组件入口见 [`build-windows-components.mjs`](../../scripts/build-windows-components.mjs)。Windows 需要匹配版本的 x64 Node、默认位置的 7-Zip 24.06 或更新版本和系统 `tar.exe`；验证最终 ZIP 使用 PowerShell 7。
 
 Windows checkout 前执行 `git config --global core.autocrlf false`，避免换行转换改变配方摘要。需要本机排错时，按工作流运行对应步骤；`tmux`、`addon`、`assemble` 的输出目录必须不存在，父目录必须存在。
 

@@ -80,17 +80,23 @@ export function buildWindowsTmux(directory, destination) {
   const temporary = mkdtempSync(join(destination, "build-"));
   try {
     const tar = join(process.env.SystemRoot, "System32/tar.exe");
+    const sevenZip = join(process.env.ProgramFiles, "7-Zip/7z.exe");
     const bootstrap = join(temporary, "bootstrap");
-    run(join(process.env.ProgramFiles, "7-Zip/7z.exe"), [
-      "x",
-      "-y",
-      `-o${bootstrap}`,
-      join(directory, "msys2-base.tar.xz"),
-    ]);
+    run(sevenZip, ["x", "-y", `-o${bootstrap}`, join(directory, "msys2-base.tar.xz")]);
     run(tar, ["-xf", join(bootstrap, "msys2-base.tar"), "-C", temporary]);
     const msys = join(temporary, "msys64");
-    for (const pkg of recipe.packages)
-      run(tar, ["-xf", join(directory, "packages", `${pkg.name}.tar.zst`), "-C", msys]);
+    for (const pkg of recipe.packages) {
+      run(sevenZip, [
+        "x",
+        "-tzstd",
+        "-y",
+        `-o${bootstrap}`,
+        join(directory, "packages", `${pkg.name}.tar.zst`),
+      ]);
+      const archive = join(bootstrap, `${pkg.name}.tar`);
+      run(tar, ["-xf", archive, "-C", msys]);
+      rmSync(archive);
+    }
     const environment = {
       SystemRoot: process.env.SystemRoot,
       WINDIR: process.env.SystemRoot,
