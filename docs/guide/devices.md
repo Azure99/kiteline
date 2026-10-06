@@ -124,7 +124,7 @@ Windows 调用方式和执行策略前提见 [kiteline-agent 命令](reference.m
 
 ### 仅绑定命令
 
-绑定对话框也提供仅绑定命令，先执行 `check`，再用绑定码绑定，不安装也不启动 agent。用于已经手工安装、或重新绑定的设备；绑定后用上面的启动命令运行 agent。设备已有绑定时，这条命令同样提示 `This installation is already bound` 并停止。
+绑定对话框也提供仅绑定命令，先执行 `check`，再用绑定码绑定，不安装也不启动 agent。用于已经手工安装、或重新绑定的设备；绑定后用上面的启动命令运行 agent。
 
 ## 手工安装
 
@@ -151,7 +151,7 @@ tar -xpzf "$name.tar.gz" --no-same-owner
 sudo "./$name/bin/kiteline-agent" install --user "$(id -un)"
 ```
 
-`install` 完成后输出 `Installed but not started`。由管理员替其他账户安装时，管理员执行最后一条命令并把 `"$(id -un)"` 换成项目用户名，`check` 仍由项目用户执行。
+由管理员替其他账户安装时，管理员执行最后一条命令并把 `"$(id -un)"` 换成项目用户名，`check` 仍由项目用户执行。
 
 随包的 tmux、`flock` 等程序没有经过 Apple 公证。macOS 上用浏览器下载的发布包带有隔离属性 `com.apple.quarantine`，运行随包程序时 macOS 可能提示无法验证开发者并拒绝运行；用上面的 curl 命令下载的文件不带这个属性。已经用浏览器下载时，核对 SHA-256 后对解包目录执行 `xattr -dr com.apple.quarantine "./$name"`，再运行 `check`。已经安装的程序目录执行 `sudo xattr -dr com.apple.quarantine /opt/kiteline-agent`。
 
@@ -290,7 +290,7 @@ notepad "$service\kiteline-agent.xml"
 WinSW 按自身文件名查找配置，所以程序名 `kiteline-agent.exe` 必须与 `kiteline-agent.xml` 同名并放在同一目录。在记事本中检查：
 
 - `PATH`：包含 PowerShell 7、Git 的 `cmd` 目录和项目工具所在的目录。
-- `KITELINE_AGENT_HOME` 和 `KITELINE_AGENT_RUN_DIR`：与安装时的数据目录和运行目录一致；安装时没有指定 `--data-dir`、`--run-dir` 时保持示例值。
+- `KITELINE_AGENT_HOME` 和 `KITELINE_AGENT_RUN_DIR`：分别使用 `%ProgramData%\kiteline-agent\installation.json` 中 `dataDir` 和 `runDir` 的实际值。
 - 代理：需要时加入 `<env name="HTTPS_PROXY" value="http://proxy.example.com:3128" />` 等行。
 - 保留 `<hidewindow>false</hidewindow>`、`<stopparentprocessfirst>true</stopparentprocessfirst>` 和 `<stoptimeout>45sec</stoptimeout>`。停止服务时，WinSW 依靠它们把 Ctrl-C 送到 agent，并给 agent 足够的时间结束终端会话和定时任务运行。
 
@@ -462,7 +462,7 @@ sudo /usr/local/bin/kiteline-agent upgrade --archive "$PWD/kiteline-agent-X.Y.Z-
 
 版本号和文件名按实际下载的发布包修改。加 `--yes` 跳过确认。
 
-升级失败时，agent 会恢复升级前的程序目录，并提示没有启动任何实例；恢复也失败时，输出会给出旧程序的备份位置。升级、卸载使用的锁和替换过程见 [agent 安装与运行](../design/agent-lifecycle.md)。
+替换程序失败时，升级会尝试恢复旧程序；恢复失败时，输出会给出备份位置。升级不会自动启动 agent。
 
 ## 卸载
 
@@ -486,15 +486,7 @@ Windows（管理员 PowerShell 7）：
 
 命令提示 `Type yes to continue:`，输入 `yes` 继续；加 `--yes` 跳过确认。卸载删除程序目录、命令入口和安装记录。默认保留 agent 数据目录和项目文件，之后重新安装同一设备时不需要重新绑定。
 
-加 `--purge-state` 时，还会删除 agent 数据目录中的以下文件：
-
-| 文件                   | 内容                       |
-| ---------------------- | -------------------------- |
-| `agent.json`           | 工作区登记、快捷方式和设置 |
-| `connection.json`      | 绑定凭据和 server 地址     |
-| `config.json`          | agent 配置                 |
-| `temporary-files.json` | 临时文件记录               |
-| `tasks/`               | 定时任务定义和运行记录     |
+加 `--purge-state` 时，还会清除 agent 管理的工作区登记、快捷方式和设置、绑定凭据、配置、临时文件记录，以及定时任务定义和运行记录。对应文件见[agent 数据目录](reference.md#agent-数据目录)。
 
 `--purge-state` 作用于安装记录中的数据目录（`/etc/kiteline-agent.env` 或默认位置，Windows 为安装时确定的目录），不作用于只在服务配置中设置的 `KITELINE_AGENT_HOME`。数据目录正被使用时，卸载拒绝执行。项目文件和工作区目录不会被删除。
 

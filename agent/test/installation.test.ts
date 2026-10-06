@@ -133,7 +133,7 @@ test("every installed command holds a shared lock before loading program files",
   await running.closed;
   const lock = await open(entry.use, "r");
   try {
-    await lockFileDescriptor(lock.fd, "exclusive");
+    await lockFileDescriptor(lock.fd);
     const blocked = child(entry.path, ["--version"]);
     expect((await blocked.closed)[0]).toBe(1);
     expect(blocked.output()).not.toContain("loaded");

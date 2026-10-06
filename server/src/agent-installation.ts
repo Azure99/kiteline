@@ -29,6 +29,13 @@ function curlCommand(entryOrigin: string) {
   return `curl -fsSL --proto '${protocols}' --proto-redir '${protocols}'`;
 }
 
+function fill(template: string, values: Record<string, string>) {
+  return template.replace(
+    new RegExp(Object.keys(values).join("|"), "g"),
+    (token) => values[token]!,
+  );
+}
+
 export function installationCommands(entryOrigin: string, code: string) {
   const origin = quote(entryOrigin);
   const bind = `kiteline-agent check && printf '%s\\n' ${quote(code)} | kiteline-agent bind --server ${origin} --if-unbound`;
@@ -54,10 +61,7 @@ function connectionScript(entryOrigin: string) {
     __KITELINE_ORIGIN__: quote(entryOrigin),
     __KITELINE_VERSION__: quote(appVersion),
   };
-  return connectionTemplate.replace(
-    /__KITELINE_(CURL|INSTALL_URL|ORIGIN|VERSION)__/g,
-    (token) => values[token]!,
-  );
+  return fill(connectionTemplate, values);
 }
 
 export function upgradeCommand(entryOrigin: string) {
@@ -80,10 +84,7 @@ function windowsScript(entryOrigin: string, mode: "Connect" | "Upgrade") {
     __KITELINE_MODE__: mode,
     __KITELINE_ORIGIN__: psQuote(entryOrigin),
   };
-  return windowsTemplate.replace(
-    /__KITELINE_(VERSION|INSTALL_URL|MODE|ORIGIN)__/g,
-    (token) => values[token]!,
-  );
+  return fill(windowsTemplate, values);
 }
 
 function upgradeScript(entryOrigin: string) {
@@ -93,10 +94,7 @@ function upgradeScript(entryOrigin: string) {
     __KITELINE_DOWNLOAD_URL__: quote(entryOrigin + "/downloads/agent/" + appVersion + "/"),
     __KITELINE_CURL__: curlCommand(entryOrigin),
   };
-  return upgradeTemplate.replace(
-    /__KITELINE_(VERSION|ARCHIVE_VERSION|DOWNLOAD_URL|CURL)__/g,
-    (token) => values[token]!,
-  );
+  return fill(upgradeTemplate, values);
 }
 
 export async function serveAgentInstallation(

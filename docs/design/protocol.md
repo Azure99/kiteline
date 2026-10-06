@@ -95,7 +95,7 @@ server 为每个 HTTP 请求和 WebSocket 升级确定一个入口 origin（`req
 
 ### 尝试次数限制
 
-`/api/setup` 和 `/api/login` 共用一个限制器，`/api/agent/bind` 使用另一个。每个限制器分别统计每分钟的全局次数和每个来源的次数，成功和失败都计数，超过后返回 429 `busy`。来源是 TCP 连接的对端地址；经过反向代理时所有请求来自同一个地址，每来源限制的效果与全局限制相同。数值见[限额](../guide/reference.md#限额)。
+`/api/setup` 和 `/api/login` 共用一个限制器，`/api/agent/bind` 使用另一个。每个限制器分别统计全局和每个来源的尝试次数，成功和失败都计数，超过后返回 429 `busy`。来源是 TCP 连接的对端地址；经过同一反向代理地址的请求共用一个来源额度，全局额度仍分别检查。数值见[限额](../guide/reference.md#限额)。
 
 ### 设备认证
 
@@ -276,21 +276,13 @@ server 为每个 HTTP 请求和 WebSocket 升级确定一个入口 origin（`req
 `kiteline-agent` 的本机命令通过本机 IPC 调用正在运行的 agent（`agent/src/local.ts`）。
 
 - **端点**：Linux 和 macOS 为 Unix socket `<运行目录>/agent.sock`，权限 0600，agent 启动时重新创建。Windows 为命名管道 `\\.\pipe\kiteline-<哈希>`，哈希是用户 SID 和运行目录真实路径的 SHA-256，访问控制见 [Windows](platforms.md#windows)。本机 IPC 不使用 TCP。
-- **协议**：在端点上使用 HTTP/1.1，只有 `POST /rpc`。请求体为 `{method, params}`，不超过 `controlMessageBytes`；响应是 `id` 为 `"local"` 的 `Reply`。每次调用在 agent 内的期限为 `rpcTimeout`（定时任务方法也一样），连接断开时取消；命令行最多等待 `rpcTimeout` 加 1 秒，其中 `attach` 和 `doctor` 不读取 `config.json`，使用默认的 `rpcTimeout`。
+- **协议**：在端点上使用 HTTP/1.1，只有 `POST /rpc`。请求体不超过 `controlMessageBytes`；响应是 `id` 为 `"local"` 的 `Reply`。每次调用在 agent 内的期限为 `rpcTimeout`（定时任务方法也一样），连接断开时取消；命令行最多等待 `rpcTimeout` 加 1 秒，其中 `attach` 和 `doctor` 不读取 `config.json`，使用默认的 `rpcTimeout`。
 
-| 方法                 | 参数 → 结果                                  | 命令                            |
-| -------------------- | -------------------------------------------- | ------------------------------- |
-| `doctor`             | `{}` → `{runtime, items}`                    | `kiteline-agent doctor`         |
-| `workspaces.list`    | `{}` → `{workspaces}`                        | `kiteline-agent workspace list` |
-| `sessions.list`      | 与 RPC 相同                                  | `kiteline-agent terminal list`  |
-| `sessions.create`    | 与 RPC 相同                                  | `kiteline-agent terminal new`   |
-| `sessions.end`       | `{sessionId}` → `{ended}`                    | `kiteline-agent terminal end`   |
-| `terminal.attach`    | `{sessionId}` → `{socket, paneId, windowId}` | `kiteline-agent attach`         |
-| 定时任务的 14 个方法 | 与 RPC 相同                                  | `kiteline-agent schedule`       |
+允许的本机操作以 `agent/src/agent.ts` 的 `handleLocal()` 为准；它只开放本机诊断、工作区和终端管理、附着及定时任务操作，不是全部远端 RPC 的镜像。
 
 - 其他方法返回 `unsupported`，agent 正在停止时返回 `cancelled`。`sessions.end` 不需要 `workspaceId`。
 - `terminal.attach` 在会话仍在创建时返回 `busy`；它只返回 tmux socket 和窗格标识，命令行随后直接运行 tmux 附着。
-- `doctor` 的结果为 `{runtime, items: [{name, status, detail}]}`，`status` 为 `ok`、`warn` 或 `error`；命令行连不上 agent 时自己生成 `runtime: false` 的结果。检查项和退出码见 [check 与 doctor](agent-lifecycle.md#check-与-doctor)。
+- 命令行连不上 agent 时，以当前 CLI 环境生成离线检查结果；运行态检查范围及提示见 [check 与 doctor](agent-lifecycle.md#check-与-doctor)。
 - `kiteline-agent bind` 不使用本机 IPC，它只在 agent 停止时写入凭据，见[绑定与连接](agent-lifecycle.md#绑定与连接)。
 
 ## recorder IPC

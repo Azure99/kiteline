@@ -53,7 +53,7 @@ server 的环境变量见[参考](reference.md#server-环境变量)。
 
 `.env` 中还可以设置 `KITELINE_HTTP_BIND`、`KITELINE_HTTP_PORT` 和 `KITELINE_TRUST_PROXY_PROTO`，用法见[局域网访问与端口](#局域网访问与端口)和 [HTTPS 与反向代理](#https-与反向代理)，默认值见[参考](reference.md#server-环境变量)。修改 `.env` 后再次执行 `docker compose up -d`，Compose 会用新设置重建容器。
 
-Compose 默认使用官方 GHCR 镜像，Docker 自动选择主机架构。使用自己构建的镜像时，在 `.env` 中设置 `KITELINE_IMAGE=kiteline-server` 和 `KITELINE_VERSION=X.Y.Z-amd64`（ARM64 改为 `X.Y.Z-arm64`）；这与 `pnpm images` 生成的标签一致，见[构建与发布](../development/release.md#构建-linux-包与镜像)。使用 fork 镜像时，把 `KITELINE_IMAGE` 设为它的镜像路径，`KITELINE_VERSION` 设为对应标签。
+Compose 默认使用官方 GHCR 镜像，Docker 自动选择主机架构。使用自建或 fork 镜像时，把 `KITELINE_IMAGE` 设为镜像路径，`KITELINE_VERSION` 设为对应标签；本机构建方法和标签见[构建与发布](../development/release.md#构建-linux-包与镜像)。
 
 容器内的 server 以 `kiteline` 用户（UID 1000、GID 1000）运行，数据目录 `/var/lib/kiteline` 位于 Compose 卷 `server-data` 中。Compose 项目名是 `kiteline`，所以 Docker 中的实际卷名是 `kiteline_server-data`。`docker compose down` 保留这个卷；`docker compose down -v` 会删除卷和全部 server 数据。把卷换成宿主机目录挂载时，该目录的属主必须是 `1000:1000`。
 
@@ -72,8 +72,6 @@ Compose 默认使用官方 GHCR 镜像，Docker 自动选择主机架构。使�
    curl -fLO "https://github.com/Azure99/kiteline/releases/download/v$KITELINE_VERSION/$name.tar.gz.sha256"
    sha256sum -c "$name.tar.gz.sha256"
    ```
-
-   校验通过时输出 `kiteline-server-<版本>-linux-<架构>.tar.gz: OK`。
 
 2. 解压到程序目录 `/opt/kiteline-server`。包内有一层顶层目录 `kiteline-server-<版本>-linux-<架构>/`，所以解压时去掉一层：
 
@@ -140,7 +138,7 @@ HTTPS 由部署者自己的反向代理（nginx、Caddy 等）提供，反向代
 - Docker：在 `.env` 中设置 `KITELINE_TRUST_PROXY_PROTO=1`，执行 `docker compose up -d`。
 - 原生：在 `/etc/kiteline-server.env` 中设置 `KITELINE_TRUST_PROXY_PROTO=1`，执行 `sudo systemctl restart kiteline-server`。
 
-设为 `1` 后，server 也信任直接连接的客户端发来的 `X-Forwarded-Proto`，所以 server 的 HTTP 端口应只让反向代理访问（保持 `127.0.0.1` 绑定，或只在反向代理所在的网络中开放）。入口识别和来源检查的规则见[通信契约](../design/protocol.md#请求入口与认证)。
+设为 `1` 后，server 也信任直接连接的客户端发来的 `X-Forwarded-Proto`，所以 server 的 HTTP 端口应只让反向代理访问（保持 `127.0.0.1` 绑定，或只在反向代理所在的网络中开放）。
 
 反向代理必须满足以下要求：
 
@@ -225,7 +223,7 @@ Caddy 自动申请证书、原样转发 `Host`、用实际协议覆盖 `X-Forwar
 两个恢复命令都必须在 server 停止后、使用同一个数据目录执行；server 运行时执行会报 `Lock file is already being held`。
 
 - `setup-token`：生成新的初始化 token，替换旧的，有效期与首次打印的 token 相同。只能在设置拥有者之前使用，之后执行会报 `Already initialized`。
-- `reset-password`：设置新的拥有者密码。提示 `New password:` 后输入密码，输入内容不回显，按 Enter 提交，按 Ctrl-C 取消。成功后所有浏览器的登录会话都失效，需要用新密码重新登录。设备的绑定不受影响。只能在设置拥有者之后使用，之前执行会报 `Not initialized`。
+- `reset-password`：设置新的拥有者密码。成功后所有浏览器的登录会话都失效，需要用新密码重新登录。设备的绑定不受影响。只能在设置拥有者之后使用，之前执行会报 `Not initialized`。
 
 Docker（在部署目录中执行）：
 
@@ -251,7 +249,7 @@ server 数据目录保存拥有者密码、设备登记和定时任务摘要。�
 
 停止 server 后备份整个数据目录，可以得到一致的副本。
 
-Docker（在部署目录中执行）：
+Docker（在部署目录中执行）：下面的备份和恢复命令使用默认卷 `kiteline_server-data`。改过数据挂载时，把两处该卷名换成实际卷名或宿主机目录的绝对路径。
 
 ```sh
 docker compose stop server

@@ -15,7 +15,6 @@ interface Item {
   detail: string;
 }
 export interface DoctorReport {
-  runtime: boolean;
   items: Item[];
 }
 interface Runtime {
@@ -85,7 +84,7 @@ export async function diagnose(
       "Runtime environment has not been checked; only the current installation and configuration were checked",
       "warn",
     );
-    return { runtime: false, items };
+    return { items };
   }
   const identity = windows ? windowsNative().identity() : undefined;
   add(
@@ -170,5 +169,5 @@ Repository-specific includeIf/configuration and actual authentication are verifi
       await access(path, constants.R_OK | constants.W_OK);
       return `${path}; accessible; authentication must be verified by an actual synchronization`;
     });
-  return { runtime: true, items };
+  return { items };
 }

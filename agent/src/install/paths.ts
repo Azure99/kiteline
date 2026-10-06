@@ -38,11 +38,11 @@ export interface Installation {
   gid: number;
   home: string;
 }
-export async function lockFileDescriptor(fd: number, mode: "shared" | "exclusive") {
+export async function lockFileDescriptor(fd: number) {
   const flock =
     process.platform === "darwin" ? resolve(packageDirectory, "dist/native/bin/flock") : "flock";
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(flock, [`--${mode}`, "--nonblock", "3"], {
+    const child = spawn(flock, ["--exclusive", "--nonblock", "3"], {
       stdio: ["ignore", "ignore", "ignore", fd],
     });
     child.once("error", reject);
@@ -59,11 +59,11 @@ export async function lockFileDescriptor(fd: number, mode: "shared" | "exclusive
     });
   });
 }
-export async function lockInstallation(mode: "shared" | "exclusive") {
+export async function lockInstallation() {
   const file = await open(installationUseFile, "r");
   try {
     // flock locks the shared open file description; Node retains it after the helper exits.
-    await lockFileDescriptor(file.fd, mode);
+    await lockFileDescriptor(file.fd);
     return file;
   } catch (error) {
     try {

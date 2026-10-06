@@ -124,7 +124,7 @@ Running the install command again on an already installed and bound device stops
 
 ### Bind-only command
 
-The binding dialog also provides a bind-only command. It runs `check` and binds using the code, without installing or starting the agent. Use it for a manually installed device or when binding again, then start the agent with the command above. On an already bound device, this command also stops with `This installation is already bound`.
+The binding dialog also provides a bind-only command. It runs `check` and binds using the code, without installing or starting the agent. Use it for a manually installed device or when binding again, then start the agent with the command above.
 
 ## Manual installation
 
@@ -151,7 +151,7 @@ tar -xpzf "$name.tar.gz" --no-same-owner
 sudo "./$name/bin/kiteline-agent" install --user "$(id -un)"
 ```
 
-`install` prints `Installed but not started` when finished. An administrator installing for another account runs the last command with the project username in place of `"$(id -un)"`; the project user still runs `check`.
+An administrator installing for another account runs the last command with the project username in place of `"$(id -un)"`; the project user still runs `check`.
 
 Bundled programs such as tmux and `flock` are not notarized by Apple. A package downloaded in a macOS browser carries `com.apple.quarantine`; macOS may refuse to run bundled programs because it cannot verify the developer. Files downloaded with the curl commands above do not carry that attribute. For a browser download, verify SHA-256, then run `xattr -dr com.apple.quarantine "./$name"` on the extracted directory before `check`. For an installed copy, run `sudo xattr -dr com.apple.quarantine /opt/kiteline-agent`.
 
@@ -290,7 +290,7 @@ notepad "$service\kiteline-agent.xml"
 WinSW finds configuration by its own filename, so `kiteline-agent.exe` and `kiteline-agent.xml` must share a basename and directory. Check in Notepad:
 
 - `PATH`: include PowerShell 7, Git's `cmd` directory and your project tools.
-- `KITELINE_AGENT_HOME` and `KITELINE_AGENT_RUN_DIR`: match the directories chosen during installation. Keep the example values if you did not specify `--data-dir` or `--run-dir`.
+- `KITELINE_AGENT_HOME` and `KITELINE_AGENT_RUN_DIR`: use the actual `dataDir` and `runDir` values from `%ProgramData%\kiteline-agent\installation.json`, respectively.
 - Proxy: add lines such as `<env name="HTTPS_PROXY" value="http://proxy.example.com:3128" />` as needed.
 - Keep `<hidewindow>false</hidewindow>`, `<stopparentprocessfirst>true</stopparentprocessfirst>` and `<stoptimeout>45sec</stoptimeout>`. WinSW relies on them to send Ctrl-C to the agent when stopping the service and allow enough time to end terminal sessions and scheduled-task runs.
 
@@ -462,7 +462,7 @@ sudo /usr/local/bin/kiteline-agent upgrade --archive "$PWD/kiteline-agent-X.Y.Z-
 
 Adjust the version and filename to the downloaded package. Add `--yes` to skip confirmation.
 
-If upgrading fails, the agent restores the previous installation directory and reports that no instance was started. If restoration also fails, the output gives the old installation's backup location. For locking and replacement during upgrade and uninstall, see [Agent installation and runtime (Chinese)](../design/agent-lifecycle.md).
+If replacing the program fails, the upgrade attempts to restore the previous installation; if restoration fails, the output gives the backup location. Upgrading does not start the agent automatically.
 
 ## Uninstall
 
@@ -486,15 +486,7 @@ On Windows, in administrator PowerShell 7:
 
 Enter `yes` at `Type yes to continue:`, or add `--yes` to skip confirmation. Uninstall removes the installation directory, public launcher and installation record. By default, it keeps the agent data directory and project files, so reinstalling on the same device does not require rebinding.
 
-With `--purge-state`, it also deletes these entries in the agent data directory:
-
-| File                   | Content                                         |
-| ---------------------- | ----------------------------------------------- |
-| `agent.json`           | Workspace registrations, shortcuts and settings |
-| `connection.json`      | Binding credentials and server address          |
-| `config.json`          | Agent configuration                             |
-| `temporary-files.json` | Temporary-file records                          |
-| `tasks/`               | Scheduled-task definitions and run records      |
+With `--purge-state`, uninstall also removes agent-managed workspace registrations, shortcuts and settings, binding credentials, configuration, temporary-file records, and scheduled-task definitions and run records. See [Agent data directory](reference.en.md#agent-data-directory) for the corresponding files.
 
 `--purge-state` applies to the data directory recorded by the installation (`/etc/kiteline-agent.env` or the default location; on Windows, the directory selected at installation). It does not apply to `KITELINE_AGENT_HOME` set only in service configuration. Uninstall refuses if the data directory is in use. Project files and workspace directories are not deleted.
 

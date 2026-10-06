@@ -149,7 +149,7 @@ async function account(name: string): Promise<Installation> {
   return { user: fields[0]!, uid, gid, home };
 }
 async function acquireInstallationLocks(installation: Installation, purge = false) {
-  const use = await lockInstallation("exclusive");
+  const use = await lockInstallation();
   let state: (() => Promise<void>) | undefined;
   try {
     if (purge) {
