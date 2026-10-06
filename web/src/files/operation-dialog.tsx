@@ -238,10 +238,8 @@ export function FileOperationDialog({
       onResult(result);
     } finally {
       if (current.current === request) current.current = undefined;
-      if (alive.current) {
-        setBusy(false);
-        setCancelling(false);
-      }
+      setBusy(false);
+      setCancelling(false);
     }
   }
   async function inspect(row: Row) {
@@ -254,15 +252,14 @@ export function FileOperationDialog({
         path: row.targetPath,
         suggestCopyName: true,
       });
-      if (alive.current)
-        setConflict({
-          row,
-          inspection,
-        });
+      setConflict({
+        row,
+        inspection,
+      });
     } catch (reason) {
-      if (alive.current) setError(reason);
+      setError(reason);
     } finally {
-      if (alive.current) setConflictBusy(false);
+      setConflictBusy(false);
     }
   }
   const Icon = action.kind === "copy" ? Copy : action.kind === "move" ? FolderInput : Trash2;
@@ -373,30 +370,11 @@ export function FileOperationDialog({
                       </p>
                     )}
                     {row.result.error && !row.result.failures?.length && (
-                      <ErrorNotice
-                        error={
-                          new ApiError(
-                            row.result.error.code,
-                            row.result.error.message,
-                            row.result.outcome,
-                            row.result.error.details,
-                          )
-                        }
-                      />
+                      <ErrorNotice error={apiError(row.result.error, row.result.outcome)} />
                     )}
                     {row.result.failures?.map((failure, index) => (
                       <div key={index} className="break-all text-muted-foreground">
-                        {failure.path}:{" "}
-                        <ErrorNotice
-                          error={
-                            new ApiError(
-                              failure.error.code,
-                              failure.error.message,
-                              "failed",
-                              failure.error.details,
-                            )
-                          }
-                        />
+                        {failure.path}: <ErrorNotice error={apiError(failure.error, "failed")} />
                       </div>
                     ))}
                     {row.result.truncated && <p>{t(($) => $.files.errorsOmitted)}</p>}
@@ -455,10 +433,8 @@ export function FileOperationDialog({
                   if (!request) return;
                   setCancelling(true);
                   void cancelRequest(deviceId, request.id).catch((reason: unknown) => {
-                    if (alive.current) {
-                      setError(reason);
-                      setCancelling(false);
-                    }
+                    setError(reason);
+                    setCancelling(false);
                   });
                 }}
               >

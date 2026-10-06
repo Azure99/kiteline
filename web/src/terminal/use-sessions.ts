@@ -89,7 +89,7 @@ export function useSessions(device: Device, workspaceId: string) {
         if (alive.current) return current?.find((item) => item.id === knownId);
       }
     } finally {
-      if (alive.current) setBusy(false);
+      setBusy(false);
     }
   }
   async function change(kind: "rename" | "end", sessionId: string, name: string) {
@@ -104,9 +104,9 @@ export function useSessions(device: Device, workspaceId: string) {
         return true;
       }
     } catch (error) {
-      if (alive.current) setError(error);
+      setError(error);
     } finally {
-      if (alive.current) setBusy(false);
+      setBusy(false);
     }
     return false;
   }

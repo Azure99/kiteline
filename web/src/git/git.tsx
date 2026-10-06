@@ -6,7 +6,7 @@ import type { Device, DiscardScope, GitEntry, Repo, Workspace } from "@kiteline/
 import { ToolHeader, ToolSidebar } from "../components/tool-layout";
 import { Button } from "../components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
-import { ApiError } from "../lib/api";
+import { apiError } from "../lib/api";
 import { useMobile } from "../lib/use-mobile";
 import type { DraftStore } from "../files/drafts";
 import { showFile } from "../files/navigation";
@@ -139,12 +139,7 @@ export function GitTool({
             )}
             {scan?.issues.map((item, i) => (
               <div key={i} className="break-all">
-                {item.path}:{" "}
-                <ErrorNotice
-                  error={
-                    new ApiError(item.error.code, item.error.message, "failed", item.error.details)
-                  }
-                />
+                {item.path}: <ErrorNotice error={apiError(item.error, "failed")} />
               </div>
             ))}
           </div>

@@ -19,7 +19,8 @@ import {
 } from "lucide-react";
 import type { Device } from "@kiteline/shared/protocol";
 import type { LoginSession } from "./auth";
-import { ApiError, errorMessage, post } from "./lib/api";
+import { apiError, errorMessage, post } from "./lib/api";
+import { emit } from "./lib/events";
 import { ErrorDetails } from "./components/error-notice";
 import {
   currentPath,
@@ -164,12 +165,7 @@ export function Workbench({
         drafts.fileFailed(message.channelId, message.error);
         if (message.purpose === "download" && message.error.code !== "cancelled")
           setError({
-            cause: new ApiError(
-              message.error.code,
-              message.error.message,
-              undefined,
-              message.error.details,
-            ),
+            cause: apiError(message.error),
             downloadPath: message.path,
           });
       }
@@ -562,14 +558,11 @@ export function Workbench({
             setActiveUpload(undefined);
           }}
           onWritten={(path) =>
-            window.dispatchEvent(
-              new CustomEvent<WindowEventMap["kiteline:file-written"]["detail"]>(
-                "kiteline:file-written",
-                {
-                  detail: { deviceId: item.deviceId, workspaceId: item.workspaceId, path },
-                },
-              ),
-            )
+            emit("kiteline:file-written", {
+              deviceId: item.deviceId,
+              workspaceId: item.workspaceId,
+              path,
+            })
           }
         />
       ))}
@@ -580,14 +573,7 @@ export function Workbench({
           onClose={() => setFileOperation(undefined)}
           onResult={(items) => {
             const { deviceId, workspaceId, action } = fileOperation;
-            window.dispatchEvent(
-              new CustomEvent<WindowEventMap["kiteline:files-operated"]["detail"]>(
-                "kiteline:files-operated",
-                {
-                  detail: { deviceId, workspaceId, kind: action.kind, items },
-                },
-              ),
-            );
+            emit("kiteline:files-operated", { deviceId, workspaceId, kind: action.kind, items });
           }}
         />
       )}

@@ -255,7 +255,7 @@ The workbench opens HTTP services listening on local device ports, including Web
 
 Enter a port in the device's "Open port" dialog. Candidates are a snapshot and may include non-HTTP services; unlisted ports can be entered manually.
 
-The service must listen on `127.0.0.1`, `::1`, `0.0.0.0` or `::` on the agent's machine or container. See [Run in a container](devices.en.md#run-in-a-container) and [Port suggestions (Chinese)](../design/http-access.md#端口建议).
+The service must listen on `127.0.0.1`, `::1`, `0.0.0.0` or `::` on the agent's machine or container. See [Run in a container](devices.en.md#run-in-a-container).
 
 In terminal output, `http:` links whose hosts are `localhost`, `127.0.0.1`, `[::1]`, `0.0.0.0` or `[::]` are converted to that device's port address. Click on desktop; on phones, long-press to select the full link and tap "Open device port". Other links open their original addresses.
 
@@ -268,7 +268,7 @@ In terminal output, `http:` links whose hosts are `localhost`, `127.0.0.1`, `[::
 
 "Strip prefix" suits pages using only relative URLs. If a page references resources with paths starting with `/`, requests go to the workbench root, causing blank pages or MIME-type errors. Use "Keep prefix" for these projects and set the project's base to `/absproxy/DEVICE_ID/PORT/`.
 
-The service receives the workbench address as `Host`, such as `kiteline.example.com:8443`; the workbench login cookie is not forwarded. See [Addresses and path modes (Chinese)](../design/http-access.md#地址与路径模式) for full rules. Find the device ID in its page URL `/devices/DEVICE_ID`, or choose "Keep prefix" and "Copy link".
+The service receives the workbench address as `Host`, such as `kiteline.example.com:8443`; the workbench login cookie is not forwarded. Find the device ID in its page URL `/devices/DEVICE_ID`, or choose "Keep prefix" and "Copy link".
 
 ### Configure Vite
 
@@ -314,7 +314,7 @@ const socket = new WebSocket(socketUrl);
 - 504 or 429: connection timeout or device connection capacity reached. Retry later.
 - Blank page or MIME-type error: use "Keep prefix" and configure the base.
 
-Workbench-generated error pages are in English; errors returned by the development service appear unchanged. See [Error responses (Chinese)](../design/http-access.md#错误响应) for all status codes.
+Workbench-generated error pages are in English; errors returned by the development service appear unchanged.
 
 ### Security
 

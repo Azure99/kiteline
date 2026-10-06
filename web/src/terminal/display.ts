@@ -27,6 +27,9 @@ import { isKeyboardOpen } from "../lib/viewport";
 import { KeyboardViewport } from "./keyboard-viewport";
 import { AuxiliaryInput, type Modifiers } from "./auxiliary-input";
 
+const fontSizeKey = "kiteline.terminal-font-size";
+const clampFontSize = (value: number) => Math.max(10, Math.min(24, value));
+
 export interface DisplayState {
   status: "connecting" | "ready" | "ended" | "error";
   error?: unknown;
@@ -184,7 +187,7 @@ export class TerminalDisplay {
         const leaveLink = () => this.element.removeAttribute("title");
         let savedFontSize = 0;
         try {
-          savedFontSize = Number(localStorage.getItem("kiteline.terminal-font-size"));
+          savedFontSize = Number(localStorage.getItem(fontSizeKey));
         } catch {
           // Font preferences are optional when browser storage is unavailable.
         }
@@ -195,7 +198,7 @@ export class TerminalDisplay {
           cols: integer(frame.cols, "cols", 1, 10000),
           rows: integer(frame.rows, "rows", 1, 10000),
           fontFamily: "'Cascadia Code', 'DejaVu Sans Mono', monospace",
-          fontSize: Math.max(10, Math.min(24, savedFontSize || (isMobile() ? 12 : 13))),
+          fontSize: clampFontSize(savedFontSize || (isMobile() ? 12 : 13)),
           lineHeight: 1.2,
           cursorBlink: true,
           disableStdin: true,
@@ -339,10 +342,10 @@ export class TerminalDisplay {
   }
   changeFontSize(delta: number) {
     if (!this.terminal) return;
-    const size = Math.max(10, Math.min(24, (this.terminal.options.fontSize ?? 13) + delta));
+    const size = clampFontSize((this.terminal.options.fontSize ?? 13) + delta);
     this.terminal.options.fontSize = size;
     try {
-      localStorage.setItem("kiteline.terminal-font-size", String(size));
+      localStorage.setItem(fontSizeKey, String(size));
     } catch {
       // The current terminal still uses the selected size.
     }

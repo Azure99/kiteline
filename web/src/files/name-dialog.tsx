@@ -76,9 +76,9 @@ export function FileNameDialog({
             }).then((entry) => ({ to: entry.path!, entry }));
       if (alive.current) onDone(result);
     } catch (error) {
-      if (alive.current) setError(error);
+      setError(error);
     } finally {
-      if (alive.current) setBusy(false);
+      setBusy(false);
     }
   }
   return (

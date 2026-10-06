@@ -10,6 +10,7 @@ import type {
 } from "@kiteline/shared/protocol";
 import { decodeText } from "@kiteline/shared/protocol/text";
 import { ApiError, api, apiError, post } from "../lib/api";
+import { emit } from "../lib/events";
 import { observeServerVersion, versionedPath, webCompatible } from "../lib/release";
 
 export interface FileTarget {
@@ -149,11 +150,7 @@ export function downloadFile(target: FileTarget) {
   document.body.append(link);
   link.click();
   link.remove();
-  window.dispatchEvent(
-    new CustomEvent<WindowEventMap["kiteline:download"]["detail"]>("kiteline:download", {
-      detail: target,
-    }),
-  );
+  emit("kiteline:download", target);
 }
 
 export async function uploadFile(

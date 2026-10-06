@@ -3,7 +3,8 @@ import { useCallback, useSyncExternalStore } from "react";
 import { Compartment, type EditorState } from "@codemirror/state";
 import type { KitelineError, Device, TextFormat } from "@kiteline/shared/protocol";
 import { encodeText } from "@kiteline/shared/protocol/text";
-import { ApiError, errorMessage, rpc } from "../lib/api";
+import { apiError, ApiError, errorMessage, rpc } from "../lib/api";
+import { emit } from "../lib/events";
 import { readText, writeText, type DiskText, type FileTarget } from "./content";
 import { textState } from "./editor-state";
 import { isWithin, movedPath } from "./paths";
@@ -173,7 +174,7 @@ export class DraftStore {
   fileFailed(channelId: string, error: KitelineError) {
     const draft = this.items.find((item) => item.readChannel === channelId);
     if (!draft) return;
-    draft.readError = new ApiError(error.code, error.message, "failed", error.details);
+    draft.readError = apiError(error, "failed");
     draft.error = draft.readError;
     this.changed();
   }
@@ -346,14 +347,11 @@ export class DraftStore {
         },
       );
       const savedPath = saved.path;
-      window.dispatchEvent(
-        new CustomEvent<WindowEventMap["kiteline:file-written"]["detail"]>(
-          "kiteline:file-written",
-          {
-            detail: { deviceId: draft.deviceId, workspaceId: draft.workspaceId, path: savedPath },
-          },
-        ),
-      );
+      emit("kiteline:file-written", {
+        deviceId: draft.deviceId,
+        workspaceId: draft.workspaceId,
+        path: savedPath,
+      });
       if (!this.has(draft) || draft.operation?.request !== request) return false;
       if (draft.path !== sourcePath) {
         draft.notice = "savedOldPath";
@@ -458,11 +456,7 @@ export class DraftStore {
     draft.error = undefined;
     draft.observationError = undefined;
     draft.notice = this.hasDuplicate(draft, draft.path) ? "duplicateDraft" : "diskMatches";
-    window.dispatchEvent(
-      new CustomEvent<WindowEventMap["kiteline:file-written"]["detail"]>("kiteline:file-written", {
-        detail: disk.target,
-      }),
-    );
+    emit("kiteline:file-written", disk.target);
   }
   private async checkMoved(draft: Draft, previous: Promise<void>) {
     const request = new AbortController();

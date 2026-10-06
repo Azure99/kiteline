@@ -15,7 +15,7 @@ export const prepareKeyboard = () => {
   keyboardRequested = true;
 };
 
-// App owns these listeners; terminal displays read the same keyboard-height decision.
+// Workbench owns these listeners; terminal displays read the same keyboard-height decision.
 export function trackViewport() {
   const dynamicViewport = CSS.supports("height", "100dvh");
   const viewport = window.visualViewport;

@@ -215,6 +215,7 @@ export const zhCN = {
     permission_denied: "设备用户没有执行此操作的权限。",
     cancelled: "操作已取消。",
     io_error: "操作未能完成。",
+    command_failed: "命令执行失败。",
     recording_unavailable: "终端记录器不可用。",
     unknown: "结果未确认。请刷新核查后再决定是否重试。",
     partial: "操作部分完成。",

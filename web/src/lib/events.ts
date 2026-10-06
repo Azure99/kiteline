@@ -13,3 +13,10 @@ declare global {
     "kiteline:viewport": Event;
   }
 }
+
+export function emit<K extends keyof WindowEventMap>(
+  name: K,
+  detail: WindowEventMap[K] extends CustomEvent<infer D> ? D : never,
+) {
+  window.dispatchEvent(new CustomEvent(name, { detail }));
+}

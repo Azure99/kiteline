@@ -15,7 +15,7 @@ import {
 import { IconButton } from "../components/icon-button";
 import { rpc } from "../lib/api";
 import { serviceURL } from "../lib/device-service";
-import { copyText } from "../lib/clipboard";
+import { useCopyFeedback } from "../lib/use-copy-feedback";
 
 export function PortDialog({ device, onClose }: { device: Device; onClose: () => void }) {
   const { t } = useTranslation();
@@ -26,7 +26,7 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
   const [ports, setPorts] = useState<ListeningPorts>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>();
-  const [notice, setNotice] = useState<{ kind: "copied" } | { kind: "error"; error: unknown }>();
+  const { copied, error: copyError, copy, reset } = useCopyFeedback();
   const request = useRef<AbortController>(undefined);
   const load = useCallback(async () => {
     request.current?.abort();
@@ -51,15 +51,6 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
   const url = value >= 1 && value <= 65535 ? serviceURL(device.id, value, retain).href : undefined;
   function open() {
     if (url) window.open(url, "_blank", "noopener,noreferrer");
-  }
-  async function copy() {
-    if (!url) return;
-    try {
-      await copyText(url);
-      setNotice({ kind: "copied" });
-    } catch (error) {
-      setNotice({ kind: "error", error });
-    }
   }
   return (
     <Dialog
@@ -92,7 +83,7 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
                 value={port}
                 onChange={(event) => {
                   setPort(event.target.value);
-                  setNotice(undefined);
+                  reset();
                 }}
               />
             </label>
@@ -144,7 +135,7 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
                       variant="outline"
                       onClick={() => {
                         setPort(String(entry));
-                        setNotice(undefined);
+                        reset();
                       }}
                     >
                       {entry}
@@ -166,13 +157,9 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
                 {t(($) => $.devices.portRange)}
               </p>
             )}
-            {notice && (
+            {(copied || copyError) && (
               <div role="status" className="text-sm text-muted-foreground">
-                {notice.kind === "copied" ? (
-                  t(($) => $.common.copied)
-                ) : (
-                  <ErrorNotice error={notice.error} />
-                )}
+                {copyError ? <ErrorNotice error={copyError.error} /> : t(($) => $.common.copied)}
               </div>
             )}
           </div>
@@ -181,7 +168,9 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
               variant="outline"
               disabled={!url}
               onPointerDown={(event) => event.preventDefault()}
-              onClick={() => void copy()}
+              onClick={() => {
+                if (url) void copy(url, "link");
+              }}
             >
               <Copy />
               {t(($) => $.devices.copyLink)}

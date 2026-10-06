@@ -82,8 +82,7 @@ export function UploadDialog({
   }, []);
   const editable = (row: UploadRow) => row.status === "pending" || row.status === "failed";
   const update = (id: number, values: Partial<UploadRow>) => {
-    if (alive.current)
-      setRows((old) => old.map((row) => (row.id === id ? { ...row, ...values } : row)));
+    setRows((old) => old.map((row) => (row.id === id ? { ...row, ...values } : row)));
   };
   async function run() {
     const selected = rows.filter(editable);
@@ -122,7 +121,7 @@ export function UploadDialog({
         active.current = undefined;
       }
     }
-    if (alive.current) setBusy(false);
+    setBusy(false);
   }
   async function cancel() {
     stop.current = true;
@@ -137,7 +136,7 @@ export function UploadDialog({
     try {
       await request.cancel();
     } catch (reason) {
-      if (alive.current && active.current === request) {
+      if (active.current === request) {
         update(request.rowId, { error: reason });
         setCancelled(false);
       }
@@ -152,11 +151,11 @@ export function UploadDialog({
         path: row.path,
         suggestCopyName: true,
       });
-      if (alive.current) setConflict({ row, inspection });
+      setConflict({ row, inspection });
     } catch (reason) {
-      if (alive.current) setError(reason);
+      setError(reason);
     } finally {
-      if (alive.current) setChecking(false);
+      setChecking(false);
     }
   }
   return (

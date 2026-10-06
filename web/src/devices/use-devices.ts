@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BrowserControlMessage, BrowserEvent, Device } from "@kiteline/shared/protocol";
 import { api } from "../lib/api";
+import { emit } from "../lib/events";
 import type { LoginSession } from "../auth";
 import { useServerVersion, versionedPath, webCompatible } from "../lib/release";
 
@@ -73,11 +74,7 @@ export function useDevices(
             invalidateReads();
             setDevices(message.devices);
           }
-          window.dispatchEvent(
-            new CustomEvent<WindowEventMap["kiteline:event"]["detail"]>("kiteline:event", {
-              detail: message,
-            }),
-          );
+          emit("kiteline:event", message);
         };
         socket.onclose = () => {
           setConnected(false);

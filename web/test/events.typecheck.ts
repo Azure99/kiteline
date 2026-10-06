@@ -1,5 +1,5 @@
 import type { AgentEvent, BrowserEvent } from "@kiteline/shared/protocol";
-import type {} from "../src/lib/events";
+import { emit } from "../src/lib/events";
 
 export function checkEvents(event: BrowserEvent) {
   // @ts-expect-error not every browser event has a workspace
@@ -25,4 +25,9 @@ export function checkWindowEvents() {
   // @ts-expect-error file-written producers must include the workspace and path
   const target = { deviceId: "d" } satisfies WindowEventMap["kiteline:file-written"]["detail"];
   void target;
+  emit("kiteline:file-written", { deviceId: "d", workspaceId: "w", path: "file.txt" });
+  // @ts-expect-error file-written producers must include the workspace and path
+  emit("kiteline:file-written", { deviceId: "d" });
+  // @ts-expect-error browser events require their protocol discriminator
+  emit("kiteline:event", { deviceId: "d", workspaceId: "w", path: "file.txt" });
 }

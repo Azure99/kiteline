@@ -73,10 +73,13 @@ test("existing errors are translated at display time without changing diagnostic
   const details = { path: "原路径" },
     result = { completed: ["one"] };
   const error = new ApiError("conflict", "original diagnostic", "unknown", details, result);
+  const commandError = new ApiError("command_failed", "git exited 1", "failed");
   await setLanguagePreference("en");
   expect(errorMessage(error)).toContain("Result unconfirmed");
+  expect(errorMessage(commandError)).toBe("The command failed. [command_failed] git exited 1");
   await setLanguagePreference("zh-CN");
   expect(errorMessage(error)).toContain("结果未确认");
+  expect(errorMessage(commandError)).toBe("命令执行失败。 [command_failed] git exited 1");
   expect(errorMessage(error)).toContain("[conflict] original diagnostic");
   expect(error).toMatchObject({
     code: "conflict",

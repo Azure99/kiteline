@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Download, RefreshCw } from "lucide-react";
 import { ErrorNotice } from "../components/error-notice";
 import { IconButton } from "../components/icon-button";
-import { ApiError } from "../lib/api";
+import { apiError, type ApiError } from "../lib/api";
 import { currentRoute, isWorkspaceRoute, updateWorkspaceQuery } from "../lib/navigation";
 import { showDraft } from "./navigation";
 import { parentPath } from "./paths";
@@ -35,12 +35,7 @@ export function FileContent({
     const failed = (event: WindowEventMap["kiteline:event"]) => {
       const message = event.detail;
       if (message.type === "channel.failed" && message.channelId === channelId) {
-        failure = new ApiError(
-          message.error.code,
-          message.error.message,
-          "failed",
-          message.error.details,
-        );
+        failure = apiError(message.error, "failed");
         setError(failure);
       }
     };

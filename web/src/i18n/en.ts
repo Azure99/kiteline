@@ -218,6 +218,7 @@ export const en = {
     permission_denied: "The device user does not have permission for this operation.",
     cancelled: "The operation was cancelled.",
     io_error: "The operation could not be completed.",
+    command_failed: "The command failed.",
     recording_unavailable: "Terminal recording is unavailable.",
     unknown: "Result unconfirmed. Refresh and check before trying again.",
     partial: "The operation was only partially completed.",
