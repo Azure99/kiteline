@@ -491,70 +491,24 @@ rg 版本必须在三处保持相同：`release/inputs.json` 的 `ripgrep.versio
 
 ### xterm.js
 
-工作台使用打过补丁的 `@xterm/xterm`。补丁文件是 `web/patches/@xterm__xterm@6.1.0-beta.304.patch`，在 `pnpm-workspace.yaml` 的 `patchedDependencies` 中登记，包含可读的 TypeScript 修改和工作台加载的 `lib/xterm.mjs`。recorder 使用 `@xterm/headless` 和 `@xterm/addon-serialize`，`shared` 使用 `@xterm/addon-unicode11`，这些版本在组包时写入 agent 的 `identity.json`。升级时把 xterm.js 相关的包作为一组升级，重新生成补丁，并重新测试终端的显示、选择、恢复和输入。
+工作台的 Vite 配置直接编译 `@xterm/xterm` 的 TypeScript 入口，补丁 `web/patches/@xterm__xterm@6.1.0-beta.304.patch` 只维护源码修改，在 `pnpm-workspace.yaml` 的 `patchedDependencies` 中登记。recorder 使用 `@xterm/headless` 和 `@xterm/addon-serialize`，`shared` 使用 `@xterm/addon-unicode11`，这些版本在组包时写入 agent 的 `identity.json`。
 
 当前 `@xterm/xterm@6.1.0-beta.304` 与 `@xterm/headless@6.1.0-beta.303` 来自同一上游源码提交。升级时联合核对两端及 addon 的配套，并检查 [`shared/src/terminal/index.ts`](../../shared/src/terminal/index.ts) 使用的 `_core`、buffer、输入处理器、解析器和鼠标状态成员，以及 [`web/src/terminal/auxiliary-input.ts`](../../web/src/terminal/auxiliary-input.ts) 引用的私有键盘编码；具体适配见[终端组件](../design/terminal.md#组件)。
 
-补丁中的 `DomRenderer.ts` 和 `WidthCache.ts` 修改按设备像素比测量字形宽度。`Event.ts` 的非空断言只用于类型检查：辅助输入导入 xterm 私有源码后，项目的 `noUncheckedIndexedAccess` 也会检查这些源码。重做补丁时同时核对此项；它与 DPR 的运行时修改是两项独立内容。
+补丁中的 `DomRenderer.ts` 和 `WidthCache.ts` 按设备像素比测量字形宽度，修正 Windows 页面缩放后中文字形和选区边界错位。`Event.ts` 的非空断言只用于类型检查：辅助输入导入 xterm 私有源码后，项目的 `noUncheckedIndexedAccess` 也会检查这些源码；它与 DPR 的运行时修改是两项独立内容。
 
-重新生成补丁的步骤：
+维护现有补丁时，在仓库根目录运行 `pnpm patch @xterm/xterm@6.1.0-beta.304`。它输出一个已应用现有补丁的编辑目录（加 `--ignore-existing` 从未修补的包开始）。在该目录的 `src/` 中修改 TypeScript，然后运行：
 
-1. 在仓库外建立维护目录，安装 esbuild 0.28.0，取得未修补的 npm 包：
+```sh
+pnpm patch-commit --patches-dir web/patches EDIT_DIR
+```
 
-   ```sh
-   mkdir /var/tmp/xterm-patch && cd /var/tmp/xterm-patch
-   npm install esbuild@0.28.0
-   npm pack @xterm/xterm@6.1.0-beta.304
-   mkdir original && tar -xzf xterm-xterm-6.1.0-beta.304.tgz -C original --strip-components=1
-   ```
-
-2. 在维护目录中保存以下脚本为 `generate.mjs`。它从 TypeScript 源码重新生成 `lib/xterm.mjs`，文件头注释取自未修补包的原件：
-
-   ```js
-   import { build } from "esbuild";
-   import { readFileSync } from "node:fs";
-   import { resolve } from "node:path";
-
-   const root = resolve(process.argv[2]);
-   const original = readFileSync(resolve(process.argv[3], "lib/xterm.mjs"), "utf8");
-   await build({
-     absWorkingDir: root,
-     entryPoints: ["src/browser/public/Terminal.ts"],
-     outfile: "lib/xterm.mjs",
-     bundle: true,
-     format: "esm",
-     target: "es2021",
-     sourcemap: true,
-     treeShaking: true,
-     minify: true,
-     legalComments: "none",
-     banner: { js: original.slice(0, original.indexOf("var ")).trimEnd() },
-     tsconfigRaw: { compilerOptions: { target: "es2021", experimentalDecorators: true } },
-   });
-   ```
-
-3. 确认脚本能逐字节重现未修补的原件：
-
-   ```sh
-   cp -r original check
-   node generate.mjs check original
-   cmp check/lib/xterm.mjs original/lib/xterm.mjs
-   ```
-
-4. 在仓库根目录运行 `pnpm patch @xterm/xterm@6.1.0-beta.304`，它输出一个编辑目录（下面命令中的 `EDIT_DIR`），其中已应用现有补丁（加 `--ignore-existing` 从未修补的包开始）。在编辑目录的 `src/` 中修改 TypeScript，然后重新生成 `lib/xterm.mjs`，恢复未修补的 source map，最后提交补丁：
-
-   ```sh
-   node /var/tmp/xterm-patch/generate.mjs EDIT_DIR /var/tmp/xterm-patch/original
-   cp /var/tmp/xterm-patch/original/lib/xterm.mjs.map EDIT_DIR/lib/xterm.mjs.map
-   pnpm patch-commit --patches-dir web/patches EDIT_DIR
-   ```
-
-   `pnpm patch-commit` 写入补丁并重新安装依赖。把 `web/patches/` 中的补丁、`pnpm-workspace.yaml` 和 `pnpm-lock.yaml`（锁文件记录补丁的哈希）一起提交。
+`pnpm patch-commit` 写入补丁并重新安装依赖。一起提交补丁、`pnpm-workspace.yaml` 和记录补丁哈希的 `pnpm-lock.yaml`。Vite 的生产编译和开发预优化都需要 legacy 参数装饰器转换；修改后分别启动完整应用验证显示、选择、恢复和输入，并在 Windows 页面缩放下核对中文拖选和复制。
 
 升级到新的 xterm.js 版本时：
 
 1. 在各 `package.json` 中把 xterm.js 相关的包改到新版本，删除 `pnpm-workspace.yaml` 中旧版本的 `patchedDependencies` 条目（否则 `pnpm install` 报 `ERR_PNPM_UNUSED_PATCH`），然后运行 `pnpm install`。
-2. 用新版本号执行上述步骤。这时 `pnpm patch` 从未修补的包开始，参照旧补丁文件在新版本上重新修改。
+2. 用新版本号执行上述步骤。这时 `pnpm patch` 从未修补的包开始，参照旧补丁文件在新版本上重新修改，并完成生产与开发模式验证。
 3. 提交新补丁后删除旧补丁文件。
 
 ### Undici 与代理

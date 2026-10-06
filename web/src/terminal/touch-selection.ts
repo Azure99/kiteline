@@ -1,5 +1,5 @@
 import type { IBufferCellPosition, Terminal } from "@xterm/xterm";
-import { scrollTerminalLines } from "./viewport";
+import { scrollTerminalLines } from "./clipped-screen";
 
 type Cell = IBufferCellPosition;
 type Point = { x: number; y: number };
@@ -295,7 +295,7 @@ export class TouchSelection {
 const touchHoldMs = 550;
 const touchSlopPx = 8;
 
-// Fixed xterm beta inertia omits coordinates; only an explicit tap requests focus.
+// The pinned xterm beta inertia omits coordinates; only an explicit tap requests focus.
 export function adaptTouchGestures(
   container: HTMLElement,
   screen: HTMLElement,

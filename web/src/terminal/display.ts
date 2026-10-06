@@ -20,7 +20,7 @@ import {
 } from "@kiteline/shared/terminal";
 import { ApiError, api, post } from "../lib/api";
 import { i18n } from "../i18n";
-import { retainReadonlyViewport } from "./viewport";
+import { retainReadonlyViewport } from "./clipped-screen";
 import { isMobile } from "../lib/use-mobile";
 import { versionedPath } from "../lib/release";
 import { isKeyboardOpen } from "../lib/viewport";

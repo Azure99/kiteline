@@ -12,12 +12,12 @@
 
 tmux 使用会话目录下的 `tmux.conf`，不加载用户的 tmux 配置或插件。预设在 `terminalPreset()`（`shared/src/terminal/node.ts`）中：`status off`、`window-size latest`、`default-terminal tmux-256color`、`remain-on-exit on`、`mouse on`、`allow-passthrough off`、`set-clipboard external`；`history-limit` 和 `default-size` 取创建时的值；prefix 键表只保留 `C-b`（发送 `C-b`）、`d`（断开）、`[`（复制模式）和 `]`（`paste-buffer -p`）；右键点击把鼠标事件交给程序，不弹出 tmux 菜单。
 
-固定版本：tmux 版本见 [`release/inputs.json`](../../release/inputs.json)，各平台都禁用 Sixel 并应用 [`native/tmux/paste.patch`](../../native/tmux/paste.patch)。xterm.js 及插件版本见 [`web/package.json`](../../web/package.json)、[`terminal-recorder/package.json`](../../terminal-recorder/package.json) 和 [`shared/package.json`](../../shared/package.json)。网页的 xterm.js 带有 [`web/patches/`](../../web/patches/) 中的补丁，让 DOM 渲染器按设备像素比测量字形宽度；重新生成步骤见[构建与发布](../development/release.md#升级固定依赖)。
+固定版本：tmux 版本见 [`release/inputs.json`](../../release/inputs.json)，各平台都禁用 Sixel 并应用 [`native/tmux/paste.patch`](../../native/tmux/paste.patch)。xterm.js 及插件版本见 [`web/package.json`](../../web/package.json)、[`terminal-recorder/package.json`](../../terminal-recorder/package.json) 和 [`shared/package.json`](../../shared/package.json)。网页的 xterm.js 带有 [`web/patches/`](../../web/patches/) 中的补丁，让 DOM 渲染器按设备像素比测量字形宽度；维护方法见[构建与发布](../development/release.md#xtermjs)。
 
 依赖固定 xterm 版本内部行为的代码集中在两处，升级 xterm 时要逐项复核：
 
 - `shared/src/terminal/index.ts`（网页和 recorder 共用，保证两端解析一致）：Unicode 11 初始化、终端选项（关闭 `win32InputMode` 和 `kittyKeyboard`）、CSI S/T/L/M 与 REP 的计数适配、解析器空闲判断、鼠标编码补齐、用户输入转发、结束后冻结鼠标、粘贴规范化。
-- `web/src/terminal/`：`touch-selection.ts`（触控选择）、`viewport.ts`（滚动、搜索定位及结束后的视口保留）、`auxiliary-input.ts`（辅助按键编码，直接导入 xterm.js 私有源码 `src/common/input/Keyboard`）。
+- `web/src/terminal/`：`touch-selection.ts`（触控选择）、`clipped-screen.ts`（屏幕裁切、搜索定位及结束后的网格保留）、`auxiliary-input.ts`（辅助按键编码，直接导入 xterm.js 私有源码 `src/common/input/Keyboard`）。
 
 ## 会话生命周期
 
