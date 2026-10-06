@@ -3,5 +3,5 @@
 !release/**
 !dist/
 !dist/releases/
-!dist/releases/*.tar.gz
-!dist/releases/*.sha256
+!dist/releases/kiteline-server-*.tar.gz
+!dist/releases/kiteline-server-*.tar.gz.sha256

@@ -9,7 +9,7 @@
 | 工具             | 要求                                                                                    |
 | ---------------- | --------------------------------------------------------------------------------------- |
 | Node             | 使用 [`package.json`](../../package.json) 的 `engines.node` 指定版本。                  |
-| pnpm             | 11.25.0，取自 `package.json` 的 `packageManager`，通过 Corepack 启用                    |
+| pnpm             | 使用 `package.json` 的 `packageManager` 指定版本，通过 Corepack 启用。                  |
 | 原生组件构建     | C 编译器、`make`、`pkg-config`、libevent 与 ncurses 开发文件、`tic`、bison、curl、patch |
 | 源码运行的 agent | 与设备相同的前置条件，见[支持的系统与准备](../guide/devices.md#支持的系统与准备)        |
 | Docker           | 只在[本地 HTTPS](#本地-https) 和构建发布包时使用                                        |
@@ -41,11 +41,9 @@ pnpm native:build
 pnpm build
 ```
 
-- `pnpm install --frozen-lockfile` 按 `pnpm-lock.yaml` 安装依赖，并应用 `pnpm-workspace.yaml` 中 `patchedDependencies` 登记的 xterm.js 补丁。
-- `pnpm native:build` 下载 `release/inputs.json` 固定的 tmux 源码，应用 `native/tmux/paste.patch` 后用系统工具链编译（动态链接系统的 libevent 和 ncurses）；同时编译 `native/linux/rename-noreplace.c`，用 `native/tmux/tmux.terminfo` 生成 terminfo，并取得 `release/inputs.json` 固定的 rg。结果写入仓库根目录的 `dist/native/`，其中 `identity.json` 记录各文件的来源和 SHA-256。
-- `pnpm build` 用 `tsc -b` 把 `shared`、`server`、`agent`、`terminal-recorder` 编译到各自的 `dist/`，再用 Vite 构建 `web/dist/`。
+`pnpm install --frozen-lockfile` 按锁文件安装依赖，并应用 `pnpm-workspace.yaml` 中 `patchedDependencies` 登记的补丁。`pnpm native:build` 生成源码 agent 和测试所需的 `dist/native/`；开发构建动态链接系统的 libevent 和 ncurses。`pnpm build` 编译各包并构建工作台。
 
-`pnpm native:build` 每次运行都重新下载并编译 tmux；rg 的归档缓存在 `/var/tmp/kiteline-release-cache/ripgrep/`。修改 tmux 或 rg 的版本、tmux 补丁、terminfo 源文件或 `rename-noreplace.c` 后，重新运行 `pnpm native:build`。
+修改原生源码、tmux 补丁、terminfo 或固定的 tmux/rg 输入后，重新运行 `pnpm native:build`。它每次重新下载并编译 tmux；rg 归档缓存在 `/var/tmp/kiteline-release-cache/ripgrep/`。
 
 ## 本地运行
 
@@ -55,15 +53,7 @@ server 的默认数据目录 `/var/lib/kiteline` 通常不可写，开发时用 
 KITELINE_DATA_DIR=/var/tmp/kiteline-dev/server pnpm dev
 ```
 
-`pnpm dev`（[`scripts/dev/run.mjs`](../../scripts/dev/run.mjs)）先执行一次 `tsc -b`，然后同时运行以下进程：
-
-| 进程                               | 作用                                                                                                                               |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `tsc -b --watch`                   | 源码改动后重新编译到各包的 `dist/`                                                                                                 |
-| `node --watch server/dist/main.js` | 在 `127.0.0.1:8080` 运行 server，编译输出变化后自动重启                                                                            |
-| Vite                               | 在 `http://localhost:5173` 提供工作台并热更新，把 `/api`、`/healthz`、`/proxy`、`/absproxy`、安装脚本和 `/downloads` 转发到 server |
-
-本机的 8080 和 5173 端口需要空闲。按 Ctrl-C 会结束全部进程；任一进程退出时，其余进程也随之结束。
+`pnpm dev` 先编译一次，再持续编译源码、自动重启 `127.0.0.1:8080` 的 server，并在 `http://localhost:5173` 提供工作台热更新和 server 请求代理，入口见 [`scripts/dev/run.mjs`](../../scripts/dev/run.mjs)。本机的 8080 和 5173 端口需要空闲。按 Ctrl-C 或任一子进程退出都会结束整个开发环境。
 
 server 首次启动时在输出中打印 `Kiteline setup token: …`。打开 `http://localhost:5173`，输入该 token 并设置密码。token 过期或丢失时，先停止 `pnpm dev`，再生成新的 token：
 
@@ -134,13 +124,13 @@ KITELINE_DATA_DIR=/var/tmp/kiteline-dev/server pnpm server setup-token
 
 ## 检查与测试
 
-| 命令                | 内容                                                                                |
-| ------------------- | ----------------------------------------------------------------------------------- |
-| `pnpm format:check` | Prettier 格式检查；`pnpm format` 直接改写文件                                       |
-| `pnpm lint`         | ESLint，范围是 `server`、`agent`、`terminal-recorder`、`shared`、`web`、`scripts`   |
-| `pnpm typecheck`    | `tsc -b`、测试代码（`tsconfig.tests.json`）和 `web` 的类型检查                      |
-| `pnpm test`         | Vitest，运行 `server`、`agent`、`terminal-recorder`、`web` 下的 `test/**/*.test.ts` |
-| `pnpm build`        | 编译全部包并构建工作台                                                              |
+| 命令                | 内容                               |
+| ------------------- | ---------------------------------- |
+| `pnpm format:check` | 检查格式；`pnpm format` 会改写文件 |
+| `pnpm lint`         | 运行 ESLint                        |
+| `pnpm typecheck`    | 检查源码、测试和工作台的类型       |
+| `pnpm test`         | 运行自动测试                       |
+| `pnpm build`        | 编译各包并构建工作台               |
 
 完整的 `pnpm test` 有三个前提：
 
@@ -150,13 +140,11 @@ KITELINE_DATA_DIR=/var/tmp/kiteline-dev/server pnpm server setup-token
 
 只运行部分测试时，把文件或目录传给 `pnpm test`，例如 `pnpm test agent/test/git-read.test.ts`。
 
-### CI 中的检查
-
-PR、推送到 main 和手动运行的 `checks` 模式执行 [`.github/workflows/build.yml`](../../.github/workflows/build.yml) 的 `checks` 任务，包含格式、lint、类型、Web 构建及不需要原生组件的测试。提交前仍在本机运行完整的 `pnpm test`；CI 的完整构建与发布包检查见[GitHub Actions](release.md#github-actions)。
+CI 的检查范围见[GitHub Actions](release.md#github-actions)。
 
 ## 手工验证
 
-自动测试不覆盖浏览器中的显示、真实设备上的输入和安装流程。按改动范围在下表的环境中验证：
+按改动范围在下表的环境中验证：
 
 | 改动范围                               | 验证环境                                                                                     |
 | -------------------------------------- | -------------------------------------------------------------------------------------------- |
@@ -166,5 +154,3 @@ PR、推送到 main 和手动运行的 `checks` 模式执行 [`.github/workflows
 | 安装、升级、卸载、原生组件或构建输入   | 每个受影响的平台，使用最终发布包                                                             |
 
 最终发布包指 `pnpm package` 或 CI 完整构建产生的压缩包，构建方法见[构建与发布](release.md)。支持的浏览器见[浏览器与界面](../guide/usage.md#浏览器与界面)，Chromium 97 兼容的实现见[浏览器兼容](../design/architecture.md#浏览器兼容)；各平台支持的系统版本见[支持的系统与准备](../guide/devices.md#支持的系统与准备)。
-
-CI 的完整构建只对发布包做基本检查（见 [GitHub Actions](release.md#github-actions)），不在 Windows 11 和各平台的最低系统版本上运行，也不执行安装、升级和卸载流程，这些由上表的人工验证覆盖。
