@@ -7,8 +7,9 @@ import {
   packageNames,
   releaseMatches,
   sourceCommit,
+  staticNodeInput,
 } from "./release-artifacts.mjs";
-import { digest } from "./release-inputs.mjs";
+import { digest, json } from "./release-inputs.mjs";
 
 const [kind, target, archivePath, directoryPath, extra] = process.argv.slice(2);
 if (!archivePath || !directoryPath || extra || !["agent", "server"].includes(kind))
@@ -18,7 +19,6 @@ if (!archivePath || !directoryPath || extra || !["agent", "server"].includes(kin
 const source = process.cwd();
 const archive = resolve(archivePath);
 const directory = realpathSync(directoryPath);
-const json = (file) => JSON.parse(readFileSync(file, "utf8"));
 const inputs = json(join(source, "release/inputs.json"));
 const { version } = json(join(source, "shared/src/version.json"));
 const [platform, arch] = target.split("-");
@@ -94,7 +94,11 @@ if (kind === "agent") {
   if (platform !== "windows") assert.equal(actual.get(rg), identity.ripgrep.binarySha256, rg);
   if (platform === "linux") {
     assert.equal(identity.linkage, "static-musl");
-    const pinned = json(join(source, "release/node-static.json")).archives[arch];
+    const pinned = staticNodeInput(
+      inputs.node,
+      json(join(source, "release/node-static.json")),
+      arch,
+    );
     assert.deepEqual(release.staticBuild.node, pinned);
     // The Docker export precedes the identity and rg additions made by the builder.
     for (const [file, hash] of checksumEntries(release.staticBuild.files)) {

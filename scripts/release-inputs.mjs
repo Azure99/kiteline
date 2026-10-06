@@ -24,6 +24,13 @@ export const digest = (file) => createHash("sha256").update(readFileSync(file)).
 export const hash = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 export const json = (file) => JSON.parse(readFileSync(file, "utf8"));
 
+export function ripgrepInput(version, input) {
+  return {
+    url: `https://github.com/BurntSushi/ripgrep/releases/download/${version}/ripgrep-${version}-${input.archiveSuffix}`,
+    sha256: input.sha256,
+  };
+}
+
 export function writeJson(file, value) {
   writeFileSync(file, JSON.stringify(value, null, 2) + "\n");
 }

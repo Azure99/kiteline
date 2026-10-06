@@ -429,7 +429,7 @@ git push origin "v$KITELINE_VERSION"
 
 - `package.json` 的 `engines.node`，以及 `@types/node` 的主版本。
 - `release/inputs.json` 的 `node`，以及 `nodeArchives` 中 server 使用的官方 Linux `.tar.xz` 的 SHA-256。
-- 先在 [Azure99/node-static-builds](https://github.com/Azure99/node-static-builds) 为新版本发布静态 Node 组件，再更新 `release/node-static.json` 的下载地址、SHA-256 和 `recipeRevision`。组包时检查组件中的 `runtime/build.json` 与 Node 版本、`recipeRevision` 和架构一致。
+- Linux agent 还需先在 [Azure99/node-static-builds](https://github.com/Azure99/node-static-builds) 发布新静态组件，再更新 `release/node-static.json` 的摘要和 `recipeRevision`。
 - `release/agent-windows.json` 的 `nodeArchiveSha256`（`win-x64.zip`）和 `nodeHeadersSha256`（`headers.tar.gz`）。
 - `release/agent-macos.json` 中两个架构的 `nodeArchiveSha256`（`darwin-*.tar.xz`）。
 
@@ -441,7 +441,7 @@ git push origin "v$KITELINE_VERSION"
 
 ### rg
 
-rg 版本必须在三处保持相同：`release/inputs.json` 的 `ripgrep.version` 和两个 `linuxArchives`、`release/agent-macos.json` 的两个 `ripgrep`、`release/agent-windows.json` 的 `ripgrep`。Windows 组装时按 `inputs.json` 的版本号查找 ZIP 中的目录。修改后重新运行 `pnpm native:build`。
+更新 `release/inputs.json` 的 `ripgrep.version`，配套更新同文件的 Linux 归档、`release/agent-macos.json` 两架构和 `release/agent-windows.json` 的归档摘要，然后重新运行 `pnpm native:build`。
 
 ### tmux 与 libevent
 

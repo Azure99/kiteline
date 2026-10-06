@@ -8,6 +8,7 @@ import {
   hash,
   json,
   prepareInputs,
+  ripgrepInput,
   run,
   verifyComponentFiles,
   verifyPreparedInputs,
@@ -40,7 +41,7 @@ function downloads(architecture) {
     "tmux.tar.gz": release.tmux,
     "libevent.tar.gz": release.libevent,
     "flock.tar.gz": recipe.flock,
-    "rg.tar.gz": target.ripgrep,
+    "rg.tar.gz": ripgrepInput(release.ripgrep.version, target.ripgrep),
   };
 }
 const binaries = [

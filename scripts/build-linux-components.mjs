@@ -9,19 +9,19 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { digest, fetchPinned, run } from "./release-inputs.mjs";
+import { digest, fetchPinned, json, run } from "./release-inputs.mjs";
+import { staticNodeInput } from "./release-artifacts.mjs";
 import { prepareRipgrep } from "./prepare-ripgrep.mjs";
 
 const root = resolve(import.meta.dirname, "..");
-const json = (file) => JSON.parse(readFileSync(join(root, file), "utf8"));
 
 export function buildLinuxComponents(destination, architecture = "amd64") {
-  const release = json("release/inputs.json");
+  const release = json(join(root, "release/inputs.json"));
   const nodeArchitecture = release.nodeArchives[architecture]?.architecture;
   if (!nodeArchitecture) throw new Error(`Unsupported Linux agent architecture: ${architecture}`);
-  const nodeRecipe = json("release/node-static.json");
-  const nodeArchive = nodeRecipe.archives[architecture];
-  const recipe = json("release/agent-linux.json");
+  const nodeRecipe = json(join(root, "release/node-static.json"));
+  const nodeArchive = staticNodeInput(release.node, nodeRecipe, architecture);
+  const recipe = json(join(root, "release/agent-linux.json"));
   const cache = "/var/tmp/kiteline-release-cache/static-sources";
   const temporary = mkdtempSync("/var/tmp/kiteline-linux-");
   let container;

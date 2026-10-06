@@ -3,13 +3,12 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { agentTargets, packageNames, sourceCommit } from "./release-artifacts.mjs";
-import { digest, run } from "./release-inputs.mjs";
+import { digest, json, run } from "./release-inputs.mjs";
 
 const [mode, extra] = process.argv.slice(2);
 if (extra || !["plan", "candidate", "dev-image", "publish"].includes(mode))
   throw new Error("Usage: node scripts/ci-release.mjs plan|candidate|dev-image|publish");
 const root = process.cwd();
-const json = (file) => JSON.parse(readFileSync(file, "utf8"));
 const capture = (file, args) =>
   run(file, args, {
     encoding: "utf8",

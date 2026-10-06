@@ -8,6 +8,14 @@ export const agentTargets = [
   "macos-arm64",
 ];
 
+export function staticNodeInput(version, recipe, architecture) {
+  const name = `node-v${version}-r${recipe.recipeRevision}`;
+  return {
+    url: `https://github.com/Azure99/node-static-builds/releases/download/${name}/${name}-linux-${architecture}.tar.gz`,
+    sha256: recipe.archives[architecture].sha256,
+  };
+}
+
 export function packageNames(kind, version, target) {
   const name = `kiteline-${kind}-${version}-${target}`;
   return { name, archive: `${name}.${target.startsWith("windows-") ? "zip" : "tar.gz"}` };
