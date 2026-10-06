@@ -252,7 +252,7 @@ export function DirectoryDialog({
           <div className="scroll-area min-h-40 flex-1 overflow-auto" aria-busy={busy}>
             {listing?.entries.items.map((entry, index) => (
               <button
-                className="flex min-h-9 w-full items-center gap-3 rounded px-2 py-1.5 text-left hover:bg-muted disabled:opacity-50 max-[959px]:min-h-11"
+                className="flex min-h-9 w-full items-center gap-3 rounded px-2 py-1.5 text-left hover:bg-muted disabled:opacity-50 max-desk:min-h-11"
                 key={entry.path ?? index}
                 disabled={busy || !entry.path || !["directory", "symlink"].includes(entry.kind)}
                 onClick={() => go(entry.path!)}

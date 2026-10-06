@@ -49,13 +49,13 @@ export function DeviceNavigation({
             className={`flex items-center rounded ${deviceId === d.id && !tool ? "bg-primary-soft" : ""}`}
           >
             <button
-              className="flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded px-2 text-left text-sm hover:bg-muted max-[959px]:min-h-11"
+              className="flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded px-2 text-left text-sm hover:bg-muted max-desk:min-h-11"
               onClick={() => onNavigate(devicePath(d.id))}
             >
               <span className="status-dot" data-status={d.status} />
               <Server size={15} className="shrink-0 text-muted-foreground" />
               <span
-                className="min-w-0 flex-1 truncate max-[959px]:whitespace-normal max-[959px]:break-all"
+                className="min-w-0 flex-1 truncate max-desk:whitespace-normal max-desk:break-all"
                 title={d.name}
               >
                 {d.name}
@@ -82,7 +82,7 @@ export function DeviceNavigation({
             d.snapshot?.workspaces.map((w) => (
               <button
                 key={w.id}
-                className={`flex min-h-9 w-full items-center gap-2 rounded py-1.5 pl-8 pr-2 text-left text-xs hover:bg-muted max-[959px]:min-h-11 max-[959px]:text-sm ${deviceId === d.id && workspaceId === w.id ? "bg-primary-soft text-primary" : "text-muted-foreground"}`}
+                className={`flex min-h-9 w-full items-center gap-2 rounded py-1.5 pl-8 pr-2 text-left text-xs hover:bg-muted max-desk:min-h-11 max-desk:text-sm ${deviceId === d.id && workspaceId === w.id ? "bg-primary-soft text-primary" : "text-muted-foreground"}`}
                 onClick={() =>
                   onNavigate(
                     workspaceDestination({ deviceId: d.id, workspaceId: w.id }, tool ?? "terminal"),
@@ -95,7 +95,7 @@ export function DeviceNavigation({
                     className={
                       showPaths
                         ? "block break-words"
-                        : "block truncate max-[959px]:whitespace-normal max-[959px]:break-all"
+                        : "block truncate max-desk:whitespace-normal max-desk:break-all"
                     }
                   >
                     {w.name}

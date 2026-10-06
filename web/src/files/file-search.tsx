@@ -101,14 +101,14 @@ export function FileSearch({
                 key={value}
                 type="button"
                 aria-pressed={mode === value}
-                className={`min-h-8 px-3 text-xs max-[959px]:min-h-11 ${mode === value ? "rounded bg-background shadow-xs" : "text-muted-foreground"}`}
+                className={`min-h-8 px-3 text-xs max-desk:min-h-11 ${mode === value ? "rounded bg-background shadow-xs" : "text-muted-foreground"}`}
                 onClick={() => setMode(value)}
               >
                 {label}
               </button>
             ))}
           </div>
-          <label className="flex items-center gap-2 text-xs text-muted-foreground max-[959px]:min-h-11">
+          <label className="flex items-center gap-2 text-xs text-muted-foreground max-desk:min-h-11">
             <input
               type="checkbox"
               checked={includeIgnored}

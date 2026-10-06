@@ -150,7 +150,7 @@ export function TerminalSettings({ device, onClose }: { device: Device; onClose:
               >
                 <fieldset className="space-y-1" disabled={busy}>
                   <legend className="text-sm">{t(($) => $.terminal.shortcutIcon)}</legend>
-                  <div className="grid w-fit grid-cols-8 gap-1 max-[959px]:grid-cols-4">
+                  <div className="grid w-fit grid-cols-8 gap-1 max-desk:grid-cols-4">
                     {shortcutIcons.map((icon) => (
                       <IconButton
                         key={icon}
@@ -179,7 +179,7 @@ export function TerminalSettings({ device, onClose }: { device: Device; onClose:
                 <label className="block space-y-1 text-sm">
                   <span>{t(($) => $.terminal.command)}</span>
                   <Textarea
-                    className="min-h-24 px-3 py-2 font-mono max-[959px]:min-h-24"
+                    className="min-h-24 px-3 py-2 font-mono max-desk:min-h-24"
                     value={editing.command ?? ""}
                     required
                     maxLength={limits.shortcutCommandLength}

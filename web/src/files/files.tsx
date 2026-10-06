@@ -467,7 +467,7 @@ export function Files({
         {(mobile ? !queryFile : listOpen) && (
           <ToolSidebar visible={visible && !searching}>
             <aside
-              className="scroll-area w-full overflow-auto border-border bg-muted/25 min-[960px]:w-72 min-[960px]:shrink-0 min-[960px]:border-r"
+              className="scroll-area w-full overflow-auto border-border bg-muted/25 desk:w-72 desk:shrink-0 desk:border-r"
               aria-label={t(($) => $.files.list)}
             >
               <FileExplorer

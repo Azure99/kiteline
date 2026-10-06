@@ -293,7 +293,7 @@ function RepoView({
         <div className="flex min-h-11 shrink-0 items-center gap-2 border-b border-border px-3">
           {picker}
           <button
-            className="flex min-h-10 min-w-0 flex-1 items-center gap-2 text-xs max-[959px]:min-h-11"
+            className="flex min-h-10 min-w-0 flex-1 items-center gap-2 text-xs max-desk:min-h-11"
             title={value?.head.oid ?? undefined}
             onClick={() => selectView("branches")}
           >
@@ -380,7 +380,7 @@ function RepoView({
       <div className={view === "changes" ? "flex min-h-0 flex-1" : "hidden"}>
         <ToolSidebar visible={visible && view === "changes" && (!mobile || !target)}>
           <aside
-            className="flex min-h-0 w-full flex-col border-border min-[960px]:w-80 min-[960px]:shrink-0 min-[960px]:border-r"
+            className="flex min-h-0 w-full flex-col border-border desk:w-80 desk:shrink-0 desk:border-r"
             aria-label={t(($) => $.git.changeList)}
           >
             <div className="scroll-area min-h-0 flex-1 overflow-auto">

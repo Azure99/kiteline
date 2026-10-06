@@ -71,11 +71,11 @@ export function FileExplorer({
         return (
           <div key={entry.path ?? `invalid-${index}`}>
             <div
-              className={`flex min-h-8 items-center pr-1 max-[959px]:min-h-11 ${currentFile === entry.path ? "bg-primary-soft" : "hover:bg-muted"}`}
+              className={`flex min-h-8 items-center pr-1 max-desk:min-h-11 ${currentFile === entry.path ? "bg-primary-soft" : "hover:bg-muted"}`}
               style={{ paddingLeft: 8 + depth * 14 }}
             >
               {selecting && (
-                <label className="flex size-8 shrink-0 cursor-pointer items-center justify-center max-[959px]:size-11">
+                <label className="flex size-8 shrink-0 cursor-pointer items-center justify-center max-desk:size-11">
                   <input
                     type="checkbox"
                     aria-label={t(($) => $.files.selectNamed, { name: entry.name })}
@@ -87,7 +87,7 @@ export function FileExplorer({
                 </label>
               )}
               <button
-                className="flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left disabled:opacity-50 max-[959px]:min-h-11"
+                className="flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left disabled:opacity-50 max-desk:min-h-11"
                 disabled={!entry.path || disabled}
                 title={entry.linkTarget ? `${entry.name} -> ${entry.linkTarget}` : entry.name}
                 onClick={() => (folder ? onFolder(entry.path!) : onOpen(entry))}

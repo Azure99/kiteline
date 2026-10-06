@@ -13,8 +13,8 @@ const buttonVariants = cva(
         destructive: "border-destructive bg-destructive text-white hover:brightness-95",
       },
       size: {
-        default: "min-h-8 px-3 py-1.5 max-[959px]:min-h-11",
-        icon: "size-8 max-[959px]:size-11",
+        default: "min-h-8 px-3 py-1.5 max-desk:min-h-11",
+        icon: "size-8 max-desk:size-11",
       },
     },
     defaultVariants: { variant: "default", size: "default" },

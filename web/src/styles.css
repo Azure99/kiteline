@@ -3,6 +3,7 @@
 @import "tailwindcss";
 
 @theme {
+  --breakpoint-desk: 960px;
   --color-background: #fff;
   --color-foreground: #323946;
   --color-primary: #426aad;
@@ -146,7 +147,7 @@ body {
 .dialog-backdrop:is([data-starting-style], [data-ending-style]) {
   opacity: 0;
 }
-@media (max-width: 959px) {
+@variant max-desk {
   .dialog-content:is([data-starting-style], [data-ending-style]) {
     translate: 0 8px;
   }
@@ -174,7 +175,7 @@ body {
   .dialog-content:is([data-starting-style], [data-ending-style]) {
     transform: translate(-50%, -50%) translateY(4px);
   }
-  @media (max-width: 959px) {
+  @variant max-desk {
     .dialog-content:is([data-starting-style], [data-ending-style]) {
       transform: translateY(8px);
     }
@@ -334,7 +335,7 @@ body {
 .split-divider[data-separator="active"] {
   background: var(--primary);
 }
-@media (min-width: 960px) {
+@variant desk {
   .terminal-aux {
     display: none;
   }
@@ -391,7 +392,7 @@ body {
 .terminal-aux .aux-key:active {
   background: var(--primary);
 }
-@media (max-width: 959px) {
+@variant max-desk {
   .dialog-content {
     top: auto;
     bottom: 0;

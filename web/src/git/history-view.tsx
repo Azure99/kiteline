@@ -124,7 +124,7 @@ export function HistoryView(props: Props) {
                   {commit.author} · {new Date(commit.time).toLocaleString(i18n.resolvedLanguage)}
                 </span>
               </span>
-              <span className="hidden font-mono text-xs text-muted-foreground min-[960px]:block">
+              <span className="hidden font-mono text-xs text-muted-foreground desk:block">
                 {commit.oid.slice(0, 8)}
               </span>
             </button>
@@ -344,7 +344,7 @@ function CommitView({
                 offset: row ? row.getBoundingClientRect().top - top : undefined,
               };
             }}
-            className={`${mobile && target ? "hidden" : ""} scroll-area w-full overflow-auto border-border min-[960px]:w-72 min-[960px]:shrink-0 min-[960px]:border-r`}
+            className={`${mobile && target ? "hidden" : ""} scroll-area w-full overflow-auto border-border desk:w-72 desk:shrink-0 desk:border-r`}
             aria-label={t(($) => $.git.commitFiles)}
           >
             {value?.files.map((file) =>
@@ -370,7 +370,7 @@ function CommitView({
                     })
                   }
                   aria-current={target?.path === file.path ? "true" : undefined}
-                  className={`flex min-h-8 w-full items-center gap-2 border-b border-border px-3 text-left text-xs max-[959px]:min-h-11 ${target?.path === file.path ? "bg-primary-soft shadow-[inset_3px_0_var(--primary)]" : "hover:bg-primary-soft"}`}
+                  className={`flex min-h-8 w-full items-center gap-2 border-b border-border px-3 text-left text-xs max-desk:min-h-11 ${target?.path === file.path ? "bg-primary-soft shadow-[inset_3px_0_var(--primary)]" : "hover:bg-primary-soft"}`}
                 >
                   <span className="font-mono text-muted-foreground">{file.status}</span>
                   <GitFilePath path={file.path} />

@@ -196,7 +196,7 @@ function SessionRow({
         <button
           disabled={disabled}
           onClick={onOpen}
-          className="flex min-h-10 min-w-0 flex-1 items-center gap-2 py-2 text-left hover:bg-muted disabled:opacity-60 max-[959px]:min-h-11"
+          className="flex min-h-10 min-w-0 flex-1 items-center gap-2 py-2 text-left hover:bg-muted disabled:opacity-60 max-desk:min-h-11"
         >
           <Terminal size={16} className="shrink-0 text-muted-foreground" />
           <span className="min-w-0 flex-1 break-words text-sm">

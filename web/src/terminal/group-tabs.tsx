@@ -94,7 +94,7 @@ export function GroupTabs({
                 <button
                   key={id}
                   type="button"
-                  className="terminal-member flex min-h-7 max-w-44 items-center gap-1.5 px-2 text-xs max-[959px]:min-h-11 max-[959px]:min-w-11"
+                  className="terminal-member flex min-h-7 max-w-44 items-center gap-1.5 px-2 text-xs max-desk:min-h-11 max-desk:min-w-11"
                   data-selected={group.id === layout.current && id === group.active}
                   data-drop-before={drag.target?.key === `${id}:before`}
                   data-drop-after={drag.target?.key === `${id}:after`}

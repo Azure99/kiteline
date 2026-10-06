@@ -7,7 +7,7 @@ export const MenuRadioGroup = Primitive.RadioGroup;
 export function MenuRadioItem({ children, ...props }: Primitive.RadioItem.Props) {
   return (
     <Primitive.RadioItem
-      className="flex min-h-8 cursor-default items-center gap-2 rounded px-2 py-1.5 text-sm outline-none data-highlighted:bg-muted max-[959px]:min-h-11"
+      className="flex min-h-8 cursor-default items-center gap-2 rounded px-2 py-1.5 text-sm outline-none data-highlighted:bg-muted max-desk:min-h-11"
       {...props}
     >
       <span className="size-4 shrink-0">
@@ -33,7 +33,7 @@ export function MenuContent({ children }: { children: React.ReactNode }) {
 export function MenuItem(props: Primitive.Item.Props) {
   return (
     <Primitive.Item
-      className="flex min-h-8 cursor-default items-center gap-2 rounded px-2 py-1.5 text-sm outline-none data-highlighted:bg-muted data-disabled:opacity-40 max-[959px]:min-h-11 [&_svg]:size-4"
+      className="flex min-h-8 cursor-default items-center gap-2 rounded px-2 py-1.5 text-sm outline-none data-highlighted:bg-muted data-disabled:opacity-40 max-desk:min-h-11 [&_svg]:size-4"
       {...props}
     />
   );

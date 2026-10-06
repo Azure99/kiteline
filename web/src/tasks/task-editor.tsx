@@ -18,7 +18,7 @@ import {
 import { formSchedule, scheduleForm, taskChanges, taskTime, type SchedulePreset } from "./form";
 
 export const scheduleSelectClass =
-  "min-h-9 w-full min-w-0 rounded border border-border bg-background px-2 text-sm max-[959px]:min-h-11";
+  "min-h-9 w-full min-w-0 rounded border border-border bg-background px-2 text-sm max-desk:min-h-11";
 
 export function TaskEditor({
   devices,

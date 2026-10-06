@@ -40,7 +40,7 @@ export function ImagePreview({
     <>
       <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-1 border-b border-border px-3">
         <span
-          className="min-w-16 flex-1 truncate text-xs max-[959px]:basis-full max-[959px]:py-2"
+          className="min-w-16 flex-1 truncate text-xs max-desk:basis-full max-desk:py-2"
           title={path}
         >
           {path}

@@ -417,12 +417,12 @@ export function WorkspaceView({
     <>
       <div
         hidden={focusMode.active}
-        className="flex shrink-0 items-center border-b border-border bg-muted/60 px-4 max-[959px]:px-0"
+        className="flex shrink-0 items-center border-b border-border bg-muted/60 px-4 max-desk:px-0"
       >
         <div
           role="tablist"
           aria-label={t(($) => $.shell.tools)}
-          className="flex min-w-0 flex-1 gap-5 max-[959px]:gap-0"
+          className="flex min-w-0 flex-1 gap-5 max-desk:gap-0"
         >
           {[
             { id: "terminal" as const, name: t(($) => $.common.terminal), icon: Terminal },
@@ -445,7 +445,7 @@ export function WorkspaceView({
         </div>
         {!visible && (
           <IconButton
-            className="max-[959px]:hidden"
+            className="max-desk:hidden"
             label={
               layout.dockOpen ? t(($) => $.terminal.collapseDock) : t(($) => $.terminal.expandDock)
             }
@@ -483,7 +483,7 @@ export function WorkspaceView({
             </IconButton>
           </div>
         )}
-        <div className="flex min-h-10 shrink-0 items-center gap-1 border-b border-border bg-muted/50 px-2 max-[959px]:gap-0 max-[959px]:px-1">
+        <div className="flex min-h-10 shrink-0 items-center gap-1 border-b border-border bg-muted/50 px-2 max-desk:gap-0 max-desk:px-1">
           {picker()}
           {!mobile && (multipleGroups || drag.dragging) ? (
             <GroupTabs

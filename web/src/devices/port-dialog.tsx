@@ -98,7 +98,7 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
             </label>
             <fieldset className="flex flex-wrap gap-x-5 gap-y-2 text-sm">
               <legend className="sr-only">{t(($) => $.devices.proxyPath)}</legend>
-              <label className="flex min-h-8 items-center gap-2 max-[959px]:min-h-11">
+              <label className="flex min-h-8 items-center gap-2 max-desk:min-h-11">
                 <input
                   type="radio"
                   name="proxy-mode"
@@ -107,7 +107,7 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
                 />
                 {t(($) => $.devices.stripPrefix)}
               </label>
-              <label className="flex min-h-8 items-center gap-2 max-[959px]:min-h-11">
+              <label className="flex min-h-8 items-center gap-2 max-desk:min-h-11">
                 <input
                   type="radio"
                   name="proxy-mode"

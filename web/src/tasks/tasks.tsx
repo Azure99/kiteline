@@ -133,7 +133,7 @@ export function TasksPage({
       )}
       <div className="flex min-h-0 flex-1">
         <div
-          className={`flex min-h-0 w-80 shrink-0 flex-col border-r border-border max-[959px]:w-full ${hasDetail ? "max-[959px]:hidden" : ""}`}
+          className={`flex min-h-0 w-80 shrink-0 flex-col border-r border-border max-desk:w-full ${hasDetail ? "max-desk:hidden" : ""}`}
         >
           <div className="flex shrink-0 items-center gap-2 border-b border-border p-3">
             <select
@@ -251,7 +251,7 @@ export function TasksPage({
           </div>
         </div>
         <div
-          className={`flex min-h-0 min-w-0 flex-1 flex-col ${hasDetail ? "" : "max-[959px]:hidden"}`}
+          className={`flex min-h-0 min-w-0 flex-1 flex-col ${hasDetail ? "" : "max-desk:hidden"}`}
         >
           {hasDetail ? (
             <>

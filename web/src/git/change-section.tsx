@@ -121,9 +121,9 @@ export function ChangeSection({
         ) : (
           <div
             key={`path:${entry.path}`}
-            className={`flex min-h-8 items-center gap-1 border-b border-border/50 px-2 max-[959px]:min-h-11 ${target?.path === entry.path && (target.side === side || side === "conflict") ? "bg-primary-soft" : ""}`}
+            className={`flex min-h-8 items-center gap-1 border-b border-border/50 px-2 max-desk:min-h-11 ${target?.path === entry.path && (target.side === side || side === "conflict") ? "bg-primary-soft" : ""}`}
           >
-            <label className="flex min-h-8 items-center justify-center max-[959px]:min-h-11 max-[959px]:min-w-11">
+            <label className="flex min-h-8 items-center justify-center max-desk:min-h-11 max-desk:min-w-11">
               <input
                 type="checkbox"
                 aria-label={t(($) => $.git.selectNamed, { area: label, path: entry.path })}
@@ -143,7 +143,7 @@ export function ChangeSection({
                   ? onFile(entry.path)
                   : onTarget({ path: entry.path, side: side === "staged" ? "staged" : "worktree" })
               }
-              className="flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left text-xs max-[959px]:min-h-11"
+              className="flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left text-xs max-desk:min-h-11"
             >
               <GitFilePath path={entry.path} stacked />
               {entry.submodule && (

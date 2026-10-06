@@ -345,11 +345,11 @@ export function Workbench({
       >
         <header
           hidden={terminalFocus.active}
-          className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3 max-[959px]:gap-1 max-[959px]:px-2"
+          className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3 max-desk:gap-1 max-desk:px-2"
         >
           <div className="flex shrink-0 items-center gap-2">
             <IconButton
-              className="max-[959px]:hidden"
+              className="max-desk:hidden"
               label={
                 sidebarOpen ? t(($) => $.shell.collapseSidebar) : t(($) => $.shell.expandSidebar)
               }
@@ -360,14 +360,14 @@ export function Workbench({
               {sidebarOpen ? <PanelLeftClose /> : <PanelLeftOpen />}
             </IconButton>
             <button
-              className="flex min-h-9 items-center justify-center gap-2 text-sm font-semibold max-[959px]:size-11"
+              className="flex min-h-9 items-center justify-center gap-2 text-sm font-semibold max-desk:size-11"
               aria-label={t(($) => $.home.open)}
               onClick={() => choose("/devices")}
             >
               <span className="flex size-6 items-center justify-center rounded bg-primary text-white">
                 <Terminal size={17} />
               </span>
-              <span className="max-[959px]:hidden">Kiteline</span>
+              <span className="max-desk:hidden">Kiteline</span>
             </button>
           </div>
           <Dialog open={picker} onOpenChange={setPicker}>
@@ -382,7 +382,7 @@ export function Workbench({
               }
             >
               <Server className="max-[360px]:hidden" />
-              <span className="flex min-w-0 flex-col min-[960px]:flex-row min-[960px]:items-center min-[960px]:gap-2">
+              <span className="flex min-w-0 flex-col desk:flex-row desk:items-center desk:gap-2">
                 <span className="truncate">
                   {workspace?.name ?? device?.name ?? t(($) => $.common.devices)}
                 </span>
@@ -424,7 +424,7 @@ export function Workbench({
               <Globe />
             </IconButton>
           )}
-          <div className="hidden items-center gap-2 min-[960px]:flex">
+          <div className="hidden items-center gap-2 desk:flex">
             {!!uploads.length && (
               <Menu>
                 <MenuTrigger
@@ -464,7 +464,7 @@ export function Workbench({
               <MoreHorizontal />
               {!!uploads.length && (
                 <span
-                  className="absolute right-1 top-1 size-1.5 rounded-full bg-primary min-[960px]:hidden"
+                  className="absolute right-1 top-1 size-1.5 rounded-full bg-primary desk:hidden"
                   aria-label={t(($) => $.shell.uploadStatus, { count: uploads.length })}
                 />
               )}
@@ -477,7 +477,7 @@ export function Workbench({
               <div className="my-1 border-t border-border" />
               <LanguageOptions />
               <div className="my-1 border-t border-border" />
-              <div className="min-[960px]:hidden">
+              <div className="desk:hidden">
                 {uploads.map((item) => (
                   <MenuItem key={item.id} onClick={() => setActiveUpload(item.id)}>
                     <Upload />
