@@ -16,7 +16,7 @@ import { status } from "./status.js";
 import { workingDiff } from "./diff.js";
 import { branches, commitDiff, commitFiles, history } from "./history.js";
 import { changeIndex, checkedGitPaths, discard, discardScope, reviewDiscard } from "./changes.js";
-import { changeBranch, commit, createBranch } from "./refs.js";
+import { commit, createBranch, deleteBranch, switchBranch } from "./refs.js";
 import { expectedHead, remotes, syncRemote } from "./remotes.js";
 import { finishOperation } from "./in-progress.js";
 
@@ -90,11 +90,11 @@ export async function gitRpc(
       ) satisfies Promise<RpcResult<typeof method>>;
     case "git.branch.switch":
       return write((repo) =>
-        changeBranch(repo, string(params.name), string(params.refOid), "switch", signal),
+        switchBranch(repo, string(params.name), string(params.refOid), signal),
       ) satisfies Promise<RpcResult<typeof method>>;
     case "git.branch.delete":
       return write((repo) =>
-        changeBranch(repo, string(params.name), string(params.refOid), "delete", signal),
+        deleteBranch(repo, string(params.name), string(params.refOid), signal),
       ) satisfies Promise<RpcResult<typeof method>>;
     case "git.stage":
     case "git.unstage":

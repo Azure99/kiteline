@@ -9,7 +9,7 @@ import {
   type HeadIdentity,
   type Repo,
 } from "@kiteline/shared/protocol";
-import { commandLine, git } from "./process.js";
+import { commandLine, git, gitProgressError } from "./process.js";
 import { observeIndex } from "./observe.js";
 
 export async function readOperation(
@@ -223,23 +223,13 @@ export async function finishOperation(
   } catch (error) {
     const after = await currentOperation(repo, signal).catch(() => undefined);
     if (!after) throw error;
-    const reason = asError(error);
     const moved =
       JSON.stringify(after.head) !== JSON.stringify(current.head) ||
       after.operation?.token !== operation.token;
-    throw new OperationError(
-      reason.code,
-      reason.message,
-      moved ? "partial" : error instanceof OperationError ? error.outcome : "failed",
-      {
-        ...(error instanceof OperationError && typeof error.result === "object"
-          ? error.result
-          : {}),
-        headOid: after.head.oid,
-        operationAfter: after.operation,
-      },
-      reason.details,
-    );
+    throw gitProgressError(error, moved, {
+      headOid: after.head.oid,
+      operationAfter: after.operation,
+    });
   }
   try {
     const after = await currentOperation(repo, signal);

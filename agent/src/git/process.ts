@@ -199,13 +199,7 @@ export async function git(
         ? signal.reason
         : (error ?? new AppError("io_error", stderr.text().trim() || "Git command failed")),
     );
-    throw new OperationError(
-      reason.code,
-      reason.message,
-      child.pid ? "unknown" : "failed",
-      result,
-      reason.details,
-    );
+    throw OperationError.from(reason, child.pid ? "unknown" : "failed", result);
   }
   signal.throwIfAborted();
   if (error) throw error;
@@ -220,6 +214,16 @@ export async function git(
     truncated: clipped || stderr.truncated,
     code,
   };
+}
+export function gitProgressError(error: unknown, progressed: boolean, result: object) {
+  return OperationError.from(
+    asError(error),
+    progressed ? "partial" : error instanceof OperationError ? error.outcome : "failed",
+    {
+      ...(error instanceof OperationError && typeof error.result === "object" ? error.result : {}),
+      ...result,
+    },
+  );
 }
 export async function gitHash(root: string, args: string[], signal: AbortSignal) {
   const hash = createHash("sha256");

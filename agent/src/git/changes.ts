@@ -5,15 +5,13 @@ import { open, opendir, readlink, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AppError,
-  asError,
-  OperationError,
   type DiscardScope,
   type GitEntry,
   type GitReview,
   type Repo,
 } from "@kiteline/shared/protocol";
 import { entryInfo, gitMetadataPath, relativePath } from "../files/paths.js";
-import { git, gitPath, literalPathspec, NulRecords } from "./process.js";
+import { git, gitPath, gitProgressError, literalPathspec, NulRecords } from "./process.js";
 import { headIdentity, observeIndex } from "./observe.js";
 import { modeType, readStatus } from "./status.js";
 
@@ -229,19 +227,7 @@ async function steps(run: (done: (paths: string[]) => void) => Promise<void>) {
   try {
     await run((paths) => paths.forEach((path) => changed.add(path)));
   } catch (error) {
-    const reason = asError(error);
-    throw new OperationError(
-      reason.code,
-      reason.message,
-      changed.size ? "partial" : error instanceof OperationError ? error.outcome : "failed",
-      {
-        ...(error instanceof OperationError && typeof error.result === "object"
-          ? error.result
-          : {}),
-        changedPaths: [...changed],
-      },
-      reason.details,
-    );
+    throw gitProgressError(error, changed.size > 0, { changedPaths: [...changed] });
   }
   return { changedPaths: [...changed] };
 }

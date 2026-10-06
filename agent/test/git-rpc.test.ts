@@ -1,8 +1,15 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { AppError, type RepoDiscovery, type GitReview } from "@kiteline/shared/protocol";
+import {
+  AppError,
+  OperationError,
+  errorReply,
+  type RepoDiscovery,
+  type GitReview,
+} from "@kiteline/shared/protocol";
 import { Agent } from "../src/agent.js";
+import { gitProgressError } from "../src/git/process.js";
 import { testConfig } from "./support/config.js";
 import { gitRepoFixture, isolateGitEnvironment } from "./support/git.js";
 
@@ -45,6 +52,31 @@ async function setup() {
   const params = { workspaceId: workspace.id, repoId: found.repos[0]!.id };
   return { data, root, cli, agent, signal, params };
 }
+
+test("operation replies preserve diagnostics, uncertainty and observed Git progress", () => {
+  const reason = {
+    code: "permission_denied",
+    message: "Cannot save run",
+    details: { path: "state" },
+  };
+  const error = OperationError.from(reason, "unknown", { stdout: "done", changedPaths: ["old"] });
+  expect(errorReply("request", error)).toEqual({
+    id: "request",
+    outcome: "unknown",
+    error: reason,
+    result: { stdout: "done", changedPaths: ["old"] },
+  });
+  for (const progressed of [false, true]) {
+    expect(
+      errorReply("request", gitProgressError(error, progressed, { changedPaths: ["new"] })),
+    ).toEqual({
+      id: "request",
+      outcome: progressed ? "partial" : "unknown",
+      error: reason,
+      result: { stdout: "done", changedPaths: ["new"] },
+    });
+  }
+});
 
 test("Git dispatch preserves index, discard review, error invalidation and device directories", async () => {
   const { data, root, cli, agent, signal, params } = await setup();

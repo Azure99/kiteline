@@ -19,7 +19,7 @@ import { gitRepoFixture, isolateGitEnvironment, workspaceFixture } from "./suppo
 import { changeIndex, reviewDiscard, discard } from "../src/git/changes.js";
 import { GitWriteQueue } from "../src/git/queue.js";
 import { git } from "../src/git/process.js";
-import { commit, createBranch, changeBranch } from "../src/git/refs.js";
+import { commit, createBranch, deleteBranch, switchBranch } from "../src/git/refs.js";
 import { observeIndex, headIdentity } from "../src/git/observe.js";
 import { status } from "../src/git/status.js";
 import { workingDiff } from "../src/git/diff.js";
@@ -740,20 +740,18 @@ test("branch mutations check target OID and preserve native occupancy and unmerg
   await cli("add", ".");
   await cli("commit", "-m", "two");
   const second = (await headIdentity(root, signal())).oid!;
-  await expect(changeBranch(repo, "topic", first, "delete", signal())).rejects.toMatchObject({
+  await expect(deleteBranch(repo, "topic", first, signal())).rejects.toMatchObject({
     code: "conflict",
   });
-  await changeBranch(repo, "main", first, "switch", signal());
-  await expect(changeBranch(repo, "topic", second, "delete", signal())).rejects.toThrow(
-    "not fully merged",
-  );
+  await switchBranch(repo, "main", first, signal());
+  await expect(deleteBranch(repo, "topic", second, signal())).rejects.toThrow("not fully merged");
   const linked = await mkdtemp("/var/tmp/kiteline-git-write-linked-");
   roots.push(linked);
   await cli("worktree", "add", linked, "topic");
-  await expect(changeBranch(repo, "topic", second, "switch", signal())).rejects.toThrow(linked);
+  await expect(switchBranch(repo, "topic", second, signal())).rejects.toThrow(linked);
   expect((await headIdentity(root, signal())).symbolicRef).toBe("refs/heads/main");
   await createBranch(repo, "removable", first, false, signal());
-  expect(await changeBranch(repo, "removable", first, "delete", signal())).toEqual({
+  expect(await deleteBranch(repo, "removable", first, signal())).toEqual({
     deleted: true,
   });
   await expect(createBranch(repo, "bad..name", first, false, signal())).rejects.toMatchObject({

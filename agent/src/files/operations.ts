@@ -57,10 +57,7 @@ interface OperationContext {
 }
 
 export class FileOperations {
-  private executions = new Map<
-    Promise<void>,
-    { controller: AbortController; signal: AbortSignal }
-  >();
+  private executions = new Map<Promise<void>, AbortController>();
   private closing = false;
   constructor(
     private metadata: MetadataStore,
@@ -70,7 +67,7 @@ export class FileOperations {
 
   async close() {
     this.closing = true;
-    for (const { controller } of this.executions.values())
+    for (const controller of this.executions.values())
       controller.abort(new AppError("cancelled", "Agent is stopping"));
     await Promise.allSettled([...this.executions.keys()]);
   }
@@ -193,7 +190,7 @@ export class FileOperations {
         report(item.path, 0, 0, true);
       }
     })();
-    this.executions.set(execution, { controller, signal });
+    this.executions.set(execution, controller);
     void execution
       .then(() => settle(), reject)
       .finally(() => {
@@ -544,6 +541,7 @@ async function verify(root: string, original: ObjectRef, content = false) {
   return current;
 }
 function sameContentStat(a: BigIntStats, b: BigIntStats) {
+  // Recheck content metadata before deleting the source of a cross-device move.
   return a.size === b.size && a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs;
 }
 function fail(state: ResultState, path: string, error: unknown) {

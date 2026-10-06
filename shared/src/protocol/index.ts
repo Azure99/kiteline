@@ -398,6 +398,10 @@ export class AppError extends Error {
   }
 }
 export class OperationError extends AppError {
+  static from(reason: KitelineError, outcome: OperationError["outcome"], result?: unknown) {
+    return new OperationError(reason.code, reason.message, outcome, result, reason.details);
+  }
+
   constructor(
     code: string,
     message: string,

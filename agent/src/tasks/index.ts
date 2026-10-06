@@ -424,14 +424,7 @@ export class ScheduledTasks {
         for (const run of record.runs) this.residuals.add(run.id);
         for (const run of record.runs) await this.removeOutput(run.id);
       } catch (error) {
-        const detail = asError(error);
-        throw new OperationError(
-          detail.code,
-          detail.message,
-          "partial",
-          { removed: true },
-          detail.details,
-        );
+        throw OperationError.from(asError(error), "partial", { removed: true });
       }
       return { removed: true as const };
     }, signal);
@@ -632,13 +625,7 @@ export class ScheduledTasks {
     saved.pid = process.pid;
     const detail = await this.saveKnown(started);
     if (detail) {
-      throw new OperationError(
-        detail.code,
-        detail.message,
-        "unknown",
-        { taskId: id, runId },
-        detail.details,
-      );
+      throw OperationError.from(detail, "unknown", { taskId: id, runId });
     }
     return this.getRun(runId);
   }
@@ -656,13 +643,7 @@ export class ScheduledTasks {
       );
       const detail = await this.saveKnown(record);
       if (detail) {
-        throw new OperationError(
-          detail.code,
-          detail.message,
-          "unknown",
-          { runId: id },
-          detail.details,
-        );
+        throw OperationError.from(detail, "unknown", { runId: id });
       }
       return this.getRun(id);
     }, signal);

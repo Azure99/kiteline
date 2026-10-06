@@ -127,14 +127,13 @@ PNG, JPEG, GIF and WebP images are detected by content and previewed; images exc
 
 The editor preserves the original BOM, line endings and final newline. For mixed line endings, it indicates whether saves will use LF or CRLF. An edit that would exceed the editing limit is rejected in full. Copying content does not mean it was saved.
 
-To save, the agent writes a temporary `.kiteline-<random ID>.tmp` file in the same directory, then replaces the original. The temporary file briefly appears in the directory; those left after an abnormal agent exit are cleaned up at the next startup. Saving through a symbolic link writes to its target and preserves the original file's ordinary permission bits.
+Saving replaces the original with a new file, so its parent directory must allow file creation and renaming. Ordinary permission bits are preserved; ownership, group, ACLs and extended attributes follow the rules for new files. Other hard links still point to the old content. Saving through a symbolic link writes to its target.
 
 ### Drafts
 
 Unsaved edits, or drafts, exist only in the current page:
 
 - They survive switching files, tools, workspaces and devices. "Open files" lets you find open drafts across all devices.
-- Closing an edited file asks you to save or discard its changes.
 - Reloading or closing the page triggers a browser prompt. Confirming that you want to leave loses the drafts.
 - If a device goes offline or a device/workspace is deleted, content remains viewable and copyable, but cannot be saved to its original location.
 
@@ -142,7 +141,7 @@ Unsaved edits, or drafts, exist only in the current page:
 
 If a file changed since it was opened or last saved, saving does not proceed and the file is not automatically reloaded. Use "Check disk content" to read the current disk text, then decide whether to load it and discard your draft, overwrite that version, or defer the decision.
 
-If a save result is uncertain, for example after losing connection during saving, compare the disk content with the last submitted content before deciding what to do next. See [Saving (Chinese)](../design/files.md#保存).
+If a save result is uncertain, for example after losing connection during saving, compare the disk content with the last submitted content before deciding what to do next.
 
 ### Search
 
@@ -195,7 +194,7 @@ Git uses the device's Git installation and the project user's Git configuration,
 
 Git scans the workspace directory and all subdirectories, listing repositories including initialized submodules and linked worktrees within the workspace (marked `worktree`). Repositories outside the workspace are not used. If the workspace is only a subdirectory of a repository, it shows "No Git repositories found"; add the repository root as a workspace.
 
-With several repositories, the first is selected automatically. Switch by path in the upper-left repository menu. "Discover repositories again" rescans; click "Continue scan" when "Repository scan incomplete" appears. Bare repositories are not supported.
+With several repositories, the first is selected automatically. Switch by path in the repository menu. "Discover repositories again" rescans; click "Continue scan" when "Repository scan incomplete" appears. Bare repositories are not supported.
 
 ### Status and diff
 
@@ -211,19 +210,19 @@ The commit includes everything staged, regardless of the current page or selecte
 
 ### Discard changes
 
-The row menu offers "Discard unstaged changes" (restore the index version) and "Discard all changes" (restore the HEAD version). The dialog first lists whether each item will be restored or deleted; review and click "Discard". Files listed for deletion, such as untracked files, are permanently deleted. If a file changes after review, the operation does not proceed and must be reviewed again.
+"Discard unstaged changes" restores the index version; "Discard all changes" restores the HEAD version. Before proceeding, review whether each item will be restored or deleted. Files listed for deletion, such as untracked files, are permanently deleted. If a file changes after review, the operation does not proceed and must be reviewed again.
 
 ### Branches and history
 
-"Branches" lists local branches. Branches checked out in other worktrees show their paths and cannot be switched to or deleted. Switching does not force-overwrite local changes. Deletion runs `git branch -d`, which rejects unmerged branches; Git rejection shows [Result unconfirmed](#result-unconfirmed). "Create branch" offers "Switch after creating", and history offers "Create branch from this commit".
+"Branches" lists local branches. Branches checked out in other worktrees show their paths and cannot be switched to or deleted. Switching does not force-overwrite local changes. Deletion runs `git branch -d`, which rejects unmerged branches; Git rejection shows [Result unconfirmed](#result-unconfirmed).
 
-"History" lists commits in pages. Click a commit for its changed files, then a file for the diff against its parent. Merge commits let you choose the parent.
+History diffs compare against a parent commit. For merge commits, you can choose the parent.
 
 ### Synchronization and authentication
 
 Pull runs `git pull`, using the default commit message for merges. Pull configured for interactive rebase fails. Push runs `git push`; force push is not available.
 
-Authentication cannot be interactive: Git does not prompt for a username or password. SSH keys, ssh-agent or credential helpers must work without input in the agent's environment. If authentication fails, click "Terminal" in the feedback and run the same Git command in that workspace's terminal to finish configuration, such as saving credentials in a helper, then return and retry. For service agents, see [Run in the background](devices.en.md#run-in-the-background); for details, see [Synchronization and authentication (Chinese)](../design/git.md#同步与认证).
+Authentication cannot be interactive: Git does not prompt for a username or password. SSH keys, ssh-agent or credential helpers must work without input in the agent's environment. If authentication fails, click "Terminal" in the feedback and run the same Git command in that workspace's terminal to finish configuration, such as saving credentials in a helper, then return and retry. For service agents, see [Run in the background](devices.en.md#run-in-the-background).
 
 ### Conflicts and continuation
 
@@ -233,7 +232,7 @@ During merge, rebase, cherry-pick, revert or am, including operations begun in a
 2. Click the plus on a conflict row in Git to mark it resolved.
 3. Once no conflicts remain, click "Continue" to use the default commit message.
 
-After confirmation, "Abort" asks Git to restore the pre-operation state; uncommitted content may be affected. The web app can continue only rebases consisting of ordinary pick steps. Finish rebases with edit, reword, squash, fixup, exec or other steps, and unrecognized operations, in a terminal, then refresh the web app. See [Conflicts and operations in progress (Chinese)](../design/git.md#冲突与进行中的操作).
+After confirmation, "Abort" asks Git to restore the pre-operation state; uncommitted content may be affected. The web app can continue only rebases consisting of ordinary pick steps. Finish rebases with edit, reword, squash, fixup, exec or other steps, and unrecognized operations, in a terminal, then refresh the web app.
 
 ### Result unconfirmed
 
@@ -246,7 +245,7 @@ Each repository executes one Git write at a time, queuing the rest. "Cancel oper
 
 Expand "Git output" to read Git's original output, then "Refresh Git" to check branches, commits and changes. Retry manually only after confirming that the operation did not take effect. The workbench does not retry automatically.
 
-A partially completed multi-step operation shows "The operation was only partially completed." See [Result semantics (Chinese)](../design/protocol.md#结果语义). Use a terminal for stash, line staging and other omitted functions; see [Out of scope (Chinese)](../design/git.md#范围外).
+A partially completed multi-step operation shows "The operation was only partially completed." Use a terminal for stash, line staging and other omitted functions; see [Out of scope (Chinese)](../design/git.md#范围外).
 
 ## Access development services
 

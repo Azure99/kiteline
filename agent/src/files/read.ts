@@ -165,6 +165,7 @@ export function revisionOf(path: string, dev: bigint, content: Buffer) {
   return revisionDigest(path, dev, createHash("sha256").update(content).digest());
 }
 export function revisionDigest(path: string, dev: bigint, digest: Buffer) {
+  // Ignore inode changes from identical atomic replacements; path and filesystem bind the revision.
   return createHash("sha256")
     .update(path)
     .update("\0")

@@ -12,7 +12,6 @@ export interface UploadWrite {
   size: number;
   received: number;
   target: Awaited<ReturnType<typeof locate>>;
-  targetPath: string;
   collision: "error" | "replace";
   expectedTargetVersion?: string;
   temporary: Temporary;
@@ -51,7 +50,6 @@ export class BinaryFiles {
     return {
       workspaceId,
       path,
-      targetPath: path,
       target,
       size,
       received: 0,
@@ -72,7 +70,15 @@ export class BinaryFiles {
         item.path,
         item.target,
       );
-      const target = await checkTarget(current, item, false);
+      const target = await checkTarget(
+        current,
+        {
+          targetPath: item.path,
+          collision: item.collision,
+          expectedTargetVersion: item.expectedTargetVersion,
+        },
+        false,
+      );
       await item.temporary.handle.chmod(
         target?.isFile() ? Number(target.mode & 0o777n) : 0o666 & ~process.umask(),
       );

@@ -90,27 +90,7 @@ export async function createBranch(
     head: await headAfter(repo, signal, { created: true, switched: switchTo }),
   };
 }
-export function changeBranch(
-  repo: Repo,
-  name: string,
-  refOid: string,
-  kind: "switch",
-  signal: AbortSignal,
-): Promise<RpcResult<"git.branch.switch">>;
-export function changeBranch(
-  repo: Repo,
-  name: string,
-  refOid: string,
-  kind: "delete",
-  signal: AbortSignal,
-): Promise<RpcResult<"git.branch.delete">>;
-export async function changeBranch(
-  repo: Repo,
-  name: string,
-  refOid: string,
-  kind: "switch" | "delete",
-  signal: AbortSignal,
-): Promise<RpcResult<"git.branch.switch" | "git.branch.delete">> {
+async function checkBranch(repo: Repo, name: string, refOid: string, signal: AbortSignal) {
   await branchName(repo, name, signal);
   const actual = await git(
     repo.rootPath,
@@ -120,17 +100,26 @@ export async function changeBranch(
   );
   if (actual.code !== 0 || commandLine(actual.bytes) !== refOid)
     throw new AppError("conflict", "Target branch has changed; refresh");
-  await git(
-    repo.rootPath,
-    kind === "switch"
-      ? ["switch", "--no-recurse-submodules", "--", name]
-      : ["branch", "-d", "--", name],
-    signal,
-    { write: true },
-  );
-  return kind === "delete"
-    ? ({ deleted: true } satisfies RpcResult<"git.branch.delete">)
-    : ({
-        head: await headAfter(repo, signal, { switched: true }),
-      } satisfies RpcResult<"git.branch.switch">);
+}
+export async function switchBranch(
+  repo: Repo,
+  name: string,
+  refOid: string,
+  signal: AbortSignal,
+): Promise<RpcResult<"git.branch.switch">> {
+  await checkBranch(repo, name, refOid, signal);
+  await git(repo.rootPath, ["switch", "--no-recurse-submodules", "--", name], signal, {
+    write: true,
+  });
+  return { head: await headAfter(repo, signal, { switched: true }) };
+}
+export async function deleteBranch(
+  repo: Repo,
+  name: string,
+  refOid: string,
+  signal: AbortSignal,
+): Promise<RpcResult<"git.branch.delete">> {
+  await checkBranch(repo, name, refOid, signal);
+  await git(repo.rootPath, ["branch", "-d", "--", name], signal, { write: true });
+  return { deleted: true };
 }
