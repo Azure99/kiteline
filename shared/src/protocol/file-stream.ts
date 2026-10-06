@@ -1,7 +1,7 @@
 import { WebSocket, type RawData } from "ws";
 import { AppError, limits } from "./index.js";
 
-export interface FileFrame {
+interface FileFrame {
   data: Buffer;
   binary: boolean;
 }

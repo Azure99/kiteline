@@ -182,8 +182,9 @@ export class RecordedSession {
       this.maybeRelease();
     });
   }
-  fault(error: Error) {
+  fault(cause: unknown) {
     if (this.ended || this.failed) return;
+    const error = cause instanceof Error ? cause : new Error(String(cause));
     this.failed = true;
     void this.input.close();
     this.control.dispose(error);
@@ -204,7 +205,7 @@ export class RecordedSession {
         AbortSignal.timeout(limits.interactionTimeout),
       );
     } catch (error) {
-      this.fault(error instanceof Error ? error : new Error(String(error)));
+      this.fault(error);
       throw error;
     }
     this.finish(null);

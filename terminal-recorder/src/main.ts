@@ -89,7 +89,7 @@ async function main() {
         try {
           result = await session.start();
         } catch (error) {
-          session.fault(error instanceof Error ? error : new Error(String(error)));
+          session.fault(error);
           throw error;
         }
       } else {

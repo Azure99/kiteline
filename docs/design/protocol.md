@@ -4,7 +4,7 @@
 
 ## 契约来源
 
-- `shared/src/protocol/index.ts`：`appVersion`、固定限额 `limits`（其中单条控制消息上限 `controlMessageBytes` 见[限额](../guide/reference.md#限额)，数据块上限 `dataChunkBytes` 为 64 KiB）、`Reply`、各对象类型、控制消息、浏览器事件、`ChannelKind`、校验函数。
+- `shared/src/protocol/index.ts`：`appVersion`、固定限额 `limits`、`Reply`、各对象类型、控制消息、浏览器事件、`ChannelKind` 和校验函数。
 - `shared/src/protocol/rpc.ts`：RPC 方法及参数、结果类型，`rpcMutates`，`gitWriteMethods`。
 - `shared/src/protocol/tasks.ts`：定时任务对象。`shared/src/protocol/ipc.ts`：recorder IPC 消息和终端帧。
 - `shared/src/protocol/ws.ts`、`file-stream.ts`、`http-stream.ts`、`stdio.ts`：心跳、帧发送、文件帧队列、HTTP 字节流、逐行 JSON。
@@ -24,7 +24,7 @@ server、agent 和工作台使用同一个产品版本 `appVersion`，版本必�
 
 ## 结果语义
 
-RPC、文件写入和本机 IPC 返回 `Reply`：成功时为 `{id, outcome: "succeeded", result}`，否则为 `{id, outcome, error: {code, message, details?}, result?}`。
+RPC、文件写入和本机 IPC 返回 `Reply`，字段定义见 `shared/src/protocol/index.ts`。调用方必须先按 `outcome` 区分以下结果，不能只根据是否收到错误判断有无副作用。
 
 | `outcome`   | 含义                                      |
 | ----------- | ----------------------------------------- |
@@ -165,20 +165,20 @@ server 为每个 HTTP 请求和 WebSocket 升级确定一个入口 origin（`req
 ### 控制连接
 
 1. agent 带 Bearer 和 `appVersion` 连接 `/api/agent/control`，握手期限为 `interactionTimeout`。
-2. 连接打开后，agent 发送 `hello{snapshot, editorBytes, environment}`。
-3. server 在 30 秒内没有收到 hello 时，以 1008 `hello_timeout` 关闭连接；hello 不合法时以 1008 `invalid_control_message` 关闭，同一设备已有的连接不受影响。hello 合法时，server 以 4001 `connection_replaced` 关闭同一设备的旧连接，保存快照和 `lastSeenAt`，发送 `welcome{connectionId, serverVersion}`，再发送 `watch.set`。从这时起设备在线，RPC 和数据通道都关联这个 `connectionId`。
+2. 连接打开后，agent 发送 `hello`。
+3. server 在 30 秒内没有收到 hello 时，以 1008 `hello_timeout` 关闭连接；hello 不合法时以 1008 `invalid_control_message` 关闭，同一设备已有的连接不受影响。hello 合法时，server 以 4001 `connection_replaced` 关闭同一设备的旧连接，保存快照和 `lastSeenAt`，发送 `welcome`，再发送 `watch.set`。从这时起设备在线，RPC 和数据通道都关联这个 `connectionId`。
 4. agent 收到 welcome 后发送 `tasks.snapshot`。
 
-agent 发往 server 的消息：`hello`、`metadata.snapshot`、`tasks.snapshot`、`rpc.result`、`request.progress`、`workspace.changed`、`sessions.changed`、`watch.status`。server 发往 agent 的消息：`welcome`、`watch.set`、`rpc.request`、`rpc.cancel`、`channel.open`、`channel.cancel`。
+控制消息的类型和字段见 `shared/src/protocol/index.ts` 的 `AgentControlMessage` 与 `ServerControlMessage`。
 
 - `metadata.snapshot` 是完整快照，server 只接受同一连接中 `revision` 更大的快照。`tasks.snapshot` 同样按连接内递增的 `revision` 接受，每条连接的第一份直接替换；server 只保留白名单字段，见 [server 摘要](scheduled-tasks.md#server-摘要)。
-- `watch.set{workspaceIds}` 是所有浏览器正在查看的、该设备上的工作区的并集。
-- server 校验已知事件的字段，只转发白名单中的字段：`request.progress` 只发给发起请求的登录；`workspace.changed`、`sessions.changed`、`watch.status` 只发给正在查看该工作区的浏览器。已知类型的字段不合法时，server 以 1008 `invalid_control_message` 关闭连接；不认识的类型被忽略。
+- `watch.set` 是所有浏览器正在查看的、该设备上的工作区的并集。
+- server 校验已知事件的字段，只转发白名单中的字段：`request.progress` 只发给发起请求的登录；`workspace.changed`、`sessions.changed`、`watch.status` 只发给正在查看该工作区的浏览器。已知类型的字段不合法时，server 以 1008 `invalid_control_message` 关闭连接；hello 完成后不认识的类型被忽略，hello 之前的其他消息则关闭连接。
 - agent 收到不合法的消息时同样以 1008 `invalid_control_message` 关闭连接。
 
 ### 浏览器事件
 
-连接建立后，server 立即发送一次 `devices.changed`。浏览器只能发送 `watch.set{targets: [{deviceId, workspaceId}]}`，最多 128 个目标，每次替换上一次的列表；其他消息使 server 以 1008 `invalid_event_message` 关闭连接。
+连接建立后，server 立即发送一次 `devices.changed`。浏览器只能发送 `watch.set`，声明正在查看的设备和工作区，每次替换上一次的列表；消息定义见 `BrowserControlMessage`。目标数超过 server 的上限或发送其他消息时，server 以 1008 `invalid_event_message` 关闭连接。
 
 | 事件                                                    | 接收者                   |
 | ------------------------------------------------------- | ------------------------ |
@@ -191,9 +191,9 @@ agent 发往 server 的消息：`hello`、`metadata.snapshot`、`tasks.snapshot`
 
 ### 心跳与背压
 
-- 控制连接（两端）、事件连接和终端数据连接（server 的两侧和 agent 一侧）每 20 秒发送 ping（`heartbeatInterval`），60 秒没有收到 pong 时强制断开（`heartbeatTimeout`）。文件和开发服务的数据连接不发送 ping。
-- 升级后的 socket 和 agent 的数据连接启用 TCP keepalive，间隔 20 秒（`tcpKeepAliveDelayMs`）。
-- 控制连接和事件连接的发送缓冲超过 2 倍 `controlMessageBytes` 时，发送方以 1013 `control_backpressure` 关闭连接。
+- 控制连接（两端）、事件连接和终端数据连接（server 的两侧和 agent 一侧）按 `heartbeatInterval` 发送 ping，超过 `heartbeatTimeout` 没有收到 pong 时强制断开。文件和开发服务的数据连接不发送 ping。
+- 升级后的 socket 和 agent 的数据连接启用 TCP keepalive，间隔由 `tcpKeepAliveDelayMs` 决定。
+- 控制连接和事件连接的发送缓冲超过 `shared/src/protocol/ws.ts` 的控制消息预算时，发送方以 1013 `control_backpressure` 关闭连接。
 
 ### 关闭码
 
@@ -212,11 +212,11 @@ agent 发往 server 的消息：`hello`、`metadata.snapshot`、`tasks.snapshot`
 
 ## RPC
 
-1. 工作台发送 `POST /api/devices/:deviceId/rpc`，请求体为 `{id, method, params}`。
+1. 工作台通过 `POST /api/devices/:deviceId/rpc` 发送 RPC 请求。
 2. server 检查：设备在线（否则 `offline` 或 `version_mismatch`），`id` 不在进行中（否则 `conflict`），该连接进行中的 RPC 少于 `pendingRequestsPerDevice`（否则 `busy`），`rpc.request` 不超过 `controlMessageBytes`（否则 `limit_exceeded`）。server 不检查方法名和参数字段，也不设期限，只等待 agent 回复或连接断开。
 3. agent 对未知方法返回 `unsupported`，其他方法按下表设置期限后执行，到期时以 `timeout` 结束。
 4. 取消：调用 `DELETE /api/devices/:deviceId/requests/:requestId`（只能取消同一登录的请求），或者原 HTTP 请求在响应前关闭，server 都会向 agent 发送 `rpc.cancel`。原请求仍以自己的 `Reply` 结束，通常为 `cancelled`。
-5. 进度：长操作发送 `request.progress{id, phase, currentPath?, completedItems?, bytes?}`，`phase` 为 `queued` 或 `running`。
+5. 进度：长操作通过 `request.progress` 报告排队或执行进度，只通知发起请求的登录；字段见 `FileProgress`。
 
 | 期限              | 方法                                       |
 | ----------------- | ------------------------------------------ |
@@ -225,15 +225,9 @@ agent 发往 server 的消息：`hello`、`metadata.snapshot`、`tasks.snapshot`
 | 无总期限          | `files.copy`、`files.move`、`files.delete` |
 | `rpcTimeout`      | 其他方法                                   |
 
-期限的数值见[限额](../guide/reference.md#限额)。下面的“写”是 `rpcMutates` 为 `true` 的方法，结果不明时按[结果语义](#结果语义)处理；参数和结果见 `shared/src/protocol/rpc.ts`。
+期限的数值见[限额](../guide/reference.md#限额)。方法、参数和结果类型以 `shared/src/protocol/rpc.ts` 的 `RpcMethods` 为准；`rpcMutates` 定义哪些方法按写请求处理，结果不明时遵守[结果语义](#结果语义)。
 
-- **定时任务**（`agent/src/tasks/rpc.ts`）：读 `tasks.list`、`tasks.get`、`tasks.preview`、`runs.list`、`runs.get`、`runs.output`；写 `tasks.create`、`tasks.update`、`tasks.pause`、`tasks.resume`、`tasks.acknowledge`、`tasks.delete`、`tasks.run`、`runs.stop`。见[定时任务](scheduled-tasks.md)。
-- **端口建议**（`agent/src/http/ports.ts`）：读 `ports.list`。见[端口建议](http-access.md#端口建议)。
-- **目录**（`agent/src/files/directories.ts`）：读 `directories.list`、`cursors.release`（也释放仓库发现的游标）；写 `directories.mkdir`。
-- **工作区与设置**（`agent/src/metadata.ts`）：写 `workspaces.add`、`workspaces.rename`、`workspaces.remove`、`settings.update`、`shortcuts.put`、`shortcuts.remove`。
-- **终端会话**（`agent/src/terminal/sessions.ts`）：读 `sessions.list`；写 `sessions.create`、`sessions.rename`、`sessions.end`、`sessions.recover`、`sessions.redraw`。见[终端](terminal.md)。
-- **文件**（`agent/src/files/`）：读 `files.list`、`files.inspect`、`files.search`；写 `files.create`、`files.rename`、`files.copy`、`files.move`、`files.delete`。见[文件](files.md)。
-- **Git**（`agent/src/git/rpc.ts`）：读 `repos.discover`、`git.status`、`git.diff`、`git.history`、`git.commitFiles`、`git.branches`、`git.remotes`、`git.review`；写 `git.stage`、`git.unstage`、`git.discard`、`git.commit`、`git.branch.create`、`git.branch.switch`、`git.branch.delete`、`git.fetch`、`git.pull`、`git.push`、`git.continue`、`git.abort`。见 [Git](git.md)。
+运行时分派入口是 `agent/src/agent.ts` 的 `perform()`；定时任务和 Git 分别交给 `agent/src/tasks/rpc.ts` 与 `agent/src/git/rpc.ts`。各方法的业务规则见相应的终端、文件、Git、定时任务和开发服务访问文档。
 
 ## 数据通道
 
@@ -249,9 +243,9 @@ agent 发往 server 的消息：`hello`、`metadata.snapshot`、`tasks.snapshot`
 ### 建立
 
 1. server 登记通道：设备必须在线，`channel.open` 不超过 `controlMessageBytes`，该连接的通道数少于 `channelsPerDevice`（从登记时开始计数）。通道绑定发起的登录、设备和当前 `connectionId`，然后发送 `channel.open`。
-2. agent 连接 `/api/agent/channels/:channelId`，准备完成后发送 `ready{meta}`，失败时发送 `error{code, message, details?}`。从登记到 `ready` 的期限为 `interactionTimeout`。
+2. agent 连接 `/api/agent/channels/:channelId`，准备完成后发送 `ready`，失败时发送 `error`。从登记到 `ready` 的期限为 `interactionTimeout`。
 3. server 校验 `meta`：文件通道的 `size` 为非负整数，`targetPath` 为不含 `..` 的相对路径；`file.write` 的 `size` 必须等于声明的大小；`open` 和 `image` 的内容类型只允许 `image/png`、`image/jpeg`、`image/webp`、`image/gif`，`open` 另允许 `text/plain; charset=utf-8`。
-4. 由 POST 创建的通道：server 把 `{channelId, meta}` 作为 POST 的响应返回，浏览器必须在下一个 `interactionTimeout` 内用同一登录加入一次。下载和代理请求本身就是接收方，没有这一步。
+4. 由 POST 创建的通道：server 在 POST 响应中返回通道 ID 和元数据，浏览器必须在下一个 `interactionTimeout` 内用同一登录加入一次。下载和代理请求本身就是接收方，没有这一步。
 5. 两侧就绪后，server 向 agent 发送 `start`，开始传输。
 
 ### 帧
@@ -259,14 +253,14 @@ agent 发往 server 的消息：`hello`、`metadata.snapshot`、`tasks.snapshot`
 文本帧是 JSON 控制消息，二进制帧是不超过 `dataChunkBytes` 的数据块。每个方向只有一个发送者，按顺序发送。
 
 - **`file.read`**：agent 发送二进制数据块，总长度等于 `meta.size`，没有表示成功的帧。agent 留住最后一块，直到读取完成且检查全部通过才发出；失败时改发 `error` 并关闭。server 收到恰好 `meta.size` 字节时结束 HTTP 响应，字节不足的断流按读取失败处理。细节见[上传与下载](files.md#上传与下载)。
-- **`file.write`**：server 把 PUT 请求体分块转发，请求体长度等于声明大小后发送 `end`。agent 校验并发布文件，发送 `result{reply}`，server 把这个 `Reply` 作为 PUT 的响应返回。
-- **`terminal.attach`**：agent 在连接后立即发送 `ready{meta}`，收到 `start` 后才开始恢复。agent 发往浏览器的帧有 `restore.begin`、`ready`、`resize`、`ended{exitCode}`、`error{code, message}`、`input.error{code, message, outcome}` 和二进制输出；浏览器发往 agent 的是二进制输入、`paste{text}`、`resize{cols, rows}` 和 `consumed{bytes}`。帧的顺序和含义见[附着与恢复](terminal.md#附着与恢复)、[输入](terminal.md#输入)和[尺寸](terminal.md#尺寸)。
+- **`file.write`**：server 把 PUT 请求体分块转发，请求体长度等于声明大小后发送 `end`。agent 校验并发布文件，发送 `result`，server 把这个 `Reply` 作为 PUT 的响应返回。
+- **`terminal.attach`**：agent 在连接后立即发送通道就绪帧 `ready`，收到 `start` 后才开始恢复。终端帧和浏览器输入类型见 `shared/src/protocol/ipc.ts` 的 `TerminalFrame` 与 `BrowserTerminalInput`；输出和普通输入使用二进制帧。恢复完成前不允许输入，帧的顺序和含义见[附着与恢复](terminal.md#附着与恢复)、[输入](terminal.md#输入)和[尺寸](terminal.md#尺寸)。
 - **`http.proxy`**：`ready` 的 `meta` 为空对象。`start` 之后通道只传二进制帧，收到文本帧按失败处理；连接以 1000 或无关闭码关闭表示正常结束，其他关闭码表示失败。见[请求转发](http-access.md#请求转发)。
 
 ### 流控与期限
 
-- **文件**：接收端处理完一帧才读取下一帧，未处理的帧最多 `filePendingFrames`（256）帧、`filePendingBytes`（2 MiB），超过时以 `limit_exceeded` 结束；HTTP 一侧的写入背压同样传到数据通道。传输开始后，在 `channelIdleTimeout` 内没有进展时以 `timeout` 结束。
-- **终端**：未确认的输出由 recorder 按附着控制，浏览器用 `consumed` 推进。server 和 agent 每条 socket 的发送积压超过 `terminalPendingBytes`（1 MiB）时，以 `limit_exceeded` 关闭该附着。见[附着与恢复](terminal.md#附着与恢复)。
+- **文件**：接收端处理完一帧才读取下一帧，未处理的帧最多 `filePendingFrames` 帧、`filePendingBytes`，超过时以 `limit_exceeded` 结束；HTTP 一侧的写入背压同样传到数据通道。传输开始后，在 `channelIdleTimeout` 内没有进展时以 `timeout` 结束。
+- **终端**：未确认的输出由 recorder 按附着控制，浏览器用 `consumed` 推进。server 和 agent 每条 socket 的发送积压超过 `terminalPendingBytes` 时，以 `limit_exceeded` 关闭该附着。见[附着与恢复](terminal.md#附着与恢复)。
 - **开发服务**：使用 WebSocket 流的背压，块大小为 `dataChunkBytes`，不设空闲期限，见[连接寿命](http-access.md#连接寿命)。
 
 ### 结束与取消
@@ -274,7 +268,7 @@ agent 发往 server 的消息：`hello`、`metadata.snapshot`、`tasks.snapshot`
 - 浏览器调用 `DELETE /api/channels/:channelId`，或者 POST、GET、PUT、终端 WebSocket 在完成前关闭时，server 取消通道。
 - 登录结束时，server 取消该登录的全部通道（`unauthenticated`）；控制连接断开或被替换时，取消属于它的通道（`offline`）。
 - 取消时，server 向 agent 发送 `channel.cancel` 并关闭两侧连接；终端的浏览器一侧尚未收到 `ended` 或 `error` 时，先收到一条 `error` 帧。agent 收到 `channel.cancel` 后停止仍在进行的准备，迟到的连接和文件句柄直接关闭。
-- `file.read` 失败（包括设备离线、通道已满）时，server 向发起的登录发送 `channel.failed{channelId, deviceId, workspaceId, path, purpose, error, outcome: "failed"}`。
+- `file.read` 失败（包括设备离线、通道已满）时，server 向发起的登录发送 `channel.failed`。
 - 正常完成后，server 在 HTTP 响应结束时释放通道，并以 1000 关闭 agent 一侧。
 
 ## 本机 IPC
@@ -301,10 +295,9 @@ agent 发往 server 的消息：`hello`、`metadata.snapshot`、`tasks.snapshot`
 
 ## recorder IPC
 
-agent 以 `node terminal-recorder/dist/main.js --agent <配置 JSON>` 启动 recorder，配置包含 `terminalInputBytes` 和 `terminalStallTimeout`；Windows 上 recorder 运行在 Job 对象中。消息类型见 `shared/src/protocol/ipc.ts`，终端行为见[终端](terminal.md)。
+agent 按需启动 recorder，并通过 `RecorderConfig` 传入配置；Windows 上 recorder 运行在 Job 对象中。消息类型见 `shared/src/protocol/ipc.ts` 的 `RecorderRequest` 和 `RecorderMessage`，启动入口见 `agent/src/terminal/recorder.ts`，终端行为见[终端](terminal.md)。
 
-- **传输**：agent 写 recorder 的 stdin，recorder 写 stdout，每行一条 JSON，每行不超过 `controlMessageBytes`（`shared/src/protocol/stdio.ts`）。发送队列按附着分别计量：某个附着的积压超过 `terminalPendingBytes` 时，发往该附着的新消息被拒绝（agent 一侧返回 `limit_exceeded`），其他附着不受影响。recorder 的 stderr 最多保留 8 KiB，用作退出原因。
-- **需要回复的请求**：`create`、`recover`、`cancelCreate`、`end`、`redraw`、`attach`，都带 `id`，recorder 以 `reply{reply}` 回复。agent 最多等待 `interactionTimeout`，超时按 `timeout` 和结果未确认处理；recorder 退出时，所有等待中的请求以 `recording_unavailable` 和结果未确认结束。
-- **不需要回复的消息**：`input{dataBase64}`、`paste{text}`、`resize{cols, rows}`、`consumed{bytes}`、`detach`，都带 `sessionId` 和 `attachmentId`。一次粘贴始终是一条 `paste` 消息。
-- **recorder 发往 agent**：`frame`（终端文本帧，agent 原样转发给浏览器）、`bytes`（终端输出，agent 转为二进制帧）、`fault{sessionId, error}`（该会话的记录丢失）、`ended{sessionId, exitCode}`。
-- **`cancelCreate{createId}`** 撤销 `id` 为 `createId` 的 `create`。成功回复表示这次创建不会再启动 tmux；得不到回复时，agent 停止整个 recorder。随后的查证规则见[会话生命周期](terminal.md#会话生命周期)。
+- **传输。** agent 写 recorder 的 stdin，recorder 写 stdout，每行一条 JSON，每行不超过 `controlMessageBytes`（`shared/src/protocol/stdio.ts`）。发送队列按附着分别计量：某个附着的积压超过 `terminalPendingBytes` 时，发往该附着的新消息被拒绝（agent 一侧返回 `limit_exceeded`），其他附着不受影响。recorder 的 stderr 只保留有界前缀，用作退出原因。
+- **请求结果。** 需要回复的请求带 `id`，recorder 用 `reply` 返回 `Reply`。agent 最多等待 `interactionTimeout`，超时按 `timeout` 和结果未确认处理；recorder 退出时，所有等待中的请求以 `recording_unavailable` 和结果未确认结束。
+- **附着数据。** 终端帧和输出按会话、附着路由到浏览器。普通输入、粘贴、尺寸和消费确认不等待独立回复；一次粘贴始终是一条消息，不能拆成普通输入。
+- **撤销创建。** `cancelCreate` 的成功回复表示所指向的创建不会再启动 tmux；得不到回复时，agent 停止整个 recorder。随后的查证规则见[会话生命周期](terminal.md#会话生命周期)。

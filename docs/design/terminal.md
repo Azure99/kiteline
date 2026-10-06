@@ -1,6 +1,6 @@
 # 终端
 
-本文写给修改 `agent/src/terminal/`、`terminal-recorder/`、`shared/src/terminal/` 或 `web/src/terminal/` 的人，说明终端会话的机制和必须保持的不变量。界面操作见[使用工作台](../guide/usage.md#终端)，帧格式见[数据通道](protocol.md#数据通道)。
+本文说明终端会话的机制和必须保持的不变量。界面操作见[使用工作台](../guide/usage.md#终端)，帧格式见[数据通道](protocol.md#数据通道)。
 
 ## 组件
 
@@ -10,34 +10,30 @@
 - **网页显示**（`web/src/terminal/display.ts`）：每次附着新建一个 xterm.js 实例，恢复画面后接收实时输出，发送输入和尺寸。
 - **本机客户端**（`agent/src/cli/terminal.ts`）：`kiteline-agent attach` 运行随包 tmux 客户端，附着到同一个 tmux 会话。
 
-tmux 使用会话目录下的 `tmux.conf`，不加载用户的 tmux 配置或插件。预设在 `terminalPreset()`（`shared/src/terminal/node.ts`）中：`status off`、`window-size latest`、`default-terminal tmux-256color`、`remain-on-exit on`、`mouse on`、`allow-passthrough off`、`set-clipboard external`；`history-limit` 和 `default-size` 取创建时的值；prefix 键表只保留 `C-b`（发送 `C-b`）、`d`（断开）、`[`（复制模式）和 `]`（`paste-buffer -p`）；右键点击把鼠标事件交给程序，不弹出 tmux 菜单。
+tmux 使用会话目录下的私有配置，不加载用户的 tmux 配置或插件，并收窄 prefix 键表。具体设置由 `shared/src/terminal/node.ts` 的 `terminalPreset()` 定义。
 
 固定版本：tmux 版本见 [`release/inputs.json`](../../release/inputs.json)，各平台都禁用 Sixel 并应用 [`native/tmux/paste.patch`](../../native/tmux/paste.patch)。xterm.js 及插件版本见 [`web/package.json`](../../web/package.json)、[`terminal-recorder/package.json`](../../terminal-recorder/package.json) 和 [`shared/package.json`](../../shared/package.json)。网页的 xterm.js 带有 [`web/patches/`](../../web/patches/) 中的补丁，让 DOM 渲染器按设备像素比测量字形宽度；维护方法见[构建与发布](../development/release.md#xtermjs)。
 
-依赖固定 xterm 版本内部行为的代码集中在两处，升级 xterm 时要逐项复核：
-
-- `shared/src/terminal/index.ts`（网页和 recorder 共用，保证两端解析一致）：Unicode 11 初始化、终端选项（关闭 `win32InputMode` 和 `kittyKeyboard`）、CSI S/T/L/M 与 REP 的计数适配、解析器空闲判断、鼠标编码补齐、用户输入转发、结束后冻结鼠标、粘贴规范化。
-- `web/src/terminal/`：`touch-selection.ts`（触控选择）、`clipped-screen.ts`（屏幕裁切、搜索定位及结束后的网格保留）、`auxiliary-input.ts`（辅助按键编码，直接导入 xterm.js 私有源码 `src/common/input/Keyboard`）。
+网页和 recorder 的共同适配在 `shared/src/terminal/index.ts`，两端必须同步升级。该模块的私有状态访问经过 `core()`，升级时以 `TerminalCore` 核对使用的成员。网页还依赖 `web/src/terminal/` 的触控选择和画面保留适配，其中 `auxiliary-input.ts` 直接导入 xterm.js 的私有键盘编码；这些入口也要随升级复核。
 
 ## 会话生命周期
 
 ### 创建
 
-agent 处理 `sessions.create`（网页或 `kiteline-agent terminal new`）的顺序：
+创建由 `agent/src/terminal/sessions.ts` 协调，必须保持：
 
-1. 确认 agent 未在停止、Shell 可执行、会话数未达到 `terminalSessionsPerDevice`、工作区和快捷方式存在。
-2. 生成 8 个随机字节作为会话 ID（16 位小写十六进制），以 `0700` 新建 `<运行目录>/<会话 ID>/`。ID 已在会话表中或目录已存在时换一个，最多 8 次，仍失败返回 `busy`。已存在的目录从不复用。
-3. 启动 tmux 之前登记会话：名称（参数、快捷方式名称或 `Shell`）、创建时间、当时的 `historyLines`，状态 `starting`。
-4. 让 recorder 创建会话（Windows 先由 agent 启动空的 tmux server，见[平台实现](platforms.md#windows)）。成功后状态变为 `running`，记录可用。
+- 以 `0700` 独占新建会话目录，已存在的目录从不复用。
+- 启动 tmux 之前以 `starting` 状态登记会话及创建时的 `historyLines`；确认创建成功后才变为 `running`、记录可用。
+- 程序的工作目录是工作区目录，通过进程 cwd 传给 tmux，不用会展开格式字符串的 `-c`。
 
-程序的工作目录是工作区目录，通过进程 cwd 传给 tmux，不用会展开格式字符串的 `-c`。Linux 和 macOS 上普通终端运行 `<Shell> -l`，快捷方式运行 `<Shell> -lc <命令>`，Windows 见[平台实现](platforms.md#windows)；Shell 的选择见 [agent 配置文件](../guide/reference.md#agent-配置文件)。tmux 把参数末尾的 `;` 当作命令分隔符，recorder 构造 `new-session` 时因此在末尾分号前加 `\`。初始尺寸 80×24（`agent/src/limits.ts` 的 `terminalInitialCols`、`terminalInitialRows`），之后由附着的客户端调整。
+Shell 的选择和执行参数见 [agent 配置文件](../guide/reference.md#agent-配置文件)；Windows 由 agent 先启动空的 tmux server，见[平台实现](platforms.md#windows)。
 
 ### 创建结果不确定时
 
 - recorder 在应答前失败或退出：agent 在私有 socket 上执行 `list-panes -a` 查证。pane 存活则设为 `running`、记录不可用（可以恢复）；确认不存在且不会再出现时删除登记并返回失败；无法确认时保留 `starting`，返回带 `sessionId` 的结果未确认（见[结果语义](protocol.md#结果语义)）。
 - 调用方停止等待（RPC 取消、超时或控制连接断开）：agent 只停止等待，返回带 `sessionId` 的 `cancelled`、结果未确认，创建在后台继续。
 - Windows 上创建失败或 agent 停止时，agent 发送 `cancelCreate`。recorder 等该次创建的准备步骤结束、关闭已建立的部分后才应答；不应答时 agent 结束 recorder 的整个进程集合。此后不会有迟到的创建。
-- Linux 和 macOS 没有撤销步骤，失败后 tmux 会话仍可能出现。agent 每 2 秒查证一次记录不可用的会话：存活的 `starting` 会话变为 `running`，确认已结束的删除登记。
+- Linux 和 macOS 没有撤销步骤，失败后 tmux 会话仍可能出现。agent 定期查证记录不可用的会话：存活的 `starting` 会话变为 `running`，确认已结束的删除登记。
 - 网页收到结果未确认时重新读取会话列表，按 `sessionId` 找回会话，从不自动重发创建。
 
 ### 存续与结束
@@ -56,7 +52,7 @@ agent 处理 `sessions.create`（网页或 `kiteline-agent terminal new`）的�
 
 会话没有空闲超时。server 重启、退出登录和删除设备只关闭相关的网页附着。控制客户端故障时会话变为记录不可用，可以[恢复](#记录故障后的恢复)。
 
-agent 正常停止（包括停止或重启服务）时，`Agent.close()` 在每个会话的私有 socket 上执行 `kill-server`，会话中的程序随之结束，正在运行的定时任务也被停止（见[执行与停止](scheduled-tasks.md#执行与停止)）。新启动的 agent 会话表为空，不导入旧会话。停止顺序见[启动与停止](agent-lifecycle.md#启动与停止)，异常退出见[资源与清理](#资源与清理)。
+agent 正常停止（包括停止或重启服务）时，`Agent.close()` 在每个会话的私有 socket 上执行 `kill-server`，会话中的程序随之结束。新启动的 agent 会话表为空，不导入旧会话。停止顺序见[启动与停止](agent-lifecycle.md#启动与停止)，异常退出见[资源与清理](#资源与清理)。
 
 程序退出后，`remain-on-exit on` 让 pane 保留到 agent 读取退出码。recorder 订阅 `#{pane_dead}` 和退出码，在控制流中排在之前的输出之后处理结束：先把结束帧（含退出码）送给所有显示，再通知 agent。agent 在私有 socket 上执行 `kill-server`（Windows 还要结束 tmux server 的进程集合并等它清空），删除登记，推送 `sessions.changed`，再删除会话目录。退出码在 Linux 和 macOS 上取 `#{pane_dead_status}`，在 Windows 上取 pane 选项 `@kiteline-exit-dword`，读不到时为空。明确结束会话时，agent 先等进行中的创建或恢复，再让 recorder 关闭控制客户端并执行 `kill-server`，退出码为空。
 
@@ -72,7 +68,7 @@ recorder 由 agent 在第一次需要时启动，通过标准输入输出交换�
 
 ### 顺序与故障
 
-控制流中的 `%output`、`%layout-change` 和存活订阅按到达顺序进入同一个队列：输出写入模型，布局变化调整模型尺寸，存活变化触发结束。以下情况属于记录故障：控制客户端退出、tmux 命令超过 30 秒未应答、出现 `%pause`、`%continue`、`%extended-output` 或 `%exit`、出现意外的 pane 或布局、模型待解析的输出超过 `terminalModelPendingBytes`。记录故障时 recorder 关闭该会话的所有显示（`recording_unavailable`），agent 把会话标为记录不可用并设置 `historyGap`；tmux 中的程序不受影响。整个 recorder 退出时，它的所有会话都按此处理。
+控制流中的 `%output`、`%layout-change` 和存活订阅按到达顺序进入同一个队列：输出写入模型，布局变化调整模型尺寸，存活变化触发结束。以下情况属于记录故障：控制客户端退出、tmux 命令超过应答期限、出现 `%pause`、`%continue`、`%extended-output` 或 `%exit`、出现意外的 pane 或布局、模型待解析的输出超过 `terminalModelPendingBytes`。记录故障时 recorder 关闭该会话的所有显示（`recording_unavailable`），agent 把会话标为记录不可用并设置 `historyGap`；tmux 中的程序不受影响。整个 recorder 退出时，它的所有会话都按此处理。
 
 tmux 是终端查询的唯一应答方：headless 模型的应答被丢弃，网页只转发 xterm.js 标记为用户输入的数据（`forwardUserInput`）。
 
@@ -91,20 +87,7 @@ recorder 为每个会话保存一个检查点和其后的完整尾段：
 - “历史存在缺口”（`historyGap`）：本次 agent 运行期间该会话发生过记录故障，部分输出没有进入网页历史。agent 运行期间不清除。
 - “已减少较早历史”（`historyLimited`）：本次附着的恢复副本被缩短。
 
-### 内部常量
-
-| 常量                              | 值                   | 位置                                  | 作用                          |
-| --------------------------------- | -------------------- | ------------------------------------- | ----------------------------- |
-| `terminalModelPendingBytes`       | 8 MiB                | `terminal-recorder/src/model.ts`      | 模型待解析输出上限            |
-| `terminalCheckpointIntervalBytes` | 4 MiB                | `terminal-recorder/src/model.ts`      | 生成新检查点的尾段长度        |
-| `terminalRecoveryTailBytes`       | 8 MiB                | `terminal-recorder/src/model.ts`      | 尾段上限                      |
-| `terminalSnapshotBytes`           | 16 MiB               | `shared/src/protocol/index.ts`        | 一份恢复副本的上限            |
-| `terminalOutstandingBytes`        | 256 KiB              | `terminal-recorder/src/attachment.ts` | 每个显示已发送未确认的输出    |
-| `terminalPendingBytes`            | 1 MiB                | `shared/src/protocol/index.ts`        | 每个显示的待发队列和 IPC 积压 |
-| `dataChunkBytes`                  | 64 KiB               | `shared/src/protocol/index.ts`        | 输出分块、单个输入帧上限      |
-| `interactionTimeout`              | 30 秒                | `shared/src/protocol/index.ts`        | recorder 应答和各种等待的期限 |
-| 存活查证间隔                      | 2 秒                 | `agent/src/terminal/sessions.ts`      | 记录不可用的会话              |
-| 重绘                              | 行数加 1，停留 80 ms | `terminal-recorder/src/session.ts`    | 见[恢复动作](#恢复动作)       |
+模型积压、检查点间隔和恢复尾段的阈值见 `terminal-recorder/src/model.ts` 的 `modelLimits`；每个显示已发送但未确认的窗口见 `terminal-recorder/src/attachment.ts` 的 `terminalOutstandingBytes`；跨进程共用的恢复副本、待发队列、分块和交互期限见 `shared/src/protocol/index.ts` 的 `limits`。各机制的越界后果见本页相应段落。
 
 ## 附着与恢复
 
@@ -112,7 +95,7 @@ recorder 为每个会话保存一个检查点和其后的完整尾段：
 
 网页打开显示时建立 `terminal.attach` 数据通道（见[数据通道](protocol.md#数据通道)）。agent 确认会话为 `running` 且记录可用后发送通道就绪帧 `ready{meta}`（带 `terminalInputBytes`；server 读取它，并在创建通道的响应中交给浏览器），收到 `start` 后请求 recorder 附着，`history` 为 `retained`（默认）或 `screen`：
 
-- `retained`：解析器空闲且尚无检查点或尾段非空时，先生成新检查点；然后发送检查点和尾段副本。解析器不空闲但有检查点时，直接发送已有检查点和完整尾段，不等程序补完序列。两者都没有时等待下一次输出，30 秒内取不到返回 `busy`。
+- `retained`：解析器空闲且尚无检查点或尾段非空时，先生成新检查点；然后发送检查点和尾段副本。解析器不空闲但有检查点时，直接发送已有检查点和完整尾段，不等程序补完序列。两者都没有时等待下一次输出，`interactionTimeout` 内取不到返回 `busy`。
 - `screen`：只在解析器空闲时序列化当前屏幕（滚屏为 0），否则等待，超时返回 `busy`。它不替换检查点，也不改会话的 `historyLines`。
 
 agent 发往该显示的帧依次为：`restore.begin`（尺寸、`historyLines`、副本字节数、`historyLimited`、`historyGap`）、副本的二进制分块、尾段（二进制输出和 `resize`）、恢复完成帧 `ready`，然后是实时的二进制输出和 `resize`，最后是 `ended` 或 `error`（帧名列表见[数据通道](protocol.md#数据通道)）。恢复期间的新输出进入该显示自己的队列，不阻塞模型。网页在 `restore.begin` 时新建 xterm.js 实例，副本字节数对不上就放弃该实例；收到恢复完成帧 `ready` 并发出第一次尺寸后才允许输入。
@@ -123,9 +106,9 @@ agent 发往该显示的帧依次为：`restore.begin`（尺寸、`historyLines`
 
 ### 本机附着
 
-`kiteline-agent attach <会话 ID>` 通过本机 IPC（见[通信契约](protocol.md#本机-ipc)）调用 `terminal.attach` 取得 socket，然后运行随包 tmux：`tmux -S <socket> attach-session -E -t kiteline`（`-E` 不用客户端环境更新会话环境）。标准输入和输出都必须是终端；会话仍在创建时返回 `busy`。命令按 [`--run-dir` 和目录配置](../guide/reference.md#agent-环境变量)找到运行目录，不读取 `config.json`，本机请求使用默认的 `rpcTimeout`，附着时长不限。附着期间公开入口持有共享使用锁，升级和卸载会被拒绝（见[锁](agent-lifecycle.md#锁)）。
+`kiteline-agent attach <会话 ID>` 通过本机 IPC（见[通信契约](protocol.md#本机-ipc)）调用 `terminal.attach` 取得 socket，然后运行随包 tmux：`tmux -S <socket> attach-session -E -t kiteline`（`-E` 不用客户端环境更新会话环境）。标准输入和输出都必须是终端；会话仍在创建时返回 `busy`。命令按 [`--run-dir` 和目录配置](../guide/reference.md#agent-环境变量)找到运行目录，不读取 `config.json`，本机请求使用默认的 `rpcTimeout`，附着时长不限。附着期间命令入口持有共享使用锁，升级和卸载会被拒绝（见[锁](agent-lifecycle.md#锁)）。
 
-网页菜单“本机接续命令”生成的命令包含公开入口的绝对路径和 `--run-dir`；Windows 客户端的启动方式见[平台实现](platforms.md#windows)。
+网页菜单“本机接续命令”生成的命令包含命令入口的绝对路径和 `--run-dir`；Windows 客户端的启动方式见[平台实现](platforms.md#windows)。
 
 ### 记录故障后的恢复
 
@@ -168,17 +151,17 @@ agent 发往该显示的帧依次为：`restore.begin`（尺寸、`historyLines`
 
 ## 恢复动作
 
-| 动作（i18n 键）                           | 出现条件                                       |
-| ----------------------------------------- | ---------------------------------------------- |
-| “重新连接”（`terminal.reconnect`）        | 显示出错，错误码不是 `recording_unavailable`   |
-| “恢复终端”（`terminal.recover`）          | 错误码为 `recording_unavailable`               |
-| “减少历史后重试”（`terminal.screenOnly`） | 错误码为 `limit_exceeded`、`timeout` 或 `busy` |
-| “重绘程序”（`terminal.redrawProgram`）    | 会话菜单，确认后执行                           |
+| 动作             | 出现条件                                       |
+| ---------------- | ---------------------------------------------- |
+| “重新连接”       | 显示出错，错误码不是 `recording_unavailable`   |
+| “恢复终端”       | 错误码为 `recording_unavailable`               |
+| “减少历史后重试” | 错误码为 `limit_exceeded`、`timeout` 或 `busy` |
+| “重绘程序”       | 会话菜单，确认后执行                           |
 
 - 重新连接：确认登录仍有效后关闭当前显示，新建显示并以 `retained` 重新附着。不触及 recorder、共享历史和程序。
-- 恢复终端：调用 `sessions.recover`，`recovering` 期间每 500 ms 读取一次会话列表，变为可用后重新附着（见[记录故障后的恢复](#记录故障后的恢复)）。
+- 恢复终端：调用 `sessions.recover`，`recovering` 期间读取会话列表，变为可用后重新附着（见[记录故障后的恢复](#记录故障后的恢复)）。
 - 减少历史后重试：以 `screen` 重新附着，只省略本次的较早滚屏；检查点和 `historyLines` 不变，之后的附着仍取完整历史。
-- 重绘程序：调用 `sessions.redraw`，在输入队列中排队，把行数加 1，等实际尺寸生效后停留 80 ms，再恢复原尺寸并等待生效。要求记录可用。程序会向所有客户端重画，其他客户端的画面和选区可能改变；请求完成只表示尺寸已恢复。
+- 重绘程序：调用 `sessions.redraw`，在输入队列中排队，通过临时改变尺寸让程序重画，随后恢复原尺寸。要求记录可用。程序会向所有客户端重画，其他客户端的画面和选区可能改变；请求完成只表示尺寸已恢复。
 
 关闭显示后再打开会新建附着，原显示的选区和本地历史随之释放。程序输出未结束的 OSC 或 DCS 序列时解析器一直不空闲，尾段超过 `terminalRecoveryTailBytes` 后新的附着只能返回 `busy`；以上动作都无法纠正，需要程序输出结束序列或结束会话。
 

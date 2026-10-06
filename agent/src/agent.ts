@@ -17,6 +17,7 @@ import {
   type Reply,
   type AgentEvent,
   type AgentControlMessage,
+  type ChannelKind,
   type FileProgress,
   type RpcResult,
   type RpcMethod,
@@ -47,13 +48,23 @@ import { ScheduledTasks } from "./tasks/index.js";
 import { isScheduleMethod, scheduleRpc } from "./tasks/rpc.js";
 
 const gitWrites = new Set<string>(gitWriteMethods);
-const unboundedMethods = new Set(["files.copy", "files.move", "files.delete"]);
+const unboundedMethods = new Set<string>([
+  "files.copy",
+  "files.move",
+  "files.delete",
+] satisfies readonly RpcMethod[]);
 const specializedTimeouts = new Map<string, "searchTimeout" | "gitWriteTimeout">([
-  ["files.search", "searchTimeout"],
+  ["files.search" satisfies RpcMethod, "searchTimeout"],
   ...gitWriteMethods.map((method) => [method, "gitWriteTimeout"] as const),
 ]);
-const notifiedFileMethods = new Set(["files.create", "files.rename"]);
-const localSessionMethods = new Set(["sessions.list", "sessions.create"]);
+const notifiedFileMethods = new Set<string>([
+  "files.create",
+  "files.rename",
+] satisfies readonly RpcMethod[]);
+const localSessionMethods = new Set<string>([
+  "sessions.list",
+  "sessions.create",
+] satisfies readonly RpcMethod[]);
 
 function knownRpcMethod(method: string): RpcMethod {
   if (!Object.hasOwn(rpcMutates, method))
@@ -122,6 +133,7 @@ export class Agent {
       (workspaceId) => this.watches.changed(workspaceId, true),
     );
     this.httpChannels = new HttpChannels(identity);
+    this.sessions.onFrame = (message) => this.terminalChannels.frame(message);
     this.sessions.onChanged = (workspaceId) =>
       this.send({ type: "sessions.changed", workspaceId } satisfies AgentEvent);
     this.local = new LocalServer(config, (method, params, signal) =>
@@ -285,18 +297,26 @@ export class Agent {
     } else if (message.type === "channel.open") {
       if (message.connectionId !== this.connectionId)
         throw new AppError("conflict", "Stale control connection");
-      const channels =
-        message.kind === "terminal.attach"
-          ? this.terminalChannels
-          : message.kind === "http.proxy"
-            ? this.httpChannels
-            : this.fileChannels;
-      channels.open(
-        string(message.channelId),
-        string(message.connectionId),
-        string(message.kind),
-        record(message.params),
-      );
+      const channelId = string(message.channelId);
+      const connectionId = string(message.connectionId);
+      const kind = string(message.kind) as ChannelKind;
+      const params = record(message.params);
+      switch (kind) {
+        case "terminal.attach":
+          this.terminalChannels.open(channelId, connectionId, params);
+          break;
+        case "http.proxy":
+          this.httpChannels.open(channelId, connectionId, params);
+          break;
+        case "file.read":
+        case "file.write":
+          this.fileChannels.open(channelId, connectionId, kind, params);
+          break;
+        default: {
+          const unhandled: never = kind;
+          this.fileChannels.open(channelId, connectionId, unhandled, params);
+        }
+      }
     } else if (message.type === "channel.cancel") {
       this.terminalChannels.cancel(string(message.channelId));
       this.fileChannels.cancel(string(message.channelId));

@@ -11,7 +11,7 @@ import {
   type DeviceTaskSummary,
 } from "@kiteline/shared/protocol";
 
-export const digest = (value: string) => createHash("sha256").update(value).digest("hex");
+const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const secret = (bytes = 32) => randomBytes(bytes).toString("base64url");
 type DeviceRow = {
   id: string;

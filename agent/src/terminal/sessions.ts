@@ -15,7 +15,7 @@ import type { AgentConfig } from "../config.js";
 import type { MetadataStore } from "../metadata.js";
 import { Recorder, type Creation } from "./recorder.js";
 
-export const sessionIdBytes = 8;
+const sessionIdBytes = 8;
 
 export function checkRunDir(runDir: string) {
   const socket = join(runDir, "0".repeat(sessionIdBytes * 2), "tmux.sock");
@@ -30,6 +30,7 @@ interface Managed {
   session: Session;
   identity: Partial<TerminalIdentity> & Pick<TerminalIdentity, "socket">;
   creation?: Promise<Session>;
+  // A recorder timeout can leave creation in flight; a missing tmux server is not yet proof of failure.
   creationMayArrive?: boolean;
   createRequest?: Creation;
   server?: Awaited<ReturnType<typeof startTerminalServer>>;

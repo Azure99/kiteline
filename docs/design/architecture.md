@@ -203,37 +203,26 @@ agent 的出站代理规则见[出站代理与证书](../guide/devices.md#出站
 
 ### 添加 RPC 方法
 
-1. 在 `shared/src/protocol/rpc.ts` 的 `RpcMethods` 中加入方法和类型，在 `rpcMutates` 中标明是否为写操作。Git 写方法还要加入 `gitWriteMethods`（决定 `gitWriteTimeout`、完成后立即发送的 `workspace.changed` 和工作台的 Git 操作类型），并在 `agent/src/git/rpc.ts` 中通过 `GitWriteQueue.run` 执行。
-2. 定时任务在 `agent/src/tasks/rpc.ts` 的 `scheduleRpc` 中加入方法；Git 在 `agent/src/git/rpc.ts` 的 `gitRpc` 中加入分支；它们由 `isScheduleMethod`、`isGitMethod` 分流。其他方法在 `agent/src/agent.ts` 的 `perform` 中加入分支。各分支校验参数并保留 `never` 穷尽检查；server 只检查参数是对象。
-3. 需要特殊期限时，修改 `agent.ts` 的 `unboundedMethods` 或 `specializedTimeouts`。
-4. 本机 IPC 通过 `localSessionMethods` 和 `isScheduleMethod` 选择允许的方法。
-5. 方法改变工作区内容时，确保完成后发送 `workspace.changed`（`dispatch` 对文件创建、改名和 Git 写方法自动发送）。
-6. 工作台用 `rpc()` 调用，按[结果语义](protocol.md#结果语义)处理失败和结果未确认。
-7. 在 `agent/test/` 和 `web/test/rpc.typecheck.ts` 中补测试，更新 [RPC](protocol.md#rpc) 一节和负责该工具的 design 文档。
+在 `shared/src/protocol/rpc.ts` 定义方法、参数、结果和写分类，并按操作确定期限、本机调用权限及变化通知时点。
+
+Git 写操作经过 `GitWriteQueue`；工作区变化通知分别发生在 RPC 完成、后台文件操作真正结束或内容已发布/结果未确认时。调用方按[结果语义](protocol.md#结果语义)处理失败及结果未确认；测试覆盖实际变化的行为。
 
 ### 添加事件
 
-1. 在 `shared/src/protocol/index.ts` 的 `AgentEvent` 或 `BrowserEvent` 中加入类型。
-2. agent 发往浏览器的事件必须在 `server/src/connections.ts` 中加分支，校验字段并转发。server 忽略不认识的消息类型，浏览器收不到；已知类型的字段不合法时，server 以 1008 关闭 agent 的控制连接。server 只转发白名单中的字段，给已有事件加字段也要改这里。
-3. 浏览器发往 server 的消息只接受 `watch.set`，其他消息使 server 以 1008 关闭事件连接；添加消息时修改 `Connections.acceptBrowser`。
-4. 工作台在 `kiteline:event` 监听中处理事件。本地 window 事件的名称和载荷统一在 `web/src/lib/events.ts` 的 `WindowEventMap` 声明中维护，生产方引用对应的 detail 类型；在 `web/test/events.typecheck.ts` 中补类型测试。
+在 `shared/src/protocol/index.ts` 定义协议事件，在接收边界检查新增字段，并按接收者构造允许转发的字段。
+
+浏览器发往 server 的消息目前只接受 `watch.set`。本地 window 事件的名称和载荷由 `web/src/lib/events.ts` 的 `WindowEventMap` 维护。
 
 ### 添加数据通道种类
 
-1. 在 `shared/src/protocol/index.ts` 的 `ChannelParams` 中加入种类和参数，`ChannelKind` 从其键推导；同时定义对应的 `meta` 类型。静态参数类型不替代接收边界的运行时校验。
-2. 在 `server/src/channels.ts` 的 `create` 中接受该种类（种类和 `purpose` 都是白名单），在 `acceptAgent` 中校验 `meta`；浏览器需要加入时，在 `server/src/app.ts` 中加接口并选择单条消息上限。浏览器会直接显示内容时，更新内容类型白名单。
-3. 在 `agent/src/agent.ts` 处理 `channel.open` 的分派中加入处理类，提供 `open`、`cancel` 和 `close`。
-4. 通道自动计入 `channelsPerDevice`；文件类通道在 agent 端还计入 `transfersPerDevice`。
+在 `shared/src/protocol/index.ts` 定义种类、参数和 meta，更新 `server/src/channels.ts` 的公开种类、purpose、meta 和内容类型检查。
+
+在 agent 中接入通道的 open 分派，确定取消、断连与关闭时的资源归属，以及是否占用文件传输额度。共用同一资源所有者的通道统一清理。
 
 ### 添加 HTTP 路由
 
-1. 在 `server/src/app.ts` 中按位置加入。判断顺序为：开发服务代理、安装资源、`/healthz`、`/api/agent/bind`、`/api/*`、静态文件；`/api/*` 内依次是非 GET 请求的 Origin 检查、初始化与登录、登录检查、不检查版本的接口、版本检查、其余接口。路由所在的位置决定它要经过哪些检查。
-2. 需要已有登录的 JSON 路由用 `loginBody()` 读取并在读取后复核登录；初始化、登录和 agent 绑定用 `body()`。读取均有大小和时间限制。用 `json()` 返回，用 `AppError` 表示错误；状态码映射在 `server/src/http.ts`。
-3. 路径不在 `/api/` 下时，在 `web/vite.config.ts` 的 `server.proxy` 中加入前缀，开发服务器才会转发到 server。
-4. 在 `server/test/` 中补测试，并更新 [HTTP 接口](protocol.md#http-接口)。
+在 `server/src/app.ts` 中按 [HTTP 接口](protocol.md#http-接口)的检查列选择位置，核对登录、Origin、版本和读完请求体后的认证时点。路径不在 `/api/` 下时，还须考虑 `web/vite.config.ts` 的开发代理前缀。
 
 ### 添加限额或配置项
 
-1. 多个进程共用的固定值放在 `shared/src/protocol/index.ts` 的 `limits`；只在 server 用的放在 `server/src/limits.ts`；agent 的固定值放在 `agent/src/limits.ts`；允许用户调整的放在 `agent/src/config.ts` 的 `defaultAgentLimits`，需要上限时同时加入 `limitMaximums`。
-2. 浏览器需要知道的 agent 配置值通过协议传递（如 hello 中的 `editorBytes`、终端 `ready` 中的 `terminalInputBytes`），不在工作台中写死。
-3. 用户能感知的限额写入[限额](../guide/reference.md#限额)，可调项同时写入 [agent 配置文件](../guide/reference.md#agent-配置文件)。
+共用规则复用现有定义；浏览器所需的设备配置通过协议传递。新增可配置项或影响拒绝、截断、操作选择的约束时，更新[用户参考](../guide/reference.md)。

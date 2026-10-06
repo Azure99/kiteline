@@ -149,7 +149,7 @@ export interface RpcMethods {
 }
 
 export type RpcMethod = keyof RpcMethods;
-export const rpcMutates: Record<RpcMethod, boolean> = {
+export const rpcMutates = {
   "tasks.list": false,
   "tasks.get": false,
   "tasks.preview": false,
@@ -208,7 +208,7 @@ export const rpcMutates: Record<RpcMethod, boolean> = {
   "git.push": true,
   "git.continue": true,
   "git.abort": true,
-};
+} satisfies Record<RpcMethod, boolean>;
 export type RpcParams<M extends RpcMethod> = RpcMethods[M]["params"];
 export type RpcResult<M extends RpcMethod> = RpcMethods[M]["result"];
 export type RpcReply<M extends RpcMethod> = Reply<
@@ -220,21 +220,17 @@ export type RpcArguments<M extends RpcMethod = RpcMethod> = {
   [K in M]: [method: K, params: RpcParams<K>, signal?: AbortSignal];
 }[M];
 
-export const gitWriteMethods = [
-  "git.stage",
-  "git.unstage",
-  "git.discard",
-  "git.commit",
-  "git.branch.create",
-  "git.branch.switch",
-  "git.branch.delete",
-  "git.fetch",
-  "git.pull",
-  "git.push",
-  "git.continue",
-  "git.abort",
-] as const satisfies readonly RpcMethod[];
-export type GitWriteMethod = (typeof gitWriteMethods)[number];
+export type GitWriteMethod = {
+  [M in RpcMethod]: M extends `git.${string}`
+    ? (typeof rpcMutates)[M] extends true
+      ? M
+      : never
+    : never;
+}[RpcMethod];
+export const gitWriteMethods: readonly GitWriteMethod[] = Object.keys(rpcMutates).filter(
+  (method): method is GitWriteMethod =>
+    method.startsWith("git.") && rpcMutates[method as RpcMethod],
+);
 type GitParams<M extends GitWriteMethod> = Omit<RpcParams<M>, keyof RepoParams>;
 export type GitWriteArguments = {
   [M in GitWriteMethod]: [method: M, params: GitParams<M>];

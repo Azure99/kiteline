@@ -18,10 +18,8 @@ export class TerminalChannels {
     private sessions: Sessions,
     private config: AgentConfig,
     private identity: Identity,
-  ) {
-    sessions.onFrame = (message) => this.frame(message);
-  }
-  open(id: string, connectionId: string, kind: string, params: Record<string, unknown>) {
+  ) {}
+  open(id: string, connectionId: string, params: Record<string, unknown>) {
     if (this.entries.has(id)) throw new AppError("conflict", "Channel already exists");
     const socket = connectChannel(this.identity, id, connectionId, {
       maxPayload: limits.controlMessageBytes,
@@ -39,8 +37,6 @@ export class TerminalChannels {
     socket.on("open", () => {
       heartbeat(socket);
       try {
-        if (kind !== "terminal.attach")
-          throw new AppError("unsupported", "Unsupported data channel");
         const item = this.sessions.get(string(params.sessionId), string(params.workspaceId));
         if (
           params.history !== undefined &&
@@ -134,7 +130,7 @@ export class TerminalChannels {
     socket.on("error", () => this.cancel(id));
     socket.on("close", () => this.cancel(id));
   }
-  private frame(message: RecorderMessage) {
+  frame(message: RecorderMessage) {
     if (message.type === "fault") {
       for (const item of this.entries.values())
         if (item.sessionId === message.sessionId)

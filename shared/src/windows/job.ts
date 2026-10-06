@@ -2,8 +2,8 @@ import { Socket } from "node:net";
 import { writeSync } from "node:fs";
 import { windowsNative, type NativeHandle } from "./native.js";
 
-export type JobStdio = "pipe" | "inherit" | "ignore";
-export interface JobOptions {
+type JobStdio = "pipe" | "inherit" | "ignore";
+interface JobOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   stdio?: [JobStdio, JobStdio, JobStdio];

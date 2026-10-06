@@ -16,7 +16,7 @@ interface Channel {
 export class HttpChannels {
   private entries = new Map<string, Channel>();
   constructor(private identity: Identity) {}
-  open(id: string, connectionId: string, _kind: string, params: Record<string, unknown>) {
+  open(id: string, connectionId: string, params: Record<string, unknown>) {
     const socket = connectChannel(this.identity, id, connectionId, {
       maxPayload: limits.dataChunkBytes,
       finishRequest(request) {

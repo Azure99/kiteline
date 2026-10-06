@@ -12,6 +12,7 @@ import {
   record,
   string,
   type ServerControlMessage,
+  type AgentControlMessage,
   type BrowserEvent,
   type BrowserControlMessage,
   type WorkspaceEvent,
@@ -130,7 +131,8 @@ export class Connections {
         const message = record(JSON.parse(data.toString()));
         if (socket.readyState !== WebSocket.OPEN) return;
         if (!this.handshakes.has(connection) && this.agents.get(id) !== connection) return;
-        if (message.type === "hello") {
+        const type = message.type as AgentControlMessage["type"];
+        if (type === "hello") {
           if (connection.snapshot) throw new AppError("unsupported", "Invalid hello");
           const online = Object.assign(connection, {
             environment: checkEnvironment(message.environment),
@@ -159,85 +161,101 @@ export class Connections {
           } satisfies ServerControlMessage);
           this.broadcastDevices();
           this.updateWatch(id);
-        } else if (!connection.snapshot) throw new AppError("invalid_argument", "hello required");
-        else if (message.type === "metadata.snapshot") {
-          const snapshot = checkMetadata(message.snapshot);
-          if (snapshot.revision > connection.snapshot.revision) {
-            connection.snapshot = snapshot;
-            this.store.saveSnapshot(id, snapshot);
-            this.broadcastDevices();
+          return;
+        }
+        if (!connection.snapshot) throw new AppError("invalid_argument", "hello required");
+        switch (type) {
+          case "metadata.snapshot": {
+            const snapshot = checkMetadata(message.snapshot);
+            if (snapshot.revision > connection.snapshot.revision) {
+              connection.snapshot = snapshot;
+              this.store.saveSnapshot(id, snapshot);
+              this.broadcastDevices();
+            }
+            break;
           }
-        } else if (message.type === "tasks.snapshot") {
-          const snapshot = projectTaskSnapshot(message);
-          if (
-            connection.taskRevision === undefined ||
-            snapshot.revision > connection.taskRevision
-          ) {
-            connection.taskRevision = snapshot.revision;
-            this.store.saveTaskSnapshot(id, snapshot);
+          case "tasks.snapshot": {
+            const snapshot = projectTaskSnapshot(message);
+            if (
+              connection.taskRevision === undefined ||
+              snapshot.revision > connection.taskRevision
+            ) {
+              connection.taskRevision = snapshot.revision;
+              this.store.saveTaskSnapshot(id, snapshot);
+              for (const browser of this.browsers)
+                send(browser.socket, {
+                  type: "tasks.changed",
+                  deviceId: id,
+                } satisfies BrowserEvent);
+            }
+            break;
+          }
+          case "rpc.result": {
+            const reply = record(message.reply);
+            const requestId = string(reply.id, "request id", 128);
+            const pending = this.pending.get(requestId);
+            if (pending?.connection === connection) {
+              const checked = checkReply(reply);
+              this.pending.delete(requestId);
+              pending.resolve(checked);
+            }
+            break;
+          }
+          case "request.progress": {
+            const requestId = string(message.id);
+            const pending = this.pending.get(requestId);
+            if (pending?.connection === connection) {
+              const { phase, currentPath, completedItems, bytes } = message;
+              if (
+                (phase !== "queued" && phase !== "running") ||
+                (currentPath !== undefined && typeof currentPath !== "string") ||
+                (completedItems !== undefined && typeof completedItems !== "number") ||
+                (bytes !== undefined && typeof bytes !== "number")
+              )
+                throw new AppError("invalid_argument", "Invalid request progress");
+              this.notify(pending.loginId, {
+                type: "request.progress",
+                id: requestId,
+                deviceId: id,
+                phase,
+                currentPath,
+                completedItems,
+                bytes,
+              });
+            }
+            break;
+          }
+          case "workspace.changed":
+          case "sessions.changed":
+          case "watch.status": {
+            const workspaceId = string(message.workspaceId);
+            let event: WorkspaceEvent;
+            if (message.type === "workspace.changed") {
+              const scopes = message.scopes;
+              if (
+                !Array.isArray(scopes) ||
+                !scopes.every((scope) => scope === "files" || scope === "git" || scope === "repos")
+              )
+                throw new AppError("invalid_argument", "Invalid workspace change scopes");
+              event = { type: "workspace.changed", workspaceId, scopes };
+            } else if (message.type === "sessions.changed") {
+              event = { type: "sessions.changed", workspaceId };
+            } else {
+              const { status, reason } = message;
+              if (
+                (status !== "normal" && status !== "degraded") ||
+                (reason !== undefined && typeof reason !== "string")
+              )
+                throw new AppError("invalid_argument", "Invalid workspace watch status");
+              event = { type: "watch.status", workspaceId, status, reason };
+            }
             for (const browser of this.browsers)
-              send(browser.socket, { type: "tasks.changed", deviceId: id } satisfies BrowserEvent);
+              if (browser.targets.some((t) => t.deviceId === id && t.workspaceId === workspaceId))
+                send(browser.socket, { ...event, deviceId: id });
+            break;
           }
-        } else if (message.type === "rpc.result") {
-          const reply = record(message.reply);
-          const requestId = string(reply.id, "request id", 128);
-          const pending = this.pending.get(requestId);
-          if (pending?.connection === connection) {
-            const checked = checkReply(reply);
-            this.pending.delete(requestId);
-            pending.resolve(checked);
-          }
-        } else if (message.type === "request.progress") {
-          const requestId = string(message.id);
-          const pending = this.pending.get(requestId);
-          if (pending?.connection === connection) {
-            const { phase, currentPath, completedItems, bytes } = message;
-            if (
-              (phase !== "queued" && phase !== "running") ||
-              (currentPath !== undefined && typeof currentPath !== "string") ||
-              (completedItems !== undefined && typeof completedItems !== "number") ||
-              (bytes !== undefined && typeof bytes !== "number")
-            )
-              throw new AppError("invalid_argument", "Invalid request progress");
-            this.notify(pending.loginId, {
-              type: "request.progress",
-              id: requestId,
-              deviceId: id,
-              phase,
-              currentPath,
-              completedItems,
-              bytes,
-            });
-          }
-        } else if (
-          message.type === "workspace.changed" ||
-          message.type === "sessions.changed" ||
-          message.type === "watch.status"
-        ) {
-          const workspaceId = string(message.workspaceId);
-          let event: WorkspaceEvent;
-          if (message.type === "workspace.changed") {
-            const scopes = message.scopes;
-            if (
-              !Array.isArray(scopes) ||
-              !scopes.every((scope) => scope === "files" || scope === "git" || scope === "repos")
-            )
-              throw new AppError("invalid_argument", "Invalid workspace change scopes");
-            event = { type: "workspace.changed", workspaceId, scopes };
-          } else if (message.type === "sessions.changed") {
-            event = { type: "sessions.changed", workspaceId };
-          } else {
-            const { status, reason } = message;
-            if (
-              (status !== "normal" && status !== "degraded") ||
-              (reason !== undefined && typeof reason !== "string")
-            )
-              throw new AppError("invalid_argument", "Invalid workspace watch status");
-            event = { type: "watch.status", workspaceId, status, reason };
-          }
-          for (const browser of this.browsers)
-            if (browser.targets.some((t) => t.deviceId === id && t.workspaceId === workspaceId))
-              send(browser.socket, { ...event, deviceId: id });
+          default:
+            return void (type satisfies never);
         }
       } catch (error) {
         serverError(error);

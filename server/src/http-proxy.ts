@@ -30,7 +30,7 @@ interface Target {
   redirect?: string;
 }
 export const isProxyPath = (path: string) => /^\/(?:proxy|absproxy)(?:[/?]|$)/.test(path);
-export function proxyTarget(raw: string): Target {
+function proxyTarget(raw: string): Target {
   const match = /^(\/(proxy|absproxy)\/([^/?]+)\/(\d{1,5}))((?:[/?].*)?)$/.exec(raw);
   if (!match) throw new AppError("invalid_argument", "Invalid device port path");
   const [, prefix, kind, encodedDevice, port, suffix = ""] = match;

@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 import { resolve } from "node:path";
 
 export type NativeHandle = object;
-export interface WindowsNative {
+interface WindowsNative {
   identity(): {
     sid: string;
     sessionId: number;
