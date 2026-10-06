@@ -69,10 +69,6 @@ Kiteline 是一个单人自托管的远程工作台。在桌面或手机浏览�
 | 构建发布包                   | [构建与发布](docs/development/release.md)                                    |
 | 理解架构和行为契约           | [文档地图](docs/README.md)                                                   |
 
-## 参与开发
-
-开发环境、本地运行和提交前检查见[源码开发](docs/development/setup.md)。改动某个模块前，先阅读[文档地图](docs/README.md#改动代码前阅读)中对应的设计文档。
-
 ## 许可证
 
 Kiteline 使用 [Apache-2.0](LICENSE) 许可证。发布包中的第三方组件保留各自的许可证，位置见[产物结构](docs/development/release.md#产物结构)。

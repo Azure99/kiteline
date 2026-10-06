@@ -36,50 +36,30 @@ flowchart LR
 ## 仓库结构
 
 ```text
-server/src/              kiteline-server
-  app.ts                 HTTP 路由和 WebSocket 升级处理；路由的先后顺序决定它经过哪些检查
-  http.ts                入口 origin、Cookie、Origin 检查、错误状态码、尝试次数限制
-  connections.ts         agent 控制连接、浏览器事件连接、RPC 转发
-  channels.ts            数据通道；file-transfer.ts 转发文件内容
-  http-proxy.ts          开发服务代理；proxy-headers.ts 处理请求头
-  agent-installation.ts  接入和升级脚本、agent 发布包下载
-  store.ts               SQLite 存储
-  main.ts                命令行：serve、setup-token、reset-password
-agent/src/               kiteline-agent
-  agent.ts               控制连接、RPC 分派与期限、本机 IPC 白名单
-  local.ts               本机 IPC 的监听端（LocalServer）和客户端（localRequest）
-  config.ts、limits.ts    目录、config.json、可调与固定限额、JSON 原子写入
-  metadata.ts            工作区、快捷方式、设置
-  watches.ts             活跃工作区的文件监听
-  cli/、install/          命令行子命令；安装、升级、卸载
-  terminal/              终端会话、recorder 进程管理、终端数据通道
-  files/、git/            文件工具、Git 工具
-  http/、tasks/           开发服务通道与端口建议、定时任务
-terminal-recorder/src/   recorder：tmux control 客户端、屏幕模型、附着流控、输入队列
-shared/src/protocol/     跨进程类型、固定限额、校验函数、WebSocket 与 stdio 辅助
-shared/src/terminal/     xterm 适配、tmux 路径与启动
-shared/src/windows/      Windows 原生 addon 的封装
-shared/src/version.json  产品版本号
-web/src/                 工作台：app.tsx、workbench.tsx 和各工具目录
-  devices/               设备、绑定、工作区、事件连接
-  terminal/、files/、git/、tasks/   各工具界面
-  components/            通用组件；ui/ 为本地 UI 组件
-  lib/                   API 客户端、版本检查、浏览器兼容、视口
-  i18n/                  en、zh-CN 文案
+server/src/              kiteline-server：HTTP、WebSocket、转发与 SQLite
+agent/src/               kiteline-agent：设备操作、本机 IPC、安装与运行
+  cli/、install/          命令行与安装维护
+  terminal/              终端会话、recorder 管理与终端通道
+  files/、git/            文件与 Git 工具
+  http/、tasks/           开发服务访问与定时任务
+agent/patches/           agent 依赖补丁
+terminal-recorder/src/   tmux control 客户端、屏幕模型、附着流控与输入
+shared/src/              跨进程协议、终端与 Windows 平台适配
+web/src/                 React 工作台与本地 UI 组件
 web/postcss/             Chromium 97 的 CSS layer 适配
-web/patches/             xterm.js 补丁
-*/test/                  各包的测试；web/test/*.typecheck.ts 只做类型检查
-native/                  helper 和 Windows addon 源码、tmux 补丁与 terminfo
-installer/               接入、安装、升级脚本和 launcher；.in 文件是模板
-scripts/                 构建、组包、验证和本地开发脚本
+web/patches/             Web 依赖补丁
+*/test/                  各包测试；web/test/*.typecheck.ts 只做类型检查
+native/                  helper、Windows addon、tmux 补丁与 terminfo
+installer/               安装脚本和 launcher；.in 文件是模板
+scripts/                 构建、组包、验证与本地开发脚本
 release/                 固定构建输入和 Dockerfile
 deploy/                  Compose、systemd、launchd、WinSW 示例
 .github/workflows/       CI 与发布
 ```
 
-根目录有 `package.json`（脚本和 Node 版本）、`pnpm-workspace.yaml`（五个包、依赖覆盖和补丁）、`tsconfig*.json`、`eslint.config.mjs`、`vitest.config.ts` 和 `.prettierrc.json`。检查命令见[源码开发](../development/setup.md#检查与测试)，构建输入见 [release/README.md](../../release/README.md)。
+检查命令见[源码开发](../development/setup.md#检查与测试)，构建输入见 [release/README.md](../../release/README.md)。
 
-`shared` 按入口导出（`@kiteline/shared/protocol`、`/protocol/ws`、`/terminal/node`、`/windows/pipe` 等）。工作台只导入不依赖 Node 的 `protocol`、`protocol/text` 和 `terminal`。
+`shared` 按入口导出。浏览器不能使用依赖 Node 的入口，具体导入限制由根目录 `eslint.config.mjs` 中针对 `web/src/` 的 `no-restricted-imports` 规则维护。
 
 ## 状态归属
 
@@ -107,12 +87,6 @@ deploy/                  Compose、systemd、launchd、WinSW 示例
 | 登录状态                               | 浏览器 Cookie                     |                                      |
 
 定时任务摘要的字段见 [server 摘要](scheduled-tasks.md#server-摘要)，登录 Cookie 的规则见[请求入口与认证](protocol.md#请求入口与认证)。
-
-`localStorage` 的键：
-
-- `kiteline.language`：手动选择的语言；选择“跟随浏览器”时删除该键。
-- `kiteline.recentWorkspaces`：最近工作区及上次使用的工具，最多 8 项。
-- `kiteline.terminal-font-size`：终端字号。
 
 目录的默认位置见[文件位置](../guide/reference.md#文件位置)。
 
@@ -147,37 +121,36 @@ agent 的 JSON 状态文件以原子替换写入，不调用 fsync，见[目录�
 - **退出登录或登录到期**：server 关闭该登录的事件连接和数据通道，取消它进行中的 RPC；其他登录不受影响。
 - **控制连接断开或被替换**：server 把该连接上进行中的 RPC 返回为结果未确认，关闭它的数据通道；agent 中止仍在执行的 RPC，然后按 [WebSocket 连接](protocol.md#websocket-连接)中的规则重连。终端会话和定时任务继续。
 - **server 重启**：所有浏览器和 agent 连接断开，影响同上。登录会话保存在 SQLite 中，重启后仍然有效；设备版本和环境信息在 agent 重连后恢复。
-- **agent 停止**（包括容器停止；升级和卸载要求先停止 agent）：agent 结束全部终端会话和 recorder，重启后会话列表为空，见[会话生命周期](terminal.md#会话生命周期)。正在执行的定时任务运行被停止；agent 异常退出时，重启后把未结束的运行标为结果未确认，见[持久化与恢复](scheduled-tasks.md#持久化与恢复)。
+- **agent 停止**：正常停止会结束全部终端会话和正在运行的定时任务，见[启动与停止](agent-lifecycle.md#启动与停止)。异常退出后的终端清理和任务核查分别见[资源与清理](terminal.md#资源与清理)及[持久化与恢复](scheduled-tasks.md#持久化与恢复)。
 - **recorder 退出**：终端程序继续在 tmux 中运行；浏览器附着收到 `recording_unavailable`，可以用“恢复终端”重新建立记录，见[恢复动作](terminal.md#恢复动作)。
 - **设备被删除**：server 删除设备记录，以关闭码 4003 关闭控制连接，agent 停止重连；设备上的终端会话继续运行。重新接入见[重新绑定](../guide/devices.md#重新绑定)。
 
 ## 技术选择
 
-| 部分          | 选择                                                | 理由与代价                                                                                   |
-| ------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| 语言与运行时  | TypeScript（strict、ESM），Node.js 22               | 各程序共用 `shared` 中的类型，消息在编译时检查。agent 发布包要携带 Node。                    |
-| server HTTP   | `node:http`、`ws`，不用 Web 框架                    | 文件和开发服务直接按流转发。路由的位置决定它经过哪些检查。                                   |
-| server 存储   | `node:sqlite`（`DatabaseSync`，WAL）                | 随 Node 提供，无需编译。调用是同步的，所以事务都很短，内容数据不进数据库。                   |
-| 密码          | `bcryptjs`，cost 12                                 | 纯 JavaScript。bcrypt 只使用前 72 字节，所以密码上限为 72 字节。                             |
-| 进程锁        | `proper-lockfile`、Windows 原生锁                   | server 和 Linux/macOS agent 使用 proper-lockfile；Windows agent 使用 LockFileEx 和命名管道。 |
-| agent 出站    | `undici`、`https-proxy-agent`、`proxy-from-env`     | 按 `http_proxy`、`no_proxy` 等环境变量走 HTTP 或 HTTPS 代理。                                |
-| 终端          | tmux、`@xterm/headless`、xterm.js                   | 程序不依赖浏览器连接，可本机接续，重连能恢复画面。需随包携带打过补丁的 tmux。                |
-| 文件改名      | `rename-noreplace`、Windows addon                   | Node 没有原子的不覆盖改名。Linux 和 macOS 上每次不覆盖改名要启动一个进程。                   |
-| 搜索          | 随包 ripgrep，`stream-json` 解析 `rg --json`        | 遵守忽略规则；结果逐条解析，不整份读入内存。                                                 |
-| 文件监听      | chokidar 5                                          | 跨平台。只监听正在查看的工作区，事件只用于提示刷新。                                         |
-| 图片          | `image-size`                                        | 只读文件头取尺寸，不解码图片。                                                               |
-| 定时任务      | croner 10，Node 子进程                              | 计划在 agent 内计算，与连接无关；agent 未运行时不触发。                                      |
-| 工作台        | React 19、Vite 8、Tailwind CSS 4、Base UI           | 见[前端约定](#前端约定)。                                                                    |
-| 编辑器与 diff | CodeMirror 6；react-diff-view、gitdiff-parser 0.3.1 | diff 直接显示 Git 原生 patch；gitdiff-parser 版本由 pnpm `overrides` 固定。                  |
+| 部分          | 选择                                            | 理由与代价                                                                                   |
+| ------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| 语言与运行时  | TypeScript（strict、ESM），Node.js              | 各程序共用 `shared` 中的类型，消息在编译时检查。agent 发布包要携带 Node。                    |
+| server HTTP   | `node:http`、`ws`，不用 Web 框架                | 文件和开发服务直接按流转发。                                                                 |
+| server 存储   | `node:sqlite`（`DatabaseSync`，WAL）            | 随 Node 提供，无需编译。调用是同步的，所以事务都很短，内容数据不进数据库。                   |
+| 密码          | `bcryptjs`，cost 12                             | 纯 JavaScript。bcrypt 只使用前 72 字节，所以密码上限为 72 字节。                             |
+| 进程锁        | `proper-lockfile`、Windows 原生锁               | server 和 Linux/macOS agent 使用 proper-lockfile；Windows agent 使用 LockFileEx 和命名管道。 |
+| agent 出站    | `undici`、`https-proxy-agent`、`proxy-from-env` | 按 `http_proxy`、`no_proxy` 等环境变量走 HTTP 或 HTTPS 代理。                                |
+| 终端          | tmux、`@xterm/headless`、xterm.js               | 程序不依赖浏览器连接，可本机接续，重连能恢复画面。需随包携带打过补丁的 tmux。                |
+| 文件改名      | `rename-noreplace`、Windows addon               | Node 没有原子的不覆盖改名。Linux 和 macOS 上每次不覆盖改名要启动一个进程。                   |
+| 搜索          | 随包 ripgrep，`stream-json` 解析 `rg --json`    | 遵守忽略规则；结果逐条解析，不整份读入内存。                                                 |
+| 文件监听      | chokidar                                        | 跨平台。只监听正在查看的工作区，事件只用于提示刷新。                                         |
+| 图片          | `image-size`                                    | 只读文件头取尺寸，不解码图片。                                                               |
+| 定时任务      | Croner，Node 子进程                             | 计划在 agent 内计算，与连接无关；agent 未运行时不触发。                                      |
+| 工作台        | React、Vite、Tailwind CSS、Base UI              | 见[前端约定](#前端约定)。                                                                    |
+| 编辑器与 diff | CodeMirror；react-diff-view、gitdiff-parser     | diff 直接显示 Git 原生 patch；gitdiff-parser 版本由 pnpm `overrides` 固定。                  |
 
 agent 的出站代理规则见[出站代理与证书](../guide/devices.md#出站代理与证书)。依赖的确切版本见各 `package.json` 和 `pnpm-lock.yaml`，随包组件（Node、tmux、ripgrep）的版本见 [release/README.md](../../release/README.md)。
 
 ## 前端约定
 
-- **样式**：使用 Tailwind CSS 4（`@tailwindcss/vite`），主题变量和视觉规则见[视觉](interaction.md#视觉)。合并类名用 `web/src/lib/utils.ts` 的 `cn`，组件变体用 class-variance-authority；第三方组件的样式适配写在 `web/src/styles.css`。
-- **通用组件**：按钮、输入框、菜单、对话框、多行输入框和提示在 `web/src/components/ui/`，来源和维护方式见该目录的 [README](../../web/src/components/ui/README.md)。图标用 lucide-react，可拖动的分栏用 react-resizable-panels。
-- **文案**：使用 i18next 和 react-i18next，资源在 `web/src/i18n/`，静态打包；键、类型检查、插值和语言选择规则见[语言](interaction.md#语言)。server 和 agent 不接收语言，返回英文诊断；工作台按 `error.code` 显示本地化说明。
-- **按需加载**：登录后才加载工作台代码（`web/src/app.tsx`）；文件、Git、定时任务页面和终端显示在第一次使用时加载（`web/src/workbench.tsx`、`web/src/terminal/lazy-terminal-view.ts`）。`web/src/components/deferred-view.tsx` 包装这些视图，加载或渲染失败只影响该视图，界面见[反馈与状态](interaction.md#反馈与状态)。
+- **样式**：主题变量和视觉规则见[视觉](interaction.md#视觉)；第三方组件的样式适配写在 `web/src/styles.css`。
+- **通用组件**：复用 `web/src/components/ui/`；来源和维护方式见该目录的 [README](../../web/src/components/ui/README.md)。
+- **文案**：资源在 `web/src/i18n/`，新增文案遵守[语言](interaction.md#语言)约定。server 和 agent 不接收语言，返回英文诊断；工作台按 `error.code` 显示本地化说明。
 - **专业组件**：xterm.js、CodeMirror 和 react-diff-view 直接使用，外面没有通用组件包装。它们的实例由各自的 React 组件创建和销毁，焦点、滚动和键盘处理由组件本身负责。
 
 布局、反馈、焦点和视觉规则见[界面交互](interaction.md)。

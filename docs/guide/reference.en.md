@@ -67,18 +67,13 @@ The project user is the account recorded at installation. Other accounts receive
 
 ### Installation and maintenance
 
-- Run `install` from a complete extracted release package, not the installed launcher. On Linux/macOS, run the package's `bin/kiteline-agent` as root, for example `sudo ./kiteline-agent-<version>-linux-<architecture>/bin/kiteline-agent install --user PROJECT_USER`. It installs the program directory and launcher, records the project user, and writes a default `KITELINE_AGENT_HOME` if `/etc/kiteline-agent.env` does not exist. It neither binds nor starts the agent.
-- On Windows, run the package's `bin\kiteline-agent.ps1 install --user PROJECT_USER` in administrator PowerShell 7. Account names can use `COMPUTER\USERNAME`. The project user must have signed in once to create a profile. `--data-dir` and `--run-dir` must be absolute paths; defaults are that user's `%LOCALAPPDATA%\kiteline-agent` and its `run` subdirectory.
-- Installing the same version for the same user again only reports that it is installed. A different installed version produces an error; run `upgrade` first.
-- `upgrade --archive FILE` verifies the package with `FILE.sha256` in the same directory, then prompts `Type yes to continue:`. Without an interactive terminal it requires `--yes`. Upgrades preserve bindings, configuration, workspaces and scheduled tasks, and do not start the agent afterward. A failed replacement restores the original installation directory.
-- `uninstall` removes the installation directory, launcher and installation record, keeping agent data by default. For `--purge-state` deletions and leftover files, see [Uninstall](devices.en.md#uninstall). Uninstall also requires confirmation or `--yes`.
-- `upgrade` and `uninstall` require that no process is using the installation. See [Upgrade the agent](devices.en.md#upgrade-the-agent) for stopping them.
+For procedures, prerequisites and data effects, see [Manual installation](devices.en.md#manual-installation), [Upgrade the agent](devices.en.md#upgrade-the-agent) and [Uninstall](devices.en.md#uninstall).
 
 ### Binding and running
 
 - `check` checks bundled components, [system prerequisites](devices.en.md#supported-systems-and-prerequisites), data and runtime directory writability, and runtime path length. Success prints `Setup checks passed.` Otherwise it lists failures and exits nonzero.
 - `bind --server URL` registers this machine as a device with a single-use binding code. Enter it at `Binding code: ` or supply one line on stdin. `URL` must use `http://` or `https://`; the agent stores only the scheme, host and port. The device name comes from its hostname. `--if-unbound` exits with an error if already bound, preserving the existing identity.
-- `run` starts the agent in the foreground, connects to the server and begins scheduled-task execution. Linux/macOS stop on `SIGINT`, `SIGTERM` or `SIGHUP`; Windows stops on Ctrl-C or Ctrl-Break. Normal shutdown ends all terminal sessions and active scheduled-task runs (see [Session lifecycle (Chinese)](../design/terminal.md#会话生命周期)). For persistent background use, see [Run in the background](devices.en.md#run-in-the-background).
+- `run` starts the agent in the foreground, connects to the server and begins scheduled-task execution. Linux/macOS stop on `SIGINT`, `SIGTERM` or `SIGHUP`; Windows stops on Ctrl-C or Ctrl-Break. Normal shutdown ends all terminal sessions and active scheduled-task runs. For persistent background use, see [Run in the background](devices.en.md#run-in-the-background).
 - `doctor` reports `[ok]`, `[warn]` and `[error]` checks, exiting with status 1 if any is `[error]`. With an agent running, it reports that agent's actual environment: version, server connection, recorder, scheduled tasks, Git configuration sources and `SSH_AUTH_SOCK`. Without one, it checks only installation and configuration files and reports `Runtime environment has not been checked`.
 
 ### Terminals and workspaces
@@ -98,7 +93,7 @@ The project user is the account recorded at installation. Other accounts receive
 | `KITELINE_TRUST_PROXY_PROTO` | `0`                 | `1` uses the reverse proxy's `X-Forwarded-Proto`     |
 
 - Omitting the port in `KITELINE_LISTEN_ADDR` uses port 80. The Docker image sets `0.0.0.0:8080`; the repository's systemd example sets `127.0.0.1:8080`, overridable in `/etc/kiteline-server.env`.
-- `KITELINE_TRUST_PROXY_PROTO` accepts only `0` or `1`. Other values prevent startup with `KITELINE_TRUST_PROXY_PROTO must be 0 or 1`. See [HTTPS and reverse proxies](server.en.md#https-and-reverse-proxies) for when to use `1`, and [Request origin and authentication (Chinese)](../design/protocol.md#请求入口与认证) for validation.
+- `KITELINE_TRUST_PROXY_PROTO` accepts only `0` or `1`. Other values prevent startup with `KITELINE_TRUST_PROXY_PROTO must be 0 or 1`. See [HTTPS and reverse proxies](server.en.md#https-and-reverse-proxies) for when to use `1`.
 
 The repository's original `deploy/compose.yaml` also reads:
 
@@ -193,33 +188,30 @@ The agent reads and writes `agent.json`, `connection.json`, `temporary-files.jso
 
 ## Limits
 
-This section lists all user-visible limits. The configuration column gives keys under `limits` in `config.json` (see [Agent configuration file](#agent-configuration-file)). Non-configurable entries are marked fixed, followed by constant names for finding them in code.
+This section lists limits relevant to configuration, capacity and troubleshooting. The configuration column gives keys under `limits` in `config.json` (see [Agent configuration file](#agent-configuration-file)). Non-configurable entries are marked fixed.
 
 ### Sign-in and binding
 
-| Item                       | Value                                                      | Configuration              |
-| -------------------------- | ---------------------------------------------------------- | -------------------------- |
-| Setup token lifetime       | 30 minutes                                                 | Fixed `setupTokenLifetime` |
-| Binding code lifetime      | 10 minutes                                                 | Fixed `bindingLifetime`    |
-| Login lifetime             | 30 days from sign-in, not extended by use                  | Fixed `loginLifetime`      |
-| Owner password             | 8 to 72 bytes (UTF-8)                                      | Fixed                      |
-| Sign-in and setup attempts | 10 per source per minute, 30 across all sources per minute | Fixed                      |
-| Binding attempts           | Same as sign-in, counted separately                        | Fixed                      |
+| Item                       | Value                                                      | Configuration |
+| -------------------------- | ---------------------------------------------------------- | ------------- |
+| Setup token lifetime       | 30 minutes                                                 | Fixed         |
+| Binding code lifetime      | 10 minutes                                                 | Fixed         |
+| Login lifetime             | 30 days from sign-in, not extended by use                  | Fixed         |
+| Owner password             | 8 to 72 bytes (UTF-8)                                      | Fixed         |
+| Sign-in and setup attempts | 10 per source per minute, 30 across all sources per minute | Fixed         |
+| Binding attempts           | Same as sign-in, counted separately                        | Fixed         |
 
-A source is the TCP peer address connected to the server. Behind a reverse proxy, all requests come from the proxy address, so the per-source limit effectively applies to all sources together.
+A source is the TCP peer address connected to the server. Requests arriving through the same reverse-proxy address share one per-source allowance.
 
 ### Terminal
 
-| Item                            | Value                                                   | Configuration                              |
-| ------------------------------- | ------------------------------------------------------- | ------------------------------------------ |
-| Terminal sessions per device    | 32                                                      | `terminalSessionsPerDevice`                |
-| Single paste and queued input   | 256 KiB                                                 | `terminalInputBytes`                       |
-| New-session scrollback lines    | Default 10,000; range 0 to 50,000                       | Web "Terminal settings"                    |
-| Web terminal size               | At most 500 columns, 200 rows                           | Fixed `terminalMaxCols`, `terminalMaxRows` |
-| Browser stops processing output | Display disconnects after 10 seconds; session continues | `terminalStallTimeout`                     |
-| Runtime directory path          | 76 bytes (UTF-8)                                        | Fixed                                      |
-
-The runtime path limit keeps a session's `<runtime directory>/<session ID>/tmux.sock` within 103 bytes, on every platform.
+| Item                            | Value                                                   | Configuration               |
+| ------------------------------- | ------------------------------------------------------- | --------------------------- |
+| Terminal sessions per device    | 32                                                      | `terminalSessionsPerDevice` |
+| Single paste and queued input   | 256 KiB                                                 | `terminalInputBytes`        |
+| New-session scrollback lines    | Default 10,000; range 0 to 50,000                       | Web "Terminal settings"     |
+| Browser stops processing output | Display disconnects after 10 seconds; session continues | `terminalStallTimeout`      |
+| Runtime directory path          | 76 bytes (UTF-8)                                        | Fixed                       |
 
 ### Files
 
@@ -229,53 +221,48 @@ The runtime path limit keeps a session's `<runtime directory>/<session ID>/tmux.
 | Individual upload or download      | 1 GiB                                                               | `transferBytes`             |
 | Concurrent file transfers          | 4                                                                   | `transfersPerDevice`        |
 | Image preview                      | 20 MiB and at most 20,000,000 pixels                                | `imageBytes`, `imagePixels` |
-| Transfer timeout without progress  | 120 seconds                                                         | Fixed `channelIdleTimeout`  |
-| Directory-list page                | 500 entries                                                         | Fixed `listPageEntries`     |
-| One copy, move or delete operation | 500 entries                                                         | Fixed `listPageEntries`     |
-| Search results                     | 1,000 matches                                                       | Fixed `searchMatches`       |
+| Transfer timeout without progress  | 120 seconds                                                         | Fixed                       |
+| One copy, move or delete operation | 500 entries                                                         | Fixed                       |
+| Search results                     | 1,000 matches                                                       | Fixed                       |
 | Search duration                    | 10 seconds; returns matches found before timeout                    | `searchTimeout`             |
 
 Opening text, saving, image previews, uploads and downloads all consume concurrent file-transfer slots.
 
 ### Git
 
-| Item                                          | Value                                                           | Configuration           |
-| --------------------------------------------- | --------------------------------------------------------------- | ----------------------- |
-| Status-list page                              | 500 entries                                                     | Fixed `listPageEntries` |
-| Commit-history page                           | 500 commits                                                     | Fixed `listPageEntries` |
-| Commit file-list page                         | 500 entries                                                     | Fixed `listPageEntries` |
-| Paths per stage, unstage or discard operation | 1,000                                                           | Fixed                   |
-| One diff                                      | Approximately 512 KiB; excess is truncated                      | Fixed `resultBytes`     |
-| Structured diff display                       | 2,000 lines; beyond this, displays the first 32 KiB of raw text | Fixed                   |
-| Write deadline                                | 10 minutes                                                      | `gitWriteTimeout`       |
-| Read deadline                                 | 30 seconds                                                      | `rpcTimeout`            |
+| Item                                          | Value                                                           | Configuration     |
+| --------------------------------------------- | --------------------------------------------------------------- | ----------------- |
+| Paths per stage, unstage or discard operation | 1,000                                                           | Fixed             |
+| One diff                                      | Approximately 512 KiB; excess is truncated                      | Fixed             |
+| Structured diff display                       | 2,000 lines; beyond this, displays the first 32 KiB of raw text | Fixed             |
+| Write deadline                                | 10 minutes                                                      | `gitWriteTimeout` |
+| Read deadline                                 | 30 seconds                                                      | `rpcTimeout`      |
 
 Writes include stage, unstage, discard, commit, branch operations, fetch, pull, push, and continuing or aborting an operation in progress.
 
 ### Scheduled tasks
 
-| Item                               | Value                                    | Configuration           |
-| ---------------------------------- | ---------------------------------------- | ----------------------- |
-| Tasks per device                   | 100                                      | `tasksPerDevice`        |
-| Concurrent runs per device         | 4; runs needing review also occupy slots | `taskRunsPerDevice`     |
-| Finished records retained per task | 20, including skipped records            | `taskHistoryRuns`       |
-| Output per run                     | 1 MiB combined stdout and stderr         | `taskOutputBytes`       |
-| Total retained output per device   | 128 MiB                                  | `taskOutputTotalBytes`  |
-| Task name                          | 256 bytes (UTF-8)                        | Fixed `nameBytes`       |
-| Command                            | 16 KiB                                   | Fixed `commandBytes`    |
-| Cron expression                    | 256 characters                           | Fixed                   |
-| Scheduled-time lateness tolerance  | 5 seconds                                | Fixed `lateToleranceMs` |
-| TERM-to-KILL stop grace period     | 5 seconds                                | Fixed `stopGraceMs`     |
+| Item                               | Value                                    | Configuration          |
+| ---------------------------------- | ---------------------------------------- | ---------------------- |
+| Tasks per device                   | 100                                      | `tasksPerDevice`       |
+| Concurrent runs per device         | 4; runs needing review also occupy slots | `taskRunsPerDevice`    |
+| Finished records retained per task | 20, including skipped records            | `taskHistoryRuns`      |
+| Output per run                     | 1 MiB combined stdout and stderr         | `taskOutputBytes`      |
+| Total retained output per device   | 128 MiB                                  | `taskOutputTotalBytes` |
+| Task name                          | 256 bytes (UTF-8)                        | Fixed                  |
+| Command                            | 16 KiB                                   | Fixed                  |
+| Cron expression                    | 256 characters                           | Fixed                  |
+| Scheduled-time lateness tolerance  | 5 seconds                                | Fixed                  |
+| TERM-to-KILL stop grace period     | 5 seconds                                | Fixed                  |
 
 ### Connections and requests
 
-| Item                              | Value                                                                            | Configuration                    |
-| --------------------------------- | -------------------------------------------------------------------------------- | -------------------------------- |
-| General device-operation deadline | 30 seconds                                                                       | `rpcTimeout`                     |
-| Concurrent requests per device    | 32                                                                               | Fixed `pendingRequestsPerDevice` |
-| Data channels per device          | 128 total for terminal displays, file transfers and development-service requests | Fixed `channelsPerDevice`        |
-| Data-channel establishment        | 30 seconds                                                                       | Fixed `interactionTimeout`       |
-| One request or result             | 1 MiB; oversized requests return 413, oversized results are unconfirmed          | Fixed `controlMessageBytes`      |
+| Item                              | Value                                                                            | Configuration |
+| --------------------------------- | -------------------------------------------------------------------------------- | ------------- |
+| General device-operation deadline | 30 seconds                                                                       | `rpcTimeout`  |
+| Concurrent requests per device    | 32                                                                               | Fixed         |
+| Data channels per device          | 128 total for terminal displays, file transfers and development-service requests | Fixed         |
+| One request or result             | 1 MiB; oversized requests return 413, oversized results are unconfirmed          | Fixed         |
 
 General device operations include file listing and renaming, Git reads, scheduled-task management and local CLI requests. Copy, move and delete have no overall deadline.
 
@@ -371,17 +358,10 @@ Original errors are in English; this table quotes their key parts.
 | Agent logs `HTTP 401. Invalid device credentials`, then `Remote connection stopped`                 | Device deleted in the web app, or credentials belong to another server                                                     | [Bind again](devices.en.md#bind-again)                                                                                      |
 | `Remote connection stopped: … (4003: device_deleted)`                                               | Device deleted in the web app                                                                                              | [Bind again](devices.en.md#bind-again)                                                                                      |
 | `Remote connection stopped: … (4001: connection_replaced)`                                          | Another agent with the same credentials connected, often from a machine/container with a copied data directory             | See [Bind again](devices.en.md#bind-again)                                                                                  |
-| `KITELINE_AGENT_RUN_DIR is too long`                                                                | Runtime path exceeds [Limits](#limits)                                                                                     | Set `KITELINE_AGENT_RUN_DIR` to a shorter path                                                                              |
 | `UTF-8 locale: Character map is …`                                                                  | Startup locale is not UTF-8                                                                                                | Set an installed UTF-8 locale; see [Supported systems and prerequisites](devices.en.md#supported-systems-and-prerequisites) |
-| `git: Requires >= 2.23.0`                                                                           | Git older than 2.23.0                                                                                                      | Install newer Git; see [Supported systems and prerequisites](devices.en.md#supported-systems-and-prerequisites)             |
 | `git: spawn git ENOENT`                                                                             | Git absent from startup `PATH`                                                                                             | Install Git or fix `PATH`; see [Supported systems and prerequisites](devices.en.md#supported-systems-and-prerequisites)     |
 | `git: Native executable not found in the current PATH: git`                                         | Git absent from Windows startup `PATH`                                                                                     | Install Git or fix `PATH`                                                                                                   |
 | `Agent installation is busy`; Windows: `Installation is busy`                                       | A `kiteline-agent` process still uses the installation during upgrade/uninstall                                            | Stop `run`, `attach` and services, then retry; see [Upgrade the agent](devices.en.md#upgrade-the-agent)                     |
-| `Agent installation is being changed; try again after maintenance`                                  | Upgrade or uninstall in progress                                                                                           | Wait for maintenance to finish                                                                                              |
-| `Interactive confirmation is required, or explicitly pass --yes`                                    | Upgrade/uninstall without an interactive terminal                                                                          | Use a terminal or add `--yes`                                                                                               |
-| `A different version is installed`                                                                  | Installed and requested agent versions differ                                                                              | Upgrade first; see [Upgrade the agent](devices.en.md#upgrade-the-agent)                                                     |
-| `Attaching requires a local terminal`                                                               | `attach` or `terminal new` lacks an interactive terminal                                                                   | Use an interactive terminal; `terminal new` also accepts `--no-attach`                                                      |
-| `Use project user … to run this command`                                                            | `kiteline-agent` invoked as an account other than the recorded project user                                                | Switch to the project user                                                                                                  |
 | `… uses the installation configuration`                                                             | Install-command shell has `KITELINE_AGENT_HOME` or `KITELINE_AGENT_RUN_DIR` set                                            | Unset both; see [Agent environment variables](#agent-environment-variables) for customization                               |
 | Local command reports `connect ENOENT …/agent.sock` or `connect ECONNREFUSED …/agent.sock`          | Agent stopped (`ECONNREFUSED` indicates a stale socket after abnormal exit), or command resolves another runtime directory | Start the agent; match the user and directories used by `run`                                                               |
 | `Device channel limit reached`                                                                      | Simultaneous terminal displays, file transfers and development requests reach the device limit                             | Close unused terminal displays and pages                                                                                    |

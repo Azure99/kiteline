@@ -71,10 +71,6 @@ An agent running in the foreground stops when its terminal closes, which also en
 | Build release packages                              | [Build and release (Chinese)](docs/development/release.md)                                       |
 | Understand the architecture and behaviour contracts | [Documentation map (Chinese)](docs/README.md)                                                    |
 
-## Contributing
-
-Development setup, running locally and the checks to run before submitting are described in [Development setup (Chinese)](docs/development/setup.md). Before changing a module, read the matching design document listed in the [documentation map (Chinese)](docs/README.md#改动代码前阅读).
-
 ## License
 
 Kiteline is licensed under [Apache-2.0](LICENSE). Third-party components in the release packages keep their own licenses; their locations are listed in [Artifacts (Chinese)](docs/development/release.md#产物结构).

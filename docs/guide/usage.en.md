@@ -8,7 +8,7 @@ This guide is for owners who have connected devices and want to use the workbenc
 
 ### Supported browsers
 
-The workbench supports desktop Chrome and Android Chrome, with Chromium 97 as the minimum (see [Browser compatibility (Chinese)](../design/architecture.md#浏览器兼容)). When accessing it over HTTPS or `localhost`, current Chrome versions can install it as an app from the browser menu and open it in a separate window. It still needs a connection to the server and has no offline functionality.
+The workbench supports desktop Chrome and Android Chrome, with Chromium 97 as the minimum. When accessing it over HTTPS or `localhost`, current Chrome versions can install it as an app from the browser menu and open it in a separate window. It still needs a connection to the server and has no offline functionality.
 
 ### Sign-in and language
 
@@ -20,7 +20,7 @@ The address bar records the device, workspace, tool and open file, repository an
 
 After a server upgrade, an already open page shows the Web and Server versions and pauses remote operations. Copy unsaved content before clicking "Reload page".
 
-The layout follows the available window width; see [Layout (Chinese)](../design/interaction.md#布局).
+Layout follows the available window width. Below 960 CSS pixels, it shows one terminal session at a time, without a terminal panel in Files or Git. At 960 pixels or wider, split terminals and the terminal panel are available.
 
 ### Where settings are stored
 
@@ -52,7 +52,7 @@ Terminal sessions keep running when you switch tools, workspaces or devices. Lea
 
 ## Terminal
 
-Terminal sessions run on the device. Closing the page, losing the network, signing out, restarting the server or deleting the device does not end them. A session ends when its shell or shortcut command exits, you end it, the agent stops, or the device restarts. See [Session lifecycle (Chinese)](../design/terminal.md#会话生命周期) for the full list. The same session can be open in multiple browsers and local terminals at once. All clients can type directly; simultaneous input is interleaved.
+Terminal sessions run on the device. Closing the page, losing the network, signing out, restarting the server or deleting the device does not end them. A session ends when its shell or shortcut command exits, you end it, the agent shuts down normally, or the device restarts. For abnormal exit, see [Clean up leftover terminal sessions](reference.en.md#clean-up-leftover-terminal-sessions). The same session can be open in multiple browsers and local terminals at once. All clients can type directly; simultaneous input is interleaved.
 
 ### Create sessions and shortcuts
 
@@ -64,7 +64,7 @@ Shortcuts run one command in the login shell; the session ends when that command
 
 ### Copy and paste
 
-Scroll up to view retained history. New output does not pull you to the bottom; use "Scroll to bottom" for the latest output. Each client's scrolling and selection are independent.
+Scroll up to read retained history; new output does not pull you back to the bottom. Each client's scrolling and selection are independent.
 
 - Desktop: drag to select text. Hold Shift while dragging if a program such as htop handles the mouse. Copy through the context menu, or Cmd-C on macOS. Paste with Ctrl-Shift-V, Cmd-V or the context menu. Ctrl-C and Ctrl-V are sent to the program.
 - Phone: long-press to select a word, drag the selection handles, then tap "Copy selected text". Tap the terminal or "Keyboard" to open the keyboard. A "Paste" button appears when the browser allows clipboard access.
@@ -85,7 +85,7 @@ A session has one row/column size, determined by the client that most recently t
 
 Input is available after the session's display and history are restored. Reconnect after a connection failure. If capacity is insufficient, retry with less history to restore only the current screen; history on the device is unchanged. A history gap means some output was lost during a recorder failure. Ended sessions are read-only and show their exit code.
 
-"Recover terminal" rebuilds recording and reattaches to the same program without restarting it. If connected but the display is garbled, use "Redraw program" in the session menu. It briefly resizes the program to trigger a redraw, which can change other clients' displays and selections, so it requires confirmation. If that does not help, use "Close display" and reopen it. See [Recovery actions (Chinese)](../design/terminal.md#恢复动作).
+"Recover terminal" rebuilds recording and reattaches to the same program without restarting it. If connected but the display is garbled, use "Redraw program" in the session menu. It briefly resizes the program to trigger a redraw, which can change other clients' displays and selections, so it requires confirmation. If that does not help, use "Close display" and reopen it.
 
 "End session" in the session menu asks once, then ends the session and every program in it.
 

@@ -67,18 +67,13 @@ Linux 和 macOS 的命令入口是 `/usr/local/bin/kiteline-agent`；用 `sudo` 
 
 ### 安装与维护
 
-- `install` 从解压后的完整发布包执行，不使用已安装的入口。Linux 和 macOS 以 root 执行包内的 `bin/kiteline-agent`，例如 `sudo ./kiteline-agent-<版本>-linux-<架构>/bin/kiteline-agent install --user PROJECT_USER`。它安装程序目录和命令入口，记录项目用户，并在 `/etc/kiteline-agent.env` 不存在时写入默认的 `KITELINE_AGENT_HOME`；它不绑定，也不启动 agent。
-- Windows 在管理员 PowerShell 7 中执行包内的 `bin\kiteline-agent.ps1 install --user PROJECT_USER`，账户名可以写成 `计算机名\用户名`。项目用户必须已经登录过一次以生成用户配置文件。`--data-dir` 和 `--run-dir` 必须是绝对路径，省略时使用该用户的 `%LOCALAPPDATA%\kiteline-agent` 和其下的 `run`。
-- 同一用户重复安装同一版本时只提示已安装；已安装其他版本时报错，需要先执行 `upgrade`。
-- `upgrade --archive FILE` 读取同目录下的 `FILE.sha256` 校验发布包，然后提示 `Type yes to continue:`。没有交互终端时必须加 `--yes`。升级保留绑定、配置、工作区和定时任务，完成后不启动 agent；替换失败时恢复原程序目录。
-- `uninstall` 删除程序目录、命令入口和安装记录，默认保留 agent 数据目录；`--purge-state` 删除的文件和卸载后留下的文件见[卸载](devices.md#卸载)。卸载同样需要确认或 `--yes`。
-- `upgrade` 和 `uninstall` 要求没有任何进程在使用这份安装，停止方法见[升级 agent](devices.md#升级-agent)。
+安装、升级和卸载的步骤、前提及数据影响分别见[手工安装](devices.md#手工安装)、[升级 agent](devices.md#升级-agent)和[卸载](devices.md#卸载)。
 
 ### 绑定与运行
 
 - `check` 检查随包组件、[系统前提](devices.md#支持的系统与准备)、数据及运行目录是否可写，以及运行目录的路径长度。全部通过时打印 `Setup checks passed.`，否则列出失败项并以非零状态退出。
 - `bind --server URL` 用一次性绑定码把这台机器登记为设备。绑定码在终端中由 `Binding code: ` 提示输入，或从标准输入读入一行。`URL` 必须是 `http://` 或 `https://` 地址，agent 只保存其中的协议、主机和端口；设备名取主机名。`--if-unbound` 在已经绑定时报错退出，不改动已有身份。
-- `run` 在前台运行 agent，连接 server 并开始执行定时任务。Linux 和 macOS 收到 `SIGINT`、`SIGTERM` 或 `SIGHUP` 时停止，Windows 收到 Ctrl-C 或 Ctrl-Break 时停止。正常停止会结束全部终端会话和正在运行的定时任务（见[会话生命周期](../design/terminal.md#会话生命周期)）。后台常驻见[后台运行](devices.md#后台运行)。
+- `run` 在前台运行 agent，连接 server 并开始执行定时任务。Linux 和 macOS 收到 `SIGINT`、`SIGTERM` 或 `SIGHUP` 时停止，Windows 收到 Ctrl-C 或 Ctrl-Break 时停止。正常停止会结束全部终端会话和正在运行的定时任务。后台常驻见[后台运行](devices.md#后台运行)。
 - `doctor` 输出 `[ok]`、`[warn]`、`[error]` 三类检查结果，有 `[error]` 时以状态 1 退出。agent 正在运行时，它报告 agent 实际的环境：版本、server 连接、recorder、定时任务、Git 配置来源和 `SSH_AUTH_SOCK`；agent 未运行时只检查安装和配置文件，并提示 `Runtime environment has not been checked`。
 
 ### 终端与工作区
@@ -98,7 +93,7 @@ Linux 和 macOS 的命令入口是 `/usr/local/bin/kiteline-agent`；用 `sudo` 
 | `KITELINE_TRUST_PROXY_PROTO` | `0`                 | 设为 `1` 时采用反向代理传入的 `X-Forwarded-Proto` |
 
 - `KITELINE_LISTEN_ADDR` 省略端口时监听 80 端口。Docker 镜像把它设为 `0.0.0.0:8080`；仓库中的 systemd 示例把它设为 `127.0.0.1:8080`，可在 `/etc/kiteline-server.env` 中覆盖。
-- `KITELINE_TRUST_PROXY_PROTO` 只接受 `0` 和 `1`，其他值使 server 启动失败并报错 `KITELINE_TRUST_PROXY_PROTO must be 0 or 1`。何时设为 `1` 见 [HTTPS 与反向代理](server.md#https-与反向代理)，校验规则见[请求入口与认证](../design/protocol.md#请求入口与认证)。
+- `KITELINE_TRUST_PROXY_PROTO` 只接受 `0` 和 `1`，其他值使 server 启动失败并报错 `KITELINE_TRUST_PROXY_PROTO must be 0 or 1`。何时设为 `1` 见 [HTTPS 与反向代理](server.md#https-与反向代理)。
 
 仓库原版 `deploy/compose.yaml` 另外读取以下变量：
 
@@ -193,33 +188,30 @@ agent 数据目录中的 `agent.json`、`connection.json`、`temporary-files.jso
 
 ## 限额
 
-本节列出用户能感知的全部限额。配置列给出 `config.json` 中 `limits` 的键名（见 [agent 配置文件](#agent-配置文件)）；不能配置的项标为固定，后附常量名，供修改代码时查找。
+本节列出配置、容量和排错所需的限额。配置列给出 `config.json` 中 `limits` 的键名（见 [agent 配置文件](#agent-配置文件)）；不能配置的项标为固定。
 
 ### 登录与绑定
 
-| 项目                | 值                                             | 配置                      |
-| ------------------- | ---------------------------------------------- | ------------------------- |
-| 初始化 token 有效期 | 30 分钟                                        | 固定 `setupTokenLifetime` |
-| 绑定码有效期        | 10 分钟                                        | 固定 `bindingLifetime`    |
-| 登录有效期          | 30 天，从登录时起算，使用期间不延长            | 固定 `loginLifetime`      |
-| 拥有者密码          | 8 至 72 字节（UTF-8）                          | 固定                      |
-| 登录与初始化尝试    | 每个来源每分钟 10 次，全部来源合计每分钟 30 次 | 固定                      |
-| 绑定尝试            | 与登录相同，单独计数                           | 固定                      |
+| 项目                | 值                                             | 配置 |
+| ------------------- | ---------------------------------------------- | ---- |
+| 初始化 token 有效期 | 30 分钟                                        | 固定 |
+| 绑定码有效期        | 10 分钟                                        | 固定 |
+| 登录有效期          | 30 天，从登录时起算，使用期间不延长            | 固定 |
+| 拥有者密码          | 8 至 72 字节（UTF-8）                          | 固定 |
+| 登录与初始化尝试    | 每个来源每分钟 10 次，全部来源合计每分钟 30 次 | 固定 |
+| 绑定尝试            | 与登录相同，单独计数                           | 固定 |
 
-来源是连到 server 的 TCP 对端地址。server 在反向代理之后时，所有请求都来自代理的地址，每个来源的限制实际等于全部来源的限制。
+来源是连到 server 的 TCP 对端地址。经同一个反向代理地址接入的请求共用一个来源额度。
 
 ### 终端
 
-| 项目                   | 值                              | 配置                                      |
-| ---------------------- | ------------------------------- | ----------------------------------------- |
-| 每台设备的终端会话     | 32                              | `terminalSessionsPerDevice`               |
-| 单次粘贴和待发送的输入 | 256 KiB                         | `terminalInputBytes`                      |
-| 新会话滚屏行数         | 默认 10,000，可设 0 至 50,000   | 网页“终端设置”                            |
-| 网页终端尺寸           | 最多 500 列、200 行             | 固定 `terminalMaxCols`、`terminalMaxRows` |
-| 浏览器停止处理输出     | 10 秒后断开该显示，会话继续运行 | `terminalStallTimeout`                    |
-| 运行目录路径           | 76 字节（UTF-8）                | 固定                                      |
-
-运行目录路径的上限保证会话的 `<运行目录>/<会话 ID>/tmux.sock` 不超过 103 字节，各系统相同。
+| 项目                   | 值                              | 配置                        |
+| ---------------------- | ------------------------------- | --------------------------- |
+| 每台设备的终端会话     | 32                              | `terminalSessionsPerDevice` |
+| 单次粘贴和待发送的输入 | 256 KiB                         | `terminalInputBytes`        |
+| 新会话滚屏行数         | 默认 10,000，可设 0 至 50,000   | 网页“终端设置”              |
+| 浏览器停止处理输出     | 10 秒后断开该显示，会话继续运行 | `terminalStallTimeout`      |
+| 运行目录路径           | 76 字节（UTF-8）                | 固定                        |
 
 ### 文件
 
@@ -229,26 +221,22 @@ agent 数据目录中的 `agent.json`、`connection.json`、`temporary-files.jso
 | 单个文件上传或下载   | 1 GiB                             | `transferBytes`             |
 | 同时进行的文件传输   | 4                                 | `transfersPerDevice`        |
 | 图片预览             | 20 MiB，且不超过 20,000,000 像素  | `imageBytes`、`imagePixels` |
-| 传输无进展超时       | 120 秒                            | 固定 `channelIdleTimeout`   |
-| 目录列表每页         | 500 项                            | 固定 `listPageEntries`      |
-| 每次复制、移动或删除 | 500 项                            | 固定 `listPageEntries`      |
-| 搜索结果             | 1,000 条                          | 固定 `searchMatches`        |
+| 传输无进展超时       | 120 秒                            | 固定                        |
+| 每次复制、移动或删除 | 500 项                            | 固定                        |
+| 搜索结果             | 1,000 条                          | 固定                        |
 | 搜索时长             | 10 秒，超时返回已找到的结果       | `searchTimeout`             |
 
 文本打开、保存、图片预览、上传和下载都占用同时进行的文件传输名额。
 
 ### Git
 
-| 项目                           | 值                                 | 配置                   |
-| ------------------------------ | ---------------------------------- | ---------------------- |
-| 状态列表每页                   | 500 项                             | 固定 `listPageEntries` |
-| 提交历史每页                   | 500 个提交                         | 固定 `listPageEntries` |
-| 提交中的文件列表每页           | 500 项                             | 固定 `listPageEntries` |
-| 单次暂存、取消暂存或丢弃的路径 | 1,000 个                           | 固定                   |
-| 单个 Diff 内容                 | 约 512 KiB，超出部分截断           | 固定 `resultBytes`     |
-| Diff 结构化显示                | 2,000 行；超出时显示前 32 KiB 原文 | 固定                   |
-| 写操作时限                     | 10 分钟                            | `gitWriteTimeout`      |
-| 读取操作时限                   | 30 秒                              | `rpcTimeout`           |
+| 项目                           | 值                                 | 配置              |
+| ------------------------------ | ---------------------------------- | ----------------- |
+| 单次暂存、取消暂存或丢弃的路径 | 1,000 个                           | 固定              |
+| 单个 Diff 内容                 | 约 512 KiB，超出部分截断           | 固定              |
+| Diff 结构化显示                | 2,000 行；超出时显示前 32 KiB 原文 | 固定              |
+| 写操作时限                     | 10 分钟                            | `gitWriteTimeout` |
+| 读取操作时限                   | 30 秒                              | `rpcTimeout`      |
 
 写操作包括暂存、取消暂存、丢弃、提交、分支操作、fetch、pull、push，以及继续或中止进行中的操作。
 
@@ -261,21 +249,20 @@ agent 数据目录中的 `agent.json`、`connection.json`、`temporary-files.jso
 | 每个任务保留的已结束记录 | 20，含已跳过的记录           | `taskHistoryRuns`      |
 | 每次运行的输出           | 1 MiB，stdout 与 stderr 合计 | `taskOutputBytes`      |
 | 设备上保留的输出总量     | 128 MiB                      | `taskOutputTotalBytes` |
-| 任务名称                 | 256 字节（UTF-8）            | 固定 `nameBytes`       |
-| 命令                     | 16 KiB                       | 固定 `commandBytes`    |
+| 任务名称                 | 256 字节（UTF-8）            | 固定                   |
+| 命令                     | 16 KiB                       | 固定                   |
 | Cron 表达式              | 256 个字符                   | 固定                   |
-| 计划时刻的迟到容差       | 5 秒                         | 固定 `lateToleranceMs` |
-| 停止时从 TERM 到 KILL    | 5 秒                         | 固定 `stopGraceMs`     |
+| 计划时刻的迟到容差       | 5 秒                         | 固定                   |
+| 停止时从 TERM 到 KILL    | 5 秒                         | 固定                   |
 
 ### 连接与请求
 
-| 项目                   | 值                                              | 配置                            |
-| ---------------------- | ----------------------------------------------- | ------------------------------- |
-| 一般设备操作时限       | 30 秒                                           | `rpcTimeout`                    |
-| 每台设备同时处理的请求 | 32                                              | 固定 `pendingRequestsPerDevice` |
-| 每台设备的数据通道     | 128，终端显示、文件传输和开发服务请求合计       | 固定 `channelsPerDevice`        |
-| 数据通道建立           | 30 秒                                           | 固定 `interactionTimeout`       |
-| 单条请求或结果         | 1 MiB；请求超出返回 413，结果超出时为结果未确认 | 固定 `controlMessageBytes`      |
+| 项目                   | 值                                              | 配置         |
+| ---------------------- | ----------------------------------------------- | ------------ |
+| 一般设备操作时限       | 30 秒                                           | `rpcTimeout` |
+| 每台设备同时处理的请求 | 32                                              | 固定         |
+| 每台设备的数据通道     | 128，终端显示、文件传输和开发服务请求合计       | 固定         |
+| 单条请求或结果         | 1 MiB；请求超出返回 413，结果超出时为结果未确认 | 固定         |
 
 一般设备操作包括文件列表与重命名、Git 读取、定时任务管理和本机命令行请求。复制、移动和删除没有总时限。
 
@@ -371,17 +358,10 @@ Docker 部署中，server 数据目录是容器内的 `/var/lib/kiteline`，对�
 | agent 日志 `HTTP 401. Invalid device credentials`，随后 `Remote connection stopped`  | 设备已在网页删除，或凭据属于另一个 server                                                     | [重新绑定](devices.md#重新绑定)                                                  |
 | `Remote connection stopped: … (4003: device_deleted)`                                | 设备在网页中被删除                                                                            | [重新绑定](devices.md#重新绑定)                                                  |
 | `Remote connection stopped: … (4001: connection_replaced)`                           | 另一个使用相同凭据的 agent 连上了 server，常见于复制了数据目录的机器或容器                    | 见[重新绑定](devices.md#重新绑定)                                                |
-| `KITELINE_AGENT_RUN_DIR is too long`                                                 | 运行目录路径超过[限额](#限额)中的上限                                                         | 把 `KITELINE_AGENT_RUN_DIR` 设为更短的目录                                       |
 | `UTF-8 locale: Character map is …`                                                   | 启动环境的 locale 不是 UTF-8                                                                  | 设置已安装的 UTF-8 locale，见[支持的系统与准备](devices.md#支持的系统与准备)     |
-| `git: Requires >= 2.23.0`                                                            | Git 版本低于 2.23.0                                                                           | 安装新版 Git，见[支持的系统与准备](devices.md#支持的系统与准备)                  |
 | `git: spawn git ENOENT`                                                              | 启动环境的 `PATH` 中没有 Git                                                                  | 安装 Git 或修正 `PATH`，见[支持的系统与准备](devices.md#支持的系统与准备)        |
 | `git: Native executable not found in the current PATH: git`                          | Windows 上启动环境的 `PATH` 中没有 Git                                                        | 安装 Git 或修正 `PATH`                                                           |
 | `Agent installation is busy`；Windows 上为 `Installation is busy`                    | 升级或卸载时仍有 `kiteline-agent` 进程在使用这份安装                                          | 停止 `run`、`attach` 和服务后重试，见[升级 agent](devices.md#升级-agent)         |
-| `Agent installation is being changed; try again after maintenance`                   | 升级或卸载正在进行                                                                            | 维护结束后再执行                                                                 |
-| `Interactive confirmation is required, or explicitly pass --yes`                     | 在没有交互终端的环境中升级或卸载                                                              | 在终端中执行，或加 `--yes`                                                       |
-| `A different version is installed`                                                   | 已安装的 agent 版本与要安装的不同                                                             | 先升级，见[升级 agent](devices.md#升级-agent)                                    |
-| `Attaching requires a local terminal`                                                | `attach` 或 `terminal new` 没有交互终端                                                       | 在交互终端中执行；`terminal new` 可加 `--no-attach`                              |
-| `Use project user … to run this command`                                             | 以安装记录之外的账户执行 `kiteline-agent`                                                     | 切换到项目用户                                                                   |
 | `… uses the installation configuration`                                              | 执行接入命令的 Shell 中设置了 `KITELINE_AGENT_HOME` 或 `KITELINE_AGENT_RUN_DIR`               | 取消这两个变量；自定义目录的设置方法见 [agent 环境变量](#agent-环境变量)         |
 | 本机命令报 `connect ENOENT …/agent.sock` 或 `connect ECONNREFUSED …/agent.sock`      | agent 未运行（ECONNREFUSED 表示 agent 异常退出后留下了旧 socket），或命令解析到不同的运行目录 | 启动 agent；确认用户和目录与 `run` 一致                                          |
 | `Device channel limit reached`                                                       | 该设备上同时打开的终端显示、文件传输和开发服务请求达到上限                                    | 关闭不用的终端显示和页面                                                         |
