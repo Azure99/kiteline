@@ -3,7 +3,11 @@ import { mkdtemp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promise
 import { join } from "node:path";
 import { AppError, limits } from "@kiteline/shared/protocol";
 import { tmux } from "@kiteline/shared/terminal/node";
-import type { RecorderCall } from "@kiteline/shared/protocol/ipc";
+import {
+  terminalOutputCost,
+  type RecorderCall,
+  type RecorderMessage,
+} from "@kiteline/shared/protocol/ipc";
 import { Agent } from "../src/agent.js";
 import { testConfig } from "./support/config.js";
 
@@ -36,6 +40,13 @@ afterEach(async () => {
   if (failures.length) throw new AggregateError(failures, "Terminal test cleanup failed");
 });
 const pollOptions = { timeout: 5000, interval: 20 };
+function outputCredit(message: Extract<RecorderMessage, { type: "bytes" | "frame" }>) {
+  if (message.type === "bytes")
+    return terminalOutputCost(Buffer.byteLength(message.dataBase64, "base64"));
+  return message.frame.type === "error" || message.frame.type === "input.error"
+    ? 0
+    : terminalOutputCost(Buffer.byteLength(JSON.stringify(message.frame)));
+}
 async function fixture() {
   const dataDir = await mkdtemp("/var/tmp/kiteline-term-");
   cleanups.push(() => rm(dataDir, { recursive: true, force: true }));
@@ -85,11 +96,15 @@ test("real recorder captures Shell output, restores history and pastes while nat
   const ready = new Set<string>();
   const consumed = new Map<string, number>();
   agent.sessions.onFrame = (message) => {
+    if (message.type !== "frame" && message.type !== "bytes") return;
     if (message.type === "frame" && message.frame.type === "ready") ready.add(message.attachmentId);
     if (message.type === "bytes") {
       const bytes = Buffer.from(message.dataBase64, "base64");
       output += bytes.toString();
-      const count = (consumed.get(message.attachmentId) ?? 0) + bytes.length;
+    }
+    const credit = outputCredit(message);
+    if (credit) {
+      const count = (consumed.get(message.attachmentId) ?? 0) + credit;
       consumed.set(message.attachmentId, count);
       agent.sessions.recorder.send({
         type: "consumed",
@@ -271,11 +286,15 @@ test("recovery restores the same task and pending Shell input, then redraw and e
   let ready = false;
   let consumed = 0;
   agent.sessions.onFrame = (message) => {
+    if (message.type !== "frame" && message.type !== "bytes") return;
     if (message.type === "frame" && message.frame.type === "ready") ready = true;
     if (message.type === "bytes") {
       const data = Buffer.from(message.dataBase64, "base64");
       output += data.toString();
-      consumed += data.length;
+    }
+    const credit = outputCredit(message);
+    if (credit) {
+      consumed += credit;
       agent.sessions.recorder.send({
         type: "consumed",
         sessionId: session.id,
@@ -442,11 +461,15 @@ test("a failed tmux kill marks the session unavailable and can recover the same 
   let consumed = 0;
   let output = "";
   agent.sessions.onFrame = (message) => {
+    if (message.type !== "frame" && message.type !== "bytes") return;
     if (message.type === "frame" && message.frame.type === "ready") ready = true;
     if (message.type === "bytes") {
       const bytes = Buffer.from(message.dataBase64, "base64");
       output += bytes.toString();
-      consumed += bytes.length;
+    }
+    const credit = outputCredit(message);
+    if (credit) {
+      consumed += credit;
       agent.sessions.recorder.send({
         type: "consumed",
         sessionId: session.id,

@@ -3,6 +3,7 @@ import headless from "@xterm/headless";
 import serialize from "@xterm/addon-serialize";
 import { limits } from "@kiteline/shared/protocol";
 import type { TerminalEvent, TerminalFrame } from "@kiteline/shared/protocol/ipc";
+import { terminalOutputCost } from "@kiteline/shared/protocol/ipc";
 import {
   mouseEncodingVT,
   adaptTerminalScrolling,
@@ -32,7 +33,13 @@ async function apply(target: ReturnType<typeof screen>, event: TerminalEvent) {
 
 test("batched output preserves UTF-8, non-ground recovery, resize and live order", async () => {
   const faults: Error[] = [];
-  const model = new Model(80, 24, 100, (error) => faults.push(error));
+  const model = new Model(
+    80,
+    24,
+    100,
+    (error) => faults.push(error),
+    () => {},
+  );
   const reference = screen();
   const restored = screen();
   let snapshot!: Snapshot;
@@ -108,23 +115,31 @@ test("recovery respects the ACK window before tail, ready, live output, resize a
   let closed = false;
   const attachment = new Attachment(
     "window",
-    3000,
     (piece) => {
       sent.push(piece);
       return true;
     },
     () => (closed = true),
+    () => {},
   );
   const data = Buffer.alloc(terminalOutstandingBytes * 2 + 7, 65);
   const byteCount = () =>
-    sent.reduce((total, piece) => total + (Buffer.isBuffer(piece) ? piece.length : 0), 0);
+    sent.reduce(
+      (total, piece) =>
+        total +
+        terminalOutputCost(
+          Buffer.isBuffer(piece) ? piece.length : Buffer.byteLength(JSON.stringify(piece)),
+        ),
+      0,
+    );
   try {
     attachment.start(
       { data, cols: 80, rows: 24, historyLimited: false, tail: [{ type: "output", data: "TAIL" }] },
       100,
       false,
     );
-    expect(byteCount()).toBe(terminalOutstandingBytes);
+    expect(byteCount()).toBeLessThanOrEqual(terminalOutstandingBytes);
+    expect(byteCount()).toBeGreaterThan(terminalOutstandingBytes - limits.dataChunkBytes);
     expect(sent.some((piece) => !Buffer.isBuffer(piece) && piece.type === "ready")).toBe(false);
     attachment.output({ type: "output", data: "LIVE" });
     attachment.output({ type: "resize", cols: 40, rows: 12 });
@@ -148,9 +163,49 @@ test("recovery respects the ACK window before tail, ready, live output, resize a
   }
 });
 
+test("small output and resize frames share the consumption window without losing order", () => {
+  const sent: (Buffer | TerminalFrame)[] = [];
+  const attachment = new Attachment(
+    "small",
+    (piece) => {
+      sent.push(piece);
+      return true;
+    },
+    () => {},
+    () => {},
+  );
+  const events = Array.from(
+    { length: 3000 },
+    (_, i): TerminalEvent =>
+      i % 2 ? { type: "resize", cols: 80 + (i % 3), rows: 24 } : { type: "output", data: "x" },
+  );
+  try {
+    for (const event of events) attachment.output(event);
+    expect(sent.length).toBe(terminalOutstandingBytes / 128);
+    expect(attachment.backlog).toBeGreaterThan(0);
+    while (sent.length < events.length) {
+      const consumed = sent.length * 128;
+      attachment.acknowledge(consumed);
+      expect(sent.length * 128 - consumed).toBeLessThanOrEqual(terminalOutstandingBytes);
+    }
+    expect(sent.map((piece) => (Buffer.isBuffer(piece) ? piece.toString() : piece))).toEqual(
+      events.map((event) => (event.type === "output" ? event.data : event)),
+    );
+    expect(attachment.backlog).toBe(0);
+  } finally {
+    attachment.close();
+  }
+});
+
 test("periodic checkpoints retain a bounded incomplete OSC after total output crosses the tail budget", async () => {
   const faults: Error[] = [];
-  const model = new Model(80, 24, 100, (error) => faults.push(error));
+  const model = new Model(
+    80,
+    24,
+    100,
+    (error) => faults.push(error),
+    () => {},
+  );
   const restored = screen();
   let snapshot!: Snapshot;
   const live: TerminalEvent[] = [];
@@ -208,9 +263,15 @@ test("periodic checkpoints retain a bounded incomplete OSC after total output cr
 });
 
 test("reattaching preserves snapshots across unchanged, mode-only and resized states", async () => {
-  const model = new Model(40, 10, 100, (error) => {
-    throw error;
-  });
+  const model = new Model(
+    40,
+    10,
+    100,
+    (error) => {
+      throw error;
+    },
+    () => {},
+  );
   const capture = async (history: "retained" | "screen" = "retained") => {
     let snapshot!: Snapshot;
     const detach = await model.attach(
@@ -270,7 +331,13 @@ test("reattaching preserves snapshots across unchanged, mode-only and resized st
 
 test("coalescing still rejects a real parser backlog above its byte budget", async () => {
   const faults: Error[] = [];
-  const model = new Model(80, 24, 100, (error) => faults.push(error));
+  const model = new Model(
+    80,
+    24,
+    100,
+    (error) => faults.push(error),
+    () => {},
+  );
   try {
     const chunk = Buffer.alloc(limits.dataChunkBytes / 4, 65);
     for (let bytes = 0; bytes <= modelLimits.terminalModelPendingBytes; bytes += chunk.length)
@@ -385,7 +452,13 @@ test.each([
   { name: "pending wrap", prefix: "x".repeat(20) },
 ])("REP after a $name checkpoint matches continuous output", async ({ prefix }) => {
   const faults: Error[] = [];
-  const model = new Model(20, 6, 100, (error) => faults.push(error));
+  const model = new Model(
+    20,
+    6,
+    100,
+    (error) => faults.push(error),
+    () => {},
+  );
   const restored = screen(20, 6, 100);
   const serialized = new serialize.SerializeAddon();
   model.terminal.loadAddon(serialized);

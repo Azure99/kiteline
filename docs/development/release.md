@@ -243,7 +243,7 @@ Linux agent 还需先在 [Azure99/node-static-builds](https://github.com/Azure99
 
 更新 `release/inputs.json` 的 tmux/libevent 及 `release/agent-macos.json` 的 `libeventVersion` 标签；Linux 的 libevent/ncurses Ubuntu 补丁在 `release/agent-linux.json`，Windows 的库和 DLL 集合在 `release/agent-windows.json` 的 MSYS2 包及 `runtimeFiles`。
 
-确认 `native/tmux/paste.patch` 和 `native/tmux/cygwin-outfd.patch` 仍可应用，并验证终端输入、粘贴、恢复和本机接续。tmux 变化后重新运行 `pnpm native:build`；开发构建使用系统 libevent。
+确认 `native/tmux/paste.patch`、`native/tmux/flow-control.patch` 和 Windows 的 `native/tmux/cygwin-outfd.patch` 仍可应用，并验证终端输入、粘贴、恢复和本机接续。流控补丁还须验证：普通及快 control 客户端存在时的慢消费背压、超过五分钟停读后原流续传、PTY 退出尾部与退出码、暂停期间反复调整尺寸。tmux 变化后重新运行 `pnpm native:build`；开发构建使用系统 libevent，各平台最终包按补丁摘要校验构建身份。
 
 ### Ubuntu 镜像与快照
 

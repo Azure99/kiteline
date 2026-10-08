@@ -33,6 +33,7 @@ const sourceFiles = [
   "scripts/prepare-windows-notices.mjs",
   "scripts/windows-components.ts",
   "native/tmux/paste.patch",
+  "native/tmux/flow-control.patch",
   "native/tmux/cygwin-outfd.patch",
   "native/tmux/tmux.terminfo",
   ...readdirSync(join(root, "native/windows"))

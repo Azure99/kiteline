@@ -36,8 +36,12 @@ export class RecordedSession {
     private release: () => void,
   ) {
     this.initialized = options.type === "create";
-    this.model = new Model(options.cols, options.rows, options.historyLines, (error) =>
-      this.fault(error),
+    this.model = new Model(
+      options.cols,
+      options.rows,
+      options.historyLines,
+      (error) => this.fault(error),
+      () => this.pressure(),
     );
     this.control = new Control(
       options,
@@ -96,11 +100,11 @@ export class RecordedSession {
     }));
     try {
       await this.control.resize(cols, rows + 1);
-      await this.model.waitForSize(cols, rows + 1, limits.interactionTimeout);
+      await this.model.waitForSize(cols, rows + 1, this.control.schedule, this.control.signal);
       await delay(80);
     } finally {
       await this.control.resize(cols, rows);
-      await this.model.waitForSize(cols, rows, limits.interactionTimeout);
+      await this.model.waitForSize(cols, rows, this.control.schedule, this.control.signal);
     }
   }
   private frame(id: string, frame: TerminalFrame) {
@@ -120,7 +124,6 @@ export class RecordedSession {
     const abort = new AbortController();
     const attachment = new Attachment(
       id,
-      this.config.terminalStallTimeout,
       (piece) =>
         Buffer.isBuffer(piece)
           ? this.emit(
@@ -140,7 +143,9 @@ export class RecordedSession {
         abort.abort(new AppError("cancelled", "Display closed"));
         this.input.detach(id);
         this.maybeRelease();
+        this.pressure();
       },
+      () => this.pressure(),
     );
     const display: Display = { attachment, abort, ready: false };
     this.displays.set(id, display);
@@ -160,6 +165,14 @@ export class RecordedSession {
   }
   private maybeRelease() {
     if (!this.closing && (this.ended || this.failed) && !this.displays.size) this.release();
+  }
+  private pressure() {
+    if (this.ended || this.failed) return;
+    const pending =
+      this.model.backlog +
+      Math.max(0, ...[...this.displays.values()].map((display) => display.attachment.backlog));
+    // Leave room for the current stdout chunk, which readLines still finishes after pause().
+    this.control.setPaused(pending >= (this.control.paused ? 128 * 1024 : 512 * 1024));
   }
   detach(id: string) {
     this.displays.get(id)?.attachment.close();

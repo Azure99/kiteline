@@ -12,7 +12,7 @@
 
 tmux 使用会话目录下的私有配置，不加载用户的 tmux 配置或插件，并收窄 prefix 键表。具体设置由 `shared/src/terminal/node.ts` 的 `terminalPreset()` 定义。
 
-固定版本：tmux 版本见 [`release/inputs.json`](../../release/inputs.json)，各平台都禁用 Sixel 并应用 [`native/tmux/paste.patch`](../../native/tmux/paste.patch)。xterm.js 及插件版本见 [`web/package.json`](../../web/package.json)、[`terminal-recorder/package.json`](../../terminal-recorder/package.json) 和 [`shared/package.json`](../../shared/package.json)。网页的 xterm.js 带有 [`web/patches/`](../../web/patches/) 中的补丁，让 DOM 渲染器按设备像素比测量字形宽度；维护方法见[构建与发布](../development/release.md#xtermjs)。
+固定版本：tmux 版本见 [`release/inputs.json`](../../release/inputs.json)，各平台都禁用 Sixel，并应用 [`paste.patch`](../../native/tmux/paste.patch) 和 [`flow-control.patch`](../../native/tmux/flow-control.patch)。后者为 recorder 的 `flow-control` 客户端标志提供无损在线背压；普通客户端不设置该标志。xterm.js 及插件版本见 [`web/package.json`](../../web/package.json)、[`terminal-recorder/package.json`](../../terminal-recorder/package.json) 和 [`shared/package.json`](../../shared/package.json)。网页的 xterm.js 带有 [`web/patches/`](../../web/patches/) 中的补丁，让 DOM 渲染器按设备像素比测量字形宽度；维护方法见[构建与发布](../development/release.md#xtermjs)。
 
 网页和 recorder 的共同适配在 `shared/src/terminal/index.ts`，两端必须同步升级。该模块的私有状态访问经过 `core()`，升级时以 `TerminalCore` 核对使用的成员。网页还依赖 `web/src/terminal/` 的触控选择和画面保留适配，其中 `auxiliary-input.ts` 直接导入 xterm.js 的私有键盘编码；这些入口也要随升级复核。
 
@@ -54,7 +54,7 @@ Shell 的选择和执行参数见 [agent 配置文件](../guide/reference.md#age
 
 agent 正常停止（包括停止或重启服务）时，`Agent.close()` 在每个会话的私有 socket 上执行 `kill-server`，会话中的程序随之结束。新启动的 agent 会话表为空，不导入旧会话。停止顺序见[启动与停止](agent-lifecycle.md#启动与停止)，异常退出见[资源与清理](#资源与清理)。
 
-程序退出后，`remain-on-exit on` 让 pane 保留到 agent 读取退出码。recorder 订阅 `#{pane_dead}` 和退出码，在控制流中排在之前的输出之后处理结束：先把结束帧（含退出码）送给所有显示，再通知 agent。agent 在私有 socket 上执行 `kill-server`（Windows 还要结束 tmux server 的进程集合并等它清空），删除登记，推送 `sessions.changed`，再删除会话目录。退出码在 Linux 和 macOS 上取 `#{pane_dead_status}`，在 Windows 上取 pane 选项 `@kiteline-exit-dword`，读不到时为空。明确结束会话时，agent 先等进行中的创建或恢复，再让 recorder 关闭控制客户端并执行 `kill-server`，退出码为空。
+程序退出后，`remain-on-exit on` 让 pane 保留到 agent 读取退出码。受管 pane 必须同时得到子进程退出状态、PTY 读取 EOF 并排空原始输出后才变为 dead，避免慢消费期间提前关闭 PTY 丢失尾部。recorder 订阅 `#{pane_dead}` 和退出码，在控制流中排在之前的输出之后处理结束：先把结束帧（含退出码）送给所有显示，再通知 agent。agent 在私有 socket 上执行 `kill-server`（Windows 还要结束 tmux server 的进程集合并等它清空），删除登记，推送 `sessions.changed`，再删除会话目录。退出码在 Linux 和 macOS 上取 `#{pane_dead_status}`，在 Windows 上取 pane 选项 `@kiteline-exit-dword`，读不到时为空。明确结束会话时，agent 先等进行中的创建或恢复，再让 recorder 关闭控制客户端并执行 `kill-server`，退出码为空。
 
 不变量：
 
@@ -98,9 +98,13 @@ recorder 为每个会话保存一个检查点和其后的完整尾段：
 - `retained`：解析器空闲且尚无检查点或尾段非空时，先生成新检查点；然后发送检查点和尾段副本。解析器不空闲但有检查点时，直接发送已有检查点和完整尾段，不等程序补完序列。两者都没有时等待下一次输出，`interactionTimeout` 内取不到返回 `busy`。
 - `screen`：只在解析器空闲时序列化当前屏幕（滚屏为 0），否则等待，超时返回 `busy`。它不替换检查点，也不改会话的 `historyLines`。
 
-agent 发往该显示的帧依次为：`restore.begin`（尺寸、`historyLines`、副本字节数、`historyLimited`、`historyGap`）、副本的二进制分块、尾段（二进制输出和 `resize`）、恢复完成帧 `ready`，然后是实时的二进制输出和 `resize`，最后是 `ended` 或 `error`（帧名列表见[数据通道](protocol.md#数据通道)）。恢复期间的新输出进入该显示自己的队列，不阻塞模型。网页在 `restore.begin` 时新建 xterm.js 实例，副本字节数对不上就放弃该实例；收到恢复完成帧 `ready` 并发出第一次尺寸后才允许输入。
+agent 发往该显示的帧依次为：`restore.begin`（尺寸、`historyLines`、副本字节数、`historyLimited`、`historyGap`）、副本的二进制分块、尾段（二进制输出和 `resize`）、恢复完成帧 `ready`，然后是实时的二进制输出和 `resize`，最后是 `ended` 或 `error`（帧名列表见[数据通道](protocol.md#数据通道)）。恢复期间的新输出进入该显示自己的有界队列，参与会话背压。网页在 `restore.begin` 时新建 xterm.js 实例，副本字节数对不上就放弃该实例；收到恢复完成帧 `ready` 并发出第一次尺寸后才允许输入。
 
-流量控制：网页每写完一块输出就回报累计的 `consumed` 字节数。未确认输出达到 `terminalOutstandingBytes` 时暂停发送；待发队列超过 `terminalPendingBytes` 返回 `limit_exceeded`；有未确认输出且 `terminalStallTimeout` 内没有进展返回 `timeout`。这些错误只关闭这一个显示。
+流量控制：二进制输出和有序 JSON 帧使用同一累计信用，计量规则为 `terminalOutputCost()`，见 [IPC 类型](../../shared/src/protocol/ipc.ts)。JSON 按 UTF-8 编码计量；每帧最低信用覆盖小帧的 IPC 封装成本。网页按 FIFO 处理帧，二进制须等 xterm write 回调后才回报 `consumed.bytes`；带外 `error`、`input.error` 不计入信用。达到 `terminalOutstandingBytes` 后暂停发送，不能先确认尚未处理的输出来腾出窗口。
+
+recorder 将模型待解析量与最慢显示的待发量相加，按 `RecordedSession.pressure()` 的高低水位同步暂停或恢复 control stdout。已经进入当前 Node chunk 的内容继续处理，预算为它留出余量。tmux 的受管 control 堵塞会阻止真实 PTY 继续读取，普通或更快的客户端不能绕过；受管 control 禁用上游五分钟积压淘汰。ACK 和关闭显示独立于输入队列，所以恢复消费或关闭慢显示可自动解除背压。
+
+背压期间，程序输出、同会话其他显示和输入可能等待。未处理输出保序保留，已解析 scrollback 按配置行数淘汰。待发及传输容量检查保留为异常终态。
 
 显示在第一次打开时附着。切换分组、工具，或收起文件和 Git 视图下方的终端面板，只隐藏显示，隐藏的显示保持附着并继续消费输出；关闭显示、离开工作区或页面销毁时释放附着。断开后网页不自动重连，显示“连接已断开”，由用户点击“重新连接”。同一会话的多个显示各自维护视口、选区和搜索。
 
@@ -137,15 +141,17 @@ agent 发往该显示的帧依次为：`restore.begin`（尺寸、`historyLines`
 - 网页输入不经过 tmux 键表，网页中的 Ctrl-b 直接交给程序。本机客户端使用 tmux 键表：`Ctrl-b d` 断开，`Ctrl-b Ctrl-b` 发送 Ctrl-b。
 - 手机辅助键和待用修饰键用 xterm.js 的键盘编码函数生成，读取程序当前的应用光标键模式；虚拟 Alt 按 Meta 处理。
 - 多个客户端同时输入时按到达顺序交错写入。
+- 输出背压期间，输入队列在取出下一项之前等待 control 恢复读取；既有容量内的输入保持 FIFO，不清空或重发。关闭显示或结束会话的取消规则保持不变。
 
 ## 尺寸
 
 真实 PTY 只有一组行列。tmux 使用 `window-size latest`，最近活动的客户端决定尺寸：
 
 - 本机客户端按自己终端的尺寸参与。
-- 网页通过 recorder 的控制客户端参与：执行 `select-window` 和 `refresh-client -C <列>x<行>`，等控制流报告同样的实际尺寸（30 秒期限）后再处理队列中的下一项。实际尺寸经控制流进入模型，再以 `resize` 帧发给所有显示。
+- 网页通过 recorder 的控制客户端参与：执行 `select-window` 和 `refresh-client -C <列>x<行>`，等控制流报告同样的实际尺寸后再处理队列中的下一项。命令和尺寸等待使用 `interactionTimeout` 的剩余期限，主动背压暂停计时，恢复后继续计时；control 关闭立即使等待失败。实际尺寸经控制流进入模型，再以 `resize` 帧发给所有显示。
 - 网页请求限制在 `terminalMaxCols` × `terminalMaxRows` 以内（见[限额](../guide/reference.md#限额)）。本机客户端可以让实际尺寸更大，所以恢复帧接受最大 10000 列和 10000 行。没有网页时控制客户端保留最后的尺寸。
 - 不使用 `resize-window`，它会把窗口切换为手动尺寸，客户端之后无法再调整。
+- 受管 control 输出堵塞时，本机客户端的实际尺寸调整也延后，复用 tmux 待调整尺寸只保留最后尚未执行的目标；恢复后执行该尺寸。已经执行的尺寸及其输出、通知不被丢弃，避免暂停期间布局通知无限积压。
 
 网页一侧（`display.ts` 的 `resize()`）：先按会话的实际尺寸恢复画面，收到 `ready` 后按自己的可见区域发送第一次尺寸，再开放输入。隐藏或尺寸为 0 的显示不发送尺寸；滚动、选择和输出不重复提交尺寸。手机软键盘只缩短可见高度时，宽度和字号不变就保留打开键盘前的行列，终端只在本地裁切并跟随光标，不请求会话改变尺寸；宽度、旋转和字号变化会重新计算。
 
@@ -167,7 +173,7 @@ agent 发往该显示的帧依次为：`restore.begin`（尺寸、`historyLines`
 
 ## 资源与清理
 
-- 每个显示的待发队列、未确认窗口和 IPC 积压各有上限，慢的显示只关闭自己。控制命令结果、IPC 单行和本机请求以 `controlMessageBytes` 为上限。超出记录能力时报告记录故障并保留程序，不靠长时间背压或结束程序来满足上限。
+- 每个显示的待发队列、未确认窗口和 IPC 积压各有上限，在线慢消费通过真实 PTY 背压维持这些界限；异常越界仍明确失败。控制命令结果、IPC 单行和本机请求以 `controlMessageBytes` 为上限。超出记录能力时报告记录故障并保留程序。
 - `terminalSnapshotBytes` 只限制序列化结果，不限制内存；内存还包括各会话的 tmux 和 headless 网格、尾段和队列。
 - 关闭显示会取消它尚未注入的输入、帧路由和恢复引用。会话结束时删除 `<运行目录>/<会话 ID>/`。
 

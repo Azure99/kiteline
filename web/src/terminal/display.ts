@@ -3,6 +3,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { deviceServiceLink } from "../lib/device-service";
 import type { BrowserTerminalInput } from "@kiteline/shared/protocol/ipc";
+import { terminalOutputCost } from "@kiteline/shared/protocol/ipc";
 import {
   integer,
   limits,
@@ -29,6 +30,7 @@ import { AuxiliaryInput, type Modifiers } from "./auxiliary-input";
 
 const fontSizeKey = "kiteline.terminal-font-size";
 const clampFontSize = (value: number) => Math.max(10, Math.min(24, value));
+const encoder = new TextEncoder();
 
 export interface DisplayState {
   status: "connecting" | "ready" | "ended" | "error";
@@ -122,6 +124,8 @@ export class TerminalDisplay {
               .catch((error: unknown) => this.fail(error));
           } else {
             const frame = record(JSON.parse(event.data));
+            const credit = terminalOutputCost(encoder.encode(event.data).length);
+            const ordered = frame.type !== "input.error" && frame.type !== "error";
             if (frame.type === "ended" || frame.type === "error") {
               this.finalFrame = true;
               this.receivedEnd = frame.type === "ended";
@@ -129,7 +133,10 @@ export class TerminalDisplay {
               if (this.terminal) this.terminal.options.disableStdin = true;
             }
             this.queue = this.queue
-              .then(() => this.frame(frame))
+              .then(async () => {
+                await this.frame(frame);
+                if (ordered) this.acknowledge(credit);
+              })
               .catch((error: unknown) => this.fail(error));
           }
         } catch (error) {
@@ -306,7 +313,10 @@ export class TerminalDisplay {
       this.snapshotRemaining -= bytes.length;
     }
     await new Promise<void>((resolve) => terminal.write(bytes, resolve));
-    this.consumed += bytes.length;
+    this.acknowledge(terminalOutputCost(bytes.length));
+  }
+  private acknowledge(credit: number) {
+    this.consumed += credit;
     this.send({ type: "consumed", bytes: this.consumed });
   }
   private send(value: BrowserTerminalInput) {

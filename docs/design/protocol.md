@@ -260,7 +260,7 @@ server 为每个 HTTP 请求和 WebSocket 升级确定一个入口 origin（`req
 ### 流控与期限
 
 - **文件**：接收端处理完一帧才读取下一帧，未处理的帧最多 `filePendingFrames` 帧、`filePendingBytes`，超过时以 `limit_exceeded` 结束；HTTP 一侧的写入背压同样传到数据通道。传输开始后，在 `channelIdleTimeout` 内没有进展时以 `timeout` 结束。
-- **终端**：未确认的输出由 recorder 按附着控制，浏览器用 `consumed` 推进。server 和 agent 每条 socket 的发送积压超过 `terminalPendingBytes` 时，以 `limit_exceeded` 关闭该附着。见[附着与恢复](terminal.md#附着与恢复)。
+- **终端**：二进制输出与有序 JSON 共用累计信用，浏览器完成处理后用 `consumed` 推进；recorder 根据最慢显示将背压传到真实 PTY，消费恢复后自动继续。server 和 agent 每条 socket 的发送积压超过 `terminalPendingBytes` 时，仍以 `limit_exceeded` 关闭异常附着。计量和暂停规则见[附着与恢复](terminal.md#附着与恢复)。
 - **开发服务**：使用 WebSocket 流的背压，块大小为 `dataChunkBytes`，不设空闲期限，见[连接寿命](http-access.md#连接寿命)。
 
 ### 结束与取消
@@ -290,6 +290,6 @@ server 为每个 HTTP 请求和 WebSocket 升级确定一个入口 origin（`req
 agent 按需启动 recorder，并通过 `RecorderConfig` 传入配置；Windows 上 recorder 运行在 Job 对象中。消息类型见 `shared/src/protocol/ipc.ts` 的 `RecorderRequest` 和 `RecorderMessage`，启动入口见 `agent/src/terminal/recorder.ts`，终端行为见[终端](terminal.md)。
 
 - **传输。** agent 写 recorder 的 stdin，recorder 写 stdout，每行一条 JSON，每行不超过 `controlMessageBytes`（`shared/src/protocol/stdio.ts`）。发送队列按附着分别计量：某个附着的积压超过 `terminalPendingBytes` 时，发往该附着的新消息被拒绝（agent 一侧返回 `limit_exceeded`），其他附着不受影响。recorder 的 stderr 只保留有界前缀，用作退出原因。
-- **请求结果。** 需要回复的请求带 `id`，recorder 用 `reply` 返回 `Reply`。agent 最多等待 `interactionTimeout`，超时按 `timeout` 和结果未确认处理；recorder 退出时，所有等待中的请求以 `recording_unavailable` 和结果未确认结束。
+- **请求结果。** 需要回复的请求带 `id`，recorder 用 `reply` 返回 `Reply`。agent 最多等待 `interactionTimeout`，超时按 `timeout` 和结果未确认处理；`redraw` 由 recorder 内部命令及尺寸的有效执行期限控制，不叠加包含背压等待的外层墙钟。recorder 退出时，所有等待中的请求以 `recording_unavailable` 和结果未确认结束。
 - **附着数据。** 终端帧和输出按会话、附着路由到浏览器。普通输入、粘贴、尺寸和消费确认不等待独立回复；一次粘贴始终是一条消息，不能拆成普通输入。
 - **撤销创建。** `cancelCreate` 的成功回复表示所指向的创建不会再启动 tmux；得不到回复时，agent 停止整个 recorder。随后的查证规则见[会话生命周期](terminal.md#会话生命周期)。

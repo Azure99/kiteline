@@ -19,6 +19,7 @@ try {
   run("tar", ["-xzf", tarball]);
   const source = resolve(directory, `tmux-${tmux.version}`);
   run("patch", ["-p1", "-i", resolve(root, "native/tmux/paste.patch")], source);
+  run("patch", ["-p1", "-i", resolve(root, "native/tmux/flow-control.patch")], source);
   run("./configure", ["--quiet", "--disable-sixel", `--prefix=${destination}`], source);
   run("make", ["-s", "-j2"], source);
   mkdirSync(resolve(destination, "bin"), { recursive: true });
@@ -47,6 +48,7 @@ try {
         tmux: tmux.version,
         tmuxSource: checksum,
         patch: digest(resolve(root, "native/tmux/paste.patch")),
+        flowControlPatch: digest(resolve(root, "native/tmux/flow-control.patch")),
         helper: digest(resolve(root, "native/linux/rename-noreplace.c")),
         terminfo: digest(terminfoSource),
         tmuxBinary: digest(resolve(destination, "bin/tmux")),

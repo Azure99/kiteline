@@ -25,12 +25,7 @@ test("configuration bounds timers and task capacity without limiting transfer by
   try {
     const configure = (limits: object) =>
       writeFile(join(root, "config.json"), JSON.stringify({ limits }));
-    for (const key of [
-      "rpcTimeout",
-      "searchTimeout",
-      "gitWriteTimeout",
-      "terminalStallTimeout",
-    ] as const) {
+    for (const key of ["rpcTimeout", "searchTimeout", "gitWriteTimeout"] as const) {
       const maximum = key === "rpcTimeout" ? 2147482647 : 2147483647;
       await configure({ [key]: maximum });
       expect((await agentConfig()).limits[key]).toBe(maximum);

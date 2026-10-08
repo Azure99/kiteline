@@ -12,6 +12,7 @@ mkdir -p "$output/source" "$output/terminfo"
 cd "$output/source"
 tar -xf "$inputs/tmux.tar.gz" --strip-components=1
 patch -p1 -i "$inputs/native/tmux/paste.patch"
+patch -p1 -i "$inputs/native/tmux/flow-control.patch"
 patch -p1 -i "$inputs/native/tmux/cygwin-outfd.patch"
 ./configure --disable-sixel --prefix=/usr/local
 make -j2

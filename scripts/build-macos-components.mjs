@@ -27,6 +27,7 @@ const sourceFiles = [
   "native/macos/rename-noreplace.c",
   "native/macos/entry-name.c",
   "native/tmux/paste.patch",
+  "native/tmux/flow-control.patch",
   "native/tmux/tmux.terminfo",
 ];
 function downloads(architecture) {

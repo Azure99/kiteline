@@ -207,13 +207,12 @@ A source is the TCP peer address connected to the server. Requests arriving thro
 
 ### Terminal
 
-| Item                            | Value                                                   | Configuration               |
-| ------------------------------- | ------------------------------------------------------- | --------------------------- |
-| Terminal sessions per device    | 32                                                      | `terminalSessionsPerDevice` |
-| Single paste and queued input   | 256 KiB                                                 | `terminalInputBytes`        |
-| New-session scrollback lines    | Default 10,000; range 0 to 50,000                       | Web "Terminal settings"     |
-| Browser stops processing output | Display disconnects after 10 seconds; session continues | `terminalStallTimeout`      |
-| Runtime directory path          | 76 bytes (UTF-8)                                        | Fixed                       |
+| Item                          | Value                             | Configuration               |
+| ----------------------------- | --------------------------------- | --------------------------- |
+| Terminal sessions per device  | 32                                | `terminalSessionsPerDevice` |
+| Single paste and queued input | 256 KiB                           | `terminalInputBytes`        |
+| New-session scrollback lines  | Default 10,000; range 0 to 50,000 | Web "Terminal settings"     |
+| Runtime directory path        | 76 bytes (UTF-8)                  | Fixed                       |
 
 ### Files
 

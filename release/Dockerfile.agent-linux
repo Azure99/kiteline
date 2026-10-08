@@ -10,7 +10,7 @@ WORKDIR /var/tmp/build
 FROM toolchain AS native
 ARG NODE_ARCH
 COPY libevent* ncurses* tmux.tar.gz build-linux-native.sh ./
-COPY tmux-paste.patch rename-noreplace.c tmux.terminfo native-inputs.json ./
+COPY tmux-paste.patch tmux-flow-control.patch rename-noreplace.c tmux.terminfo native-inputs.json ./
 RUN sh build-linux-native.sh "$NODE_ARCH"
 COPY licenses/musl-COPYRIGHT /output/native/licenses/musl-COPYRIGHT
 COPY --from=toolchain /var/tmp/build-packages.txt /output/native/build-packages.txt

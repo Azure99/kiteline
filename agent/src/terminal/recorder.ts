@@ -19,7 +19,7 @@ import { spawnJob, type JobChild } from "@kiteline/shared/windows/job";
 interface Pending {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
-  timer: NodeJS.Timeout;
+  timer?: NodeJS.Timeout;
 }
 interface Instance {
   ready: Promise<void>;
@@ -201,12 +201,20 @@ export class Recorder {
   }
   private call<T>(instance: Instance, message: RecorderCall, id = randomUUID()): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        instance.pending.delete(id);
-        reject(
-          new OperationError("timeout", "Recorder did not acknowledge the operation", "unknown"),
-        );
-      }, limits.interactionTimeout);
+      // Redraw's control deadlines already exclude time spent under output backpressure.
+      const timer =
+        message.type === "redraw"
+          ? undefined
+          : setTimeout(() => {
+              instance.pending.delete(id);
+              reject(
+                new OperationError(
+                  "timeout",
+                  "Recorder did not acknowledge the operation",
+                  "unknown",
+                ),
+              );
+            }, limits.interactionTimeout);
       instance.pending.set(id, { resolve: (value) => resolve(value as T), reject, timer });
       try {
         this.write(instance, { ...message, id } as RecorderRequest);

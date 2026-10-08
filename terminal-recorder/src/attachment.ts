@@ -1,4 +1,5 @@
 import { AppError, limits } from "@kiteline/shared/protocol";
+import { terminalOutputCost } from "@kiteline/shared/protocol/ipc";
 import type { TerminalEvent, TerminalFrame } from "@kiteline/shared/protocol/ipc";
 import { eventCost, type Snapshot } from "./model.js";
 
@@ -35,14 +36,16 @@ export class Attachment {
   private pendingBytes = 0;
   private sent = 0;
   private consumed = 0;
-  private timer?: NodeJS.Timeout;
   private closed = false;
   constructor(
     readonly id: string,
-    private stallTimeout: number,
     private send: (piece: Piece) => boolean,
     private onClose: () => void,
+    private changed: () => void,
   ) {}
+  get backlog() {
+    return this.closed ? 0 : this.pendingBytes;
+  }
   start(snapshot: Snapshot, historyLines: number, historyGap: boolean) {
     this.restoration = restore(snapshot, historyLines, historyGap);
     this.pump();
@@ -75,10 +78,7 @@ export class Attachment {
     }
     if (bytes === this.consumed) return;
     this.consumed = bytes;
-    clearTimeout(this.timer);
-    this.timer = undefined;
     this.pump();
-    this.checkStall();
   }
   private next(): Piece | undefined {
     if (this.restoration) {
@@ -104,10 +104,10 @@ export class Attachment {
     while (!this.closed) {
       const piece = this.held ?? this.next();
       if (!piece) break;
-      if (
-        Buffer.isBuffer(piece) &&
-        this.sent - this.consumed + piece.length > terminalOutstandingBytes
-      ) {
+      const credit = terminalOutputCost(
+        Buffer.isBuffer(piece) ? piece.length : Buffer.byteLength(JSON.stringify(piece)),
+      );
+      if (this.sent - this.consumed + credit > terminalOutstandingBytes) {
         this.held = piece;
         break;
       }
@@ -121,20 +121,13 @@ export class Attachment {
         );
         return;
       }
-      if (Buffer.isBuffer(piece)) this.sent += piece.length;
-      else if (piece.type === "ended") {
+      this.sent += credit;
+      if (!Buffer.isBuffer(piece) && piece.type === "ended") {
         this.close();
         return;
       }
     }
-    this.checkStall();
-  }
-  private checkStall() {
-    if (!this.closed && this.sent > this.consumed && !this.timer)
-      this.timer = setTimeout(
-        () => this.fail(new AppError("timeout", "Display has stopped consuming output")),
-        this.stallTimeout,
-      );
+    this.changed();
   }
   fail(error: Error) {
     if (this.closed) return;
@@ -148,7 +141,6 @@ export class Attachment {
   close() {
     if (this.closed) return;
     this.closed = true;
-    clearTimeout(this.timer);
     this.pending = [];
     this.held = undefined;
     this.restoration = undefined;

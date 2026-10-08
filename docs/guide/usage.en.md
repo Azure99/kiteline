@@ -54,6 +54,8 @@ Terminal sessions keep running when you switch tools, workspaces or devices. Lea
 
 Terminal sessions run on the device. Closing the page, losing the network, signing out, restarting the server or deleting the device does not end them. A session ends when its shell or shortcut command exits, you end it, the agent shuts down normally, or the device restarts. For abnormal exit, see [Clean up leftover terminal sessions](reference.en.md#clean-up-leftover-terminal-sessions). The same session can be open in multiple browsers and local terminals at once. All clients can type directly; simultaneous input is interleaved.
 
+If the terminal remains unresponsive, close displays of the same session that you are not using, then try again.
+
 ### Create sessions and shortcuts
 
 New sessions start in the workspace directory and inherit the agent's environment (from service configuration when running as a service; see [Run in the background](devices.en.md#run-in-the-background)). Linux and macOS use the project user's login shell; Windows uses PowerShell. See [Shell](reference.en.md#shell) for defaults and configuration.

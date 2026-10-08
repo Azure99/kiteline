@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { finished } from "node:stream/promises";
-import type { Writable } from "node:stream";
+import type { Readable, Writable } from "node:stream";
 import { AppError, limits } from "@kiteline/shared/protocol";
 import { readLines } from "@kiteline/shared/protocol/stdio";
 import {
@@ -22,7 +22,7 @@ import type { TerminalSource, TerminalIdentity } from "@kiteline/shared/protocol
 interface Pending {
   resolve: (result: string[]) => void;
   reject: (error: Error) => void;
-  timer: NodeJS.Timeout;
+  cancel: () => void;
 }
 interface ControlEvents {
   output: (data: Buffer) => void;
@@ -56,6 +56,62 @@ export class Control {
   private initializing = true;
   private initialDeath?: number | null;
   identity?: TerminalIdentity;
+  paused = false;
+  private stdout?: Readable;
+  private resumed = new Set<() => void>();
+  private deadlines = new Set<{
+    run: () => void;
+    remaining: number;
+    started: number;
+    timer?: NodeJS.Timeout;
+  }>();
+  private abort = new AbortController();
+  get signal() {
+    return this.abort.signal;
+  }
+  schedule = (run: () => void) => {
+    const deadline = {
+      run,
+      remaining: this.timeout,
+      started: Date.now(),
+      timer: undefined as NodeJS.Timeout | undefined,
+    };
+    const cancel = () => {
+      clearTimeout(deadline.timer);
+      this.deadlines.delete(deadline);
+    };
+    const fire = () => {
+      cancel();
+      run();
+    };
+    deadline.run = fire;
+    this.deadlines.add(deadline);
+    if (!this.paused) deadline.timer = setTimeout(fire, deadline.remaining);
+    return cancel;
+  };
+  setPaused(paused: boolean) {
+    if (this.paused === paused || this.disposed) return;
+    this.paused = paused;
+    for (const deadline of this.deadlines) {
+      if (paused) {
+        clearTimeout(deadline.timer);
+        deadline.remaining = Math.max(0, deadline.remaining - (Date.now() - deadline.started));
+      } else {
+        deadline.started = Date.now();
+        deadline.timer = setTimeout(deadline.run, deadline.remaining);
+      }
+    }
+    if (paused) this.stdout?.pause();
+    else {
+      this.stdout?.resume();
+      for (const resume of this.resumed) resume();
+      this.resumed.clear();
+    }
+  }
+  waitReadable() {
+    if (!this.paused || this.disposed) return Promise.resolve();
+    return new Promise<void>((resolve) => this.resumed.add(resolve));
+  }
   constructor(
     private options: TerminalSource,
     private events: ControlEvents,
@@ -80,6 +136,8 @@ export class Control {
     const command = creating
       ? [
           "new-session",
+          "-f",
+          "flow-control",
           "-P",
           "-F",
           "#{pane_id} #{window_id} #{pane_width} #{pane_height}",
@@ -97,7 +155,7 @@ export class Control {
               : [o.shell, "-lc", o.command]
           ).map((value) => value.replace(/;$/, "\\;")),
         ]
-      : ["attach-session", "-E", "-t", tmuxSession];
+      : ["attach-session", "-f", "flow-control", "-E", "-t", tmuxSession];
     if (!creating) this.identity = o;
     let stdout;
     let stderr;
@@ -126,11 +184,11 @@ export class Control {
       void drained.catch(() => {});
       this.stopped = (async () => {
         await job.exited;
+        this.fail(new Error(this.stderr.trim() || "tmux control connection closed"));
         await job.stop();
         await drained;
-      })().then(
-        () => this.fail(new Error(this.stderr.trim() || "tmux control connection closed")),
-        (error: unknown) => this.fail(error instanceof Error ? error : new Error(String(error))),
+      })().catch((error: unknown) =>
+        this.fail(error instanceof Error ? error : new Error(String(error))),
       );
     } else {
       this.child = spawn(tmuxBinary, ["-S", o.socket, "-f", config, "-u", "-C", ...command], {
@@ -154,6 +212,7 @@ export class Control {
     stderr.on("data", (data: Buffer) => {
       if (this.stderr.length < 8192) this.stderr += data.toString();
     });
+    this.stdout = stdout;
     readLines(
       stdout,
       (line) => this.line(line),
@@ -216,11 +275,10 @@ export class Control {
   }
   private expect() {
     return new Promise<string[]>((resolve, reject) => {
-      const timer = setTimeout(
-        () => this.fail(new AppError("timeout", "tmux control command timed out")),
-        this.timeout,
+      const cancel = this.schedule(() =>
+        this.fail(new AppError("timeout", "tmux control command timed out")),
       );
-      this.pending.push({ resolve, reject, timer });
+      this.pending.push({ resolve, reject, cancel });
     });
   }
   command(value: string) {
@@ -251,7 +309,7 @@ export class Control {
       const block = this.block;
       if (text === `%end ${block.guard}` || text === `%error ${block.guard}`) {
         this.block = undefined;
-        clearTimeout(block.pending.timer);
+        block.pending.cancel();
         if (text.startsWith("%error "))
           block.pending.reject(new AppError("command_failed", block.lines.join("\n")));
         else block.pending.resolve(block.lines);
@@ -305,13 +363,17 @@ export class Control {
   dispose(error = new Error("Control closed")) {
     if (this.disposed) return;
     this.disposed = true;
+    this.stdout?.resume();
+    this.abort.abort(error);
+    for (const resume of this.resumed) resume();
+    this.resumed.clear();
     if (this.block) {
-      clearTimeout(this.block.pending.timer);
+      this.block.pending.cancel();
       this.block.pending.reject(error);
       this.block = undefined;
     }
     for (const pending of this.pending.splice(0)) {
-      clearTimeout(pending.timer);
+      pending.cancel();
       pending.reject(error);
     }
     this.terminate();

@@ -33,7 +33,6 @@ export const defaultAgentLimits = {
   rpcTimeout: 30_000,
   terminalInputBytes: 256 * 1024,
   terminalSessionsPerDevice: 32,
-  terminalStallTimeout: 10_000,
   tasksPerDevice: 100,
   taskRunsPerDevice: 4,
   taskHistoryRuns: 20,
@@ -45,7 +44,6 @@ const limitMaximums: Partial<Record<keyof typeof defaultAgentLimits, number>> = 
   rpcTimeout: agentLimits.maxTimerDelay - agentLimits.localClientGraceMs,
   searchTimeout: agentLimits.maxTimerDelay,
   gitWriteTimeout: agentLimits.maxTimerDelay,
-  terminalStallTimeout: agentLimits.maxTimerDelay,
 };
 export interface Identity {
   deviceId: string;

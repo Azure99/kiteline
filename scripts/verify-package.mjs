@@ -108,6 +108,7 @@ if (kind === "agent") {
     assert.equal(actual.get("dist/native/bin/tmux"), identity.tmuxBinary);
     assert.equal(actual.get("dist/native/bin/rename-noreplace"), identity.helperBinary);
     assert.equal(identity.patch, digest(join(source, "native/tmux/paste.patch")));
+    assert.equal(identity.flowControlPatch, digest(join(source, "native/tmux/flow-control.patch")));
     assert.equal(identity.helper, digest(join(source, "native/linux/rename-noreplace.c")));
   } else {
     for (const [file, hash] of Object.entries(identity.files))

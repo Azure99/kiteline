@@ -46,6 +46,7 @@ mkdir tmux
 tar -xf tmux.tar.gz --strip-components=1 -C tmux
 cd tmux
 patch -p1 -i ../tmux-paste.patch
+patch -p1 -i ../tmux-flow-control.patch
 ./configure --enable-static --disable-sixel
 make -j2
 cp tmux /output/native/bin/tmux

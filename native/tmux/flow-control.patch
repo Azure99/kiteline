@@ -1,0 +1,232 @@
+--- a/control.c
++++ b/control.c
+@@ -252,6 +252,8 @@
+ 		return (cp);
+ 
+ 	cp = xcalloc(1, sizeof *cp);
++	if (c->flags & CLIENT_CONTROL_FLOW)
++		wp->flags |= PANE_FLOWCONTROL;
+ 	cp->pane = wp->id;
+ 	RB_INSERT(control_panes, &cs->panes, cp);
+ 
+@@ -331,6 +333,24 @@
+ 	return (&cp->offset);
+ }
+ 
++int
++control_window_blocked(struct window *w)
++{
++	struct client *c;
++	struct control_state *cs;
++
++	TAILQ_FOREACH(c, &clients, entry) {
++		if (!(c->flags & CLIENT_CONTROL_FLOW) || c->session == NULL ||
++		    !session_has(c->session, w))
++			continue;
++		cs = c->control_state;
++		if (EVBUFFER_LENGTH(cs->write_event->output) >= CONTROL_BUFFER_LOW ||
++		    !TAILQ_EMPTY(&cs->all_blocks))
++			return (1);
++	}
++	return (0);
++}
++
+ /* Set pane as on. */
+ void
+ control_set_pane_on(struct client *c, struct window_pane *wp)
+@@ -436,6 +456,9 @@
+ 	struct control_block	*cb;
+ 	uint64_t		 t, age;
+ 
++	if (c->flags & CLIENT_CONTROL_FLOW)
++		return (0);
++
+ 	cb = TAILQ_FIRST(&cp->blocks);
+ 	if (cb == NULL)
+ 		return (0);
+--- a/server-client.c
++++ b/server-client.c
+@@ -361,12 +361,20 @@
+ server_client_set_session(struct client *c, struct session *s)
+ {
+ 	struct session	*old = c->session;
++	struct winlink *wl;
++	struct window_pane *wp;
+ 
+ 	if (s != NULL && c->session != NULL && c->session != s)
+ 		c->last_session = c->session;
+ 	else if (s == NULL)
+ 		c->last_session = NULL;
+ 	c->session = s;
++	if (s != NULL && (c->flags & CLIENT_CONTROL_FLOW)) {
++		RB_FOREACH(wl, winlinks, &s->windows) {
++			TAILQ_FOREACH(wp, &wl->window->panes, entry)
++				wp->flags |= PANE_FLOWCONTROL;
++		}
++	}
+ 	c->flags |= CLIENT_FOCUSED;
+ 
+ 	if (old != NULL && old->curw != NULL)
+@@ -2107,7 +2115,7 @@
+ {
+ 	struct client		*c;
+ 	struct window		*w;
+-	struct window_pane	*wp;
++	struct window_pane	*wp, *wp1;
+ 
+ 	/* Check for window resize. This is done before redrawing. */
+ 	RB_FOREACH(w, windows, &windows)
+@@ -2137,6 +2145,11 @@
+ 		}
+ 		check_window_name(w);
+ 	}
++	RB_FOREACH_SAFE(wp, window_pane_tree, &all_window_panes, wp1) {
++		if ((wp->flags & PANE_FLOWCONTROL) && wp->fd != -1 &&
++		    window_pane_destroy_ready(wp))
++			server_destroy_pane(wp, 1);
++	}
+ }
+ 
+ /* Check if window needs to be resized. */
+@@ -2249,7 +2262,7 @@
+ 	size_t				 minimum;
+ 	struct client			*c;
+ 	struct window_pane_offset	*wpo;
+-	int				 off = 1, flag;
++	int				 off = 1, flag, held = 0;
+ 	u_int				 attached_clients = 0;
+ 	size_t				 new_size;
+ 
+@@ -2270,6 +2283,9 @@
+ 			continue;
+ 		}
+ 		wpo = control_pane_offset(c, wp, &flag);
++		if ((c->flags & CLIENT_CONTROL_FLOW) && wpo != NULL &&
++		    (flag || wp->offset.used - wpo->used >= 65536))
++			held = 1;
+ 		if (wpo == NULL) {
+ 			if (!flag)
+ 				off = 0;
+@@ -2324,7 +2340,7 @@
+ 	 * accept any more data.
+ 	 */
+ 	log_debug("%s: pane %%%u is %s", __func__, wp->id, off ? "off" : "on");
+-	if (off)
++	if (off || held || (wp->flags & PANE_READEOF))
+ 		bufferevent_disable(wp->event, EV_READ);
+ 	else
+ 		bufferevent_enable(wp->event, EV_READ);
+@@ -3111,6 +3127,8 @@
+ 	}
+ 	if (strcmp(next, "no-output") == 0)
+ 		return (CLIENT_CONTROL_NOOUTPUT);
++	if (strcmp(next, "flow-control") == 0)
++		return (CLIENT_CONTROL_FLOW);
+ 	if (strcmp(next, "wait-exit") == 0)
+ 		return (CLIENT_CONTROL_WAITEXIT);
+ 	return (0);
+@@ -3175,6 +3193,8 @@
+ 		strlcat(s, "ignore-size,", sizeof s);
+ 	if (c->flags & CLIENT_CONTROL_NOOUTPUT)
+ 		strlcat(s, "no-output,", sizeof s);
++	if (c->flags & CLIENT_CONTROL_FLOW)
++		strlcat(s, "flow-control,", sizeof s);
+ 	if (c->flags & CLIENT_CONTROL_WAITEXIT)
+ 		strlcat(s, "wait-exit,", sizeof s);
+ 	if (c->flags & CLIENT_CONTROL_PAUSEAFTER) {
+--- a/window.c
++++ b/window.c
+@@ -369,6 +369,12 @@
+ {
+ 	int	n;
+ 
++	if ((wp->flags & PANE_FLOWCONTROL) && wp->fd != -1 &&
++	    ((~wp->flags & PANE_READEOF) ||
++	    (~wp->flags & PANE_STATUSREADY) ||
++	    EVBUFFER_LENGTH(wp->event->input) != 0))
++		return (0);
++
+ 	if (wp->pipe_fd != -1) {
+ 		if (EVBUFFER_LENGTH(wp->pipe_event->output) != 0)
+ 			return (0);
+@@ -1032,12 +1038,14 @@
+ 
+ static void
+ window_pane_error_callback(__unused struct bufferevent *bufev,
+-    __unused short what, void *data)
++    short what, void *data)
+ {
+ 	struct window_pane *wp = data;
+ 
+ 	log_debug("%%%u error", wp->id);
+-	wp->flags |= PANE_EXITED;
++	if ((wp->flags & PANE_FLOWCONTROL) && !(what & EVBUFFER_READ))
++		return;
++	wp->flags |= PANE_EXITED|PANE_READEOF;
+ 
+ 	if (window_pane_destroy_ready(wp))
+ 		server_destroy_pane(wp, 1);
+@@ -1052,6 +1060,7 @@
+ 	    NULL, window_pane_error_callback, wp);
+ 	if (wp->event == NULL)
+ 		fatalx("out of memory");
++	bufferevent_set_max_single_read(wp->event, 16384);
+ 	wp->ictx = input_init(wp, wp->event, &wp->palette);
+ 
+ 	bufferevent_enable(wp->event, EV_READ|EV_WRITE);
+--- a/spawn.c
++++ b/spawn.c
+@@ -476,7 +476,7 @@
+ 	}
+ #endif
+ 
+-	new_wp->flags &= ~PANE_EXITED;
++	new_wp->flags &= ~(PANE_EXITED|PANE_READEOF);
+ 
+ 	sigprocmask(SIG_SETMASK, &oldset, NULL);
+ 	window_pane_set_event(new_wp);
+--- a/resize.c
++++ b/resize.c
+@@ -27,6 +27,15 @@
+ {
+ 	int	zoomed;
+ 
++	if (control_window_blocked(w)) {
++		w->new_sx = sx;
++		w->new_sy = sy;
++		w->new_xpixel = xpixel;
++		w->new_ypixel = ypixel;
++		w->flags |= WINDOW_RESIZE;
++		return;
++	}
++
+ 	/* Check size limits. */
+ 	if (sx < WINDOW_MINIMUM)
+ 		sx = WINDOW_MINIMUM;
+--- a/tmux.h
++++ b/tmux.h
+@@ -1082,6 +1082,8 @@
+ #define PANE_INPUTOFF 0x40
+ #define PANE_CHANGED 0x80
+ #define PANE_EXITED 0x100
++#define PANE_FLOWCONTROL 0x4000
++#define PANE_READEOF 0x8000
+ #define PANE_STATUSREADY 0x200
+ #define PANE_STATUSDRAWN 0x400
+ #define PANE_EMPTY 0x800
+@@ -1859,6 +1861,7 @@
+ #define CLIENT_WINDOWSIZECHANGED 0x400000000ULL
+ #define CLIENT_CLIPBOARDBUFFER 0x800000000ULL
+ #define CLIENT_BRACKETPASTING 0x1000000000ULL
++#define CLIENT_CONTROL_FLOW 0x2000000000ULL
+ #define CLIENT_ALLREDRAWFLAGS		\
+ 	(CLIENT_REDRAWWINDOW|		\
+ 	 CLIENT_REDRAWSTATUS|		\
+@@ -3248,6 +3251,7 @@
+ void	control_set_pane_off(struct client *, struct window_pane *);
+ void	control_continue_pane(struct client *, struct window_pane *);
+ void	control_pause_pane(struct client *, struct window_pane *);
++int	control_window_blocked(struct window *);
+ struct window_pane_offset *control_pane_offset(struct client *,
+ 	   struct window_pane *, int *);
+ void	control_reset_offsets(struct client *);

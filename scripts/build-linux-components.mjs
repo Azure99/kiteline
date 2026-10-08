@@ -61,6 +61,7 @@ export function buildLinuxComponents(destination, architecture = "amd64") {
       "packages.txt": "release/agent-linux-packages.txt",
       "build-linux-native.sh": "scripts/build-linux-native.sh",
       "tmux-paste.patch": "native/tmux/paste.patch",
+      "tmux-flow-control.patch": "native/tmux/flow-control.patch",
       "rename-noreplace.c": "native/linux/rename-noreplace.c",
       "tmux.terminfo": "native/tmux/tmux.terminfo",
     };
@@ -73,6 +74,7 @@ export function buildLinuxComponents(destination, architecture = "amd64") {
       toolchain,
       recipe: digest(join(temporary, "build-linux-native.sh")),
       patch: digest(join(temporary, "tmux-paste.patch")),
+      flowControlPatch: digest(join(temporary, "tmux-flow-control.patch")),
       helper: digest(join(temporary, "rename-noreplace.c")),
       terminfo: digest(join(temporary, "tmux.terminfo")),
     };
@@ -132,6 +134,7 @@ export function buildLinuxComponents(destination, architecture = "amd64") {
           tmux: nativeInputs.sources.tmux.version,
           tmuxSource: nativeInputs.sources.tmux.sha256,
           patch: nativeInputs.patch,
+          flowControlPatch: nativeInputs.flowControlPatch,
           helper: nativeInputs.helper,
           terminfo: nativeInputs.terminfo,
           terminfoResources: {

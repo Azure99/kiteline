@@ -43,12 +43,16 @@ export class Model {
     rows: number,
     readonly historyLines: number,
     private fault: (error: Error) => void,
+    private changed: () => void,
   ) {
     this.terminal = new Terminal({ ...terminalOptions(historyLines), cols, rows });
     initializeTerminalUnicode(this.terminal);
     adaptTerminalScrolling(this.terminal);
     this.terminal.loadAddon(this.serializer);
     this.rotate();
+  }
+  get backlog() {
+    return this.pendingBytes;
   }
   ordered<T>(action: () => T | Promise<T>): Promise<T> {
     // Only adjacent output that has not started parsing can share a batch.
@@ -63,6 +67,7 @@ export class Model {
     if (!data) return;
     const bytes = Buffer.byteLength(data);
     this.pendingBytes += bytes;
+    this.changed();
     if (this.pendingBytes > modelLimits.terminalModelPendingBytes) {
       this.fault(
         new AppError("limit_exceeded", "Terminal recording parser backlog exceeds the limit"),
@@ -84,22 +89,38 @@ export class Model {
         this.record({ type: "output", data });
       } finally {
         this.pendingBytes -= batch.bytes;
+        this.changed();
       }
     }).catch((error: Error) => this.fault(error));
     this.pendingOutput = batch;
   }
   resize(cols: number, rows: number) {
+    const event: TerminalEvent = { type: "resize", cols, rows };
+    const bytes = eventCost(event);
+    this.pendingBytes += bytes;
+    this.changed();
     void this.ordered(() => {
-      if (this.stopped || (this.terminal.cols === cols && this.terminal.rows === rows)) return;
-      this.terminal.resize(cols, rows);
-      this.record({ type: "resize", cols, rows });
+      try {
+        if (this.stopped || (this.terminal.cols === cols && this.terminal.rows === rows)) return;
+        this.terminal.resize(cols, rows);
+        this.record(event);
+      } finally {
+        this.pendingBytes -= bytes;
+        this.changed();
+      }
     }).catch((error: Error) => this.fault(error));
   }
-  waitForSize(cols: number, rows: number, timeout: number) {
+  waitForSize(
+    cols: number,
+    rows: number,
+    schedule: (fail: () => void) => () => void,
+    signal: AbortSignal,
+  ) {
     return new Promise<void>((resolve, reject) => {
       const cleanup = () => {
-        clearTimeout(timer);
+        cancel();
         this.listeners.delete(check);
+        signal.removeEventListener("abort", abort);
       };
       const check = () => {
         if (this.terminal.cols === cols && this.terminal.rows === rows) {
@@ -107,7 +128,7 @@ export class Model {
           resolve();
         }
       };
-      const timer = setTimeout(() => {
+      const cancel = schedule(() => {
         cleanup();
         reject(
           new AppError(
@@ -115,7 +136,16 @@ export class Model {
             "Actual terminal dimensions were not received; reopen the display and try again",
           ),
         );
-      }, timeout);
+      });
+      const abort = () => {
+        cleanup();
+        reject(signal.reason);
+      };
+      signal.addEventListener("abort", abort, { once: true });
+      if (signal.aborted) {
+        abort();
+        return;
+      }
       this.listeners.add(check);
       void this.ordered(check);
     });

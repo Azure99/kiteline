@@ -95,6 +95,8 @@ export class InputQueue {
   }
   private async drain() {
     while (!this.closed && this.queue.length) {
+      await this.control.waitReadable();
+      if (this.closed || !this.queue.length) break;
       const item = this.queue.shift()!;
       try {
         if (item.type === "redraw") {
@@ -102,7 +104,12 @@ export class InputQueue {
           item.resolve();
         } else if (item.type === "resize") {
           await this.control.resize(item.cols, item.rows);
-          await this.model.waitForSize(item.cols, item.rows, limits.interactionTimeout);
+          await this.model.waitForSize(
+            item.cols,
+            item.rows,
+            this.control.schedule,
+            this.control.signal,
+          );
         } else {
           const identity = this.control.identity;
           if (!identity) throw new AppError("busy", "Terminal creation is not complete");

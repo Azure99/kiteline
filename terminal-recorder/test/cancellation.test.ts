@@ -19,7 +19,6 @@ test("create cancellation fences both same-chunk admission and a retiring record
       "--agent",
       JSON.stringify({
         terminalInputBytes: 65536,
-        terminalStallTimeout: 3000,
       }),
     ],
     { stdio: "pipe" },

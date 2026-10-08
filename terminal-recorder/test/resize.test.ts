@@ -17,7 +17,7 @@ test("redraw keeps preceding Web and actual tmux sizes while the model parses ou
       rows: 30,
       historyLines: 1000,
     },
-    { terminalInputBytes: 65536, terminalStallTimeout: 3000 },
+    { terminalInputBytes: 65536 },
     () => true,
     () => {},
   );

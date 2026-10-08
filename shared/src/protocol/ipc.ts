@@ -2,7 +2,6 @@ import type { KitelineError, Reply } from "./index.js";
 
 export interface RecorderConfig {
   terminalInputBytes: number;
-  terminalStallTimeout: number;
 }
 export interface TerminalIdentity {
   socket: string;
@@ -74,3 +73,8 @@ export type RecorderMessage =
 
 type WithoutId<T> = T extends { id: string } ? Omit<T, "id"> : never;
 export type RecorderCall = WithoutId<RecorderRequest>;
+
+// Small frames also consume credit for their WebSocket and recorder IPC envelopes.
+export function terminalOutputCost(payloadBytes: number) {
+  return Math.max(payloadBytes, 128);
+}
