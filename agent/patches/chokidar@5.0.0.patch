@@ -1,0 +1,202 @@
+diff --git a/handler.js b/handler.js
+index 6b12880bfcdae186dd738a9397b53ebb5849f0ac..fe91d86c3f915fb43857d6e56374b444937abd7a 100644
+--- a/handler.js
++++ b/handler.js
+@@ -152,7 +152,7 @@ const fsWatchBroadcast = (fullPath, listenerType, val1, val2, val3) => {
+  * @param options to be passed to fs_watch
+  * @param handlers container for event listener functions
+  */
+-const setFsWatchListener = (path, fullPath, options, handlers) => {
++const setFsWatchListener = (path, fullPath, options, handlers, stats) => {
+     const { listener, errHandler, rawEmitter } = handlers;
+     let cont = FsWatchInstances.get(fullPath);
+     let watcher;
+@@ -162,17 +162,15 @@ const setFsWatchListener = (path, fullPath, options, handlers) => {
+             return;
+         return watcher.close.bind(watcher);
+     }
+-    if (cont) {
+-        addAndConvert(cont, KEY_LISTENERS, listener);
+-        addAndConvert(cont, KEY_ERR, errHandler);
+-        addAndConvert(cont, KEY_RAW, rawEmitter);
+-    }
+-    else {
+-        watcher = createFsWatchInstance(path, options, fsWatchBroadcast.bind(null, fullPath, KEY_LISTENERS), errHandler, // no need to use broadcast here
++    const createWatcher = () => {
++        const onError = cont ? fsWatchBroadcast.bind(null, fullPath, KEY_ERR) : errHandler;
++        const next = createFsWatchInstance(path, options, fsWatchBroadcast.bind(null, fullPath, KEY_LISTENERS), onError,
+         fsWatchBroadcast.bind(null, fullPath, KEY_RAW));
+-        if (!watcher)
++        if (!next)
+             return;
+-        watcher.on(EV.ERROR, async (error) => {
++        next.on(EV.ERROR, async (error) => {
++            if (cont && cont.watcher !== next)
++                return;
+             const broadcastErr = fsWatchBroadcast.bind(null, fullPath, KEY_ERR);
+             if (cont)
+                 cont.watcherUnusable = true; // documented since Node 10.4.1
+@@ -191,11 +189,34 @@ const setFsWatchListener = (path, fullPath, options, handlers) => {
+                 broadcastErr(error);
+             }
+         });
++        return next;
++    };
++    if (cont) {
++        addAndConvert(cont, KEY_LISTENERS, listener);
++        addAndConvert(cont, KEY_ERR, errHandler);
++        addAndConvert(cont, KEY_RAW, rawEmitter);
++        if (isLinux && stats && (cont.ino !== stats.ino || cont.dev !== stats.dev)) {
++            const next = createWatcher();
++            if (next) {
++                // Keep every owner's listeners and closers attached to the shared container.
++                cont.watcher.close();
++                cont.watcher = next;
++                cont.ino = stats.ino;
++                cont.dev = stats.dev;
++            }
++        }
++    }
++    else {
++        watcher = createWatcher();
++        if (!watcher)
++            return;
+         cont = {
+             listeners: listener,
+             errHandlers: errHandler,
+             rawEmitters: rawEmitter,
+             watcher,
++            ino: stats?.ino,
++            dev: stats?.dev,
+         };
+         FsWatchInstances.set(fullPath, cont);
+     }
+@@ -302,7 +323,7 @@ export class NodeFsHandler {
+      * @param listener on fs change
+      * @returns closer for the watcher instance
+      */
+-    _watchWithNodeFs(path, listener) {
++    _watchWithNodeFs(path, listener, stats) {
+         const opts = this.fsw.options;
+         const directory = sp.dirname(path);
+         const basename = sp.basename(path);
+@@ -328,7 +349,7 @@ export class NodeFsHandler {
+                 listener,
+                 errHandler: this._boundHandleError,
+                 rawEmitter: this.fsw._emitRaw,
+-            });
++            }, stats);
+         }
+         return closer;
+     }
+@@ -365,7 +386,7 @@ export class NodeFsHandler {
+                     if ((isMacos || isLinux || isFreeBSD) && prevStats.ino !== newStats.ino) {
+                         this.fsw._closeFile(path);
+                         prevStats = newStats;
+-                        const closer = this._watchWithNodeFs(file, listener);
++                        const closer = this._watchWithNodeFs(file, listener, newStats);
+                         if (closer)
+                             this.fsw._addPathCloser(path, closer);
+                     }
+@@ -390,7 +411,7 @@ export class NodeFsHandler {
+             }
+         };
+         // kick off the watcher
+-        const closer = this._watchWithNodeFs(file, listener);
++        const closer = this._watchWithNodeFs(file, listener, stats);
+         // emit an add event if we're supposed to
+         if (!(initialAdd && this.fsw.options.ignoreInitial) && this.fsw._isntIgnored(file)) {
+             if (!this.fsw._throttle(EV.ADD, file, 0))
+@@ -539,6 +560,7 @@ export class NodeFsHandler {
+         this.fsw._getWatchedDir(dir);
+         let throttler;
+         let closer;
++        let retired = false;
+         const oDepth = this.fsw.options.depth;
+         if ((oDepth == null || depth <= oDepth) && !this.fsw._symlinkPaths.has(realpath)) {
+             if (!target) {
+@@ -546,14 +568,36 @@ export class NodeFsHandler {
+                 if (this.fsw.closed)
+                     return;
+             }
+-            closer = this._watchWithNodeFs(dir, (dirPath, stats) => {
++            closer = this._watchWithNodeFs(dir, async (dirPath, currentStats) => {
+                 // if current directory is removed, do nothing
+-                if (stats && stats.mtimeMs === 0)
++                if (retired || this.fsw.closed || (currentStats && currentStats.mtimeMs === 0))
+                     return;
++                if (isLinux && !this.fsw.options.usePolling) {
++                    try {
++                        const next = await lstat(dirPath);
++                        if (retired || this.fsw.closed)
++                            return;
++                        if (next.ino !== stats.ino || next.dev !== stats.dev) {
++                            retired = true;
++                            this.fsw._remove(sp.dirname(dirPath), sp.basename(dirPath), true, true);
++                            await this._addToNodeFs(dirPath, false, wh, depth, target);
++                            return;
++                        }
++                    } catch (error) {
++                        if (error.code === 'ENOENT') {
++                            retired = true;
++                            this.fsw._remove(sp.dirname(dirPath), sp.basename(dirPath), true, true);
++                        } else this.fsw._handleError(error);
++                        return;
++                    }
++                }
+                 this._handleRead(dirPath, false, wh, target, dir, depth, throttler);
+-            });
++            }, stats);
+         }
+-        return closer;
++        if (closer) return () => {
++            retired = true;
++            closer();
++        };
+     }
+     /**
+      * Handle added file, directory, or glob pattern.
+@@ -606,7 +650,10 @@ export class NodeFsHandler {
+                 const parent = sp.dirname(wh.watchPath);
+                 this.fsw._getWatchedDir(parent).add(wh.watchPath);
+                 this.fsw._emit(EV.ADD, wh.watchPath, stats);
+-                closer = await this._handleDir(parent, stats, initialAdd, depth, path, wh, targetPath);
++                const parentStats = isLinux && !this.fsw.options.usePolling ? await lstat(parent) : stats;
++                if (this.fsw.closed)
++                    return;
++                closer = await this._handleDir(parent, parentStats, initialAdd, depth, path, wh, targetPath);
+                 if (this.fsw.closed)
+                     return;
+                 // preserve this symlink's target path
+diff --git a/index.js b/index.js
+index f26482978d544bf39828bd152f2369d53413bc27..b3b99286b36cfef357c409aba7630ff44bdd51ec 100644
+--- a/index.js
++++ b/index.js
+@@ -706,7 +706,7 @@ export class FSWatcher extends EventEmitter {
+      * @param directory within which the following item is located
+      * @param item      base path of item/directory
+      */
+-    _remove(directory, item, isDirectory) {
++    _remove(directory, item, isDirectory, replaced = false) {
+         // if what is being deleted is a directory, get that directory's paths
+         // for recursive deleting and cleaning of watched object
+         // if it is not a directory, nestedDirectoryChildren will be empty array
+@@ -716,7 +716,8 @@ export class FSWatcher extends EventEmitter {
+             isDirectory != null ? isDirectory : this._watched.has(path) || this._watched.has(fullPath);
+         // prevent duplicate handling in case of arriving here nearly simultaneously
+         // via multiple paths (such as _handleFile and _handleDir)
+-        if (!this._throttle('remove', path, 100))
++        // A new inode needs fresh descendants even after a recent removal at the same path.
++        if (!replaced && !this._throttle('remove', path, 100))
+             return;
+         // if the only watched file is removed, watch for its return
+         if (!isDirectory && this._watched.size === 1) {
+@@ -727,7 +728,7 @@ export class FSWatcher extends EventEmitter {
+         const wp = this._getWatchedDir(path);
+         const nestedDirectoryChildren = wp.getChildren();
+         // Recursively remove children directories / files.
+-        nestedDirectoryChildren.forEach((nested) => this._remove(path, nested));
++        nestedDirectoryChildren.forEach((nested) => this._remove(path, nested, undefined, replaced));
+         // Check if item was on the watched list and remove it
+         const parent = this._getWatchedDir(directory);
+         const wasTracked = parent.has(item);

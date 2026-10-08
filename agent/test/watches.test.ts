@@ -169,7 +169,11 @@ test("dependencies stay ignored while repositories join metadata watching before
   await expect
     .poll(() => events.some((event) => event.type === "workspace.changed"), pollOptions)
     .toBe(true);
+  events.length = 0;
   watches.reposComplete("a", new Set());
+  await expect
+    .poll(() => events.some((event) => event.status === "normal"), pollOptions)
+    .toBe(true);
   events.length = 0;
   await run("git", ["-C", nested, "symbolic-ref", "HEAD", "refs/heads/removed"]);
   await new Promise((resolve) => setTimeout(resolve, 450));
@@ -302,3 +306,116 @@ test("discovery resolves a linked .git directory for external metadata watching"
     .poll(() => events.some((event) => event.type === "workspace.changed"), pollOptions)
     .toBe(true);
 });
+
+test("closing during startup permits a new subscription and immediate write notifications", async () => {
+  const { root, watches, events, workspace } = await setup();
+  const a = join(root, "a"),
+    b = join(root, "b");
+  await mkdir(a);
+  await mkdir(b);
+  watches.set([workspace("a", a)]);
+  const closing = watches.close();
+  watches.set([workspace("b", b)]);
+  await closing;
+  await expect
+    .poll(
+      () => events.some((event) => event.workspaceId === "b" && event.status === "normal"),
+      pollOptions,
+    )
+    .toBe(true);
+  expect(events.some((event) => event.workspaceId === "a")).toBe(false);
+  events.length = 0;
+  watches.changed("b", true);
+  expect(events).toMatchObject([{ type: "workspace.changed", workspaceId: "b" }]);
+  events.length = 0;
+  watches.set([workspace("a", a), workspace("b", b)]);
+  await writeFile(join(b, "changed"), "still subscribed");
+  await expect
+    .poll(
+      () => events.some((event) => event.type === "workspace.changed" && event.workspaceId === "b"),
+      pollOptions,
+    )
+    .toBe(true);
+  await watches.close();
+  events.length = 0;
+  watches.set([workspace("a", a)]);
+  await expect
+    .poll(
+      () => events.some((event) => event.workspaceId === "a" && event.status === "normal"),
+      pollOptions,
+    )
+    .toBe(true);
+});
+
+test.runIf(process.platform === "linux")(
+  "atomic directory replacement keeps overlapping workspaces watching",
+  async () => {
+    const { root, watches, events, workspace } = await setup();
+    const project = join(root, "project"),
+      child = join(project, "child"),
+      replacement = join(root, "replacement");
+    await mkdir(child, { recursive: true });
+    await mkdir(replacement);
+    watches.set([workspace("a", project), workspace("b", child)]);
+    await expect
+      .poll(
+        () =>
+          new Set(
+            events.filter((event) => event.status === "normal").map((event) => event.workspaceId),
+          ).size,
+        pollOptions,
+      )
+      .toBe(2);
+    events.length = 0;
+    await rename(replacement, child);
+    await expect
+      .poll(
+        () =>
+          new Set(
+            events
+              .filter((event) => event.type === "workspace.changed")
+              .map((event) => event.workspaceId),
+          ).size,
+        pollOptions,
+      )
+      .toBe(2);
+    events.length = 0;
+    await writeFile(join(child, "new"), "new directory");
+    await expect
+      .poll(
+        () =>
+          new Set(
+            events
+              .filter((event) => event.type === "workspace.changed")
+              .map((event) => event.workspaceId),
+          ).size,
+        pollOptions,
+      )
+      .toBe(2);
+    events.length = 0;
+    await writeFile(join(root, "new-file"), "atomic file replacement");
+    await rename(join(root, "new-file"), join(child, "new"));
+    await expect
+      .poll(
+        () =>
+          new Set(
+            events
+              .filter((event) => event.type === "workspace.changed")
+              .map((event) => event.workspaceId),
+          ).size,
+        pollOptions,
+      )
+      .toBe(2);
+    watches.set([workspace("b", child)]);
+    events.length = 0;
+    await appendFile(join(child, "new"), "one remaining owner");
+    await expect
+      .poll(
+        () =>
+          events.some((event) => event.type === "workspace.changed" && event.workspaceId === "b"),
+        pollOptions,
+      )
+      .toBe(true);
+    expect(events.some((event) => event.workspaceId === "a")).toBe(false);
+  },
+);

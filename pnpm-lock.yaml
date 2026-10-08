@@ -9,6 +9,7 @@ overrides:
 
 patchedDependencies:
   '@xterm/xterm@6.1.0-beta.304': 90c5d0471eff9174ef3091ee0017b1d126bde4b7dbaaf97c900c9827c013ab20
+  chokidar@5.0.0: 933e7ef0d51b0a2819433d5d3a9fad4728a649f38e2e00ae7e8548dc9aa0dcc6
   https-proxy-agent@9.1.0: fdfac9eda01004a9695c7008fdf63694acaf498dda4b1ff93cdd421faf637afd
 
 importers:
@@ -59,7 +60,7 @@ importers:
         version: link:../shared
       chokidar:
         specifier: 5.0.0
-        version: 5.0.0
+        version: 5.0.0(patch_hash=933e7ef0d51b0a2819433d5d3a9fad4728a649f38e2e00ae7e8548dc9aa0dcc6)
       croner:
         specifier: 10.0.1
         version: 10.0.1
@@ -2756,7 +2757,7 @@ snapshots:
 
   chai@6.2.2: {}
 
-  chokidar@5.0.0:
+  chokidar@5.0.0(patch_hash=933e7ef0d51b0a2819433d5d3a9fad4728a649f38e2e00ae7e8548dc9aa0dcc6):
     dependencies:
       readdirp: 5.1.1
 

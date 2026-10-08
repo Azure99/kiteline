@@ -182,11 +182,12 @@
 
 ## 变化监听
 
-- 浏览器通过事件 WebSocket 的 `watch.set` 声明正在使用的设备和工作区。server 汇总所有浏览器的目标，按设备下发，agent 只监听其中仍登记的工作区（`agent/src/watches.ts`，使用 chokidar，不跟随符号链接，不轮询）。
-- 工作树监听排除 `agent/src/watches.ts` 的 `excluded` 目录、`.git` 内部，以及工作区内已发现仓库的 gitDir 和 commonDir。agent 同时监听根目录的上一级，根目录被替换后能重新挂上。被排除的目录仍可浏览，只靠定时刷新更新。
+- 浏览器通过事件 WebSocket 的 `watch.set` 声明正在使用的设备和工作区。server 汇总所有浏览器的目标，按设备下发，agent 只监听其中仍登记的工作区。监听实现位于 `agent/src/watch-roots.ts`，使用 chokidar，不跟随符号链接，不轮询。Linux 在独立 worker 内处理监听建立、文件系统事件和关闭，避免这些工作阻塞 agent 的交互请求；其他平台在主线程运行。
+- 工作树监听排除 `agent/src/watch-roots.ts` 的 `excluded` 目录、`.git` 内部，以及工作区内已发现仓库的 gitDir 和 commonDir。agent 同时监听根目录的上一级，根目录被替换后能重新挂上。Linux 的 Chokidar 补丁按目录身份变化重建监听，并更新共享底层 handle，避免同名新目录继续引用旧 inode。被排除的目录仍可浏览，只靠定时刷新更新。
 - Git 元数据监听覆盖每个已发现仓库的 gitDir 和 commonDir，只看顶层文件和 `gitTrees` 指定的状态目录，不看 `objects/`。多个工作区共享同一元数据目录时共用一个监听。
 - 文件系统事件按 `watchDebounce` 合并为 `workspace.changed`，通知文件、Git 和仓库发现刷新，不带文件内容。agent 自己完成写操作时立即发送事件。
-- 全部监听就绪后 agent 发送 `watch.status` 为 `normal`；任一监听报错时为 `degraded` 并附原因，界面显示监听退化。重新订阅会重建监听。
+- 全部监听就绪后 agent 发送 `watch.status` 为 `normal`；任一监听报错时为 `degraded` 并附原因，界面显示监听退化。Linux 保留同一监听的首次错误原因，抑制后续重复错误报告，已建立的部分监听继续工作。worker 异常退出也报告 degraded，不自动重启；后续明确订阅可重新建立 worker。
+- 没有订阅或控制连接断开时释放监听；Linux 同时结束当前 worker，最终停止等待关闭中的 worker 全部退出。重连后的新订阅与旧 worker 的退出分开处理，旧状态不会覆盖新订阅。agent 写操作的即时变化通知仍直接由主线程发出。
 - 浏览器的刷新节奏在 `web/src/lib/use-workspace-refresh.ts`：事件合并使用 `watchDebounce`，可见页面还按 `visibleRefreshInterval` 定时刷新；进入工具立即刷新，重新连接和页面恢复可见时也触发刷新。同一视图同时只有一个刷新请求，期间到达的事件在它完成后再触发一次。
 - 文件工具刷新当前目录，并重新读取当前显示的打开文件：revision 与草稿的基准 revision 不同时只标记磁盘已变化，不替换编辑器中的内容。草稿、磁盘和 Git index 的关系见 [Git 写操作](git.md#写操作)。
 

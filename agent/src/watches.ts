@@ -1,215 +1,101 @@
-import type { Stats } from "node:fs";
-import { dirname, relative, sep } from "node:path";
-import { watch, type FSWatcher } from "chokidar";
-import {
-  asError,
-  limits,
-  type Repo,
-  type Workspace,
-  type WorkspaceEvent,
-} from "@kiteline/shared/protocol";
+import { Worker } from "node:worker_threads";
+import { asError, type Repo, type Workspace, type WorkspaceEvent } from "@kiteline/shared/protocol";
+import { WatchRoots } from "./watch-roots.js";
+import type { WatchCommand, WatchMessage } from "./watch-worker.js";
 
-const excluded = new Set(["node_modules", ".pnpm", ".venv", "dist", "build", "target"]);
-const gitTrees = new Set(["refs", "rebase-merge", "rebase-apply", "sequencer"]);
-interface Watched {
-  watcher: FSWatcher;
-  owners: Set<string>;
-  ready: boolean;
-  error?: string;
-}
-interface Active {
-  root: string;
-  repos: Map<string, Repo>;
-  metadataRoots: string[];
-  tree?: Watched;
+interface Instance {
+  worker: Worker;
+  done: Promise<void>;
 }
 
 export class WorkspaceWatches {
-  private active = new Map<string, Active>();
-  private git = new Map<string, Watched>();
+  private local?: WatchRoots;
+  private instance?: Instance;
   private closing = new Set<Promise<void>>();
-  private pending = new Set<string>();
-  private events?: NodeJS.Timeout;
-  constructor(private send: (event: WorkspaceEvent) => void) {}
+  private active = new Set<string>();
+  private revision = 0;
+
+  constructor(private send: (event: WorkspaceEvent) => void) {
+    if (process.platform !== "linux") this.local = new WatchRoots(send);
+  }
 
   set(workspaces: Workspace[]) {
-    const ids = new Set(workspaces.map((item) => item.id));
-    for (const [id, active] of this.active)
-      if (!ids.has(id)) {
-        if (active.tree) this.stop(active.tree);
-        this.active.delete(id);
-        this.pending.delete(id);
-      }
-    for (const item of workspaces)
-      if (!this.active.has(item.id))
-        this.active.set(item.id, { root: item.path, repos: new Map(), metadataRoots: [] });
-    this.reconcile();
+    if (this.local) return this.local.set(workspaces);
+    this.active = new Set(workspaces.map((workspace) => workspace.id));
+    this.revision++;
+    if (!workspaces.length) {
+      void this.close();
+      return;
+    }
+    try {
+      this.instance ??= this.start();
+      this.post({ type: "set", revision: this.revision, workspaces });
+    } catch (error) {
+      this.failed(asError(error).message);
+    }
   }
 
   repo(workspaceId: string, repo: Repo) {
-    const active = this.active.get(workspaceId);
-    if (!active) return;
-    const previous = [...active.repos.values()].find((item) => item.rootPath === repo.rootPath);
-    if (previous?.id === repo.id) return;
-    if (previous) active.repos.delete(previous.id);
-    active.repos.set(repo.id, repo);
-    this.reconcile();
+    if (this.local) this.local.repo(workspaceId, repo);
+    else this.post({ type: "repo", workspaceId, repo });
   }
 
   reposComplete(workspaceId: string, repoIds: Set<string>) {
-    const active = this.active.get(workspaceId);
-    if (!active) return;
-    for (const id of active.repos.keys()) if (!repoIds.has(id)) active.repos.delete(id);
-    this.reconcile();
+    if (this.local) this.local.reposComplete(workspaceId, repoIds);
+    else this.post({ type: "reposComplete", workspaceId, repoIds });
   }
 
   changed(workspaceId: string, immediate = false) {
-    if (!this.active.has(workspaceId)) return;
-    if (immediate) {
-      this.pending.delete(workspaceId);
-      this.emit(workspaceId);
-      return;
-    }
-    this.pending.add(workspaceId);
-    this.events ??= setTimeout(() => {
-      this.events = undefined;
-      for (const id of this.pending) this.emit(id);
-      this.pending.clear();
-    }, limits.watchDebounce);
+    if (this.local) this.local.changed(workspaceId, immediate);
+    else if (immediate && this.active.has(workspaceId))
+      this.send({ type: "workspace.changed", workspaceId, scopes: ["files", "git", "repos"] });
+    else this.post({ type: "changed", workspaceId });
   }
 
-  private emit(workspaceId: string) {
-    this.send({ type: "workspace.changed", workspaceId, scopes: ["files", "git", "repos"] });
+  private post(message: WatchCommand) {
+    this.instance?.worker.postMessage(message);
   }
 
-  private reconcile() {
-    const desired = new Map<string, Set<string>>();
-    for (const [id, active] of this.active)
-      for (const repo of active.repos.values())
-        for (const root of [repo.gitDir, repo.commonDir]) {
-          if (!desired.has(root)) desired.set(root, new Set());
-          desired.get(root)!.add(id);
-        }
-    for (const [root, entry] of this.git)
-      if (!desired.has(root)) {
-        this.stop(entry);
-        this.git.delete(root);
-      }
-    for (const [root, owners] of desired) {
-      const existing = this.git.get(root);
-      if (existing) existing.owners = owners;
-      else
-        this.git.set(
-          root,
-          this.start(root, (path, info) => ignoreGit(root, path, info), owners),
-        );
-    }
-    for (const [id, active] of this.active) {
-      const metadataRoots = [...desired.keys()]
-        .filter((root) => {
-          const path = relative(active.root, root);
-          return (
-            within(active.root, root) &&
-            !path.split(sep).some((name) => name === ".git" || excluded.has(name))
-          );
-        })
-        .sort();
-      if (
-        !active.tree ||
-        metadataRoots.length !== active.metadataRoots.length ||
-        metadataRoots.some((root, index) => root !== active.metadataRoots[index])
-      ) {
-        if (active.tree) this.stop(active.tree);
-        active.metadataRoots = metadataRoots;
-        active.tree = this.start(
-          active.root,
-          (path) => ignoreTree(active.root, metadataRoots, path),
-          new Set([id]),
-        );
-      }
-      this.report(id);
-    }
+  private start(): Instance {
+    // Tests use the source facade and the same compiled worker shipped in the package.
+    const worker = new Worker(new URL("../dist/watch-worker.js", import.meta.url));
+    let finish!: () => void;
+    const instance = { worker, done: new Promise<void>((resolve) => (finish = resolve)) };
+    let error: Error | undefined;
+    worker.on("message", ({ revision, event }: WatchMessage) => {
+      if (this.instance !== instance || !this.active.has(event.workspaceId)) return;
+      if (event.type === "watch.status" && revision !== this.revision) return;
+      this.send(event);
+    });
+    worker.on("error", (reason) => {
+      error = reason;
+    });
+    worker.once("exit", (code) => {
+      if (this.instance === instance) {
+        this.instance = undefined;
+        this.failed(error?.message ?? `File watcher exited unexpectedly (${code})`);
+      } else if (error) console.error("File watcher cleanup:", error);
+      finish();
+    });
+    return instance;
   }
 
-  private start(
-    root: string,
-    ignored: (path: string, info?: Stats) => boolean,
-    owners: Set<string>,
-  ): Watched {
-    const parent = dirname(root);
-    const watcher = watch([root, parent], {
-      // Watching the parent boundary lets Chokidar reattach a replaced root.
-      ignored: (path, info) => path !== parent && (!within(root, path) || ignored(path, info)),
-      ignoreInitial: true,
-      followSymlinks: false,
-      usePolling: false,
-    });
-    const entry: Watched = { watcher, owners, ready: false };
-    watcher.on("all", () => {
-      for (const id of entry.owners) this.changed(id);
-    });
-    watcher.on("ready", () => {
-      entry.ready = true;
-      for (const id of entry.owners) this.report(id);
-    });
-    watcher.on("error", (error) => {
-      entry.error = asError(error).message;
-      for (const id of entry.owners) this.report(id);
-    });
-    return entry;
-  }
-
-  private report(workspaceId: string) {
-    const active = this.active.get(workspaceId);
-    if (!active?.tree) return;
-    const entries = [
-      active.tree,
-      ...[...this.git.values()].filter((entry) => entry.owners.has(workspaceId)),
-    ];
-    const reason = entries.find((entry) => entry.error)?.error;
-    if (!reason && entries.some((entry) => !entry.ready)) return;
-    this.send({
-      type: "watch.status",
-      workspaceId,
-      status: reason ? "degraded" : "normal",
-      reason,
-    });
-  }
-
-  private stop(entry: Watched) {
-    const closing = entry.watcher
-      .close()
-      .catch((error: unknown) => console.error("Watcher cleanup:", error));
-    this.closing.add(closing);
-    void closing.then(() => this.closing.delete(closing));
+  private failed(reason: string) {
+    console.error("File watcher:", reason);
+    for (const workspaceId of this.active)
+      this.send({ type: "watch.status", workspaceId, status: "degraded", reason });
   }
 
   async close() {
-    clearTimeout(this.events);
-    this.events = undefined;
-    this.pending.clear();
-    this.set([]);
+    if (this.local) return this.local.close();
+    this.active.clear();
+    const instance = this.instance;
+    if (instance) {
+      this.instance = undefined;
+      instance.worker.postMessage({ type: "close" } satisfies WatchCommand);
+      this.closing.add(instance.done);
+      void instance.done.then(() => this.closing.delete(instance.done));
+    }
     await Promise.all(this.closing);
   }
-}
-
-function within(root: string, path: string) {
-  return path === root || path.startsWith(root.endsWith(sep) ? root : root + sep);
-}
-
-function ignoreTree(root: string, metadataRoots: string[], path: string) {
-  const parts = relative(root, path).split(sep);
-  const git = parts.indexOf(".git");
-  return (
-    parts.some((name) => excluded.has(name)) ||
-    (git !== -1 && git < parts.length - 1) ||
-    metadataRoots.some((metadata) => path !== metadata && within(metadata, path))
-  );
-}
-
-function ignoreGit(root: string, path: string, info?: Stats) {
-  const local = relative(root, path);
-  if (!local) return false;
-  const parts = local.split(sep);
-  return !gitTrees.has(parts[0]!) && (parts.length > 1 || info?.isDirectory() === true);
 }
