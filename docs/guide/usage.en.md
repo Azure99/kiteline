@@ -66,7 +66,7 @@ Shortcuts run one command in the login shell; the session ends when that command
 
 Scroll up to read retained history; new output does not pull you back to the bottom. Each client's scrolling and selection are independent.
 
-- Desktop: drag to select text. Hold Shift while dragging if a program such as htop handles the mouse. Copy through the context menu, or Cmd-C on macOS. Paste with Ctrl-Shift-V, Cmd-V or the context menu. Ctrl-C and Ctrl-V are sent to the program.
+- Desktop: drag to select text. Hold Shift while dragging if a program such as htop handles the mouse. Copy through the context menu, or Cmd-C on macOS. Paste with Ctrl-V, Ctrl-Shift-V, Cmd-V or the context menu. Ctrl-C is sent to the program.
 - Phone: long-press to select a word, drag the selection handles, then tap "Copy selected text". Tap the terminal or "Keyboard" to open the keyboard. A "Paste" button appears when the browser allows clipboard access.
 
 Oversized pastes are not sent and show "Pasted text exceeds the input limit". Programs cannot display images or write to the clipboard through OSC 52 in the web terminal.

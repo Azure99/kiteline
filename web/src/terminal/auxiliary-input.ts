@@ -146,6 +146,8 @@ export class AuxiliaryInput {
     if (event.type === "keypress" && this.handled) return false;
     if (event.type !== "keydown") return true;
     this.handled = false;
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "v")
+      return false;
     if (
       this.terminal.options.disableStdin ||
       this.composing ||
