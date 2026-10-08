@@ -75,7 +75,7 @@ agent 启动 tmux 时设置 `TERMINFO_DIRS`，依次为随包现代目录、随�
 
 agent、recorder 和 pane 的启动脚本运行在随包的原生 Windows Node 中。私有 MSYS2 运行时只供 tmux 使用，不修改用户的 `PATH`，也不使用用户 Git 自带的 MSYS；文件与进程等系统能力由 `native/windows/` 的原生 addon 提供。ripgrep 使用随包的原生 Windows 版本。
 
-私有 MSYS2 运行时中的 tmux 应用 `paste.patch` 和 `cygwin-outfd.patch`，后者让 Cygwin 构建重新打开客户端终端后同时更新输出描述符，控制模式的输出依赖它。文件清单见 [`scripts/windows-components.ts`](../../scripts/windows-components.ts)，所属软件包的来源、版本、校验值和源码归档固定在 [`release/agent-windows.json`](../../release/agent-windows.json)；包内不带 pacman 或编译器。宿主需要原生 Git，以及系统 Windows PowerShell 5.1 Desktop 或 PowerShell 7.4 及以上 7.x 版本。
+私有 MSYS2 运行时中的 tmux 应用 `paste.patch`、`flow-control.patch` 和 `cygwin-outfd.patch`，后者让 Cygwin 构建重新打开客户端终端后同时更新输出描述符，控制模式的输出依赖它。runtime DLL 从固定源码重建并应用 [`ctrl-c.patch`](../../native/msys/ctrl-c.patch)，避免 ConPTY 的 Ctrl+C 在输出背压时阻塞于不必要的 console 附着，维护要求见 [MSYS2](../development/release.md#msys2)。文件清单见 [`scripts/windows-components.ts`](../../scripts/windows-components.ts)，所属软件包的来源、版本、校验值和源码归档固定在 [`release/agent-windows.json`](../../release/agent-windows.json)；包内不带 pacman 或编译器。宿主需要原生 Git，以及系统 Windows PowerShell 5.1 Desktop 或 PowerShell 7.4 及以上 7.x 版本。
 
 原生模块提供 Job 对象中的进程管理、私有命名管道、当前用户身份与私有目录、`LockFileEx` 锁、文件属性与两种重命名，以及 TCP 监听表快照。
 

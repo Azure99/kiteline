@@ -1,0 +1,23 @@
+--- a/winsup/cygwin/fhandler/termios.cc
++++ b/winsup/cygwin/fhandler/termios.cc
+@@ -348,7 +348,10 @@
+ 	     CTRL_C_EVENT. After sending the event, reattach to the
+ 	     console to which the process was previously attached.  */
+ 	  DWORD resume_pid = 0;
+-	  if (fh && !fh->is_console ())
++	  bool attach_console = fh && !fh->is_console ()
++	    && (fh->need_send_ctrl_c_event () || (p->process_state & PID_NEW_PG)
++		|| p->is_gdb_with_foreground_non_cygwin_inferior (pgid));
++	  if (attach_console)
+ 	    resume_pid =
+ 	      fhandler_pty_common::attach_console_temporarily (p->dwProcessId);
+ 	  if (fh && p == myself && being_debugged ())
+@@ -371,7 +374,7 @@
+ 	      GenerateConsoleCtrlEvent (CTRL_C_EVENT, 0);
+ 	      ctrl_c_event_sent = true;
+ 	    }
+-	  if (fh && !fh->is_console ())
++	  if (attach_console)
+ 	    {
+ 	      /* If a process on pseudo console is killed by Ctrl-C,
+ 		 this process may take over the ownership of the

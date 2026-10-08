@@ -118,7 +118,7 @@ sudo apt-get install -y git curl xz-utils zstd zip unzip binutils libarchive-too
 
 ### 构建 Windows 组件
 
-CI 在 Windows x64 上准备输入并编译 tmux，再传到 Linux x64 编译 addon、组装和打包，步骤见 [`build.yml`](../../.github/workflows/build.yml)，组件入口见 [`build-windows-components.mjs`](../../scripts/build-windows-components.mjs)。Windows 需要匹配版本的 x64 Node、默认位置的 7-Zip 24.06 或更新版本和系统 `tar.exe`；验证最终 ZIP 使用 PowerShell 7。
+CI 在 Windows x64 上准备输入并编译 tmux 和 MSYS2 runtime，再传到 Linux x64 编译 addon、组装和打包，步骤见 [`build.yml`](../../.github/workflows/build.yml)，组件入口见 [`build-windows-components.mjs`](../../scripts/build-windows-components.mjs)。Windows 需要匹配版本的 x64 Node、PATH 中的 Git、默认位置的 7-Zip 24.06 或更新版本和系统 `tar.exe`；验证最终 ZIP 使用 PowerShell 7。
 
 Windows checkout 前执行 `git config --global core.autocrlf false`，避免换行转换改变配方摘要。需要本机排错时，按工作流运行对应步骤；`tmux`、`addon`、`assemble` 的输出目录必须不存在，父目录必须存在。
 
@@ -256,6 +256,8 @@ Linux agent 还需先在 [Azure99/node-static-builds](https://github.com/Azure99
 ### MSYS2
 
 更新 `release/agent-windows.json` 的输入。源码包变化时，连同 `sources` 条目的地址、摘要和 `notice` 中的上游归档名、目录及许可路径一起修改；[`prepare-windows-notices.mjs`](../../scripts/prepare-windows-notices.mjs) 据此提取许可和复制源码。libevent、ncurses 和 msys2-runtime 的许可从对应安装包提取。
+
+runtime DLL 从固定源码包的 Cygwin tag 及有序 MSYS2 补丁重建，再应用 [`ctrl-c.patch`](../../native/msys/ctrl-c.patch)。该补丁避免 ConPTY 已负责发送 Ctrl+C 时仍临时附着 console，后者会在输出背压中阻塞 tmux；原始输入字节和需要额外 console event 的分支保持原样。升级后须在繁忙输出暂停/恢复期间验证 raw `0x03`、真实 SIGINT 后的同会话输入、最终输出和退出码。包内 `sources/kiteline/` 保留本地补丁与 DLL 构建脚本。
 
 ### macOS 组件
 

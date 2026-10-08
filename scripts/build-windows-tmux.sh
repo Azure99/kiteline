@@ -20,3 +20,4 @@ cp tmux.exe "$output/tmux.exe"
 cp COPYING "$output/tmux-LICENSE"
 tic -x -o "$output/terminfo" "$inputs/native/tmux/tmux.terminfo"
 ./tmux.exe -V
+bash "$inputs/scripts/build-windows-runtime.sh" "$1" "$2" "$3"

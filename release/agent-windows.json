@@ -11,6 +11,30 @@
   },
   "packages": [
     {
+      "name": "autoconf-wrapper",
+      "version": "20260320-1",
+      "url": "https://repo.msys2.org/msys/x86_64/autoconf-wrapper-20260320-1-any.pkg.tar.zst",
+      "sha256": "84c1f93d4450b3bf1ef567110b51c15ffb3f13670d656cc48fea70a01371b20c"
+    },
+    {
+      "name": "autoconf2.73",
+      "version": "2.73-1",
+      "url": "https://repo.msys2.org/msys/x86_64/autoconf2.73-2.73-1-any.pkg.tar.zst",
+      "sha256": "716d0542dc12a481f1c2d5574f17f1470eb9d3226cf6e206d4e243c12fa95e1a"
+    },
+    {
+      "name": "automake-wrapper",
+      "version": "20260320-1",
+      "url": "https://repo.msys2.org/msys/x86_64/automake-wrapper-20260320-1-any.pkg.tar.zst",
+      "sha256": "693817c288c81bb9f94ac92e5b6f914402735b80bb33e326ccddd7c89cc6a719"
+    },
+    {
+      "name": "automake1.18",
+      "version": "1.18.1-1",
+      "url": "https://repo.msys2.org/msys/x86_64/automake1.18-1.18.1-1-any.pkg.tar.zst",
+      "sha256": "c045d9eddf900dbacae06d9e0e19e250cc32d849def7d06b833253f85e3fc941"
+    },
+    {
       "name": "bison",
       "version": "3.8.2-5",
       "url": "https://repo.msys2.org/msys/x86_64/bison-3.8.2-5-x86_64.pkg.tar.zst",
@@ -33,6 +57,12 @@
       "version": "2.47-1",
       "url": "https://repo.msys2.org/msys/x86_64/binutils-2.47-1-x86_64.pkg.tar.zst",
       "sha256": "b7ddaca6e8b63774cdb1f5ac2720963cd76f8f62ca7e2667b1b0f008ed7ecba2"
+    },
+    {
+      "name": "cocom",
+      "version": "0.996-6",
+      "url": "https://repo.msys2.org/msys/x86_64/cocom-0.996-6-x86_64.pkg.tar.zst",
+      "sha256": "1f265c5871a6a63daa7bc1f4aead733bd3170840cf037cc577ab92f3e2e76f1d"
     },
     {
       "name": "coreutils",

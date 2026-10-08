@@ -21,6 +21,7 @@ const root = resolve(import.meta.dirname, "..");
 const release = json(join(root, "release/inputs.json"));
 const recipe = json(join(root, "release/agent-windows.json"));
 const { tmux } = release;
+const msysRuntime = recipe.packages.find((pkg) => pkg.name === "msys2-runtime");
 const sourceFiles = [
   "release/inputs.json",
   "release/agent-windows.json",
@@ -29,12 +30,14 @@ const sourceFiles = [
   "scripts/build-windows-components.mjs",
   "scripts/release-inputs.mjs",
   "scripts/build-windows-tmux.sh",
+  "scripts/build-windows-runtime.sh",
   "scripts/build-windows-addon.sh",
   "scripts/prepare-windows-notices.mjs",
   "scripts/windows-components.ts",
   "native/tmux/paste.patch",
   "native/tmux/flow-control.patch",
   "native/tmux/cygwin-outfd.patch",
+  "native/msys/ctrl-c.patch",
   "native/tmux/tmux.terminfo",
   ...readdirSync(join(root, "native/windows"))
     .filter((file) => /\.(cc|hpp|def)$/.test(file))
@@ -98,6 +101,26 @@ export function buildWindowsTmux(directory, destination) {
       run(tar, ["-xf", archive, "-C", msys]);
       rmSync(archive);
     }
+    const runtimeSource = `msys2-runtime-${msysRuntime.version}.src.tar`;
+    run(sevenZip, [
+      "x",
+      "-tzstd",
+      "-y",
+      `-o${bootstrap}`,
+      join(directory, "sources", `${runtimeSource}.zst`),
+    ]);
+    run(tar, ["-xf", join(bootstrap, runtimeSource), "-C", temporary]);
+    const runtimeRecipe = join(temporary, "msys2-runtime");
+    const runtimeArchive = join(temporary, "runtime.tar");
+    run("git", [
+      `--git-dir=${join(runtimeRecipe, "msys2-runtime")}`,
+      "archive",
+      "--format=tar",
+      `--output=${runtimeArchive}`,
+      `cygwin-${msysRuntime.version.split("-")[0]}`,
+    ]);
+    mkdirSync(join(destination, "runtime-source"));
+    run(tar, ["-xf", runtimeArchive, "-C", join(destination, "runtime-source")]);
     const environment = {
       SystemRoot: process.env.SystemRoot,
       WINDIR: process.env.SystemRoot,
@@ -117,10 +140,13 @@ export function buildWindowsTmux(directory, destination) {
         join(directory, "scripts/build-windows-tmux.sh").replaceAll("\\", "/"),
         directory,
         destination,
+        runtimeRecipe,
       ],
       { env: environment, cwd: temporary },
     );
     rmSync(join(destination, "source"), { recursive: true });
+    rmSync(join(destination, "runtime-source"), { recursive: true });
+    rmSync(join(destination, "runtime-build"), { recursive: true });
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }
@@ -237,6 +263,7 @@ export function assembleWindowsComponents(directory, tmuxDirectory, addonDirecto
       for (const file of paths) copy(join(extracted, file), join(native, "msys", file));
     }
     copy(join(tmuxDirectory, "tmux.exe"), join(native, "msys/usr/bin/tmux.exe"));
+    copy(join(tmuxDirectory, "msys-2.0.dll"), join(native, "msys/usr/bin/msys-2.0.dll"));
     copy(
       join(tmuxDirectory, "terminfo/74/tmux-256color"),
       join(native, "msys/usr/share/terminfo/74/tmux-256color"),
@@ -277,7 +304,8 @@ export function assembleWindowsComponents(directory, tmuxDirectory, addonDirecto
       controlPatch: expected.files["native/tmux/cygwin-outfd.patch"],
       terminfo: expected.files["native/tmux/tmux.terminfo"],
       ripgrep: { version: release.ripgrep.version, ...expected.downloads["rg.zip"] },
-      msysRuntime: recipe.packages.find((pkg) => pkg.name === "msys2-runtime").version,
+      msysRuntime: msysRuntime.version,
+      runtimePatch: expected.files["native/msys/ctrl-c.patch"],
       inputs: expected,
       files: componentFiles,
     });

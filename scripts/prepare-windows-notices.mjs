@@ -40,6 +40,8 @@ export function prepareWindowsNotices(directory, native) {
     mkdirSync(join(native, "sources"), { recursive: true });
     for (const name of Object.keys(sources))
       cpSync(join(directory, "sources", name), join(native, "sources", name));
+    for (const path of ["native/msys/ctrl-c.patch", "scripts/build-windows-runtime.sh"])
+      write(join(native, "sources/kiteline", path), readFileSync(join(directory, path)));
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }
