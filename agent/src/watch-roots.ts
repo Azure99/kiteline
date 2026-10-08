@@ -1,5 +1,5 @@
 import type { Stats } from "node:fs";
-import { dirname, relative, sep } from "node:path";
+import { dirname, relative, resolve, sep } from "node:path";
 import { watch, type FSWatcher } from "chokidar";
 import {
   asError,
@@ -125,6 +125,7 @@ export class WatchRoots {
           active.root,
           (path) => ignoreTree(active.root, metadataRoots, path),
           new Set([id]),
+          process.platform === "linux",
         );
       }
       this.report(id);
@@ -135,16 +136,29 @@ export class WatchRoots {
     root: string,
     ignored: (path: string, info?: Stats) => boolean,
     owners: Set<string>,
+    directoriesOnly = false,
   ): Watched {
     const parent = dirname(root);
     const watcher = watch([root, parent], {
       // Watching the parent boundary lets Chokidar reattach a replaced root.
-      ignored: (path, info) => path !== parent && (!within(root, path) || ignored(path, info)),
+      ignored: (path, info) =>
+        path !== parent &&
+        (!within(root, path) ||
+          ignored(path, info) ||
+          (directoriesOnly && info !== undefined && !info.isDirectory())),
       ignoreInitial: true,
       followSymlinks: false,
       usePolling: false,
     });
     const entry: Watched = { watcher, owners, ready: false };
+    if (directoriesOnly)
+      // Linux directory watches report file changes without a watch for each file.
+      watcher.on("raw", (_event, path, details) => {
+        const { watchedPath } = details as { watchedPath: string };
+        const absolute = path ? resolve(watchedPath, path) : watchedPath;
+        if (within(root, absolute) && !ignored(absolute))
+          for (const id of entry.owners) this.changed(id);
+      });
     watcher.on("all", () => {
       for (const id of entry.owners) this.changed(id);
     });

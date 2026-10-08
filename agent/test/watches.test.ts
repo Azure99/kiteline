@@ -25,6 +25,46 @@ async function setup() {
   const workspace = (id: string, path: string): Workspace => ({ id, path, name: id });
   return { root, watches, events, workspace };
 }
+test.runIf(process.platform === "linux")(
+  "directory watches follow moved subtrees and file changes without following symlinks",
+  async () => {
+    const { root, watches, events, workspace } = await setup();
+    const project = join(root, "project"),
+      incoming = join(root, "incoming"),
+      outside = join(root, "outside");
+    await mkdir(project);
+    await mkdir(join(incoming, "nested"), { recursive: true });
+    await writeFile(join(incoming, "nested", "file"), "original");
+    await mkdir(outside);
+    await writeFile(join(outside, "file"), "outside");
+    await symlink(outside, join(project, "link"));
+    watches.set([workspace("a", project)]);
+    await expect
+      .poll(() => events, pollOptions)
+      .toContainEqual(expect.objectContaining({ status: "normal" }));
+    events.length = 0;
+    await appendFile(join(outside, "file"), "ignored");
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    expect(events).toEqual([]);
+    await rename(incoming, join(project, "moved"));
+    await expect
+      .poll(() => events.some((event) => event.type === "workspace.changed"), pollOptions)
+      .toBe(true);
+    const file = join(project, "moved", "nested", "file"),
+      renamed = join(project, "moved", "nested", "renamed");
+    for (const change of [
+      () => appendFile(file, "after move"),
+      () => rename(file, renamed),
+      () => rm(renamed),
+    ]) {
+      events.length = 0;
+      await change();
+      await expect
+        .poll(() => events.some((event) => event.type === "workspace.changed"), pollOptions)
+        .toBe(true);
+    }
+  },
+);
 test("directory replacement remains watched and deactivation stops events", async () => {
   const { root, watches, events, workspace } = await setup();
   await mkdir(join(root, "child"));

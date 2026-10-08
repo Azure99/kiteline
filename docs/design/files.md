@@ -184,6 +184,7 @@
 
 - 浏览器通过事件 WebSocket 的 `watch.set` 声明正在使用的设备和工作区。server 汇总所有浏览器的目标，按设备下发，agent 只监听其中仍登记的工作区。监听实现位于 `agent/src/watch-roots.ts`，使用 chokidar，不跟随符号链接，不轮询。Linux 在独立 worker 内处理监听建立、文件系统事件和关闭，避免这些工作阻塞 agent 的交互请求；其他平台在主线程运行。
 - 工作树监听排除 `agent/src/watch-roots.ts` 的 `excluded` 目录、`.git` 内部，以及工作区内已发现仓库的 gitDir 和 commonDir。agent 同时监听根目录的上一级，根目录被替换后能重新挂上。Linux 的 Chokidar 补丁按目录身份变化重建监听，并更新共享底层 handle，避免同名新目录继续引用旧 inode。被排除的目录仍可浏览，只靠定时刷新更新。
+- Linux 工作树只为目录建立 watch，通过 Chokidar raw 事件接收目录内的文件变化，再按同一工作树边界和排除规则合并通知。初次遍历仍检查每个文件；目录数量本身很大时仍可能耗尽系统监听配额。Git 元数据不使用此目录模式。
 - Git 元数据监听覆盖每个已发现仓库的 gitDir 和 commonDir，只看顶层文件和 `gitTrees` 指定的状态目录，不看 `objects/`。多个工作区共享同一元数据目录时共用一个监听。
 - 文件系统事件按 `watchDebounce` 合并为 `workspace.changed`，通知文件、Git 和仓库发现刷新，不带文件内容。agent 自己完成写操作时立即发送事件。
 - 全部监听就绪后 agent 发送 `watch.status` 为 `normal`；任一监听报错时为 `degraded` 并附原因，界面显示监听退化。Linux 保留同一监听的首次错误原因，抑制后续重复错误报告，已建立的部分监听继续工作。worker 异常退出也报告 degraded，不自动重启；后续明确订阅可重新建立 worker。
