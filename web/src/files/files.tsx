@@ -464,34 +464,37 @@ export function Files({
         )}
       </ToolHeader>
       <div className={searching ? "hidden" : "flex min-h-0 flex-1"}>
-        {(mobile ? !queryFile : listOpen) && (
-          <ToolSidebar visible={visible && !searching}>
+        {(mobile || listOpen) && (
+          <ToolSidebar visible={visible && !searching && (!mobile || !queryFile)}>
             <aside
+              key={mobile ? folder : undefined}
               className="scroll-area w-full overflow-auto border-border bg-muted/25 desk:w-72 desk:shrink-0 desk:border-r"
               aria-label={t(($) => $.files.list)}
             >
-              <FileExplorer
-                path={mobile || reveal ? folder : "."}
-                {...{ pages, expanded, selected, mobile, selecting }}
-                currentFile={queryFile ?? reveal ?? undefined}
-                disabled={!enabled}
-                savingWithin={savingWithin}
-                onFolder={enter}
-                onOpen={open}
-                onSelect={(path) =>
-                  setSelected((old) => {
-                    const next = new Set(old);
-                    if (next.has(path)) next.delete(path);
-                    else next.add(path);
-                    return next;
-                  })
-                }
-                onRename={(entry) => beginAction({ kind: "rename", entry })}
-                onAction={(kind, entry) => onOperation({ kind, entries: [entry] }, folder)}
-                onDownload={(entry) => download(entry.path!)}
-                onMore={(path) => void load(path, true)}
-                onDetails={setDetails}
-              />
+              {(!mobile || !queryFile) && (
+                <FileExplorer
+                  path={mobile || reveal ? folder : "."}
+                  {...{ pages, expanded, selected, mobile, selecting }}
+                  currentFile={queryFile ?? reveal ?? undefined}
+                  disabled={!enabled}
+                  savingWithin={savingWithin}
+                  onFolder={enter}
+                  onOpen={open}
+                  onSelect={(path) =>
+                    setSelected((old) => {
+                      const next = new Set(old);
+                      if (next.has(path)) next.delete(path);
+                      else next.add(path);
+                      return next;
+                    })
+                  }
+                  onRename={(entry) => beginAction({ kind: "rename", entry })}
+                  onAction={(kind, entry) => onOperation({ kind, entries: [entry] }, folder)}
+                  onDownload={(entry) => download(entry.path!)}
+                  onMore={(path) => void load(path, true)}
+                  onDetails={setDetails}
+                />
+              )}
             </aside>
           </ToolSidebar>
         )}
