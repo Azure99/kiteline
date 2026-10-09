@@ -441,7 +441,6 @@ export const zhCN = {
     fileCapacity: "内容超过单文件编辑容量",
     savedOldPath: "原路径保存已完成，请核对移动后的文件",
     duplicateDraft: "目标还有一份打开的草稿，两份内容均已保留",
-    diskMatches: "磁盘内容与上次发送内容一致",
     checkingMoved: "路径已更新，正在核对磁盘版本",
     diskChangedKept: "磁盘内容已变化，草稿已保留",
     deletedDraft: "磁盘文件已删除，当前内容可另存",

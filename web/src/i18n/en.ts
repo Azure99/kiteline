@@ -449,7 +449,6 @@ export const en = {
     fileCapacity: "Content exceeds the per-file editing limit",
     savedOldPath: "The original path was saved. Check the moved file.",
     duplicateDraft: "Another draft is open for this target. Both drafts have been kept.",
-    diskMatches: "Disk content matches the last submitted content",
     checkingMoved: "Path updated. Checking the disk version.",
     diskChangedKept: "Disk content changed. Your draft has been kept.",
     deletedDraft: "The file was deleted from disk. You can save this content elsewhere.",

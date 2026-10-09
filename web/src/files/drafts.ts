@@ -14,7 +14,6 @@ export type DraftNotice =
   | "fileCapacity"
   | "savedOldPath"
   | "duplicateDraft"
-  | "diskMatches"
   | "checkingMoved"
   | "diskChangedKept"
   | "deletedDraft"
@@ -455,7 +454,7 @@ export class DraftStore {
     draft.diskChanged = false;
     draft.error = undefined;
     draft.observationError = undefined;
-    draft.notice = this.hasDuplicate(draft, draft.path) ? "duplicateDraft" : "diskMatches";
+    draft.notice = this.hasDuplicate(draft, draft.path) ? "duplicateDraft" : undefined;
     emit("kiteline:file-written", disk.target);
   }
   private async checkMoved(draft: Draft, previous: Promise<void>) {
