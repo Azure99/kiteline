@@ -461,7 +461,7 @@ export function WorkspaceView({
         )}
       </div>
       <WatchStatus deviceId={device.id} workspaceId={workspace.id} />
-      {!!remote.error && (
+      {!!remote.error && (visible || dockExpanded || remote.error !== remote.listError) && (
         <div
           role="alert"
           className="workbench-notice flex shrink-0 items-start gap-2 bg-red-50 px-3 py-2 text-sm text-destructive"

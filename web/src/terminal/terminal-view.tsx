@@ -253,7 +253,7 @@ export function TerminalView({
               t(($) => $.terminal.historyLimited)
             ) : null}
           </div>
-          {!!(state.status === "error") && (
+          {!!(state.status === "error" && code !== "not_found") && (
             <>
               <Button
                 variant="ghost"
