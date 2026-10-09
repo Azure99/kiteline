@@ -49,6 +49,7 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
   }, [load]);
   const value = /^\d{1,5}$/.test(port) ? Number(port) : 0;
   const url = value >= 1 && value <= 65535 ? serviceURL(device.id, value, retain).href : undefined;
+  const copyFailure = copyError?.id === url ? copyError : undefined;
   function open() {
     if (url) window.open(url, "_blank", "noopener,noreferrer");
   }
@@ -94,7 +95,10 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
                   type="radio"
                   name="proxy-mode"
                   checked={!retain}
-                  onChange={() => setRetain(false)}
+                  onChange={() => {
+                    setRetain(false);
+                    reset();
+                  }}
                 />
                 {t(($) => $.devices.stripPrefix)}
               </label>
@@ -103,7 +107,10 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
                   type="radio"
                   name="proxy-mode"
                   checked={retain}
-                  onChange={() => setRetain(true)}
+                  onChange={() => {
+                    setRetain(true);
+                    reset();
+                  }}
                 />
                 {t(($) => $.devices.keepPrefix)}
               </label>
@@ -157,9 +164,13 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
                 {t(($) => $.devices.portRange)}
               </p>
             )}
-            {(copied || copyError) && (
+            {url && (copied === url || copyFailure) && (
               <div role="status" className="text-sm text-muted-foreground">
-                {copyError ? <ErrorNotice error={copyError.error} /> : t(($) => $.common.copied)}
+                {copyFailure ? (
+                  <ErrorNotice error={copyFailure.error} />
+                ) : (
+                  t(($) => $.common.copied)
+                )}
               </div>
             )}
           </div>
@@ -169,7 +180,7 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
               disabled={!url}
               onPointerDown={(event) => event.preventDefault()}
               onClick={() => {
-                if (url) void copy(url, "link");
+                if (url) void copy(url);
               }}
             >
               <Copy />

@@ -30,7 +30,7 @@ export function RunDetail({
   const [busy, setBusy] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [stream, setStream] = useState<Stream>("stdout");
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<Stream>();
   const [outputChanged, setOutputChanged] = useState(false);
   const outputs = useRef<Record<Stream, Output>>({
     stdout: { chunks: [], nextOffset: 0 },
@@ -117,7 +117,7 @@ export function RunDetail({
   }, [deviceId, taskId, runId, online, refresh]);
   useEffect(() => {
     if (!copied) return;
-    const timer = setTimeout(() => setCopied(false), 1800);
+    const timer = setTimeout(() => setCopied(undefined), 1800);
     return () => clearTimeout(timer);
   }, [copied]);
   async function stop() {
@@ -136,7 +136,7 @@ export function RunDetail({
   async function copy() {
     try {
       await copyText(output[stream].chunks.map((chunk) => chunk.text).join(""));
-      setCopied(true);
+      setCopied(stream);
     } catch (cause) {
       setActionError(cause);
     }
@@ -244,7 +244,7 @@ export function RunDetail({
         ))}
         <span className="flex-1" />
         <span role="status" className="text-xs text-muted-foreground">
-          {copied ? t(($) => $.common.copied) : ""}
+          {copied === stream ? t(($) => $.common.copied) : ""}
         </span>
         <IconButton
           label={t(($) => $.common.copy)}
