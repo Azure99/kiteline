@@ -2,6 +2,7 @@ import { newId } from "./lib/id";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { trackViewport } from "./lib/viewport";
+import { useMobile } from "./lib/use-mobile";
 import { LanguageOptions } from "./components/language-menu";
 import {
   ChevronDown,
@@ -133,9 +134,14 @@ export function Workbench({
     document.documentElement.toggleAttribute("data-terminal-active", terminalPage);
     return () => document.documentElement.removeAttribute("data-terminal-active");
   }, [terminalPage]);
+  const mobile = useMobile();
   const terminalFocus = useTerminalFocus(
-    session && route.valid && route.tool === "terminal" && device && workspace
-      ? `${device.id}:${workspace.id}`
+    session &&
+      route.valid &&
+      (route.tool === "terminal" || (mobile && route.tool === "files" && route.query.draft)) &&
+      device &&
+      workspace
+      ? `${device.id}:${workspace.id}:${route.tool}`
       : undefined,
   );
   const orphan =
@@ -281,6 +287,7 @@ export function Workbench({
             focusMode={terminalFocus}
           >
             <Files
+              focusMode={terminalFocus}
               device={device}
               workspace={workspace}
               visible={route.tool === "files"}

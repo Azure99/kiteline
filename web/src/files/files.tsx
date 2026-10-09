@@ -45,6 +45,7 @@ import { FileContent } from "./file-content";
 import { downloadFile } from "./content";
 import { FileSearch } from "./file-search";
 import { useWorkspaceRefresh } from "../lib/use-workspace-refresh";
+import type { useTerminalFocus } from "../terminal/use-terminal-focus";
 
 export function Files({
   device,
@@ -53,7 +54,9 @@ export function Files({
   store,
   onUpload,
   onOperation,
+  focusMode,
 }: {
+  focusMode?: ReturnType<typeof useTerminalFocus>;
   device: Device;
   workspace: Workspace;
   visible: boolean;
@@ -327,7 +330,7 @@ export function Files({
       <ToolHeader visible={visible}>
         <div
           className={
-            searching
+            searching || focusMode?.active
               ? "hidden"
               : "flex min-h-10 shrink-0 items-center gap-1 border-b border-border px-2"
           }
@@ -534,6 +537,7 @@ export function Files({
           >
             {draft ? (
               <DraftView
+                focusMode={mobile ? focusMode : undefined}
                 key={draft.id}
                 store={store}
                 draft={draft}

@@ -474,6 +474,7 @@ export const en = {
     checkDisk: "Check disk content",
     saveAs: "Save as",
     saveFile: "Save file",
+    enterFocus: "Focus file",
     previewMarkdown: "Preview Markdown",
     editSource: "Edit source",
     markdownPreview: "Markdown preview",

@@ -1,7 +1,20 @@
 import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Circle, Code, Copy, Download, Eye, FileOutput, RefreshCw, Save, X } from "lucide-react";
+import {
+  Circle,
+  Code,
+  Copy,
+  Download,
+  Eye,
+  FileOutput,
+  Fullscreen,
+  Minimize,
+  RefreshCw,
+  Save,
+  Scan,
+  X,
+} from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
 import {
@@ -27,6 +40,7 @@ import { requestCloseDraft, showDraft } from "./navigation";
 import { TextEditor } from "./text-editor";
 import { formatBytes } from "./format";
 import { downloadFile, type DiskText } from "./content";
+import type { useTerminalFocus } from "../terminal/use-terminal-focus";
 
 const MarkdownPreview = deferredView(async () => ({
   default: (await import("./markdown-preview")).MarkdownPreview,
@@ -36,7 +50,9 @@ export function DraftView({
   store,
   draft,
   unavailable,
+  focusMode,
 }: {
+  focusMode?: ReturnType<typeof useTerminalFocus>;
   store: DraftStore;
   draft: Draft;
   unavailable?: string;
@@ -125,6 +141,7 @@ export function DraftView({
   return (
     <>
       <div
+        hidden={focusMode?.active}
         ref={tabStrip}
         role="tablist"
         aria-label={t(($) => $.files.openFiles)}
@@ -156,9 +173,9 @@ export function DraftView({
           </div>
         ))}
       </div>
-      <div className="flex min-h-10 shrink-0 items-center gap-1 border-b border-border px-3">
+      <div className="flex min-h-10 shrink-0 items-center gap-1 border-b border-border px-3 max-sm:flex-wrap">
         <span
-          className="min-w-0 flex-1 truncate text-xs"
+          className="min-w-0 flex-1 truncate text-xs max-sm:basis-full max-sm:pt-1"
           title={`${draft.deviceName} / ${draft.workspaceName}\n${draft.resolvedPath ?? draft.path}`}
         >
           {draft.path}
@@ -211,7 +228,30 @@ export function DraftView({
         >
           <Save />
         </IconButton>
+        {focusMode && (
+          <IconButton
+            label={
+              focusMode.next === "enterFocus"
+                ? t(($) => $.files.enterFocus)
+                : t(($) => $.terminal[focusMode.next])
+            }
+            onClick={focusMode.toggle}
+          >
+            {focusMode.next === "exitFocus" ? (
+              <Minimize />
+            ) : focusMode.next === "enterFullscreen" ? (
+              <Fullscreen />
+            ) : (
+              <Scan />
+            )}
+          </IconButton>
+        )}
       </div>
+      {focusMode?.error && (
+        <div role="alert" className="shrink-0 text-destructive">
+          {t(($) => $.terminal[focusMode.error!])}
+        </div>
+      )}
       {(unavailable ||
         store.overLimit(draft) ||
         draft.notice ||

@@ -466,6 +466,7 @@ export const zhCN = {
     checkDisk: "核对磁盘内容",
     saveAs: "另存为",
     saveFile: "保存文件",
+    enterFocus: "专注文件",
     previewMarkdown: "预览 Markdown",
     editSource: "编辑源码",
     markdownPreview: "Markdown 预览",
