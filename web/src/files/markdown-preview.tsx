@@ -1,11 +1,14 @@
 import {
+  Children,
   createElement,
+  isValidElement,
   useEffect,
   useLayoutEffect,
   useMemo,
   useState,
   type AnchorHTMLAttributes,
   type HTMLAttributes,
+  type ReactNode,
   type RefObject,
 } from "react";
 import Markdown, { type Components, type ExtraProps } from "react-markdown";
@@ -13,11 +16,16 @@ import { useTranslation } from "react-i18next";
 import remarkGfm from "remark-gfm";
 import rehypeSlug from "rehype-slug";
 import { ErrorNotice } from "../components/error-notice";
+import { deferredView } from "../components/deferred-view";
 import { i18n } from "../i18n";
 import { readContent, type FileTarget } from "./content";
 import { showFile } from "./navigation";
 import { parentPath } from "./paths";
 import { workspacePath } from "../lib/navigation";
+
+const MermaidDiagram = deferredView(async () => ({
+  default: (await import("./mermaid-diagram")).MermaidDiagram,
+}));
 
 function localPath(target: FileTarget, href: string) {
   if (!href || /^[a-z][a-z\d+.-]*:|^\/\//i.test(href) || href.startsWith("#")) return;
@@ -163,7 +171,22 @@ export function MarkdownPreview({
       h6: SourceBlock,
       li: SourceBlock,
       tr: SourceBlock,
-      pre: SourceBlock,
+      pre: ({ node, children, ...props }) => {
+        const child = Children.toArray(children)[0];
+        return isValidElement<{ className?: string; children: ReactNode }>(child) &&
+          child.props.className === "language-mermaid" ? (
+          <div className="my-4" data-source-line={node!.position?.start.line}>
+            <MermaidDiagram
+              key={String(child.props.children)}
+              text={String(child.props.children)}
+            />
+          </div>
+        ) : (
+          <SourceBlock node={node} {...props}>
+            {children}
+          </SourceBlock>
+        );
+      },
       a: ({ node, ...props }) =>
         "dataFootnoteRef" in node!.properties || "dataFootnoteBackref" in node!.properties ? (
           <a {...props} />

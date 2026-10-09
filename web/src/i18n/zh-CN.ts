@@ -470,6 +470,7 @@ export const zhCN = {
     previewMarkdown: "预览 Markdown",
     editSource: "编辑源码",
     markdownPreview: "Markdown 预览",
+    mermaidSource: "Mermaid 源码",
     footnotes: "脚注",
     backToReference: "返回引用",
     invalidMarkdownLink: "链接无效：{{href}}",

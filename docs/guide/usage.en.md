@@ -139,7 +139,9 @@ In narrow layouts, the Focus file button cycles through focus within the window,
 
 Switch `.md` and `.markdown` files between source and preview. The preview includes unsaved edits and supports tables, task lists, strikethrough, local images and section links. Relative file links open their targets in Files. Returning to source locates the paragraph you were reading; switching back to preview lets you continue there.
 
-Raw HTML appears as text. External images appear as links that open in a new tab.
+Fenced `mermaid` blocks render as diagrams. Scroll wide diagrams horizontally, or expand their source to inspect it. External images within diagrams load automatically. Invalid diagram syntax shows an error and keeps the source visible.
+
+Raw HTML appears as text. External images in ordinary Markdown appear as links that open in a new tab.
 
 ### Drafts
 

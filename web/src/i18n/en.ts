@@ -478,6 +478,7 @@ export const en = {
     previewMarkdown: "Preview Markdown",
     editSource: "Edit source",
     markdownPreview: "Markdown preview",
+    mermaidSource: "Mermaid source",
     footnotes: "Footnotes",
     backToReference: "Back to reference",
     invalidMarkdownLink: "Invalid link: {{href}}",
