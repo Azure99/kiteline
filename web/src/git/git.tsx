@@ -423,7 +423,7 @@ function RepoView({
               target={actionTarget}
               actions={actions}
               status={value}
-              disabled={disabled}
+              disabled={disabled || state.busy}
               mobile={mobile}
             />
           </aside>

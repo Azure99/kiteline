@@ -208,7 +208,7 @@ Diffs exceeding the limit show only part of the raw patch. Changes are paginated
 - An action that would also change unselected paths does not proceed. Those paths and the required preceding actions are listed.
 - Unstaging a rename affects both old and new paths. "Unstage the new path only" affects only the new path.
 
-The commit includes everything staged, regardless of the current page or selected rows. You cannot commit with an empty message, unresolved conflicts or no staged changes.
+The commit includes everything staged, regardless of the current page or selected rows. You cannot commit while status is refreshing, with an empty message, unresolved conflicts or no staged changes.
 
 ### Discard changes
 
