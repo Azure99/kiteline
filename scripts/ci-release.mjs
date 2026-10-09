@@ -161,8 +161,16 @@ function candidate(temporary) {
   let release = findRelease();
   assert.ok(!release || release.draft, `Release ${tag} is already published; cannot rebuild it`);
   const packages = packageFiles(join(root, "dist/releases"));
+  const compose = join(temporary, "compose.yaml");
+  writeFileSync(
+    compose,
+    readFileSync(join(root, "deploy/compose.yaml"), "utf8").replace(
+      /\$\{KITELINE_VERSION:\?[^}]*\}/,
+      `\${KITELINE_VERSION:-${version}}`,
+    ),
+  );
   const sums = join(temporary, "SHA256SUMS");
-  writeFileSync(sums, packages.map(checksum).sort().join(""));
+  writeFileSync(sums, [...packages, compose].map(checksum).sort().join(""));
   const images = loadImages();
   const runId = Number(process.env.GITHUB_RUN_ID);
   const runUrl = `https://github.com/${repository}/actions/runs/${runId}`;
@@ -185,6 +193,7 @@ function candidate(temporary) {
     repository,
     "--clobber",
     ...packages.flatMap((file) => [file, file + ".sha256"]),
+    compose,
     sums,
   ]);
   const imageDigest = pushImages(images, `candidate-${tag}-${runId}`);
@@ -226,6 +235,8 @@ function publish(temporary) {
     "kiteline-*",
     "--pattern",
     "SHA256SUMS",
+    "--pattern",
+    "compose.yaml",
     "--dir",
     temporary,
   ]);
@@ -241,6 +252,7 @@ function publish(temporary) {
     );
     return expected;
   });
+  actualChecksums.push(checksum(join(temporary, "compose.yaml")));
   const sums = join(temporary, "SHA256SUMS");
   assert.equal(
     readFileSync(sums, "utf8"),

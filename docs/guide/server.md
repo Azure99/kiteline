@@ -21,16 +21,14 @@ server 的环境变量见[参考](reference.md#server-环境变量)。
 
 需要 Docker Engine 和 Docker Compose v2（`docker compose` 命令）。以下命令在 server 主机上，以能使用 Docker 的用户（root 或 `docker` 组成员）执行。
 
-1. 创建部署目录，从对应版本的仓库 tag 取得 `compose.yaml`，并把版本写入 `.env`：
+1. 创建部署目录，下载最新正式版的 `compose.yaml`：
 
    ```sh
-   KITELINE_VERSION=X.Y.Z  # 替换为要部署的版本
    mkdir -p ~/kiteline && cd ~/kiteline
-   curl -fsSLO "https://raw.githubusercontent.com/Azure99/kiteline/v$KITELINE_VERSION/deploy/compose.yaml"
-   printf 'KITELINE_VERSION=%s\n' "$KITELINE_VERSION" > .env
+   curl -fsSLO https://github.com/Azure99/kiteline/releases/latest/download/compose.yaml
    ```
 
-   Docker Compose 自动读取同一目录下的 `.env`。之后的 `docker compose` 命令都在这个目录中执行。
+   下载的文件默认使用该正式版的镜像，之后启动时保持这个版本。后续 `docker compose` 命令都在这个目录中执行。
 
 2. 拉取镜像并启动：
 
@@ -51,9 +49,9 @@ server 的环境变量见[参考](reference.md#server-环境变量)。
 
 4. 打开 `http://127.0.0.1:8080`，按[初始化拥有者](#初始化拥有者)设置密码。
 
-`.env` 中还可以设置 `KITELINE_HTTP_BIND`、`KITELINE_HTTP_PORT` 和 `KITELINE_TRUST_PROXY_PROTO`，用法见[局域网访问与端口](#局域网访问与端口)和 [HTTPS 与反向代理](#https-与反向代理)，默认值见[参考](reference.md#server-环境变量)。修改 `.env` 后再次执行 `docker compose up -d`，Compose 会用新设置重建容器。
+需要自定义设置时，在同一目录创建 `.env`，Docker Compose 会自动读取它。可以设置 `KITELINE_HTTP_BIND`、`KITELINE_HTTP_PORT` 和 `KITELINE_TRUST_PROXY_PROTO`，用法见[局域网访问与端口](#局域网访问与端口)和 [HTTPS 与反向代理](#https-与反向代理)，默认值见[参考](reference.md#server-环境变量)。修改 `.env` 后再次执行 `docker compose up -d`，Compose 会用新设置重建容器。
 
-Compose 默认使用官方 GHCR 镜像，Docker 自动选择主机架构。使用自建或 fork 镜像时，把 `KITELINE_IMAGE` 设为镜像路径，`KITELINE_VERSION` 设为对应标签；本机构建方法和标签见[构建与发布](../development/release.md#构建-linux-包与镜像)。
+Compose 默认使用官方 GHCR 镜像，Docker 自动选择主机架构。在 `.env` 中设置 `KITELINE_VERSION` 可以覆盖默认版本；使用自建或 fork 镜像时，同时把 `KITELINE_IMAGE` 设为镜像路径，`KITELINE_VERSION` 设为对应标签。本机构建方法和标签见[构建与发布](../development/release.md#构建-linux-包与镜像)。
 
 容器内的 server 以 `kiteline` 用户（UID 1000、GID 1000）运行，数据目录 `/var/lib/kiteline` 位于 Compose 卷 `server-data` 中。Compose 项目名是 `kiteline`，所以 Docker 中的实际卷名是 `kiteline_server-data`。`docker compose down` 保留这个卷；`docker compose down -v` 会删除卷和全部 server 数据。把卷换成宿主机目录挂载时，该目录的属主必须是 `1000:1000`。
 
@@ -290,12 +288,10 @@ sudo systemctl start kiteline-server
 
 先阅读[目标版本的 Release 说明](https://github.com/Azure99/kiteline/releases)，核对部署文件、环境变量、配置的变化和需要的手工步骤。先升级 server，再升级各设备的 agent；升级前建议先[备份](#备份与恢复)。停止和重启 server 不影响设备上的终端和定时任务；server 恢复后，版本相同的 agent 自动重新连接。
 
-Docker 部署在部署目录中执行下面的命令。其中的 `curl` 用新版本覆盖 `compose.yaml`；如果你修改过它（例如改用宿主机目录挂载），改为先下载到 `compose.yaml.new`（`curl -fsSL -o compose.yaml.new …`），把修改合并进去后替换 `compose.yaml`，再执行其余命令。直接覆盖时修改会丢失，例如 server 改用命名卷 `server-data` 启动，读不到原来的数据。
+Docker 部署在部署目录中执行下面的命令，升级到最新正式版。如果 `.env` 或 Shell 环境中设置了 `KITELINE_VERSION`，先删除这个覆盖或将其改为目标版本。`curl` 会替换 `compose.yaml`；如果修改过该文件，先下载到 `compose.yaml.new`（`curl -fsSL -o compose.yaml.new …`），合并自定义设置后替换原文件，再启动。
 
 ```sh
-KITELINE_VERSION=X.Y.Z  # 替换为新版本
-curl -fsSLO "https://raw.githubusercontent.com/Azure99/kiteline/v$KITELINE_VERSION/deploy/compose.yaml"
-sed -i "s/^KITELINE_VERSION=.*/KITELINE_VERSION=$KITELINE_VERSION/" .env
+curl -fsSLO https://github.com/Azure99/kiteline/releases/latest/download/compose.yaml
 docker compose pull
 docker compose up -d
 ```

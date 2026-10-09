@@ -21,16 +21,14 @@ For server environment variables, see [Reference](reference.en.md#server-environ
 
 Docker Engine and Docker Compose v2 (the `docker compose` command) are required. Run these commands on the server host as a user with Docker access (root or a member of the `docker` group).
 
-1. Create a deployment directory, download `compose.yaml` from the repository tag for your version, and write the version to `.env`:
+1. Create a deployment directory and download `compose.yaml` from the latest stable release:
 
    ```sh
-   KITELINE_VERSION=X.Y.Z  # Replace with the version to deploy
    mkdir -p ~/kiteline && cd ~/kiteline
-   curl -fsSLO "https://raw.githubusercontent.com/Azure99/kiteline/v$KITELINE_VERSION/deploy/compose.yaml"
-   printf 'KITELINE_VERSION=%s\n' "$KITELINE_VERSION" > .env
+   curl -fsSLO https://github.com/Azure99/kiteline/releases/latest/download/compose.yaml
    ```
 
-   Docker Compose automatically reads `.env` in this directory. Run all subsequent `docker compose` commands here.
+   The downloaded file defaults to that release's image and keeps using that version on subsequent starts. Run all subsequent `docker compose` commands here.
 
 2. Pull the image and start it:
 
@@ -51,9 +49,9 @@ Docker Engine and Docker Compose v2 (the `docker compose` command) are required.
 
 4. Open `http://127.0.0.1:8080` and set a password as described in [Set up the owner](#set-up-the-owner).
 
-You can also set `KITELINE_HTTP_BIND`, `KITELINE_HTTP_PORT` and `KITELINE_TRUST_PROXY_PROTO` in `.env`. See [LAN access and ports](#lan-access-and-ports) and [HTTPS and reverse proxies](#https-and-reverse-proxies) for usage, and [Reference](reference.en.md#server-environment-variables) for defaults. After changing `.env`, run `docker compose up -d` again; Compose recreates the container with the new settings.
+For custom settings, create `.env` in the same directory; Docker Compose reads it automatically. You can set `KITELINE_HTTP_BIND`, `KITELINE_HTTP_PORT` and `KITELINE_TRUST_PROXY_PROTO` there. See [LAN access and ports](#lan-access-and-ports) and [HTTPS and reverse proxies](#https-and-reverse-proxies) for usage, and [Reference](reference.en.md#server-environment-variables) for defaults. After changing `.env`, run `docker compose up -d` again; Compose recreates the container with the new settings.
 
-Compose uses the official GHCR image by default, and Docker selects the host architecture automatically. For a locally built or fork image, set `KITELINE_IMAGE` to its image path and `KITELINE_VERSION` to its tag. See [Build and release (Chinese)](../development/release.md#构建-linux-包与镜像) for local builds and tags.
+Compose uses the official GHCR image by default, and Docker selects the host architecture automatically. Set `KITELINE_VERSION` in `.env` to override the default version. For a locally built or fork image, also set `KITELINE_IMAGE` to its image path and `KITELINE_VERSION` to its tag. See [Build and release (Chinese)](../development/release.md#构建-linux-包与镜像) for local builds and tags.
 
 Inside the container, the server runs as `kiteline` (UID 1000, GID 1000). Its data directory `/var/lib/kiteline` is in the Compose volume `server-data`. The Compose project is named `kiteline`, so Docker's actual volume name is `kiteline_server-data`. `docker compose down` keeps this volume; `docker compose down -v` deletes it and all server data. If you replace the volume with a host directory mount, that directory must be owned by `1000:1000`.
 
@@ -290,12 +288,10 @@ Restoring returns device registrations to their state at backup time. Devices bo
 
 Read the [target version's release notes](https://github.com/Azure99/kiteline/releases) first, checking changes to deployment files, environment variables and configuration, and any manual steps. Upgrade the server before the agents. A [backup](#backup-and-restore) is recommended first. Stopping or restarting the server does not affect terminals or scheduled tasks on devices. Agents with a matching version reconnect automatically when the server returns.
 
-For Docker, run the following in the deployment directory. The `curl` command overwrites `compose.yaml` with the new version. If you customized it, for example to use a host directory mount, download to `compose.yaml.new` instead (`curl -fsSL -o compose.yaml.new …`), merge your changes, replace `compose.yaml`, then run the remaining commands. Overwriting loses your changes; for example, the server may start with the named volume `server-data` and no longer read the original data.
+For Docker, run the following in the deployment directory to upgrade to the latest stable release. If `.env` or your shell environment sets `KITELINE_VERSION`, remove that override or change it to the target version first. The `curl` command replaces `compose.yaml`. If you customized it, download to `compose.yaml.new` instead (`curl -fsSL -o compose.yaml.new …`), merge your settings, then replace the original file before starting.
 
 ```sh
-KITELINE_VERSION=X.Y.Z  # Replace with the new version
-curl -fsSLO "https://raw.githubusercontent.com/Azure99/kiteline/v$KITELINE_VERSION/deploy/compose.yaml"
-sed -i "s/^KITELINE_VERSION=.*/KITELINE_VERSION=$KITELINE_VERSION/" .env
+curl -fsSLO https://github.com/Azure99/kiteline/releases/latest/download/compose.yaml
 docker compose pull
 docker compose up -d
 ```

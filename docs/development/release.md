@@ -4,7 +4,7 @@
 
 ## 概览
 
-一次发布包含 7 个发布包和一个多架构镜像，全部从同一个提交构建：
+一次发布包含 7 个发布包、Compose 部署文件和一个多架构镜像，全部从同一个提交生成：
 
 | 产物          | 文件或标签                                                                               |
 | ------------- | ---------------------------------------------------------------------------------------- |
@@ -13,6 +13,7 @@
 | Windows agent | `kiteline-agent-<版本>-windows-amd64.zip`                                                |
 | server        | `kiteline-server-<版本>-linux-amd64.tar.gz`、`kiteline-server-<版本>-linux-arm64.tar.gz` |
 | server 镜像   | 本地 `kiteline-server:<版本>-<架构>`，发布为 `ghcr.io/azure99/kiteline:<版本>`           |
+| Compose       | Release 附件 `compose.yaml`，默认镜像固定到该发布版本                                    |
 
 - 版本号来自 [`shared/src/version.json`](../../shared/src/version.json)。发布包写入 `dist/releases/`，每个包旁有同名 `.sha256`。
 - server 包在 `downloads/` 中携带 agent 包，接入和升级命令从这里下载。因此先构建 agent，再组装 server，最后构建镜像。
@@ -21,7 +22,7 @@
 
 ## 发布流程
 
-1. 在 PR 中更新 `shared/src/version.json` 的版本和两个 README 快速开始的示例版本，合并到 main。
+1. 在 PR 中更新 `shared/src/version.json` 的版本，合并到 main。
 2. 在该提交建立并推送 tag。tag 必须为 `vX.Y.Z`，与该提交的版本一致，且提交属于 main 历史。在同一个 Shell 中执行：
 
    ```sh
@@ -70,7 +71,7 @@
 | `dev`                                                            | 仅在 main 仍指向构建提交时更新。       |
 | `X.Y.Z`，不带 `v`                                                | `publish`，与候选镜像具有同一 digest。 |
 
-不产生 `latest` 标签。候选草稿包含 7 个包、各自的 `.sha256` 和汇总 `SHA256SUMS`；最后上传的 `delivery.json` 标记候选完成，记录源码、运行 ID、汇总校验文件摘要和镜像 digest。
+不产生 `latest` 镜像标签。候选草稿包含 7 个包、各自的 `.sha256`、固定版本的 `compose.yaml` 和覆盖这些包与 Compose 的 `SHA256SUMS`；最后上传的 `delivery.json` 标记候选完成，记录源码、运行 ID、汇总校验文件摘要和镜像 digest。
 
 `publish` 使用 main 当前提交中的脚本，检查候选与 tag 指向同一源码、附件与校验文件一致，再把候选 digest 复制为版本标签，并公开 Release。
 

@@ -27,9 +27,7 @@ Kiteline 面向个人使用。准备一台安装了 Docker 的 Linux 主机部�
 
 ```sh
 mkdir kiteline && cd kiteline
-KITELINE_VERSION=0.2.5
-curl -fsSLO "https://raw.githubusercontent.com/Azure99/kiteline/v$KITELINE_VERSION/deploy/compose.yaml"
-printf 'KITELINE_VERSION=%s\n' "$KITELINE_VERSION" > .env
+curl -fsSLO https://github.com/Azure99/kiteline/releases/latest/download/compose.yaml
 docker compose up -d
 docker compose logs server
 ```
