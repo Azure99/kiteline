@@ -1,3 +1,16 @@
+diff --git a/src/browser/Viewport.ts b/src/browser/Viewport.ts
+index 18c275ccbe583f48ccb5c5f66cd26d0bd8621e39..d695f43c0ecde21df4d87577d35ecba77a60472e 100644
+--- a/src/browser/Viewport.ts
++++ b/src/browser/Viewport.ts
+@@ -185,7 +185,7 @@ export class Viewport extends Disposable {
+     // never cause a scrollLines call, only setScrollPosition can do that.
+     this._suppressOnScrollHandler = true;
+     this._scrollableElement.setScrollDimensions({
+-      height: this._renderService.dimensions.css.canvas.height,
++      height: this._bufferService.rows * this._renderService.dimensions.css.cell.height,
+       scrollHeight: this._renderService.dimensions.css.cell.height * this._bufferService.buffer.lines.length
+     });
+     this._suppressOnScrollHandler = false;
 diff --git a/src/browser/renderer/dom/DomRenderer.ts b/src/browser/renderer/dom/DomRenderer.ts
 index 657217f7104c97ce54b98e88b381b325b061604c..3c520efe00d80c86698a0345ecbda910ccb4951f 100644
 --- a/src/browser/renderer/dom/DomRenderer.ts
