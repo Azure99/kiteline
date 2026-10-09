@@ -146,11 +146,20 @@ export function MarkdownPreview({
 }) {
   const { t } = useTranslation();
   useLayoutEffect(() => {
+    if (!position) return;
     const article = containerRef.current!;
-    const block = position && article.querySelector(`[data-source-line="${position.line}"]`);
-    if (block) {
+    let nearest: HTMLElement | undefined;
+    let distance = Infinity;
+    for (const block of article.querySelectorAll<HTMLElement>("[data-source-line]")) {
+      const gap = Math.abs(Number(block.dataset.sourceLine) - position.line);
+      if (gap < distance) {
+        nearest = block;
+        distance = gap;
+      }
+    }
+    if (nearest) {
       article.scrollTop +=
-        block.getBoundingClientRect().top - article.getBoundingClientRect().top - position.offset;
+        nearest.getBoundingClientRect().top - article.getBoundingClientRect().top - position.offset;
     }
   }, [containerRef, position]);
   const components = useMemo<Components>(() => {
