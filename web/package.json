@@ -9,7 +9,6 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.type-tests.json"
   },
   "dependencies": {
-    "@kiteline/shared": "workspace:*",
     "@base-ui/react": "1.8.0",
     "@codemirror/commands": "6.11.1",
     "@codemirror/language": "6.12.4",
@@ -17,6 +16,7 @@
     "@codemirror/search": "6.7.2",
     "@codemirror/state": "6.7.5",
     "@codemirror/view": "6.43.12",
+    "@kiteline/shared": "workspace:*",
     "@tailwindcss/vite": "4.3.3",
     "@ungap/structured-clone": "1.4.0",
     "@xterm/addon-fit": "0.11.0",
@@ -31,7 +31,10 @@
     "react-diff-view": "3.3.3",
     "react-dom": "19.2.0",
     "react-i18next": "17.0.14",
+    "react-markdown": "10.1.0",
     "react-resizable-panels": "4.12.4",
+    "rehype-slug": "6.0.0",
+    "remark-gfm": "4.0.1",
     "tailwind-merge": "3.6.0",
     "tailwindcss": "4.3.3"
   },

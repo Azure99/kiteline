@@ -1,7 +1,7 @@
 import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Circle, Copy, Download, FileOutput, RefreshCw, Save, X } from "lucide-react";
+import { Circle, Code, Copy, Download, Eye, FileOutput, RefreshCw, Save, X } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
 import {
@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "../components/ui/dialog";
 import { IconButton } from "../components/icon-button";
+import { deferredView } from "../components/deferred-view";
 import { ApiError } from "../lib/api";
 import { useCopyFeedback } from "../lib/use-copy-feedback";
 import {
@@ -26,6 +27,10 @@ import { requestCloseDraft, showDraft } from "./navigation";
 import { TextEditor } from "./text-editor";
 import { formatBytes } from "./format";
 import { downloadFile, type DiskText } from "./content";
+
+const MarkdownPreview = deferredView(async () => ({
+  default: (await import("./markdown-preview")).MarkdownPreview,
+}));
 
 export function DraftView({
   store,
@@ -42,6 +47,35 @@ export function DraftView({
   // Editing updates this draft without notifying the entire open-files list.
   useDraftVersion(store, draft);
   const busy = draft.operation?.kind;
+  const markdown = /\.(md|markdown)$/i.test(draft.path);
+  const [preview, setPreview] = useState(false);
+  const previewElement = useRef<HTMLElement>(null);
+  const previewPosition = useRef<{ line: number; offset: number }>(undefined);
+  function togglePreview() {
+    const article = previewElement.current;
+    if (preview && article) {
+      const viewport = article.getBoundingClientRect();
+      let nearest: HTMLElement | undefined;
+      let distance = Infinity;
+      for (const block of article.querySelectorAll<HTMLElement>("[data-source-line]")) {
+        const bounds = block.getBoundingClientRect();
+        const gap = Math.abs(bounds.top - viewport.top);
+        if (bounds.bottom > viewport.top && bounds.top < viewport.bottom && gap < distance) {
+          nearest = block;
+          distance = gap;
+        }
+      }
+      if (nearest) {
+        const line = Number(nearest.dataset.sourceLine);
+        previewPosition.current = {
+          line,
+          offset: nearest.getBoundingClientRect().top - viewport.top,
+        };
+        draft.location = { line };
+      }
+    }
+    setPreview(!preview);
+  }
   const [disk, setDisk] = useState<DiskText>();
   const [saveAs, setSaveAs] = useState(false);
   const [path, setPath] = useState(draft.path);
@@ -129,6 +163,14 @@ export function DraftView({
         >
           {draft.path}
         </span>
+        {markdown && (
+          <IconButton
+            label={preview ? t(($) => $.files.editSource) : t(($) => $.files.previewMarkdown)}
+            onClick={togglePreview}
+          >
+            {preview ? <Code /> : <Eye />}
+          </IconButton>
+        )}
         <IconButton
           label={t(($) => $.files.downloadFile)}
           disabled={!!unavailable}
@@ -211,7 +253,14 @@ export function DraftView({
           )}
         </div>
       )}
-      {draft.state ? (
+      {draft.state && markdown && preview ? (
+        <MarkdownPreview
+          target={draft}
+          text={draft.state.doc.toString()}
+          containerRef={previewElement}
+          position={previewPosition.current}
+        />
+      ) : draft.state ? (
         <TextEditor
           key={draft.id}
           {...{ draft, store }}

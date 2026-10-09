@@ -131,6 +131,12 @@ The editor preserves the original BOM, line endings and final newline. For mixed
 
 Saving replaces the original with a new file, so its parent directory must allow file creation and renaming. Ordinary permission bits are preserved; ownership, group, ACLs and extended attributes follow the rules for new files. Other hard links still point to the old content. Saving through a symbolic link writes to its target.
 
+### Markdown preview
+
+Switch `.md` and `.markdown` files between source and preview. The preview includes unsaved edits and supports tables, task lists, strikethrough, local images and section links. Relative file links open their targets in Files. Returning to source locates the paragraph you were reading; switching back to preview lets you continue there.
+
+Raw HTML appears as text. External images appear as links that open in a new tab.
+
 ### Drafts
 
 Unsaved edits, or drafts, exist only in the current page:

@@ -1,6 +1,7 @@
 @import "@xterm/xterm/css/xterm.css";
 @import "react-diff-view/style/index.css";
 @import "tailwindcss";
+@import "./files/markdown-preview.css";
 
 @theme {
   --breakpoint-desk: 960px;
