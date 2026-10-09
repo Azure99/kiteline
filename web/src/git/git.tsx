@@ -162,7 +162,7 @@ export function GitTool({
         />
       ) : (
         <div className="flex flex-1 items-center justify-center p-4 text-sm text-muted-foreground">
-          {busy
+          {enabled && (busy || (!scan && !error))
             ? t(($) => $.git.discovering)
             : repo
               ? t(($) => $.git.bareUnsupported)

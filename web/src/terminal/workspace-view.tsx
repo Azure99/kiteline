@@ -589,7 +589,9 @@ export function WorkspaceView({
             <p role="status">
               {targetMissing
                 ? t(($) => $.terminal.missing)
-                : remote.refreshing
+                : targetKnown ||
+                    remote.refreshing ||
+                    (!remote.loaded && !remote.listError && device.status === "online")
                   ? t(($) => $.terminal.checkingTarget)
                   : t(($) => $.terminal.targetUnknown)}
             </p>

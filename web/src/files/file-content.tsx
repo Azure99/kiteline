@@ -24,7 +24,7 @@ export function FileContent({
   const [image, setImage] = useState<DiskImage>();
   const [error, setError] = useState<unknown>();
   const [attempt, setAttempt] = useState(0);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(true);
   const { deviceId, workspaceId, path, deviceName, workspaceName } = target;
   useEffect(() => {
     if (!active) return;
