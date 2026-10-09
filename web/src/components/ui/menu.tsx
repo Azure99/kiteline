@@ -2,6 +2,7 @@ import { Menu as Primitive } from "@base-ui/react/menu";
 import { Check } from "lucide-react";
 
 export const Menu = Primitive.Root;
+export const createMenuHandle = Primitive.createHandle;
 export const MenuTrigger = Primitive.Trigger;
 export const MenuRadioGroup = Primitive.RadioGroup;
 export function MenuRadioItem({ children, ...props }: Primitive.RadioItem.Props) {

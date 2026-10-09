@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ErrorNotice } from "../components/error-notice";
 import {
@@ -16,7 +17,7 @@ import {
 } from "lucide-react";
 import type { Entry } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
-import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
+import { Menu, MenuContent, MenuItem, MenuTrigger, createMenuHandle } from "../components/ui/menu";
 import type { DirectoryPage } from "./use-browser";
 import { formatBytes } from "./format";
 
@@ -61,6 +62,7 @@ export function FileExplorer({
 }) {
   const { t } = useTranslation();
 
+  const [menuHandle] = useState(() => createMenuHandle<string>());
   const page = pages[path];
   return (
     <div aria-busy={page?.busy}>
@@ -118,62 +120,20 @@ export function FileExplorer({
                 )}
               </button>
               {!!entry.path && (
-                <Menu>
-                  <MenuTrigger
-                    render={
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label={t(($) => $.files.actionsNamed, { name: entry.name })}
-                        disabled={disabled}
-                      />
-                    }
-                  >
-                    <MoreHorizontal />
-                  </MenuTrigger>
-                  <MenuContent>
-                    <MenuItem onClick={() => onDetails(entry)}>
-                      <Info />
-                      {t(($) => $.files.details)}
-                    </MenuItem>
-                    {(entry.kind === "file" || entry.kind === "symlink") && (
-                      <>
-                        <MenuItem onClick={() => onDownload(entry)}>
-                          <Download />
-                          {t(($) => $.common.download)}
-                        </MenuItem>
-                      </>
-                    )}
-                    <MenuItem disabled={savingWithin(entry.path)} onClick={() => onRename(entry)}>
-                      <Pencil />
-                      {t(($) => $.common.rename)}
-                    </MenuItem>
-                    <MenuItem onClick={() => onAction("copy", entry)}>
-                      <Copy />
-                      {t(($) => $.common.copy)}
-                    </MenuItem>
-                    <MenuItem
-                      disabled={savingWithin(entry.path)}
-                      onClick={() => onAction("move", entry)}
-                    >
-                      <FolderInput />
-                      {t(($) => $.common.move)}
-                    </MenuItem>
-                    <MenuItem
-                      disabled={savingWithin(entry.path)}
-                      onClick={() => onAction("delete", entry)}
-                    >
-                      <Trash2 />
-                      {t(($) => $.common.delete)}
-                    </MenuItem>
-                    {entry.kind === "symlink" && (
-                      <MenuItem onClick={() => onFolder(entry.path!)}>
-                        <Folder />
-                        {t(($) => $.files.openLinkDirectory)}
-                      </MenuItem>
-                    )}
-                  </MenuContent>
-                </Menu>
+                <MenuTrigger
+                  handle={menuHandle}
+                  payload={entry.path}
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={t(($) => $.files.actionsNamed, { name: entry.name })}
+                      disabled={disabled}
+                    />
+                  }
+                >
+                  <MoreHorizontal />
+                </MenuTrigger>
               )}
             </div>
             {!mobile && (folder || entry.kind === "symlink") && open && (
@@ -228,6 +188,68 @@ export function FileExplorer({
           {t(($) => $.common.more)}
         </Button>
       )}
+      <Menu handle={menuHandle}>
+        {({ payload }) => {
+          const entry = page?.listing?.entries.items.find((item) => item.path === payload);
+          return (
+            <MenuContent>
+              {entry?.path ? (
+                <>
+                  <MenuItem onClick={() => onDetails(entry)}>
+                    <Info />
+                    {t(($) => $.files.details)}
+                  </MenuItem>
+                  {(entry.kind === "file" || entry.kind === "symlink") && (
+                    <>
+                      <MenuItem onClick={() => onDownload(entry)}>
+                        <Download />
+                        {t(($) => $.common.download)}
+                      </MenuItem>
+                    </>
+                  )}
+                  <MenuItem disabled={savingWithin(entry.path)} onClick={() => onRename(entry)}>
+                    <Pencil />
+                    {t(($) => $.common.rename)}
+                  </MenuItem>
+                  <MenuItem onClick={() => onAction("copy", entry)}>
+                    <Copy />
+                    {t(($) => $.common.copy)}
+                  </MenuItem>
+                  <MenuItem
+                    disabled={savingWithin(entry.path)}
+                    onClick={() => onAction("move", entry)}
+                  >
+                    <FolderInput />
+                    {t(($) => $.common.move)}
+                  </MenuItem>
+                  <MenuItem
+                    disabled={savingWithin(entry.path)}
+                    onClick={() => onAction("delete", entry)}
+                  >
+                    <Trash2 />
+                    {t(($) => $.common.delete)}
+                  </MenuItem>
+                  {entry.kind === "symlink" && (
+                    <MenuItem onClick={() => onFolder(entry.path!)}>
+                      <Folder />
+                      {t(($) => $.files.openLinkDirectory)}
+                    </MenuItem>
+                  )}
+                </>
+              ) : payload ? (
+                <CloseMissingMenu handle={menuHandle} />
+              ) : null}
+            </MenuContent>
+          );
+        }}
+      </Menu>
     </div>
   );
+}
+
+function CloseMissingMenu({ handle }: { handle: ReturnType<typeof createMenuHandle<string>> }) {
+  useEffect(() => {
+    handle.close();
+  }, [handle]);
+  return null;
 }
