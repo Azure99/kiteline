@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { useMobile } from "../lib/use-mobile";
 
-type FocusIntent = { target: string; attempted: boolean; entered: boolean };
+type FocusIntent = { target: string; attempted: boolean };
 
 export function useTerminalFocus(context: string | undefined) {
-  const mobile = useMobile();
   const [target, setTarget] = useState<FocusIntent>();
   const [fullscreen, setFullscreen] = useState(false);
   const [error, setError] = useState<"fullscreenFailed" | "fullscreenExitFailed">();
@@ -44,14 +42,12 @@ export function useTerminalFocus(context: string | undefined) {
       const current = intent.current;
       const entered = document.fullscreenElement === document.documentElement;
       setFullscreen(entered);
-      if (entered) {
-        if (!current || (pending.current && pending.current !== current)) leaveFullscreen();
-        else if (!exiting.current) current.entered = true;
-      } else if (current?.entered && !mobile) exit();
+      if (entered && (!current || (pending.current && pending.current !== current)))
+        leaveFullscreen();
     };
     document.addEventListener("fullscreenchange", changed);
     return () => document.removeEventListener("fullscreenchange", changed);
-  }, [mobile, exit, leaveFullscreen]);
+  }, [leaveFullscreen]);
   useEffect(
     () => () => {
       intent.current = undefined;
@@ -72,7 +68,6 @@ export function useTerminalFocus(context: string | undefined) {
         () => {
           if (pending.current === current) pending.current = undefined;
           if (intent.current !== current) leaveFullscreen();
-          else if (!exiting.current && document.fullscreenElement === root) current.entered = true;
         },
         () => {
           if (pending.current === current) pending.current = undefined;
@@ -86,7 +81,7 @@ export function useTerminalFocus(context: string | undefined) {
   }
   const active = context !== undefined && target?.target === context;
   const next: "exitFocus" | "enterFullscreen" | "enterFocus" =
-    fullscreen || (active && (!mobile || target.attempted))
+    fullscreen || (active && target.attempted)
       ? "exitFocus"
       : active
         ? "enterFullscreen"
@@ -95,7 +90,7 @@ export function useTerminalFocus(context: string | undefined) {
     if (next === "exitFocus") return exit();
     if (!context) return;
     setError(undefined);
-    const current = { target: context, attempted: !mobile || active, entered: false };
+    const current = { target: context, attempted: active };
     intent.current = current;
     setTarget(current);
     if (current.attempted) request(current);

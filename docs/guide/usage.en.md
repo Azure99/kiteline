@@ -77,6 +77,8 @@ On the phone key row, tap SHIFT, CTRL or ALT once to apply it to the next key, a
 
 ### Search and display
 
+The Focus terminal button cycles through focus within the window, browser fullscreen, and exit. The first step hides the rest of the workbench while keeping the browser window's position and size, so several windows can monitor output at once. Leaving fullscreen through the browser keeps window focus active; click the button again to exit.
+
 Terminal search covers currently loaded display content, including history, without case sensitivity.
 
 "Scrollback lines for new sessions" in "Terminal settings" controls the history retained per session (range in [Limits](reference.en.md#limits)). It affects only sessions created afterward.
