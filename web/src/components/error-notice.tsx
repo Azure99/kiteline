@@ -13,10 +13,7 @@ export function ErrorNotice({ error, context }: { error: unknown; context?: "log
 
 export function ErrorDetails({ error }: { error: unknown }) {
   const { t } = useTranslation();
-  if (
-    !(error instanceof ApiError) ||
-    (error.details === undefined && error.outcome === undefined && error.result === undefined)
-  )
+  if (!(error instanceof ApiError) || (error.details === undefined && error.result === undefined))
     return null;
   return (
     <details className="mt-1 text-xs">

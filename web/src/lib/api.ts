@@ -109,5 +109,5 @@ export function errorMessage(error: unknown, context?: "login") {
     error instanceof ApiError && (error.outcome === "unknown" || error.outcome === "partial")
       ? i18n.t(($) => $.errors[error.outcome as "unknown" | "partial"])
       : "";
-  return [summary, code ? `[${code}] ${message}` : message, outcome].filter(Boolean).join(" ");
+  return [outcome, summary, code ? `[${code}] ${message}` : message].filter(Boolean).join(" ");
 }

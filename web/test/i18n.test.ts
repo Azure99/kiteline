@@ -74,11 +74,18 @@ test("existing errors are translated at display time without changing diagnostic
     result = { completed: ["one"] };
   const error = new ApiError("conflict", "original diagnostic", "unknown", details, result);
   const commandError = new ApiError("command_failed", "git exited 1", "failed");
+  const partialError = new ApiError("command_failed", "checkout rejected", "partial");
   await setLanguagePreference("en");
-  expect(errorMessage(error)).toContain("Result unconfirmed");
+  expect(errorMessage(error)).toMatch(/^Result unconfirmed\./);
+  expect(errorMessage(partialError)).toBe(
+    "The operation was only partially completed. The command failed. [command_failed] checkout rejected",
+  );
   expect(errorMessage(commandError)).toBe("The command failed. [command_failed] git exited 1");
   await setLanguagePreference("zh-CN");
-  expect(errorMessage(error)).toContain("结果未确认");
+  expect(errorMessage(error)).toMatch(/^结果未确认。/);
+  expect(errorMessage(partialError)).toBe(
+    "操作部分完成。 命令执行失败。 [command_failed] checkout rejected",
+  );
   expect(errorMessage(commandError)).toBe("命令执行失败。 [command_failed] git exited 1");
   expect(errorMessage(error)).toContain("[conflict] original diagnostic");
   expect(error).toMatchObject({
