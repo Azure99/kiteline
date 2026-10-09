@@ -512,6 +512,7 @@ export const en = {
     uploadPicker: "Choose files to upload",
     moreActions: "More file actions",
     uploadFiles: "Upload files",
+    directoryDropUnsupported: "Directory upload is not supported. Drop files without directories.",
     finishSelection: "Finish selecting",
     selectFiles: "Select files",
     downloadSelected: "Download selected file",

@@ -74,6 +74,7 @@ export function Files({
   const [listOpen, setListOpen] = useState(true);
   const [action, setAction] = useState<NameAction & { origin: string }>();
   const [details, setDetails] = useState<Entry>();
+  const [directoryDrop, setDirectoryDrop] = useState(false);
   const [notice, setNotice] = useState<
     { kind: "downloadStarted"; path: string } | { kind: "renamed" | "created" }
   >();
@@ -280,7 +281,30 @@ export function Files({
   }
   const savingWithin = (path: string) => store.savingWithin(device.id, workspace.id, path);
   return (
-    <div className={visible ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+    <div
+      className={visible ? "flex min-h-0 flex-1 flex-col" : "hidden"}
+      onDragOverCapture={(event) => {
+        if (!event.dataTransfer.types.includes("Files")) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = enabled ? "copy" : "none";
+      }}
+      onDropCapture={(event) => {
+        if (!event.dataTransfer.types.includes("Files")) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (!enabled) return;
+        if (
+          Array.from(event.dataTransfer.items).some((item) => item.webkitGetAsEntry()?.isDirectory)
+        ) {
+          setDirectoryDrop(true);
+          return;
+        }
+        setDirectoryDrop(false);
+        const files = Array.from(event.dataTransfer.files);
+        if (files.length) onUpload(files, folder);
+      }}
+    >
       <FileSearch
         deviceId={device.id}
         workspaceId={workspace.id}
@@ -455,6 +479,11 @@ export function Files({
         {!enabled && (
           <p className="border-b border-border px-3 py-2 text-sm text-muted-foreground">
             {t(($) => $.common.deviceOffline)}
+          </p>
+        )}
+        {directoryDrop && (
+          <p role="alert" className="px-3 py-2 text-sm text-destructive">
+            {t(($) => $.files.directoryDropUnsupported)}
           </p>
         )}
         {!!revealError && (

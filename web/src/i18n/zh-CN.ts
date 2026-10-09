@@ -504,6 +504,7 @@ export const zhCN = {
     uploadPicker: "上传文件选择",
     moreActions: "更多文件操作",
     uploadFiles: "上传文件",
+    directoryDropUnsupported: "不支持上传目录，请仅拖入文件。",
     finishSelection: "结束选择",
     selectFiles: "选择文件",
     downloadSelected: "下载所选文件",

@@ -161,7 +161,7 @@ Creation and renaming fail if the name exists; nothing is overwritten. Open tabs
 
 ### Upload and download
 
-Uploads send selected files sequentially; directories cannot be uploaded. After data is sent, the device still needs to finish. Collapsing the dialog does not cancel the upload. Downloads use the browser's download manager; directories cannot be downloaded. See [Limits](reference.en.md#limits) for size limits.
+Choose files or drop them onto Files to upload. The confirmation dialog defaults to the current directory and lets you change destination paths. A drop containing any directory is rejected in full. Uploads send files sequentially. After data is sent, the device still needs to finish. Collapsing the dialog does not cancel the upload. Downloads use the browser's download manager; directories cannot be downloaded. See [Limits](reference.en.md#limits) for size limits.
 
 ### Organize files
 
