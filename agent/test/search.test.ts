@@ -29,6 +29,56 @@ test("search uses bundled rg when PATH contains a different executable", async (
   expect(result.matches).toMatchObject([{ path: "file.txt", text: "needle" }]);
 });
 
+test("content search waits for metadata before returning records in line order", async () => {
+  const root = await setup();
+  await writeFile(join(root, "ordered.txt"), "needle one\nneedle two\nneedle three\n");
+  let enter!: () => void, release!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  vi.spyOn(paths, "gitMetadataPath").mockImplementation(async () => {
+    enter();
+    await gate;
+    return false;
+  });
+  let settled = false;
+  const searching = searchFiles(root, "content", "needle", false, signal()).then((result) => {
+    settled = true;
+    return result;
+  });
+  try {
+    await entered;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+    release();
+    const result = await searching;
+    expect(result.truncated).toBe(false);
+    expect(result.matches.map(({ line, text }) => ({ line, text }))).toEqual([
+      { line: 1, text: "needle one" },
+      { line: 2, text: "needle two" },
+      { line: 3, text: "needle three" },
+    ]);
+  } finally {
+    release();
+    await searching;
+  }
+});
+
+test("an asynchronous metadata failure rejects content search", async () => {
+  const root = await setup();
+  await writeFile(join(root, "file.txt"), "needle one\nneedle two\n");
+  vi.spyOn(paths, "gitMetadataPath").mockImplementation(async () => {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    throw new Error("Metadata lookup failed");
+  });
+  await expect(searchFiles(root, "content", "needle", false, signal())).rejects.toMatchObject({
+    code: "io_error",
+  });
+});
+
 test.each(["name", "content"] as const)(
   "a deadline during a metadata lookup freezes %s results and stops consumption",
   async (mode) => {

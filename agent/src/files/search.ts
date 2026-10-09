@@ -123,7 +123,9 @@ export async function searchFiles(
           objectMode: true,
           write(token: Token, _encoding, callback) {
             try {
-              Promise.resolve(reader.token(token)).then(() => callback(), callback);
+              const pending = reader.token(token);
+              if (pending) pending.then(() => callback(), callback);
+              else callback();
             } catch (error) {
               callback(error as Error);
             }
