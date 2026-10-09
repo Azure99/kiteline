@@ -47,15 +47,18 @@ export function rawReader(each: (change: RawChange) => void) {
     },
   };
 }
-export function numstatReader(each: (path: GitPath, binary: boolean) => void) {
+export function numstatReader(
+  each: (path: GitPath, binary: boolean, lines?: { additions: number; deletions: number }) => void,
+) {
   let renamed = 0,
     binary = false;
+  let lines: { additions: number; deletions: number } | undefined;
   let from: Buffer | undefined;
   const reader = new NulRecords((record) => {
     if (renamed) {
       if (renamed === 2) from = record;
       else {
-        each(gitPath(record, from), binary);
+        each(gitPath(record, from), binary, lines);
         from = undefined;
       }
       renamed--;
@@ -65,8 +68,14 @@ export function numstatReader(each: (path: GitPath, binary: boolean) => void) {
       second = record.indexOf(9, first + 1);
     if (first < 0 || second < 0) throw new AppError("io_error", "Git numstat is incomplete");
     binary = record[0] === 45;
+    lines = binary
+      ? undefined
+      : {
+          additions: Number(record.subarray(0, first).toString("ascii")),
+          deletions: Number(record.subarray(first + 1, second).toString("ascii")),
+        };
     if (second === record.length - 1) renamed = 2;
-    else each(gitPath(record.subarray(second + 1)), binary);
+    else each(gitPath(record.subarray(second + 1)), binary, lines);
   });
   return {
     data: reader.data,

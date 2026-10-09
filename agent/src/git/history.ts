@@ -132,18 +132,18 @@ async function changes(
   );
   reader.end();
 }
-async function binary(
+async function statistics(
   repo: Repo,
   base: string,
   commit: string,
   paths: GitPath[],
   signal: AbortSignal,
 ) {
-  const result = new Set<string>();
+  const result = new Map<string, { binary: boolean; additions?: number; deletions?: number }>();
   const wanted = new Set(paths.map(gitPathKey));
-  const reader = numstatReader((path, isBinary) => {
+  const reader = numstatReader((path, isBinary, lines) => {
     const key = gitPathKey(path);
-    if (isBinary && wanted.has(key)) result.add(key);
+    if (wanted.has(key)) result.set(key, { binary: isBinary, ...lines });
   });
   await git(
     repo.rootPath,
@@ -174,7 +174,8 @@ export async function commitFiles(
       status: change.status,
       binary: false,
     };
-    const size = Buffer.byteLength(JSON.stringify(item)) + 1;
+    // Reserve space for the two line counts populated by numstat below.
+    const size = Buffer.byteLength(JSON.stringify(item)) + 65;
     if (size + 512 > agentLimits.resultBytes)
       throw new AppError("limit_exceeded", "A commit file entry exceeds the size limit");
     if (count++ < offset || full) return;
@@ -185,8 +186,8 @@ export async function commitFiles(
     bytes += size;
     files.push(item);
   });
-  const binaries = await binary(repo, base, commit, files, signal);
-  for (const item of files) item.binary = binaries.has(gitPathKey(item));
+  const stats = await statistics(repo, base, commit, files, signal);
+  for (const item of files) Object.assign(item, stats.get(gitPathKey(item)));
   signal.throwIfAborted();
   const nextOffset = offset + files.length;
   return { parentOid, files, ...(nextOffset < count ? { nextOffset } : {}) };
@@ -206,12 +207,12 @@ export async function commitDiff(
   });
   if (change?.path === undefined)
     throw new AppError("not_found", "Selected file change is not present in this commit");
-  const binaries = await binary(repo, base, commit, [change], signal);
+  const stats = await statistics(repo, base, commit, [change], signal);
   const summary: DiffSummary = {
     path,
     oldPath: change.oldPath,
     status: change.status,
-    binary: binaries.has(gitPathKey(change)),
+    binary: stats.get(gitPathKey(change))?.binary ?? false,
     ...(change.oldMode !== "000000" ? { oldMode: change.oldMode } : {}),
     ...(change.newMode !== "000000" ? { newMode: change.newMode } : {}),
   };

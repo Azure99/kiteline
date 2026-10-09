@@ -261,6 +261,8 @@ export interface GitHistory {
 export type CommitFile = GitPath & {
   status: string;
   binary: boolean;
+  additions?: number;
+  deletions?: number;
 };
 export interface CommitFiles {
   files: CommitFile[];

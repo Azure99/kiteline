@@ -353,7 +353,16 @@ test("history anchors pages and root commit files continue with exact paths and 
   const all = [...first.files, ...second.files];
   expect(all.length).toBe(505);
   expect(new Set(all.map((item) => item.path)).size).toBe(505);
-  expect(all.find((item) => item.path === "binary")?.binary).toBe(true);
+  expect(all.find((item) => item.path === "binary")).toEqual({
+    path: "binary",
+    status: "A",
+    binary: true,
+  });
+  expect(
+    all
+      .filter((item) => !item.binary)
+      .every((item) => item.additions === 1 && item.deletions === 0),
+  ).toBe(true);
   const patch = await commitDiff(repo, oid, undefined, "special\n[]", signals());
   expect(patch.summary).toMatchObject({ path: "special\n[]", status: "A", binary: false });
   expect(patch.patch).toContain("+root text");
@@ -382,7 +391,48 @@ test("commit file offsets continue at the actual byte-limited page length", asyn
   expect(Buffer.byteLength(JSON.stringify(first))).toBeLessThan(agentLimits.resultBytes);
   const second = await commitFiles(repo, oid, undefined, first.nextOffset!, signals());
   expect([...first.files, ...second.files].map((file) => file.path)).toEqual(paths);
+  expect(
+    [...first.files, ...second.files].every((file) => file.additions === 1 && file.deletions === 0),
+  ).toBe(true);
+  expect(Buffer.byteLength(JSON.stringify(second))).toBeLessThan(agentLimits.resultBytes);
   expect(second.nextOffset).toBeUndefined();
+  await repos.close();
+}, 15_000);
+test("commit statistics preserve rename paths, zero counts, deletions and counts beyond patch truncation", async () => {
+  const { root, cli, repo, repos } = await setup();
+  const old = "old\tname.txt",
+    next = "renamed\tline\nbreak.txt";
+  await writeFile(join(root, old), "keep\n".repeat(10));
+  await writeFile(join(root, "mode.sh"), "#!/bin/sh\necho hi\n");
+  await writeFile(join(root, "gone.txt"), "gone\nsecond\n");
+  await cli("add", ".");
+  await cli("commit", "-m", "base");
+  await rename(join(root, old), join(root, next));
+  await writeFile(join(root, next), "keep\n".repeat(10) + "added\n");
+  await chmod(join(root, "mode.sh"), 0o755);
+  await rm(join(root, "gone.txt"));
+  await writeFile(join(root, "large.txt"), "a complete added line\n".repeat(70_000));
+  await cli("add", ".");
+  await cli("commit", "-m", "mixed statistics");
+  const oid = (await history(repo, undefined, 0, signals())).anchorOid!;
+  const files = (await commitFiles(repo, oid, undefined, 0, signals())).files;
+  expect(files).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        path: next,
+        oldPath: old,
+        status: "R",
+        additions: 1,
+        deletions: 0,
+      }),
+      expect.objectContaining({ path: "mode.sh", additions: 0, deletions: 0 }),
+      expect.objectContaining({ path: "gone.txt", status: "D", additions: 0, deletions: 2 }),
+      expect.objectContaining({ path: "large.txt", additions: 70_000, deletions: 0 }),
+    ]),
+  );
+  const diff = await commitDiff(repo, oid, undefined, "large.txt", signals());
+  expect(diff.truncated).toBe(true);
+  expect(Buffer.byteLength(JSON.stringify(diff))).toBeLessThan(agentLimits.resultBytes);
   await repos.close();
 }, 15_000);
 test("merge parents are explicit and branches expose linked worktree occupancy", async () => {
@@ -404,16 +454,12 @@ test("merge parents are explicit and branches expose linked worktree occupancy",
   await expect(commitFiles(repo, merge.oid, undefined, 0, signals())).rejects.toMatchObject({
     code: "invalid_argument",
   });
-  expect(
-    (await commitFiles(repo, merge.oid, merge.parents[0], 0, signals())).files.map(
-      (item) => item.path,
-    ),
-  ).toEqual(["feature"]);
-  expect(
-    (await commitFiles(repo, merge.oid, merge.parents[1], 0, signals())).files.map(
-      (item) => item.path,
-    ),
-  ).toEqual(["main"]);
+  expect((await commitFiles(repo, merge.oid, merge.parents[0], 0, signals())).files).toMatchObject([
+    { path: "feature", additions: 1, deletions: 0 },
+  ]);
+  expect((await commitFiles(repo, merge.oid, merge.parents[1], 0, signals())).files).toMatchObject([
+    { path: "main", additions: 1, deletions: 0 },
+  ]);
   const linked = join(home, 'linked\t路径"\\\n');
   await cli("worktree", "add", linked, "feature");
   await cli("worktree", "lock", linked);

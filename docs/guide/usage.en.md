@@ -218,7 +218,7 @@ The commit includes everything staged, regardless of the current page or selecte
 
 "Branches" lists local branches. Branches checked out in other worktrees show their paths and cannot be switched to or deleted. Switching does not force-overwrite local changes. Deletion runs `git branch -d`, which rejects unmerged branches; Git rejection shows [Result unconfirmed](#result-unconfirmed).
 
-History diffs compare against a parent commit. For merge commits, you can choose the parent.
+History file line counts and diffs compare against the same parent commit. For merge commits, you can choose the parent. Binary files do not show line counts.
 
 ### Synchronization and authentication
 

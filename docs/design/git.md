@@ -78,6 +78,7 @@
 
 - `git.history` 从固定的 `anchorOid`（首次为当前 HEAD）开始，用 `git log --no-show-signature --encoding=UTF-8 -z` 每页读取最多 `listPageEntries` 个提交（多读一个判断是否还有下一页），返回 OID、父提交、作者、时间和主题。翻页沿用同一个 anchor，不受之后新提交的影响。
 - `git.commitFiles` 和提交 diff 只接受完整的 40 或 64 位十六进制提交 OID。根提交与空树比较；合并提交必须由浏览器指定父提交，否则返回 `invalid_argument`。
+- `git.commitFiles` 的文本增删行数与 diff 使用同一父提交，来自完整 numstat，不受 patch 截断影响。纯 rename 或 mode 变化保留真实零值，二进制不返回行数。文件项按条目数和结果字节上限分页，预算包含稍后补入的统计字段。
 - `git.branches` 用 `git for-each-ref refs/heads/` 一次返回全部本地分支和检出它的工作树路径，不分页，超过结果上限时返回 `limit_exceeded`。
 
 ## 写操作

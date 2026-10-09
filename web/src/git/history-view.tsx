@@ -373,7 +373,13 @@ function CommitView({
                   className={`flex min-h-8 w-full items-center gap-2 border-b border-border px-3 text-left text-xs max-desk:min-h-11 ${target?.path === file.path ? "bg-primary-soft shadow-[inset_3px_0_var(--primary)]" : "hover:bg-primary-soft"}`}
                 >
                   <span className="font-mono text-muted-foreground">{file.status}</span>
-                  <GitFilePath path={file.path} />
+                  <GitFilePath path={file.path} stacked />
+                  {!file.binary && file.additions !== undefined && file.deletions !== undefined && (
+                    <span className="shrink-0 whitespace-nowrap font-mono text-[11px]">
+                      <span className="text-green-800">+{file.additions}</span>{" "}
+                      <span className="text-destructive">−{file.deletions}</span>
+                    </span>
+                  )}
                   {file.binary && (
                     <span className="text-muted-foreground">{t(($) => $.git.binary)}</span>
                   )}
