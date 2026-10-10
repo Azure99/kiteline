@@ -80,6 +80,36 @@ test("stage and unstage exact names on unborn HEAD, keeping other staged data", 
   await expect(readFile(join(root, name))).rejects.toMatchObject({ code: "ENOENT" });
   expect(await cli("ls-files", "-z")).toBe("third\0");
 });
+test.each(["file", "symlink", "untracked"])(
+  "staging preserves scope when %s becomes a directory",
+  async (kind) => {
+    const { root, cli, write, stage } = await setup();
+    await write("third", "base");
+    if (kind === "symlink") await symlink("third", join(root, "selected"));
+    else await write("selected", "base");
+    await cli("add", "--", ...(kind === "untracked" ? ["third"] : ["third", "selected"]));
+    await cli("commit", "-m", "base");
+    if (kind === "symlink") {
+      await rm(join(root, "selected"));
+      await symlink("other", join(root, "selected"));
+    } else await write("selected", "changed");
+    await write("third", "unrelated staged content");
+    await cli("add", "third");
+    const actual = (await exec("/bin/sh", ["-c", "command -v git"])).stdout.trim();
+    const bin = join(root, ".git/bin");
+    await mkdir(bin);
+    await writeFile(
+      join(bin, "git"),
+      `#!/bin/sh\ncase " $* " in\n  *" add -A "*)\n    rm -- selected\n    mkdir -- selected\n    printf '%s' unselected > selected/child\n    ;;\nesac\nexec '${actual.replaceAll("'", "'\\''")}' "$@"\n`,
+    );
+    await chmod(join(bin, "git"), 0o755);
+    vi.stubEnv("PATH", bin + ":" + process.env.PATH);
+    await stage(["selected"]);
+    expect(await cli("ls-files", "-z")).toBe("third\0");
+    expect(await cli("show", ":third")).toBe("unrelated staged content");
+    expect(await readFile(join(root, "selected/child"), "utf8")).toBe("unselected");
+  },
+);
 test("selected repositories and linked worktrees own storage while retaining identity and hooks", async () => {
   const { root, repo, cli, repos, workspace, write } = await setup();
   const other = await setup();

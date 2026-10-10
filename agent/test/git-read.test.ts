@@ -11,6 +11,7 @@ import { gitRepoFixture, isolateGitEnvironment, workspaceFixture } from "./suppo
 import { observeIndex } from "../src/git/observe.js";
 import { status } from "../src/git/status.js";
 import { workingDiff } from "../src/git/diff.js";
+import { changeIndex } from "../src/git/changes.js";
 import { branches, commitDiff, commitFiles, history } from "../src/git/history.js";
 
 const run = promisify(execFile);
@@ -77,7 +78,7 @@ test.each(["mod", "module[*]\n\\link", "[prefix]module", "-mod", "项目"])(
     await cli("clone", "--no-checkout", "--", ".", path);
     await run("git", ["checkout", two], { cwd: join(root, path) });
     const worktree = await workingDiff(repo, path, "worktree", signals());
-    await cli("update-index", "--cacheinfo", `160000,${two},${path}`);
+    await changeIndex(repo, [path], "stage", signals());
     const staged = await workingDiff(repo, path, "staged", signals());
     await cli("commit", "-m", "module pointer");
     const oid = (await cli("rev-parse", "HEAD")).stdout.trim();

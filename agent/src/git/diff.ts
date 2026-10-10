@@ -9,7 +9,7 @@ import {
   type Repo,
 } from "@kiteline/shared/protocol";
 import { relativePath } from "../files/paths.js";
-import { git, gitPath, gitPathKey, literalPathspec, NulRecords } from "./process.js";
+import { git, gitPath, gitPathKey, leafPathspecs, literalPathspec, NulRecords } from "./process.js";
 import { diffOptions } from "./observe.js";
 import { readStatus } from "./status.js";
 
@@ -111,14 +111,6 @@ export function boundedDiff(patch: string, summary: DiffSummary, truncated: bool
 }
 // The parser needs the context prefix even on blank lines to avoid silently losing them.
 const patchConfig = ["-c", "core.quotePath=true", "-c", "diff.suppressBlankEmpty=false"];
-function leafPathspecs(paths: string[]) {
-  return paths.flatMap((path) => {
-    const escaped = path.replace(/[\\*?[\]]/g, "\\$&");
-    // Git 2.23 otherwise treats the plain prefix as the gitlink itself.
-    const prefix = escaped.startsWith("\\") ? escaped : `\\${escaped}`;
-    return [literalPathspec(path), `:(top,glob,exclude)${prefix}/**`];
-  });
-}
 export async function selectedPatch(
   repo: Repo,
   args: string[],

@@ -252,6 +252,14 @@ export function gitPathKey(path: GitPath) {
 export function literalPathspec(path: string) {
   return `:(top,literal)${path}`;
 }
+export function leafPathspecs(paths: string[]) {
+  return paths.flatMap((path) => {
+    const escaped = path.replace(/[\\*?[\]]/g, "\\$&");
+    // Git 2.23 otherwise treats the plain prefix as the gitlink itself.
+    const prefix = escaped.startsWith("\\") ? escaped : `\\${escaped}`;
+    return [literalPathspec(path), `:(top,glob,exclude)${prefix}/**`];
+  });
+}
 export function commandLine(bytes: Buffer) {
   return utf8(bytes.at(-1) === 10 ? bytes.subarray(0, -1) : bytes);
 }

@@ -11,7 +11,14 @@ import {
   type Repo,
 } from "@kiteline/shared/protocol";
 import { entryInfo, gitMetadataPath, relativePath } from "../files/paths.js";
-import { git, gitPath, gitProgressError, literalPathspec, NulRecords } from "./process.js";
+import {
+  git,
+  gitPath,
+  gitProgressError,
+  leafPathspecs,
+  literalPathspec,
+  NulRecords,
+} from "./process.js";
 import { headIdentity, observeIndex } from "./observe.js";
 import { modeType, readStatus } from "./status.js";
 
@@ -283,7 +290,7 @@ export async function changeIndex(
     await forceRemove(repo, remove, signal);
     done(remove);
     if (add.length) {
-      const pathspecs = add.map(literalPathspec);
+      const pathspecs = kind === "stage" ? leafPathspecs(add) : add.map(literalPathspec);
       await git(
         repo.rootPath,
         kind === "stage"
