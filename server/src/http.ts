@@ -161,7 +161,8 @@ export function errorStatus(error: unknown) {
     offline: 503,
     version_mismatch: 426,
   };
-  return statuses[asError(error).code] ?? 500;
+  const code = asError(error).code;
+  return Object.hasOwn(statuses, code) ? statuses[code]! : 500;
 }
 export function serverError(error: unknown) {
   if (error instanceof AppError) return error;

@@ -109,21 +109,32 @@ test("channel envelope budget is checked before reserving a channel", async () =
 });
 
 test.each([
-  { code: "unsupported", status: 400 },
-  { code: "permission_denied", status: 403 },
-  { code: "timeout", status: 504 },
+  { kind: "file", code: "unsupported", status: 400 },
+  { kind: "file", code: "permission_denied", status: 403 },
+  { kind: "file", code: "timeout", status: 504 },
+  { kind: "file", code: "unknown_code", status: 500 },
+  { kind: "file", code: "constructor", status: 500 },
+  { kind: "file", code: "__proto__", status: 500 },
+  { kind: "proxy", code: "unsupported", status: 501 },
+  { kind: "proxy", code: "unknown_code", status: 502 },
+  { kind: "proxy", code: "constructor", status: 502 },
+  { kind: "proxy", code: "__proto__", status: 502 },
 ])(
-  "channel preparation reports $code through HTTP $status and releases the channel",
-  async ({ code, status }) => {
+  "$kind channel preparation reports $code through HTTP $status and releases the channel",
+  async ({ kind, code, status }) => {
     const f = await fixture();
     const peer = await f.device();
     const login = f.store.createLogin(60_000);
-    const pending = f.call(
-      `/api/devices/${peer.deviceId}/channels`,
-      "POST",
-      { kind: "file.read", params: { workspaceId: "work", path: "file", purpose: "text" } },
-      `kiteline_session_http=${login.token}`,
-    );
+    const cookie = `kiteline_session_http=${login.token}`;
+    const pending =
+      kind === "proxy"
+        ? f.call(`/proxy/${peer.deviceId}/5173/`, "GET", undefined, cookie)
+        : f.call(
+            `/api/devices/${peer.deviceId}/channels`,
+            "POST",
+            { kind: "file.read", params: { workspaceId: "work", path: "file", purpose: "text" } },
+            cookie,
+          );
     await expect
       .poll(() => peer.messages.some((message) => message.type === "channel.open"))
       .toBe(true);
@@ -138,7 +149,9 @@ test.each([
     socket.send(JSON.stringify({ type: "error", code, message: "Could not prepare file" }));
     const response = await pending;
     expect(response.status).toBe(status);
-    expect(await response.json()).toEqual({ error: { code, message: "Could not prepare file" } });
+    if (kind === "proxy") expect(await response.text()).toContain("Could not prepare file");
+    else
+      expect(await response.json()).toEqual({ error: { code, message: "Could not prepare file" } });
     await expect
       .poll(() =>
         peer.messages.some(

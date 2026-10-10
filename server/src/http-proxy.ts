@@ -84,7 +84,7 @@ function failure(
     busy: 429,
     timeout: 504,
   };
-  const status = statuses[detail.code] ?? 502;
+  const status = Object.hasOwn(statuses, detail.code) ? statuses[detail.code]! : 502;
   if (status === 401 && navigation(request) && destination instanceof ServerResponse) {
     destination
       .writeHead(302, {
