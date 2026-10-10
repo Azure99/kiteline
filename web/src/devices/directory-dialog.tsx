@@ -8,7 +8,7 @@ import {
   type DirectoryListing,
   type Workspace,
 } from "@kiteline/shared/protocol";
-import { rpc } from "../lib/api";
+import { ApiError, rpc } from "../lib/api";
 import { cursorRpc, releaseCursor } from "../lib/cursors";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -86,7 +86,10 @@ export function DirectoryDialog({
           setInput(result.path);
         },
         (error: unknown) => {
-          if (!controller.signal.aborted) setError(error);
+          if (!controller.signal.aborted) {
+            if (cursor && error instanceof ApiError && error.code === "conflict") go(path);
+            else setError(error);
+          }
         },
       )
       .finally(() => {

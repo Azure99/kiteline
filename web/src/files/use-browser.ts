@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Entry, FileListing } from "@kiteline/shared/protocol";
+import { ApiError } from "../lib/api";
 import { cursorRpc, releaseCursor } from "../lib/cursors";
 import { isWithin } from "./paths";
 
@@ -94,10 +95,28 @@ export function useFileBrowser(deviceId: string, workspaceId: string, active: bo
         return listing;
       } catch (error) {
         if (!controller.signal.aborted) {
-          setPages((old) => ({
-            ...old,
-            [path]: { ...old[path], busy: false, error },
-          }));
+          const page = pagesRef.current[path]!;
+          if (
+            more &&
+            previous?.entries.nextCursor &&
+            error instanceof ApiError &&
+            error.code === "conflict"
+          ) {
+            pagesRef.current = {
+              ...pagesRef.current,
+              [path]: {
+                ...page,
+                listing: page.listing && {
+                  ...page.listing,
+                  entries: { ...page.listing.entries, nextCursor: undefined },
+                },
+              },
+            };
+            setPages(pagesRef.current);
+            return load(path);
+          }
+          pagesRef.current = { ...pagesRef.current, [path]: { ...page, busy: false, error } };
+          setPages(pagesRef.current);
         }
       } finally {
         if (requests.current.get(path) === controller) {
