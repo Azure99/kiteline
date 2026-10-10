@@ -31,6 +31,10 @@ jobs:
         with:
           node-version-file: package.json
           package-manager-cache: false
+      - name: Prepare native build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential pkg-config libevent-dev libncurses-dev ncurses-bin bison curl patch
       - name: Check source
         run: |
           set -euo pipefail
@@ -41,7 +45,8 @@ jobs:
           pnpm lint
           pnpm typecheck
           pnpm --filter @kiteline/web build
-          pnpm test web/test agent/test/config.test.ts agent/test/state-records.test.ts
+          pnpm native:build
+          pnpm test
 
   agent:
     needs: checks

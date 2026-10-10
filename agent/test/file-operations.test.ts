@@ -321,7 +321,11 @@ test("cross-filesystem move publishes before deleting only its copied source; bi
   try {
     await exec("mount", ["-t", "tmpfs", "-o", "size=1m", "tmpfs", disk]);
   } catch (error) {
-    if (/permission denied|Operation not permitted/.test(String(error))) context.skip();
+    if (
+      /permission denied|Operation not permitted|must be superuser to use mount/.test(String(error))
+    ) {
+      context.skip();
+    }
     throw error;
   }
   cleanups.push(() => exec("umount", [disk]));

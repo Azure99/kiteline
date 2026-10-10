@@ -311,7 +311,7 @@ test("recovery restores the same task and pending Shell input, then redraw and e
     history: "retained",
   });
   await expect.poll(() => ready, pollOptions).toBe(true);
-  expect(output).toContain("recovered.txt");
+  expect(output.replaceAll("\r\n", "")).toContain("recovered.txt");
   agent.sessions.recorder.send({
     type: "input",
     sessionId: session.id,
