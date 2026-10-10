@@ -42,7 +42,7 @@ export function installationCommands(entryOrigin: string, code: string) {
   const origin = quote(entryOrigin);
   const bind = `kiteline-agent check && printf '%s\\n' ${quote(code)} | kiteline-agent bind --server ${origin} --if-unbound`;
   const install = (platform: "linux" | "macos") =>
-    `${curlCommand(entryOrigin)} ${quote(entryOrigin + "/connect.sh")} | sh -s -- ${platform} ${quote(code)}`;
+    `(kiteline_script=$(${curlCommand(entryOrigin)} ${quote(entryOrigin + "/connect.sh")}) && sh -c "$kiteline_script" -- ${platform} ${quote(code)})`;
   return {
     linux: { install: install("linux"), bind },
     macos: { install: install("macos"), bind },

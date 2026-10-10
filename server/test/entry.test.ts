@@ -454,7 +454,7 @@ test("binding returns versioned installation commands from the current request o
   expect(response.status).toBe(200);
   const value = await response.json();
   expect(value.commands.linux.install).toContain(`${f.origin}/connect.sh`);
-  expect(value.commands.macos.install).toContain(`| sh -s -- macos '${value.code}'`);
+  expect(value.commands.macos.install).toContain(`-- macos '${value.code}'`);
   expect(Object.keys(value.commands).sort()).toEqual(["linux", "macos", "windows"]);
   expect(Object.keys(value.commands.linux).sort()).toEqual(["bind", "install"]);
   expect(Object.keys(value.commands.windows).sort()).toEqual(["bind", "install"]);

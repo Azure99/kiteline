@@ -129,19 +129,33 @@ test("the real upgrade script refuses stale commands and noninteractive executio
 });
 
 test.each(["linux", "macos"] as const)(
-  "the %s connection command preserves the code and refuses an incomplete installer",
+  "the %s connection command executes complete downloads and preserves arguments and exit status",
   async (platform) => {
     const root = await mkdtemp("/var/tmp/kiteline-connect-download-");
     cleanup.push(() => rm(root, { recursive: true, force: true }));
     const output = root + "/executed";
     const script = `printf '%s\\n' "$@" > '${output}'\n`;
     let origin = "";
-    let complete = false;
+    let mode:
+      | "first-404"
+      | "first-503"
+      | "first-truncated"
+      | "exit-7"
+      | "installer-truncated"
+      | "complete" = "first-404";
     const server = createServer((request, response) => {
-      if (request.url === "/install.sh") {
+      if (request.url === "/connect.sh" && mode.startsWith("first-")) {
+        response.writeHead(mode === "first-404" ? 404 : mode === "first-503" ? 503 : 200, {
+          connection: "close",
+          "content-length": Buffer.byteLength(script) + (mode === "first-truncated" ? 100 : 0),
+        });
+        response.end(script);
+      } else if (request.url === "/connect.sh" && mode === "exit-7") {
+        response.end("exit 7\n");
+      } else if (request.url === "/install.sh") {
         response.writeHead(200, {
           connection: "close",
-          "content-length": Buffer.byteLength(script) + (complete ? 0 : 100),
+          "content-length": Buffer.byteLength(script) + (mode === "installer-truncated" ? 100 : 0),
         });
         response.end(script);
       } else void serveAgentInstallation(request.url!, root, origin, request, response);
@@ -150,13 +164,22 @@ test.each(["linux", "macos"] as const)(
     await once(server, "listening");
     cleanup.push(() => new Promise<void>((resolve) => server.close(() => resolve())));
     origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-    const code = "binding'code";
+    const code = "binding'code $literal `not-executed`";
     const command = installationCommands(origin, code)[platform].install;
-    await expect(execute("sh", ["-c", command], { timeout: 5000 })).rejects.toMatchObject({
-      code: 18,
-    });
-    await expect(readFile(output)).rejects.toMatchObject({ code: "ENOENT" });
-    complete = true;
+    for (const [failure, status] of [
+      ["first-404", 22],
+      ["first-503", 22],
+      ["first-truncated", 18],
+      ["exit-7", 7],
+      ["installer-truncated", 18],
+    ] as const) {
+      mode = failure;
+      await expect(execute("sh", ["-c", command], { timeout: 5000 })).rejects.toMatchObject({
+        code: status,
+      });
+      await expect(readFile(output)).rejects.toMatchObject({ code: "ENOENT" });
+    }
+    mode = "complete";
     await execute("sh", ["-c", command], { timeout: 5000 });
     expect(await readFile(output, "utf8")).toBe(
       `--server\n${origin}\n--version\n${appVersion}\n--platform\n${platform}\n--code\n${code}\n`,
