@@ -103,7 +103,7 @@ export function DraftView({
     const strip = tabStrip.current;
     if (!strip) return;
     const reveal = () => {
-      const tab = strip.querySelector('[aria-selected="true"]')?.parentElement;
+      const tab = strip.querySelector('[aria-current="true"]')?.parentElement;
       if (!tab || !strip.clientWidth) return;
       const bounds = strip.getBoundingClientRect();
       const current = tab.getBoundingClientRect();
@@ -143,7 +143,7 @@ export function DraftView({
       <div
         hidden={focusMode?.active}
         ref={tabStrip}
-        role="tablist"
+        role="group"
         aria-label={t(($) => $.files.openFiles)}
         className="flex min-h-9 shrink-0 overflow-x-auto border-b border-border bg-muted/40"
       >
@@ -153,8 +153,7 @@ export function DraftView({
             className={`flex max-w-64 shrink-0 items-center border-r border-border ${item === draft ? "bg-background" : ""}`}
           >
             <button
-              role="tab"
-              aria-selected={item === draft}
+              aria-current={item === draft ? "true" : undefined}
               title={item.path}
               onClick={() => showDraft(item)}
               className="flex min-h-9 min-w-0 items-center gap-2 px-3 text-xs"

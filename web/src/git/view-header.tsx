@@ -66,15 +66,14 @@ export function GitViewHeader({
     <div className="flex min-h-9 shrink-0 items-center gap-1 border-b border-border px-2 text-xs max-desk:min-h-11">
       {(!mobile || !target) && (
         <div
-          role="tablist"
+          role="group"
           aria-label={t(($) => $.git.views)}
           className="flex shrink-0 gap-1 desk:gap-3"
         >
           {(["changes", "history", "branches"] as const).map((id) => (
             <button
               key={id}
-              role="tab"
-              aria-selected={view === id}
+              aria-current={view === id ? "true" : undefined}
               onClick={() => onView(id)}
               className={`flex min-h-9 items-center justify-center gap-2 border-b-2 px-1 max-desk:min-h-11 max-desk:min-w-11 ${view === id ? "border-primary text-primary" : "border-transparent"}`}
             >
