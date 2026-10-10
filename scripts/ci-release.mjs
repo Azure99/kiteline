@@ -157,6 +157,41 @@ function copyIndex(imageDigest, reference) {
   console.log(`Image available: ${reference}@${imageDigest}`);
 }
 
+function commitLog() {
+  const previous = capture("git", ["tag", "--merged", product])
+    .split("\n")
+    .filter((name) => /^v[0-9]+\.[0-9]+\.[0-9]+$/.test(name) && name !== tag)
+    .map((name) => ({
+      name,
+      version: name.slice(1).split(".").map(Number),
+      distance: Number(capture("git", ["rev-list", "--count", `refs/tags/${name}..${product}`])),
+    }))
+    .sort(
+      (a, b) =>
+        a.distance - b.distance ||
+        b.version[0] - a.version[0] ||
+        b.version[1] - a.version[1] ||
+        b.version[2] - a.version[2] ||
+        (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+    )[0]?.name;
+  const range = previous ? `refs/tags/${previous}..${product}` : product;
+  const entries = capture("git", ["log", "--topo-order", "--reverse", "--format=%H%x09%s", range])
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [sha, ...subject] = line.split("\t");
+      const title = subject
+        .join("\t")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/[\\`*_[\]~]/g, "\\$&");
+      return `- [${sha.slice(0, 8)}](https://github.com/${repository}/commit/${sha}) ${title}`;
+    });
+  const baseline = previous ? `Since ${previous}.` : "Initial release: all reachable commits.";
+  return `## Commits\n\n${baseline}\n\n${entries.join("\n")}\n`;
+}
+
 function candidate(temporary) {
   let release = findRelease();
   assert.ok(!release || release.draft, `Release ${tag} is already published; cannot rebuild it`);
@@ -174,7 +209,7 @@ function candidate(temporary) {
   const images = loadImages();
   const runId = Number(process.env.GITHUB_RUN_ID);
   const runUrl = `https://github.com/${repository}/actions/runs/${runId}`;
-  const body = { draft: true, body: `Source: ${product}\n\nBuild: ${runUrl}\n` };
+  const body = { draft: true, body: `Source: ${product}\n\nBuild: ${runUrl}\n\n${commitLog()}` };
   if (release) release = api("PATCH", `releases/${release.id}`, body);
   else
     release = api("POST", "releases", {
