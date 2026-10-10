@@ -123,6 +123,9 @@ body {
     opacity 160ms ease-out,
     translate 160ms ease-out;
 }
+.dialog-content[data-closed] {
+  visibility: hidden;
+}
 .menu-content {
   transition:
     opacity 120ms ease-out,
