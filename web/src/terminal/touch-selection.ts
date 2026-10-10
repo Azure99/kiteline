@@ -263,7 +263,7 @@ export class TouchSelection {
       end,
       menu: {
         x: Math.min(rect.right - 50, Math.max(rect.left + 50, (start ?? end)?.x ?? rect.left + 50)),
-        y: Math.max(rect.top + 64, (start ?? end)?.y ?? rect.top),
+        y: Math.max(64, (start ?? end)?.y ?? rect.top),
       },
     });
   }
