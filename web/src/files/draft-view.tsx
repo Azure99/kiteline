@@ -1,6 +1,6 @@
 import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Circle,
   Code,
@@ -67,7 +67,7 @@ export function DraftView({
   const [preview, setPreview] = useState(false);
   const previewElement = useRef<HTMLElement>(null);
   const previewPosition = useRef<{ line: number; offset: number }>(undefined);
-  function togglePreview() {
+  const rememberPreviewPosition = useCallback(() => {
     const article = previewElement.current;
     if (preview && article) {
       const viewport = article.getBoundingClientRect();
@@ -87,11 +87,21 @@ export function DraftView({
           line,
           offset: nearest.getBoundingClientRect().top - viewport.top,
         };
-        draft.location = { line };
+        return line;
       }
     }
+  }, [preview]);
+  function togglePreview() {
+    const line = rememberPreviewPosition();
+    if (line) draft.location = { line };
     setPreview(!preview);
   }
+  useLayoutEffect(() => {
+    if (preview && draft.location) {
+      rememberPreviewPosition();
+      setPreview(false);
+    }
+  }, [preview, draft.location, rememberPreviewPosition]);
   const [disk, setDisk] = useState<DiskText>();
   const [saveAs, setSaveAs] = useState(false);
   const [path, setPath] = useState(draft.path);
