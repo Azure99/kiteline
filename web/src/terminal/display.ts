@@ -71,6 +71,7 @@ export class TerminalDisplay {
     history: "retained" | "screen" = "retained",
     private interaction?: {
       opened: (terminal: Terminal) => void;
+      title: (title: string) => void;
       reading: (value: boolean) => void;
       modifiers: (value: Modifiers) => void;
     },
@@ -243,6 +244,8 @@ export class TerminalDisplay {
         this.element.addEventListener("scroll", this.reportReading);
         this.cleanups.push(() => this.element.removeEventListener("scroll", this.reportReading));
         this.cleanups.push(() => readingEvents.forEach((event) => event.dispose()));
+        const titleSubscription = terminal.onTitleChange((title) => this.interaction?.title(title));
+        this.cleanups.push(() => titleSubscription.dispose());
         this.interaction?.opened(terminal);
         this.change({
           status: "connecting",

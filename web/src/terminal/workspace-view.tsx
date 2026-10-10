@@ -1,3 +1,4 @@
+import { ApplicationTitle } from "./application-title";
 import { useTranslation } from "react-i18next";
 import { ErrorNotice } from "../components/error-notice";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
@@ -218,7 +219,11 @@ export function WorkspaceView({
     (region: "main" | "dock", id: string, value: TerminalCapabilities | undefined) => {
       setCapabilities((old) => {
         const previous = old[region][id];
-        if (previous?.ready === value?.ready && previous?.hasTerminal === value?.hasTerminal)
+        if (
+          previous?.ready === value?.ready &&
+          previous?.hasTerminal === value?.hasTerminal &&
+          previous?.title === value?.title
+        )
           return old;
         const next = { ...old[region] };
         if (value === undefined) delete next[id];
@@ -493,8 +498,17 @@ export function WorkspaceView({
               drag={drag}
               onSelect={choose}
             />
-          ) : (
-            <span className="flex-1" />
+          ) : null}
+          {(!split || !multipleGroups) && (
+            <span className="flex min-w-0 flex-1 overflow-hidden px-1">
+              {!split && (
+                <ApplicationTitle
+                  title={
+                    !targetPending && selected ? capabilities.main[selected]?.title : undefined
+                  }
+                />
+              )}
+            </span>
           )}
           {newButtons()}
           {mobile && (
@@ -621,6 +635,7 @@ export function WorkspaceView({
               name,
               actions: register,
               capabilities: reportMain,
+              title: (id) => capabilities.main[id]?.title,
               focus,
               close,
               maximize: () => patchGroup({ maximized: !group?.maximized }),
@@ -681,7 +696,9 @@ export function WorkspaceView({
                 }
               >
                 {picker(true)}
-                <span className="flex-1" />
+                <span className="flex min-w-0 flex-1 overflow-hidden px-1">
+                  <ApplicationTitle title={dockId ? capabilities.dock[dockId]?.title : undefined} />
+                </span>
                 {newButtons(true)}
                 <IconButton
                   label={t(($) => $.terminal.search)}

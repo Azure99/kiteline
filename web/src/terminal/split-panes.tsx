@@ -1,3 +1,4 @@
+import { ApplicationTitle } from "./application-title";
 import { useTranslation } from "react-i18next";
 import { useCallback, useLayoutEffect, useRef, type ReactNode } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
@@ -9,6 +10,7 @@ import { members, parentSplit, type TerminalGroup, type TerminalNode } from "./g
 import { memberTarget, type useTerminalDrag } from "./group-tabs";
 
 export interface PaneEvents {
+  title(id: string): string | undefined;
   actions(id: string, value: TerminalActions | null): void;
   capabilities(id: string, value: TerminalCapabilities | undefined): void;
   focus(id: string): void;
@@ -200,6 +202,7 @@ function TerminalPane({
     id,
     t(($) => $.common.terminal),
   );
+  const title = events.title(id);
   const actions = useRef<TerminalActions>(null);
   const register = events.actions;
   const setActions = useCallback(
@@ -242,7 +245,8 @@ function TerminalPane({
             title={name}
           >
             <SquareTerminal size={13} className="shrink-0" />
-            <span className="truncate">{name}</span>
+            <span className={title ? "shrink-0 max-w-[40%] truncate" : "truncate"}>{name}</span>
+            <ApplicationTitle title={title} />
           </button>
           <IconButton label={t(($) => $.terminal.maximize)} onClick={events.maximize}>
             <Maximize2 />

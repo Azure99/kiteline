@@ -40,6 +40,7 @@ export interface TerminalActions {
   search(): void;
 }
 export interface TerminalCapabilities {
+  title?: string;
   ready: boolean;
   hasTerminal: boolean;
 }
@@ -61,6 +62,7 @@ export function TerminalView({
 
   const element = useRef<HTMLDivElement>(null);
   const display = useRef<TerminalDisplay>(undefined);
+  const [title, setTitle] = useState("");
   const [terminal, setTerminal] = useState<Terminal>();
   const [reading, setReading] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -81,8 +83,9 @@ export function TerminalView({
       onCapabilities?.(sessionId, {
         ready: state.status === "ready",
         hasTerminal: !!terminal,
+        title,
       }),
-    [onCapabilities, sessionId, state.status, terminal],
+    [onCapabilities, sessionId, state.status, terminal, title],
   );
   useEffect(() => () => onCapabilities?.(sessionId, undefined), [onCapabilities, sessionId]);
   const [history, setHistory] = useState<"retained" | "screen">("retained");
@@ -166,6 +169,7 @@ export function TerminalView({
       history,
       {
         opened: setTerminal,
+        title: setTitle,
         reading: setReading,
         modifiers: setModifiers,
       },
@@ -173,6 +177,7 @@ export function TerminalView({
     display.current = current;
     return () => {
       current.dispose();
+      setTitle("");
       display.current = undefined;
       setTerminal(undefined);
       setReading(false);
