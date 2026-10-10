@@ -556,7 +556,8 @@ export class ScheduledTasks {
     if (reason) skipRun(run, reason);
     record.runs.push(run);
     if (scheduledAt) this.nextTime(record);
-    await this.save(record);
+    if (reason) await this.saveKnown(record);
+    else await this.save(record);
     if (scheduledAt) this.arm(record);
     if (reason) {
       await this.cleanup(() => this.prune(id));

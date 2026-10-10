@@ -227,6 +227,45 @@ test("real one-shot timers skip overlaps and persist consumption independently o
   }
 });
 
+test("a failed overlap write retains consumed once status and skipped history after repair", async () => {
+  const f = await fixture();
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const at = new Date(Date.now() + 1000).toISOString();
+    await f.tasks.create(
+      "task",
+      { ...input(f.root, "sleep 60"), schedule: { kind: "once", at } },
+      signal,
+    );
+    await f.tasks.start("task", "manual", signal);
+    const path = join(f.root, "tasks", "task.json");
+    await rename(path, path + ".saved");
+    await mkdir(path);
+    await expect
+      .poll(() => f.tasks.status().storageError, { timeout: 3000 })
+      .toContain("not persisted");
+    expect(f.tasks.get("task").onceStatus).toBe("consumed");
+    const skipped = { state: "skipped", reasonCode: "overlap", scheduledAt: at };
+    expect(f.tasks.listRuns("task").items).toContainEqual(expect.objectContaining(skipped));
+    await rm(path, { recursive: true });
+    await rename(path + ".saved", path);
+    await f.tasks.setPaused("task", true, signal);
+    expect(f.tasks.status().storageError).toBeUndefined();
+    await f.tasks.close();
+    const restored = new ScheduledTasks(f.config);
+    try {
+      await restored.load();
+      expect(restored.get("task")).toMatchObject({ onceStatus: "consumed", nextRunAt: null });
+      expect(restored.listRuns("task").items).toContainEqual(expect.objectContaining(skipped));
+    } finally {
+      await restored.close();
+    }
+  } finally {
+    log.mockRestore();
+    await f.close();
+  }
+});
+
 test("management of expired paused one-shot tasks keeps skipped history bounded", async () => {
   const f = await fixture({ taskHistoryRuns: 1 });
   try {
