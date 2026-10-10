@@ -590,6 +590,7 @@ export class Agent {
       }
     };
     await Promise.all([
+      finish(() => this.sessions.close()),
       finish(() => this.terminalChannels.close()),
       finish(() => this.httpChannels.close()),
       finish(() => this.local.close()),
@@ -603,7 +604,6 @@ export class Agent {
       finish(() => this.directories.close()),
       finish(() => this.repos.close()),
       finish(() => this.watches.close()),
-      finish(() => this.sessions.close()),
     ]);
     if (errors.length) throw new AggregateError(errors, "Agent cleanup failed");
   }

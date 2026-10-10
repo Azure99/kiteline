@@ -357,9 +357,14 @@ test("an unresponsive recorder cannot leave a phantom creation or block agent sh
   expect(agent.sessions.list().sessions.some((item) => item.state === "starting")).toBe(true);
   process.kill(agent.sessions.recorder.pid!, "SIGKILL");
   await expect.poll(() => agent.sessions.list().sessions.length === 1, pollOptions).toBe(true);
-  await agent.sessions.create(workspace.id, undefined, undefined, signal);
+  const session = await agent.sessions.create(workspace.id, undefined, undefined, signal);
   process.kill(agent.sessions.recorder.pid!, "SIGSTOP");
+  const redraw = expect(
+    agent.dispatch("sessions.redraw", { workspaceId: workspace.id, sessionId: session.id }, signal),
+  ).rejects.toMatchObject({ code: "recording_unavailable" });
+  await new Promise<void>((resolve) => setImmediate(resolve));
   await agent.close();
+  await redraw;
   expect(agent.sessions.list().sessions).toEqual([]);
 }, 10000);
 
