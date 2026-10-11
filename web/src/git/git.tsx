@@ -53,7 +53,11 @@ export function GitTool({
   const route = useRoute();
   const requestedRepo = route.query.repo;
   const enabled = device.status === "online";
-  const { repos, scan, busy, error, discover } = useRepos(device.id, workspace.id, enabled);
+  const { repos, scan, busy, error, discover } = useRepos(
+    device.id,
+    workspace.id,
+    visible && enabled,
+  );
   const selectedRepoId = requestedRepo ?? repos.find((item) => item.available)?.id ?? repos[0]?.id;
   const repo = repos.find((item) => item.id === selectedRepoId);
   const activeRepoId = repo?.id;
@@ -146,7 +150,9 @@ export function GitTool({
         )}
         {scan && !scan.complete && (
           <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-1 text-xs">
-            <span>{t(($) => $.git.scanIncomplete)}</span>
+            <span>
+              {enabled && busy ? t(($) => $.git.discovering) : t(($) => $.git.scanIncomplete)}
+            </span>
             <Button variant="ghost" disabled={!enabled || busy} onClick={() => void discover()}>
               {t(($) => $.git.continueScan)}
             </Button>

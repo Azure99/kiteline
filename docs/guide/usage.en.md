@@ -210,7 +210,7 @@ Git uses the device's Git installation and the project user's Git configuration,
 
 Git scans the workspace directory and all subdirectories, listing repositories including initialized submodules and linked worktrees within the workspace (marked `worktree`). Repositories outside the workspace are not used. If the workspace is only a subdirectory of a repository, it shows "No Git repositories found"; add the repository root as a workspace.
 
-With several repositories, the first is selected automatically. Switch by path in the repository menu. "Discover repositories again" rescans; click "Continue scan" when "Repository scan incomplete" appears. Bare repositories are not supported.
+With several repositories, the first is selected automatically. Switch by path in the repository menu. Opening Git for the first time automatically continues the scan; an error stops that continuous run and is displayed. After the initial scan completes, later scans advance with each refresh. You can also click "Continue scan" when "Repository scan incomplete" appears. "Discover repositories again" rescans. Bare repositories are not supported.
 
 ### Status and diff
 
