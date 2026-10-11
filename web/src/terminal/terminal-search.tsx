@@ -79,6 +79,7 @@ export function TerminalSearch({
       className="absolute inset-0 z-20 flex items-center border-b border-border bg-background px-2 text-foreground"
     >
       <Input
+        className="h-8 min-h-8 py-1 max-desk:h-9 max-desk:min-h-9"
         ref={inputRef}
         value={query}
         disabled={!terminal}
@@ -101,6 +102,9 @@ export function TerminalSearch({
           }
         }}
       />
+      <span role="status" className="w-16 shrink-0 px-1 text-xs text-muted-foreground">
+        {found === false ? t(($) => $.terminal.searchEmpty) : ""}
+      </span>
       <IconButton
         label={t(($) => $.terminal.searchPrevious)}
         disabled={!terminal || !query}
@@ -124,9 +128,6 @@ export function TerminalSearch({
       >
         <X />
       </IconButton>
-      <span role="status" className="w-16 shrink-0 px-1 text-xs text-muted-foreground">
-        {found === false ? t(($) => $.terminal.searchEmpty) : ""}
-      </span>
     </div>
   );
 }
