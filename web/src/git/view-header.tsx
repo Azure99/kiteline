@@ -14,12 +14,20 @@ import type { DiffTarget } from "./diff-view";
 
 export type GitView = "changes" | "history" | "branches";
 
-export function GitFilePath({ path, stacked = false }: { path: string; stacked?: boolean }) {
+export function GitFilePath({
+  path,
+  stacked = false,
+  title = path,
+}: {
+  path: string;
+  stacked?: boolean;
+  title?: string;
+}) {
   const split = path.lastIndexOf("/");
   return (
     <span
       className={stacked ? "min-w-0 flex-1 py-px" : "flex min-w-0 flex-1 items-center gap-2"}
-      title={path}
+      title={title}
     >
       <span className={stacked ? "block truncate leading-4" : "truncate"}>
         {path.slice(split + 1)}

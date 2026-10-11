@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import { ChevronDown, Minus, Plus, Undo2 } from "lucide-react";
 import type { DiscardScope, GitEntry, GitStatus } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
+import { Tooltip, TooltipTrigger, TooltipContent } from "../components/ui/tooltip";
 import { discardable, RowActions, stageable } from "./change-actions";
 import { inSide, type ChangeSelection, type ChangeSide } from "./selection";
 import type { DiffTarget } from "./diff-view";
@@ -107,18 +108,37 @@ export function ChangeSection({
           </>
         )}
       </div>
-      {entries.map((entry) =>
-        entry.path === undefined ? (
-          <div
-            key={`invalid:${entry.pathError}`}
-            className="border-b border-border/50 px-3 py-2 text-xs break-all text-muted-foreground"
+      {entries.map((entry) => {
+        if (entry.path === undefined)
+          return (
+            <div
+              key={`invalid:${entry.pathError}`}
+              className="border-b border-border/50 px-3 py-2 text-xs break-all text-muted-foreground"
+            >
+              <span className="mr-2 font-mono">
+                {side === "staged" ? entry.indexStatus : entry.worktreeStatus}
+              </span>
+              {t(($) => $.git.invalidPath, { path: entry.pathError })}
+            </div>
+          );
+        const description = entry.submodule
+          ? t(($) => $.git[submoduleLabel(entry.submodule!)])
+          : undefined;
+        const button = (
+          <button
+            title={description ? undefined : entry.path}
+            aria-label={description ? `${entry.path} · ${description}` : undefined}
+            onClick={() =>
+              side === "conflict"
+                ? onFile(entry.path)
+                : onTarget({ path: entry.path, side: side === "staged" ? "staged" : "worktree" })
+            }
+            className="flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left text-xs max-desk:min-h-11"
           >
-            <span className="mr-2 font-mono">
-              {side === "staged" ? entry.indexStatus : entry.worktreeStatus}
-            </span>
-            {t(($) => $.git.invalidPath, { path: entry.pathError })}
-          </div>
-        ) : (
+            <GitFilePath path={entry.path} stacked title={description ? "" : entry.path} />
+          </button>
+        );
+        return (
           <div
             key={`path:${entry.path}`}
             className={`flex min-h-8 items-center gap-1 border-b border-border/50 px-2 max-desk:min-h-11 ${target?.path === entry.path && (target.side === side || side === "conflict") ? "bg-primary-soft" : ""}`}
@@ -136,24 +156,20 @@ export function ChangeSection({
             >
               {side === "staged" ? entry.indexStatus : entry.worktreeStatus}
             </span>
-            <button
-              title={entry.path}
-              onClick={() =>
-                side === "conflict"
-                  ? onFile(entry.path)
-                  : onTarget({ path: entry.path, side: side === "staged" ? "staged" : "worktree" })
-              }
-              className="flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left text-xs max-desk:min-h-11"
-            >
-              <GitFilePath path={entry.path} stacked />
-              {entry.submodule && (
-                <span className="shrink-0 text-[10px] text-muted-foreground">
-                  {t(($) => $.git[submoduleLabel(entry.submodule!)])}
-                </span>
-              )}
-            </button>
+            {description ? (
+              <Tooltip>
+                <TooltipTrigger render={button} />
+                <TooltipContent>
+                  <p className="break-all">{entry.path}</p>
+                  <p>{description}</p>
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              button
+            )}
             <RowActions
               entry={entry}
+              description={description}
               side={side}
               disabled={disabled}
               onIndex={onIndex}
@@ -161,8 +177,8 @@ export function ChangeSection({
               onFile={() => onFile(entry.path)}
             />
           </div>
-        ),
-      )}
+        );
+      })}
       {!entries.length && (
         <p className="px-8 py-3 text-xs text-muted-foreground">{t(($) => $.git.noChanges)}</p>
       )}

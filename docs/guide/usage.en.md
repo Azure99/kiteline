@@ -218,6 +218,8 @@ With several repositories, the first is selected automatically. Switch by path i
 
 Diffs exceeding the limit show only part of the raw patch. Changes are paginated. The Staged changes count covers the whole repository; other group counts cover the current page. Entries with non-UTF-8 paths cannot be operated on.
 
+Hover over or focus a submodule path to see its full path and status. On touchscreens, open the row menu to view these details.
+
 ### Stage and commit
 
 - Staging uses files on disk, not unsaved drafts.

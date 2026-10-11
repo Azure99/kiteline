@@ -31,6 +31,7 @@ export function discardable(entry: GitEntry) {
 }
 export function RowActions({
   entry,
+  description,
   side,
   disabled,
   onIndex,
@@ -38,6 +39,7 @@ export function RowActions({
   onFile,
 }: {
   entry: GitEntry & { path: string };
+  description?: string;
   side: ChangeSide;
   disabled: boolean;
   onIndex: (paths: string[], kind: "stage" | "unstage") => void;
@@ -85,6 +87,9 @@ export function RowActions({
         </MenuTrigger>
         <MenuContent>
           <p className="max-w-72 px-2 py-1 text-xs break-all text-muted-foreground">{entry.path}</p>
+          {description && (
+            <p className="max-w-72 px-2 py-1 text-xs text-muted-foreground">{description}</p>
+          )}
           <MenuItem onClick={onFile}>
             <FolderOpen />
             {t(($) => $.git.openFiles)}
