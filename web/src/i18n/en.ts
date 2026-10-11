@@ -212,7 +212,7 @@ export const en = {
     version_mismatch: "The versions do not match. Use the server's matching release.",
     busy: "The resource is busy.",
     timeout: "The operation timed out.",
-    conflict: "The current state has changed. Refresh and check before continuing.",
+    conflict: "Check the current state before continuing.",
     limit_exceeded: "The operation exceeds the available capacity.",
     unsupported: "This operation is not supported.",
     permission_denied: "The device user does not have permission for this operation.",

@@ -214,7 +214,7 @@ With several repositories, the first is selected automatically. Switch by path i
 
 ### Status and diff
 
-Diffs exceeding the limit show only part of the raw patch. Changes are paginated, but group counts cover the whole repository. Entries with non-UTF-8 paths cannot be operated on.
+Diffs exceeding the limit show only part of the raw patch. Changes are paginated. The Staged changes count covers the whole repository; other group counts cover the current page. Entries with non-UTF-8 paths cannot be operated on.
 
 ### Stage and commit
 

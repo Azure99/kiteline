@@ -154,9 +154,9 @@ sudo "./$name/bin/kiteline-agent" install --user "$(id -un)"
 
 随包的 tmux、`flock` 等程序没有经过 Apple 公证。macOS 上用浏览器下载的发布包带有隔离属性 `com.apple.quarantine`，运行随包程序时 macOS 可能提示无法验证开发者并拒绝运行；用上面的 curl 命令下载的文件不带这个属性。已经用浏览器下载时，核对 SHA-256 后对解包目录执行 `xattr -dr com.apple.quarantine "./$name"`，再运行 `check`。已经安装的程序目录执行 `sudo xattr -dr com.apple.quarantine /opt/kiteline-agent`。
 
-然后以项目用户在网页复制[仅绑定命令](#仅绑定命令)执行，再执行 `kiteline-agent run`。
-
 `install` 在 `/etc/kiteline-agent.env` 中记录 agent 数据目录，默认为项目用户的 `~/.local/share/kiteline-agent`，运行目录默认为其中的 `run`。需要使用其他目录时，在绑定前编辑这个文件中的 `KITELINE_AGENT_HOME` 和 `KITELINE_AGENT_RUN_DIR`，格式要求见[参考](reference.md#agent-环境变量)。运行目录的路径长度有上限（见[限额](reference.md#限额)），超出时 agent 提示 `KITELINE_AGENT_RUN_DIR is too long`。
+
+然后以项目用户在网页复制[仅绑定命令](#仅绑定命令)执行，再执行 `kiteline-agent run`。
 
 同一用户重复安装同一版本时，`install` 提示已经安装，不改动程序、绑定和任务；已安装其他版本时，`install` 拒绝执行，改用[升级 agent](#升级-agent)。
 
@@ -178,6 +178,8 @@ Expand-Archive -LiteralPath "$package.zip" -DestinationPath .
 whoami
 ```
 
+agent 数据目录默认为项目用户的 `%LOCALAPPDATA%\kiteline-agent`，运行目录默认为其中的 `run`。安装时可以用 `--data-dir` 和 `--run-dir` 指定其他绝对路径；运行目录的路径长度同样有上限。安装程序无法确定项目用户的 LocalAppData 时（例如该用户当前没有登录），会要求显式指定这两个选项。
+
 `whoami` 输出项目用户的账户名，例如 `desktop-1234\alice`。然后以管理员身份打开 PowerShell（右键“以管理员身份运行”），进入同一个下载目录并安装，`--user` 填上面的账户名：
 
 ```powershell
@@ -187,8 +189,6 @@ Set-Location 'C:\Users\PROJECT_USER\Downloads'
 ```
 
 安装完成后关闭管理员窗口，回到项目用户的窗口，执行网页上的[仅绑定命令](#仅绑定命令)，再用[用网页命令接入](#用网页命令接入)中的 Windows 启动命令运行 agent。
-
-agent 数据目录默认为项目用户的 `%LOCALAPPDATA%\kiteline-agent`，运行目录默认为其中的 `run`。安装时可以用 `--data-dir` 和 `--run-dir` 指定其他绝对路径；运行目录的路径长度同样有上限。安装程序无法确定项目用户的 LocalAppData 时（例如该用户当前没有登录），会要求显式指定这两个选项。
 
 ## 添加工作区
 

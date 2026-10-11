@@ -337,6 +337,8 @@ Docker 部署中，server 数据目录是容器内的 `/var/lib/kiteline`，对�
 
 ## 常见问题
 
+agent 正在运行时，`kiteline-agent doctor` 会显示 server 连接状态和最近一次连接错误，是排查设备离线的第一步。
+
 报错原文是英文；表中引用的是其中的关键部分。
 
 | 现象或报错                                                                           | 原因                                                                                          | 处理                                                                             |
@@ -368,8 +370,6 @@ Docker 部署中，server 数据目录是容器内的 `/var/lib/kiteline`，对�
 | `Device channel limit reached`                                                       | 该设备上同时打开的终端显示、文件传输和开发服务请求达到上限                                    | 关闭不用的终端显示和页面                                                         |
 | agent 异常退出后留下终端会话                                                         | agent 被强制结束或崩溃时不清理终端会话                                                        | 见[清理遗留的终端会话](#清理遗留的终端会话)                                      |
 | “此设备的任务存储不可用。”                                                           | agent 无法读取 `tasks/` 中的文件                                                              | 见 [agent 重启后的核查](scheduled-tasks.md#agent-重启后的核查)                   |
-
-agent 正在运行时，`kiteline-agent doctor` 会显示 server 连接状态和最近一次连接错误，是排查设备离线的第一步。
 
 ### 清理遗留的终端会话
 

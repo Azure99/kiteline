@@ -337,6 +337,8 @@ With Docker, the server data directory is `/var/lib/kiteline` inside the contain
 
 ## Troubleshooting
 
+With the agent running, `kiteline-agent doctor` shows server connection status and the latest connection error. Start there when diagnosing an offline device.
+
 Original errors are in English; this table quotes their key parts.
 
 | Symptom or error                                                                                    | Cause                                                                                                                      | Action                                                                                                                      |
@@ -368,8 +370,6 @@ Original errors are in English; this table quotes their key parts.
 | `Device channel limit reached`                                                                      | Simultaneous terminal displays, file transfers and development requests reach the device limit                             | Close unused terminal displays and pages                                                                                    |
 | Terminal sessions remain after abnormal agent exit                                                  | Forced termination or crash does not clean up sessions                                                                     | See [Clean up leftover terminal sessions](#clean-up-leftover-terminal-sessions)                                             |
 | "Scheduled task storage is unavailable on this device."                                             | Agent cannot read files in `tasks/`                                                                                        | See [Review after an agent restart](scheduled-tasks.en.md#review-after-an-agent-restart)                                    |
-
-With the agent running, `kiteline-agent doctor` shows server connection status and the latest connection error. Start there when diagnosing an offline device.
 
 ### Clean up leftover terminal sessions
 

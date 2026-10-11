@@ -154,9 +154,9 @@ An administrator installing for another account runs the last command with the p
 
 Bundled programs such as tmux and `flock` are not notarized by Apple. A package downloaded in a macOS browser carries `com.apple.quarantine`; macOS may refuse to run bundled programs because it cannot verify the developer. Files downloaded with the curl commands above do not carry that attribute. For a browser download, verify SHA-256, then run `xattr -dr com.apple.quarantine "./$name"` on the extracted directory before `check`. For an installed copy, run `sudo xattr -dr com.apple.quarantine /opt/kiteline-agent`.
 
-Then, as the project user, run the [bind-only command](#bind-only-command) copied from the web app, followed by `kiteline-agent run`.
-
 `install` records the agent data directory in `/etc/kiteline-agent.env`. It defaults to the project user's `~/.local/share/kiteline-agent`, with `run` inside it as the runtime directory. To use other directories, edit `KITELINE_AGENT_HOME` and `KITELINE_AGENT_RUN_DIR` in this file before binding; see [Reference](reference.en.md#agent-environment-variables) for the format. The runtime directory path has a length limit (see [Limits](reference.en.md#limits)); exceeding it produces `KITELINE_AGENT_RUN_DIR is too long`.
+
+Then, as the project user, run the [bind-only command](#bind-only-command) copied from the web app, followed by `kiteline-agent run`.
 
 Installing the same version again for the same user reports that it is already installed and does not change the programs, binding or tasks. `install` refuses if another version is installed; use [Upgrade the agent](#upgrade-the-agent).
 
@@ -178,6 +178,8 @@ Expand-Archive -LiteralPath "$package.zip" -DestinationPath .
 whoami
 ```
 
+The data directory defaults to the project user's `%LOCALAPPDATA%\kiteline-agent`, and the runtime directory to `run` inside it. Specify other absolute paths during installation with `--data-dir` and `--run-dir`; the runtime path also has a length limit. If the installer cannot determine the project user's LocalAppData, for example when that user is not currently signed in, it requires both options explicitly.
+
 `whoami` prints the project user's account name, such as `desktop-1234\alice`. Open PowerShell as administrator (right-click and choose "Run as administrator"), go to the same download directory and install, using that account name for `--user`:
 
 ```powershell
@@ -187,8 +189,6 @@ Set-Location 'C:\Users\PROJECT_USER\Downloads'
 ```
 
 Close the administrator window after installation. Back in the project user's window, run the web app's [bind-only command](#bind-only-command), then the Windows startup command in [Connect using the web command](#connect-using-the-web-command).
-
-The data directory defaults to the project user's `%LOCALAPPDATA%\kiteline-agent`, and the runtime directory to `run` inside it. Specify other absolute paths during installation with `--data-dir` and `--run-dir`; the runtime path also has a length limit. If the installer cannot determine the project user's LocalAppData, for example when that user is not currently signed in, it requires both options explicitly.
 
 ## Add a workspace
 

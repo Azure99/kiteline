@@ -209,7 +209,7 @@ export const zhCN = {
     version_mismatch: "版本不匹配，请使用与 server 配套的版本。",
     busy: "资源正忙。",
     timeout: "操作已超时。",
-    conflict: "当前状态已变化，请刷新核对后继续。",
+    conflict: "请核对当前状态后继续。",
     limit_exceeded: "操作超过可用容量。",
     unsupported: "不支持此操作。",
     permission_denied: "设备用户没有执行此操作的权限。",
