@@ -1,17 +1,43 @@
 import { useTranslation } from "react-i18next";
-import { useWatchStatus } from "../lib/use-workspace-refresh";
+import { AlertTriangle, X } from "lucide-react";
+import { IconButton } from "./icon-button";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
 
-export function WatchStatus({ deviceId, workspaceId }: { deviceId: string; workspaceId: string }) {
+export function WatchStatus({
+  reason,
+  compact = false,
+  onDismiss,
+}: {
+  reason?: string;
+  compact?: boolean;
+  onDismiss?: () => void;
+}) {
   const { t } = useTranslation();
-  const reason = useWatchStatus(deviceId, workspaceId);
   return reason !== undefined ? (
-    <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border px-3 text-xs text-muted-foreground">
-      <span role="status">{t(($) => $.common.watchLimited)}</span>
+    <div
+      className={
+        compact
+          ? "shrink-0"
+          : "flex h-11 shrink-0 items-center gap-2 border-b border-border px-3 text-xs text-muted-foreground"
+      }
+    >
+      {!compact && (
+        <span role="status" className="flex-1">
+          {t(($) => $.common.watchLimited)}
+        </span>
+      )}
       <Dialog>
-        <DialogTrigger render={<Button variant="ghost" className="h-11 text-xs" />}>
-          {t(($) => $.common.watchDetails)}
+        <DialogTrigger
+          render={
+            compact ? (
+              <IconButton label={t(($) => $.common.watchLimited)} />
+            ) : (
+              <Button variant="ghost" className="h-11 text-xs" />
+            )
+          }
+        >
+          {compact ? <AlertTriangle /> : t(($) => $.common.watchDetails)}
         </DialogTrigger>
         <DialogContent>
           <DialogHeader>
@@ -25,6 +51,11 @@ export function WatchStatus({ deviceId, workspaceId }: { deviceId: string; works
           </div>
         </DialogContent>
       </Dialog>
+      {!compact && (
+        <IconButton label={t(($) => $.common.dismiss)} onClick={onDismiss}>
+          <X />
+        </IconButton>
+      )}
     </div>
   ) : null;
 }

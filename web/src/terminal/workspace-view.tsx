@@ -24,6 +24,7 @@ import type { Device, Workspace } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
 import { Button } from "../components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
+import { useWatchStatus } from "../lib/use-workspace-refresh";
 import { WatchStatus } from "../components/watch-status";
 import { ToolLayout } from "../components/tool-layout";
 import type { TerminalActions, TerminalCapabilities } from "./terminal-view";
@@ -78,6 +79,8 @@ export function WorkspaceView({
   children: ReactNode;
 }) {
   const { t } = useTranslation();
+  const watchReason = useWatchStatus(device.id, workspace.id);
+  const [watchDismissed, setWatchDismissed] = useState(false);
 
   const key = `${device.id}:${workspace.id}`;
   const [layout, setLayout] = useState(() => layouts.get(key) ?? emptyLayout());
@@ -448,6 +451,7 @@ export function WorkspaceView({
             </button>
           ))}
         </div>
+        {watchDismissed && <WatchStatus reason={watchReason} compact />}
         {!visible && (
           <IconButton
             className="max-desk:hidden"
@@ -465,7 +469,9 @@ export function WorkspaceView({
           </IconButton>
         )}
       </div>
-      <WatchStatus deviceId={device.id} workspaceId={workspace.id} />
+      {!watchDismissed && (
+        <WatchStatus reason={watchReason} onDismiss={() => setWatchDismissed(true)} />
+      )}
       {!!remote.error && (visible || dockExpanded || remote.error !== remote.listError) && (
         <div
           role="alert"

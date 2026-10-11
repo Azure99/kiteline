@@ -123,7 +123,7 @@ Files browses and edits the current workspace, with list paths relative to its d
 
 Handle names that are not valid UTF-8, FIFOs, sockets and device nodes in a terminal.
 
-The list refreshes automatically when other programs change files, and periodically while the page is visible. Periodic refresh remains available if the device cannot watch directories.
+The list refreshes automatically when other programs change files, and periodically while the page is visible. Periodic refresh remains available if the device cannot watch directories. You can dismiss "Live updates limited" for this visit. While updates are limited, open the current diagnostic from the toolbar warning icon; exit focus mode first. Returning to the workspace or reloading the page shows the banner again if updates are still limited.
 
 ### Open and edit
 
