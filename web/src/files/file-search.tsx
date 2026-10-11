@@ -120,6 +120,7 @@ export function FileSearch({
         <div className="flex gap-2">
           <Input
             aria-label={t(($) => $.files.searchQuery)}
+            autoCapitalize="none"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             className="min-w-0 flex-1"
