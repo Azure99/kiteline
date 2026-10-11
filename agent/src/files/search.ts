@@ -1,7 +1,7 @@
 import { agentLimits } from "../limits.js";
 import { isUtf8 } from "node:buffer";
 import { spawn } from "node:child_process";
-import { Writable } from "node:stream";
+import { Writable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { parserStream } from "stream-json";
 import type { Token } from "stream-json/parser.js";
@@ -113,6 +113,11 @@ export async function searchFiles(
       });
       await pipeline(
         child.stdout!,
+        new Transform({
+          transform(chunk, _encoding, callback) {
+            setImmediate(callback, null, chunk);
+          },
+        }),
         parserStream({
           packStrings: false,
           packNumbers: false,
