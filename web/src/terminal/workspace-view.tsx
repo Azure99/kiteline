@@ -15,8 +15,6 @@ import {
   Fullscreen,
   X,
   Minimize,
-  ClipboardPaste,
-  Keyboard,
   Scan,
   Search,
 } from "lucide-react";
@@ -521,32 +519,6 @@ export function WorkspaceView({
               </span>
             )}
             {newButtons()}
-            {mobile && (
-              <>
-                {typeof navigator.clipboard?.readText === "function" && (
-                  <IconButton
-                    label={t(($) => $.terminal.paste)}
-                    disabled={targetPending || !selected || !capabilities.main[selected]?.ready}
-                    onPointerDown={(event) => event.preventDefault()}
-                    onClick={() => {
-                      if (selected && !targetPending) void displays.current.get(selected)?.paste();
-                    }}
-                  >
-                    <ClipboardPaste />
-                  </IconButton>
-                )}
-                <IconButton
-                  label={t(($) => $.terminal.keyboard)}
-                  disabled={targetPending || !selected || !capabilities.main[selected]?.ready}
-                  onPointerDown={(event) => event.preventDefault()}
-                  onClick={() => {
-                    if (selected && !targetPending) displays.current.get(selected)?.keyboard();
-                  }}
-                >
-                  <Keyboard />
-                </IconButton>
-              </>
-            )}
             {!mobile && (
               <Menu>
                 <MenuTrigger

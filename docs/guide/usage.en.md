@@ -69,7 +69,7 @@ Shortcuts run one command in the login shell; the session ends when that command
 Scroll up to read retained history; new output does not pull you back to the bottom. Each client's scrolling and selection are independent.
 
 - Desktop: drag to select text. Hold Shift while dragging if a program such as htop handles the mouse. Copy through the context menu, or Cmd-C on macOS. Paste with Ctrl-V, Ctrl-Shift-V, Cmd-V or the context menu. Ctrl-C is sent to the program.
-- Phone: long-press to select a word, drag the selection handles, then tap "Copy selected text". Tap the terminal or "Keyboard" to open the keyboard. A "Paste" button appears when the browser allows clipboard access.
+- Phone: tap the terminal to open the keyboard. Long-press text or blank space to open the menu and paste; adjust the selection with the handles if needed before copying. Clear an existing selection before tapping the terminal to open the keyboard. Paste appears when the browser supports reading the clipboard.
 
 Oversized pastes are not sent and show "Pasted text exceeds the input limit". Programs cannot display images or write to the clipboard through OSC 52 in the web terminal.
 
@@ -79,7 +79,7 @@ On the phone key row, tap SHIFT, CTRL or ALT once to apply it to the next key, a
 
 The Focus terminal button cycles through focus within the window, browser fullscreen, and exit. The first step hides the rest of the workbench while keeping the browser window's position and size, so several windows can monitor output at once. Leaving fullscreen through the browser keeps window focus active; click the button again to exit.
 
-Terminal search covers currently loaded display content, including history, without case sensitivity. Search temporarily hides the session picker, Paste, and other toolbar controls. Close search to use them; this clears the query. In desktop split view, you can switch directly to another pane.
+Terminal search covers currently loaded display content, including history, without case sensitivity. Search temporarily hides the session picker and other toolbar controls. Close search to use them; this clears the query. In desktop split view, you can switch directly to another pane.
 
 "Scrollback lines for new sessions" in "Terminal settings" controls the history retained per session (range in [Limits](reference.en.md#limits)). It affects only sessions created afterward.
 

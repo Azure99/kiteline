@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
-import { Copy, X, ExternalLink } from "lucide-react";
+import { Copy, ClipboardPaste, X, ExternalLink } from "lucide-react";
 import type { Terminal } from "@xterm/xterm";
 import { TouchSelection, type SelectionHandles } from "./touch-selection";
 import { IconButton } from "../components/icon-button";
@@ -12,10 +12,12 @@ export function TouchControls({
   terminal,
   deviceId,
   onTap,
+  onPaste,
 }: {
   terminal: Terminal;
   deviceId: string;
   onTap: () => void;
+  onPaste?: () => Promise<void>;
 }) {
   const { t } = useTranslation();
 
@@ -25,7 +27,7 @@ export function TouchControls({
   const selection = useRef<TouchSelection>(undefined);
   const layer = useRef<HTMLDivElement>(null);
   const service = handles ? deviceServiceLink(terminal.getSelection(), deviceId) : undefined;
-  const halfWidth = service ? 68 : 50;
+  const halfWidth = (2 + Number(!!service) + Number(!!onPaste)) * 22 + 6;
   const tapped = useEffectEvent(onTap);
   useEffect(() => {
     const current = new TouchSelection(terminal, setHandles, tapped);
@@ -121,11 +123,16 @@ export function TouchControls({
           >
             <IconButton
               label={t(($) => $.terminal.copySelected)}
-              disabled={copying}
+              disabled={copying || !terminal.getSelection()}
               onClick={() => void copy()}
             >
               <Copy />
             </IconButton>
+            {onPaste && (
+              <IconButton label={t(($) => $.terminal.paste)} onClick={() => void onPaste()}>
+                <ClipboardPaste />
+              </IconButton>
+            )}
             <IconButton
               label={t(($) => $.terminal.cancelSelection)}
               onClick={() => selection.current?.cancel()}

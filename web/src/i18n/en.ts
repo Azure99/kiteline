@@ -434,7 +434,6 @@ export const en = {
     endedCode: "Ended ({{code}})",
     historyGapLimited: "Some history is missing and older history was reduced",
     inputLabel: "Terminal input",
-    keyboard: "Keyboard",
     enterFocus: "Focus terminal",
     exitFocus: "Exit focus mode",
     enterFullscreen: "Enter fullscreen",

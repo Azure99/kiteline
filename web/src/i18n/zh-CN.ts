@@ -425,7 +425,6 @@ export const zhCN = {
     endedCode: "已结束 ({{code}})",
     historyGapLimited: "历史存在缺口；已减少较早历史",
     inputLabel: "终端输入",
-    keyboard: "键盘",
     enterFocus: "专注终端",
     exitFocus: "退出专注",
     enterFullscreen: "进入全屏",

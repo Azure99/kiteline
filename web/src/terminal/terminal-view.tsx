@@ -36,8 +36,6 @@ export interface TerminalActions {
   redraw(): void;
   fontSize(delta: number): void;
   focus(): void;
-  paste(): Promise<void>;
-  keyboard(): void;
   search(): void;
 }
 export interface TerminalCapabilities {
@@ -129,8 +127,6 @@ export function TerminalView({
     redraw: () => setRedrawDialog(true),
     fontSize: (delta) => display.current?.changeFontSize(delta),
     focus: () => display.current?.focus(),
-    paste,
-    keyboard: () => input.current(),
     search: () => {
       if (!terminal) return;
       setSearchOpen(true);
@@ -217,8 +213,8 @@ export function TerminalView({
   async function paste() {
     const current = display.current;
     try {
+      current?.focus();
       current?.paste(await navigator.clipboard.readText());
-      if (!mobile) current?.focus();
     } catch (error) {
       setNotice(error);
     }
@@ -328,6 +324,11 @@ export function TerminalView({
           <TouchControls
             terminal={terminal}
             deviceId={deviceId}
+            onPaste={
+              state.status === "ready" && typeof navigator.clipboard?.readText === "function"
+                ? paste
+                : undefined
+            }
             onTap={() => {
               if (mobile) input.current();
             }}
