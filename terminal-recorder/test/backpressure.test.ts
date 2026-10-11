@@ -96,10 +96,13 @@ for (let round = 0; round < 3; round++) {
     session.input.input("slow", Buffer.from("DONE"));
     for (const output of [slow, fast]) {
       await expect
-        .poll(() =>
-          output.frames.some(
-            (message) => message.type === "frame" && message.frame.type === "ended",
-          ),
+        .poll(
+          () =>
+            output.frames.some(
+              (message) => message.type === "frame" && message.frame.type === "ended",
+            ),
+          // tmux checks life subscriptions once per second.
+          { timeout: 5000 },
         )
         .toBe(true);
       expect(
