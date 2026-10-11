@@ -117,7 +117,7 @@ For this section's interactive commands in a Windows PowerShell console, replace
 
 ## Files
 
-Files browses and edits the current workspace, showing paths relative to its directory.
+Files browses and edits the current workspace, with list paths relative to its directory. “Copy device absolute path” in Details copies the path text on the device; quote it according to your shell's rules when using it in a shell command.
 
 ### Browse
 

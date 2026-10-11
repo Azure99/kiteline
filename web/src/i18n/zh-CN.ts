@@ -542,6 +542,8 @@ export const zhCN = {
     openCount_other: "打开的文件 {{count, number}}",
     details: "详情",
     path: "路径",
+    devicePath: "设备绝对路径",
+    copyDevicePath: "复制设备绝对路径",
     type: "类型",
     size: "大小",
     modified: "修改时间",

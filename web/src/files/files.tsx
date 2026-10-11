@@ -567,7 +567,9 @@ export function Files({
           </section>
         )}
       </div>
-      {details && <FileDetails entry={details} onClose={() => setDetails(undefined)} />}
+      {details && (
+        <FileDetails entry={details} root={workspace.path} onClose={() => setDetails(undefined)} />
+      )}
       {action && (
         <FileNameDialog
           deviceId={device.id}

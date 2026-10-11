@@ -551,6 +551,8 @@ export const en = {
     openCount_other: "{{count, number}} open files",
     details: "Details",
     path: "Path",
+    devicePath: "Device absolute path",
+    copyDevicePath: "Copy device absolute path",
     type: "Type",
     size: "Size",
     modified: "Modified",
