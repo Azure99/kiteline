@@ -6,6 +6,11 @@ kiteline_main() {
   kiteline_installed=__KITELINE_INSTALLED__
   kiteline_management=__KITELINE_MANAGEMENT__
   kiteline_use=__KITELINE_USE__
+  kiteline_lock_use() {
+    exec 8<"$kiteline_use" || return
+    "$kiteline_flock" --shared --nonblock 8 || { echo 'Agent installation is being changed' >&2; return 1; }
+    "$kiteline_root/runtime/bin/node" -e 'const fs = require("node:fs"); const fd = fs.fstatSync(8); const path = fs.statSync(process.argv[1], { throwIfNoEntry: false }); process.exit(path && fd.dev === path.dev && fd.ino === path.ino ? 0 : 1)' "$kiteline_use" || { echo 'Installation lock changed; invoke the current launcher again' >&2; return 1; }
+  }
   case "$1" in
     install|upgrade|uninstall)
       [ "$(id -u)" -eq 0 ] || { echo 'Installation changes require sudo or root' >&2; return 1; }
@@ -14,8 +19,7 @@ kiteline_main() {
       exec __KITELINE_MANAGEMENT_FD__>>"$kiteline_management" || return
       "$kiteline_flock" --exclusive --nonblock __KITELINE_MANAGEMENT_FD__ || { echo 'Another installation operation is running' >&2; return 1; }
       if [ "$kiteline_root" = "$kiteline_installed" ]; then
-        exec 8<"$kiteline_use" || return
-        "$kiteline_flock" --shared --nonblock 8 || { echo 'Agent installation is being changed' >&2; return 1; }
+        kiteline_lock_use || return
       fi
       kiteline_temporary=$(mktemp -d /var/tmp/kiteline-agent-maintenance.XXXXXX) || return
       kiteline_child='' kiteline_interrupted=0
@@ -46,8 +50,7 @@ kiteline_main() {
       ;;
     *)
       if [ "$kiteline_root" = "$kiteline_installed" ]; then
-        exec 8<"$kiteline_use" || return
-        "$kiteline_flock" --shared --nonblock 8 || { echo 'Agent installation is being changed; try again after maintenance' >&2; return 1; }
+        kiteline_lock_use || return
       fi
       exec "$kiteline_root/runtime/bin/node" "$kiteline_root/agent/dist/main.js" "$@"
       ;;

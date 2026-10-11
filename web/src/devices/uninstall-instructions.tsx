@@ -5,21 +5,49 @@ import { AgentPlatformChoice, type AgentPlatform } from "./agent-platform";
 import { IconButton } from "../components/icon-button";
 import { ErrorNotice } from "../components/error-notice";
 import { useCopyFeedback } from "../lib/use-copy-feedback";
+import { appVersion, type Device } from "@kiteline/shared/protocol";
 
-export function UninstallInstructions({ initialPlatform }: { initialPlatform?: AgentPlatform }) {
-  const { t } = useTranslation();
+export function UninstallInstructions({
+  initialPlatform,
+  release,
+}: {
+  initialPlatform?: AgentPlatform;
+  release?: Device["release"];
+}) {
+  const { t, i18n } = useTranslation();
   const [platform, setPlatform] = useState<AgentPlatform>(initialPlatform ?? "linux");
+  const [purge, setPurge] = useState(false);
+  const supportsPurge = appVersion !== "0.2.6" && release?.agentVersion === appVersion;
   const { copied, error, copy, pending } = useCopyFeedback();
   const command =
-    platform === "windows"
-      ? `& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\\kiteline-agent\\kiteline-agent.ps1" uninstall`
-      : "sudo /usr/local/bin/kiteline-agent uninstall";
+    (platform === "windows"
+      ? `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\\kiteline-agent\\kiteline-agent.ps1" uninstall`
+      : "sudo /usr/local/bin/kiteline-agent uninstall") + (purge ? " --purge" : "");
   return (
     <div className="space-y-3 text-sm">
       <h2 className="font-medium">{t(($) => $.devices.uninstallAgent)}</h2>
       <AgentPlatformChoice value={platform} onChange={setPlatform} />
       <p>{t(($) => $.devices.uninstallStop)}</p>
       {platform === "windows" && <p>{t(($) => $.devices.uninstallWindows)}</p>}
+      {supportsPurge && (
+        <fieldset className="flex flex-wrap gap-3">
+          <legend className="mb-2 text-xs text-muted-foreground">
+            {t(($) => $.devices.uninstallMode)}
+          </legend>
+          {[false, true].map((value) => (
+            <label key={String(value)} className="flex cursor-pointer items-center gap-2">
+              <input
+                type="radio"
+                name="uninstall-mode"
+                checked={purge === value}
+                onChange={() => setPurge(value)}
+                className="size-4 accent-primary"
+              />
+              {value ? t(($) => $.devices.uninstallPurge) : t(($) => $.devices.uninstallKeep)}
+            </label>
+          ))}
+        </fieldset>
+      )}
       <div className="flex items-start gap-2">
         <pre className="min-w-0 flex-1 whitespace-pre-wrap break-all rounded bg-muted p-3 text-xs">
           {command}
@@ -33,7 +61,18 @@ export function UninstallInstructions({ initialPlatform }: { initialPlatform?: A
           {copied === command ? <Check /> : <Copy />}
         </IconButton>
       </div>
-      <p className="text-muted-foreground">{t(($) => $.devices.uninstallKeepsData)}</p>
+      <p className="text-muted-foreground">
+        {purge ? t(($) => $.devices.uninstallPurgesData) : t(($) => $.devices.uninstallKeepsData)}
+      </p>
+      {!supportsPurge && <p>{t(($) => $.devices.uninstallUpgrade)}</p>}
+      <a
+        className="text-primary underline"
+        href={`https://github.com/Azure99/kiteline/blob/main/docs/guide/devices${i18n.language.startsWith("zh") ? ".md#卸载" : ".en.md#uninstall"}`}
+        target="_blank"
+        rel="noreferrer"
+      >
+        {t(($) => $.devices.uninstallGuide)}
+      </a>
       {error?.id === command && (
         <div role="alert" className="break-words text-destructive">
           <ErrorNotice error={error.error} />

@@ -471,7 +471,7 @@ First stop all users of the installation as in [Upgrade the agent](#upgrade-the-
 - launchd: run `bootout` from the [stop commands](#launchd), then remove `/Library/LaunchDaemons/com.kiteline.agent.plist`.
 - WinSW: run `stopwait` and `uninstall` on the service executable in administrator PowerShell, then remove the service directory.
 
-Uninstall the program. On Linux and macOS:
+Choose an uninstall mode. Default uninstall removes the program directory, command entry and installation record, keeping data, runtime directories, the Unix installation env file and coordination locks. On Linux and macOS:
 
 ```sh
 sudo /usr/local/bin/kiteline-agent uninstall
@@ -480,36 +480,22 @@ sudo /usr/local/bin/kiteline-agent uninstall
 On Windows, in administrator PowerShell:
 
 ```powershell
-& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" uninstall
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" uninstall
 ```
 
-Enter `yes` at `Type yes to continue:`, or add `--yes` to skip confirmation. Uninstall removes the installation directory, public launcher and installation record. By default, it keeps the agent data directory and project files, so reinstalling on the same device does not require rebinding.
+Reinstalling for the same project user with the original data path reuses binding and data. On Windows, pass custom data and runtime paths again when reinstalling; the installer does not remember them after the installation record is deleted. Unix installation reuses `/etc/kiteline-agent.env`; remove it or correct its data path before changing the project user.
 
-With `--purge-state`, uninstall also removes agent-managed workspace registrations, shortcuts and settings, binding credentials, configuration, temporary-file records, and scheduled-task definitions and run records. See [Agent data directory](reference.en.md#agent-data-directory) for the corresponding files.
+For complete removal, use `--purge`:
 
-`--purge-state` applies to the data directory recorded by the installation (`/etc/kiteline-agent.env` or the default location; on Windows, the directory selected at installation). It does not apply to `KITELINE_AGENT_HOME` set only in service configuration. Uninstall refuses if the data directory is in use. Project files and workspace directories are not deleted.
+```sh
+sudo /usr/local/bin/kiteline-agent uninstall --purge
+```
 
-These files remain after uninstall and can be removed manually when no longer needed:
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" uninstall --purge
+```
 
-- Linux and macOS: the data directory itself (including `run/` and launchd logs), `/etc/kiteline-agent.env`, and lock files `/opt/.kiteline-agent-use.lock` and `/opt/.kiteline-agent-install.lock`.
-
-  ```sh
-  sudo rm -f /etc/kiteline-agent.env /opt/.kiteline-agent-use.lock /opt/.kiteline-agent-install.lock
-  rm -rf ~/.local/share/kiteline-agent
-  ```
-
-- Windows: `C:\ProgramData\kiteline-agent` (lock files) and the data directory.
-
-  ```powershell
-  # Administrator PowerShell
-  Remove-Item -Recurse -Force "$env:ProgramData\kiteline-agent"
-  # Project user's PowerShell
-  Remove-Item -Recurse -Force "$env:LOCALAPPDATA\kiteline-agent"
-  ```
-
-The next `install` reuses a retained `/etc/kiteline-agent.env` unchanged. Before installing for another project user, delete this file or correct its `KITELINE_AGENT_HOME`; otherwise the new user's `bind` and `run` fail because they cannot access the old directory.
-
-Deleting the data directory also deletes this device's binding credentials. Finally, open its workbench page and choose "Delete device" from "Device actions" to remove it from the list.
+`--purge` also removes the Unix installation env file, entire dedicated agent data and runtime directories, coordination locks and empty agent-owned directories. Check the directories listed by the command, then type `yes` to confirm; add `--yes` to skip confirmation.
 
 ## Bind again
 

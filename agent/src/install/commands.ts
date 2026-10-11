@@ -8,6 +8,9 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
+  rmdir,
+  realpath,
   rename,
   rm,
   writeFile,
@@ -17,7 +20,7 @@ import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { parseArgs, promisify, type ParseArgsOptionsConfig } from "node:util";
 import { lockAgentState } from "../state-lock.js";
-import { atomicJson, stateFiles } from "../config.js";
+import { atomicJson } from "../config.js";
 import {
   applicationPaths,
   environmentFile,
@@ -148,14 +151,11 @@ async function account(name: string): Promise<Installation> {
     throw new Error("Specify an existing project user");
   return { user: fields[0]!, uid, gid, home };
 }
-async function acquireInstallationLocks(installation: Installation, purge = false) {
+async function acquireInstallationLocks(dataDir?: string) {
   const use = await lockInstallation();
   let state: (() => Promise<void>) | undefined;
   try {
-    if (purge) {
-      const { dataDir } = await installationPaths(installation);
-      if (await exists(dataDir)) state = await lockAgentState(dataDir);
-    }
+    if (dataDir && (await exists(dataDir))) state = await lockAgentState(dataDir);
   } catch (error) {
     const errors = [error];
     await cleanup(errors, installationUseFile, () => use.close());
@@ -271,7 +271,7 @@ async function upgrade(
   signal: AbortSignal,
 ) {
   // Report busy before preparation; reacquire for the actual transaction below.
-  await (await acquireInstallationLocks(installation)).close();
+  await (await acquireInstallationLocks()).close();
   const source = resolve(archive);
   const temporary = await mkdtemp(join(dirname(installDirectory), ".kiteline-upgrade-"));
   const replacement = join(temporary, "new"),
@@ -310,7 +310,7 @@ async function upgrade(
       signal,
     );
     protectSignals();
-    use = await acquireInstallationLocks(installation);
+    use = await acquireInstallationLocks();
     await command("chown", ["-h", "-R", "-P", "0:0", replacement]);
     await replaceProgram(
       installDirectory,
@@ -350,25 +350,51 @@ async function uninstall(
   protectSignals: () => void,
   signal: AbortSignal,
 ) {
+  let { dataDir, runDir } = await installationPaths(installation);
+  let externalRun = false;
+  if (purge) {
+    const actual = new Map<string, string>();
+    for (const path of new Set([dataDir, runDir])) {
+      const info = await lstat(path).catch((error) => {
+        if (error.code !== "ENOENT") throw error;
+      });
+      if (info && !info.isDirectory())
+        throw new Error("Purge requires a real dedicated directory: " + path);
+      actual.set(path, info ? await realpath(path) : path);
+    }
+    const isWithin = (parent: string, child: string) =>
+      child !== parent && child.startsWith(parent.endsWith("/") ? parent : parent + "/");
+    dataDir = actual.get(dataDir)!;
+    runDir = actual.get(runDir)!;
+    if (isWithin(runDir, dataDir))
+      throw new Error("Purge run directory must not contain the data directory");
+    externalRun = runDir !== dataDir && !isWithin(dataDir, runDir);
+  }
   // Report busy before confirmation; reacquire for the actual transaction below.
-  await (await acquireInstallationLocks(installation, purge)).close();
-  const { dataDir } = await installationPaths(installation);
+  await (await acquireInstallationLocks(purge ? dataDir : undefined)).close();
   await confirm(
-    `Remove the agent program? ${purge ? `Delete its state JSON and tasks at ${dataDir}.` : `Retain state and tasks at ${dataDir}.`} Workspaces and external manager configuration are not removed.`,
+    `Remove the agent program? ${purge ? `Delete all contents of dedicated data ${dataDir} and run ${runDir}, including tasks and additional files.` : `Retain state and tasks at ${dataDir}.`} Project/work files outside the listed directories and external manager configuration are retained.`,
     yes,
     signal,
   );
   protectSignals();
-  const use = await acquireInstallationLocks(installation, purge);
-  const purgePaths =
-    purge && use.stateLocked ? Object.values(stateFiles).map((name) => join(dataDir, name)) : [];
+  const use = await acquireInstallationLocks(purge ? dataDir : undefined);
+
   const errors: unknown[] = [];
   try {
+    if (purge && externalRun) await rm(runDir, { recursive: true, force: true });
+    if (purge && use.stateLocked) {
+      // Keep the proper-lockfile directory until its release callback runs.
+      for (const entry of await readdir(dataDir)) {
+        if (entry !== "process.lock")
+          await rm(join(dataDir, entry), { recursive: true, force: true });
+      }
+    }
+    if (purge) await rm(environmentFile, { force: true });
     await rm(launcherFile, { force: true });
     await rm(installDirectory, { recursive: true, force: true });
-    for (const path of purgePaths)
-      await rm(path, { force: true, recursive: path === join(dataDir, stateFiles.tasks) });
     await rm(installationFile, { force: true });
+    if (purge) await rm(installationUseFile);
   } catch (error) {
     errors.push(error);
     console.error(
@@ -377,8 +403,16 @@ async function uninstall(
   } finally {
     await cleanup(errors, installationUseFile, () => use.close());
   }
+  if (!errors.length && purge) {
+    if (use.stateLocked) await cleanup(errors, dataDir, () => rmdir(dataDir));
+
+    // No product mutation may follow the removal of this management-lock pathname.
+    if (!errors.length)
+      await cleanup(errors, installationManagementFile, () => rm(installationManagementFile));
+  }
   if (errors.length) throw failures("Uninstall did not complete", errors);
-  return `Uninstalled; ${purge && use.stateLocked ? "application state removed" : "state retained"}. External manager configuration was not changed. Application directory configuration was not removed: ${environmentFile}. Stable installation lock files were not removed: ${installationUseFile}, ${installationManagementFile}.`;
+  if (purge) return "Uninstalled; dedicated data, env and installation locks removed.";
+  return `Uninstalled; state retained. External manager configuration was not changed. Application directory configuration was not removed: ${environmentFile}. Stable installation lock files were not removed: ${installationUseFile}, ${installationManagementFile}.`;
 }
 
 export async function installCli(action: string, args: string[]) {
@@ -389,7 +423,7 @@ export async function installCli(action: string, args: string[]) {
       ? { user: { type: "string" as const } }
       : action === "upgrade"
         ? { archive: { type: "string" as const }, yes: { type: "boolean" as const } }
-        : { "purge-state": { type: "boolean" as const }, yes: { type: "boolean" as const } };
+        : { purge: { type: "boolean" as const }, yes: { type: "boolean" as const } };
   const { values } = parseArgs({ args, options });
   if (action === "install" && !values.user)
     throw new Error("Usage: kiteline-agent install --user PROJECT_USER");
@@ -442,7 +476,7 @@ export async function installCli(action: string, args: string[]) {
             )
           : await uninstall(
               installation,
-              !!values["purge-state"],
+              !!values.purge,
               !!values.yes,
               protectSignals,
               cancellation.signal,

@@ -279,7 +279,16 @@ export const en = {
     uninstallStop:
       "Stop the agent, local attach sessions and external restart policies, then run this on the device.",
     uninstallWindows: "Use an administrator PowerShell console.",
-    uninstallKeepsData: "Uninstall keeps application state and project files by default.",
+    uninstallMode: "Uninstall mode",
+    uninstallKeep: "Keep data",
+    uninstallPurge: "Remove all agent data",
+    uninstallKeepsData:
+      "Remove the program, command entry and installation record. Keep data, runtime directories and the Unix installation env file.",
+    uninstallPurgesData:
+      "Remove the installation and entire dedicated agent data and runtime directories, including task records, logs and extra files. If these directories contain project or work files, keep data or move those files out first.",
+    uninstallUpgrade:
+      "Complete removal support is not confirmed for this device. To remove its data, follow the guide to upgrade the agent before uninstalling.",
+    uninstallGuide: "Uninstall guide",
     copyUninstall: "Copy uninstall command",
     containerDeployment: "Container deployment",
     uninstallContainer:

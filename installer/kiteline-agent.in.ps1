@@ -280,11 +280,15 @@ import(url.pathToFileURL(process.argv[1]).href).catch(error=>{console.error(erro
             foreach ($key in $saved.Keys) { [Environment]::SetEnvironmentVariable($key, $saved[$key]) }
         }
     }
+    function Remove-KitelineDirectory([string]$Path, [bool]$Recursive) {
+        try { [IO.Directory]::Delete($Path, $Recursive) }
+        catch { throw [IO.IOException]::new("Cannot remove directory ${Path}: $($_.Exception.Message)", $_.Exception) }
+    }
     function Remove-KitelineTree([string]$Path) {
         if (-not (Test-KitelineExists $Path)) { return }
         Assert-KitelineNoReparse $Path
         $null = Get-KitelineTree $Path
-        [IO.Directory]::Delete($Path, $true)
+        Remove-KitelineDirectory $Path $true
     }
 
     try {
@@ -302,7 +306,7 @@ import(url.pathToFileURL(process.argv[1]).href).catch(error=>{console.error(erro
             for ($i = 1; $i -lt $Arguments.Count; $i++) {
                 $name = $Arguments[$i]
                 if ($options.ContainsKey($name)) { throw "Duplicate option: $name" }
-                if (($action -in @('upgrade', 'uninstall') -and $name -eq '--yes') -or ($action -eq 'uninstall' -and $name -eq '--purge-state')) { $options[$name] = $true }
+                if (($action -in @('upgrade', 'uninstall') -and $name -eq '--yes') -or ($action -eq 'uninstall' -and $name -eq '--purge')) { $options[$name] = $true }
                 elseif (($action -eq 'install' -and $name -in @('--user', '--data-dir', '--run-dir')) -or ($action -eq 'upgrade' -and $name -eq '--archive')) {
                     if (++$i -ge $Arguments.Count) { throw "Missing value: $name" }
                     $options[$name] = $Arguments[$i]
@@ -373,31 +377,49 @@ import(url.pathToFileURL(process.argv[1]).href).catch(error=>{console.error(erro
                 Test-KitelineCancellation
                 if ($errors.Count) { throw 'Preparation cleanup failed; no installation change attempted' }
                 if ($action -ne 'install') {
-                    $message = if ($action -eq 'upgrade') { "Install version $($release.version), retaining state at $($installation.dataDir)?" } else { "Remove the program; $(if ($options['--purge-state']) {'purge application JSON and tasks'} else {'retain all state'}) at $($installation.dataDir)?" }
+                    $message = if ($action -eq 'upgrade') { "Install version $($release.version), retaining state at $($installation.dataDir)?" } else { "Remove the program; $(if ($options['--purge']) {'delete entire recorded agent data and runtime directories'} else {'retain all state'}) at $($installation.dataDir)$(if ($options['--purge']) { '; runtime at ' + $installation.runDir })?" }
                     Write-Host "$message No external manager will be controlled."
                     if (-not $options['--yes'] -and -not $guard.Confirm('Type yes to continue: ')) { throw 'Cancelled' }
                 }
                 Test-KitelineCancellation
                 if (-not [IO.File]::Exists($useFile)) { $file = [IO.File]::Open($useFile, [IO.FileMode]::CreateNew); $file.Dispose() }
                 if ($action -ne 'install') { $exclusive = $guard.Lock($useFile, $false) }
-                if ($action -eq 'uninstall' -and $options['--purge-state']) { $state = Lock-KitelineState $installation }
+                if ($action -eq 'uninstall' -and $options['--purge']) { $state = Lock-KitelineState $installation }
                 $oldPublic = if ($action -ne 'install') { [IO.File]::ReadAllText($public) } else { $null }
                 Test-KitelineCancellation
                 if ($action -eq 'uninstall') {
+                    if ($options['--purge']) {
+                        if ($installation.dataDir.TrimEnd('\').StartsWith($installation.runDir.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                            throw "Cannot purge: runtime directory $($installation.runDir) contains data directory $($installation.dataDir); use default uninstall or separate these directories first"
+                        }
+                        if ($installation.runDir.TrimEnd('\') -ine $installation.dataDir.TrimEnd('\') -and
+                            -not $installation.runDir.StartsWith($installation.dataDir.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                            Remove-KitelineTree $installation.runDir
+                        }
+                        if ($null -ne $state) {
+                            $null = Get-KitelineTree $installation.dataDir
+                            foreach ($item in [IO.Directory]::EnumerateFileSystemEntries($installation.dataDir)) {
+                                if ([IO.Path]::GetFileName($item) -ieq 'process.lock') { continue }
+                                if ([IO.Directory]::Exists($item)) { Remove-KitelineDirectory $item $true }
+                                else { [IO.File]::Delete($item) }
+                            }
+                            $state.Dispose(); $state = $null
+                            [IO.File]::Delete((Join-Path $installation.dataDir 'process.lock'))
+                            Remove-KitelineDirectory $installation.dataDir $false
+                        }
+                    }
                     [IO.Directory]::Move($program, $previous)
                     [IO.File]::Delete($public)
                     [IO.File]::Delete($recordFile)
-                    if ($options['--purge-state'] -and $null -ne $state) {
-                        # Match the explicit uninstall policy in agent/src/install/commands.ts; names live in agent/src/config.ts.
-                        foreach ($name in __KITELINE_STATE_FILES__) {
-                            $path = Join-Path $installation.dataDir $name
-                            if (-not (Test-KitelineExists $path)) { continue }
-                            Assert-KitelineNoReparse $path
-                            if ($name -eq __KITELINE_TASKS_DIRECTORY__) { Remove-KitelineTree $path } else { [IO.File]::Delete($path) }
-                        }
-                    }
                     Remove-KitelineTree $previous
-                    Write-Host 'Uninstalled. External manager configuration and workspaces were not changed.'
+                    if ($options['--purge']) {
+                        $exclusive.Dispose(); $exclusive = $null
+                        [IO.File]::Delete($useFile)
+                        $manager.Dispose(); $manager = $null
+                        [IO.File]::Delete($managementFile)
+                        if ([IO.Directory]::GetFileSystemEntries($management).Length -eq 0) { Remove-KitelineDirectory $management $false }
+                    }
+                    Write-Host 'Uninstalled.'
                 } else {
                     $movedNew = $false; $movedOld = $false; $wroteRecord = $false
                     try {

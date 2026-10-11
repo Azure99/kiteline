@@ -83,7 +83,7 @@ Output and records have retention limits; see [Limits](reference.en.md#limits) f
 - Each task retains only its latest `taskHistoryRuns` finished records, including “Skipped” records.
 - Total output on a device is limited. Before a new run, the agent may delete finished records containing output, oldest first. Active runs and runs needing review are protected; if capacity is insufficient, the new run's output may be truncated earlier.
 
-Records are stored under `tasks/` in the agent data directory (see [File locations](reference.en.md#file-locations)), survive restarts and upgrades, and are deleted by `uninstall --purge-state`. A missing record does not prove the command never ran; check the previous execution before running again. Files written by the command remain where it wrote them.
+Records are stored under `tasks/` in the agent data directory (see [File locations](reference.en.md#file-locations)), survive restarts and upgrades, and are deleted by `uninstall --purge`. A missing record does not prove the command never ran; check the previous execution before running again. Task working files and outputs outside the cleanup directories remain; see [Uninstall](devices.en.md#uninstall) for the boundary.
 
 ## Review after an agent restart
 

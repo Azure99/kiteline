@@ -471,7 +471,7 @@ sudo /usr/local/bin/kiteline-agent upgrade --archive "$PWD/kiteline-agent-X.Y.Z-
 - launchd：执行[停止命令](#launchd)中的 `bootout`，再删除 `/Library/LaunchDaemons/com.kiteline.agent.plist`。
 - WinSW：在管理员 PowerShell 中对服务程序执行 `stopwait` 和 `uninstall`，再删除服务目录。
 
-然后卸载程序。Linux 和 macOS：
+然后选择卸载模式。默认卸载删除程序目录、命令入口和安装记录，保留数据、运行目录、Unix 安装 env 和协调锁。Linux 和 macOS：
 
 ```sh
 sudo /usr/local/bin/kiteline-agent uninstall
@@ -480,36 +480,22 @@ sudo /usr/local/bin/kiteline-agent uninstall
 Windows（管理员 PowerShell）：
 
 ```powershell
-& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" uninstall
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" uninstall
 ```
 
-命令提示 `Type yes to continue:`，输入 `yes` 继续；加 `--yes` 跳过确认。卸载删除程序目录、命令入口和安装记录。默认保留 agent 数据目录和项目文件，之后重新安装同一设备时不需要重新绑定。
+同一项目用户使用原数据路径重新安装时，可以复用绑定和数据。Windows 自定义数据或运行目录需要在重新安装时再次传入；安装记录删除后，安装器不会记住它们。Unix 重新安装会沿用 `/etc/kiteline-agent.env`；更换项目用户前，先删除它或改正其中的数据路径。
 
-加 `--purge-state` 时，还会清除 agent 管理的工作区登记、快捷方式和设置、绑定凭据、配置、临时文件记录，以及定时任务定义和运行记录。对应文件见[agent 数据目录](reference.md#agent-数据目录)。
+完整清理使用 `--purge`：
 
-`--purge-state` 作用于安装记录中的数据目录（`/etc/kiteline-agent.env` 或默认位置，Windows 为安装时确定的目录），不作用于只在服务配置中设置的 `KITELINE_AGENT_HOME`。数据目录正被使用时，卸载拒绝执行。项目文件和工作区目录不会被删除。
+```sh
+sudo /usr/local/bin/kiteline-agent uninstall --purge
+```
 
-卸载后留下的文件如下，确定以后不用时可以手工删除：
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" uninstall --purge
+```
 
-- Linux 和 macOS：数据目录本身（含 `run/` 目录和 launchd 日志）、`/etc/kiteline-agent.env`、锁文件 `/opt/.kiteline-agent-use.lock` 和 `/opt/.kiteline-agent-install.lock`。
-
-  ```sh
-  sudo rm -f /etc/kiteline-agent.env /opt/.kiteline-agent-use.lock /opt/.kiteline-agent-install.lock
-  rm -rf ~/.local/share/kiteline-agent
-  ```
-
-- Windows：`C:\ProgramData\kiteline-agent`（锁文件）和数据目录。
-
-  ```powershell
-  # 管理员 PowerShell
-  Remove-Item -Recurse -Force "$env:ProgramData\kiteline-agent"
-  # 项目用户的 PowerShell
-  Remove-Item -Recurse -Force "$env:LOCALAPPDATA\kiteline-agent"
-  ```
-
-下一次 `install` 原样沿用保留下来的 `/etc/kiteline-agent.env`。改由另一个项目用户安装前，先删除这个文件或改正其中的 `KITELINE_AGENT_HOME`，否则新用户的 `bind` 和 `run` 会因无权访问旧目录而失败。
-
-删除数据目录后，这台设备的绑定凭据也随之删除。最后在工作台的设备页，从“设备操作”菜单点击“删除设备”，从列表中移除它。
+`--purge` 还会删除 Unix 安装 env、完整的 agent 专用数据与运行目录、协调锁及 agent 专用空目录。检查命令列出的目录后，输入 `yes` 确认；加 `--yes` 跳过确认。
 
 ## 重新绑定
 

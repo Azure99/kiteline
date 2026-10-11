@@ -93,7 +93,10 @@ export function DeviceActionDialog({
             </DialogHeader>
             <div className="space-y-4 overflow-auto p-5">
               <p className="break-words font-medium">{action.device.name}</p>
-              <UninstallInstructions initialPlatform={action.device.environment?.os} />
+              <UninstallInstructions
+                initialPlatform={action.device.environment?.os}
+                release={action.device.release}
+              />
             </div>
             <DialogFooter>
               <Button onClick={onClose}>{t(($) => $.common.close)}</Button>

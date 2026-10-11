@@ -274,7 +274,15 @@ export const zhCN = {
     uninstallAgent: "本机卸载 agent",
     uninstallStop: "先停止 agent、本机接续及外部自动重启，再在目标设备执行。",
     uninstallWindows: "使用管理员 PowerShell。",
-    uninstallKeepsData: "卸载默认保留状态和项目文件。",
+    uninstallMode: "卸载模式",
+    uninstallKeep: "保留数据",
+    uninstallPurge: "完整清理",
+    uninstallKeepsData: "删除程序、命令入口和安装记录，保留数据、运行目录及 Unix 安装 env。",
+    uninstallPurgesData:
+      "删除安装及整个 agent 专用数据、运行目录，包括任务记录、日志和附加文件。目录内混有项目或工作文件时，请保留数据或先迁出。",
+    uninstallUpgrade:
+      "此设备尚不能确认支持完整清理。需要清理数据时，请先按指南升级 agent，再卸载。",
+    uninstallGuide: "卸载指南",
     copyUninstall: "复制卸载命令",
     containerDeployment: "容器部署",
     uninstallContainer: "按原部署方式停止并移除 agent 容器，保留挂载的项目和状态目录。",

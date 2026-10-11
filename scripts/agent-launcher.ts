@@ -35,11 +35,9 @@ export function agentLauncher(
 
 export function windowsAgentLaunchers({
   runtimeFiles,
-  stateFiles,
   nodeEnvironmentKeys,
 }: {
   runtimeFiles: readonly string[];
-  stateFiles: Record<string, string> & { tasks: string };
   nodeEnvironmentKeys: readonly string[];
 }) {
   const nativeSource = readFileSync(
@@ -71,8 +69,6 @@ export function windowsAgentLaunchers({
     "utf8",
   )
     .replace("__KITELINE_REQUIRED_FILES__", list(required))
-    .replace("__KITELINE_STATE_FILES__", list(Object.values(stateFiles)))
-    .replace("__KITELINE_TASKS_DIRECTORY__", literal(stateFiles.tasks))
     .replace("__KITELINE_NODE_ENVIRONMENT_KEYS__", list(nodeEnvironmentKeys))
     .replace("__KITELINE_NATIVE_SOURCE__", nativeSource)
     .replaceAll("__KITELINE_LAUNCHER_TYPE__", type);

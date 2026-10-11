@@ -51,7 +51,7 @@ Running `kiteline-agent` with no arguments or with `--help` prints a subcommand 
 | ------------------------- | ------------------------------------------------------------------------------- | --------------------- | ----------------------- |
 | `install`                 | `--user PROJECT_USER`; Windows also accepts `--data-dir PATH`, `--run-dir PATH` | root or administrator | Irrelevant              |
 | `upgrade`                 | `--archive FILE` (required), `--yes`                                            | root or administrator | All must be stopped     |
-| `uninstall`               | `--purge-state`, `--yes`                                                        | root or administrator | All must be stopped     |
+| `uninstall`               | `--purge`, `--yes`                                                              | root or administrator | All must be stopped     |
 | `check`                   | None                                                                            | Project user          | Irrelevant              |
 | `bind`                    | `--server URL` (required), `--if-unbound`                                       | Project user          | Must be stopped         |
 | `run`                     | None                                                                            | Project user          | Started by this command |

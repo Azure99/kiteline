@@ -51,7 +51,7 @@ Linux 和 macOS 的命令入口是 `/usr/local/bin/kiteline-agent`；用 `sudo` 
 | ------------------------- | --------------------------------------------------------------------------- | ------------- | ------------ |
 | `install`                 | `--user PROJECT_USER`；Windows 另有 `--data-dir PATH`、`--run-dir PATH`     | root 或管理员 | 无关         |
 | `upgrade`                 | `--archive FILE`（必填）、`--yes`                                           | root 或管理员 | 必须全部停止 |
-| `uninstall`               | `--purge-state`、`--yes`                                                    | root 或管理员 | 必须全部停止 |
+| `uninstall`               | `--purge`、`--yes`                                                          | root 或管理员 | 必须全部停止 |
 | `check`                   | 无                                                                          | 项目用户      | 无关         |
 | `bind`                    | `--server URL`（必填）、`--if-unbound`                                      | 项目用户      | 必须停止     |
 | `run`                     | 无                                                                          | 项目用户      | 由它启动     |
