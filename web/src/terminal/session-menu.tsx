@@ -41,11 +41,9 @@ export function SessionMenu({
   layout,
   mobile,
   dock,
-  disabled,
   label,
   onCommand,
   onMove,
-  onSplit,
   onDirection,
   onSettings,
 }: {
@@ -54,11 +52,9 @@ export function SessionMenu({
   layout: TerminalLayout;
   mobile: boolean;
   dock?: boolean;
-  disabled: boolean;
   label?: string;
   onCommand(command: SessionCommand, id: string): void;
   onMove(id: string, target?: string, position?: MemberPosition): void;
-  onSplit(direction: SplitDirection): void;
   onDirection(direction: SplitDirection): void;
   onSettings?(): void;
 }) {
@@ -93,14 +89,6 @@ export function SessionMenu({
           <>
             {!dock && !mobile && (
               <>
-                <MenuItem disabled={disabled} onClick={() => onSplit("horizontal")}>
-                  <Columns2 />
-                  {t(($) => $.terminal.splitRight)}
-                </MenuItem>
-                <MenuItem disabled={disabled} onClick={() => onSplit("vertical")}>
-                  <Rows2 />
-                  {t(($) => $.terminal.splitDown)}
-                </MenuItem>
                 <MenuItem disabled={ids.length < 2} onClick={() => onMove(id)}>
                   <Split />
                   {t(($) => $.terminal.separateGroup)}

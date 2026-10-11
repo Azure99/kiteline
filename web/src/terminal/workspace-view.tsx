@@ -374,10 +374,8 @@ export function WorkspaceView({
         mobile={mobile}
         dock={dock}
         label={label}
-        disabled={!enabled}
         onCommand={(kind, value) => command(kind, value, dock)}
         onMove={move}
-        onSplit={(direction) => createSplit(id, direction)}
         onDirection={(direction) => {
           const owner = id ? groupFor(layout, id) : undefined;
           if (owner) setLayout((old) => arrangeGroup(old, owner.id, direction));
