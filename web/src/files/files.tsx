@@ -316,12 +316,12 @@ export function Files({
         visible={searching}
         disabled={!enabled}
         onBack={() => updateQuery({ search: undefined })}
-        onOpen={(match) => {
+        onOpen={(match, query) => {
           setLocation(
             match.line
               ? {
                   path: match.path,
-                  position: { line: match.line, range: match.ranges?.[0] },
+                  position: { line: match.line, range: match.ranges?.[0], query },
                 }
               : undefined,
           );

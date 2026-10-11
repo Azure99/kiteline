@@ -41,7 +41,7 @@ export interface Draft extends FileTarget {
   resolvedPath?: string;
   scrollTop: number;
   scrollLeft: number;
-  location?: { line: number; range?: [number, number] };
+  location?: { line: number; range?: [number, number]; query?: string };
   operation?: { request: AbortController } & (
     | { kind: "loading" | "checking" }
     | { kind: "saving"; snapshot: SaveSnapshot }

@@ -23,14 +23,14 @@ export function FileSearch({
   visible: boolean;
   disabled: boolean;
   onBack: () => void;
-  onOpen: (match: SearchMatch) => void;
+  onOpen: (match: SearchMatch, query: string) => void;
 }) {
   const { t } = useTranslation();
 
   const [mode, setMode] = useState<"name" | "content">("content");
   const [query, setQuery] = useState("");
   const [includeIgnored, setIncludeIgnored] = useState(false);
-  const [result, setResult] = useState<SearchResult>();
+  const [result, setResult] = useState<SearchResult & { query: string }>();
   const [status, setStatus] = useState<{ kind: "cancelled" } | { kind: "error"; error: unknown }>();
   const [busy, setBusy] = useState(false);
   const request = useRef<AbortController>(undefined);
@@ -55,7 +55,7 @@ export function FileSearch({
         { workspaceId, mode, query, includeIgnored },
         current.signal,
       );
-      if (request.current === current) setResult(next);
+      if (request.current === current) setResult({ ...next, query });
     } catch (error) {
       if (request.current === current) setStatus({ kind: "error", error });
     } finally {
@@ -159,7 +159,7 @@ export function FileSearch({
         {result?.matches.map((match, index) => (
           <button
             key={index}
-            onClick={() => onOpen(match)}
+            onClick={() => onOpen(match, result.query)}
             className="block w-full border-b border-border px-4 py-3 text-left hover:bg-muted"
           >
             <span className="flex items-start gap-2 text-xs">

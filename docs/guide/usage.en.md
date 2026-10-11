@@ -159,13 +159,15 @@ If a save result is uncertain, for example after losing connection during saving
 
 ### Search
 
-File search supports content and file names, with these rules:
+File search searches the workspace's files on disk by content or file name, with these rules:
 
 - Matches literal text, case-sensitively.
 - "File name" finds files whose relative paths, including directories, contain the query. Results contain files only.
 - Includes hidden files, excludes `.git`, and does not follow any symbolic links, whether to files or directories.
 - `.gitignore` applies only inside Git repositories; `.ignore` and `.rgignore` always apply. Check "Include ignored files" to include files excluded by these rules.
 - Results and search duration are limited (see [Limits](reference.en.md#limits)). Reaching a limit shows "incomplete results". Results with non-UTF-8 paths are omitted and also mark the results incomplete.
+
+When you open a content result, if the text at its original position no longer matches the query, the editor opens Find. Click “next” to search the current content.
 
 ### Create and rename
 

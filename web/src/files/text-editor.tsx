@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { EditorView } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
+import { openSearchPanel, SearchQuery, setSearchQuery } from "@codemirror/search";
 import { LanguageDescription } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { encodeText } from "@kiteline/shared/protocol/text";
@@ -76,11 +77,27 @@ export function TextEditor({
   useLayoutEffect(() => {
     const editor = view.current;
     if (editor && draft.location) {
-      const { line: number, range } = draft.location;
+      const { line: number, range, query } = draft.location;
       draft.location = undefined;
       const line = editor.state.doc.line(Math.max(1, Math.min(number, editor.state.doc.lines)));
       const anchor = line.from + Math.min(range?.[0] ?? 0, line.length);
       const head = line.from + Math.min(range?.[1] ?? 0, line.length);
+      if (query !== undefined && (!range || editor.state.doc.sliceString(anchor, head) !== query)) {
+        openSearchPanel(editor);
+        editor.dispatch({
+          effects: setSearchQuery.of(
+            new SearchQuery({
+              search: query
+                .replaceAll("\\", "\\\\")
+                .replaceAll("\n", "\\n")
+                .replaceAll("\r", "\\r")
+                .replaceAll("\t", "\\t"),
+              caseSensitive: true,
+            }),
+          ),
+        });
+        return;
+      }
       editor.dispatch({
         selection: { anchor, head },
         effects: EditorView.scrollIntoView(anchor, { y: "center" }),
