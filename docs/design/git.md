@@ -188,5 +188,4 @@ stage、unstage、review 和 discard 的路径最多 `listPageEntries × 2` 个�
 - 子模块的初始化和更新，以及裸仓库的操作。
 - 专门的合并编辑器、提交说明编辑器和 rebase todo 编辑器。
 - amend、reset、交互式 rebase、强制推送、`git branch -D` 等改写历史或强制性的操作。
-- 自动 stash、自动重试和删除 `index.lock`。
-- 为了让操作成功而关闭 hooks、签名或认证：agent 从不添加 `--no-verify` 或 `--no-gpg-sign`，也不修改凭据配置。
+- 自动 stash。

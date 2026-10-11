@@ -56,8 +56,6 @@
 | 推送 `v*` tag                     | `candidate` | 完整构建后建立 Release 草稿并推送候选镜像。                 |
 | main 上手动 `publish`，填写 `tag` | `publish`   | 发布已有候选。                                              |
 
-手动运行时，在 Actions 的 `CI` 页面点击 “Run workflow”，选择分支和 `mode`；只有 `publish` 使用 `tag`。`candidate` 只由推送 tag 触发。
-
 完整构建会校验归档和解包内容，在对应平台运行 agent 的版本检查及 `check`，检查 server 与镜像的健康响应和正常退出，并在 Linux amd64 上检查绑定和终端输出。它不覆盖安装、升级、卸载、Windows 11 或最低支持系统版本。
 
 ### Release 与镜像

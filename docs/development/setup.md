@@ -132,11 +132,7 @@ KITELINE_DATA_DIR=/var/tmp/kiteline-dev/server pnpm server setup-token
 | `pnpm test`         | 运行自动测试                       |
 | `pnpm build`        | 编译各包并构建工作台               |
 
-完整的 `pnpm test` 有三个前提：
-
-- 已运行 `pnpm build`。部分测试启动编译后的 `server/dist`、`agent/dist` 和 `terminal-recorder/dist`。
-- 已运行 `pnpm native:build`。文件、搜索、终端和 recorder 的测试使用真实文件系统，以及 `dist/native/` 中的 tmux、rg 和 `rename-noreplace`。
-- 系统 Git 为 2.23.0 及以上版本。Git 测试在临时仓库中执行真实的 Git 命令。
+完整的 `pnpm test` 需要先完成[安装依赖与构建](#安装依赖与构建)，并使用 Git 2.23.0 及以上版本。
 
 只运行部分测试时，把文件或目录传给 `pnpm test`，例如 `pnpm test agent/test/git-read.test.ts`。
 
