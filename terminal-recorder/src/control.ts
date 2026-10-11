@@ -386,5 +386,6 @@ export class Control {
     this.dispose();
     await this.starting?.catch(() => {});
     await this.stopped;
+    this.stdin?.destroy();
   }
 }
