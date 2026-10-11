@@ -26,6 +26,7 @@ export function SplitPanes({
   groups,
   current,
   opened,
+  searchHost,
   mobile,
   visible,
   events,
@@ -36,6 +37,7 @@ export function SplitPanes({
   groups: TerminalGroup[];
   current?: string;
   opened: ReadonlySet<string>;
+  searchHost: HTMLDivElement | null;
   mobile: boolean;
   visible: boolean;
   events: PaneEvents;
@@ -155,6 +157,7 @@ export function SplitPanes({
                   group={owner}
                   showHeader={!mobile && !owner.maximized && members(owner).length > 1}
                   hidden={!shown}
+                  searchHost={searchHost}
                   events={events}
                 />
               )}
@@ -185,6 +188,7 @@ function TerminalPane({
   group,
   showHeader,
   hidden,
+  searchHost,
   events,
 }: {
   id: string;
@@ -194,6 +198,7 @@ function TerminalPane({
   group: TerminalGroup;
   showHeader: boolean;
   hidden: boolean;
+  searchHost: HTMLDivElement | null;
   events: PaneEvents;
 }) {
   const { t } = useTranslation();
@@ -268,6 +273,8 @@ function TerminalPane({
         deviceId={deviceId}
         workspaceId={workspaceId}
         sessionId={id}
+        searchHost={searchHost}
+        searchActive={active && !hidden}
       />
     </div>
   );

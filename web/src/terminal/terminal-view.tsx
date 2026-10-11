@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
 import {
@@ -50,12 +51,16 @@ export function TerminalView({
   sessionId,
   ref,
   onCapabilities,
+  searchHost,
+  searchActive,
 }: {
   deviceId: string;
   workspaceId: string;
   sessionId: string;
   ref?: Ref<TerminalActions>;
   onCapabilities?(id: string, value: TerminalCapabilities | undefined): void;
+  searchHost: HTMLDivElement | null;
+  searchActive: boolean;
 }) {
   const { t } = useTranslation();
   const compatible = useWebCompatible();
@@ -73,6 +78,14 @@ export function TerminalView({
   const [expanded, setExpanded] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const searchInput = useRef<HTMLInputElement>(null);
+  useLayoutEffect(() => {
+    if (!searchOpen || !searchActive || !searchHost) return;
+    const controls = searchHost.querySelector<HTMLElement>("[data-search-controls]")!;
+    controls.style.visibility = "hidden";
+    return () => {
+      controls.style.visibility = "";
+    };
+  }, [searchOpen, searchActive, searchHost]);
   const mobile = useMobile();
   const input = useRef<() => void>(() => {});
   useEffect(() => {
@@ -297,17 +310,20 @@ export function TerminalView({
         )}
       >
         <div ref={element} className="terminal-canvas min-h-0 min-w-0 flex-1" />
-        {searchOpen && (
-          <TerminalSearch
-            terminal={terminal}
-            ended={state.status === "ended"}
-            inputRef={searchInput}
-            onClose={() => {
-              setSearchOpen(false);
-              terminal?.focus();
-            }}
-          />
-        )}
+        {searchOpen &&
+          searchHost &&
+          createPortal(
+            <TerminalSearch
+              terminal={terminal}
+              active={searchActive}
+              inputRef={searchInput}
+              onClose={() => {
+                setSearchOpen(false);
+                terminal?.focus();
+              }}
+            />,
+            searchHost,
+          )}
         {terminal && (
           <TouchControls
             terminal={terminal}

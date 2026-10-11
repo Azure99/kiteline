@@ -6,16 +6,15 @@ import type { Terminal } from "@xterm/xterm";
 import { IconButton } from "../components/icon-button";
 import { Input } from "../components/ui/input";
 import { revealTerminalSelection } from "./clipped-screen";
-import { cn } from "../lib/utils";
 
 export function TerminalSearch({
   terminal,
-  ended,
+  active,
   inputRef,
   onClose,
 }: {
   terminal?: Terminal;
-  ended: boolean;
+  active: boolean;
   inputRef: RefObject<HTMLInputElement | null>;
   onClose(): void;
 }) {
@@ -76,66 +75,58 @@ export function TerminalSearch({
     <div
       role="search"
       aria-label={t(($) => $.terminal.search)}
-      className={cn(
-        "z-20 max-w-sm rounded border border-border bg-background p-1 text-foreground shadow-md",
-        ended
-          ? "order-first w-full shrink-0 self-end"
-          : "absolute top-1 right-1 w-[calc(100%_-_8px)]",
-      )}
+      hidden={!active}
+      className="absolute inset-0 z-20 flex items-center border-b border-border bg-background px-2 text-foreground"
     >
-      <div className="flex items-center">
-        <Input
-          ref={inputRef}
-          value={query}
-          disabled={!terminal}
-          aria-label={t(($) => $.terminal.search)}
-          placeholder={t(($) => $.common.search)}
-          autoComplete="off"
-          spellCheck={false}
-          onChange={(event) => {
-            setQuery(event.target.value);
-            search.current(event.target.value, false, true);
-          }}
-          onKeyDown={(event) => {
-            if (event.nativeEvent.isComposing) return;
-            if (event.key === "Escape") {
-              event.preventDefault();
-              onClose();
-            } else if (event.key === "Enter") {
-              event.preventDefault();
-              search.current(query, event.shiftKey);
-            }
-          }}
-        />
-        <IconButton
-          label={t(($) => $.terminal.searchPrevious)}
-          disabled={!terminal || !query}
-          onPointerDown={(event) => event.preventDefault()}
-          onClick={() => search.current(query, true)}
-        >
-          <ArrowUp />
-        </IconButton>
-        <IconButton
-          label={t(($) => $.terminal.searchNext)}
-          disabled={!terminal || !query}
-          onPointerDown={(event) => event.preventDefault()}
-          onClick={() => search.current(query)}
-        >
-          <ArrowDown />
-        </IconButton>
-        <IconButton
-          label={t(($) => $.terminal.closeSearch)}
-          onPointerDown={(event) => event.preventDefault()}
-          onClick={onClose}
-        >
-          <X />
-        </IconButton>
-      </div>
-      {found === false && (
-        <p role="status" className="px-2 py-1 text-sm text-muted-foreground">
-          {t(($) => $.terminal.searchEmpty)}
-        </p>
-      )}
+      <Input
+        ref={inputRef}
+        value={query}
+        disabled={!terminal}
+        aria-label={t(($) => $.terminal.search)}
+        placeholder={t(($) => $.common.search)}
+        autoComplete="off"
+        spellCheck={false}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          search.current(event.target.value, false, true);
+        }}
+        onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing) return;
+          if (event.key === "Escape") {
+            event.preventDefault();
+            onClose();
+          } else if (event.key === "Enter") {
+            event.preventDefault();
+            search.current(query, event.shiftKey);
+          }
+        }}
+      />
+      <IconButton
+        label={t(($) => $.terminal.searchPrevious)}
+        disabled={!terminal || !query}
+        onPointerDown={(event) => event.preventDefault()}
+        onClick={() => search.current(query, true)}
+      >
+        <ArrowUp />
+      </IconButton>
+      <IconButton
+        label={t(($) => $.terminal.searchNext)}
+        disabled={!terminal || !query}
+        onPointerDown={(event) => event.preventDefault()}
+        onClick={() => search.current(query)}
+      >
+        <ArrowDown />
+      </IconButton>
+      <IconButton
+        label={t(($) => $.terminal.closeSearch)}
+        onPointerDown={(event) => event.preventDefault()}
+        onClick={onClose}
+      >
+        <X />
+      </IconButton>
+      <span role="status" className="w-16 shrink-0 px-1 text-xs text-muted-foreground">
+        {found === false ? t(($) => $.terminal.searchEmpty) : ""}
+      </span>
     </div>
   );
 }

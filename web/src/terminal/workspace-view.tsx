@@ -90,6 +90,8 @@ export function WorkspaceView({
   // A later selection prevents a pending create from taking over that region.
   const selectionEpoch = useRef({ main: 0, dock: 0 });
   const displays = useRef(new Map<string, TerminalActions>());
+  const [mainSearchHost, setMainSearchHost] = useState<HTMLDivElement | null>(null);
+  const [dockSearchHost, setDockSearchHost] = useState<HTMLDivElement | null>(null);
   const [capabilities, setCapabilities] = useState<
     Record<"main" | "dock", Record<string, TerminalCapabilities>>
   >({ main: {}, dock: {} });
@@ -488,115 +490,120 @@ export function WorkspaceView({
             </IconButton>
           </div>
         )}
-        <div className="flex min-h-10 shrink-0 items-center gap-1 border-b border-border bg-muted/50 px-2 max-desk:gap-0 max-desk:px-1">
-          {picker()}
-          {!mobile && (multipleGroups || drag.dragging) ? (
-            <GroupTabs
-              layout={layout}
-              name={name}
-              canDrag={(id) => !!find(id) || opened.main.has(id)}
-              drag={drag}
-              onSelect={choose}
-            />
-          ) : null}
-          {(!split || !multipleGroups) && (
-            <span className="flex min-w-0 flex-1 overflow-hidden px-1">
-              {!split && (
-                <ApplicationTitle
-                  title={
-                    !targetPending && selected ? capabilities.main[selected]?.title : undefined
-                  }
-                />
-              )}
-            </span>
-          )}
-          {newButtons()}
-          {mobile && (
-            <>
-              {typeof navigator.clipboard?.readText === "function" && (
+        <div ref={setMainSearchHost} className="relative shrink-0">
+          <div
+            data-search-controls
+            className="flex min-h-10 shrink-0 items-center gap-1 border-b border-border bg-muted/50 px-2 max-desk:gap-0 max-desk:px-1"
+          >
+            {picker()}
+            {!mobile && (multipleGroups || drag.dragging) ? (
+              <GroupTabs
+                layout={layout}
+                name={name}
+                canDrag={(id) => !!find(id) || opened.main.has(id)}
+                drag={drag}
+                onSelect={choose}
+              />
+            ) : null}
+            {(!split || !multipleGroups) && (
+              <span className="flex min-w-0 flex-1 overflow-hidden px-1">
+                {!split && (
+                  <ApplicationTitle
+                    title={
+                      !targetPending && selected ? capabilities.main[selected]?.title : undefined
+                    }
+                  />
+                )}
+              </span>
+            )}
+            {newButtons()}
+            {mobile && (
+              <>
+                {typeof navigator.clipboard?.readText === "function" && (
+                  <IconButton
+                    label={t(($) => $.terminal.paste)}
+                    disabled={targetPending || !selected || !capabilities.main[selected]?.ready}
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      if (selected && !targetPending) void displays.current.get(selected)?.paste();
+                    }}
+                  >
+                    <ClipboardPaste />
+                  </IconButton>
+                )}
                 <IconButton
-                  label={t(($) => $.terminal.paste)}
+                  label={t(($) => $.terminal.keyboard)}
                   disabled={targetPending || !selected || !capabilities.main[selected]?.ready}
                   onPointerDown={(event) => event.preventDefault()}
                   onClick={() => {
-                    if (selected && !targetPending) void displays.current.get(selected)?.paste();
+                    if (selected && !targetPending) displays.current.get(selected)?.keyboard();
                   }}
                 >
-                  <ClipboardPaste />
+                  <Keyboard />
                 </IconButton>
-              )}
-              <IconButton
-                label={t(($) => $.terminal.keyboard)}
-                disabled={targetPending || !selected || !capabilities.main[selected]?.ready}
-                onPointerDown={(event) => event.preventDefault()}
-                onClick={() => {
-                  if (selected && !targetPending) displays.current.get(selected)?.keyboard();
-                }}
-              >
-                <Keyboard />
-              </IconButton>
-            </>
-          )}
-          {!mobile && (
-            <Menu>
-              <MenuTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    disabled={!enabled}
-                    aria-label={t(($) => $.terminal.createSplit)}
-                  />
-                }
-              >
-                <Columns2 />
-              </MenuTrigger>
-              <MenuContent>
-                <MenuItem onClick={() => createSplit(selected, "horizontal")}>
-                  <Columns2 />
-                  {t(($) => $.terminal.splitRight)}
-                </MenuItem>
-                <MenuItem onClick={() => createSplit(selected, "vertical")}>
-                  <Rows2 />
-                  {t(($) => $.terminal.splitDown)}
-                </MenuItem>
-              </MenuContent>
-            </Menu>
-          )}
-          {!mobile && group?.maximized && members.length > 1 && (
-            <IconButton
-              label={t(($) => $.terminal.restoreSplit)}
-              onClick={() => patchGroup({ maximized: false })}
-            >
-              <Minimize2 />
-            </IconButton>
-          )}
-          <IconButton
-            label={t(($) => $.terminal.search)}
-            disabled={targetPending || !selected || !capabilities.main[selected]?.hasTerminal}
-            onClick={() => {
-              if (selected && !targetPending) displays.current.get(selected)?.search();
-            }}
-          >
-            <Search />
-          </IconButton>
-          <IconButton
-            label={t(($) => $.terminal[focusMode.next])}
-            aria-pressed={focusMode.active || focusMode.fullscreen}
-            onPointerDown={(event) => {
-              if (mobile) event.preventDefault();
-            }}
-            onClick={focusMode.toggle}
-          >
-            {focusMode.next === "exitFocus" ? (
-              <Minimize />
-            ) : focusMode.next === "enterFullscreen" ? (
-              <Fullscreen />
-            ) : (
-              <Scan />
+              </>
             )}
-          </IconButton>
-          {menu({ id: split || targetPending ? undefined : selected })}
+            {!mobile && (
+              <Menu>
+                <MenuTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      disabled={!enabled}
+                      aria-label={t(($) => $.terminal.createSplit)}
+                    />
+                  }
+                >
+                  <Columns2 />
+                </MenuTrigger>
+                <MenuContent>
+                  <MenuItem onClick={() => createSplit(selected, "horizontal")}>
+                    <Columns2 />
+                    {t(($) => $.terminal.splitRight)}
+                  </MenuItem>
+                  <MenuItem onClick={() => createSplit(selected, "vertical")}>
+                    <Rows2 />
+                    {t(($) => $.terminal.splitDown)}
+                  </MenuItem>
+                </MenuContent>
+              </Menu>
+            )}
+            {!mobile && group?.maximized && members.length > 1 && (
+              <IconButton
+                label={t(($) => $.terminal.restoreSplit)}
+                onClick={() => patchGroup({ maximized: false })}
+              >
+                <Minimize2 />
+              </IconButton>
+            )}
+            <IconButton
+              label={t(($) => $.terminal.search)}
+              disabled={targetPending || !selected || !capabilities.main[selected]?.hasTerminal}
+              onClick={() => {
+                if (selected && !targetPending) displays.current.get(selected)?.search();
+              }}
+            >
+              <Search />
+            </IconButton>
+            <IconButton
+              label={t(($) => $.terminal[focusMode.next])}
+              aria-pressed={focusMode.active || focusMode.fullscreen}
+              onPointerDown={(event) => {
+                if (mobile) event.preventDefault();
+              }}
+              onClick={focusMode.toggle}
+            >
+              {focusMode.next === "exitFocus" ? (
+                <Minimize />
+              ) : focusMode.next === "enterFullscreen" ? (
+                <Fullscreen />
+              ) : (
+                <Scan />
+              )}
+            </IconButton>
+            {menu({ id: split || targetPending ? undefined : selected })}
+          </div>
         </div>
         {targetPending && (
           <div className="flex min-h-0 flex-1 flex-col items-start gap-3 overflow-auto p-4 text-sm">
@@ -626,6 +633,7 @@ export function WorkspaceView({
             groups={groups}
             current={targetPending ? undefined : group?.id}
             opened={opened.main}
+            searchHost={mainSearchHost}
             mobile={mobile}
             visible={visible && !targetPending}
             onSizes={(groupId, splitId, sizes) =>
@@ -687,40 +695,45 @@ export function WorkspaceView({
               defaultSize={`${dockExpanded ? layout.dockSize : 0}%`}
               className="flex h-full min-h-0 flex-col"
             >
-              <div
-                id="companion-terminal"
-                className={
-                  dockExpanded
-                    ? "flex min-h-9 shrink-0 items-center gap-1 border-b border-border bg-muted/50 px-2"
-                    : "hidden"
-                }
-              >
-                {picker(true)}
-                <span className="flex min-w-0 flex-1 overflow-hidden px-1">
-                  <ApplicationTitle title={dockId ? capabilities.dock[dockId]?.title : undefined} />
-                </span>
-                {newButtons(true)}
-                <IconButton
-                  label={t(($) => $.terminal.search)}
-                  disabled={!dockExpanded || !dockId || !capabilities.dock[dockId]?.hasTerminal}
-                  onClick={() => {
-                    if (dockExpanded && dockId) dockActions.current.get(dockId)?.search();
-                  }}
+              <div ref={setDockSearchHost} className="relative shrink-0">
+                <div
+                  data-search-controls
+                  id="companion-terminal"
+                  className={
+                    dockExpanded
+                      ? "flex min-h-9 shrink-0 items-center gap-1 border-b border-border bg-muted/50 px-2"
+                      : "hidden"
+                  }
                 >
-                  <Search />
-                </IconButton>
-                {dockId && (
-                  <>
-                    <IconButton
-                      label={t(($) => $.terminal.expandTerminal)}
-                      disabled={!find(dockId) && !opened.main.has(dockId)}
-                      onClick={() => applyMain(selectSession(layout, dockId), "terminal")}
-                    >
-                      <Maximize2 />
-                    </IconButton>
-                  </>
-                )}
-                {menu({ id: dockId, dock: true })}
+                  {picker(true)}
+                  <span className="flex min-w-0 flex-1 overflow-hidden px-1">
+                    <ApplicationTitle
+                      title={dockId ? capabilities.dock[dockId]?.title : undefined}
+                    />
+                  </span>
+                  {newButtons(true)}
+                  <IconButton
+                    label={t(($) => $.terminal.search)}
+                    disabled={!dockExpanded || !dockId || !capabilities.dock[dockId]?.hasTerminal}
+                    onClick={() => {
+                      if (dockExpanded && dockId) dockActions.current.get(dockId)?.search();
+                    }}
+                  >
+                    <Search />
+                  </IconButton>
+                  {dockId && (
+                    <>
+                      <IconButton
+                        label={t(($) => $.terminal.expandTerminal)}
+                        disabled={!find(dockId) && !opened.main.has(dockId)}
+                        onClick={() => applyMain(selectSession(layout, dockId), "terminal")}
+                      >
+                        <Maximize2 />
+                      </IconButton>
+                    </>
+                  )}
+                  {menu({ id: dockId, dock: true })}
+                </div>
               </div>
               {[...opened.dock].map((id) => (
                 <div
@@ -739,6 +752,8 @@ export function WorkspaceView({
                     workspaceId={workspace.id}
                     sessionId={id}
                     onCapabilities={reportDock}
+                    searchHost={dockSearchHost}
+                    searchActive={!visible && dockExpanded && dockId === id}
                   />
                 </div>
               ))}
