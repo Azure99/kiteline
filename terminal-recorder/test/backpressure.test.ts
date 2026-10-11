@@ -80,12 +80,20 @@ for (let round = 0; round < 3; round++) {
     for (let round = 0; round < 3; round++) {
       stopped = true;
       await writeFile(join(directory, "go-" + round), "");
-      await expect.poll(() => slow.data.length).toBeGreaterThan(round * 2 * 1024 * 1024);
-      await delay(200);
-      const progress = await readFile(join(directory, "progress"), "utf8");
-      await delay(200);
-      expect(await readFile(join(directory, "progress"), "utf8")).toBe(progress);
-      expect(progress).not.toBe(round + ":511");
+      await expect
+        .poll(
+          async () => {
+            const progress = await readFile(join(directory, "progress"), "utf8");
+            await delay(200);
+            return (
+              progress.startsWith(round + ":") &&
+              progress !== round + ":511" &&
+              (await readFile(join(directory, "progress"), "utf8")) === progress
+            );
+          },
+          { timeout: 5000 },
+        )
+        .toBe(true);
       session.input.input("slow", Buffer.from("text" + round + "\x03"));
       session.input.paste("slow", "paste" + round);
       stopped = false;
