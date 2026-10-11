@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { isolateHistory, redo, undo } from "@codemirror/commands";
 import type { Device } from "@kiteline/shared/protocol";
-import { DraftStore, draftError, isDirty } from "../src/files/drafts";
+import { DraftStore, draftError, isDirty, type Draft } from "../src/files/drafts";
 import { ApiError } from "../src/lib/api";
 import type { DiskText, FileTarget } from "../src/files/content";
 import { LanguageDescription, syntaxTree } from "@codemirror/language";
@@ -236,7 +236,8 @@ test.each([
         }).state,
       );
       const state = draft.state;
-      draft.scrollTop = 120;
+      const scrollSnapshot = {} as NonNullable<Draft["scrollSnapshot"]>;
+      draft.scrollSnapshot = scrollSnapshot;
       vi.stubGlobal("fetch", async () => {
         await rename(join(root, paths.from), join(root, paths.to));
         return Response.json({ outcome: "succeeded", result: { from: paths.from, to: paths.to } });
@@ -254,7 +255,7 @@ test.each([
       expect(draft.baseRaw).toBe("sent");
       expect(draft.revision).toBe((await read({ ...target, path: paths.final })).meta.revision);
       expect(draft.state).toBe(state);
-      expect(draft.scrollTop).toBe(120);
+      expect(draft.scrollSnapshot).toBe(scrollSnapshot);
       expect(draft.unknownSave).toBeUndefined();
       expect(undo({ state: draft.state!, dispatch: (tr) => store.update(draft, tr.state) })).toBe(
         true,

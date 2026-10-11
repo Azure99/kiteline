@@ -1,6 +1,7 @@
 import { newId } from "../lib/id";
 import { useCallback, useSyncExternalStore } from "react";
 import { Compartment, type EditorState } from "@codemirror/state";
+import type { EditorView } from "@codemirror/view";
 import type { KitelineError, Device, TextFormat } from "@kiteline/shared/protocol";
 import { encodeText } from "@kiteline/shared/protocol/text";
 import { apiError, ApiError, errorMessage, rpc } from "../lib/api";
@@ -39,8 +40,7 @@ export interface Draft extends FileTarget {
   baseRaw: string;
   revision?: string;
   resolvedPath?: string;
-  scrollTop: number;
-  scrollLeft: number;
+  scrollSnapshot?: ReturnType<EditorView["scrollSnapshot"]>;
   location?: { line: number; range?: [number, number]; query?: string };
   operation?: { request: AbortController } & (
     | { kind: "loading" | "checking" }
@@ -232,8 +232,6 @@ export class DraftStore {
       bytes: 0,
       baseText: "",
       baseRaw: "",
-      scrollTop: 0,
-      scrollLeft: 0,
       diskActivity: 0,
       sourceVersion: 0,
     };
@@ -297,7 +295,7 @@ export class DraftStore {
     draft.observationError = undefined;
     draft.notice = undefined;
     draft.diskChanged = false;
-    draft.scrollTop = draft.scrollLeft = 0;
+    draft.scrollSnapshot = undefined;
     this.changed();
   }
   async load(draft: Draft) {

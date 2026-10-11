@@ -29,6 +29,7 @@ export function TextEditor({
     const editor = new EditorView({
       parent: host.current,
       state: draft.state,
+      scrollTo: draft.scrollSnapshot,
       dispatchTransactions(transactions, current) {
         // Undo can bypass transaction filters; reject before updating either the document or history.
         let measured: { text: string; bytes: number } | undefined;
@@ -48,8 +49,6 @@ export function TextEditor({
       },
     });
     view.current = editor;
-    editor.scrollDOM.scrollTop = draft.scrollTop;
-    editor.scrollDOM.scrollLeft = draft.scrollLeft;
     const keydown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
@@ -58,8 +57,7 @@ export function TextEditor({
     };
     editor.dom.addEventListener("keydown", keydown);
     return () => {
-      draft.scrollTop = editor.scrollDOM.scrollTop;
-      draft.scrollLeft = editor.scrollDOM.scrollLeft;
+      draft.scrollSnapshot = editor.scrollSnapshot();
       editor.destroy();
       view.current = undefined;
     };
