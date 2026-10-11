@@ -501,7 +501,7 @@ export function Files({
       )}
       <div className={searching ? "hidden" : "flex min-h-0 flex-1"}>
         {(mobile || listOpen) && (
-          <ToolSidebar visible={visible && !searching && (!mobile || !queryFile)}>
+          <ToolSidebar visible={visible && (!mobile || (!searching && !queryFile))}>
             <aside
               key={mobile ? folder : undefined}
               className="scroll-area w-full overflow-auto border-border bg-muted/25 desk:w-72 desk:shrink-0 desk:border-r"
