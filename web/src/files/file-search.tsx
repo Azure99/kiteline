@@ -67,7 +67,7 @@ export function FileSearch({
   }
   return (
     <section
-      className={visible ? "flex min-h-0 flex-1 flex-col" : "hidden"}
+      className={visible ? "flex min-h-0 flex-1 flex-col max-desk:overflow-auto" : "hidden"}
       aria-label={t(($) => $.files.searchTitle)}
     >
       <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border px-2">
@@ -136,7 +136,7 @@ export function FileSearch({
           )}
         </div>
       </form>
-      <div className="scroll-area min-h-0 flex-1 overflow-auto">
+      <div className="scroll-area min-h-0 flex-1 overflow-auto max-desk:flex-none max-desk:overflow-visible">
         {(busy || status || result) && (
           <div
             role="status"

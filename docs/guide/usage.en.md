@@ -169,6 +169,8 @@ File search searches the workspace's files on disk by content or file name, with
 
 When you open a content result, if the text at its original position no longer matches the query, the editor opens Find. Click “next” to search the current content.
 
+On phones, the back button, search mode, and query field scroll with the results. Scroll back up to use them.
+
 ### Create and rename
 
 Creation and renaming fail if the name exists; nothing is overwritten. Open tabs follow renamed or moved paths. The workspace root and files currently being saved cannot be renamed, moved or deleted.
