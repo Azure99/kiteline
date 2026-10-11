@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ErrorNotice } from "../components/error-notice";
 import {
@@ -120,20 +120,12 @@ export function FileExplorer({
                 )}
               </button>
               {!!entry.path && (
-                <MenuTrigger
+                <EntryMenuTrigger
                   handle={menuHandle}
-                  payload={entry.path}
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label={t(($) => $.files.actionsNamed, { name: entry.name })}
-                      disabled={disabled}
-                    />
-                  }
-                >
-                  <MoreHorizontal />
-                </MenuTrigger>
+                  path={entry.path}
+                  label={t(($) => $.files.actionsNamed, { name: entry.name })}
+                  disabled={disabled}
+                />
               )}
             </div>
             {!mobile && (folder || entry.kind === "symlink") && open && (
@@ -246,6 +238,28 @@ export function FileExplorer({
     </div>
   );
 }
+
+const EntryMenuTrigger = memo(function EntryMenuTrigger({
+  handle,
+  path,
+  label,
+  disabled,
+}: {
+  handle: ReturnType<typeof createMenuHandle<string>>;
+  path: string;
+  label: string;
+  disabled: boolean;
+}) {
+  return (
+    <MenuTrigger
+      handle={handle}
+      payload={path}
+      render={<Button variant="ghost" size="icon" aria-label={label} disabled={disabled} />}
+    >
+      <MoreHorizontal />
+    </MenuTrigger>
+  );
+});
 
 function CloseMissingMenu({ handle }: { handle: ReturnType<typeof createMenuHandle<string>> }) {
   useEffect(() => {
