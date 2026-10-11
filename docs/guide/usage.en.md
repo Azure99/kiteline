@@ -129,7 +129,7 @@ The list refreshes automatically when other programs change files, and periodica
 
 PNG, JPEG, GIF and WebP images are detected by content and previewed; images exceeding preview byte or pixel limits can only be downloaded. Other files open as UTF-8 text. Files containing NUL bytes, invalid UTF-8 or content exceeding editing limits (see [Limits](reference.en.md#limits)) can be downloaded but not edited.
 
-The editor preserves the original BOM, line endings and final newline. For mixed line endings, it indicates whether saves will use LF or CRLF. An edit that would exceed the editing limit is rejected in full. Copying content does not mean it was saved.
+The editor preserves the original BOM, line endings and final newline. For mixed line endings, it indicates whether saves will use LF or CRLF. An edit that would exceed the editing limit is rejected in full.
 
 Saving replaces the original with a new file, so its parent directory must allow file creation and renaming. Ordinary permission bits are preserved; ownership, group, ACLs and extended attributes follow the rules for new files. Other hard links still point to the old content. Saving through a symbolic link writes to its target.
 
@@ -202,7 +202,7 @@ Each result is "Completed", "Not completed" (not executed or confirmed failed, w
 
 Files follows symbolic links accessible to the project user, including links to directories outside the workspace. Opening and saving affect the target file; renaming, moving, deleting and replacing affect only the link.
 
-Directory uploads, archive downloads and copying across workspaces are not provided by Files; see [Out of scope (Chinese)](../design/files.md#范围外).
+Files does not provide copying across workspaces; see [Out of scope (Chinese)](../design/files.md#范围外) for other capability boundaries.
 
 ## Git
 

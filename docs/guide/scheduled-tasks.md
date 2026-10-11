@@ -48,17 +48,16 @@ agent 在运行但计时器晚于计划时刻且超过迟到容差（见[限额]
 
 ## 执行环境
 
-命令由 agent 配置的 Shell 以非交互方式执行（Linux、macOS 为 `SHELL -c COMMAND`，Windows 为 PowerShell 的 `-Command`），Shell 的默认值和完整参数见 [shell](reference.md#shell)。
+命令使用 agent 配置的 Shell，默认值和启动参数见 [shell](reference.md#shell)。
 
 - Shell 既不是登录 Shell，也不是交互 Shell。命令依赖的设置若来自 `~/.bashrc`、`~/.profile` 或 PowerShell profile，请把它们写进命令，或放进 agent 的启动环境。
 - Windows 任务的文本输出使用 UTF-8；外部程序的输出编码也应设为 UTF-8。
 - Windows PowerShell 5.1 默认以 ASCII 把字符串送入原生程序的 stdin；需要中文输入时，在命令中显式设置 `$OutputEncoding = [Text.UTF8Encoding]::new($false)`。文件重定向仍使用所选 Shell 的默认编码。
-- 标准输入已关闭，也没有终端（PTY）。需要终端或等待人工确认的程序会失败或立即读到输入结束，AI CLI 需要使用它的非交互方式运行。
+- 标准输入已关闭，没有终端（PTY），也不能附着输入。需要终端或人工确认的程序会失败或立即读到输入结束；AI CLI 应使用非交互方式，结果在运行记录中查看。
 - 命令以 agent 的操作系统用户运行，继承 agent 进程的环境，包括 `HOME`、`PATH`、代理变量、SSH agent 和 Git 凭据。它不继承执行 `kiteline-agent schedule` 的那个 Shell 的环境和当前目录。agent 作为后台服务运行时，环境由服务配置提供，见[后台运行](devices.md#后台运行)。
 - 默认工作目录是项目用户的 HOME（Windows 上是用户配置文件目录）。
 - 没有默认的运行时长上限，命令一直运行到退出或被停止。输出超过限额也不会结束命令。
 - 命令在独立的进程组（Linux、macOS）或 Job（Windows）中运行，停止时作用于其中所有进程。命令应在前台完成工作；在 Linux 和 macOS 上，自行脱离进程组的后台进程不受停止操作管理。
-- 定时任务不进入 tmux，不能附着，结果通过运行记录查看。
 
 退出码为 0 时运行结果为“成功”；非 0 时为“失败”，原因“命令未成功退出”；工作目录或 Shell 不可用导致无法启动时为“失败”，原因“命令无法启动”。
 
@@ -83,7 +82,7 @@ stdout 和 stderr 分开保存，两者之间没有统一的时间顺序。
 - 每个任务只保留最近 `taskHistoryRuns` 条已结束的记录，“已跳过”的记录也计入。
 - 设备上的输出总量有上限。开始新运行时，agent 可能从最早的已结束记录起删除带输出的记录。正在执行和待核查的运行不会被删除；剩余空间不足时，新运行的输出可能更早被截断。
 
-记录保存在 agent 数据目录的 `tasks/` 中（见[文件位置](reference.md#文件位置)），agent 重启和升级后仍在，`uninstall --purge` 会删除它们。记录不存在不能证明命令从未执行，再次运行前应核查此前的执行情况。清理目录之外的任务工作文件和产物保留，范围见[卸载](devices.md#卸载)。
+记录保存在 agent 数据目录的 `tasks/` 中（见[文件位置](reference.md#文件位置)），agent 重启和升级后仍在，[`uninstall --purge`](devices.md#卸载) 会删除它们。记录不存在不能证明命令从未执行，再次运行前应核查此前的执行情况。
 
 ## agent 重启后的核查
 

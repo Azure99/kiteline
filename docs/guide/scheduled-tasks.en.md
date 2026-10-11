@@ -48,17 +48,16 @@ If the agent is running but its timer fires later than the lateness tolerance (s
 
 ## Execution environment
 
-Commands run noninteractively using the agent's configured shell: `SHELL -c COMMAND` on Linux and macOS, and PowerShell with `-Command` on Windows. See [Shell](reference.en.md#shell) for defaults and complete arguments.
+Commands use the agent's configured shell. See [Shell](reference.en.md#shell) for defaults and startup arguments.
 
 - The shell is neither a login shell nor an interactive shell. If your command depends on settings from `~/.bashrc`, `~/.profile` or a PowerShell profile, include them in the command or the agent's startup environment.
 - Windows task text output uses UTF-8; configure external programs to output UTF-8 as well.
 - Windows PowerShell 5.1 sends strings to native stdin as ASCII by default. For non-ASCII input, explicitly set `$OutputEncoding = [Text.UTF8Encoding]::new($false)` in the command. File redirection retains the selected shell's default encoding.
-- Standard input is closed and there is no terminal (PTY). Programs requiring a terminal or human confirmation fail or immediately reach end of input. Use your AI CLI's noninteractive mode.
+- Standard input is closed, there is no terminal (PTY), and you cannot attach to provide input. Programs requiring a terminal or human confirmation fail or immediately reach end of input. Use your AI CLI's noninteractive mode and view results in run records.
 - The command runs as the agent's operating-system user and inherits its environment, including `HOME`, `PATH`, proxy variables, SSH agent and Git credentials. It does not inherit the environment or current directory of the shell that runs `kiteline-agent schedule`. For an agent running as a background service, the service configuration supplies the environment; see [Run in the background](devices.en.md#run-in-the-background).
 - The default working directory is the project user's HOME (the user profile directory on Windows).
 - There is no default runtime limit. A command runs until it exits or is stopped. Exceeding output limits does not stop it.
 - Commands run in a separate process group on Linux and macOS, or a Job on Windows. Stopping affects every process in that group or Job. Commands should complete their work in the foreground. On Linux and macOS, background processes that detach themselves from the process group are outside the stop operation's control.
-- Scheduled tasks do not run in tmux and cannot be attached to. View results in run records.
 
 Exit code 0 produces “Succeeded”. A nonzero exit produces “Failed” with “Command exited unsuccessfully”. An unavailable working directory or shell that prevents startup produces “Failed” with “Command could not start”.
 
@@ -83,7 +82,7 @@ Output and records have retention limits; see [Limits](reference.en.md#limits) f
 - Each task retains only its latest `taskHistoryRuns` finished records, including “Skipped” records.
 - Total output on a device is limited. Before a new run, the agent may delete finished records containing output, oldest first. Active runs and runs needing review are protected; if capacity is insufficient, the new run's output may be truncated earlier.
 
-Records are stored under `tasks/` in the agent data directory (see [File locations](reference.en.md#file-locations)), survive restarts and upgrades, and are deleted by `uninstall --purge`. A missing record does not prove the command never ran; check the previous execution before running again. Task working files and outputs outside the cleanup directories remain; see [Uninstall](devices.en.md#uninstall) for the boundary.
+Records are stored under `tasks/` in the agent data directory (see [File locations](reference.en.md#file-locations)), survive restarts and upgrades, and are deleted by [`uninstall --purge`](devices.en.md#uninstall). A missing record does not prove the command never ran; check the previous execution before running again.
 
 ## Review after an agent restart
 
