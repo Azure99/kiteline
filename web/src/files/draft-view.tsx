@@ -49,8 +49,10 @@ export function DraftView({
   draft,
   unavailable,
   focusMode,
+  editorVisible = true,
 }: {
   focusMode?: ReturnType<typeof useTerminalFocus>;
+  editorVisible?: boolean;
   store: DraftStore;
   draft: Draft;
   unavailable?: string;
@@ -260,13 +262,15 @@ export function DraftView({
           position={previewPosition.current}
         />
       ) : draft.state ? (
-        <TextEditor
-          key={draft.id}
-          {...{ draft, store }}
-          onSave={() => {
-            if (!unavailable) void save();
-          }}
-        />
+        editorVisible && (
+          <TextEditor
+            key={draft.id}
+            {...{ draft, store }}
+            onSave={() => {
+              if (!unavailable) void save();
+            }}
+          />
+        )
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-4 text-sm text-muted-foreground">
           {busy ? t(($) => $.common.reading) : t(($) => $.files.noText)}

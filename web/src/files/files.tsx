@@ -545,6 +545,7 @@ export function Files({
                 key={draft.id}
                 store={store}
                 draft={draft}
+                editorVisible={!searching}
                 unavailable={!enabled ? t(($) => $.common.deviceOffline) : undefined}
               />
             ) : queryFile ? (
