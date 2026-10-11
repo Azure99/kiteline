@@ -164,7 +164,9 @@ export const zhCN = {
     expandNamed: "展开 {{name}}",
     collapseNamed: "收起 {{name}}",
     actionsNamed: "{{name}} 操作",
-    watchLimited: "自动监听受限，定时刷新仍可用：{{reason}}",
+    watchLimited: "自动更新受限",
+    watchDetails: "详情",
+    watchRefresh: "查看文件或 Git 时仍会定时刷新。",
     watchUnavailable: "目录监听不可用",
   },
   auth: {

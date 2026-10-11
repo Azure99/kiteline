@@ -167,7 +167,9 @@ export const en = {
     expandNamed: "Expand {{name}}",
     collapseNamed: "Collapse {{name}}",
     actionsNamed: "Actions for {{name}}",
-    watchLimited: "Live updates are limited; periodic refresh remains available: {{reason}}",
+    watchLimited: "Live updates limited",
+    watchDetails: "Details",
+    watchRefresh: "Files and Git still refresh periodically when you view them.",
     watchUnavailable: "Directory watching is unavailable",
   },
   auth: {
