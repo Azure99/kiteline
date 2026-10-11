@@ -2,7 +2,6 @@ import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
-  Circle,
   Code,
   Copy,
   Download,
@@ -13,7 +12,6 @@ import {
   RefreshCw,
   Save,
   Scan,
-  X,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
@@ -36,7 +34,7 @@ import {
   type Draft,
   type DraftStore,
 } from "./drafts";
-import { requestCloseDraft, showDraft } from "./navigation";
+import { DraftTabs } from "./draft-tabs";
 import { TextEditor } from "./text-editor";
 import { formatBytes } from "./format";
 import { downloadFile, type DiskText } from "./content";
@@ -108,23 +106,6 @@ export function DraftView({
   const [error, setError] = useState<unknown>();
   const { copied, error: copyError, copy } = useCopyFeedback();
   const generation = useRef(0);
-  const tabStrip = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const strip = tabStrip.current;
-    if (!strip) return;
-    const reveal = () => {
-      const tab = strip.querySelector('[aria-current="true"]')?.parentElement;
-      if (!tab || !strip.clientWidth) return;
-      const bounds = strip.getBoundingClientRect();
-      const current = tab.getBoundingClientRect();
-      if (current.left < bounds.left) strip.scrollLeft += current.left - bounds.left;
-      else if (current.right > bounds.right) strip.scrollLeft += current.right - bounds.right;
-    };
-    reveal();
-    const observer = new ResizeObserver(reveal);
-    observer.observe(strip);
-    return () => observer.disconnect();
-  }, [draft.id]);
   useEffect(
     () => () => {
       generation.current++;
@@ -150,38 +131,7 @@ export function DraftView({
     return <div className="p-4 text-sm text-muted-foreground">{t(($) => $.files.closed)}</div>;
   return (
     <>
-      <div
-        hidden={focusMode?.active}
-        ref={tabStrip}
-        role="group"
-        aria-label={t(($) => $.files.openFiles)}
-        className="flex min-h-9 shrink-0 overflow-x-auto border-b border-border bg-muted/40"
-      >
-        {tabs.map((item) => (
-          <div
-            key={item.id}
-            className={`flex max-w-64 shrink-0 items-center border-r border-border ${item === draft ? "bg-background" : ""}`}
-          >
-            <button
-              aria-current={item === draft ? "true" : undefined}
-              title={item.path}
-              onClick={() => showDraft(item)}
-              className="flex min-h-9 min-w-0 items-center gap-2 px-3 text-xs"
-            >
-              <span className="truncate">{item.path.split("/").at(-1)}</span>
-              {isDirty(item) && (
-                <Circle size={7} fill="currentColor" aria-label={t(($) => $.files.unsaved)} />
-              )}
-            </button>
-            <IconButton
-              label={t(($) => $.common.closeNamed, { name: item.path })}
-              onClick={() => requestCloseDraft(store, item)}
-            >
-              <X size={13} />
-            </IconButton>
-          </div>
-        ))}
-      </div>
+      <DraftTabs store={store} tabs={tabs} draft={draft} hidden={focusMode?.active} />
       <div className="flex min-h-10 shrink-0 items-center gap-1 border-b border-border px-3 max-sm:flex-wrap">
         <span
           className="min-w-0 flex-1 truncate text-xs max-sm:basis-full max-sm:pt-1"

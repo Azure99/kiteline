@@ -37,6 +37,7 @@ import { FileDetails } from "./file-details";
 import { FileNameDialog, type NameAction } from "./name-dialog";
 import { isWithin, movedPath, parentPath } from "./paths";
 import { useFileBrowser } from "./use-browser";
+import { DraftTabs } from "./draft-tabs";
 import { DraftView } from "./draft-view";
 import { useDrafts, type Draft, type DraftStore } from "./drafts";
 import { showDraft, showFile } from "./navigation";
@@ -495,6 +496,9 @@ export function Files({
           </div>
         )}
       </ToolHeader>
+      {!searching && !queryFile && !draft && drafts.length > 0 && (
+        <DraftTabs store={store} tabs={drafts} />
+      )}
       <div className={searching ? "hidden" : "flex min-h-0 flex-1"}>
         {(mobile || listOpen) && (
           <ToolSidebar visible={visible && !searching && (!mobile || !queryFile)}>
@@ -557,7 +561,7 @@ export function Files({
               />
             ) : (
               <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-                {t(($) => $.files.selectFiles)}
+                {drafts.length === 0 && t(($) => $.files.selectFiles)}
               </div>
             )}
           </section>
