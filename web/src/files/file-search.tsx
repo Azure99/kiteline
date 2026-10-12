@@ -1,11 +1,12 @@
 import { useTranslation } from "react-i18next";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useEffectEvent, useRef, useState } from "react";
 import { ArrowLeft, File, Search, X } from "lucide-react";
 import type { SearchMatch, SearchResult } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { rpc } from "../lib/api";
+import { isMobile } from "../lib/use-mobile";
 import { ErrorNotice } from "../components/error-notice";
 
 export function FileSearch({
@@ -26,6 +27,7 @@ export function FileSearch({
   onOpen: (match: SearchMatch, query: string) => void;
 }) {
   const { t } = useTranslation();
+  const input = useRef<HTMLInputElement>(null);
 
   const [mode, setMode] = useState<"name" | "content">("content");
   const [query, setQuery] = useState("");
@@ -33,6 +35,13 @@ export function FileSearch({
   const [result, setResult] = useState<SearchResult & { query: string }>();
   const [status, setStatus] = useState<{ kind: "cancelled" } | { kind: "error"; error: unknown }>();
   const [busy, setBusy] = useState(false);
+  const focusEmpty = useEffectEvent(() => {
+    if (!isMobile() && !query && !busy && !status && !result)
+      input.current?.focus({ preventScroll: true });
+  });
+  useEffect(() => {
+    if (visible) focusEmpty();
+  }, [visible]);
   const request = useRef<AbortController>(undefined);
   useEffect(() => () => request.current?.abort(), []);
   function cancel() {
@@ -119,6 +128,7 @@ export function FileSearch({
         </div>
         <div className="flex gap-2">
           <Input
+            ref={input}
             aria-label={t(($) => $.files.searchQuery)}
             autoCapitalize="none"
             value={query}

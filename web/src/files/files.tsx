@@ -313,7 +313,7 @@ export function Files({
         deviceId={device.id}
         workspaceId={workspace.id}
         workspaceName={workspace.name}
-        visible={searching}
+        visible={visible && searching}
         disabled={!enabled}
         onBack={() => updateQuery({ search: undefined })}
         onOpen={(match, query) => {
