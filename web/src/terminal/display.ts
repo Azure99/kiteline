@@ -179,6 +179,7 @@ export class TerminalDisplay {
         );
         const styles = getComputedStyle(document.documentElement);
         const openLink = (_event: MouseEvent, uri: string) => {
+          if (terminal.hasSelection()) return;
           if (/^https?:\/\//i.test(uri))
             window.open(
               deviceServiceLink(uri, this.deviceId)?.url ?? uri,
