@@ -338,6 +338,9 @@ export function TerminalView({
           <div className="absolute bottom-3 right-4 rounded bg-[#39414c] shadow">
             <IconButton
               label={t(($) => $.terminal.bottom)}
+              onPointerDown={(event) => {
+                if (event.pointerType === "mouse") event.preventDefault();
+              }}
               onClick={() => display.current?.scrollToBottom()}
             >
               <ArrowDown />
