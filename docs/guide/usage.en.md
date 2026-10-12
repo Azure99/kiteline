@@ -240,6 +240,8 @@ History file line counts and diffs compare against the same parent commit. For m
 
 ### Synchronization and authentication
 
+On mobile, use the "Remote actions" menu for Pull and Push.
+
 Pull runs `git pull`, using the default commit message for merges. Pull configured for interactive rebase fails. Push runs `git push`; force push is not available.
 
 Authentication cannot be interactive: Git does not prompt for a username or password. SSH keys, ssh-agent or credential helpers must work without input in the agent's environment. If authentication fails, click "Terminal" in the feedback and run the same Git command in that workspace's terminal to finish configuration, such as saving credentials in a helper, then return and retry. For service agents, see [Run in the background](devices.en.md#run-in-the-background).

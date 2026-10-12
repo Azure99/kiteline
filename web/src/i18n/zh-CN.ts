@@ -636,6 +636,7 @@ export const zhCN = {
     abort: "中止",
     useTerminal: "在终端处理",
     fetchConfigured: "Fetch · 按设备 Git 配置",
+    remoteActions: "远端操作",
     refreshRemotes: "刷新远端配置",
     pushConfigured: "Push · 按设备 Git 配置",
     pushConfiguredRemote: "Push · 按设备 Git 配置 · {{remote}}",

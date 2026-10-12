@@ -288,29 +288,60 @@ function RepoView({
         : [...old, item],
     );
   };
+  const branchLabel =
+    value?.branch ?? (value?.head.oid ? value.head.oid.slice(0, 8) : t(($) => $.common.git));
+  const counts = (
+    <>
+      {!!value?.ahead && (
+        <span className={mobile ? "shrink-0 text-xs" : "text-xs"}>
+          ↑{value.ahead.toLocaleString(i18n.resolvedLanguage)}
+        </span>
+      )}
+      {!!value?.behind && (
+        <span className={mobile ? "shrink-0 text-xs" : "text-xs"}>
+          ↓{value.behind.toLocaleString(i18n.resolvedLanguage)}
+        </span>
+      )}
+    </>
+  );
   return (
     <>
       <ToolHeader visible={visible} order={1}>
         <div className="flex min-h-11 shrink-0 items-center gap-2 border-b border-border px-3">
           {picker}
           <button
-            className="flex min-h-10 min-w-0 flex-1 items-center gap-2 text-xs max-desk:min-h-11"
-            title={value?.head.oid ?? undefined}
+            className={`flex min-h-10 min-w-0 flex-1 text-xs max-desk:min-h-11 ${mobile ? "flex-col items-start justify-center" : "items-center gap-2"}`}
+            title={
+              mobile
+                ? [value?.branch, value?.upstream, value?.head.oid].filter(Boolean).join(" · ")
+                : (value?.head.oid ?? undefined)
+            }
             onClick={() => selectView("branches")}
           >
-            <GitBranch size={15} className="shrink-0" />
-            <span className="truncate">
-              {value?.branch ??
-                (value?.head.oid ? value.head.oid.slice(0, 8) : t(($) => $.common.git))}
-              {value?.upstream ? ` · ${value.upstream}` : ""}
-            </span>
+            {mobile ? (
+              <>
+                <span className="flex w-full min-w-0 items-center gap-2 leading-4">
+                  <GitBranch size={15} className="shrink-0" />
+                  <span className="min-w-0 truncate">{branchLabel}</span>
+                </span>
+                {(value?.upstream || value?.ahead || value?.behind) && (
+                  <span className="flex w-full min-w-0 items-center gap-2 leading-4">
+                    {value?.upstream && <span className="min-w-0 truncate">{value.upstream}</span>}
+                    {counts}
+                  </span>
+                )}
+              </>
+            ) : (
+              <>
+                <GitBranch size={15} className="shrink-0" />
+                <span className="truncate">
+                  {branchLabel}
+                  {value?.upstream ? ` · ${value.upstream}` : ""}
+                </span>
+              </>
+            )}
           </button>
-          {!!value?.ahead && (
-            <span className="text-xs">↑{value.ahead.toLocaleString(i18n.resolvedLanguage)}</span>
-          )}
-          {!!value?.behind && (
-            <span className="text-xs">↓{value.behind.toLocaleString(i18n.resolvedLanguage)}</span>
-          )}
+          {!mobile && counts}
           <RemoteActions
             target={actionTarget}
             actions={actions}

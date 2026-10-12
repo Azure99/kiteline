@@ -1,13 +1,14 @@
 import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, RefreshCw } from "lucide-react";
+import { ArrowDown, ArrowUp, MoreHorizontal, RefreshCw } from "lucide-react";
 import type { GitRemotes, HeadIdentity } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
 import { IconButton } from "../components/icon-button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
 import { rpc } from "../lib/api";
 import { useWorkspaceRefresh } from "../lib/use-workspace-refresh";
+import { useMobile } from "../lib/use-mobile";
 import { type GitActions, type GitTarget, useGitActivity } from "./actions";
 
 export function RemoteActions({
@@ -22,6 +23,7 @@ export function RemoteActions({
   head?: HeadIdentity;
 }) {
   const { t } = useTranslation();
+  const mobile = useMobile();
 
   const [value, setValue] = useState<GitRemotes>();
   const [error, setError] = useState<unknown>();
@@ -45,6 +47,21 @@ export function RemoteActions({
   useEffect(() => () => request.current?.abort(), [active, load]);
   useWorkspaceRefresh(deviceId, workspaceId, active, "git", load);
   const disabled = !active || !!activity.request;
+  const pullLabel = value?.upstream
+    ? t(($) => $.git.pullTarget, { target: value.upstream })
+    : t(($) => $.git.pullConfigured);
+  const pushLabel = value?.pushTarget
+    ? t(($) => $.git.pushTarget, { target: value.pushTarget })
+    : value?.defaultPushRemote
+      ? t(($) => $.git.pushConfiguredRemote, { remote: value.defaultPushRemote })
+      : t(($) => $.git.pushConfigured);
+  const pull = () => {
+    if (head) void actions.run(target, "git.pull", { expectedHead: head });
+  };
+  const push = () => {
+    if (head) void actions.run(target, "git.push", { expectedHead: head });
+  };
+  const menuLabel = mobile ? t(($) => $.git.remoteActions) : "Fetch";
   return (
     <div className="flex shrink-0 items-center">
       <Menu>
@@ -53,19 +70,31 @@ export function RemoteActions({
             <Button
               variant="ghost"
               size="icon"
-              aria-label="Fetch"
-              title="Fetch"
+              aria-label={menuLabel}
+              title={menuLabel}
               disabled={disabled}
             />
           }
         >
-          <RefreshCw />
+          {mobile ? <MoreHorizontal /> : <RefreshCw />}
         </MenuTrigger>
         <MenuContent>
           {!!error && (
             <div role="alert" className="max-w-64 p-2 text-xs text-destructive">
               <ErrorNotice error={error} />
             </div>
+          )}
+          {mobile && (
+            <>
+              <MenuItem disabled={disabled || !head} onClick={pull}>
+                <ArrowDown />
+                {pullLabel}
+              </MenuItem>
+              <MenuItem disabled={disabled || !head} onClick={push}>
+                <ArrowUp />
+                {pushLabel}
+              </MenuItem>
+            </>
           )}
           <MenuItem onClick={() => void actions.run(target, "git.fetch", {})}>
             {t(($) => $.git.fetchConfigured)}
@@ -85,34 +114,16 @@ export function RemoteActions({
           </MenuItem>
         </MenuContent>
       </Menu>
-      <IconButton
-        label={
-          value?.upstream
-            ? t(($) => $.git.pullTarget, { target: value.upstream })
-            : t(($) => $.git.pullConfigured)
-        }
-        disabled={disabled || !head}
-        onClick={() => {
-          if (head) void actions.run(target, "git.pull", { expectedHead: head });
-        }}
-      >
-        <ArrowDown />
-      </IconButton>
-      <IconButton
-        label={
-          value?.pushTarget
-            ? t(($) => $.git.pushTarget, { target: value.pushTarget })
-            : value?.defaultPushRemote
-              ? t(($) => $.git.pushConfiguredRemote, { remote: value.defaultPushRemote })
-              : t(($) => $.git.pushConfigured)
-        }
-        disabled={disabled || !head}
-        onClick={() => {
-          if (head) void actions.run(target, "git.push", { expectedHead: head });
-        }}
-      >
-        <ArrowUp />
-      </IconButton>
+      {!mobile && (
+        <>
+          <IconButton label={pullLabel} disabled={disabled || !head} onClick={pull}>
+            <ArrowDown />
+          </IconButton>
+          <IconButton label={pushLabel} disabled={disabled || !head} onClick={push}>
+            <ArrowUp />
+          </IconButton>
+        </>
+      )}
     </div>
   );
 }

@@ -647,6 +647,7 @@ export const en = {
     abort: "Abort",
     useTerminal: "Continue in Terminal",
     fetchConfigured: "Fetch using device Git configuration",
+    remoteActions: "Remote actions",
     refreshRemotes: "Refresh remote configuration",
     pushConfigured: "Push using device Git configuration",
     pushConfiguredRemote: "Push using device Git configuration · {{remote}}",
