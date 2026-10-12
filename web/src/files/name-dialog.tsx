@@ -14,9 +14,7 @@ import {
 } from "../components/ui/dialog";
 import { childPath } from "./paths";
 
-export type NameAction =
-  | { kind: "file" | "directory"; parent: string }
-  | { kind: "rename"; entry: Entry };
+export type NameAction = { kind: "directory"; parent: string } | { kind: "rename"; entry: Entry };
 export function FileNameDialog({
   deviceId,
   workspaceId,
@@ -32,7 +30,7 @@ export function FileNameDialog({
   blocked: boolean;
   rename: (path: string, name: string) => Promise<{ from: string; to: string }>;
   onClose: () => void;
-  onDone: (result: { from?: string; to: string; entry?: Entry }) => void;
+  onDone: (result: { from?: string; to: string }) => void;
 }) {
   const { t } = useTranslation();
 
@@ -49,11 +47,7 @@ export function FileNameDialog({
     };
   }, []);
   const title =
-    action.kind === "rename"
-      ? t(($) => $.common.rename)
-      : action.kind === "file"
-        ? t(($) => $.files.newFile)
-        : t(($) => $.files.newDirectory);
+    action.kind === "rename" ? t(($) => $.common.rename) : t(($) => $.files.newDirectory);
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (blocked) return;
@@ -73,7 +67,7 @@ export function FileNameDialog({
               workspaceId,
               path: childPath(action.parent, name),
               kind: action.kind,
-            }).then((entry) => ({ to: entry.path!, entry }));
+            }).then((entry) => ({ to: entry.path! }));
       if (alive.current) onDone(result);
     } catch (error) {
       setError(error);

@@ -47,6 +47,18 @@ async function opened() {
   await vi.waitFor(() => expect(draft.state).toBeDefined());
   return { store, draft };
 }
+function untitled() {
+  const store = new DraftStore();
+  store.limits([{ id: "device", editorBytes: 1024 } as Device]);
+  const draft = store.open({
+    ...target,
+    path: "",
+    folder: "dir",
+    deviceName: "Device",
+    workspaceName: "Workspace",
+  });
+  return { store, draft };
+}
 function browserAt(path: string) {
   const browser = Object.assign(new EventTarget(), {
     location: new URL(path, "https://kiteline.test"),
@@ -79,6 +91,73 @@ test("preloaded open adopts once and never replaces an existing editor or its un
   expect(draft.state).toBe(edited);
   expect(draft.revision).toBe("first");
   expect(transport.read).not.toHaveBeenCalled();
+});
+
+test("new drafts are distinct, have no disk source, and closing from a directory stays there", async () => {
+  const { store, draft } = untitled();
+  const second = store.open({
+    ...target,
+    path: "",
+    deviceName: "Device",
+    workspaceName: "Workspace",
+  });
+  expect(second.id).not.toBe(draft.id);
+  expect(draft.state!.doc.toString()).toBe("");
+  expect(isDirty(draft)).toBe(false);
+  expect(store.find({ ...target, path: "" })).toBeUndefined();
+  expect(store.find({ ...target, path: "" }, second.id)).toBe(second);
+  await store.observe(draft, new AbortController().signal);
+  expect(transport.read).not.toHaveBeenCalled();
+  const browser = browserAt("/devices/device/workspaces/workspace/files?folder=dir");
+  closeDraft(store, draft);
+  expect(browser.location.search).toBe("?folder=dir");
+  expect(store.snapshot()).toEqual([second]);
+});
+
+test("first save keeps a conflicting draft, then adopts its new path without losing later edits", async () => {
+  const { store, draft } = untitled();
+  store.update(draft, draft.state!.update({ changes: { from: 0, insert: "sent" } }).state);
+  const id = draft.id;
+  const conflict = new ApiError("conflict", "The path already exists");
+  transport.write.mockRejectedValueOnce(conflict);
+  expect(await store.save(draft, "dir/taken.txt", null)).toBe(false);
+  expect(draft.path).toBe("");
+  expect(draft.error).toBe(conflict);
+  expect(isDirty(draft)).toBe(true);
+  const pending = deferred<{ path: string; size: number; revision: string }>();
+  transport.write.mockReturnValueOnce(pending.promise);
+  const saving = store.save(draft, "dir/new.ts", null);
+  const [, bytes, revision] = transport.write.mock.calls[1]!;
+  expect(new TextDecoder().decode(bytes)).toBe("sent");
+  expect(revision).toBeUndefined();
+  const edited = draft.state!.update({ changes: { from: 4, insert: " later" } }).state;
+  store.update(draft, edited);
+  pending.resolve({ path: "dir/new.ts", size: 4, revision: "first" });
+  expect(await saving).toBe(true);
+  expect(draft.id).toBe(id);
+  expect(draft.path).toBe("dir/new.ts");
+  expect(draft.state).toBe(edited);
+  expect(draft.baseText).toBe("sent");
+  expect(isDirty(draft)).toBe(true);
+});
+
+test("an unknown first save checks its submitted path and keeps subsequent edits", async () => {
+  const { store, draft } = untitled();
+  store.update(draft, draft.state!.update({ changes: { from: 0, insert: "sent" } }).state);
+  transport.write.mockRejectedValueOnce(new ApiError("io_error", "lost response", "unknown"));
+  expect(await store.save(draft, "dir/new.txt", null)).toBe(false);
+  expect(draft.path).toBe("");
+  expect(draft.unknownSave?.target.path).toBe("dir/new.txt");
+  const edited = draft.state!.update({ changes: { from: 4, insert: " later" } }).state;
+  store.update(draft, edited);
+  transport.read.mockResolvedValueOnce(disk("sent", "first", "dir/new.txt"));
+  await store.check(draft);
+  expect(transport.read.mock.calls[0]![0]).toEqual({ ...target, path: "dir/new.txt" });
+  expect(draft.path).toBe("dir/new.txt");
+  expect(draft.unknownSave).toBeUndefined();
+  expect(draft.state).toBe(edited);
+  expect(draft.baseText).toBe("sent");
+  expect(isDirty(draft)).toBe(true);
 });
 
 test("closing a duplicate-path draft does not clear the file-only target of another draft", async () => {

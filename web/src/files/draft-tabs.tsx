@@ -4,6 +4,7 @@ import { Circle, X } from "lucide-react";
 import { IconButton } from "../components/icon-button";
 import { isDirty, type Draft, type DraftStore } from "./drafts";
 import { requestCloseDraft, showDraft } from "./navigation";
+import { draftLabel } from "./draft-label";
 
 export function DraftTabs({
   store,
@@ -49,17 +50,17 @@ export function DraftTabs({
         >
           <button
             aria-current={item === draft ? "true" : undefined}
-            title={item.path}
+            title={draftLabel(item)}
             onClick={() => showDraft(item)}
             className="flex min-h-9 min-w-0 items-center gap-2 px-3 text-xs"
           >
-            <span className="truncate">{item.path.split("/").at(-1)}</span>
+            <span className="truncate">{draftLabel(item).split("/").at(-1)}</span>
             {isDirty(item) && (
               <Circle size={7} fill="currentColor" aria-label={t(($) => $.files.unsaved)} />
             )}
           </button>
           <IconButton
-            label={t(($) => $.common.closeNamed, { name: item.path })}
+            label={t(($) => $.common.closeNamed, { name: draftLabel(item) })}
             onClick={() => requestCloseDraft(store, item)}
           >
             <X size={13} />

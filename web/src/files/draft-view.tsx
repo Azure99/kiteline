@@ -1,6 +1,6 @@
 import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import {
   Code,
   Copy,
@@ -35,6 +35,8 @@ import {
   type DraftStore,
 } from "./drafts";
 import { DraftTabs } from "./draft-tabs";
+import { draftLabel } from "./draft-label";
+import { SaveDraftDialog } from "./save-draft-dialog";
 import { TextEditor } from "./text-editor";
 import { formatBytes } from "./format";
 import { downloadFile, type DiskText } from "./content";
@@ -63,6 +65,7 @@ export function DraftView({
   // Editing updates this draft without notifying the entire open-files list.
   useDraftVersion(store, draft);
   const busy = draft.operation?.kind;
+  const canCheckDisk = !!(draft.path || draft.unknownSave);
   const markdown = /\.(md|markdown)$/i.test(draft.path);
   const [preview, setPreview] = useState(false);
   const previewElement = useRef<HTMLElement>(null);
@@ -104,24 +107,16 @@ export function DraftView({
   }, [preview, draft.location, rememberPreviewPosition]);
   const [disk, setDisk] = useState<DiskText>();
   const [saveAs, setSaveAs] = useState(false);
-  const [path, setPath] = useState(draft.path);
   const [error, setError] = useState<unknown>();
   const { copied, error: copyError, copy } = useCopyFeedback();
-  const generation = useRef(0);
-  useEffect(
-    () => () => {
-      generation.current++;
-    },
-    [],
-  );
-  function closeSaveAs() {
-    generation.current++;
-    setSaveAs(false);
-  }
   const tabs = all.filter(
     (item) => item.deviceId === draft.deviceId && item.workspaceId === draft.workspaceId,
   );
   async function save(revision?: string, target = draft.path) {
+    if (!target) {
+      setSaveAs(true);
+      return;
+    }
     if (await store.save(draft, target, revision ?? draft.revision)) setDisk(undefined);
   }
   async function check() {
@@ -137,9 +132,9 @@ export function DraftView({
       <div className="flex min-h-10 shrink-0 items-center gap-1 border-b border-border px-3 max-sm:flex-wrap">
         <span
           className="min-w-0 flex-1 truncate text-xs max-sm:basis-full max-sm:pt-1"
-          title={`${draft.deviceName} / ${draft.workspaceName}\n${draft.resolvedPath ?? draft.path}`}
+          title={`${draft.deviceName} / ${draft.workspaceName}\n${draft.resolvedPath ?? draftLabel(draft)}`}
         >
-          {draft.path}
+          {draftLabel(draft)}
         </span>
         {markdown && (
           <IconButton
@@ -151,7 +146,7 @@ export function DraftView({
         )}
         <IconButton
           label={t(($) => $.files.downloadFile)}
-          disabled={!!unavailable}
+          disabled={!!unavailable || !draft.path}
           onClick={() => downloadFile(draft)}
         >
           <Download />
@@ -166,7 +161,7 @@ export function DraftView({
         </IconButton>
         <IconButton
           label={t(($) => $.files.checkDisk)}
-          disabled={!!busy || !!unavailable}
+          disabled={!!busy || !!unavailable || !canCheckDisk}
           onClick={() => void check()}
         >
           <RefreshCw />
@@ -174,11 +169,7 @@ export function DraftView({
         <IconButton
           label={t(($) => $.files.saveAs)}
           disabled={!draft.state || !!busy || !!unavailable}
-          onClick={() => {
-            setPath(draft.path);
-            setError(undefined);
-            setSaveAs(true);
-          }}
+          onClick={() => setSaveAs(true)}
         >
           <FileOutput />
         </IconButton>
@@ -241,6 +232,7 @@ export function DraftView({
             </div>
           )}
           {!!(
+            canCheckDisk &&
             draft.error instanceof ApiError &&
             (draft.error.code === "conflict" || draft.error.outcome === "unknown")
           ) && (
@@ -295,7 +287,7 @@ export function DraftView({
                 ? t(($) => $.files.checking)
                 : isDirty(draft)
                   ? t(($) => $.files.unsaved)
-                  : draft.state
+                  : draft.state && draft.path
                     ? t(($) => $.common.saved)
                     : ""}
           </span>
@@ -363,59 +355,14 @@ export function DraftView({
           </DialogContent>
         )}
       </Dialog>
-      <Dialog
-        open={saveAs}
-        onOpenChange={(open) => {
-          if (!open) closeSaveAs();
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t(($) => $.files.saveAs)}</DialogTitle>
-          </DialogHeader>
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              setError(undefined);
-              const submitted = ++generation.current;
-              void store.save(draft, path, null).then((saved) => {
-                if (submitted !== generation.current || !store.has(draft)) return;
-                if (saved) {
-                  closeSaveAs();
-                } else
-                  setError(
-                    draft.error ??
-                      draft.observationError ??
-                      new Error("The file could not be saved"),
-                  );
-              });
-            }}
-            className="flex min-h-0 flex-col"
-          >
-            <div className="space-y-3 overflow-auto p-4">
-              <Textarea
-                aria-label={t(($) => $.files.savePath)}
-                rows={2}
-                value={path}
-                onChange={(event) => setPath(event.target.value)}
-              />
-              {!!error && (
-                <div role="alert" className="text-sm text-destructive">
-                  <ErrorNotice error={error} />
-                </div>
-              )}
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={closeSaveAs}>
-                {t(($) => $.common.cancel)}
-              </Button>
-              <Button type="submit" disabled={!store.canSave(draft)}>
-                {t(($) => $.files.saveCopy)}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      {saveAs && (
+        <SaveDraftDialog
+          store={store}
+          draft={draft}
+          onClose={() => setSaveAs(false)}
+          onSaved={() => setSaveAs(false)}
+        />
+      )}
     </>
   );
 }

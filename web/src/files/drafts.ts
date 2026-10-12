@@ -29,6 +29,7 @@ interface SaveSnapshot {
 // Draft and disk ownership: docs/design/files.md.
 export interface Draft extends FileTarget {
   id: string;
+  untitled?: { folder: string; number: number };
   deviceName: string;
   workspaceName: string;
   state?: EditorState;
@@ -153,7 +154,7 @@ export class DraftStore {
       isWithin(target.path, path);
     const drafts: CapturedDraft[] = [];
     for (const draft of this.items) {
-      if (matches(draft))
+      if (draft.path && matches(draft))
         drafts.push({ draft, source: { path: draft.path, version: draft.sourceVersion } });
     }
     return { drafts };
@@ -217,10 +218,20 @@ export class DraftStore {
       (item) =>
         item.deviceId === target.deviceId &&
         item.workspaceId === target.workspaceId &&
-        (id ? item.id === id : item.path === target.path),
+        (id ? item.id === id : !!target.path && item.path === target.path),
     );
   }
-  open(target: FileTarget & { deviceName: string; workspaceName: string }, disk?: DiskText) {
+  open(
+    {
+      folder = ".",
+      ...target
+    }: FileTarget & {
+      deviceName: string;
+      workspaceName: string;
+      folder?: string;
+    },
+    disk?: DiskText,
+  ) {
     const existing = this.find(target);
     if (existing) return existing;
     const draft: Draft = {
@@ -243,6 +254,13 @@ export class DraftStore {
         draft.error = error;
         this.changed();
       }
+    } else if (!target.path) {
+      draft.untitled = {
+        folder,
+        number: Math.max(0, ...this.items.map((item) => item.untitled?.number ?? 0)) + 1,
+      };
+      draft.state = textState("", draft.language, draft.phrases);
+      this.changed();
     } else void this.load(draft);
     return draft;
   }
@@ -399,7 +417,7 @@ export class DraftStore {
     }
   }
   async observe(draft: Draft, signal: AbortSignal) {
-    if (draft.operation || !draft.state || !this.has(draft)) return;
+    if (!draft.path || draft.operation || !draft.state || !this.has(draft)) return;
     const activity = draft.diskActivity,
       path = draft.path;
     try {

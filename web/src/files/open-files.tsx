@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { ErrorNotice } from "../components/error-notice";
 import { Circle, Copy, X } from "lucide-react";
 import { Button } from "../components/ui/button";
@@ -11,7 +11,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../components/ui/dialog";
-import { draftError, isDirty, useDrafts, type DraftStore } from "./drafts";
+import { draftError, isDirty, useDrafts, type Draft, type DraftStore } from "./drafts";
+import { draftLabel } from "./draft-label";
+import { SaveDraftDialog } from "./save-draft-dialog";
 import { closeDraft, requestCloseDraft, showDraft, syncDraftPath } from "./navigation";
 import { useRoute } from "../lib/navigation";
 import { useCopyFeedback } from "../lib/use-copy-feedback";
@@ -26,6 +28,7 @@ export function OpenFiles({
   onOpenChange(open: boolean): void;
 }) {
   const { t } = useTranslation();
+  const [naming, setNaming] = useState<Draft>();
   const { copied, error: copyError, copy, reset } = useCopyFeedback();
   useEffect(() => {
     if (!open) reset();
@@ -69,11 +72,11 @@ export function OpenFiles({
                 >
                   <span
                     className="min-w-0 flex-1 text-left"
-                    title={`${draft.deviceName} / ${draft.workspaceName} / ${draft.path}`}
+                    title={`${draft.deviceName} / ${draft.workspaceName} / ${draftLabel(draft)}`}
                   >
                     <span className="flex min-w-0 items-baseline gap-2">
                       <span className="min-w-0 flex-1 truncate">
-                        {draft.path.slice(draft.path.lastIndexOf("/") + 1)}
+                        {draftLabel(draft).split("/").at(-1)}
                       </span>
                       {draft.path.includes("/") && (
                         <span className="max-w-1/2 truncate text-xs text-muted-foreground">
@@ -98,7 +101,7 @@ export function OpenFiles({
                   <Copy size={13} />
                 </IconButton>
                 <IconButton
-                  label={t(($) => $.common.closeNamed, { name: draft.path })}
+                  label={t(($) => $.common.closeNamed, { name: draftLabel(draft) })}
                   onClick={() => requestCloseDraft(store, draft)}
                 >
                   <X />
@@ -120,7 +123,7 @@ export function OpenFiles({
               <DialogTitle>{t(($) => $.files.saveChanges)}</DialogTitle>
             </DialogHeader>
             <div className="space-y-3 overflow-auto p-4 text-sm">
-              <p className="break-all">{closing.path}</p>
+              <p className="break-all">{draftLabel(closing)}</p>
               {draftError(closing) && (
                 <div role="alert" className="text-destructive">
                   <ErrorNotice error={closing.error ?? closing.observationError} />
@@ -137,6 +140,10 @@ export function OpenFiles({
               <Button
                 disabled={!store.canSave(closing)}
                 onClick={() => {
+                  if (!closing.path) {
+                    setNaming(closing);
+                    return;
+                  }
                   void store.save(closing).then((saved) => {
                     if (saved && store.closing === closing.id && !isDirty(closing))
                       closeDraft(store, closing);
@@ -149,6 +156,17 @@ export function OpenFiles({
           </DialogContent>
         )}
       </Dialog>
+      {naming && (
+        <SaveDraftDialog
+          store={store}
+          draft={naming}
+          onClose={() => setNaming(undefined)}
+          onSaved={() => {
+            setNaming(undefined);
+            if (store.closing === naming.id && !isDirty(naming)) closeDraft(store, naming);
+          }}
+        />
+      )}
     </>
   );
 }

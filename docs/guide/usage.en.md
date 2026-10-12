@@ -145,10 +145,11 @@ Raw HTML appears as text. External images in ordinary Markdown appear as links t
 
 ### Drafts
 
-Unsaved edits, or drafts, exist only in the current page:
+Drafts are kept only in the current page's memory:
 
 - They survive switching files, tools, workspaces and devices. "Open files" lets you find open drafts across all devices.
-- Reloading or closing the page triggers a browser prompt. Confirming that you want to leave loses the drafts.
+- Closing a file tab with unsaved content offers Cancel, Discard changes, or Save and close. Empty unnamed drafts close directly.
+- With unsaved changes, reloading, navigating away, or closing the browser page uses the browser's native prompt, which requires prior page interaction and uses text chosen by the browser. Confirming that you want to leave loses the drafts. On mobile, the prompt may be skipped when you close the app or the system discards the page.
 - If a device goes offline or a device/workspace is deleted, content remains viewable and copyable, but cannot be saved to its original location.
 
 ### Save conflicts
@@ -173,7 +174,7 @@ On phones, the back button, search mode, and query field scroll with the results
 
 ### Create and rename
 
-Creation and renaming fail if the name exists; nothing is overwritten. Open tabs follow renamed or moved paths. The workspace root and files currently being saved cannot be renamed, moved or deleted.
+"New file" opens an unnamed draft. Enter its path on first save, starting in the directory where you created the draft. The device and Git cannot see the file until it is saved. First saves, directory creation, and renaming fail if the name exists; nothing is overwritten. Open tabs follow renamed or moved paths. The workspace root and files currently being saved cannot be renamed, moved or deleted.
 
 ### Upload and download
 

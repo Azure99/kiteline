@@ -25,7 +25,6 @@ import { Button } from "../components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
 import { useMobile } from "../lib/use-mobile";
 import {
-  currentPath,
   currentRoute,
   isWorkspaceRoute,
   updateWorkspaceQuery,
@@ -76,7 +75,7 @@ export function Files({
   const [selected, setSelected] = useState(new Set<string>());
   const [selecting, setSelecting] = useState(false);
   const [listOpen, setListOpen] = useState(true);
-  const [action, setAction] = useState<NameAction & { origin: string }>();
+  const [action, setAction] = useState<NameAction>();
   const [details, setDetails] = useState<Entry>();
   const [directoryDrop, setDirectoryDrop] = useState(false);
   const [notice, setNotice] = useState<
@@ -115,6 +114,7 @@ export function Files({
   );
   const draft =
     drafts.find((item) => item.id === queryDraft) ?? drafts.find((item) => item.path === queryFile);
+  const hasFile = !!queryFile || !!draft;
   useWorkspaceRefresh(device.id, workspace.id, visible && enabled, "files", async (signal) => {
     await refresh(signal, true);
     if (draft && !signal.aborted) await store.observe(draft, signal);
@@ -204,9 +204,6 @@ export function Files({
   const target = { deviceId: device.id, workspaceId: workspace.id };
   function updateQuery(query: WorkspaceQuery, replace = false) {
     updateWorkspaceQuery(target, query, replace);
-  }
-  function beginAction(action: NameAction) {
-    setAction({ ...action, origin: currentPath() });
   }
   function setFilePath(path?: string) {
     updateQuery({ file: path, draft: undefined });
@@ -358,7 +355,7 @@ export function Files({
               : "flex min-h-10 shrink-0 items-center gap-1 border-b border-border px-2"
           }
         >
-          {mobile && queryFile ? (
+          {mobile && hasFile ? (
             <IconButton label={t(($) => $.files.backDirectory)} onClick={() => setFilePath()}>
               <ArrowLeft />
             </IconButton>
@@ -395,7 +392,17 @@ export function Files({
           <IconButton
             label={t(($) => $.files.newFile)}
             disabled={!enabled}
-            onClick={() => beginAction({ kind: "file", parent: folder })}
+            onClick={() =>
+              showDraft(
+                store.open({
+                  ...target,
+                  path: "",
+                  folder,
+                  deviceName: device.name,
+                  workspaceName: workspace.name,
+                }),
+              )
+            }
           >
             <FilePlus2 />
           </IconButton>
@@ -426,7 +433,7 @@ export function Files({
               </MenuItem>
               <MenuItem
                 disabled={!enabled}
-                onClick={() => beginAction({ kind: "directory", parent: folder })}
+                onClick={() => setAction({ kind: "directory", parent: folder })}
               >
                 <FolderPlus />
                 {t(($) => $.files.newDirectory)}
@@ -518,19 +525,17 @@ export function Files({
           </div>
         )}
       </ToolHeader>
-      {!searching && !queryFile && !draft && drafts.length > 0 && (
-        <DraftTabs store={store} tabs={drafts} />
-      )}
+      {!searching && !hasFile && drafts.length > 0 && <DraftTabs store={store} tabs={drafts} />}
       <div className={searching ? "hidden" : "flex min-h-0 flex-1"}>
         {(mobile || listOpen) && (
-          <ToolSidebar visible={visible && (!mobile || (!searching && !queryFile))}>
+          <ToolSidebar visible={visible && (!mobile || (!searching && !hasFile))}>
             <aside
               ref={list}
               key={mobile ? folder : undefined}
               className="scroll-area w-full overflow-auto border-border bg-muted/25 desk:w-72 desk:shrink-0 desk:border-r"
               aria-label={t(($) => $.files.list)}
             >
-              {(!mobile || !queryFile) && (
+              {(!mobile || !hasFile) && (
                 <FileExplorer
                   path={mobile || reveal ? folder : "."}
                   {...{ pages, expanded, selected, mobile, selecting }}
@@ -547,7 +552,7 @@ export function Files({
                       return next;
                     })
                   }
-                  onRename={(entry) => beginAction({ kind: "rename", entry })}
+                  onRename={(entry) => setAction({ kind: "rename", entry })}
                   onAction={(kind, entry) => onOperation({ kind, entries: [entry] }, folder)}
                   onDownload={(entry) => download(entry.path!)}
                   onMore={(path) => void load(path, true)}
@@ -557,7 +562,7 @@ export function Files({
             </aside>
           </ToolSidebar>
         )}
-        {(!mobile || queryFile) && (
+        {(!mobile || hasFile) && (
           <section
             className="flex min-w-0 flex-1 flex-col"
             aria-label={t(($) => $.files.fileContent)}
@@ -610,8 +615,6 @@ export function Files({
             if (result.from) {
               moveViewPaths([{ from: result.from, to: result.to }]);
             }
-            if (result.entry?.kind === "file" && currentPath() === action.origin)
-              open(result.entry);
             void load(parentPath(result.to));
             setSelected(new Set());
           }}
