@@ -41,16 +41,20 @@ export function syncDraftPath(draft: Draft) {
   )
     updateWorkspaceQuery(draft, { file: draft.path, folder: parentPath(draft.path) }, true);
 }
-function clearDraftTarget(store: DraftStore, draft: Draft) {
+export function closeDraft(store: DraftStore, draft: Draft) {
   const route = currentRoute();
   if (
     isWorkspaceRoute(route, draft) &&
     store.find({ ...draft, path: route.query.file ?? "" }, route.query.draft) === draft
-  )
-    updateWorkspaceQuery(draft, { file: undefined, draft: undefined }, true);
-}
-export function closeDraft(store: DraftStore, draft: Draft) {
-  clearDraftTarget(store, draft);
+  ) {
+    const tabs = store
+      .snapshot()
+      .filter((item) => item.deviceId === draft.deviceId && item.workspaceId === draft.workspaceId);
+    const index = tabs.indexOf(draft);
+    const next = tabs[index + 1] ?? tabs[index - 1];
+    if (next && route.tool === "files" && !route.query.search) showDraft(next, true);
+    else updateWorkspaceQuery(draft, { file: next?.path, draft: next?.id }, true);
+  }
   store.close(draft);
 }
 export function requestCloseDraft(store: DraftStore, draft: Draft) {
