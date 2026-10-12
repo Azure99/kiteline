@@ -83,8 +83,24 @@ export function Files({
     { kind: "downloadStarted"; path: string } | { kind: "renamed" | "created" }
   >();
   const fileInput = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLElement>(null);
+  const previousFolder = useRef(folder);
   const enabled = device.status === "online";
   const { pages, load, forget } = useFileBrowser(device.id, workspace.id, visible && enabled);
+  useEffect(() => {
+    const previous = previousFolder.current;
+    if (previous === folder) return;
+    const returning = mobile && parentPath(previous) === folder;
+    const page = pages[folder];
+    if (returning && (!page || page.busy)) return;
+    previousFolder.current = folder;
+    if (!returning) return;
+    // The parent URL cannot identify the child just left; use its existing full path once.
+    const row = Array.from(
+      list.current?.querySelectorAll<HTMLElement>("[data-entry-path]") ?? [],
+    ).find((element) => element.dataset.entryPath === previous);
+    row?.scrollIntoView({ block: "center" });
+  }, [folder, mobile, pages]);
   const queryFile = route.query.file;
   const queryDraft = route.query.draft;
   const [location, setLocation] = useState<{ path: string; position: Draft["location"] }>();
@@ -503,6 +519,7 @@ export function Files({
         {(mobile || listOpen) && (
           <ToolSidebar visible={visible && (!mobile || (!searching && !queryFile))}>
             <aside
+              ref={list}
               key={mobile ? folder : undefined}
               className="scroll-area w-full overflow-auto border-border bg-muted/25 desk:w-72 desk:shrink-0 desk:border-r"
               aria-label={t(($) => $.files.list)}

@@ -73,6 +73,7 @@ export function FileExplorer({
         return (
           <div key={entry.path ?? `invalid-${index}`}>
             <div
+              data-entry-path={entry.path}
               className={`flex min-h-8 items-center pr-1 max-desk:min-h-11 ${currentFile === entry.path ? "bg-primary-soft" : "hover:bg-muted"}`}
               style={{ paddingLeft: 8 + depth * 14 }}
             >
