@@ -101,6 +101,11 @@ export function Files({
     ).find((element) => element.dataset.entryPath === previous);
     row?.scrollIntoView({ block: "center" });
   }, [folder, mobile, pages]);
+  const initialRoot =
+    visible && enabled && !mobile && listOpen && !reveal && pages["."] === undefined;
+  useEffect(() => {
+    if (initialRoot) void load(".");
+  }, [initialRoot, load]);
   const queryFile = route.query.file;
   const queryDraft = route.query.draft;
   const [location, setLocation] = useState<{ path: string; position: Draft["location"] }>();
@@ -231,6 +236,7 @@ export function Files({
   async function refresh(signal?: AbortSignal, background = false) {
     for (const path of new Set(mobile ? [folder] : [folder, ...expanded])) {
       if (signal?.aborted) return;
+      if (path === "." && initialRoot) continue;
       await load(path, false, background);
     }
   }
