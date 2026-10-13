@@ -36,7 +36,7 @@ async function listen(server: Server, host = "127.0.0.1", port = 0) {
   return (server.address() as AddressInfo).port;
 }
 async function fixture(handler: RequestListener, channels = 128) {
-  Object.assign(serverLimits, { channelsPerDevice: channels, channelIdleTimeout: 100 });
+  Object.assign(serverLimits, { channelsPerDevice: channels });
   Object.assign(limits, { interactionTimeout: 1000 });
   const { dataDir: root, app: kiteline, store, config, port, close } = await serverFixture(true);
   const keyFile = join(root, "key.pem"),

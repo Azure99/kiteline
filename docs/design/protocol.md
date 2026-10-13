@@ -269,7 +269,7 @@ Web owner 在 `POST /api/credentials` 提交 `{name, deviceIds, expiresAt}`，�
 
 ### 流控与期限
 
-- **文件**：接收端处理完一帧才读取下一帧，未处理的帧最多 `filePendingFrames` 帧、`filePendingBytes`，超过时以 `limit_exceeded` 结束；HTTP 一侧的写入背压同样传到数据通道。传输开始后，在 `channelIdleTimeout` 内没有进展时以 `timeout` 结束。
+- **文件**：接收端处理完一帧才读取下一帧，未处理的帧最多 `filePendingFrames` 帧、`filePendingBytes`，超过时以 `limit_exceeded` 结束；HTTP 一侧的写入背压同样传到数据通道。传输开始后，在 `fileIdleTimeout` 内没有进展时以 `timeout` 结束。
 - **终端**：二进制输出与有序 JSON 共用累计信用，浏览器完成处理后用 `consumed` 推进；recorder 根据最慢显示将背压传到真实 PTY，消费恢复后自动继续。server 和 agent 每条 socket 的发送积压超过 `terminalPendingBytes` 时，仍以 `limit_exceeded` 关闭异常附着。计量和暂停规则见[附着与恢复](terminal.md#附着与恢复)。
 - **开发服务**：使用 WebSocket 流的背压，块大小为 `dataChunkBytes`，不设空闲期限，见[连接寿命](http-access.md#连接寿命)。
 
