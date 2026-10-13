@@ -1,4 +1,3 @@
-import { serverLimits } from "./limits.js";
 import { once } from "node:events";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { WebSocket } from "ws";
@@ -42,7 +41,7 @@ export class FileTransfer {
     const { socket, response, fail, release } = options;
     this.timer = setTimeout(
       () => fail(new AppError("timeout", "File transfer timed out with no progress")),
-      serverLimits.channelIdleTimeout,
+      limits.fileIdleTimeout,
     );
     this.frames = consumeFileFrames(
       socket,

@@ -14,6 +14,7 @@ import { client, remote } from "./client.js";
 import { help, parse } from "./options.js";
 import { result, sessionLines } from "./output.js";
 import { terminal } from "./terminal.js";
+import { files } from "./files.js";
 
 async function session(api: ReturnType<typeof client>) {
   const value = await remote(api.api<CliCredential & { kind: string }>("/api/session"));
@@ -63,6 +64,7 @@ async function run() {
   }
   const auth = await credentials();
   const api = client(auth);
+  if (command.startsWith("files ")) return files(command, options, api);
   if (command === "auth status") {
     const access = await session(api);
     return result(

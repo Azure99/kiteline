@@ -48,7 +48,8 @@ kiteline terminal list --device DEVICE_ID --workspace WORKSPACE_ID
 
 CLI 只读当前目录，不搜索父目录、Git 根目录或 home。它是目录共享的默认值；显式
 `--device`、`--workspace`、`--session` 逐字段覆盖本次调用，不回写。组合不匹配时明确失败。
-`inspect`、`terminal list` 和 `terminal create` 忽略默认 session，不接受显式 `--session`。
+`inspect`、`terminal list`、`terminal create` 和 `files` 忽略默认 session，不接受显式
+`--session`。`web url --path` 也忽略默认 session，不能与显式 `--session` 同用。
 `auth`、`targets`、`--help` 和 `--version` 不读取目标文件。
 
 ## 操作同一个终端
@@ -65,7 +66,7 @@ kiteline web url
 
 每次调用都是短命令，终端和 Shell 状态持续存在。默认不改变尺寸，`terminal resize
 --cols 100 --rows 30` 会改变所有参与者共享的终端。目录浏览、阅读、编辑、Git、构建和
-测试直接使用终端中的原生工具；CLI 不另提供 Git 或 task/run 命令。
+测试直接使用终端中的原生工具；CLI 仅另提供文件传输，不提供 Git 或 task/run 命令。
 
 `send` 恰好选择一个 `--text TEXT`、`--paste TEXT` 或 `--key KEY`。文本与粘贴可加
 `--enter`；文字 `Enter` 不会变成回车。具名按键见 `terminal send --help`。粘贴使用
@@ -111,10 +112,36 @@ cd '/absolute/workspace/path'
 必须紧接管道读取 `PIPESTATUS[0]`。该标记只代表这次前台命令返回，不表示它启动的后台
 工作完成。CLI 不自动包装输入或解析该标记。
 
+## 文件传输
+
+```sh
+kiteline files download 'notes/设计.md' --output ./design.md
+kiteline files upload 'notes/设计副本.md' --file ./design.md
+kiteline web url --path 'notes/设计副本.md'
+```
+
+`PATH` 相对选定 workspace，使用 `/` 分隔，不能是绝对路径或含 `..` 段；本地路径由
+`--output` 或 `--file` 明确指定。下载以新建方式写入，不覆盖已有本地文件；失败可能留下
+空文件或部分内容，不能当作完整下载。文件内容直接流式传输，成功结果只给 `path`、`size`，
+下载另给 `output`；`--json` 不包含文件正文。
+
+上传读取本地普通文件，默认只创建新目标。目标存在时返回 conflict，纯文本诊断及
+`--json` 的 `error.details.current.targetVersion` 提供可选择的替换版本。确认要替换后再用：
+
+```sh
+kiteline files upload 'notes/设计副本.md' --file ./design.md --replace-version VERSION
+```
+
+`VERSION` 是该上传目标的替换条件，不是下载得到的内容 revision。设备在准备上传和发布前
+检查版本；这不保证从下载至今无人修改，最后一次检查到发布之间仍可能有外部写入。
+上传替换叶节点符号链接本身，下载则跟随该链接。上传结果为 unknown 时可能已发布，先通过
+终端或下载观察，再决定下一步；CLI 不自动重传。
+
 ## Web 接续与记录恢复
 
 `web url` 返回同一终端的链接，不创建交接状态。Web 登录后点击实际终端显示区再输入；
 “专注终端”按钮只调整布局。双方的输入与尺寸都影响同一终端，关闭 CLI 不关闭 Shell。
+`web url --path PATH` 返回文件链接，仅核实设备/workspace，不检查文件存在或版本。
 
 遇到 `recording_unavailable`，先看 `terminal list`，再按需显式 `terminal recover`。
 恢复复用同一 pane，可能短暂改变尺寸以重绘，丢失旧 recorder 历史并更换 epoch。返回
@@ -134,4 +161,5 @@ cd '/absolute/workspace/path'
 | 2      | 本地参数、配置、目标或文件 I/O 错误。                              |
 | 3      | 请求可能生效，但未取得确定结果。先观察，再决定下一步，不自动重发。 |
 
-HTTP 请求及响应体消费最多等待 30 秒。`--help` 和 `--version` 离线可用。
+JSON 交互最多等待 30 秒；文件正文传输在连续 120 秒无进度时结束等待。
+`--help` 和 `--version` 离线可用。

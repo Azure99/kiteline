@@ -12,7 +12,10 @@ export async function terminal(
   api: ReturnType<typeof client>,
   server: string,
 ) {
-  const requiresSession = command !== "terminal create" && command !== "terminal list";
+  const requiresSession =
+    command !== "terminal create" &&
+    command !== "terminal list" &&
+    !(command === "web url" && options.path !== undefined);
   const { deviceId, workspaceId, sessionId } = await target(options, requiresSession);
   if (command === "terminal list") {
     const reply = await remote(api.rpc(deviceId, "sessions.list", { workspaceId }));
@@ -27,10 +30,15 @@ export async function terminal(
   const params = { workspaceId, sessionId: sessionId! };
   if (command === "web url") {
     const reply = await remote(api.rpc(deviceId, "sessions.list", { workspaceId }));
-    if (!reply.sessions.some((s) => s.workspaceId === workspaceId && s.id === sessionId))
+    if (
+      options.path === undefined &&
+      !reply.sessions.some((s) => s.workspaceId === workspaceId && s.id === sessionId)
+    )
       throw new ApiError("not_found", "Terminal is not in this workspace; check terminal list");
     const url = new URL(
-      workspacePath(deviceId, workspaceId, "terminal", { session: sessionId }),
+      options.path === undefined
+        ? workspacePath(deviceId, workspaceId, "terminal", { session: sessionId })
+        : workspacePath(deviceId, workspaceId, "files", { file: options.path }),
       server,
     ).href;
     return result({ url }, url, options);

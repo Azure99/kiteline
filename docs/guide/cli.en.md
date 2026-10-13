@@ -57,8 +57,10 @@ Put `.kiteline.json` in the calling process's working directory to reuse targets
 Only that directory is read, without searching parents, a Git root, or home. These
 are shared directory defaults. Explicit `--device`, `--workspace`, and `--session`
 override individual fields for this call without changing the file. Mismatched
-targets fail. `inspect`, `terminal list`, and `terminal create` ignore a default session and reject an
-explicit `--session`. `auth`, `targets`, `--help`, and `--version` ignore the target file.
+targets fail. `inspect`, `terminal list`, `terminal create`, and `files` ignore a default
+session and reject an explicit `--session`. `web url --path` also ignores a default
+session and cannot use explicit `--session`. `auth`, `targets`, `--help`, and
+`--version` ignore the target file.
 
 ## Work in the same terminal
 
@@ -75,7 +77,8 @@ kiteline web url
 Each call is a short command; the terminal and shell state persist. Calls preserve
 the current size unless you use `terminal resize --cols 100 --rows 30`, which
 changes the shared terminal for everyone. Browse, read, edit, run Git, build and
-test with native terminal tools. The CLI has no dedicated Git or task/run commands.
+test with native terminal tools. The CLI additionally provides file transfer, with
+no dedicated Git or task/run commands.
 
 `send` selects exactly one of `--text TEXT`, `--paste TEXT`, or `--key KEY`. Text
 and paste may append `--enter`; the literal word `Enter` is never a key. See
@@ -132,11 +135,45 @@ Read `PIPESTATUS[0]` immediately after the pipeline. The marker means only that
 this foreground command returned, not that background work it launched completed.
 The CLI does not wrap input or interpret this marker automatically.
 
+## Transfer files
+
+```sh
+kiteline files download 'notes/design.md' --output ./design.md
+kiteline files upload 'notes/design copy.md' --file ./design.md
+kiteline web url --path 'notes/design copy.md'
+```
+
+`PATH` is relative to the selected workspace, uses `/` separators, and cannot be
+absolute or contain `..` segments. Specify the local path with `--output` or
+`--file`. Download creates a new local file without overwriting an existing one.
+Failure may leave an empty or partial file; do not treat it as a complete download.
+File bytes are streamed directly. Success reports `path` and `size`, plus `output`
+for download; `--json` does not contain file bytes.
+
+Upload reads a local regular file and creates a new target by default. An existing
+target returns conflict. Text diagnostics and `--json` provide
+`error.details.current.targetVersion` for choosing replacement. After deciding to
+replace, use:
+
+```sh
+kiteline files upload 'notes/design copy.md' --file ./design.md --replace-version VERSION
+```
+
+`VERSION` is a replacement condition for the upload target, not a downloaded
+content revision. The device checks the version when preparing and before publishing.
+This does not ensure the file has stayed unchanged since download; external writes
+can still race between the final check and publication. Upload replaces a leaf symlink
+itself; download follows it. An unknown upload result may have published the file.
+Observe through the terminal or download before deciding what to do next; the CLI
+does not resend automatically.
+
 ## Continue in Web and recover recording
 
 `web url` returns the same terminal's link without a handoff workflow. Log into Web
 and click the actual terminal display before typing; “Focus terminal” only changes
 layout. Both sides share input and size. Closing the CLI leaves the shell running.
+`web url --path PATH` returns a file link, validating only the device/workspace,
+without checking file existence or version.
 
 For `recording_unavailable`, check `terminal list`, then explicitly use
 `terminal recover` as needed. Recovery reuses the pane, may resize it briefly for a
@@ -160,5 +197,6 @@ CLI has no background process, automatic retries, or implicit interaction.
 | 2    | A local argument, configuration, target, or file I/O error.                                            |
 | 3    | The request may have taken effect, but its result is unknown. Observe before deciding what to do next. |
 
-HTTP requests, including response body consumption, have a 30-second deadline.
+JSON interactions have a 30-second deadline. File body transfers stop waiting after
+120 consecutive seconds without progress.
 `--help` and `--version` work offline.

@@ -5,7 +5,7 @@ import { en } from "../i18n/en";
 import { observeServerVersion } from "./release";
 
 export { ApiError, apiError } from "@kiteline/shared/protocol/client";
-export const { api, post, cancelRequest, rpcReply, rpc } = createApiClient({
+export const { request, api, post, fileChannel, cancelRequest, rpcReply, rpc } = createApiClient({
   request: async (path, options, consume) => consume(await fetch(path, options)),
   newId,
   observeServerVersion,

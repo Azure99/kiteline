@@ -2,6 +2,10 @@ import {
   appVersion,
   rpcMutates,
   type KitelineError,
+  type ChannelParams,
+  type ChannelReady,
+  type FileMeta,
+  type FileTarget,
   type RpcArguments,
   type RpcReply,
   type RpcResult,
@@ -23,6 +27,11 @@ export function apiError(error: KitelineError, outcome?: string, result?: unknow
   return new ApiError(error.code, error.message, outcome, error.details, result);
 }
 const gatewayStatuses = new Set([502, 503, 504]);
+type ContentParams<T> = T extends unknown ? Omit<T, "workspaceId" | "path"> : never;
+
+export function fileDownloadPath(target: FileTarget) {
+  return `/api/devices/${encodeURIComponent(target.deviceId)}/download?${new URLSearchParams({ workspaceId: target.workspaceId, path: target.path })}`;
+}
 
 export function versionedPath(path: string) {
   const url = new URL(path, "https://kiteline.invalid");
@@ -42,38 +51,29 @@ interface ClientHost {
 }
 
 export function createApiClient(host: ClientHost) {
-  async function api<T>(
+  async function request<T>(
     path: string,
-    options: RequestInit = {},
+    options: RequestInit,
+    consume: (response: Response) => Promise<T>,
     mutation = !!options.method && !["GET", "HEAD"].includes(options.method),
   ): Promise<T> {
     let response: Response | undefined;
     try {
-      return await host.request(
-        versionedPath(path),
-        {
-          ...options,
-          headers: {
-            ...(options.body ? { "content-type": "application/json" } : {}),
-            ...options.headers,
-          },
-        },
-        async (received) => {
-          response = received;
-          host.observeServerVersion?.(response.headers.get("x-kiteline-version"));
+      return await host.request(versionedPath(path), options, async (received) => {
+        response = received;
+        host.observeServerVersion?.(response.headers.get("x-kiteline-version"));
+        if (!response.ok) {
           const data: unknown = await response.json();
-          if (!response.ok) {
-            const error = (data as { error?: KitelineError } | null)?.error;
-            if (typeof error?.code !== "string" || typeof error.message !== "string")
-              throw new Error(`Invalid HTTP ${response.status} error response`);
-            if (response.status === 401) host.unauthenticated?.();
-            const failure = apiError(error);
-            failure.retryable = gatewayStatuses.has(response.status);
-            throw failure;
-          }
-          return data as T;
-        },
-      );
+          const error = (data as { error?: KitelineError } | null)?.error;
+          if (typeof error?.code !== "string" || typeof error.message !== "string")
+            throw new Error(`Invalid HTTP ${response.status} error response`);
+          if (response.status === 401) host.unauthenticated?.();
+          const failure = apiError(error);
+          failure.retryable = gatewayStatuses.has(response.status);
+          throw failure;
+        }
+        return consume(response);
+      });
     } catch (error) {
       if (error instanceof ApiError) throw error;
       if (mutation) throw new ApiError("io_error", "No operation result was received", "unknown");
@@ -89,6 +89,24 @@ export function createApiClient(host: ClientHost) {
       throw error;
     }
   }
+  function api<T>(
+    path: string,
+    options: RequestInit = {},
+    mutation = !!options.method && !["GET", "HEAD"].includes(options.method),
+  ): Promise<T> {
+    return request(
+      path,
+      {
+        ...options,
+        headers: {
+          ...(options.body ? { "content-type": "application/json" } : {}),
+          ...options.headers,
+        },
+      },
+      (response) => response.json() as Promise<T>,
+      mutation,
+    );
+  }
   function post<T>(path: string, value: unknown = {}, signal?: AbortSignal, mutation = true) {
     return api<T>(path, { method: "POST", body: JSON.stringify(value), signal }, mutation);
   }
@@ -97,6 +115,24 @@ export function createApiClient(host: ClientHost) {
       `/api/devices/${encodeURIComponent(deviceId)}/requests/${encodeURIComponent(requestId)}`,
       { method: "DELETE" },
     );
+  }
+  async function fileChannel<K extends "file.read" | "file.write">(
+    target: FileTarget,
+    kind: K,
+    params: ContentParams<ChannelParams[K]>,
+    signal?: AbortSignal,
+  ) {
+    const ready = await post<ChannelReady<FileMeta>>(
+      `/api/devices/${encodeURIComponent(target.deviceId)}/channels`,
+      { kind, params: { workspaceId: target.workspaceId, path: target.path, ...params } },
+      signal,
+      false,
+    );
+    if (signal?.aborted) {
+      void api(`/api/channels/${ready.channelId}`, { method: "DELETE" }).catch(() => {});
+      throw new DOMException("The operation was aborted", "AbortError");
+    }
+    return ready;
   }
   function rpcReply<A extends RpcArguments>(
     deviceId: string,
@@ -119,5 +155,5 @@ export function createApiClient(host: ClientHost) {
     return reply.result;
   }
 
-  return { api, post, cancelRequest, rpcReply, rpc };
+  return { request, api, post, fileChannel, cancelRequest, rpcReply, rpc };
 }

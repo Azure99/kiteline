@@ -1,4 +1,5 @@
 import { parseArgs } from "node:util";
+import { posix } from "node:path";
 import {
   AppError,
   integer,
@@ -20,6 +21,10 @@ const options = {
   device: { type: "string" },
   workspace: { type: "string" },
   session: { type: "string" },
+  path: { type: "string" },
+  file: { type: "string" },
+  output: { type: "string" },
+  "replace-version": { type: "string" },
   name: { type: "string" },
   tail: { type: "string" },
   attrs: { type: "boolean" },
@@ -54,8 +59,21 @@ const commands: Record<string, readonly Option[]> = {
   "terminal wait": [...session, ...screen, "mode", "after", "quiet-ms", "timeout-ms"],
   "terminal resize": [...session, "cols", "rows", "timeout-ms"],
   "terminal recover": session,
-  "web url": session,
+  "files download": [...workspace, "output"],
+  "files upload": [...workspace, "file", "replace-version"],
+  "web url": [...session, "path"],
 };
+
+function filePath(value: string | undefined) {
+  if (value === undefined) return undefined;
+  const path = string(value, "PATH");
+  if (posix.isAbsolute(path) || path.split("/").includes(".."))
+    throw new AppError(
+      "invalid_argument",
+      "PATH must be relative to the workspace without .. segments",
+    );
+  return posix.normalize(path).replace(/\/$/, "") || ".";
+}
 
 function keyOption(value: string | undefined) {
   if (value === undefined) return undefined;
@@ -114,7 +132,9 @@ export function parse(argv: string[]) {
     throw new AppError("invalid_argument", (error as Error).message);
   }
   const { values: raw, positionals, tokens } = parsed;
-  const command = positionals.join(" ");
+  const fileCommand =
+    positionals[0] === "files" && ["download", "upload"].includes(positionals[1] ?? "");
+  const command = (fileCommand ? positionals.slice(0, 2) : positionals).join(" ");
   const showHelp = !!raw.help || argv.length === 0;
   if (!showHelp && !(raw.version && !positionals.length)) {
     const allowed = commands[command];
@@ -132,6 +152,15 @@ export function parse(argv: string[]) {
       if (token.name !== "json" && !allowed.includes(token.name))
         throw new AppError("invalid_argument", `--${token.name} is not valid for ${command}`);
     }
+    if (fileCommand) {
+      if (positionals.length !== 3)
+        throw new AppError("invalid_argument", `${command} requires exactly one PATH`);
+      const local = command === "files download" ? "output" : "file";
+      if (raw[local] === undefined)
+        throw new AppError("invalid_argument", `${command} requires --${local} LOCAL`);
+    }
+    if (command === "web url" && raw.path !== undefined && raw.session !== undefined)
+      throw new AppError("invalid_argument", "--path cannot be combined with --session");
     if (command === "terminal send") {
       if ([raw.text, raw.paste, raw.key].filter((v) => v !== undefined).length !== 1)
         throw new AppError(
@@ -160,6 +189,13 @@ export function parse(argv: string[]) {
   }
   const values = {
     ...raw,
+    path: filePath(fileCommand ? positionals[2] : raw.path),
+    file: raw.file === undefined ? undefined : string(raw.file, "--file"),
+    output: raw.output === undefined ? undefined : string(raw.output, "--output"),
+    "replace-version":
+      raw["replace-version"] === undefined
+        ? undefined
+        : string(raw["replace-version"], "--replace-version"),
     key: keyOption(raw.key),
     tail: numberOption(raw.tail, "tail", 0, limits.terminalHistoryLines),
     cols: numberOption(raw.cols, "cols", 1, limits.terminalMaxCols),
@@ -184,6 +220,10 @@ all lines and metadata in one structured stdout result. Attributes use cell colu
 --tail N includes up to N normal-history lines; --attrs includes non-default styles.
 recording_unavailable requires explicit terminal recover, then list/snapshot.
 `;
+const fileTargetHelp = `Use --device D --workspace W, or defaults in cwd .kiteline.json.
+Ignores a cwd default session; rejects explicit --session.
+PATH is workspace-relative, uses / separators and cannot contain .. segments.
+`;
 const commandHelp: Record<string, string> = {
   "auth login": `auth login --server ORIGIN [--token-stdin]\nImport a token issued in Web: Owner menu → CLI credentials. Prompt requires a TTY;\n--token-stdin explicitly reads a piped token. KITELINE_URL/KITELINE_TOKEN override saved credentials.\n`,
   "auth status": `auth status\nShow current credential access, source and expiry.\n`,
@@ -197,7 +237,9 @@ const commandHelp: Record<string, string> = {
   "terminal wait": `terminal wait [--mode quiet] [--quiet-ms N] [--timeout-ms N] [--tail N] [--attrs]\nterminal wait --mode change --after EPOCH:SEQ [--timeout-ms N] [--tail N] [--attrs]\n${targetHelp}${observationHelp}quiet defaults to 300ms within a total 1000ms; values are 1..10000ms and timeout\nmay be shorter than quiet. Output/resize activity resets quiet, even for identical\ntext. change requires --after from snapshot.position or send.before; it rejects\n--quiet-ms. quiet rejects --after. quiet/changed/timeout/reset return full screens.\nA quiet terminal does not confirm program or command completion.\n`,
   "terminal resize": `terminal resize --cols N --rows N [--timeout-ms N]\n${targetHelp}Explicitly resize the same shared terminal; other CLI commands do not resize it.\ncols: 1..${limits.terminalMaxCols}; rows: 1..${limits.terminalMaxRows}. Timeout: 1..10000ms, default 5000ms.\nunknown requires observing the terminal before deciding to repeat.\n`,
   "terminal recover": `terminal recover\n${targetHelp}Request recorder recovery and show actual Session/webStatus. Acceptance does not\nconfirm availability; use terminal list/snapshot afterward. Recovery can reset\nepoch and report a history gap. Input is not resent; there is no automatic polling.\n`,
-  "web url": `web url\n${targetHelp}Validate this workspace/session and print its existing Web terminal URL.\nOpen it to use the same terminal. Focus terminal changes layout; click the actual\nterminal display to focus input. This command does not open a browser or change focus.\n`,
+  "files download": `files download PATH --output LOCAL\n${fileTargetHelp}Stream the remote file into a new local file; an existing LOCAL is never overwritten.\nFailure may leave an empty or partial LOCAL. Download follows a leaf symlink.\nSuccess returns path, output and size; file bytes are not JSON output.\n`,
+  "files upload": `files upload PATH --file LOCAL [--replace-version VERSION]\n${fileTargetHelp}Stream a local regular file. By default, create only; an existing target conflicts.\nTo choose replacement after conflict, copy error.details.current.targetVersion\nfrom the error into --replace-version. VERSION is not a download revision.\nReplacement checks the current target; a leaf symlink is replaced, not followed.\nAn unknown result may have published the file: observe through the terminal or\ndownload before deciding to repeat. Success returns path and size.\n`,
+  "web url": `web url [--path PATH]\n${targetHelp}Without --path, validate this workspace/session and print its Web terminal URL.\nOpen it to use the same terminal. Focus terminal changes layout; click the actual\nterminal display to focus input. With --path, validate the workspace and print\nits Web file URL, without checking file existence or version. PATH is workspace-\nrelative with / separators and no .. segments. --path ignores a default session\nand cannot use explicit --session. This command does not open a browser or change focus.\n`,
 };
 
 export function help(command = "") {
@@ -220,7 +262,9 @@ Commands:
   terminal wait [--mode quiet|change]        Wait for terminal activity conditions
   terminal resize --cols N --rows N          Resize the shared terminal
   terminal recover                          Explicitly request recorder recovery
-  web url                                   Print the shared terminal's Web URL
+  files download PATH --output LOCAL        Download into a new local file
+  files upload PATH --file LOCAL            Create a remote file; see --help for replacement
+  web url [--path PATH]                     Print a terminal or file Web URL
 
 Use COMMAND --help for parameters and behavior. All commands accept --json.
 Help and --version work offline. Owner menu → CLI credentials in Web issues tokens.
@@ -231,8 +275,9 @@ changes that directory. Logout revokes the active token, including an env token.
 Only .kiteline.json in the process working directory supplies default targets:
   {"device":"D","workspace":"W","session":"S"}
 Explicit --device/--workspace/--session override this call without updating the
-file. Parent directories are not searched. Create/list/inspect ignore a default
-session and reject an explicit --session. Copy full IDs from targets and list.
+file. Parent directories are not searched. Create/list/inspect/files ignore a
+default session and reject an explicit --session. web url --path also ignores a
+default session and cannot use explicit --session. Copy full IDs from targets and list.
 Workspace lists are device metadata snapshots, including when a device is offline.
 
 Exit: 0 succeeded; 1 remote failed/partial; 2 local usage/configuration/I/O;

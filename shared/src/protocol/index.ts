@@ -21,6 +21,7 @@ export const limits = {
   nameLength: 256,
   shortcutCommandLength: 65536,
   interactionTimeout: 30_000,
+  fileIdleTimeout: 120_000,
   controlMessageBytes: 1024 * 1024,
   dataChunkBytes: 64 * 1024,
   filePendingFrames: 256,
@@ -378,6 +379,11 @@ export interface FileMeta {
   mixedLineEndings?: boolean;
   width?: number;
   height?: number;
+}
+export interface FileTarget {
+  deviceId: string;
+  workspaceId: string;
+  path: string;
 }
 export interface UploadedFile {
   path: string;

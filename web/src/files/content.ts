@@ -1,24 +1,19 @@
-import { versionedPath } from "@kiteline/shared/protocol/client";
+import { fileDownloadPath, versionedPath } from "@kiteline/shared/protocol/client";
 import type {
-  ChannelReady,
-  ChannelParams,
   KitelineError,
   FileMeta,
   FileReadPurpose,
+  FileTarget,
   Reply,
   SavedFile,
   UploadedFile,
 } from "@kiteline/shared/protocol";
 import { decodeText } from "@kiteline/shared/protocol/text";
-import { ApiError, api, apiError, post } from "../lib/api";
+import { ApiError, api, apiError, fileChannel, request } from "../lib/api";
 import { emit } from "../lib/events";
 import { observeServerVersion, webCompatible } from "../lib/release";
 
-export interface FileTarget {
-  deviceId: string;
-  workspaceId: string;
-  path: string;
-}
+export type { FileTarget } from "@kiteline/shared/protocol";
 export interface DiskText {
   target: FileTarget;
   meta: FileMeta;
@@ -29,34 +24,8 @@ export interface DiskImage {
   blob: Blob;
   meta: FileMeta;
 }
-type ContentParams<T> = T extends unknown ? Omit<T, "workspaceId" | "path"> : never;
-async function channel<K extends "file.read" | "file.write">(
-  target: FileTarget,
-  kind: K,
-  params: ContentParams<ChannelParams[K]>,
-  signal: AbortSignal,
-) {
-  const ready = await post<ChannelReady<FileMeta>>(
-    `/api/devices/${encodeURIComponent(target.deviceId)}/channels`,
-    { kind, params: { workspaceId: target.workspaceId, path: target.path, ...params } },
-    signal,
-    false,
-  );
-  if (signal.aborted) {
-    void release(ready.channelId);
-    throw new DOMException("The operation was aborted", "AbortError");
-  }
-  return ready;
-}
 async function release(id: string) {
   await api(`/api/channels/${id}`, { method: "DELETE" }).catch(() => {});
-}
-async function check(response: Response) {
-  observeServerVersion(response.headers.get("x-kiteline-version"));
-  if (response.ok) return;
-  if (response.status === 401) window.dispatchEvent(new Event("kiteline:unauthenticated"));
-  const data = (await response.json()) as { error: KitelineError };
-  throw apiError(data.error);
 }
 async function readContentBytes(
   target: FileTarget,
@@ -64,14 +33,14 @@ async function readContentBytes(
   signal: AbortSignal,
   onChannel?: (id: string) => void,
 ) {
-  const ready = await channel(target, "file.read", { purpose }, signal);
+  const ready = await fileChannel(target, "file.read", { purpose }, signal);
   onChannel?.(ready.channelId);
   try {
-    const response = await fetch(versionedPath(`/api/channels/${ready.channelId}/content`), {
-      signal,
-    });
-    await check(response);
-    const bytes = new Uint8Array(await response.arrayBuffer());
+    const bytes = await request(
+      `/api/channels/${ready.channelId}/content`,
+      { signal },
+      async (response) => new Uint8Array(await response.arrayBuffer()),
+    );
     if (bytes.length !== ready.meta.size) throw new Error("File transfer is incomplete");
     return { bytes, meta: ready.meta };
   } finally {
@@ -111,7 +80,7 @@ export async function writeText(
   signal: AbortSignal,
   prepared: (path: string) => void,
 ): Promise<SavedFile> {
-  const ready = await channel(
+  const ready = await fileChannel(
     target,
     "file.write",
     {
@@ -124,18 +93,14 @@ export async function writeText(
   );
   try {
     prepared(ready.meta.targetPath!);
-    const response = await fetch(versionedPath(`/api/channels/${ready.channelId}/content`), {
+    const reply = await api<Reply<SavedFile>>(`/api/channels/${ready.channelId}/content`, {
       method: "PUT",
       body: new Blob([bytes as Uint8Array<ArrayBuffer>]),
+      headers: { "content-type": "application/octet-stream" },
       signal,
     });
-    await check(response);
-    const reply = (await response.json()) as Reply<SavedFile>;
     if (reply.outcome !== "succeeded") throw apiError(reply.error, reply.outcome, reply.result);
     return reply.result;
-  } catch (error) {
-    if (error instanceof ApiError) throw error;
-    throw new ApiError("io_error", "The save result is unconfirmed", "unknown");
   } finally {
     void release(ready.channelId);
   }
@@ -144,9 +109,7 @@ export async function writeText(
 export function downloadFile(target: FileTarget) {
   if (!webCompatible()) return;
   const link = document.createElement("a");
-  link.href = versionedPath(
-    `/api/devices/${encodeURIComponent(target.deviceId)}/download?${new URLSearchParams({ workspaceId: target.workspaceId, path: target.path })}`,
-  );
+  link.href = versionedPath(fileDownloadPath(target));
   link.download = target.path.split("/").at(-1)!;
   document.body.append(link);
   link.click();
@@ -162,7 +125,7 @@ export async function uploadFile(
   onProgress: (sent: number) => void,
   onReady: (cancel: () => Promise<unknown>) => void,
 ): Promise<UploadedFile> {
-  const ready = await channel(
+  const ready = await fileChannel(
     target,
     "file.write",
     {

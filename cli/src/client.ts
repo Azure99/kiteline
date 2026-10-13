@@ -18,9 +18,7 @@ export function client(credentials: Credentials) {
             origin: credentials.server,
             authorization: `Bearer ${credentials.token}`,
           },
-          signal: options.signal
-            ? AbortSignal.any([options.signal, AbortSignal.timeout(limits.interactionTimeout)])
-            : AbortSignal.timeout(limits.interactionTimeout),
+          signal: options.signal ?? AbortSignal.timeout(limits.interactionTimeout),
         },
         consume,
       ),
