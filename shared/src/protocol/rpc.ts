@@ -34,6 +34,16 @@ import type {
   TaskOutput,
 } from "./tasks.js";
 
+import type {
+  SnapshotOptions,
+  SnapshotResult,
+  InputPosition,
+  TerminalPosition,
+  SessionInput,
+  ScreenOptions,
+  ScreenWaitResult,
+} from "./terminal-observation.js";
+
 type Contract<P, R> = { params: P; result: R };
 type WorkspaceParams = { workspaceId: string };
 type FileParams = WorkspaceParams & { path: string };
@@ -88,6 +98,23 @@ export interface RpcMethods {
   "sessions.end": Contract<SessionParams, { ended: boolean }>;
   "sessions.recover": Contract<SessionParams, Session>;
   "sessions.redraw": Contract<SessionParams, Session>;
+  "sessions.snapshot": Contract<SessionParams & SnapshotOptions, SnapshotResult>;
+  "sessions.send": Contract<
+    SessionParams & { input: SessionInput; ifInput?: InputPosition; timeoutMs?: number },
+    { before: TerminalPosition; input: InputPosition }
+  >;
+  "sessions.wait": Contract<
+    SessionParams &
+      ScreenOptions & { timeoutMs?: number } & (
+        | { mode?: "quiet"; quietMs?: number }
+        | { mode: "change"; after: TerminalPosition }
+      ),
+    ScreenWaitResult
+  >;
+  "sessions.resize": Contract<
+    SessionParams & { cols: number; rows: number; timeoutMs?: number },
+    { cols: number; rows: number }
+  >;
   "settings.update": Contract<{ historyLines: number }, Metadata["settings"]>;
   "shortcuts.put": Contract<Omit<Shortcut, "id"> & { id?: string }, Shortcut>;
   "shortcuts.remove": Contract<{ id: string }, { removed: boolean }>;
@@ -177,6 +204,10 @@ export const rpcMutates = {
   "sessions.end": true,
   "sessions.recover": true,
   "sessions.redraw": true,
+  "sessions.snapshot": false,
+  "sessions.send": true,
+  "sessions.wait": false,
+  "sessions.resize": true,
   "settings.update": true,
   "shortcuts.put": true,
   "shortcuts.remove": true,

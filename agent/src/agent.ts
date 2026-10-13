@@ -26,6 +26,7 @@ import type { AgentConfig, Identity } from "./config.js";
 import { MetadataStore } from "./metadata.js";
 import { Directories } from "./files/directories.js";
 import { Sessions } from "./terminal/sessions.js";
+import { terminalRpc } from "./terminal/rpc.js";
 import { LocalServer } from "./local.js";
 import { TerminalChannels } from "./terminal/channels.js";
 import { Files } from "./files/index.js";
@@ -367,7 +368,12 @@ export class Agent {
               type: "rpc.result",
               reply: {
                 id,
-                outcome: reply.outcome === "succeeded" ? "unknown" : reply.outcome,
+                outcome:
+                  reply.outcome === "succeeded"
+                    ? method === "sessions.snapshot" || method === "sessions.wait"
+                      ? "failed"
+                      : "unknown"
+                    : reply.outcome,
                 error: {
                   code: "limit_exceeded",
                   message: "Operation result exceeds the size limit; refresh to verify",
@@ -539,6 +545,11 @@ export class Agent {
           string(params.workspaceId),
           string(params.sessionId),
         ) satisfies RpcResult<typeof method>;
+      case "sessions.snapshot":
+      case "sessions.send":
+      case "sessions.wait":
+      case "sessions.resize":
+        return terminalRpc(method, params, this.sessions);
       case "sessions.redraw":
         return this.sessions.redraw(
           string(params.workspaceId),

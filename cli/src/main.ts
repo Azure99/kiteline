@@ -7,18 +7,13 @@ import {
   string,
   type CliCredential,
   type Device,
-  type Session,
 } from "@kiteline/shared/protocol";
 import { ApiError } from "@kiteline/shared/protocol/client";
 import { credentials, removeCredentials, saveCredentials, serverOrigin, target } from "./config.js";
 import { client, remote } from "./client.js";
-import { help, parse, type Options } from "./options.js";
-
-function result(value: unknown, text: string, options: Options) {
-  process.stdout.write(
-    options.json ? JSON.stringify({ outcome: "succeeded", result: value }) + "\n" : text + "\n",
-  );
-}
+import { help, parse } from "./options.js";
+import { result, sessionLines } from "./output.js";
+import { terminal } from "./terminal.js";
 
 async function session(api: ReturnType<typeof client>) {
   const value = await remote(api.api<CliCredential & { kind: string }>("/api/session"));
@@ -27,20 +22,9 @@ async function session(api: ReturnType<typeof client>) {
   return value;
 }
 
-function sessionLines(sessions: Session[]) {
-  return sessions.length
-    ? sessions
-        .map(
-          (s) =>
-            `${s.id}  ${s.name}  ${s.state}  ${s.webStatus}${s.historyGap ? "  historyGap" : ""}${s.webReason ? `  ${s.webReason}` : ""}`,
-        )
-        .join("\n")
-    : "No terminals.";
-}
-
 async function run() {
   const { command, values: options, help: showHelp } = parse(process.argv.slice(2));
-  if (showHelp) return process.stdout.write(help);
+  if (showHelp) return process.stdout.write(help(command));
   if (options.version) return process.stdout.write(appVersion + "\n");
   if (command === "auth login") {
     const server = serverOrigin(options.server);
@@ -124,6 +108,8 @@ async function run() {
       options,
     );
   }
+  if (command.startsWith("terminal ") || command === "web url")
+    return terminal(command, options, api, auth.server);
   const { deviceId, workspaceId } = await target(options);
   if (command === "inspect") {
     const reply = await remote(api.api<{ devices: Device[] }>("/api/devices"));
@@ -145,8 +131,7 @@ async function run() {
       options,
     );
   }
-  const reply = await remote(api.rpc(deviceId, "sessions.list", { workspaceId }));
-  return result(reply, sessionLines(reply.sessions), options);
+  throw new AppError("invalid_argument", `Unknown command: ${command}`);
 }
 
 try {

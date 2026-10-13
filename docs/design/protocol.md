@@ -237,7 +237,7 @@ Web owner 在 `POST /api/credentials` 提交 `{name, deviceIds, expiresAt}`，�
 
 期限的数值见[限额](../guide/reference.md#限额)。方法、参数和结果类型以 `shared/src/protocol/rpc.ts` 的 `RpcMethods` 为准；`rpcMutates` 定义哪些方法按写请求处理，结果不明时遵守[结果语义](#结果语义)。
 
-运行时分派入口是 `agent/src/agent.ts` 的 `perform()`；定时任务和 Git 分别交给 `agent/src/tasks/rpc.ts` 与 `agent/src/git/rpc.ts`。各方法的业务规则见相应的终端、文件、Git、定时任务和开发服务访问文档。
+运行时分派入口是 `agent/src/agent.ts` 的 `perform()`；定时任务、Git 和终端观察/输入分别交给 `agent/src/tasks/rpc.ts`、`agent/src/git/rpc.ts` 与 `agent/src/terminal/rpc.ts`。终端短 RPC 的位置、屏幕和输入类型在 `shared/src/protocol/terminal-observation.ts`；snapshot/wait 为读取，send/resize 为写入，recover 沿用现有显式恢复。各方法的业务规则见相应的终端、文件、Git、定时任务和开发服务访问文档。
 
 ## 数据通道
 
@@ -302,4 +302,5 @@ agent 按需启动 recorder，并通过 `RecorderConfig` 传入配置；Windows 
 - **传输。** agent 写 recorder 的 stdin，recorder 写 stdout，每行一条 JSON，每行不超过 `controlMessageBytes`（`shared/src/protocol/stdio.ts`）。发送队列按附着分别计量：某个附着的积压超过 `terminalPendingBytes` 时，发往该附着的新消息被拒绝（agent 一侧返回 `limit_exceeded`），其他附着不受影响。recorder 的 stderr 只保留有界前缀，用作退出原因。
 - **请求结果。** 需要回复的请求带 `id`，recorder 用 `reply` 返回 `Reply`。agent 最多等待 `interactionTimeout`，超时按 `timeout` 和结果未确认处理；`redraw` 由 recorder 内部命令及尺寸的有效执行期限控制，不叠加包含背压等待的外层墙钟。recorder 退出时，所有等待中的请求以 `recording_unavailable` 和结果未确认结束。
 - **附着数据。** 终端帧和输出按会话、附着路由到浏览器。普通输入、粘贴、尺寸和消费确认不等待独立回复；一次粘贴始终是一条消息，不能拆成普通输入。
+- **短命令。** snapshot/wait 直接读取 recorder model；session.send/session.resize 在现有输入队列中操作并返回独立 reply，不创建 attachment。超大快照仅该次请求返回 `limit_exceeded`，不会使 recording 进入故障。
 - **撤销创建。** `cancelCreate` 的成功回复表示所指向的创建不会再启动 tmux；得不到回复时，agent 停止整个 recorder。随后的查证规则见[会话生命周期](terminal.md#会话生命周期)。

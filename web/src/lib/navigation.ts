@@ -1,18 +1,15 @@
 import { useSyncExternalStore } from "react";
 
-export type WorkspaceTool = "terminal" | "files" | "git";
+import {
+  workspacePath,
+  type WorkspaceTool,
+  type WorkspaceQuery,
+} from "@kiteline/shared/protocol/navigation";
+export * from "@kiteline/shared/protocol/navigation";
+
 export interface WorkspaceTarget {
   deviceId: string;
   workspaceId: string;
-}
-export interface WorkspaceQuery {
-  session?: string;
-  repo?: string;
-  file?: string;
-  draft?: string;
-  folder?: string;
-  reveal?: string;
-  search?: boolean;
 }
 export interface TasksRoute {
   filter?: string;
@@ -20,6 +17,7 @@ export interface TasksRoute {
   taskId?: string;
   runId?: string;
 }
+
 export function currentPath() {
   return window.location.pathname + window.location.search;
 }
@@ -90,23 +88,6 @@ export function tasksPath(route: TasksRoute = {}) {
     if (value !== undefined) params.set(key, value);
   const search = params.toString();
   return `/tasks${search ? `?${search}` : ""}`;
-}
-export function devicePath(deviceId: string) {
-  return `/devices/${encodeURIComponent(deviceId)}`;
-}
-export function workspacePath(
-  deviceId: string,
-  workspaceId: string,
-  tool: WorkspaceTool = "terminal",
-  query: WorkspaceQuery = {},
-) {
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(query)) {
-    if (value === undefined || value === false || (key === "folder" && value === ".")) continue;
-    params.set(key, value === true ? "1" : value);
-  }
-  const search = params.toString();
-  return `${devicePath(deviceId)}/workspaces/${encodeURIComponent(workspaceId)}/${tool}${search ? `?${search}` : ""}`;
 }
 export function isWorkspaceRoute(route: ReturnType<typeof parseRoute>, target: WorkspaceTarget) {
   return route.deviceId === target.deviceId && route.workspaceId === target.workspaceId;

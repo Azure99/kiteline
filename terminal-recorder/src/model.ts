@@ -1,3 +1,16 @@
+import { randomUUID } from "node:crypto";
+import type { IBufferLine } from "@xterm/headless";
+import type {
+  ScreenOptions,
+  ScreenLine,
+  TerminalScreen,
+  ScreenWait,
+  ScreenWaitResult,
+  SnapshotOptions,
+  SnapshotResult,
+  InputPosition,
+  CellStyle,
+} from "@kiteline/shared/protocol";
 import { StringDecoder } from "node:string_decoder";
 import headless from "@xterm/headless";
 import serialize from "@xterm/addon-serialize";
@@ -26,6 +39,10 @@ export function eventCost(event: TerminalEvent) {
 }
 export class Model {
   readonly terminal: InstanceType<typeof Terminal>;
+  private epoch = randomUUID();
+  private seq = 0;
+  private inputSeq = 0;
+  private observers = new AbortController();
   private serializer = new SerializeAddon();
   private decoder = new StringDecoder("utf8");
   private queue: Promise<unknown> = Promise.resolve();
@@ -35,7 +52,9 @@ export class Model {
   private tail: TerminalEvent[] = [];
   private tailBytes = 0;
   private snapshotError?: Error;
-  private stopped = false;
+  private get stopped() {
+    return this.observers.signal.aborted;
+  }
   private listeners = new Set<(event: TerminalEvent) => void>();
   private waiting = new Set<() => void>();
   constructor(
@@ -189,6 +208,7 @@ export class Model {
     }
   }
   private record(event: TerminalEvent) {
+    this.seq++;
     this.tailBytes += eventCost(event);
     if (this.checkpoint) this.tail.push(event);
     if (
@@ -254,8 +274,184 @@ export class Model {
       });
     }
   }
+  position() {
+    if (this.stopped) throw new AppError("recording_unavailable", "Recording interrupted");
+    return { epoch: this.epoch, seq: this.seq };
+  }
+  admitInput(condition?: InputPosition) {
+    if (condition && (condition.epoch !== this.epoch || condition.inputSeq !== this.inputSeq))
+      throw new AppError("conflict", "Terminal input position has changed");
+    this.inputSeq++;
+  }
+  inputState(): InputPosition {
+    return {
+      epoch: this.epoch,
+      inputSeq: this.inputSeq,
+    };
+  }
+  private screen(options: ScreenOptions, historyGap: boolean): TerminalScreen {
+    const position = {
+      ...this.position(),
+      tail: options.tail ?? null,
+      attrs: options.attrs ?? false,
+    };
+    const terminal = this.terminal;
+    const active = terminal.buffer.active;
+    let lineBytes = 0;
+    const project = (line: IBufferLine): ScreenLine => {
+      const result: ScreenLine = { text: line.translateToString(true), wrapped: line.isWrapped };
+      if (options.attrs) {
+        const runs: NonNullable<ScreenLine["attrs"]> = [];
+        let cell = active.getNullCell();
+        let previous = active.getNullCell();
+        for (let x = 0; x < terminal.cols; x++) {
+          line.getCell(x, cell);
+          const last = runs.at(-1);
+          if (last?.end === x && cell.attributesEquals(previous)) last.end++;
+          else if (!cell.isAttributeDefault()) {
+            const style: CellStyle = {};
+            if (cell.isFgPalette()) style.fg = { palette: cell.getFgColor() };
+            else if (cell.isFgRGB())
+              style.fg = { rgb: `#${cell.getFgColor().toString(16).padStart(6, "0")}` };
+            if (cell.isBgPalette()) style.bg = { palette: cell.getBgColor() };
+            else if (cell.isBgRGB())
+              style.bg = { rgb: `#${cell.getBgColor().toString(16).padStart(6, "0")}` };
+            if (cell.isBold()) style.bold = true;
+            if (cell.isDim()) style.dim = true;
+            if (cell.isItalic()) style.italic = true;
+            if (cell.isUnderline()) style.underline = true;
+            if (cell.isInverse()) style.inverse = true;
+            if (cell.isInvisible()) style.invisible = true;
+            if (cell.isBlink()) style.blink = true;
+            if (cell.isStrikethrough()) style.strikethrough = true;
+            if (cell.isOverline()) style.overline = true;
+            if (Object.keys(style).length) runs.push({ start: x, end: x + 1, ...style });
+          }
+          [cell, previous] = [previous, cell];
+        }
+        result.attrs = runs;
+      }
+      // Stop building a large tail before allocating a reply that IPC cannot carry.
+      // This lower bound excludes the envelope, whose existing writer checks the full size.
+      lineBytes += Buffer.byteLength(JSON.stringify(result));
+      if (lineBytes > limits.controlMessageBytes)
+        throw new AppError("limit_exceeded", "Terminal observation exceeds the size limit");
+      return result;
+    };
+    const screen = Array.from({ length: terminal.rows }, (_, y) =>
+      project(active.getLine(active.baseY + y)!),
+    );
+    const normal = terminal.buffer.normal;
+    const omitted = Math.max(0, normal.baseY - (options.tail ?? 0));
+    return {
+      position,
+      input: this.inputState(),
+      cols: terminal.cols,
+      rows: terminal.rows,
+      active: active.type,
+      cursor: { x: active.cursorX, y: active.cursorY, visible: terminal.modes.showCursor },
+      screen,
+      historyGap,
+      synchronizedOutput: terminal.modes.synchronizedOutputMode,
+      ...(options.tail === undefined
+        ? {}
+        : {
+            tail: {
+              buffer: "normal" as const,
+              omitted,
+              lines: Array.from({ length: normal.baseY - omitted }, (_, y) =>
+                project(normal.getLine(omitted + y)!),
+              ),
+            },
+          }),
+    };
+  }
+  observe(options: SnapshotOptions, historyGap: boolean): Promise<SnapshotResult> {
+    return this.ordered(() => {
+      const position = {
+        ...this.position(),
+        tail: options.tail ?? null,
+        attrs: options.attrs ?? false,
+      };
+      const condition = options.ifChanged;
+      if (
+        condition &&
+        condition.epoch === position.epoch &&
+        condition.seq === position.seq &&
+        condition.tail === position.tail &&
+        condition.attrs === position.attrs
+      )
+        return { reason: "unchanged", position, input: this.inputState() };
+      return {
+        ...this.screen(options, historyGap),
+        reason: condition && condition.epoch !== position.epoch ? "reset" : "full",
+      };
+    });
+  }
+  wait(options: ScreenWait, historyGap: boolean, deadline: number) {
+    return new Promise<ScreenWaitResult>((resolve, reject) => {
+      let timer: NodeJS.Timeout | undefined;
+      let quietAt = 0;
+      let done = false;
+      const cleanup = () => {
+        done = true;
+        clearTimeout(timer);
+        this.listeners.delete(activity);
+        this.observers.signal.removeEventListener("abort", abort);
+      };
+      const abort = () => {
+        cleanup();
+        reject(this.observers.signal.reason);
+      };
+      const check = () => {
+        if (done) return;
+        try {
+          const position = this.position();
+          let reason: ScreenWaitResult["reason"] | undefined;
+          if (options.mode === "change") {
+            if (position.epoch !== options.after.epoch) reason = "reset";
+            else if (position.seq > options.after.seq) reason = "changed";
+          }
+          if (options.mode === "quiet" && Date.now() >= quietAt) reason = "quiet";
+          if (!reason && Date.now() >= deadline) reason = "timeout";
+          if (reason) {
+            cleanup();
+            resolve({ reason, snapshot: this.screen(options, historyGap) });
+            return;
+          }
+          clearTimeout(timer);
+          timer = setTimeout(
+            () => {
+              void this.ordered(check);
+            },
+            Math.max(
+              1,
+              Math.min(deadline, options.mode === "quiet" ? quietAt : deadline) - Date.now(),
+            ),
+          );
+        } catch (error) {
+          cleanup();
+          reject(error);
+        }
+      };
+      const activity = () => {
+        if (options.mode === "quiet") quietAt = Date.now() + options.quietMs;
+        check();
+      };
+      void this.ordered(() => {
+        if (this.observers.signal.aborted) {
+          abort();
+          return;
+        }
+        if (options.mode === "quiet") quietAt = Date.now() + options.quietMs;
+        this.listeners.add(activity);
+        this.observers.signal.addEventListener("abort", abort, { once: true });
+        check();
+      });
+    });
+  }
   async dispose() {
-    this.stopped = true;
+    this.observers.abort(new AppError("recording_unavailable", "Recording interrupted"));
     for (const resume of this.waiting) resume();
     this.waiting.clear();
     this.listeners.clear();

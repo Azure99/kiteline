@@ -288,9 +288,10 @@ export class Control {
     this.stdin!.write(value + "\n");
     return result;
   }
-  async resize(cols: number, rows: number) {
+  async resize(cols: number, rows: number, signal?: AbortSignal) {
     if (!this.identity) throw new AppError("busy", "Terminal is still being created");
     await this.command(`select-window -t ${this.identity.windowId}`);
+    signal?.throwIfAborted();
     await this.command(`refresh-client -C ${cols}x${rows}`);
   }
   private life(value: string) {

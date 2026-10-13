@@ -158,8 +158,15 @@ export async function tmux(
     signal?.throwIfAborted();
   } else {
     const exited = new Promise<number | null>((resolve, reject) => {
-      child.once("error", reject);
-      child.once("close", resolve);
+      let failure: Error | undefined;
+      child.once("error", (error) => {
+        failure = error;
+      });
+      // Abort can emit error before the client exits; callers share tmux input buffers.
+      child.once("close", (code) => {
+        if (failure) reject(failure);
+        else resolve(code);
+      });
     });
     child.stdin!.end(input);
     code = await exited;

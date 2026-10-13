@@ -99,6 +99,20 @@ async function main() {
           throw new AppError("recording_unavailable", "Terminal recording is unavailable");
         }
         switch (message.type) {
+          case "snapshot":
+            result = await session.model.observe(message.options, message.historyGap);
+            break;
+          case "wait":
+            result = await session.model.wait(
+              message.options,
+              message.historyGap,
+              message.deadline,
+            );
+            break;
+          case "session.send":
+          case "session.resize":
+            result = await session.input.operation(message);
+            break;
           case "attach":
             await session.attach(message.attachmentId, message.history, message.historyGap);
             result = {};

@@ -8,6 +8,7 @@
   ],
   "exports": {
     "./protocol": "./dist/protocol/index.js",
+    "./protocol/navigation": "./dist/protocol/navigation.js",
     "./protocol/ipc": "./dist/protocol/ipc.js",
     "./protocol/stdio": "./dist/protocol/stdio.js",
     "./protocol/ws": "./dist/protocol/ws.js",

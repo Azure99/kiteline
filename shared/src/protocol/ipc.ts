@@ -1,3 +1,4 @@
+import type { SnapshotOptions, ScreenWait, TerminalOperation } from "./terminal-observation.js";
 import type { KitelineError, Reply } from "./index.js";
 
 export interface RecorderConfig {
@@ -50,6 +51,22 @@ export type TerminalFrame =
   | { type: "error"; code: string; message: string }
   | { type: "input.error"; code: string; message: string; outcome: "failed" | "unknown" };
 export type RecorderRequest =
+  | ({ id: string; sessionId: string } & TerminalOperation)
+  | {
+      type: "snapshot";
+      id: string;
+      sessionId: string;
+      options: SnapshotOptions;
+      historyGap: boolean;
+    }
+  | {
+      type: "wait";
+      id: string;
+      sessionId: string;
+      options: ScreenWait;
+      historyGap: boolean;
+      deadline: number;
+    }
   | ({ id: string } & TerminalSource)
   | { type: "cancelCreate"; id: string; sessionId: string; createId: string }
   | { type: "end" | "redraw"; id: string; sessionId: string }

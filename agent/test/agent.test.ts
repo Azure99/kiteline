@@ -427,6 +427,23 @@ test("control bounds replies without losing outcomes and ignores buffered reques
           error: { code: "limit_exceeded" },
         });
     }
+    for (const method of ["sessions.snapshot", "sessions.wait"]) {
+      const ipc = {
+        type: "reply",
+        reply: { id: "i".repeat(36), outcome: "succeeded", result: "" },
+      };
+      // Fits the recorder's full envelope, but the public request ID makes RPC larger.
+      ipc.reply.result = "x".repeat(
+        limits.controlMessageBytes - Buffer.byteLength(JSON.stringify(ipc)) - 1,
+      );
+      expect(Buffer.byteLength(JSON.stringify(ipc) + "\n")).toBe(limits.controlMessageBytes);
+      dispatch.mockResolvedValueOnce(ipc.reply.result);
+      const id = method.padEnd(128, "x");
+      peer.send(JSON.stringify({ type: "rpc.request", id, method, params: {} }));
+      await expect
+        .poll(() => replies.find((r) => r.id === id))
+        .toMatchObject({ outcome: "failed", error: { code: "limit_exceeded" } });
+    }
     dispatch.mockRestore();
     const closed = once(peer, "close");
     const transport = (peer as WebSocket & { _socket: Socket })._socket;

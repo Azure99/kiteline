@@ -9,6 +9,7 @@
 - **recorder**（`terminal-recorder/src/`）：每个 agent 一个 Node 进程；每个会话一个 tmux 控制模式客户端（`tmux -C`）、一个 `@xterm/headless` 模型和一个输入队列。
 - **网页显示**（`web/src/terminal/display.ts`）：每次附着新建一个 xterm.js 实例，恢复画面后接收实时输出，发送输入和尺寸。
 - **本机客户端**（`agent/src/cli/terminal.ts`）：`kiteline-agent attach` 运行随包 tmux 客户端，附着到同一个 tmux 会话。
+- **远程 CLI**（`cli/src/`）：短 RPC 在 recorder 中观察和操作同一终端，不新建本地模拟器或网页附着；调用结束后终端继续运行。
 
 tmux 使用会话目录下的私有配置，不加载用户的 tmux 配置或插件，并收窄 prefix 键表。具体设置由 `shared/src/terminal/node.ts` 的 `terminalPreset()` 定义。
 
@@ -126,6 +127,16 @@ recorder 将模型待解析量与最慢显示的待发量相加，按 `RecordedS
 
 ## 输入
 
+### 远程短命令
+
+`sessions.send` 与网页输入使用同一个 recorder 队列和 tmux 注入函数。一次请求是字面文本、粘贴（可附加 Enter）或一个具名按键，不能组合任意动作。粘贴沿用 `normalizePaste` 与 tmux bracketed paste，方向键按当前应用光标键模式编码。CLI 请求不属于网页 attachment，短命令退出不会触发 detach 删除。
+
+可选 `ifInput: {epoch,inputSeq}` 在队列接纳处同步比较；条件不符返回 `failed/conflict`，不接纳输入。CLI 和网页每次接纳输入都会递增 `inputSeq`，包括后来因期限或 detach 丢弃的输入；计数不回退。本机直接操作 tmux 不经过这个计数。计数不意味着回显、独占或干净提示符：已经接纳但尚未回显的输入仍可与下一次输入混合。
+
+成功回执只表示 tmux 输入操作已处理，包含操作前的输出位置 `before` 和回复时当前输入位置 `input`，不表示前台命令返回。排队到期是明确失败；开始注入后不能确定结果时为 `unknown`。调用方先观察，再决定后续输入；没有请求去重或自动重发。Unix tmux 客户端须到 `close` 才让队列继续，避免中止后仍占用共享缓冲区。预算与可用按键见 [RPC 类型](../../shared/src/protocol/terminal-observation.ts)及入口校验，不另建执行状态。
+
+### 网页输入
+
 网页到 tmux 的路径：
 
 1. 网页只发送用户输入：键盘输入编码为 UTF-8，`onBinary` 的数据按单字节映射，以二进制帧发送。单帧超过 `dataChunkBytes` 或发送缓冲超过 `terminalPendingBytes` 时不发送，显示“终端输入过大或发送积压”。
@@ -154,6 +165,16 @@ recorder 将模型待解析量与最慢显示的待发量相加，按 `RecordedS
 - 受管 control 输出堵塞时，本机客户端的实际尺寸调整也延后，复用 tmux 待调整尺寸只保留最后尚未执行的目标；恢复后执行该尺寸。已经执行的尺寸及其输出、通知不被丢弃，避免暂停期间布局通知无限积压。
 
 网页一侧（`display.ts` 的 `resize()`）：先按会话的实际尺寸恢复画面，收到 `ready` 后按自己的可见区域发送第一次尺寸，再开放输入。隐藏或尺寸为 0 的显示不发送尺寸；滚动、选择和输出不重复提交尺寸。手机软键盘只缩短可见高度时，宽度和字号不变就保留打开键盘前的行列，终端只在本地裁切并跟随光标，不请求会话改变尺寸；宽度、旋转和字号变化会重新计算。
+
+## 远程观察
+
+`sessions.snapshot` 在 model 的有序解析队列中读取活动屏幕，返回物理行、尺寸、0-based 光标与可见性、normal/alternate、historyGap 和 synchronizedOutput。可选 `tail` 只读 normal buffer 的当前保留历史；`omitted` 是本次未带出的保留行数，不含已淘汰或故障丢失的原文。可选 `attrs` 返回以 cell 列计的具名非默认样式区间，`end` 不含；颜色为 palette 索引或 RGB，文本与样式分离。宽字符和折行不通过删除控制码推断。
+
+每个 model 新建 `epoch`，每次已解析输出或尺寸变化递增 `seq`；相同文字重绘也可能推进 seq。快照的 `position` 还包含 `tail: null | number` 和 `attrs: boolean`。调用方仅能在同一目标携带该完整位置作 `ifChanged`；选项相同且位置未变才返回 `unchanged`，仍返回当前 `{epoch,inputSeq}`。更换观察选项返回完整数据，epoch 不同返回 `reset` 全屏。没有观察缓存；`send.before` 不是条件快照位置。
+
+`sessions.wait` 使用相同输出事件和有序队列。quiet 从 recorder 完成已有解析后计时，输出与 resize 重置窗口；change 比较 `after` 的 epoch/seq，能看到请求到达前已发生的变化。quiet 默认 300ms、总等待默认 1000ms，总等待始终有限，默认仅在 RPC 入口补齐。quiet、changed、timeout、reset 都返回当时完整画面；quiet 只表示近期没有输出活动，不表示业务完成。
+
+观察超过现有 1MiB IPC/control 包络上限时返回 `failed/limit_exceeded`，保留终端运行；不截屏、不自动调整尺寸。等待中的 model 关闭以 `recording_unavailable` 结束。显式 `sessions.recover` 后的新 model 使用新 epoch，能观察时直接返回 reset，不要求先返回错误再抓屏。
 
 ## 恢复动作
 

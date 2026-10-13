@@ -5,6 +5,7 @@ export const appVersion = release.version;
 export const terminalProfile = "xterm-c2-unicode11";
 export { rpcMutates, gitWriteMethods } from "./rpc.js";
 export * from "./tasks.js";
+export * from "./terminal-observation.js";
 export type {
   RpcMethods,
   RpcMethod,
