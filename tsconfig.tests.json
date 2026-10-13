@@ -9,6 +9,7 @@
     "agent/test/**/*.ts",
     "server/test/**/*.ts",
     "terminal-recorder/test/**/*.ts",
-    "scripts/**/*.ts"
+    "scripts/**/*.ts",
+    "cli/test/**/*.ts"
   ]
 }

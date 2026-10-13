@@ -4,8 +4,9 @@ import { resolve } from "node:path";
 import { lstat } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import { AppError, limits, record, string } from "@kiteline/shared/protocol";
-import { agentConfig, atomicJson, privateDirectory, stateFiles } from "../config.js";
-import { fetchServerJson } from "../network.js";
+import { atomicJson } from "@kiteline/shared/node/files";
+import { fetchServerJson } from "@kiteline/shared/node/network";
+import { agentConfig, privateDirectory, stateFiles } from "../config.js";
 import { lockAgentState } from "../state-lock.js";
 
 async function input(prompt: string) {

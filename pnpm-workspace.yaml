@@ -1,6 +1,7 @@
 packages:
   - server
   - agent
+  - cli
   - terminal-recorder
   - web
   - shared

@@ -64,27 +64,24 @@ importers:
       croner:
         specifier: 10.0.1
         version: 10.0.1
-      https-proxy-agent:
-        specifier: 9.1.0
-        version: 9.1.0(patch_hash=fdfac9eda01004a9695c7008fdf63694acaf498dda4b1ff93cdd421faf637afd)(supports-color@7.2.0)
       image-size:
         specifier: 2.0.4
         version: 2.0.4
       proper-lockfile:
         specifier: 4.1.2
         version: 4.1.2
-      proxy-from-env:
-        specifier: 2.0.0
-        version: 2.0.0
       stream-json:
         specifier: 3.6.0
         version: 3.6.0
-      undici:
-        specifier: 7.29.1
-        version: 7.29.1
       ws:
         specifier: 8.21.0
         version: 8.21.0
+
+  cli:
+    dependencies:
+      '@kiteline/shared':
+        specifier: workspace:*
+        version: link:../shared
 
   server:
     dependencies:
@@ -106,6 +103,15 @@ importers:
       '@xterm/addon-unicode11':
         specifier: 0.9.0
         version: 0.9.0
+      https-proxy-agent:
+        specifier: 9.1.0
+        version: 9.1.0(patch_hash=fdfac9eda01004a9695c7008fdf63694acaf498dda4b1ff93cdd421faf637afd)(supports-color@7.2.0)
+      proxy-from-env:
+        specifier: 2.0.0
+        version: 2.0.0
+      undici:
+        specifier: 7.29.1
+        version: 7.29.1
       ws:
         specifier: 8.21.0
         version: 8.21.0

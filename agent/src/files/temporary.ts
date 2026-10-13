@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { open, symlink, unlink, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import { AppError, OperationError } from "@kiteline/shared/protocol";
-import { atomicJson, readJson, stateFiles } from "../config.js";
+import { atomicJson, readJson } from "@kiteline/shared/node/files";
+import { stateFiles } from "../config.js";
 import { publish } from "./publish.js";
 import { renameEntry } from "./rename.js";
 

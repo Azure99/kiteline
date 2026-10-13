@@ -1,9 +1,10 @@
+import { versionedPath } from "@kiteline/shared/protocol/client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BrowserControlMessage, BrowserEvent, Device } from "@kiteline/shared/protocol";
 import { api } from "../lib/api";
 import { emit } from "../lib/events";
 import type { LoginSession } from "../auth";
-import { useServerVersion, versionedPath, webCompatible } from "../lib/release";
+import { useServerVersion, webCompatible } from "../lib/release";
 
 export function useDevices(
   active: boolean,

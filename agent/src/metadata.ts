@@ -12,7 +12,8 @@ import {
   type Metadata,
   type Shortcut,
 } from "@kiteline/shared/protocol";
-import { atomicJson, readJson, stateFiles, type AgentConfig } from "./config.js";
+import { atomicJson, readJson } from "@kiteline/shared/node/files";
+import { stateFiles, type AgentConfig } from "./config.js";
 import { windowsNative } from "@kiteline/shared/windows/native";
 import { devicePath, realPath, sameObject } from "./files/paths.js";
 import { publicCliPath } from "./install/paths.js";

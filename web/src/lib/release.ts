@@ -28,8 +28,3 @@ export function useServerVersion() {
 export function useWebCompatible() {
   return useSyncExternalStore(subscribe, webCompatible);
 }
-export function versionedPath(path: string) {
-  const url = new URL(path, "https://kiteline.invalid");
-  url.searchParams.set("appVersion", appVersion);
-  return url.pathname + url.search;
-}

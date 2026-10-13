@@ -1,3 +1,4 @@
+import { versionedPath } from "@kiteline/shared/protocol/client";
 import type {
   ChannelReady,
   ChannelParams,
@@ -11,7 +12,7 @@ import type {
 import { decodeText } from "@kiteline/shared/protocol/text";
 import { ApiError, api, apiError, post } from "../lib/api";
 import { emit } from "../lib/events";
-import { observeServerVersion, versionedPath, webCompatible } from "../lib/release";
+import { observeServerVersion, webCompatible } from "../lib/release";
 
 export interface FileTarget {
   deviceId: string;

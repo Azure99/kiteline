@@ -47,6 +47,8 @@ pnpm build
 
 ## 本地运行
 
+构建后运行 `pnpm cli --help` 可使用源码中的远程 CLI；接入与目标选择见[远程 CLI](../guide/cli.md)。
+
 server 的默认数据目录 `/var/lib/kiteline` 通常不可写，开发时用 `KITELINE_DATA_DIR` 指定一个目录，在仓库根目录执行：
 
 ```sh

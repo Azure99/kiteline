@@ -14,7 +14,8 @@ import {
   type TaskRun,
   type TaskSnapshot,
 } from "@kiteline/shared/protocol";
-import { atomicJson, readJson, stateFiles, type AgentConfig } from "../config.js";
+import { atomicJson, readJson } from "@kiteline/shared/node/files";
+import { stateFiles, type AgentConfig } from "../config.js";
 import { checkTaskInput, nextOccurrence, previewSchedule } from "./schedule.js";
 import { TaskProcess } from "./process.js";
 import { taskRecord, type TaskRecord } from "./record.js";

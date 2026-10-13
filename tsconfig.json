@@ -4,6 +4,7 @@
     { "path": "shared" },
     { "path": "server" },
     { "path": "agent" },
-    { "path": "terminal-recorder" }
+    { "path": "terminal-recorder" },
+    { "path": "cli" }
   ]
 }

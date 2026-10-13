@@ -22,7 +22,7 @@ export default tseslint.config(
   {
     files: [
       "web/src/**/*.{ts,tsx}",
-      "shared/src/protocol/{index,rpc,tasks,text}.ts",
+      "shared/src/protocol/{index,rpc,tasks,text,client}.ts",
       "shared/src/terminal/index.ts",
     ],
     rules: {
@@ -61,6 +61,7 @@ export default tseslint.config(
                 "@kiteline/shared/terminal/node",
                 "@kiteline/shared/terminal/windows",
                 "@kiteline/shared/windows/*",
+                "@kiteline/shared/node/*",
               ],
               message: "The browser cannot use Node-only shared entry points.",
             },

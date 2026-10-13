@@ -1,3 +1,4 @@
+import { versionedPath } from "@kiteline/shared/protocol/client";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -23,7 +24,6 @@ import { ApiError, api, post } from "../lib/api";
 import { i18n } from "../i18n";
 import { retainReadonlyViewport } from "./clipped-screen";
 import { isMobile } from "../lib/use-mobile";
-import { versionedPath } from "../lib/release";
 import { isKeyboardOpen } from "../lib/viewport";
 import { KeyboardViewport } from "./keyboard-viewport";
 import { AuxiliaryInput, type Modifiers } from "./auxiliary-input";

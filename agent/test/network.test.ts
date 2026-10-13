@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { getCACertificates, setDefaultCACertificates } from "node:tls";
 import { gzipSync } from "node:zlib";
 import { WebSocket, WebSocketServer } from "ws";
-import { connectServerSocket, fetchServerJson } from "../src/network.js";
+import { connectServerSocket, fetchServerJson } from "@kiteline/shared/node/network";
 
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => {

@@ -1,7 +1,7 @@
 import { homedir, userInfo } from "node:os";
 import { resolve, isAbsolute, dirname } from "node:path";
-import { readFile, writeFile, rename, rm, mkdir } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { mkdir } from "node:fs/promises";
+import { readJson } from "@kiteline/shared/node/files";
 import { AppError, integer, record, string } from "@kiteline/shared/protocol";
 import { applicationPaths, installedPaths } from "./install/paths.js";
 import { windowsNative } from "@kiteline/shared/windows/native";
@@ -49,21 +49,6 @@ export interface Identity {
   deviceId: string;
   deviceToken: string;
   server: string;
-}
-export async function readJson(path: string): Promise<unknown> {
-  return JSON.parse(await readFile(path, "utf8"));
-}
-export async function atomicJson(path: string, value: unknown) {
-  const temporary = path + "." + randomUUID() + ".tmp";
-  try {
-    await writeFile(temporary, JSON.stringify(value) + "\n", { flag: "wx", mode: 0o600 });
-    await rename(temporary, path);
-  } catch (error) {
-    await rm(temporary, { force: true }).catch((cleanup: unknown) =>
-      console.error("Atomic JSON temporary cleanup:", cleanup),
-    );
-    throw error;
-  }
 }
 export async function agentPaths(runDirOverride?: string) {
   const explicitRunDir = runDirOverride === undefined ? undefined : resolve(runDirOverride);

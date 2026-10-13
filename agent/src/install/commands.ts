@@ -20,7 +20,7 @@ import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { parseArgs, promisify, type ParseArgsOptionsConfig } from "node:util";
 import { lockAgentState } from "../state-lock.js";
-import { atomicJson } from "../config.js";
+import { atomicJson } from "@kiteline/shared/node/files";
 import {
   applicationPaths,
   environmentFile,
