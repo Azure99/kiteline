@@ -12,9 +12,9 @@ import {
 import { digest, json } from "./release-inputs.mjs";
 
 const [kind, target, archivePath, directoryPath, extra] = process.argv.slice(2);
-if (!archivePath || !directoryPath || extra || !["agent", "server"].includes(kind))
+if (!archivePath || !directoryPath || extra || !["agent", "server", "cli"].includes(kind))
   throw new Error(
-    "Usage: node scripts/verify-package.mjs agent|server PLATFORM-ARCH ARCHIVE DIRECTORY",
+    "Usage: node scripts/verify-package.mjs agent|server|cli PLATFORM-ARCH ARCHIVE DIRECTORY",
   );
 const source = process.cwd();
 const archive = resolve(archivePath);
@@ -23,7 +23,7 @@ const inputs = json(join(source, "release/inputs.json"));
 const { version } = json(join(source, "shared/src/version.json"));
 const [platform, arch] = target.split("-");
 assert.ok(["linux", "macos", "windows"].includes(platform) && inputs.nodeArchives[arch]);
-assert.ok(kind === "agent" || platform === "linux");
+assert.ok(kind === "server" ? platform === "linux" : agentTargets.includes(target));
 const { name, archive: filename } = packageNames(kind, version, target);
 assert.equal(basename(directory), name);
 assert.equal(basename(archive), filename);
@@ -71,6 +71,10 @@ walk();
 assert.deepEqual(actual, expected, "Package file set or checksums differ");
 const same = (packaged, original) => assert.equal(actual.get(packaged), digest(original), packaged);
 same("LICENSE", join(source, "LICENSE"));
+same(
+  "shared/licenses/proxy-agent-negotiate.txt",
+  join(source, "shared/licenses/proxy-agent-negotiate.txt"),
+);
 assert.ok(readFileSync(join(directory, "runtime/LICENSE"), "utf8").trim());
 
 const node = readFileSync(
@@ -82,6 +86,45 @@ if (platform === "linux") {
 } else if (platform === "windows") {
   assert.equal(node.subarray(0, 2).toString(), "MZ");
   assert.equal(node.readUInt16LE(node.readUInt32LE(0x3c) + 4), 0x8664);
+} else {
+  assert.equal(node.readUInt32LE(0), 0xfeedfacf);
+  assert.equal(node.readUInt32LE(4), arch === "amd64" ? 0x01000007 : 0x0100000c);
+}
+
+if (kind !== "server") {
+  const entry = `kiteline${platform === "windows" ? ".ps1" : ""}`;
+  same(`bin/${entry}`, join(source, "installer", entry));
+  assert.ok(actual.has("cli/dist/main.js"));
+  assert.deepEqual(
+    [...actual.keys()].filter((file) => /(?:^|\/)node(?:\.exe)?$/.test(file)),
+    [`runtime/bin/node${platform === "windows" ? ".exe" : ""}`],
+    "Portable package must contain one shared Node runtime",
+  );
+}
+if (kind === "cli") {
+  assert.ok(
+    ![...actual.keys()].some((file) =>
+      /^(agent|terminal-recorder|dist\/native|web|downloads)\//.test(file),
+    ),
+  );
+  if (platform === "linux") {
+    assert.equal(
+      release.nodeArchive,
+      staticNodeInput(inputs.node, json(join(source, "release/node-static.json")), arch).sha256,
+    );
+    const build = json(join(directory, "runtime/build.json"));
+    assert.equal(build.nodeVersion, inputs.node);
+    assert.equal(build.architecture, arch);
+    assert.ok(actual.has("runtime/licenses/musl-COPYRIGHT"));
+  } else {
+    const recipe = json(join(source, `release/agent-${platform}.json`));
+    assert.equal(
+      release.nodeArchive,
+      platform === "windows"
+        ? recipe.nodeArchiveSha256
+        : recipe.architectures[arch].nodeArchiveSha256,
+    );
+  }
 }
 
 if (kind === "agent") {
@@ -122,7 +165,7 @@ if (kind === "agent") {
     for (const [file, input] of Object.entries(recipe.sources))
       assert.equal(actual.get(`dist/native/sources/${file}`), input.sha256, file);
   }
-} else {
+} else if (kind === "server") {
   assert.ok(readFileSync(join(directory, "web/dist/licenses/dependencies.md"), "utf8").trim());
   for (const target of agentTargets) {
     const { archive: file } = packageNames("agent", version, target);

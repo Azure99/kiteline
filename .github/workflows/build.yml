@@ -100,7 +100,8 @@ jobs:
           else
             pnpm package agent "$TARGET"
           fi
-      - name: Verify and run the packaged agent
+          pnpm package cli "$TARGET"
+      - name: Verify and run the packaged agent and CLI
         shell: bash
         env:
           KITELINE_AGENT_HOME: /var/tmp/kiteline-ci/check-state
@@ -115,6 +116,15 @@ jobs:
           node scripts/verify-package.mjs agent "$TARGET" "$archive" "$package"
           test "$("$package/bin/kiteline-agent" --version)" = "$version"
           "$package/bin/kiteline-agent" check
+          test "$("$package/bin/kiteline" --version)" = "$version"
+          "$package/bin/kiteline" --help
+          name="kiteline-cli-$version-$TARGET"
+          archive="dist/releases/$name.tar.gz"
+          tar -xf "$archive" -C /var/tmp/kiteline-ci
+          package="/var/tmp/kiteline-ci/$name"
+          node scripts/verify-package.mjs cli "$TARGET" "$archive" "$package"
+          test "$("$package/bin/kiteline" --version)" = "$version"
+          "$package/bin/kiteline" --help
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: delivery-agent-${{ matrix.target }}
@@ -189,6 +199,7 @@ jobs:
           corepack enable pnpm
           pnpm install --frozen-lockfile
           pnpm package agent windows-amd64 --windows-components=/var/tmp/kiteline-ci/components
+          pnpm package cli windows-amd64
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: delivery-agent-windows-amd64
@@ -232,6 +243,20 @@ jobs:
           $actual = & pwsh -NoProfile -ExecutionPolicy Bypass -File "$package/bin/kiteline-agent.ps1" --version
           if ($actual -ne $version) { throw "Version mismatch: $actual" }
           & pwsh -NoProfile -ExecutionPolicy Bypass -File "$package/bin/kiteline-agent.ps1" check
+          $agentPackage = $package
+          $name = "kiteline-cli-$version-windows-amd64"
+          $archive = "dist/releases/$name.zip"
+          Expand-Archive -LiteralPath $archive -DestinationPath $root
+          $package = Join-Path $root $name
+          node scripts/verify-package.mjs cli windows-amd64 $archive $package
+          foreach ($directory in @($agentPackage, $package)) {
+            foreach ($hostName in @('powershell.exe', 'pwsh')) {
+              $actual = & $hostName -NoProfile -ExecutionPolicy Bypass -File "$directory/bin/kiteline.ps1" --version
+              if ($LASTEXITCODE -ne 0 -or $actual -ne $version) { throw "CLI version mismatch: $actual" }
+              & $hostName -NoProfile -ExecutionPolicy Bypass -File "$directory/bin/kiteline.ps1" --help
+              if ($LASTEXITCODE -ne 0) { throw "CLI help failed: $hostName" }
+            }
+          }
 
   server:
     needs: [agent, windows-package, windows-accept]

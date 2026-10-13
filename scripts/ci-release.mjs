@@ -97,7 +97,10 @@ function platforms(index) {
 
 function packageFiles(directory) {
   return [
-    ...agentTargets.map((target) => ["agent", target]),
+    ...agentTargets.flatMap((target) => [
+      ["agent", target],
+      ["cli", target],
+    ]),
     ["server", "linux-amd64"],
     ["server", "linux-arm64"],
   ].map(([kind, target]) => join(directory, packageNames(kind, version, target).archive));

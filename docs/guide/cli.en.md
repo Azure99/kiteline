@@ -2,8 +2,92 @@
 
 `kiteline` connects to the server with a device credential issued in Web. Use
 `kiteline-agent` for local device operation and maintenance, and `kiteline-server`
-for server administration. After building from source, substitute
-`node cli/dist/main.js` for `kiteline` below.
+for server administration.
+
+## Download and run
+
+From [GitHub Releases](https://github.com/Azure99/kiteline/releases), download the
+`kiteline-cli-<version>-<platform>-<architecture>` archive matching your server
+version and local system, plus its `.sha256` file. See
+[supported systems](devices.en.md#supported-systems-and-prerequisites) for the
+system and architecture range; Windows uses PowerShell 5.1 or 7.x starting at 7.4.
+The CLI bundles Node and needs no preinstalled Node, Git, tmux or local agent.
+The device guide's Git, SSH and other prerequisites apply to running the device agent.
+
+### Linux and macOS
+
+```sh
+KITELINE_VERSION=X.Y.Z  # Replace with the server version
+KITELINE_PLATFORM=linux # Use macos for macOS
+KITELINE_ARCH=amd64     # Use arm64 for ARM64 and Apple Silicon
+name="kiteline-cli-$KITELINE_VERSION-$KITELINE_PLATFORM-$KITELINE_ARCH"
+url="https://github.com/Azure99/kiteline/releases/download/v$KITELINE_VERSION"
+curl -fLO "$url/$name.tar.gz"
+curl -fLO "$url/$name.tar.gz.sha256"
+sha256sum -c "$name.tar.gz.sha256"       # Linux
+# shasum -a 256 -c "$name.tar.gz.sha256" # Use this instead on macOS
+tar -xpzf "$name.tar.gz" --no-same-owner
+"./$name/bin/kiteline" --version
+"./$name/bin/kiteline" --help
+```
+
+Add the extracted directory's `bin` to PATH, or replace `kiteline` below with the
+full launcher path. Keep the whole package directory; the launcher uses its bundled
+runtime. For a macOS browser download blocked by quarantine, verify the checksum,
+then follow [manual installation](devices.en.md#linux-and-macos) to remove the
+extracted directory's quarantine attribute.
+
+### Windows
+
+Run in PowerShell:
+
+```powershell
+$version = 'X.Y.Z' # Replace with the server version
+$package = "kiteline-cli-$version-windows-amd64"
+$url = "https://github.com/Azure99/kiteline/releases/download/v$version"
+Invoke-WebRequest -UseBasicParsing "$url/$package.zip" -OutFile "$package.zip"
+Invoke-WebRequest -UseBasicParsing "$url/$package.zip.sha256" -OutFile "$package.zip.sha256"
+$expected = (Get-Content "$package.zip.sha256" -Raw).Trim().Split(' ')[0]
+if ((Get-FileHash "$package.zip" -Algorithm SHA256).Hash -ine $expected) { throw 'Checksum mismatch' }
+Expand-Archive -LiteralPath "$package.zip" -DestinationPath .
+Set-ExecutionPolicy -Scope Process Bypass -Force
+& ".\$package\bin\kiteline.ps1" --help
+```
+
+The execution policy is relaxed only for the current PowerShell window and expires
+when it closes. Below, `kiteline` means
+`& '.\package-directory\bin\kiteline.ps1' <arguments>`. No administrator privileges
+or installation step are needed.
+Call ordinary commands directly and capture JSON. A PowerShell token pipeline
+must start a separate PowerShell process so that the token becomes CLI stdin;
+do not pipe directly to the script:
+
+```powershell
+$cli = 'C:\package-directory\bin\kiteline.ps1'
+$shell = (Get-Process -Id $PID).Path
+Get-Content -Raw credential.txt | & $shell -NoProfile -ExecutionPolicy Bypass -File $cli auth login --server https://desk.example --token-stdin
+$reply = & $cli targets --json
+$reply | ConvertFrom-Json
+```
+
+Pass text or JSON arguments directly to `& $cli` to avoid an outer PowerShell
+process parsing their quotes again.
+
+### Use an existing shared agent package
+
+Agent packages also contain `bin/kiteline` (`bin/kiteline.ps1` on Windows), sharing
+one Node runtime with the agent. Call either launcher directly in a portable tree.
+After system installation, the CLI is at `/opt/kiteline-agent/bin/kiteline`, or
+`C:\Program Files\kiteline-agent\bin\kiteline.ps1` on Windows. Install, upgrade
+and uninstall operate on the whole agent package and register only `kiteline-agent`.
+They do not register a global `kiteline` command or update the CLI separately.
+Wait for CLI calls using the package to finish before replacing or removing it.
+CLI credentials are separate; removing the package does not revoke them.
+
+The server download endpoint provides only shared agent packages. Get the standalone
+CLI from Releases. To upgrade it, verify and extract a new archive, then switch to its
+launcher. Delete the old package to remove its programs. For source development,
+`node cli/dist/main.js` can still replace the launcher.
 
 ## Connect
 
@@ -166,6 +250,10 @@ can still race between the final check and publication. Upload replaces a leaf s
 itself; download follows it. An unknown upload result may have published the file.
 Observe through the terminal or download before deciding what to do next; the CLI
 does not resend automatically.
+
+On filesystems that equate case or Unicode spellings, a different spelling can cause
+another conflict even when using the version from the first conflict. Check the actual
+name through the shared terminal before deciding whether to replace it.
 
 ## Continue in Web and recover recording
 

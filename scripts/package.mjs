@@ -26,6 +26,7 @@ import {
   packageNames,
   releaseMatches,
   sourceCommit as readSourceCommit,
+  staticNodeInput,
 } from "./release-artifacts.mjs";
 import { digest, fetchPinned, run as execute } from "./release-inputs.mjs";
 import { windowsRuntimeFiles, windowsComponentPath } from "./windows-components.ts";
@@ -47,7 +48,10 @@ const { positionals, values } = parseArgs({
   },
 });
 const [kind, target] = positionals;
-const [platform, arch] = kind === "agent" ? (target ?? "").split("-") : ["linux", target];
+const [platform, arch] = kind === "server" ? ["linux", target] : (target ?? "").split("-");
+const portable = kind === "agent" || kind === "cli";
+const windows = platform === "windows";
+const linuxPortable = portable && platform === "linux";
 const windowsAgent = kind === "agent" && platform === "windows";
 const macosAgent = kind === "agent" && platform === "macos";
 const linuxAgent = kind === "agent" && platform === "linux";
@@ -56,8 +60,8 @@ const macosComponents = values["macos-components"];
 const agentTargets = values["agent-target"]?.split(",") ?? allAgentTargets;
 if (
   positionals.length !== 2 ||
-  !["server", "agent"].includes(kind) ||
-  (kind === "agent" && !allAgentTargets.includes(target)) ||
+  !["server", "agent", "cli"].includes(kind) ||
+  (portable && !allAgentTargets.includes(target)) ||
   !Object.hasOwn(release.nodeArchives, arch ?? "") ||
   (values["agent-target"] !== undefined && kind !== "server") ||
   agentTargets.some((target) => !allAgentTargets.includes(target)) ||
@@ -66,7 +70,7 @@ if (
   (macosAgent ? !macosComponents : macosComponents !== undefined)
 )
   throw new Error(
-    "Usage: pnpm package server amd64|arm64 [--agent-target=linux-amd64,linux-arm64,windows-amd64,macos-amd64,macos-arm64] | agent linux-amd64|linux-arm64 | agent windows-amd64 --windows-components=PATH | agent macos-amd64|macos-arm64 --macos-components=PATH",
+    "Usage: pnpm package server amd64|arm64 [--agent-target=linux-amd64,linux-arm64,windows-amd64,macos-amd64,macos-arm64] | agent linux-amd64|linux-arm64 | agent windows-amd64 --windows-components=PATH | agent macos-amd64|macos-arm64 --macos-components=PATH | cli linux-amd64|linux-arm64|windows-amd64|macos-amd64|macos-arm64",
   );
 const node = release.nodeArchives[arch];
 const { version } = JSON.parse(readFileSync(join(root, "shared/src/version.json"), "utf8"));
@@ -102,22 +106,29 @@ async function agentArchives(sourceCommit) {
   return agents;
 }
 function deploy(name, target) {
-  run("pnpm", [
-    "--filter",
-    `@kiteline/${name}`,
-    "deploy",
-    "--prod",
-    "--offline",
-    "--config.inject-workspace-packages=true",
-    `--config.node-linker=${windowsAgent ? "hoisted" : "isolated"}`,
-    target,
-  ]);
+  if (name === "cli") {
+    // CLI only depends on the shared package deployed beside it.
+    cpSync(join(root, "cli/dist"), join(target, "dist"), { recursive: true });
+    cpSync(join(root, "cli/package.json"), join(target, "package.json"));
+  } else {
+    run("pnpm", [
+      "--filter",
+      `@kiteline/${name}`,
+      "deploy",
+      "--prod",
+      "--offline",
+      "--config.inject-workspace-packages=true",
+      `--config.node-linker=${windows ? "hoisted" : "isolated"}`,
+      target,
+    ]);
+  }
   // Shared's real location determines the existing native-component paths.
   if (name !== "shared") {
     const link = join(target, "node_modules/@kiteline/shared");
-    const injected = windowsAgent ? undefined : resolve(realpathSync(link), "../../..");
+    const injected =
+      windows || name === "cli" ? undefined : resolve(realpathSync(link), "../../..");
     rmSync(link, { recursive: true, force: true });
-    if (windowsAgent) {
+    if (windows) {
       mkdirSync(link, { recursive: true });
       const { exports } = JSON.parse(readFileSync(join(root, "shared/package.json"), "utf8"));
       const forwarding = {};
@@ -136,8 +147,9 @@ function deploy(name, target) {
         }) + "\n",
       );
     } else {
+      mkdirSync(join(target, "node_modules/@kiteline"), { recursive: true });
       symlinkSync("../../../shared", link);
-      rmSync(injected, { recursive: true, force: true });
+      if (injected) rmSync(injected, { recursive: true, force: true });
     }
     const manifest = join(target, "package.json");
     const metadata = JSON.parse(readFileSync(manifest, "utf8"));
@@ -146,6 +158,7 @@ function deploy(name, target) {
   }
   for (const path of [
     "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
     "node_modules/.pnpm/lock.yaml",
     "node_modules/.modules.yaml",
     "node_modules/.package-map.json",
@@ -157,17 +170,17 @@ function deploy(name, target) {
 function checksums(directory) {
   const entries = [];
   const expectedELFs = new Set(
-    linuxAgent
+    linuxPortable
       ? [
           "runtime/bin/node",
-          "dist/native/bin/tmux",
-          "dist/native/bin/rename-noreplace",
-          "dist/native/bin/rg",
+          ...(kind === "agent"
+            ? ["dist/native/bin/tmux", "dist/native/bin/rename-noreplace", "dist/native/bin/rg"]
+            : []),
         ]
       : [],
   );
   function walk(path) {
-    if (!windowsAgent) chmodSync(path, 0o755);
+    if (!windows) chmodSync(path, 0o755);
     for (const name of readdirSync(path).sort()) {
       const file = join(path, name);
       const stat = lstatSync(file);
@@ -176,7 +189,7 @@ function checksums(directory) {
         const name = relative(directory, file);
         const executable =
           !!(stat.mode & 0o111) || /^(?:bin|runtime\/bin|dist\/native\/bin)\//.test(name);
-        if (!windowsAgent) {
+        if (!windows) {
           // pnpm can hard-link both store entries and local workspace dependencies.
           if (stat.nlink > 1) {
             const copy = join(temporary, "permission-file");
@@ -186,36 +199,72 @@ function checksums(directory) {
           chmodSync(file, executable ? 0o755 : 0o644);
         }
         const bytes = readFileSync(file);
-        if (linuxAgent) {
+        if (linuxPortable) {
           if (name.endsWith(".node"))
             throw new Error(`Dynamic Node addon is not supported: ${name}`);
           if (bytes.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) {
-            if (!expectedELFs.delete(name)) throw new Error(`Unexpected agent ELF: ${name}`);
-            if (!executable) throw new Error(`Agent ELF is not executable: ${name}`);
+            if (!expectedELFs.delete(name)) throw new Error(`Unexpected portable ELF: ${name}`);
+            if (!executable) throw new Error(`Portable ELF is not executable: ${name}`);
             if (
               /INTERP/.test(text("readelf", ["-l", file])) ||
               /NEEDED/.test(text("readelf", ["-d", file]))
             )
-              throw new Error(`Dynamic dependency in static agent: ${name}`);
+              throw new Error(`Dynamic dependency in static portable package: ${name}`);
           }
         }
         entries.push(`${createHash("sha256").update(bytes).digest("hex")}  ${name}`);
-      } else if (windowsAgent) throw new Error(`Windows packages cannot contain links: ${file}`);
-      else if ((linuxAgent || macosAgent) && stat.isSymbolicLink()) {
+      } else if (windows) throw new Error(`Windows packages cannot contain links: ${file}`);
+      else if (portable && stat.isSymbolicLink()) {
         const target = realpathSync(file);
         if (target !== directory && !target.startsWith(directory + "/"))
-          throw new Error(`Agent symlink escapes package: ${file}`);
+          throw new Error(`Portable symlink escapes package: ${file}`);
       }
     }
   }
   walk(directory);
-  if (expectedELFs.size) throw new Error(`Missing agent ELF: ${[...expectedELFs].join(", ")}`);
+  if (expectedELFs.size) throw new Error(`Missing portable ELF: ${[...expectedELFs].join(", ")}`);
   writeFileSync(join(directory, "SHA256SUMS"), entries.join("\n") + "\n");
-  if (!windowsAgent) chmodSync(join(directory, "SHA256SUMS"), 0o644);
+  if (!windows) chmodSync(join(directory, "SHA256SUMS"), 0o644);
+}
+
+function cliRuntime() {
+  if (platform === "linux") {
+    const recipe = JSON.parse(readFileSync(join(root, "release/node-static.json"), "utf8"));
+    const input = staticNodeInput(release.node, recipe, arch);
+    const archive = join(cache, "static-sources", input.sha256);
+    fetchPinned(input, archive);
+    run("tar", ["-xzf", archive, "-C", temporary]);
+    return { path: join(temporary, "runtime"), sha256: input.sha256 };
+  }
+  const recipe = JSON.parse(readFileSync(join(root, `release/agent-${platform}.json`), "utf8"));
+  const prefix = `node-v${release.node}-${windows ? "win" : "darwin"}-${node.architecture}`;
+  const filename = `${prefix}.${windows ? "zip" : "tar.xz"}`;
+  const input = {
+    url: `https://nodejs.org/dist/v${release.node}/${filename}`,
+    sha256: windows ? recipe.nodeArchiveSha256 : recipe.architectures[arch].nodeArchiveSha256,
+  };
+  const archive = join(cache, filename);
+  fetchPinned(input, archive);
+  run("bsdtar", [
+    "-xf",
+    archive,
+    "-C",
+    temporary,
+    `${prefix}/${windows ? "node.exe" : "bin/node"}`,
+    `${prefix}/LICENSE`,
+  ]);
+  const path = join(temporary, "runtime");
+  mkdirSync(join(path, "bin"), { recursive: true });
+  cpSync(
+    join(temporary, prefix, windows ? "node.exe" : "bin/node"),
+    join(path, "bin", windows ? "node.exe" : "node"),
+  );
+  cpSync(join(temporary, prefix, "LICENSE"), join(path, "LICENSE"));
+  return { path, sha256: input.sha256 };
 }
 try {
   const sourceCommit = readSourceCommit(root);
-  for (const name of ["shared", "server", "agent", "terminal-recorder"])
+  for (const name of ["shared", "server", "agent", "terminal-recorder", "cli"])
     rmSync(join(root, name, "dist"), { recursive: true, force: true });
   run("pnpm", ["build"]);
   const agents = kind === "server" ? await agentArchives(sourceCommit) : [];
@@ -225,8 +274,13 @@ try {
   let staticBuild;
   let windowsBuild;
   let macosBuild;
+  let cliNodeArchive;
   const native = join(temporary, "native");
-  if (windowsAgent) {
+  if (kind === "cli") {
+    const prepared = cliRuntime();
+    runtime = prepared.path;
+    cliNodeArchive = prepared.sha256;
+  } else if (windowsAgent) {
     const components = resolve(windowsComponents);
     windowsBuild = verifyWindowsComponents(components);
     runtime = join(components, "runtime");
@@ -283,6 +337,7 @@ try {
   deploy("shared", join(destination, "shared"));
   deploy(kind, join(destination, kind));
   if (kind === "agent") {
+    deploy("cli", join(destination, "cli"));
     deploy("terminal-recorder", join(destination, "terminal-recorder"));
     cpSync(native, join(destination, "dist/native"), { recursive: true });
     mkdirSync(join(destination, "deploy"));
@@ -292,7 +347,7 @@ try {
       join(root, `deploy/${examples}/kiteline-agent.${manager}`),
       join(destination, `deploy/kiteline-agent.${manager}`),
     );
-  } else {
+  } else if (kind === "server") {
     cpSync(join(root, "web/dist"), join(destination, "web/dist"), { recursive: true });
     mkdirSync(join(destination, "installer"));
     for (const name of ["connect.in.sh", "upgrade.in.sh", "windows-entry.in.ps1"])
@@ -304,16 +359,16 @@ try {
     cpSync(join(root, "installer/install.sh"), join(downloads, "install.sh"));
     cpSync(join(root, "installer/install.ps1"), join(downloads, "install.ps1"));
   }
-  if (windowsAgent || macosAgent)
+  if (windows || platform === "macos")
     cpSync(runtime, join(destination, "runtime"), { recursive: true });
-  else if (linuxAgent) run("cp", ["-a", runtime, join(destination, "runtime")]);
+  else if (linuxPortable) run("cp", ["-a", runtime, join(destination, "runtime")]);
   else {
     mkdirSync(join(destination, "runtime/bin"), { recursive: true });
     cpSync(join(runtime, "bin/node"), join(destination, "runtime/bin/node"));
     cpSync(join(runtime, "LICENSE"), join(destination, "runtime/LICENSE"));
   }
   mkdirSync(join(destination, "bin"));
-  const launcher = join(destination, "bin", `kiteline-${kind}${windowsAgent ? ".ps1" : ""}`);
+  const launcher = join(destination, "bin", `kiteline-${kind}${windows ? ".ps1" : ""}`);
   if (windowsAgent) {
     const { nodeEnvironmentKeys } = await import("../shared/dist/terminal/node.js");
     const launchers = windowsAgentLaunchers({
@@ -338,8 +393,13 @@ try {
       agentLauncher(installDirectory, paths, platform),
     );
     chmodSync(join(destination, "bin/kiteline-agent-installed"), 0o755);
-  } else cpSync(join(root, "installer/kiteline-server"), launcher);
-  chmodSync(launcher, 0o755);
+  } else if (kind === "server") cpSync(join(root, "installer/kiteline-server"), launcher);
+  if (kind !== "cli") chmodSync(launcher, 0o755);
+  if (portable) {
+    const name = `kiteline${windows ? ".ps1" : ""}`;
+    cpSync(join(root, "installer", name), join(destination, "bin", name));
+    chmodSync(join(destination, "bin", name), 0o755);
+  }
   writeFileSync(
     join(destination, "release.json"),
     JSON.stringify(
@@ -347,18 +407,20 @@ try {
         ...expectedRelease(release, version, kind, `${platform}-${arch}`, sourceCommit),
         sourceDirty: false,
         lockfile: digest(join(root, "pnpm-lock.yaml")),
-        ...(windowsBuild
-          ? { nodeArchive: windowsBuild.inputs.downloads["node.zip"].sha256 }
-          : macosBuild
-            ? { nodeArchive: macosBuild.inputs.downloads["node.tar.xz"].sha256 }
-            : staticBuild
-              ? { staticBuild }
-              : {
-                  nodeArchive: node.sha256,
-                  ubuntu: release.ubuntu,
-                  aptSources: digest(join(root, "release/ubuntu.sources")),
-                  caCertificates: release.caCertificates,
-                }),
+        ...(cliNodeArchive
+          ? { nodeArchive: cliNodeArchive }
+          : windowsBuild
+            ? { nodeArchive: windowsBuild.inputs.downloads["node.zip"].sha256 }
+            : macosBuild
+              ? { nodeArchive: macosBuild.inputs.downloads["node.tar.xz"].sha256 }
+              : staticBuild
+                ? { staticBuild }
+                : {
+                    nodeArchive: node.sha256,
+                    ubuntu: release.ubuntu,
+                    aptSources: digest(join(root, "release/ubuntu.sources")),
+                    caCertificates: release.caCertificates,
+                  }),
       },
       null,
       2,
@@ -367,7 +429,7 @@ try {
   checksums(destination);
   const tarball = join(output, filename);
   const staged = join(temporary, filename);
-  if (windowsAgent) run("zip", ["-q", "-r", staged, name], { cwd: temporary });
+  if (windows) run("zip", ["-q", "-r", staged, name], { cwd: temporary });
   else run("tar", ["-czf", staged, "-C", temporary, name]);
   if (readSourceCommit(root) !== sourceCommit)
     throw new Error("Source changed during packaging; rerun the build");

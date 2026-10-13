@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "files": [
-    "dist"
+    "dist",
+    "licenses"
   ],
   "exports": {
     "./protocol": "./dist/protocol/index.js",

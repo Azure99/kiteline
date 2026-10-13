@@ -12,9 +12,11 @@ This guide explains how to connect Linux, macOS and Windows machines to the work
 | macOS 14 or later                                       | amd64 (Intel), arm64 (Apple Silicon) | `kiteline-agent-<version>-macos-<architecture>.tar.gz` |
 | Windows 11                                              | x64                                  | `kiteline-agent-<version>-windows-amd64.zip`           |
 
-All four Linux distributions use the same Linux release package for a given architecture.
+All four Linux distributions use the same Linux release package for a given architecture. The remote CLI supports the same systems and architectures; see [Remote CLI](cli.en.md) to download and run it. The Git, SSH and other prerequisites below apply to the device agent.
 
 The agent runs on the device as the project user: the operating-system account you normally use and that owns your project files. Workbench terminals, file operations, Git and scheduled tasks run with this account's permissions. Installing, upgrading and uninstalling the agent require administrator privileges (sudo on Linux and macOS, UAC elevation on Windows). Binding, running and other `kiteline-agent` commands must be performed by the project user. Other users receive `Use project user … to run this command`.
+
+The agent package also provides the independent remote CLI launcher `bin/kiteline` (`bin/kiteline.ps1` on Windows), sharing one Node runtime with the agent. CLI credentials do not use the device binding identity.
 
 The package includes Node, tmux, the terminal recorder, terminfo, ripgrep and file-operation helpers. The macOS package also includes flock; the Windows package includes a private MSYS2 runtime. You do not need to install these, npm or a compiler. The device must provide:
 
@@ -124,6 +126,8 @@ Running the install command again on an already installed and bound device stops
 ### Bind-only command
 
 The binding dialog also provides a bind-only command. It runs `check` and binds using the code, without installing or starting the agent. Use it for a manually installed device or when binding again, then start the agent with the command above.
+
+System installation registers only `kiteline-agent`. The CLI is copied with the whole package to `/opt/kiteline-agent/bin/kiteline` (`C:\Program Files\kiteline-agent\bin\kiteline.ps1` on Windows); invoke it as described in [Remote CLI](cli.en.md). Upgrade and uninstall replace or remove the whole program package, without registering a global `kiteline` command.
 
 ## Manual installation
 
@@ -429,7 +433,7 @@ To upgrade, change `KITELINE_VERSION`, run `docker compose build`, then `docker 
 
 The agent version must match the server. [Upgrade the server](server.en.md#upgrade-the-server) first, then each device showing "Version mismatch".
 
-Before upgrading, stop all processes using this installation. Otherwise the upgrade refuses to proceed (`Agent installation is busy` on Linux and macOS):
+Before upgrading, wait for CLI calls using the shared package to finish, then stop all agent processes using this installation. An agent still using it blocks the upgrade (`Agent installation is busy` on Linux and macOS):
 
 - Foreground agent: press Ctrl-C.
 - Service: use the stop commands in [Run in the background](#run-in-the-background); these also prevent automatic service-manager restarts.
@@ -470,6 +474,8 @@ First stop all users of the installation as in [Upgrade the agent](#upgrade-the-
 - systemd: run `sudo systemctl disable --now kiteline-agent`, remove `/etc/systemd/system/kiteline-agent.service`, then run `sudo systemctl daemon-reload`.
 - launchd: run `bootout` from the [stop commands](#launchd), then remove `/Library/LaunchDaemons/com.kiteline.agent.plist`.
 - WinSW: run `stopwait` and `uninstall` on the service executable in administrator PowerShell, then remove the service directory.
+
+The default CLI credential directory is separate from agent data. Agent uninstall, including `--purge`, does not clean that directory or revoke CLI credentials; [log out or revoke them](cli.en.md#connect) separately.
 
 Choose an uninstall mode. Default uninstall removes the program directory, command entry and installation record, keeping data, runtime directories, the Unix installation env file and coordination locks. On Linux and macOS:
 

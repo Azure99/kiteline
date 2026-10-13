@@ -4,19 +4,22 @@
 
 ## 概览
 
-一次发布包含 7 个发布包、Compose 部署文件和一个多架构镜像，全部从同一个提交生成：
+一次发布包含 12 个发布包、Compose 部署文件和一个多架构镜像，全部从同一个提交生成：
 
 | 产物          | 文件或标签                                                                               |
 | ------------- | ---------------------------------------------------------------------------------------- |
 | Linux agent   | `kiteline-agent-<版本>-linux-amd64.tar.gz`、`kiteline-agent-<版本>-linux-arm64.tar.gz`   |
 | macOS agent   | `kiteline-agent-<版本>-macos-amd64.tar.gz`、`kiteline-agent-<版本>-macos-arm64.tar.gz`   |
 | Windows agent | `kiteline-agent-<版本>-windows-amd64.zip`                                                |
+| Linux CLI     | `kiteline-cli-<版本>-linux-amd64.tar.gz`、`kiteline-cli-<版本>-linux-arm64.tar.gz`       |
+| macOS CLI     | `kiteline-cli-<版本>-macos-amd64.tar.gz`、`kiteline-cli-<版本>-macos-arm64.tar.gz`       |
+| Windows CLI   | `kiteline-cli-<版本>-windows-amd64.zip`                                                  |
 | server        | `kiteline-server-<版本>-linux-amd64.tar.gz`、`kiteline-server-<版本>-linux-arm64.tar.gz` |
 | server 镜像   | 本地 `kiteline-server:<版本>-<架构>`，发布为 `ghcr.io/azure99/kiteline:<版本>`           |
 | Compose       | Release 附件 `compose.yaml`，默认镜像固定到该发布版本                                    |
 
 - 版本号来自 [`shared/src/version.json`](../../shared/src/version.json)。发布包写入 `dist/releases/`，每个包旁有同名 `.sha256`。
-- server 包在 `downloads/` 中携带 agent 包，接入和升级命令从这里下载。因此先构建 agent，再组装 server，最后构建镜像。
+- agent 包提供 `kiteline-agent` 与远程 `kiteline` 两个入口，共用一份 Node；独立 CLI 包只带远程 CLI 及其 runtime。server 的 `downloads/` 仅携带五个共同 agent 包，接入和升级命令从这里下载；独立 CLI 从 Release 下载。因此先构建 agent，再组装 server，最后构建镜像。
 - `pnpm package` 和 `pnpm images` 要求工作树和暂存区干净，包括没有未跟踪文件；包与镜像必须匹配当前提交、版本、平台、架构和 Node 版本。新提交后不能复用旧提交的发布包。
 - Windows 和 macOS 的组件目录按构建输入摘要检查，输入不变时可跨提交复用。Windows 摘要包含整个 `release/inputs.json`，macOS 只包含实际消费的字段；输入变化后重建相应组件。Linux 原生组件每次组包时在 Docker 中构建，可复用 Docker 层缓存。
 
@@ -48,15 +51,15 @@
 
 ### 触发与模式
 
-| 触发                              | 模式        | 执行内容                                                    |
-| --------------------------------- | ----------- | ----------------------------------------------------------- |
-| PR、推送到 main、手动 `checks`    | `checks`    | 格式、lint、类型、Web 构建与完整 Linux 测试（含原生组件）。 |
-| 手动 `full`，可选择任意分支       | `full`      | 构建并验证五个 agent 包、两个 server 包和两个镜像。         |
-| main 上手动 `dev-image`           | `dev-image` | 完整构建后推送开发镜像。                                    |
-| 推送 `v*` tag                     | `candidate` | 完整构建后建立 Release 草稿并推送候选镜像。                 |
-| main 上手动 `publish`，填写 `tag` | `publish`   | 发布已有候选。                                              |
+| 触发                              | 模式        | 执行内容                                                                 |
+| --------------------------------- | ----------- | ------------------------------------------------------------------------ |
+| PR、推送到 main、手动 `checks`    | `checks`    | 格式、lint、类型、Web 构建与完整 Linux 测试（含原生组件）。              |
+| 手动 `full`，可选择任意分支       | `full`      | 构建并验证五个共同 agent 包、五个独立 CLI 包、两个 server 包和两个镜像。 |
+| main 上手动 `dev-image`           | `dev-image` | 完整构建后推送开发镜像。                                                 |
+| 推送 `v*` tag                     | `candidate` | 完整构建后建立 Release 草稿并推送候选镜像。                              |
+| main 上手动 `publish`，填写 `tag` | `publish`   | 发布已有候选。                                                           |
 
-完整构建会校验归档和解包内容，在对应平台运行 agent 的版本检查及 `check`，检查 server 与镜像的健康响应和正常退出，并在 Linux amd64 上检查绑定和终端输出。它不覆盖安装、升级、卸载、Windows 11 或最低支持系统版本。
+完整构建会校验归档和解包内容，在对应平台运行 agent 的版本检查及 `check`，并从共同 agent 包和独立 CLI 包分别运行 `kiteline --version`、`--help`（Windows 覆盖 PowerShell 5.1 和 7）。它还检查 server 与镜像的健康响应和正常退出，并在 Linux amd64 上检查绑定和终端输出。它不覆盖安装、升级、卸载、Windows 11 或最低支持系统版本。
 
 ### Release 与镜像
 
@@ -69,7 +72,7 @@
 | `dev`                                                            | 仅在 main 仍指向构建提交时更新。       |
 | `X.Y.Z`，不带 `v`                                                | `publish`，与候选镜像具有同一 digest。 |
 
-不产生 `latest` 镜像标签。候选草稿包含 7 个包、各自的 `.sha256`、固定版本的 `compose.yaml` 和覆盖这些包与 Compose 的 `SHA256SUMS`；最后上传的 `delivery.json` 标记候选完成，记录源码、运行 ID、汇总校验文件摘要和镜像 digest。
+不产生 `latest` 镜像标签。候选草稿包含 12 个包、各自的 `.sha256`、固定版本的 `compose.yaml` 和覆盖这些包与 Compose 的 `SHA256SUMS`；最后上传的 `delivery.json` 标记候选完成，记录源码、运行 ID、汇总校验文件摘要和镜像 digest。
 
 `publish` 使用 main 当前提交中的脚本，检查候选与 tag 指向同一源码、附件与校验文件一致，再把候选 digest 复制为版本标签，并公开 Release。
 
@@ -117,7 +120,7 @@ sudo apt-get install -y git curl xz-utils zstd zip unzip binutils libarchive-too
 
 ### 构建 Windows 组件
 
-CI 在 Windows x64 上准备输入并编译 tmux 和 MSYS2 runtime，再传到 Linux x64 编译 addon、组装和打包，步骤见 [`build.yml`](../../.github/workflows/build.yml)，组件入口见 [`build-windows-components.mjs`](../../scripts/build-windows-components.mjs)。Windows 需要匹配版本的 x64 Node、PATH 中的 Git、默认位置的 7-Zip 24.06 或更新版本和系统 `tar.exe`；验证最终 ZIP 使用 PowerShell 7。
+CI 在 Windows x64 上准备输入并编译 tmux 和 MSYS2 runtime，再传到 Linux x64 编译 addon、组装和打包，步骤见 [`build.yml`](../../.github/workflows/build.yml)，组件入口见 [`build-windows-components.mjs`](../../scripts/build-windows-components.mjs)。Windows 需要匹配版本的 x64 Node、PATH 中的 Git、默认位置的 7-Zip 24.06 或更新版本和系统 `tar.exe`；验证 agent 入口使用 PowerShell 7，两个包的 CLI 入口分别使用 PowerShell 5.1 和 7。
 
 Windows checkout 前执行 `git config --global core.autocrlf false`，避免换行转换改变配方摘要。需要本机排错时，按工作流运行对应步骤；`tmux`、`addon`、`assemble` 的输出目录必须不存在，父目录必须存在。
 
@@ -129,7 +132,7 @@ CI 在与目标架构一致的 Mac 上完成组件构建和组包，步骤见 [`
 
 下载缓存位于 `/var/tmp/kiteline-release-cache/`，复用前检查 SHA-256，可按需删除。组件输入目录和 Docker 层缓存会复用已有下载或构建；手动创建的组件、解包和验证目录须自行清理。
 
-镜像上下文包含 `dist/releases/` 下全部 server 归档及其校验文件；需要减小上下文时可删除旧 server 包。独立 agent 包不再进入镜像上下文。
+镜像上下文包含 `dist/releases/` 下全部 server 归档及其校验文件；需要减小上下文时可删除旧 server 包。独立 agent 和 CLI 归档不进入镜像上下文。
 
 ## 构建 Linux 包与镜像
 
@@ -138,11 +141,14 @@ CI 在与目标架构一致的 Mac 上完成组件构建和组包，步骤见 [`
 ```sh
 pnpm install --frozen-lockfile
 pnpm package agent linux-amd64
+pnpm package cli linux-amd64
 pnpm package server amd64 --agent-target=linux-amd64
 pnpm images amd64
 ```
 
 Linux arm64 主机可将上述 `amd64` 改为 `arm64`。完整多平台产物请运行 CI 的 `full`。
+
+`pnpm package cli <目标>` 支持与 agent 相同的五个平台，不需要 `--windows-components` 或 `--macos-components`，也不先编译 agent 原生组件。
 
 `--agent-target` 决定 server 携带哪些 agent；省略时要求全部五个平台。上述局部包不能提供其他平台的安装和升级资源，也不能通过要求五个平台齐全的 `verify-package server`。命令参数以 [`package.mjs`](../../scripts/package.mjs) 为准。
 
@@ -167,8 +173,15 @@ KITELINE_VERSION=$(node -p "require('./shared/src/version.json').version")
 CHECK=$(mktemp -d /var/tmp/kiteline-check-XXXXXX)
 tar -xzf "dist/releases/kiteline-agent-$KITELINE_VERSION-linux-amd64.tar.gz" -C "$CHECK"
 tar -xzf "dist/releases/kiteline-server-$KITELINE_VERSION-linux-amd64.tar.gz" -C "$CHECK"
+tar -xzf "dist/releases/kiteline-cli-$KITELINE_VERSION-linux-amd64.tar.gz" -C "$CHECK"
 node scripts/verify-package.mjs agent linux-amd64 \
   "dist/releases/kiteline-agent-$KITELINE_VERSION-linux-amd64.tar.gz" "$CHECK/kiteline-agent-$KITELINE_VERSION-linux-amd64"
+node scripts/verify-package.mjs cli linux-amd64 \
+  "dist/releases/kiteline-cli-$KITELINE_VERSION-linux-amd64.tar.gz" "$CHECK/kiteline-cli-$KITELINE_VERSION-linux-amd64"
+"$CHECK/kiteline-agent-$KITELINE_VERSION-linux-amd64/bin/kiteline" --version
+"$CHECK/kiteline-agent-$KITELINE_VERSION-linux-amd64/bin/kiteline" --help
+"$CHECK/kiteline-cli-$KITELINE_VERSION-linux-amd64/bin/kiteline" --version
+"$CHECK/kiteline-cli-$KITELINE_VERSION-linux-amd64/bin/kiteline" --help
 "$CHECK/kiteline-agent-$KITELINE_VERSION-linux-amd64/bin/kiteline-agent" --version
 KITELINE_AGENT_HOME="$CHECK/agent-state" KITELINE_AGENT_RUN_DIR="$CHECK/agent-run" \
   "$CHECK/kiteline-agent-$KITELINE_VERSION-linux-amd64/bin/kiteline-agent" check
@@ -186,20 +199,23 @@ node scripts/verify-server.mjs "$CHECK/kiteline-server-$KITELINE_VERSION-linux-a
 
 ### 发布包
 
-| 路径                                      | 内容                                                                      | 所在包 |
-| ----------------------------------------- | ------------------------------------------------------------------------- | ------ |
-| `LICENSE`、`release.json`、`SHA256SUMS`   | 项目许可、包身份及文件摘要。                                              | 全部   |
-| `bin/`                                    | agent 或 server 启动脚本；agent 另含安装后的启动入口，Windows 为 `.ps1`。 | 全部   |
-| `runtime/`                                | Node 运行时及其许可。                                                     | 全部   |
-| `shared/`、`agent/`、`terminal-recorder/` | 编译后的 JS 与生产依赖。                                                  | agent  |
-| `deploy/`                                 | 本平台的服务管理器示例。                                                  | agent  |
-| `dist/native/`                            | 原生组件、来源记录和许可，Windows 另含 `sources/`。                       | agent  |
-| `shared/`、`server/`、`web/dist/`         | server 程序、生产依赖和工作台。                                           | server |
-| `installer/`、`downloads/`                | 接入和升级模板、agent 包及校验文件、安装脚本。                            | server |
+| 路径                                              | 内容                                                                           | 所在包 |
+| ------------------------------------------------- | ------------------------------------------------------------------------------ | ------ |
+| `LICENSE`、`release.json`、`SHA256SUMS`           | 项目许可、包身份及文件摘要。                                                   | 全部   |
+| `bin/`                                            | agent、CLI 或 server 启动脚本；agent 另含安装后的启动入口，Windows 为 `.ps1`。 | 全部   |
+| `runtime/`                                        | Node 运行时及其许可。                                                          | 全部   |
+| `shared/`、`cli/`、`agent/`、`terminal-recorder/` | 编译后的 JS 与生产依赖。                                                       | agent  |
+| `shared/`、`cli/`                                 | 编译后的 CLI 与生产依赖。                                                      | CLI    |
+| `deploy/`                                         | 本平台的服务管理器示例。                                                       | agent  |
+| `dist/native/`                                    | 原生组件、来源记录和许可，Windows 另含 `sources/`。                            | agent  |
+| `shared/`、`server/`、`web/dist/`                 | server 程序、生产依赖和工作台。                                                | server |
+| `installer/`、`downloads/`                        | 接入和升级模板、agent 包及校验文件、安装脚本。                                 | server |
 
-包根目录为 `kiteline-<agent|server>-<版本>-<平台>-<架构>/`。Linux 和 macOS 包的目录及可执行文件权限为 `0755`，其他文件为 `0644`。Windows ZIP 没有符号链接，解压和安装不需要 Windows 开发者模式。
+包根目录为 `kiteline-<agent|cli|server>-<版本>-<平台>-<架构>/`。Linux 和 macOS 包的目录及可执行文件权限为 `0755`，其他文件为 `0644`。Windows ZIP 没有符号链接，解压和安装不需要 Windows 开发者模式。
 
-Linux agent 使用静态 Node，其余包使用官方 Node。精确组件集合由包内 `SHA256SUMS` 和 `dist/native/identity.json` 记录；平台差异见[平台实现](../design/platforms.md)。
+Linux agent 和 CLI 使用同一固定的静态 Node 输入，server 使用官方动态 Node；Windows 和 macOS 的 agent/CLI 使用各自固定的官方 Node。包内 `SHA256SUMS` 记录文件集合，agent 的 `dist/native/identity.json` 另记录原生组件；平台差异见[平台实现](../design/platforms.md)。
+
+共同 agent 包的 CLI 入口是 `bin/kiteline`（Windows 为 `bin/kiteline.ps1`），与 agent 共用 `runtime/`。系统安装、升级和卸载只注册 agent；CLI 程序随整包复制、替换和移除，不注册全局 `kiteline` 命令。CLI 凭据与 agent 数据独立，使用方式见[远程 CLI](../guide/cli.md)。
 
 ### 清单文件
 

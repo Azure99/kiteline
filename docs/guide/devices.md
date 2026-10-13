@@ -12,9 +12,11 @@
 | macOS 14 及以上                                         | amd64（Intel）、arm64（Apple 芯片） | `kiteline-agent-<版本>-macos-<架构>.tar.gz` |
 | Windows 11                                              | x64                                 | `kiteline-agent-<版本>-windows-amd64.zip`   |
 
-同一架构的四个 Linux 发行版使用同一个 Linux 发布包。
+同一架构的四个 Linux 发行版使用同一个 Linux 发布包。远程 CLI 的系统与架构范围相同，下载和运行见[远程 CLI](cli.md)；下列 Git、SSH 等准备要求用于设备 agent。
 
 agent 在设备上以项目用户运行。项目用户是你日常使用、拥有项目文件的操作系统账户；工作台中的终端、文件操作、Git 和定时任务都以这个账户的权限执行。安装、升级和卸载 agent 需要管理员权限（Linux 和 macOS 用 sudo，Windows 用 UAC 提升）；绑定、运行和其他 `kiteline-agent` 命令只能由项目用户执行，以其他用户执行会提示 `Use project user … to run this command`。
+
+agent 发布包还提供独立的远程 CLI 入口 `bin/kiteline`（Windows 为 `bin/kiteline.ps1`），与 agent 共用一份 Node；CLI 凭据不使用设备绑定身份。
 
 发布包自带 Node、tmux、终端记录器（recorder）、terminfo、ripgrep 和文件操作辅助程序（macOS 包另带 flock，Windows 包另带私有的 MSYS2 运行时），设备上不需要安装这些程序，也不需要 npm 或编译器。设备需要自己提供：
 
@@ -124,6 +126,8 @@ Windows 调用方式和执行策略前提见 [kiteline-agent 命令](reference.m
 ### 仅绑定命令
 
 绑定对话框也提供仅绑定命令，先执行 `check`，再用绑定码绑定，不安装也不启动 agent。用于已经手工安装、或重新绑定的设备；绑定后用上面的启动命令运行 agent。
+
+系统安装只注册 `kiteline-agent`，CLI 随整包复制到 `/opt/kiteline-agent/bin/kiteline`（Windows 为 `C:\Program Files\kiteline-agent\bin\kiteline.ps1`），按[远程 CLI](cli.md)调用。升级和卸载同样替换或移除整个程序包，不注册全局 `kiteline` 命令。
 
 ## 手工安装
 
@@ -429,7 +433,7 @@ docker compose logs -f agent
 
 agent 的版本必须与 server 相同。先[升级 server](server.md#升级-server)，再升级显示“版本不匹配”的每台设备。
 
-升级前，停止所有使用这份安装的进程，否则升级拒绝执行（Linux 和 macOS 上提示 `Agent installation is busy`）：
+升级前，等待共同包中的 CLI 调用结束，并停止所有使用这份安装的 agent 进程；agent 仍在使用安装时升级会拒绝执行（Linux 和 macOS 上提示 `Agent installation is busy`）：
 
 - 前台运行的 agent：按 Ctrl-C。
 - 服务：用[后台运行](#后台运行)中的停止命令，它们同时阻止服务管理器自动重启。
@@ -470,6 +474,8 @@ sudo /usr/local/bin/kiteline-agent upgrade --archive "$PWD/kiteline-agent-X.Y.Z-
 - systemd：执行 `sudo systemctl disable --now kiteline-agent`，删除 `/etc/systemd/system/kiteline-agent.service`，再执行 `sudo systemctl daemon-reload`。
 - launchd：执行[停止命令](#launchd)中的 `bootout`，再删除 `/Library/LaunchDaemons/com.kiteline.agent.plist`。
 - WinSW：在管理员 PowerShell 中对服务程序执行 `stopwait` 和 `uninstall`，再删除服务目录。
+
+CLI 的默认凭据目录独立于 agent 数据目录；agent 卸载（含 `--purge`）不清理该目录，也不撤销 CLI 凭据。按[CLI 接入](cli.md#接入)单独退出或撤销。
 
 然后选择卸载模式。默认卸载删除程序目录、命令入口和安装记录，保留数据、运行目录、Unix 安装 env 和协调锁。Linux 和 macOS：
 

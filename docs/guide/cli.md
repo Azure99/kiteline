@@ -1,8 +1,81 @@
 # 远程 CLI
 
 `kiteline` 使用 Web 签发的设备操作凭据连接 server。设备上的运行与维护仍使用
-`kiteline-agent`，server 管理仍使用 `kiteline-server`。从源码构建后，可用
-`node cli/dist/main.js` 代替下文的 `kiteline`。
+`kiteline-agent`，server 管理仍使用 `kiteline-server`。
+
+## 下载与运行
+
+从 [GitHub Releases](https://github.com/Azure99/kiteline/releases) 下载与 server 版本和本机
+系统、架构匹配的 `kiteline-cli-<版本>-<平台>-<架构>` 归档及同名 `.sha256`。系统与架构
+范围见[支持的系统](devices.md#支持的系统与准备)；Windows 使用 PowerShell 5.1 或
+7.4 及以上 7.x。CLI 包自带 Node，不需要预装 Node、Git、tmux 或本机 agent；设备指南
+中的 Git、SSH 等前置条件用于运行设备 agent。
+
+### Linux 和 macOS
+
+```sh
+KITELINE_VERSION=X.Y.Z  # 替换为 server 版本
+KITELINE_PLATFORM=linux # macOS 改为 macos
+KITELINE_ARCH=amd64     # ARM64 和 Apple 芯片改为 arm64
+name="kiteline-cli-$KITELINE_VERSION-$KITELINE_PLATFORM-$KITELINE_ARCH"
+url="https://github.com/Azure99/kiteline/releases/download/v$KITELINE_VERSION"
+curl -fLO "$url/$name.tar.gz"
+curl -fLO "$url/$name.tar.gz.sha256"
+sha256sum -c "$name.tar.gz.sha256"       # Linux
+# shasum -a 256 -c "$name.tar.gz.sha256" # macOS 用这一行代替上一行
+tar -xpzf "$name.tar.gz" --no-same-owner
+"./$name/bin/kiteline" --version
+"./$name/bin/kiteline" --help
+```
+
+将解包目录的 `bin` 加入 PATH，或以下文 `kiteline` 为简写，调用该目录中的完整入口路径。
+保留整个包目录；入口使用包内 runtime。macOS 浏览器下载的归档若被系统隔离，校验后按
+[手工安装说明](devices.md#linux-和-macos)移除解包目录的隔离属性。
+
+### Windows
+
+在 PowerShell 中执行：
+
+```powershell
+$version = 'X.Y.Z' # 替换为 server 版本
+$package = "kiteline-cli-$version-windows-amd64"
+$url = "https://github.com/Azure99/kiteline/releases/download/v$version"
+Invoke-WebRequest -UseBasicParsing "$url/$package.zip" -OutFile "$package.zip"
+Invoke-WebRequest -UseBasicParsing "$url/$package.zip.sha256" -OutFile "$package.zip.sha256"
+$expected = (Get-Content "$package.zip.sha256" -Raw).Trim().Split(' ')[0]
+if ((Get-FileHash "$package.zip" -Algorithm SHA256).Hash -ine $expected) { throw 'Checksum mismatch' }
+Expand-Archive -LiteralPath "$package.zip" -DestinationPath .
+Set-ExecutionPolicy -Scope Process Bypass -Force
+& ".\$package\bin\kiteline.ps1" --help
+```
+
+执行策略仅对当前 PowerShell 窗口临时放宽，关闭窗口后失效。下文的 `kiteline` 代表
+`& '.\包目录\bin\kiteline.ps1' <参数>`；无需管理员权限或安装步骤。
+普通命令可直接调用脚本并捕获 JSON。传入 token 的 PowerShell 管道须启动独立
+PowerShell 进程，使 token 成为 CLI 的 stdin；不能直接把管道接到脚本：
+
+```powershell
+$cli = 'C:\包目录\bin\kiteline.ps1'
+$shell = (Get-Process -Id $PID).Path
+Get-Content -Raw credential.txt | & $shell -NoProfile -ExecutionPolicy Bypass -File $cli auth login --server https://desk.example --token-stdin
+$reply = & $cli targets --json
+$reply | ConvertFrom-Json
+```
+
+文本或 JSON 参数直接传给 `& $cli`，避免外层 PowerShell 再解析引号。
+
+### 已有共同 agent 包
+
+agent 发布包也带有 `bin/kiteline`（Windows 为 `bin/kiteline.ps1`），与 agent 共用一份
+Node。便携目录可以直接调用这两个入口；系统安装后 CLI 位于
+`/opt/kiteline-agent/bin/kiteline`，Windows 位于
+`C:\Program Files\kiteline-agent\bin\kiteline.ps1`。安装、升级和卸载以整个 agent
+程序包为单位，只注册 `kiteline-agent`；不注册全局 `kiteline`，也不单独更新 CLI。
+操作前等待该包中的 CLI 调用结束。CLI 凭据独立，移除程序包不会撤销凭据。
+
+server 的下载接口只提供共同 agent 包，独立 CLI 从 Release 下载。独立 CLI 的升级是
+校验并解开新归档后改用新入口，删除旧包即可移除旧程序。源码开发仍可用
+`node cli/dist/main.js` 代替入口。
 
 ## 接入
 
@@ -136,6 +209,9 @@ kiteline files upload 'notes/设计副本.md' --file ./design.md --replace-versi
 检查版本；这不保证从下载至今无人修改，最后一次检查到发布之间仍可能有外部写入。
 上传替换叶节点符号链接本身，下载则跟随该链接。上传结果为 unknown 时可能已发布，先通过
 终端或下载观察，再决定下一步；CLI 不自动重传。
+
+在不区分大小写或 Unicode 等价拼写的文件系统中，异拼写可能在使用冲突版本后再次触发
+conflict。可通过共享终端核对实际名称，再决定是否替换。
 
 ## Web 接续与记录恢复
 
