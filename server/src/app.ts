@@ -5,12 +5,14 @@ import { extname, resolve, sep } from "node:path";
 import { WebSocketServer } from "ws";
 import { AppError, appVersion, asError, limits, record, string } from "@kiteline/shared/protocol";
 import type { ServerConfig } from "./config.js";
-import { Store, password } from "./store.js";
+import { Store, password, type Login } from "./store.js";
 import {
   AttemptLimiter,
   requireAgent,
   body,
   requireLogin,
+  requireOwner,
+  requireDevice,
   decodePath,
   errorStatus,
   failure,
@@ -38,10 +40,11 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
   const proxy = new HttpProxy(config, store, connections, channels);
   const bindingLimiter = new AttemptLimiter();
   const authenticationLimiter = new AttemptLimiter();
-  async function loginBody(request: IncomingMessage, entryOrigin: string) {
+  async function loginBody(request: IncomingMessage, entryOrigin: string, login: Login) {
     const input = record(await body(request));
     // Reading the body can outlive the login that admitted the request.
-    requireLogin(store, request, entryOrigin);
+    if (requireLogin(store, request, entryOrigin).id !== login.id)
+      throw new AppError("unauthenticated", "Login session ended");
     return input;
   }
   function newLogin(response: ServerResponse, entryOrigin: string) {
@@ -88,23 +91,78 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       if (path === "/api/session" && method === "GET")
         return json(response, 200, {
           expiresAt: login.expiresAt,
+          ...(login.deviceIds === null
+            ? {}
+            : {
+                kind: "cli",
+                id: login.id,
+                name: login.name,
+                deviceIds: login.deviceIds,
+              }),
         });
       if (path === "/api/logout" && method === "POST") {
         store.logout(login.id);
         connections.closeLogin(login.id);
-        response.setHeader("set-cookie", loginCookie(entryOrigin, "", ""));
+        if (login.deviceIds === null)
+          response.setHeader("set-cookie", loginCookie(entryOrigin, "", ""));
         return json(response, 200, {});
       }
       if (path === "/api/devices" && method === "GET")
-        return json(response, 200, { devices: connections.devices() });
-      if (path === "/api/agent/upgrade-command" && method === "GET")
+        return json(response, 200, { devices: connections.devices(login) });
+      if (path === "/api/agent/upgrade-command" && method === "GET") {
+        requireOwner(login);
         return json(response, 200, upgradeCommand(entryOrigin));
-      requireVersion(url.searchParams.get("appVersion"), "web");
-      if (path === "/api/tasks" && method === "GET")
+      }
+      requireVersion(url.searchParams.get("appVersion"), login.deviceIds === null ? "web" : "cli");
+      if (path === "/api/credentials") {
+        requireOwner(login);
+        if (method === "GET") return json(response, 200, { credentials: store.credentials() });
+        if (method === "POST") {
+          const input = await loginBody(request, entryOrigin, login);
+          const name = string(input.name, "credential name", limits.nameLength);
+          if (!Array.isArray(input.deviceIds) || !input.deviceIds.length)
+            throw new AppError("invalid_argument", "Select at least one device");
+          const deviceIds = [...new Set(input.deviceIds.map((id) => string(id, "device ID", 128)))];
+          const expiresAt = input.expiresAt;
+          if (
+            expiresAt !== null &&
+            (typeof expiresAt !== "string" ||
+              !Number.isFinite(Date.parse(expiresAt)) ||
+              Date.parse(expiresAt) <= Date.now() ||
+              Date.parse(expiresAt) >= Date.UTC(10000, 0, 1))
+          )
+            throw new AppError(
+              "invalid_argument",
+              "Choose a future expiry before year 10000, or explicit null for no expiry",
+            );
+          return json(
+            response,
+            200,
+            store.createCredential(
+              name,
+              deviceIds,
+              expiresAt === null ? null : new Date(expiresAt).toISOString(),
+            ),
+          );
+        }
+      }
+      const credential = /^\/api\/credentials\/([^/]+)$/.exec(path);
+      if (credential && method === "DELETE") {
+        requireOwner(login);
+        const id = decodePath(credential[1]!);
+        const revoked = store.revokeCredential(id);
+        if (revoked) connections.closeLogin(id);
+        return json(response, 200, { revoked });
+      }
+      if (path === "/api/tasks" && method === "GET") {
+        const deviceId = url.searchParams.get("deviceId") ?? undefined;
+        if (deviceId) requireDevice(login, deviceId);
         return json(response, 200, {
-          devices: connections.taskSummaries(url.searchParams.get("deviceId") ?? undefined),
+          devices: connections.taskSummaries(deviceId, login),
         });
+      }
       if (path === "/api/bindings" && method === "POST") {
+        requireOwner(login);
         const binding = store.newBinding();
         return json(response, 200, {
           ...binding,
@@ -112,8 +170,10 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
         });
       }
       const binding = /^\/api\/bindings\/([^/]+)$/.exec(path);
-      if (binding && method === "GET")
+      if (binding && method === "GET") {
+        requireOwner(login);
         return json(response, 200, store.binding(decodePath(binding[1]!)));
+      }
       const device = /^\/api\/devices\/([^/]+)(.*)$/.exec(path);
       const channel = /^\/api\/channels\/([^/]+)$/.exec(path);
       const content = /^\/api\/channels\/([^/]+)\/content$/.exec(path);
@@ -129,6 +189,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
         });
       if (device) {
         const id = decodePath(device[1]!);
+        requireDevice(login, id);
         const suffix = device[2];
         if (suffix === "/download" && method === "GET") {
           const pending = channels.create(
@@ -146,7 +207,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
           return;
         }
         if (suffix === "/channels" && method === "POST") {
-          const input = await loginBody(request, entryOrigin);
+          const input = await loginBody(request, entryOrigin, login);
           const pending = channels.create(id, login, string(input.kind), record(input.params));
           response.on("close", () => {
             if (!response.writableFinished)
@@ -155,17 +216,19 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
           return json(response, 200, await pending.ready);
         }
         if (!suffix && method === "PATCH") {
-          const input = await loginBody(request, entryOrigin);
+          requireOwner(login);
+          const input = await loginBody(request, entryOrigin, login);
           store.renameDevice(id, string(input.name, "device name", limits.nameLength));
           connections.broadcastDevices();
           return json(response, 200, {});
         }
         if (!suffix && method === "DELETE") {
+          requireOwner(login);
           connections.deleteDevice(id);
           return json(response, 200, {});
         }
         if (suffix === "/rpc" && method === "POST") {
-          const input = await loginBody(request, entryOrigin);
+          const input = await loginBody(request, entryOrigin, login);
           const requestId = string(input.id, "request id", 128);
           const pending = connections.rpc(
             id,
@@ -251,7 +314,10 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       function browserLogin() {
         requireOrigin(request, entryOrigin);
         const login = requireLogin(store, request, entryOrigin);
-        requireVersion(url.searchParams.get("appVersion"), "web");
+        requireVersion(
+          url.searchParams.get("appVersion"),
+          login.deviceIds === null ? "web" : "cli",
+        );
         return login;
       }
       const agentChannel = /^\/api\/agent\/channels\/([^/]+)$/.exec(url.pathname);

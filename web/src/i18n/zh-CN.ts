@@ -1,5 +1,24 @@
 import type { TranslationResources } from "./en";
 export const zhCN = {
+  credentials: {
+    title: "CLI 凭据",
+    scope: "凭据可按 agent 操作系统用户的权限操作选定设备；工作区不是沙箱。",
+    copyOnce: "请现在复制 token，关闭后无法再次查看。",
+    token: "操作 token",
+    copy: "复制 token",
+    copied: "已复制",
+    newToken: "创建另一个 token",
+    name: "名称",
+    devices: "设备",
+    noDevices: "请先绑定设备，再签发 token。",
+    days: "有效天数",
+    noExpiry: "无到期",
+    issue: "签发 token",
+    existing: "已签发凭据",
+    empty: "暂无凭据",
+    expires: "到期：{{time}}",
+    revoke: "撤销",
+  },
   schedules: {
     title: "定时任务",
     agentPrompt: "给 agent 的提示词",

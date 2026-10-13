@@ -13,6 +13,7 @@ import type { Connections } from "./connections.js";
 import type { Channels } from "./channels.js";
 import {
   requireLogin,
+  requireDevice,
   decodePath,
   closeIfBodyUnread,
   requireOrigin,
@@ -146,6 +147,7 @@ export class HttpProxy {
       target = proxyTarget(request.url ?? "");
       const entryOrigin = requestOrigin(request, this.config.trustProxyProto);
       const login = requireLogin(this.store, request, entryOrigin);
+      requireDevice(login, target.deviceId);
       if (head !== undefined || !["GET", "HEAD"].includes(request.method ?? "GET"))
         requireOrigin(request, entryOrigin);
       const device = this.connections.devices().find((value) => value.id === target!.deviceId);
@@ -234,7 +236,12 @@ export class HttpProxy {
       port: target.port,
       method: request.method,
       path: target.path,
-      headers: requestHeaders(request.headers, entryOrigin, head !== undefined),
+      headers: requestHeaders(
+        request.headers,
+        entryOrigin,
+        head !== undefined,
+        login.deviceIds !== null,
+      ),
     });
     upstream.on("error", fail);
     upstream.on("response", (result) => {

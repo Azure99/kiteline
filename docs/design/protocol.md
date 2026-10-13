@@ -15,7 +15,7 @@ server 和 agent 中的实现位置见[仓库结构](architecture.md#仓库结�
 
 ### 版本匹配
 
-server、agent 和工作台使用同一个产品版本 `appVersion`，版本必须完全相同，不同版本之间没有兼容适配。
+server、agent、工作台和远程 CLI 使用同一个产品版本 `appVersion`，版本必须完全相同，不同版本之间没有兼容适配。
 
 - agent 连接控制 WebSocket 时带 `?appVersion=`。版本不同时，server 返回 HTTP 426 和 `version_mismatch`，`details` 为 `{component: "agent", clientVersion, serverVersion}`。agent 记录原因并按退避间隔继续重连；server 记下观察到的 agent 版本（`Device.release`），工作台据此提示[升级 agent](../guide/devices.md#升级-agent)。最近一次观察的版本不同时，发往该设备的 RPC 和数据通道返回 `version_mismatch`，不返回 `offline`。
 - 工作台的每个 `/api/` 请求、事件连接和终端连接都带 `?appVersion=`。版本检查之后的接口在版本不同时返回 426（`component: "web"`）；登录和升级引导用到的接口不检查版本，见 [HTTP 接口](#http-接口)。
@@ -93,6 +93,16 @@ server 为每个 HTTP 请求和 WebSocket 升级确定一个入口 origin（`req
 
 **退出登录**（`POST /api/logout`）只删除当前登录会话：server 以关闭码 4003 关闭该登录的事件连接，取消它的全部数据通道，对它进行中的 RPC 发送 `rpc.cancel`，并用 `Max-Age=0` 清除 Cookie。其他登录不受影响。重置密码会删除全部登录会话，见[重置初始化 token 与密码](../guide/server.md#重置初始化-token-与密码)。
 
+### 设备操作凭据
+
+Web owner 在 `POST /api/credentials` 提交 `{name, deviceIds, expiresAt}`，至少选择一台已登记设备；`expiresAt` 为将来的绝对时间，显式 `null` 表示无到期。回复 `{token, credential}`，只有这一次返回原文。`GET /api/credentials` 列出摘要信息，`DELETE /api/credentials/:id` 定向撤销。三者均要求 owner 登录和版本匹配，写请求还要求 Origin。
+
+凭据复用 `sessions` 表、32 字节随机值和 SHA-256 摘要；`deviceIds=null` 表示 owner 登录，数组表示操作凭据，不另存身份类型。旧 owner 登录迁移后保留。CLI 发送 `Authorization: Bearer <token>`，仍遵守 Origin 和版本检查；版本错误的 component 为 `cli`。有效 owner Cookie 优先，以保留开发服务自己的 Authorization 认证；没有 owner Cookie 时才检查操作 Bearer。操作 token 不能用作 Cookie 或 agent 凭据。
+
+操作凭据仅能访问选定设备：HTTP 清单、task 摘要、事件初始/后续广播过滤设备，watch 订阅、设备 RPC/取消、文件/终端通道、下载和开发服务代理校验设备范围。通道消费仍绑定同一登录。设备内 RPC 不增加方法级 ACL；工作区不是 OS 沙箱。设备改名/删除、绑定码、升级命令与凭据管理只开放给 owner。开发服务代理移除用于 Kiteline 认证的 Bearer，不向项目服务泄露该 token。
+
+`GET /api/session` 对操作 token 返回 `{kind:"cli", id, name, deviceIds, expiresAt}`。自行 `POST /api/logout` 与 owner 定向撤销都复用现有登录清理，只取消该凭据的请求和通道，不结束共享 shell；已执行的输入不会回滚。到期时也按同一规则清理。无到期凭据持续有效至撤销或重置密码；没有续期服务。
+
 ### 尝试次数限制
 
 `/api/setup` 和 `/api/login` 共用一个限制器，`/api/agent/bind` 使用另一个。每个限制器分别统计全局和每个来源的尝试次数，成功和失败都计数，超过后返回 429 `busy`。来源是 TCP 连接的对端地址；经过同一反向代理地址的请求共用一个来源额度，全局额度仍分别检查。数值见[限额](../guide/reference.md#限额)。
@@ -106,7 +116,7 @@ server 为每个 HTTP 请求和 WebSocket 升级确定一个入口 origin（`req
 
 ## HTTP 接口
 
-“检查”列中，“登录”指有效的登录 Cookie，“Origin”指上一节的 Origin 检查，“版本”指 `appVersion` 查询参数必须与 server 相同。
+“检查”列中，“登录”指有效的 owner Cookie 或设备操作 Bearer token，“Origin”指上一节的 Origin 检查，“版本”指 `appVersion` 查询参数必须与 server 相同。
 
 | 方法   | 路径                                         | 用途                     | 检查               |
 | ------ | -------------------------------------------- | ------------------------ | ------------------ |

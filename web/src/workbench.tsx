@@ -17,6 +17,7 @@ import {
   PanelLeftOpen,
   Files as FilesIcon,
   CalendarClock,
+  KeyRound,
 } from "lucide-react";
 import type { Device } from "@kiteline/shared/protocol";
 import type { LoginSession } from "./auth";
@@ -60,6 +61,7 @@ import { FileOperationDialog, type FileAction } from "./files/operation-dialog";
 import { PortDialog } from "./devices/port-dialog";
 import { ReleaseNotice } from "./components/release-notice";
 import { AgentReleaseNotice } from "./devices/agent-release-notice";
+import { CredentialsDialog } from "./credentials-dialog";
 import { useTerminalFocus } from "./terminal/use-terminal-focus";
 import { deferredView, ViewBoundary } from "./components/deferred-view";
 
@@ -89,6 +91,7 @@ export function Workbench({
   const route = useRoute();
   const [error, setError] = useState<{ cause: unknown; downloadPath?: string }>();
   const [binding, setBinding] = useState(false);
+  const [credentials, setCredentials] = useState(false);
   const [picker, setPicker] = useState(false);
   const [openFiles, setOpenFiles] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -473,6 +476,10 @@ export function Workbench({
               )}
             </MenuTrigger>
             <MenuContent>
+              <MenuItem onClick={() => setCredentials(true)}>
+                <KeyRound />
+                {t(($) => $.credentials.title)}
+              </MenuItem>
               <MenuItem onClick={() => setOpenFiles(true)}>
                 <FilesIcon />
                 {t(($) => $.files.openFiles)}
@@ -539,6 +546,9 @@ export function Workbench({
         </div>
       </div>
       <OpenFiles store={drafts} open={openFiles} onOpenChange={setOpenFiles} />
+      <Dialog open={credentials} onOpenChange={setCredentials}>
+        {credentials && <CredentialsDialog devices={devices} />}
+      </Dialog>
       {device && portDevice === device.id && (
         <PortDialog key={device.id} device={device} onClose={() => setPortDevice(undefined)} />
       )}

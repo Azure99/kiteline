@@ -1,4 +1,24 @@
 export const en = {
+  credentials: {
+    title: "CLI credentials",
+    scope:
+      "A credential can operate the selected devices with the agent OS user’s permissions. Workspaces are not a sandbox.",
+    copyOnce: "Copy this token now. It will not be displayed again.",
+    token: "Operation token",
+    copy: "Copy token",
+    copied: "Copied",
+    newToken: "Create another token",
+    name: "Name",
+    devices: "Devices",
+    noDevices: "Bind a device before issuing a token.",
+    days: "Expires in days",
+    noExpiry: "No expiry",
+    issue: "Issue token",
+    existing: "Issued credentials",
+    empty: "No credentials",
+    expires: "Expires {{time}}",
+    revoke: "Revoke",
+  },
   schedules: {
     title: "Scheduled Tasks",
     agentPrompt: "Agent prompt",

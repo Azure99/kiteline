@@ -1,5 +1,5 @@
 import type { IncomingMessage, OutgoingHttpHeaders, ServerResponse } from "node:http";
-import type { Store } from "./store.js";
+import type { Store, Login } from "./store.js";
 import {
   AppError,
   appVersion,
@@ -22,9 +22,27 @@ export function requireAgent(store: Store, request: IncomingMessage) {
   return device;
 }
 export function requireLogin(store: Store, request: IncomingMessage, entryOrigin: string) {
-  const login = store.login(loginCookieToken(request, entryOrigin));
+  // A project's proxy Authorization header must keep working with an owner Cookie.
+  const login =
+    store.login(loginCookieToken(request, entryOrigin)) ??
+    store.login(
+      request.headers.authorization?.startsWith("Bearer ")
+        ? request.headers.authorization.slice(7)
+        : undefined,
+      "cli",
+    );
   if (!login) throw new AppError("unauthenticated", "Please sign in");
   return login;
+}
+export function requireOwner(login: Login) {
+  if (login.deviceIds !== null) throw new AppError("forbidden", "Owner login required");
+}
+export function permitsDevice(login: Login, deviceId: string) {
+  return login.deviceIds === null || login.deviceIds.includes(deviceId);
+}
+export function requireDevice(login: Login, deviceId: string) {
+  if (!permitsDevice(login, deviceId))
+    throw new AppError("forbidden", "Credential does not permit this device");
 }
 
 export function rawHead(status: number, message: string, headers: OutgoingHttpHeaders) {
@@ -53,10 +71,10 @@ export function checkReply(reply: Record<string, unknown>): Reply {
   return reply as unknown as Reply;
 }
 
-export function requireVersion(clientVersion: string | null, component: "agent" | "web") {
+export function requireVersion(clientVersion: string | null, component: "agent" | "web" | "cli") {
   if (clientVersion !== appVersion) throw versionMismatch(clientVersion, component);
 }
-export function versionMismatch(clientVersion: string | null, component: "agent" | "web") {
+export function versionMismatch(clientVersion: string | null, component: "agent" | "web" | "cli") {
   return new AppError(
     "version_mismatch",
     `${component} version ${clientVersion ?? "unknown"} does not match server ${appVersion}. Use the matching release.`,

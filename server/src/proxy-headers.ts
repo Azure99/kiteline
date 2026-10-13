@@ -25,8 +25,10 @@ export function requestHeaders(
   headers: IncomingHttpHeaders,
   entryOrigin: string,
   upgrade: boolean,
+  cliCredential = false,
 ) {
   const result = endToEnd(headers);
+  if (cliCredential) delete result.authorization;
   for (const name of Object.keys(result))
     if (name === "forwarded" || name.startsWith("x-forwarded-")) delete result[name];
   const url = new URL(entryOrigin);

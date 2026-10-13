@@ -63,7 +63,9 @@ async function main() {
           process.stdout.write("\n");
         }
         await store.resetPassword(value);
-        console.log("Password updated. All web login sessions have been invalidated.");
+        console.log(
+          "Password updated. All web login sessions and CLI credentials have been invalidated.",
+        );
       }
       return;
     }

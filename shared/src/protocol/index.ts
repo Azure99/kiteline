@@ -532,3 +532,9 @@ export function checkMetadata(value: unknown): Metadata {
   integer(record(data.settings).historyLines, "historyLines", 0, limits.terminalHistoryLines);
   return data as unknown as Metadata;
 }
+export interface CliCredential {
+  id: string;
+  name: string;
+  deviceIds: string[];
+  expiresAt: string | null;
+}

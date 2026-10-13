@@ -216,12 +216,18 @@ One server can have several origins at once, such as `http://192.168.1.10:8080` 
 
 For symptoms of proxy misconfiguration, such as `Origin mismatch`, `Invalid X-Forwarded-Proto`, terminals failing to connect or downloads not responding, and their remedies, see [Troubleshooting](reference.en.md#troubleshooting).
 
+## Issue a CLI credential
+
+In the workbench’s Owner menu, open **CLI credentials**. Enter a name, select one or more devices, and choose the number of days or explicitly select **No expiry**. Copy the token when it is shown; the server retains only its digest. Import it into the matching Kiteline CLI release. The device agent’s binding code is a different credential.
+
+The token can operate the selected devices with the agent OS user’s permissions; a workspace is not a sandbox. It cannot manage device registrations, binding codes or other credentials. To end access, revoke that entry in the same dialog, or use the CLI’s logout. Revocation closes that credential’s connections but keeps shared terminals running and does not undo input already sent. Other credentials keep working.
+
 ## Reset the setup token or password
 
 Both recovery commands must run with the server stopped and with the same data directory. Running them while the server is active produces `Lock file is already being held`.
 
 - `setup-token` generates a new setup token, replacing the previous one, with the same lifetime as the first token. It can only be used before owner setup; afterward it reports `Already initialized`.
-- `reset-password`: set a new owner password. Success invalidates every browser login session, requiring sign-in with the new password. Device bindings are unaffected. It works only after owner setup; before that it reports `Not initialized`.
+- `reset-password`: set a new owner password. Success invalidates every browser login session and CLI operation token. Sign in with the new password and issue replacement tokens. Device bindings are unaffected. It works only after owner setup; before that it reports `Not initialized`.
 
 Docker (run in the deployment directory):
 

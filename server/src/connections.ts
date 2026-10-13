@@ -21,7 +21,14 @@ import {
   type Reply,
 } from "@kiteline/shared/protocol";
 import type { Login, Store } from "./store.js";
-import { checkReply, requireVersion, serverError, versionMismatch } from "./http.js";
+import {
+  checkReply,
+  permitsDevice,
+  requireDevice,
+  requireVersion,
+  serverError,
+  versionMismatch,
+} from "./http.js";
 import { projectTaskSnapshot } from "./task-summary.js";
 
 export interface AgentConnection {
@@ -71,20 +78,23 @@ export class Connections {
   online(deviceId: string) {
     return this.agents.get(deviceId);
   }
-  devices() {
-    return this.store.devices().map((device) => {
-      const connection = this.agents.get(device.id);
-      const known = { ...device, release: this.releases.get(device.id) };
-      return connection
-        ? {
-            ...known,
-            status: "online" as const,
-            snapshot: connection.snapshot,
-            editorBytes: connection.editorBytes,
-            environment: connection.environment,
-          }
-        : known;
-    });
+  devices(login?: Login) {
+    return this.store
+      .devices()
+      .filter((device) => !login || permitsDevice(login, device.id))
+      .map((device) => {
+        const connection = this.agents.get(device.id);
+        const known = { ...device, release: this.releases.get(device.id) };
+        return connection
+          ? {
+              ...known,
+              status: "online" as const,
+              snapshot: connection.snapshot,
+              editorBytes: connection.editorBytes,
+              environment: connection.environment,
+            }
+          : known;
+      });
   }
   checkAgentVersion(id: string, version: string | null) {
     if (!this.agents.has(id)) {
@@ -104,14 +114,17 @@ export class Connections {
     return new AppError("offline", "Device offline");
   }
   broadcastDevices() {
-    const event = { type: "devices.changed", devices: this.devices() } satisfies BrowserEvent;
-    for (const browser of this.browsers) send(browser.socket, event);
+    for (const browser of this.browsers)
+      send(browser.socket, { type: "devices.changed", devices: this.devices(browser.login) });
   }
-  taskSummaries(deviceId?: string) {
-    return this.store.taskSummaries(deviceId).map((item) => ({
-      ...item,
-      current: this.agents.get(item.deviceId)?.taskRevision !== undefined,
-    }));
+  taskSummaries(deviceId?: string, login?: Login) {
+    return this.store
+      .taskSummaries(deviceId)
+      .filter((item) => !login || permitsDevice(login, item.deviceId))
+      .map((item) => ({
+        ...item,
+        current: this.agents.get(item.deviceId)?.taskRevision !== undefined,
+      }));
   }
   notify(loginId: string, event: BrowserEvent) {
     for (const browser of this.browsers)
@@ -183,10 +196,11 @@ export class Connections {
               connection.taskRevision = snapshot.revision;
               this.store.saveTaskSnapshot(id, snapshot);
               for (const browser of this.browsers)
-                send(browser.socket, {
-                  type: "tasks.changed",
-                  deviceId: id,
-                } satisfies BrowserEvent);
+                if (permitsDevice(browser.login, id))
+                  send(browser.socket, {
+                    type: "tasks.changed",
+                    deviceId: id,
+                  } satisfies BrowserEvent);
             }
             break;
           }
@@ -290,7 +304,7 @@ export class Connections {
     const browser: Browser = { socket, login, targets: [] };
     this.browsers.add(browser);
     heartbeat(socket);
-    send(socket, { type: "devices.changed", devices: this.devices() } satisfies BrowserEvent);
+    send(socket, { type: "devices.changed", devices: this.devices(login) } satisfies BrowserEvent);
     socket.on("message", (data, binary) => {
       try {
         if (binary) throw new Error("Expected JSON");
@@ -304,7 +318,9 @@ export class Connections {
         const previous = browser.targets;
         browser.targets = message.targets.map((value) => {
           const item = record(value);
-          return { deviceId: string(item.deviceId), workspaceId: string(item.workspaceId) };
+          const deviceId = string(item.deviceId);
+          requireDevice(login, deviceId);
+          return { deviceId, workspaceId: string(item.workspaceId) };
         });
         for (const id of new Set([...previous, ...browser.targets].map((t) => t.deviceId)))
           this.updateWatch(id);

@@ -216,12 +216,18 @@ Caddy 自动申请证书、原样转发 `Host`、用实际协议覆盖 `X-Forwar
 
 反向代理配置错误时的现象（例如 `Origin mismatch`、`Invalid X-Forwarded-Proto`、终端无法连接、下载没有响应）和处理见[常见问题](reference.md#常见问题)。
 
+## 签发 CLI 凭据
+
+在工作台右上角的“拥有者菜单”打开 **CLI 凭据**，填写名称、选择一台或多台设备，再填写有效天数或显式选择 **无到期**。token 只展示这一次，请复制并导入相同版本的 Kiteline CLI；server 只保存摘要。设备 agent 使用的绑定码是另一种凭据。
+
+token 可按 agent 操作系统用户的权限操作选定设备，工作区不是沙箱；它不能管理设备登记、绑定码或其他凭据。结束授权时，在同一对话框撤销对应条目，或从 CLI 退出。撤销会关闭该凭据的连接，保留共享终端，不撤回已经发送的输入；其他凭据继续有效。
+
 ## 重置初始化 token 与密码
 
 两个恢复命令都必须在 server 停止后、使用同一个数据目录执行；server 运行时执行会报 `Lock file is already being held`。
 
 - `setup-token`：生成新的初始化 token，替换旧的，有效期与首次打印的 token 相同。只能在设置拥有者之前使用，之后执行会报 `Already initialized`。
-- `reset-password`：设置新的拥有者密码。成功后所有浏览器的登录会话都失效，需要用新密码重新登录。设备的绑定不受影响。只能在设置拥有者之后使用，之前执行会报 `Not initialized`。
+- `reset-password`：设置新的拥有者密码。成功后所有浏览器登录会话和 CLI 操作 token 都失效，需要用新密码重新登录并重新签发 token。设备的绑定不受影响。只能在设置拥有者之后使用，之前执行会报 `Not initialized`。
 
 Docker（在部署目录中执行）：
 

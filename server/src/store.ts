@@ -9,6 +9,7 @@ import {
   type Metadata,
   type TaskSnapshot,
   type DeviceTaskSummary,
+  type CliCredential,
 } from "@kiteline/shared/protocol";
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -21,7 +22,9 @@ type DeviceRow = {
 };
 export interface Login {
   id: string;
-  expiresAt: string;
+  expiresAt: string | null;
+  name: string | null;
+  deviceIds: string[] | null;
 }
 
 export function password(value: unknown): string {
@@ -38,10 +41,18 @@ export class Store {
       this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
       CREATE TABLE IF NOT EXISTS owner (id INTEGER PRIMARY KEY CHECK(id=1), password TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS setup (id INTEGER PRIMARY KEY CHECK(id=1), hash TEXT NOT NULL, expiresAt TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, expiresAt TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, expiresAt TEXT, name TEXT, deviceIds TEXT);
       CREATE TABLE IF NOT EXISTS devices (id TEXT PRIMARY KEY, name TEXT NOT NULL, tokenHash TEXT UNIQUE NOT NULL, lastSeenAt TEXT, snapshot TEXT);
       CREATE TABLE IF NOT EXISTS bindings (id TEXT PRIMARY KEY, hash TEXT UNIQUE NOT NULL, expiresAt TEXT NOT NULL, consumedDeviceId TEXT REFERENCES devices(id));
       CREATE TABLE IF NOT EXISTS taskSummaries (deviceId TEXT PRIMARY KEY REFERENCES devices(id), snapshot TEXT NOT NULL, observedAt TEXT NOT NULL);`);
+      const columns = this.db.prepare("PRAGMA table_info(sessions)").all();
+      if (!columns.some((column) => column.name === "deviceIds"))
+        this.transaction(() => {
+          this.db.exec(`ALTER TABLE sessions RENAME TO oldSessions;
+            CREATE TABLE sessions (id TEXT PRIMARY KEY, expiresAt TEXT, name TEXT, deviceIds TEXT);
+            INSERT INTO sessions (id,expiresAt) SELECT id,expiresAt FROM oldSessions;
+            DROP TABLE oldSessions;`);
+        });
     } catch (error) {
       this.db.close();
       throw error;
@@ -96,14 +107,44 @@ export class Store {
   createLogin(lifetime: number) {
     const token = secret();
     const expiresAt = new Date(Date.now() + lifetime).toISOString();
-    this.db.prepare("INSERT INTO sessions VALUES(?,?)").run(digest(token), expiresAt);
-    return { token, id: digest(token), expiresAt };
+    this.db.prepare("INSERT INTO sessions(id,expiresAt) VALUES(?,?)").run(digest(token), expiresAt);
+    return { token, id: digest(token), expiresAt, name: null, deviceIds: null };
   }
-  login(token: string | undefined): Login | undefined {
+  login(token: string | undefined, kind: "owner" | "cli" = "owner"): Login | undefined {
     if (!token) return undefined;
-    return this.db
-      .prepare("SELECT id,expiresAt FROM sessions WHERE id=? AND expiresAt>?")
-      .get(digest(token), new Date().toISOString()) as Login | undefined;
+    const row = this.db
+      .prepare(
+        `SELECT * FROM sessions WHERE id=? AND (expiresAt IS NULL OR expiresAt>?)
+        AND deviceIds IS ${kind === "cli" ? "NOT " : ""}NULL`,
+      )
+      .get(digest(token), new Date().toISOString()) as
+      | (Omit<Login, "deviceIds"> & { deviceIds: string | null })
+      | undefined;
+    return row
+      ? { ...row, deviceIds: row.deviceIds === null ? null : JSON.parse(row.deviceIds) }
+      : undefined;
+  }
+  createCredential(name: string, deviceIds: string[], expiresAt: string | null) {
+    const known = new Set(this.devices().map((device) => device.id));
+    if (deviceIds.some((id) => !known.has(id)))
+      throw new AppError("not_found", "Selected device not found");
+    const token = secret();
+    const credential: CliCredential = { id: digest(token), name, deviceIds, expiresAt };
+    this.db
+      .prepare("INSERT INTO sessions VALUES(?,?,?,?)")
+      .run(credential.id, expiresAt, name, JSON.stringify(deviceIds));
+    return { token, credential };
+  }
+  credentials(): CliCredential[] {
+    return (
+      this.db
+        .prepare("SELECT * FROM sessions WHERE deviceIds IS NOT NULL ORDER BY rowid DESC")
+        .all() as (Omit<CliCredential, "deviceIds"> & { deviceIds: string })[]
+    ).map((row) => ({ ...row, deviceIds: JSON.parse(row.deviceIds) as string[] }));
+  }
+  revokeCredential(id: string) {
+    return !!this.db.prepare("DELETE FROM sessions WHERE id=? AND deviceIds IS NOT NULL").run(id)
+      .changes;
   }
   logout(id: string) {
     this.db.prepare("DELETE FROM sessions WHERE id=?").run(id);
