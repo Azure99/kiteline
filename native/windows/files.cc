@@ -2,26 +2,38 @@
 #include <cstring>
 
 namespace kiteline {
+enum class FileOperation { attributes, entry, rename };
 struct FileWork {
   napi_async_work work = nullptr;
   napi_deferred result;
   std::wstring source, target;
-  bool rename = false, replace = false;
+  FileOperation operation = FileOperation::attributes;
+  bool replace = false;
   DWORD error = 0;
   FILE_ATTRIBUTE_TAG_INFO attributes{};
+  WIN32_FIND_DATAW entry{};
 };
 static void executeFile(napi_env, void *data) {
   auto &item = *static_cast<FileWork *>(data);
   try {
-    if (item.rename && !item.replace) {
+    if (item.operation == FileOperation::entry) {
+      HANDLE search = FindFirstFileW(item.source.c_str(), &item.entry);
+      check(search != INVALID_HANDLE_VALUE, "read directory entry");
+      check(FindClose(search), "close directory entry search");
+      item.attributes.FileAttributes = item.entry.dwFileAttributes;
+      item.attributes.ReparseTag = item.entry.dwReserved0;
+      return;
+    }
+    const bool rename = item.operation == FileOperation::rename;
+    if (rename && !item.replace) {
       check(MoveFileExW(item.source.c_str(), item.target.c_str(), 0), "rename without replacement");
       return;
     }
-    Handle file(CreateFileW(item.source.c_str(), item.rename ? DELETE : FILE_READ_ATTRIBUTES,
+    Handle file(CreateFileW(item.source.c_str(), rename ? DELETE : FILE_READ_ATTRIBUTES,
       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
       FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
     check(file.valid(), "open file without following reparse point");
-    if (item.rename) {
+    if (rename) {
       size_t length = item.target.size() * sizeof(wchar_t);
       std::vector<BYTE> buffer(sizeof(FILE_RENAME_INFO) + length);
       auto info = reinterpret_cast<FILE_RENAME_INFO *>(buffer.data());
@@ -51,10 +63,19 @@ static void completeFile(napi_env env, napi_status status, void *data) {
     napi_reject_deferred(env, item->result, error);
   } else {
     napi_value result = nothing(env);
-    if (!item->rename) {
+    if (item->operation != FileOperation::rename) {
       napi_create_object(env, &result);
       napi_set_named_property(env, result, "attributes", number(env, item->attributes.FileAttributes));
       napi_set_named_property(env, result, "tag", number(env, item->attributes.ReparseTag));
+      if (item->operation == FileOperation::entry) {
+        napi_value size, mtime;
+        uint64_t bytes = (uint64_t(item->entry.nFileSizeHigh) << 32) | item->entry.nFileSizeLow;
+        uint64_t ticks = (uint64_t(item->entry.ftLastWriteTime.dwHighDateTime) << 32) | item->entry.ftLastWriteTime.dwLowDateTime;
+        napi_create_double(env, double(bytes), &size);
+        napi_create_double(env, double(ticks / 10000) - 11644473600000.0, &mtime);
+        napi_set_named_property(env, result, "size", size);
+        napi_set_named_property(env, result, "mtimeMs", mtime);
+      }
     }
     napi_resolve_deferred(env, item->result, result);
   }
@@ -80,11 +101,20 @@ static napi_value fileAttributes(napi_env env, napi_callback_info info) {
     return queueFile(env, std::move(item));
   });
 }
+static napi_value directoryEntry(napi_env env, napi_callback_info info) {
+  return call(env, [&] {
+    auto item = std::make_unique<FileWork>();
+    item->source = string(env, arguments(env, info, 1)[0]);
+    item->operation = FileOperation::entry;
+    return queueFile(env, std::move(item));
+  });
+}
 static napi_value renameFile(napi_env env, napi_callback_info info) {
   return call(env, [&] {
     auto args = arguments(env, info, 3);
     auto item = std::make_unique<FileWork>();
-    item->source = string(env, args[0]); item->target = string(env, args[1]); item->rename = true;
+    item->source = string(env, args[0]); item->target = string(env, args[1]);
+    item->operation = FileOperation::rename;
     if (napi_get_value_bool(env, args[2], &item->replace) != napi_ok)
       throw std::invalid_argument("Expected replacement flag");
     return queueFile(env, std::move(item));
@@ -93,6 +123,7 @@ static napi_value renameFile(napi_env env, napi_callback_info info) {
 void exportFiles(napi_env env, napi_value exports) {
   napi_property_descriptor properties[] = {
     {"fileAttributes", nullptr, fileAttributes, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"directoryEntry", nullptr, directoryEntry, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"renameFile", nullptr, renameFile, nullptr, nullptr, nullptr, napi_default, nullptr},
   };
   napi_define_properties(env, exports, sizeof(properties) / sizeof(*properties), properties);

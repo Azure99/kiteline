@@ -37,3 +37,4 @@ napi_reject_deferred
 napi_create_async_work
 napi_queue_async_work
 napi_delete_async_work
+napi_create_double

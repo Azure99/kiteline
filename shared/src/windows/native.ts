@@ -13,6 +13,12 @@ interface WindowsNative {
   listeningPorts(): Promise<number[]>;
   privateDirectory(path: string): void;
   fileAttributes(path: string): Promise<{ attributes: number; tag: number }>;
+  directoryEntry(path: string): Promise<{
+    attributes: number;
+    tag: number;
+    size: number;
+    mtimeMs: number;
+  }>;
   renameFile(source: string, target: string, replace: boolean): Promise<void>;
   lock(path: string, shared: boolean): NativeHandle;
   closeHandle(handle: NativeHandle): void;

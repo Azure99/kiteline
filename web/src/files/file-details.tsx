@@ -71,7 +71,7 @@ export function FileDetails({
           {entry.kind !== "directory" && (
             <>
               <dt>{t(($) => $.files.size)}</dt>
-              <dd>{formatBytes(entry.size)}</dd>
+              <dd>{entry.kind === "symlink" ? "—" : formatBytes(entry.size)}</dd>
             </>
           )}
           {entry.mtime && (

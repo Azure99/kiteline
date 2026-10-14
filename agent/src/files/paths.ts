@@ -113,13 +113,22 @@ export function devicePath(value: unknown) {
   );
 }
 
-export async function linkType(path: string | Buffer) {
-  if (process.platform !== "win32") return;
-  const { attributes, tag } = await windowsNative().fileAttributes(toNamespacedPath(String(path)));
+function windowsLinkType(
+  path: string | Buffer,
+  { attributes, tag }: { attributes: number; tag: number },
+) {
   if (!(attributes & 0x400)) return;
   if (tag === 0xa0000003) return "junction";
   if (tag === 0xa000000c) return attributes & 0x10 ? "dir" : "file";
   throw new AppError("unsupported", `Unsupported Windows reparse point: ${String(path)}`);
+}
+
+export async function linkType(path: string | Buffer) {
+  if (process.platform !== "win32") return;
+  return windowsLinkType(
+    path,
+    await windowsNative().fileAttributes(toNamespacedPath(String(path))),
+  );
 }
 
 export async function entryInfo(path: string | Buffer) {
@@ -226,5 +235,35 @@ export async function readEntry(parent: string, rawName: Buffer, path?: string):
     size: Number(info.size),
     mtime: new Date(Number(info.mtimeMs)).toISOString(),
     ...(info.isSymbolicLink() ? { linkTarget: await readlink(absolute) } : {}),
+  };
+}
+
+export async function readDirectoryEntry(
+  parent: string,
+  rawName: Buffer,
+  path: string,
+): Promise<Entry> {
+  if (process.platform !== "win32" || !isUtf8(rawName)) return readEntry(parent, rawName, path);
+  const name = rawName.toString("utf8");
+  const absolute = join(parent, name);
+  // Enumeration can read metadata for entries whose attribute handles are locked or denied.
+  const info = await windowsNative().directoryEntry(toNamespacedPath(absolute));
+  const link = windowsLinkType(absolute, info);
+  let linkTarget: string | undefined;
+  if (link) {
+    try {
+      linkTarget = await readlink(absolute);
+    } catch (error) {
+      // Node treats volume mount points as directories and rejects readlink with EINVAL.
+      if (link !== "junction" || (error as NodeJS.ErrnoException).code !== "EINVAL") throw error;
+    }
+  }
+  return {
+    name,
+    path,
+    kind: linkTarget !== undefined ? "symlink" : info.attributes & 0x10 ? "directory" : "file",
+    size: info.size,
+    mtime: new Date(info.mtimeMs).toISOString(),
+    ...(linkTarget !== undefined ? { linkTarget } : {}),
   };
 }

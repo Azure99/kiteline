@@ -4,7 +4,7 @@ import type { BigIntStats, Dir, Dirent } from "node:fs";
 import { basename, dirname, join, posix } from "node:path";
 import { AppError, type DirectoryListing, type Entry } from "@kiteline/shared/protocol";
 import { publish } from "./publish.js";
-import { devicePath, entryName, readEntry, realPath, sameObject } from "./paths.js";
+import { devicePath, entryName, readDirectoryEntry, realPath, sameObject } from "./paths.js";
 import { CursorBudget, CursorTable } from "../cursor-budget.js";
 
 interface Cursor {
@@ -80,7 +80,7 @@ export class Directories {
         const rawName: Buffer = Buffer.isBuffer(item.name) ? item.name : Buffer.from(item.name);
         let entry: Entry;
         try {
-          entry = await readEntry(
+          entry = await readDirectoryEntry(
             path,
             rawName,
             (relativeEntries ? posix.join : join)(entryParent, rawName.toString("utf8")),
