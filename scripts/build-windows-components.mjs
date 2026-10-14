@@ -271,6 +271,10 @@ export function assembleWindowsComponents(directory, tmuxDirectory, addonDirecto
     copy(join(tmuxDirectory, "tmux-LICENSE"), join(native, "licenses/tmux.txt"));
     for (const directory of ["etc", "tmp"]) mkdirSync(join(native, "msys", directory));
     copy(join(addonDirectory, "kiteline-windows.node"), join(native, "kiteline-windows.node"));
+    copy(
+      join(addonDirectory, "kiteline-agent.exe"),
+      join(destination, "command/kiteline-agent.exe"),
+    );
     cpSync(join(addonDirectory, "licenses"), join(native, "licenses"), { recursive: true });
     prepareWindowsNotices(directory, native);
 

@@ -76,6 +76,8 @@ winget install --id Git.Git --source winget
 
 After installation, open a new PowerShell window and check that `git --version` runs. Use PowerShell for subsequent agent commands. The project user must have signed in to Windows at least once and have a user profile. If the project user is a standard user, enter an administrator's account and password at the installation UAC prompt.
 
+Run with ordinary privileges for daily use. If the project account is itself an administrator and needs those privileges, stop the agent, open PowerShell with “Run as administrator” under that same account, and run `kiteline-agent run`. Terminal, file, Git and scheduled-task operations will then also have administrator privileges. Entering another administrator’s credentials switches accounts and cannot run the original project user’s installation.
+
 ### UTF-8 locale
 
 On Linux and macOS, the agent requires a UTF-8 locale. Run `locale charmap`; it should print `UTF-8`. Otherwise, run `locale -a` to list installed locales, then set one in the shell configuration read at project-user login: `~/.bash_profile` for bash, or `~/.profile` if that file does not exist; `~/.zprofile` for zsh; `~/.profile` for Alpine ash.
@@ -98,7 +100,7 @@ Make sure `KITELINE_AGENT_HOME` and `KITELINE_AGENT_RUN_DIR` are not set in the 
 The command checks the system, architecture and basic tools, downloads the agent release matching the server, verifies SHA-256, and runs `kiteline-agent check` for prerequisites. It then installs the agent, binds it with the binding code, and runs it in the foreground in the current terminal.
 
 - Linux and macOS: installation uses sudo to write to `/opt/kiteline-agent`, with the public launcher at `/usr/local/bin/kiteline-agent`. sudo prompts for a password; root installs directly.
-- Windows: confirm the UAC prompt before installation. A new administrator PowerShell window installs to `C:\Program Files\kiteline-agent`, with the public launcher at `C:\ProgramData\kiteline-agent\kiteline-agent.ps1`. Binding and running still happen in the original window. The command relaxes PowerShell execution policy temporarily for this process only.
+- Windows: confirm the UAC prompt before installation. A new administrator PowerShell window installs to `C:\Program Files\kiteline-agent`, with the daily EXE in the protected `C:\Program Files\kiteline-agent\command` directory, which the installer adds to Machine PATH. Binding and running still happen in the original window. The command relaxes PowerShell execution policy temporarily for this process only.
 
 For a foreground agent, Ctrl-C stops the agent and ends its terminal sessions and active scheduled-task runs. Closing the terminal also does this on Linux and macOS. On Windows, closing the PowerShell window directly or signing out forcibly ends the agent without cleanup: active scheduled-task runs require review at the next startup (see [Review after an agent restart](scheduled-tasks.en.md#review-after-an-agent-restart)). Remove leftover session directories as described in [Clean up leftover terminal sessions](reference.en.md#clean-up-leftover-terminal-sessions). To start again later, run as the project user:
 
@@ -106,11 +108,7 @@ For a foreground agent, Ctrl-C stops the agent and ends its terminal sessions an
 kiteline-agent run
 ```
 
-```powershell
-& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" run
-```
-
-See [kiteline-agent commands](reference.en.md#kiteline-agent-commands) for Windows invocation forms and execution-policy prerequisites.
+After a successful Windows web install/upgrade command, the entry directory is also added to the current window’s PATH, so you can restart there after Ctrl-C. Other existing windows and their child processes keep their old environment; open a new PowerShell window from the Windows Start menu to get the new PATH. See [kiteline-agent commands](reference.en.md#kiteline-agent-commands) for maintenance and complex arguments.
 
 You do not need to bind again when restarting. To keep the agent running after closing the terminal or signing out, see [Run in the background](#run-in-the-background).
 
@@ -192,7 +190,7 @@ Set-Location 'C:\Users\PROJECT_USER\Downloads'
 & (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File '.\kiteline-agent-X.Y.Z-windows-amd64\bin\kiteline-agent.ps1' install --user 'COMPUTER\PROJECT_USER'
 ```
 
-Close the administrator window after installation. Back in the project user's window, run the web app's [bind-only command](#bind-only-command), then the Windows startup command in [Connect using the web command](#connect-using-the-web-command).
+Close the administrator window after installation. Open a new ordinary PowerShell window as the project user from the Windows Start menu, then run the web app's [bind-only command](#bind-only-command), then the Windows startup command in [Connect using the web command](#connect-using-the-web-command).
 
 ## Add a workspace
 
@@ -344,7 +342,7 @@ kiteline-agent run
 
 ```powershell
 $env:HTTPS_PROXY = 'http://proxy.example.com:3128'
-& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" run
+kiteline-agent run
 ```
 
 Install and upgrade commands download with curl, or PowerShell on Windows. curl recognizes only lowercase `http_proxy`, so HTTP origins need that lowercase variable; the example sets both types. On Windows, the agent reads environment variables only and does not use system proxy settings, so set the variables above for the agent too.
@@ -459,8 +457,13 @@ sudo /usr/local/bin/kiteline-agent upgrade --archive "$PWD/kiteline-agent-X.Y.Z-
 ```
 
 ```powershell
-# Run in administrator PowerShell
-& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" upgrade --archive 'C:\Users\PROJECT_USER\Downloads\kiteline-agent-X.Y.Z-windows-amd64.zip'
+# Run in administrator PowerShell, using the new package’s maintenance script
+Set-Location 'C:\Users\PROJECT_USER\Downloads'
+$package = 'kiteline-agent-X.Y.Z-windows-amd64'
+$expected = (Get-Content -LiteralPath "$package.zip.sha256").Split(' ')[0]
+if ((Get-FileHash -LiteralPath "$package.zip" -Algorithm SHA256).Hash -ine $expected) { throw 'Package SHA256 verification failed' }
+Expand-Archive -LiteralPath "$package.zip" -DestinationPath .
+& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File ".\$package\bin\kiteline-agent.ps1" upgrade --archive "$PWD\$package.zip"
 ```
 
 Adjust the version and filename to the downloaded package. Add `--yes` to skip confirmation.
@@ -488,6 +491,8 @@ On Windows, in administrator PowerShell:
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" uninstall
 ```
+
+Both uninstall modes remove the EXE entry and this product’s Machine PATH item, preserving other PATH contents. Existing windows may retain the old PATH, but the entry file has been removed.
 
 Reinstalling for the same project user with the original data path reuses binding and data. On Windows, pass custom data and runtime paths again when reinstalling; the installer does not remember them after the installation record is deleted. Unix installation reuses `/etc/kiteline-agent.env`; remove it or correct its data path before changing the project user.
 

@@ -76,6 +76,8 @@ winget install --id Git.Git --source winget
 
 安装后打开新的 PowerShell 窗口，确认 `git --version` 可以执行。后续 agent 命令都在 PowerShell 中执行。项目用户需要已经登录过一次 Windows（已有用户配置文件）。项目用户是标准用户时，安装过程中的 UAC 提示需要输入管理员的账户和密码。
 
+日常以普通权限运行。项目账户本身是管理员、且确实需要其管理员权限时，先停止 agent，再以同一账户“以管理员身份运行”PowerShell，执行 `kiteline-agent run`；此时终端、文件、Git 和定时任务也会获得管理员权限。标准用户输入另一管理员凭据会切换账户，不能用它运行原项目用户的安装。
+
 ### UTF-8 locale
 
 Linux 和 macOS 上，agent 要求运行环境使用 UTF-8 locale。执行 `locale charmap`，输出应为 `UTF-8`。不是时，用 `locale -a` 查看已安装的 locale，然后在项目用户登录时读取的 Shell 配置中设置（bash 为 `~/.bash_profile`，没有该文件时为 `~/.profile`；zsh 为 `~/.zprofile`；Alpine 的 ash 为 `~/.profile`）：
@@ -98,7 +100,7 @@ export LANG=en_US.UTF-8  # CentOS 7、macOS
 接入命令先检查系统、架构和基础工具，从 server 下载与 server 版本相同的 agent 发布包并校验 SHA-256，执行 `kiteline-agent check` 检查前置条件，然后安装 agent、用绑定码绑定，最后在当前终端前台运行 agent。
 
 - Linux 和 macOS：用 sudo 安装到 `/opt/kiteline-agent`，命令入口为 `/usr/local/bin/kiteline-agent`。sudo 会询问密码；以 root 执行时直接安装。
-- Windows：安装前弹出 UAC 提示，确认后由一个新的管理员 PowerShell 窗口安装到 `C:\Program Files\kiteline-agent`，命令入口为 `C:\ProgramData\kiteline-agent\kiteline-agent.ps1`；绑定和运行仍在原窗口中进行。命令只为本次进程临时放宽 PowerShell 执行策略。
+- Windows：安装前弹出 UAC 提示，确认后由一个新的管理员 PowerShell 窗口安装到 `C:\Program Files\kiteline-agent`，日常 EXE 入口位于受保护的 `C:\Program Files\kiteline-agent\command`，安装器将该目录加入 Machine PATH；绑定和运行仍在原窗口中进行。命令只为本次进程临时放宽 PowerShell 执行策略。
 
 agent 在前台运行时，按 Ctrl-C 会停止 agent，并结束它管理的终端会话和正在执行的定时任务运行；Linux 和 macOS 上关闭终端也是如此。Windows 上直接关闭 PowerShell 窗口或注销会强制结束 agent，不做清理：正在执行的定时任务运行在下次启动时需要核查（见 [agent 重启后的核查](scheduled-tasks.md#agent-重启后的核查)），留下的会话目录按[清理遗留的终端会话](reference.md#清理遗留的终端会话)删除。以后再次启动，以项目用户执行：
 
@@ -106,11 +108,7 @@ agent 在前台运行时，按 Ctrl-C 会停止 agent，并结束它管理的终
 kiteline-agent run
 ```
 
-```powershell
-& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" run
-```
-
-Windows 调用方式和执行策略前提见 [kiteline-agent 命令](reference.md#kiteline-agent-命令)。
+Windows 网页接入/升级命令成功后，也会将入口目录加入当前窗口的 PATH，Ctrl-C 后可在同一窗口直接重启。其他已打开窗口及其子进程仍保留旧环境；从 Windows 开始菜单另开 PowerShell 窗口取得新 PATH。维护和复杂参数调用见 [kiteline-agent 命令](reference.md#kiteline-agent-命令)。
 
 再次启动不需要重新绑定。要让 agent 在关闭终端或注销后继续运行，见[后台运行](#后台运行)。
 
@@ -192,7 +190,7 @@ Set-Location 'C:\Users\PROJECT_USER\Downloads'
 & (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File '.\kiteline-agent-X.Y.Z-windows-amd64\bin\kiteline-agent.ps1' install --user 'COMPUTER\PROJECT_USER'
 ```
 
-安装完成后关闭管理员窗口，回到项目用户的窗口，执行网页上的[仅绑定命令](#仅绑定命令)，再用[用网页命令接入](#用网页命令接入)中的 Windows 启动命令运行 agent。
+安装完成后关闭管理员窗口，从 Windows 开始菜单新开项目用户的普通 PowerShell 窗口，执行网页上的[仅绑定命令](#仅绑定命令)，再用[用网页命令接入](#用网页命令接入)中的 Windows 启动命令运行 agent。
 
 ## 添加工作区
 
@@ -344,7 +342,7 @@ kiteline-agent run
 
 ```powershell
 $env:HTTPS_PROXY = 'http://proxy.example.com:3128'
-& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" run
+kiteline-agent run
 ```
 
 接入和升级命令中的下载由 curl（Windows 上由 PowerShell）完成。curl 只识别小写的 `http_proxy`，所以 HTTP 入口要设置小写变量，上例两种都设置了。Windows 上 agent 只读取环境变量，不使用系统的代理设置，所以也要为 agent 设置上述环境变量。
@@ -459,8 +457,13 @@ sudo /usr/local/bin/kiteline-agent upgrade --archive "$PWD/kiteline-agent-X.Y.Z-
 ```
 
 ```powershell
-# 在管理员 PowerShell 中执行
-& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" upgrade --archive 'C:\Users\PROJECT_USER\Downloads\kiteline-agent-X.Y.Z-windows-amd64.zip'
+# 在管理员 PowerShell 中执行，使用新包内的维护脚本
+Set-Location 'C:\Users\PROJECT_USER\Downloads'
+$package = 'kiteline-agent-X.Y.Z-windows-amd64'
+$expected = (Get-Content -LiteralPath "$package.zip.sha256").Split(' ')[0]
+if ((Get-FileHash -LiteralPath "$package.zip" -Algorithm SHA256).Hash -ine $expected) { throw 'Package SHA256 verification failed' }
+Expand-Archive -LiteralPath "$package.zip" -DestinationPath .
+& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File ".\$package\bin\kiteline-agent.ps1" upgrade --archive "$PWD\$package.zip"
 ```
 
 版本号和文件名按实际下载的发布包修改。加 `--yes` 跳过确认。
@@ -488,6 +491,8 @@ Windows（管理员 PowerShell）：
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" uninstall
 ```
+
+两种卸载模式都会删除 EXE 入口及本产品的 Machine PATH 项，保留其他 PATH 内容。已打开窗口仍可能保留旧 PATH，入口文件已经删除。
 
 同一项目用户使用原数据路径重新安装时，可以复用绑定和数据。Windows 自定义数据或运行目录需要在重新安装时再次传入；安装记录删除后，安装器不会记住它们。Unix 重新安装会沿用 `/etc/kiteline-agent.env`；更换项目用户前，先删除它或改正其中的数据路径。
 

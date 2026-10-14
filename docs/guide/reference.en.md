@@ -34,16 +34,15 @@ The Docker image's `ENTRYPOINT` is `kiteline-server`, with default argument `ser
 
 ## kiteline-agent commands
 
-On Linux and macOS, the public launcher is `/usr/local/bin/kiteline-agent`; use this absolute path with `sudo`. On Windows it is `%ProgramData%\kiteline-agent\kiteline-agent.ps1`. PowerShell supports two invocation forms:
+On Linux and macOS, the public launcher is `/usr/local/bin/kiteline-agent`; use this absolute path with `sudo`. On Windows, use `kiteline-agent run` for daily startup. The thin EXE in Machine PATH invokes the installed script through system Windows PowerShell 5.1. Maintenance uses separate PowerShell commands; see [Upgrade](devices.en.md#upgrade-the-agent) and [Uninstall](devices.en.md#uninstall). Use the full script entry for complex arguments as well, for example:
 
 ```powershell
-# Short form
-& "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" doctor
-# Full form
 & (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" doctor
 ```
 
-Use the short form for direct interaction in a real console, with an execution policy that allows local scripts. Use the full form for variable capture, PowerShell pipelines or redirection; program output from the short form does not enter the PowerShell object pipeline. The full form's `Bypass` applies only to that process, and Group Policy still takes precedence. Replace `kiteline-agent <subcommand>` in these guides with the form appropriate to its use on Windows.
+The full script invocation uses the current PowerShell version. Both entries set `Bypass` only for the child process without changing persistent execution policy; Group Policy still takes precedence.
+
+Direct `& "$env:ProgramData\kiteline-agent\kiteline-agent.ps1"` invocation is for interaction in a real console and requires an execution policy that permits local scripts. Its program output does not enter the PowerShell object pipeline; use the full invocation above for capture, pipelines or redirection.
 
 Running `kiteline-agent` with no arguments or with `--help` prints a subcommand summary; `--version` prints its version. Only `schedule` and its subcommands provide `--help`. Other subcommands have no `--help`; their arguments are listed below.
 
@@ -286,15 +285,16 @@ See [Uninstall](devices.en.md#uninstall) for files retained after removal. If up
 
 ### Agent on Windows
 
-| Path                                                      | Content                                                     |
-| --------------------------------------------------------- | ----------------------------------------------------------- |
-| `%ProgramFiles%\kiteline-agent\`                          | Installation directory                                      |
-| `%ProgramData%\kiteline-agent\kiteline-agent.ps1`         | Public launcher                                             |
-| `%ProgramData%\kiteline-agent\installation.json`          | Installation record, including data and runtime directories |
-| `%ProgramData%\kiteline-agent\use.lock`                   | Use lock                                                    |
-| `%ProgramData%\kiteline-agent\management.lock`            | Mutual-exclusion lock for install, upgrade and uninstall    |
-| `%ProgramFiles%\kiteline-agent\deploy\kiteline-agent.xml` | WinSW example                                               |
-| `%LOCALAPPDATA%\kiteline-agent\`                          | Default agent data directory                                |
+| Path                                                       | Content                                                     |
+| ---------------------------------------------------------- | ----------------------------------------------------------- |
+| `%ProgramFiles%\kiteline-agent\`                           | Installation directory                                      |
+| `%ProgramFiles%\kiteline-agent\command\kiteline-agent.exe` | Daily command entry (Machine PATH)                          |
+| `%ProgramData%\kiteline-agent\kiteline-agent.ps1`          | Separate PowerShell script entry                            |
+| `%ProgramData%\kiteline-agent\installation.json`           | Installation record, including data and runtime directories |
+| `%ProgramData%\kiteline-agent\use.lock`                    | Use lock                                                    |
+| `%ProgramData%\kiteline-agent\management.lock`             | Mutual-exclusion lock for install, upgrade and uninstall    |
+| `%ProgramFiles%\kiteline-agent\deploy\kiteline-agent.xml`  | WinSW example                                               |
+| `%LOCALAPPDATA%\kiteline-agent\`                           | Default agent data directory                                |
 
 ### Agent data directory
 

@@ -34,16 +34,15 @@ Docker 镜像的 `ENTRYPOINT` 是 `kiteline-server`，默认参数是 `serve`，
 
 ## kiteline-agent 命令
 
-Linux 和 macOS 的命令入口是 `/usr/local/bin/kiteline-agent`；用 `sudo` 执行时写这个绝对路径。Windows 的命令入口是 `%ProgramData%\kiteline-agent\kiteline-agent.ps1`，在 PowerShell 中有两种调用方式：
+Linux 和 macOS 的命令入口是 `/usr/local/bin/kiteline-agent`；用 `sudo` 执行时写这个绝对路径。Windows 日常用 `kiteline-agent run`，Machine PATH 中的薄 EXE 通过系统 Windows PowerShell 5.1 调用安装脚本。维护继续使用独立 PowerShell 命令，见[升级](devices.md#升级-agent)和[卸载](devices.md#卸载)。复杂参数调用也可使用完整脚本入口，例如：
 
 ```powershell
-# 短写法
-& "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" doctor
-# 完整写法
 & (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" doctor
 ```
 
-在真实控制台中直接交互时可用短写法，执行策略须允许运行本地脚本。需要变量捕获、PowerShell 管道或重定向时使用完整写法；短写法的程序输出不进入 PowerShell 对象管道。完整写法中的 `Bypass` 仅作用于当前进程，组策略仍优先。文档中的 `kiteline-agent <子命令>` 在 Windows 上按用途替换为相应写法。
+完整脚本调用使用当前 PowerShell 版本。两种入口均只为子进程设置 `Bypass`，不修改持久执行策略；组策略仍优先。
+
+直接用 `& "$env:ProgramData\kiteline-agent\kiteline-agent.ps1"` 调用只适用于真实控制台交互，执行策略须允许运行本地脚本。它的程序输出不进入 PowerShell 对象管道；需要捕获、管道或重定向时使用上面的完整调用。
 
 不带参数或带 `--help` 执行 `kiteline-agent` 会打印子命令概要，`--version` 打印版本号。只有 `schedule` 及其子命令提供 `--help`；其他子命令没有 `--help`，参数以下表为准。
 
@@ -286,15 +285,16 @@ agent 数据目录中的 `agent.json`、`connection.json`、`temporary-files.jso
 
 ### Windows 上的 agent
 
-| 路径                                                      | 内容                           |
-| --------------------------------------------------------- | ------------------------------ |
-| `%ProgramFiles%\kiteline-agent\`                          | 程序目录                       |
-| `%ProgramData%\kiteline-agent\kiteline-agent.ps1`         | 命令入口                       |
-| `%ProgramData%\kiteline-agent\installation.json`          | 安装记录，含数据目录与运行目录 |
-| `%ProgramData%\kiteline-agent\use.lock`                   | 使用锁                         |
-| `%ProgramData%\kiteline-agent\management.lock`            | 安装、升级、卸载的互斥锁       |
-| `%ProgramFiles%\kiteline-agent\deploy\kiteline-agent.xml` | WinSW 示例                     |
-| `%LOCALAPPDATA%\kiteline-agent\`                          | 默认的 agent 数据目录          |
+| 路径                                                       | 内容                           |
+| ---------------------------------------------------------- | ------------------------------ |
+| `%ProgramFiles%\kiteline-agent\`                           | 程序目录                       |
+| `%ProgramFiles%\kiteline-agent\command\kiteline-agent.exe` | 日常短命令入口（Machine PATH） |
+| `%ProgramData%\kiteline-agent\kiteline-agent.ps1`          | 独立 PowerShell 脚本入口       |
+| `%ProgramData%\kiteline-agent\installation.json`           | 安装记录，含数据目录与运行目录 |
+| `%ProgramData%\kiteline-agent\use.lock`                    | 使用锁                         |
+| `%ProgramData%\kiteline-agent\management.lock`             | 安装、升级、卸载的互斥锁       |
+| `%ProgramFiles%\kiteline-agent\deploy\kiteline-agent.xml`  | WinSW 示例                     |
+| `%LOCALAPPDATA%\kiteline-agent\`                           | 默认的 agent 数据目录          |
 
 ### agent 数据目录
 

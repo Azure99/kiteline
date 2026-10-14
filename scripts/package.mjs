@@ -371,6 +371,9 @@ try {
   const launcher = join(destination, "bin", `kiteline-${kind}${windows ? ".ps1" : ""}`);
   if (windowsAgent) {
     const { nodeEnvironmentKeys } = await import("../shared/dist/terminal/node.js");
+    cpSync(join(resolve(windowsComponents), "command"), join(destination, "command"), {
+      recursive: true,
+    });
     const launchers = windowsAgentLaunchers({
       runtimeFiles: windowsRuntimeFiles.map(windowsComponentPath),
       nodeEnvironmentKeys,

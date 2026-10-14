@@ -12,6 +12,9 @@ x86_64-w64-mingw32-g++-posix -std=c++20 -Wall -Wextra -Werror -O2 -shared -stati
   /inputs/native/windows/files.cc /inputs/native/windows/network.cc \
   "$temporary/libnode.a" -ladvapi32 -lshell32 -lole32 -luuid -liphlpapi -lws2_32 \
   -o /output/kiteline-windows.node
+x86_64-w64-mingw32-g++-posix -std=c++20 -Wall -Wextra -Werror -O2 -static -municode \
+  -Wl,--no-insert-timestamp /inputs/native/windows/entry.cc -lshell32 -lole32 -luuid \
+  -o /output/kiteline-agent.exe
 mkdir -p /output/licenses
 cp -L /usr/share/doc/gcc-mingw-w64-base/copyright /output/licenses/gcc-mingw-w64.txt
 cp -L /usr/share/doc/mingw-w64-x86-64-dev/copyright /output/licenses/mingw-w64.txt

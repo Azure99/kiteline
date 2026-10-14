@@ -5,6 +5,7 @@ const recipe = JSON.parse(
 ) as { runtimeFiles: Record<string, string[]> };
 
 export const windowsRuntimeFiles = [
+  "command/kiteline-agent.exe",
   "runtime/bin/node.exe",
   "native/kiteline-windows.node",
   "native/bin/rg.exe",

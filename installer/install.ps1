@@ -88,7 +88,11 @@ public static class __KITELINE_DOWNLOAD_WAIT__ {
     $hash = [Security.Cryptography.SHA256]::Create()
     try { $typeName = 'KitelineDownload_' + [BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($source))).Replace('-', '').Substring(0, 16) }
     finally { $hash.Dispose() }
-    if (-not ($typeName -as [type])) { Add-Type -TypeDefinition $source.Replace('__KITELINE_DOWNLOAD_WAIT__', $typeName) }
+    if (-not ($typeName -as [type])) {
+        $definition = $source.Replace('__KITELINE_DOWNLOAD_WAIT__', $typeName)
+        if ($PSVersionTable.PSVersion.Major -eq 5) { Add-Type -TypeDefinition $definition -ReferencedAssemblies ([ComponentModel.Win32Exception].Assembly.Location) }
+        else { Add-Type -TypeDefinition $definition }
+    }
     $command = '$ErrorActionPreference = ''Stop''; & ' + (Quote-Kiteline $Script) + ' ' + (($Arguments | ForEach-Object { Quote-Kiteline $_ }) -join ' ') + '; exit $LASTEXITCODE'
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
     try {
@@ -135,7 +139,8 @@ try {
     if ($Mode -eq 'Upgrade') {
         if (-not [IO.File]::Exists($recordFile) -or -not [IO.File]::Exists($public)) { throw 'Install and bind the agent before upgrading' }
         $archive = Get-KitelineArchive
-        Invoke-KitelineElevated $public @('upgrade', '--archive', $archive)
+        $package = Expand-KitelineDownload $archive
+        Invoke-KitelineElevated (Join-Path $package 'bin/kiteline-agent.ps1') @('upgrade', '--archive', $archive)
     } else {
         if (-not [IO.File]::Exists($recordFile)) {
             $null = Get-Command git.exe -CommandType Application
@@ -155,6 +160,8 @@ try {
         $Code | & $powershell -NoProfile -ExecutionPolicy Bypass -File $public bind --server $Server --if-unbound
         Assert-KitelineExit 'Binding'
     }
+    $commandDirectory = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'kiteline-agent/command'
+    if ($env:Path.Split(';') -inotcontains $commandDirectory) { $env:Path += ';' + $commandDirectory }
 } finally {
     if ([IO.Directory]::Exists($temporary)) {
         if ($script:retainTemporary) { [Console]::Error.WriteLine("Download files retained at $temporary; process cleanup could not be confirmed") }

@@ -5,6 +5,12 @@ using System.Text;
 using System.Threading;
 
 public sealed class __KITELINE_LAUNCHER_TYPE__ : IDisposable {
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern IntPtr SendMessageTimeoutW(IntPtr window,uint message,UIntPtr wParam,string lParam,uint flags,uint timeout,out UIntPtr result);
+    public static void NotifyEnvironment() {
+        UIntPtr result;
+        if(SendMessageTimeoutW(new IntPtr(0xffff),0x1a,UIntPtr.Zero,"Environment",2,5000,out result)==IntPtr.Zero)
+            throw new InvalidOperationException("Machine PATH was updated, but environment notification failed");
+    }
     const uint GENERIC_READ=0x80000000, GENERIC_WRITE=0x40000000;
     const uint FILE_LIST_DIRECTORY=1, FILE_READ_ATTRIBUTES=0x80;
     const uint FILE_SHARE_READ=1, FILE_SHARE_WRITE=2, OPEN_EXISTING=3;

@@ -23,7 +23,10 @@ function Invoke-KitelineAgent {
     $nativeSource = @'
 __KITELINE_NATIVE_SOURCE__
 '@
-    if (-not ('__KITELINE_LAUNCHER_TYPE__' -as [type])) { Add-Type -TypeDefinition $nativeSource }
+    if (-not ('__KITELINE_LAUNCHER_TYPE__' -as [type])) {
+        if ($PSVersionTable.PSVersion.Major -eq 5) { Add-Type -TypeDefinition $nativeSource -ReferencedAssemblies ([ComponentModel.Win32Exception].Assembly.Location) }
+        else { Add-Type -TypeDefinition $nativeSource }
+    }
     $errors = [Collections.Generic.List[Exception]]::new()
     $shared = $null; $exclusive = $null; $manager = $null; $state = $null
     $temporary = $null; $previous = $null; $result = 1
@@ -280,6 +283,23 @@ import(url.pathToFileURL(process.argv[1]).href).catch(error=>{console.error(erro
             foreach ($key in $saved.Keys) { [Environment]::SetEnvironmentVariable($key, $saved[$key]) }
         }
     }
+    function Update-KitelineMachinePath([bool]$Present) {
+        $directory = Join-Path $program 'command'
+        $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SYSTEM\CurrentControlSet\Control\Session Manager\Environment', $true)
+        try {
+            $raw = $key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+            $kind = if ($key.GetValueNames() -contains 'Path') { $key.GetValueKind('Path') } else { [Microsoft.Win32.RegistryValueKind]::ExpandString }
+            $parts = @($raw.Split(';'))
+            if ($Present) {
+                if ($parts -icontains $directory) { return }
+                $parts += $directory
+            } else {
+                $parts = @($parts | Where-Object { -not $_.Equals($directory, [StringComparison]::OrdinalIgnoreCase) })
+            }
+            $next = $parts -join ';'
+            if ($next -cne $raw) { $key.SetValue('Path', $next, $kind) }
+        } finally { $key.Dispose() }
+    }
     function Remove-KitelineDirectory([string]$Path, [bool]$Recursive) {
         try { [IO.Directory]::Delete($Path, $Recursive) }
         catch { throw [IO.IOException]::new("Cannot remove directory ${Path}: $($_.Exception.Message)", $_.Exception) }
@@ -388,10 +408,12 @@ import(url.pathToFileURL(process.argv[1]).href).catch(error=>{console.error(erro
                 $oldPublic = if ($action -ne 'install') { [IO.File]::ReadAllText($public) } else { $null }
                 Test-KitelineCancellation
                 if ($action -eq 'uninstall') {
+                    if ($options['--purge'] -and $installation.dataDir.TrimEnd('\').StartsWith($installation.runDir.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                        throw "Cannot purge: runtime directory $($installation.runDir) contains data directory $($installation.dataDir); use default uninstall or separate these directories first"
+                    }
+                    Update-KitelineMachinePath $false
+                    [__KITELINE_LAUNCHER_TYPE__]::NotifyEnvironment()
                     if ($options['--purge']) {
-                        if ($installation.dataDir.TrimEnd('\').StartsWith($installation.runDir.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
-                            throw "Cannot purge: runtime directory $($installation.runDir) contains data directory $($installation.dataDir); use default uninstall or separate these directories first"
-                        }
                         if ($installation.runDir.TrimEnd('\') -ine $installation.dataDir.TrimEnd('\') -and
                             -not $installation.runDir.StartsWith($installation.dataDir.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
                             Remove-KitelineTree $installation.runDir
@@ -430,6 +452,7 @@ import(url.pathToFileURL(process.argv[1]).href).catch(error=>{console.error(erro
                         }
                         Write-KitelineAtomic $public $newPublic
                         if ($action -eq 'install') { Set-KitelineTreeAcl $management $installation.sid }
+                        Update-KitelineMachinePath $true
                     } catch {
                         $primary = $_.Exception
                         try {
@@ -444,8 +467,9 @@ import(url.pathToFileURL(process.argv[1]).href).catch(error=>{console.error(erro
                         } catch { throw [AggregateException]::new("Installation and rollback failed; inspect $temporary", [Exception[]]@($primary, $_.Exception)) }
                         throw $primary
                     }
+                    [__KITELINE_LAUNCHER_TYPE__]::NotifyEnvironment()
                     if (Test-KitelineExists $previous) { Remove-KitelineTree $previous }
-                    Write-Host "Installed version $($release.version); not started. As $($installation.user), run & '$public' run."
+                    Write-Host "Installed version $($release.version); not started. As $($installation.user), run kiteline-agent run in a new non-elevated PowerShell window."
                 }
                 $result = 0
             }

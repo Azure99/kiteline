@@ -9,7 +9,15 @@ import { installCli } from "./install/commands.js";
 import { checkPrerequisites, checkWindowsShell } from "./prerequisites.js";
 import { lockAgentRuntime, lockAgentState } from "./state-lock.js";
 
-const usage = `Usage: kiteline-agent install --user USER | upgrade --archive RELEASE.tar.gz | uninstall | check | bind --server HTTP_OR_HTTPS_ORIGIN [--if-unbound] | run | doctor | ${attachUsage} | terminal | workspace | schedule`;
+const commands = `check | bind --server HTTP_OR_HTTPS_ORIGIN [--if-unbound] | run | doctor | ${attachUsage} | terminal | workspace | schedule`;
+const usage =
+  process.platform === "win32"
+    ? `Usage: kiteline-agent ${commands}
+Windows maintenance (PowerShell):
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File NEW_PACKAGE\\bin\\kiteline-agent.ps1 install --user USER
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File NEW_PACKAGE\\bin\\kiteline-agent.ps1 upgrade --archive RELEASE.zip
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\\kiteline-agent\\kiteline-agent.ps1" uninstall`
+    : `Usage: kiteline-agent install --user USER | upgrade --archive RELEASE.tar.gz | uninstall | ${commands}`;
 
 async function runAgent() {
   let stopping = false;
