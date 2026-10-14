@@ -297,7 +297,7 @@ export const en = {
     copyUpgrade: "Copy upgrade command",
     upgradeTarget: "Matching release: {{version}}",
     upgradeHint:
-      "Upgrade in a separate terminal or SSH session: stop all agent instances and local attachments, and pause automatic restarts. Start the agent again after upgrading. Binding, configuration, workspaces, task definitions and retained results are kept.",
+      "Upgrade in a separate terminal or SSH session: stop all agent instances, and pause automatic restarts. Start the agent again after upgrading. Binding, configuration, workspaces, task definitions and retained results are kept.",
     bind: "Connect device",
     generating: "Generating",
     deviceOnline: "Device online",
@@ -322,8 +322,7 @@ export const en = {
     deleteDevice: "Delete device",
     deviceDeleted: "Device deleted",
     uninstallAgent: "Uninstall the local agent",
-    uninstallStop:
-      "Stop the agent, local attach sessions and external restart policies, then run this on the device.",
+    uninstallStop: "Stop the agent and external restart policies, then run this on the device.",
     uninstallWindows: "Use an administrator PowerShell console.",
     uninstallMode: "Uninstall mode",
     uninstallKeep: "Keep data",

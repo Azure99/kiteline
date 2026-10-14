@@ -29,9 +29,6 @@ export const launcherFile = windows
 const installedProgram = windows
   ? packageDirectory.toLowerCase() === installDirectory.toLowerCase()
   : packageDirectory === installDirectory;
-export const publicCliPath = installedProgram
-  ? launcherFile
-  : resolve(packageDirectory, windows ? "bin/kiteline-agent.ps1" : "bin/kiteline-agent");
 export interface Installation {
   user: string;
   uid: number;
@@ -152,18 +149,15 @@ export async function installationPaths(
     overrides.KITELINE_AGENT_RUN_DIR ?? environment.KITELINE_AGENT_RUN_DIR,
   );
 }
-export async function installedPaths(runDirOverride?: string) {
+export async function installedPaths() {
   if (!installedProgram) return;
   if (windows) {
     const installation = JSON.parse(await readFile(installationFile, "utf8"));
     if (windowsNative().identity().sid !== installation.sid)
       throw new Error(`Use project user ${installation.user} to run this command`);
     const values = {
-      dataDir:
-        runDirOverride === undefined
-          ? (process.env.KITELINE_AGENT_HOME ?? installation.dataDir)
-          : installation.dataDir,
-      runDir: runDirOverride ?? process.env.KITELINE_AGENT_RUN_DIR ?? installation.runDir,
+      dataDir: process.env.KITELINE_AGENT_HOME ?? installation.dataDir,
+      runDir: process.env.KITELINE_AGENT_RUN_DIR ?? installation.runDir,
     };
     for (const [name, value] of Object.entries(values))
       if (typeof value !== "string" || !isAbsolute(value))
@@ -176,6 +170,6 @@ export async function installedPaths(runDirOverride?: string) {
     throw new Error(`Use project user ${installation.user} to run this command`);
   return installationPaths(installation, {
     KITELINE_AGENT_HOME: process.env.KITELINE_AGENT_HOME,
-    KITELINE_AGENT_RUN_DIR: runDirOverride ?? process.env.KITELINE_AGENT_RUN_DIR,
+    KITELINE_AGENT_RUN_DIR: process.env.KITELINE_AGENT_RUN_DIR,
   });
 }

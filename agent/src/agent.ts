@@ -161,12 +161,6 @@ export class Agent {
       });
     if (method === "workspaces.list")
       return Promise.resolve({ workspaces: this.metadata.value.workspaces });
-    if (method === "terminal.attach") {
-      const item = this.sessions.get(string(params.sessionId));
-      if (item.session.state !== "running")
-        throw new AppError("busy", "Terminal is still being created");
-      return Promise.resolve(item.identity);
-    }
     if (method === "sessions.end") return this.sessions.end(undefined, string(params.sessionId));
     if (!localSessionMethods.has(method) && !isScheduleMethod(method))
       throw new AppError("unsupported", "Unsupported local operation");

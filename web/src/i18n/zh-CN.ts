@@ -290,7 +290,7 @@ export const zhCN = {
     copyUpgrade: "复制升级命令",
     upgradeTarget: "配套目标版本：{{version}}",
     upgradeHint:
-      "在独立终端或 SSH 中升级：先停止所有 agent 实例和本地附件，并暂停自动重启；升级后重新启动。绑定、配置、工作区、任务定义及保留结果仍在。",
+      "在独立终端或 SSH 中升级：先停止所有 agent 实例，并暂停自动重启；升级后重新启动。绑定、配置、工作区、任务定义及保留结果仍在。",
     bind: "绑定设备",
     generating: "正在生成",
     deviceOnline: "设备已在线",
@@ -314,7 +314,7 @@ export const zhCN = {
     deleteDevice: "删除设备",
     deviceDeleted: "设备已删除",
     uninstallAgent: "本机卸载 agent",
-    uninstallStop: "先停止 agent、本机接续及外部自动重启，再在目标设备执行。",
+    uninstallStop: "先停止 agent 及外部自动重启，再在目标设备执行。",
     uninstallWindows: "使用管理员 PowerShell。",
     uninstallMode: "卸载模式",
     uninstallKeep: "保留数据",

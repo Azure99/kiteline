@@ -8,7 +8,6 @@
 - **agent 会话表**（`agent/src/terminal/sessions.ts`）：分配 ID、登记会话、创建和结束 tmux server、查证存活、发起恢复。
 - **recorder**（`terminal-recorder/src/`）：每个 agent 一个 Node 进程；每个会话一个 tmux 控制模式客户端（`tmux -C`）、一个 `@xterm/headless` 模型和一个输入队列。
 - **网页显示**（`web/src/terminal/display.ts`）：每次附着新建一个 xterm.js 实例，恢复画面后接收实时输出，发送输入和尺寸。
-- **本机客户端**（`agent/src/cli/terminal.ts`）：`kiteline-agent attach` 运行随包 tmux 客户端，附着到同一个 tmux 会话。
 - **远程 CLI**（`cli/src/`）：短 RPC 在 recorder 中观察和操作同一终端；`terminal attach` 经 agent 的 PTY 桥运行普通 tmux client，接续已有画面和原始输入。两者结束后终端继续运行。
 
 tmux 使用会话目录下的私有配置，不加载用户的 tmux 配置或插件，并收窄 prefix 键表。具体设置由 `shared/src/terminal/node.ts` 的 `terminalPreset()` 定义。
@@ -43,7 +42,7 @@ Shell 的选择和执行参数见 [agent 配置文件](../guide/reference.md#age
 | ---------------------------------------------- | ---------------------------------------- |
 | 网页刷新、关闭、断网，或没有任何客户端附着     | 继续                                     |
 | server 重启、控制连接重连、退出登录、删除设备  | 继续                                     |
-| 本机客户端断开或退出                           | 继续                                     |
+| 远程 TTY 客户端断开或退出                      | 继续                                     |
 | 控制客户端故障、recorder 退出                  | 继续                                     |
 | Shell 或快捷方式程序退出                       | 结束                                     |
 | 网页“结束会话”或 `kiteline-agent terminal end` | 结束                                     |
@@ -51,7 +50,7 @@ Shell 的选择和执行参数见 [agent 配置文件](../guide/reference.md#age
 | agent 异常退出                                 | 见 [agent 异常退出后](#agent-异常退出后) |
 | 设备或容器重启                                 | 结束；会话目录留在运行目录中             |
 
-会话没有空闲超时。server 重启、退出登录和删除设备只关闭相关的网页附着。控制客户端故障时会话变为记录不可用，可以[恢复](#记录故障后的恢复)。
+会话没有空闲超时。server 重启、退出登录和删除设备只关闭相关的网页和 TTY 附着。控制客户端故障时会话变为记录不可用，可以[恢复](#记录故障后的恢复)。
 
 agent 正常停止（包括停止或重启服务）时，`Agent.close()` 在每个会话的私有 socket 上执行 `kill-server`，会话中的程序随之结束。新启动的 agent 会话表为空，不导入旧会话。停止顺序见[启动与停止](agent-lifecycle.md#启动与停止)，异常退出见[资源与清理](#资源与清理)。
 
@@ -83,7 +82,7 @@ recorder 为每个会话保存一个检查点和其后的完整尾段：
 - 序列化结果超过 `terminalSnapshotBytes` 时把滚屏行数减半重试，并给这份副本标记 `historyLimited`；滚屏为 0 仍超过时返回 `limit_exceeded`。缩短只影响这份副本，不改变模型中的历史。
 - 序列化在 recorder 的单个线程中同步执行，同一 recorder 的其他会话会短暂停顿。
 
-`historyLines`（界面“新会话滚屏行数”，范围见[限额](../guide/reference.md#限额)）在创建时写入会话，同时决定 tmux 的 `history-limit`、recorder 模型和网页 xterm.js 的滚屏行数；修改设置只影响之后新建的会话。tmux 的历史服务本机客户端，recorder 的历史服务网页，两者各自淘汰旧行。网页的两种提示：
+`historyLines`（界面“新会话滚屏行数”，范围见[限额](../guide/reference.md#限额)）在创建时写入会话，同时决定 tmux 的 `history-limit`、recorder 模型和网页 xterm.js 的滚屏行数；修改设置只影响之后新建的会话。tmux 的历史服务远程 TTY 客户端，recorder 的历史服务网页，两者各自淘汰旧行。网页的两种提示：
 
 - “历史存在缺口”（`historyGap`）：本次 agent 运行期间该会话发生过记录故障，部分输出没有进入网页历史。agent 运行期间不清除。
 - “已减少较早历史”（`historyLimited`）：本次附着的恢复副本被缩短。
@@ -109,15 +108,9 @@ recorder 只根据模型待解析量，按 `RecordedSession.pressure()` 的高�
 
 显示在第一次打开时附着。切换分组、工具，或收起文件和 Git 视图下方的终端面板，只隐藏显示，隐藏的显示保持附着并继续消费输出；关闭显示、离开工作区或页面销毁时释放附着。断开后网页不自动重连，显示“连接已断开”，由用户点击“重新连接”。同一会话的多个显示各自维护视口、选区和搜索。
 
-### 本机附着
-
-`kiteline-agent attach <会话 ID>` 通过本机 IPC（见[通信契约](protocol.md#本机-ipc)）调用 `terminal.attach` 取得 socket，然后运行随包 tmux：`tmux -S <socket> attach-session -E -t kiteline`（`-E` 不用客户端环境更新会话环境）。标准输入和输出都必须是终端；会话仍在创建时返回 `busy`。命令按 [`--run-dir` 和目录配置](../guide/reference.md#agent-环境变量)找到运行目录，不读取 `config.json`，本机请求使用默认的 `rpcTimeout`，附着时长不限。附着期间命令入口持有共享使用锁，升级和卸载会被拒绝（见[锁](agent-lifecycle.md#锁)）。
-
-网页菜单“本机接续命令”生成的命令包含命令入口的绝对路径和 `--run-dir`；Windows 客户端的启动方式见[平台实现](platforms.md#windows)。
-
 ### 远程交互附着
 
-`kiteline terminal attach` 使用已有 CLI 凭据和目标，经 `terminal.attach` 的 `mode:"tty"` 变体接续运行中的会话。agent 收到配对后的 `start` 才启动 PTY helper 和普通 tmux client；helper 使用与本机附着共用的 tmux 参数和环境，仅该 client 使用本机传来的 `TERM`。记录不可用不阻止 TTY 附着，recorder 故障也不关闭 TTY 通道。
+`kiteline terminal attach` 使用已有 CLI 凭据和目标，经 `terminal.attach` 的 `mode:"tty"` 变体接续运行中的会话。agent 收到配对后的 `start` 才启动 PTY helper 和普通 tmux client；helper 使用 `tmux attach-session -E` 保持原会话环境，仅该 client 使用本机传来的 `TERM`。记录不可用不阻止 TTY 附着，recorder 故障也不关闭 TTY 通道。
 
 helper 持续读取 PTY，stdout 待发和 agent 待写输入受传输预算约束，helper 内部只保留一个待写输入帧。agent 在发送前核对累计未消费输出；超过显示预算就结束该 client，不向原 pane 传递显示背压。helper 退出时先排空最后输出，再发送 `ended{exitCode:0}`；启动、传输或清理失败发送 `error`。通道结束只关闭自己的 PTY client，helper 及其子进程有有限清理期限。Windows 使用现有 Job 持有整个桥进程集合，helper 主进程退出后先终止残余后代，再确认 Job 清空及输出排空。
 
@@ -131,7 +124,7 @@ CLI 在目标检查和连接成功后进入 raw，用异步写完成量确认消
 2. agent 在私有 socket 上查证 pane。pane 已结束按会话结束处理；查证失败时保留原因，回到记录不可用。
 3. recorder（必要时重新启动）以控制模式附着原会话，删除遗留的 `kiteline-web-input` 缓冲，用 `capture-pane -e` 及光标、备用屏幕、应用光标键状态构造当前屏幕，写入新模型并生成检查点。这个画面不含旧的滚屏历史和其他隐藏模式，初始化期间的输出不进入模型。
 4. recorder 做一次[重绘](#恢复动作)让程序重画，再生成检查点。
-5. 会话恢复为记录可用，网页重新附着。失败时保持记录不可用并显示原因，可以再次恢复或用本机附着；agent 不自动重试。
+5. 会话恢复为记录可用，网页重新附着。失败时保持记录不可用并显示原因，可以再次恢复或用远程 TTY 附着；agent 不自动重试。
 
 ## 输入
 
@@ -139,7 +132,7 @@ CLI 在目标检查和连接成功后进入 raw，用异步写完成量确认消
 
 `sessions.send` 与网页输入使用同一个 recorder 队列和 tmux 注入函数。一次请求是字面文本、粘贴（可附加 Enter）或一个具名按键，不能组合任意动作。粘贴沿用 `normalizePaste` 与 tmux bracketed paste，方向键按当前应用光标键模式编码。CLI 请求不属于网页 attachment，短命令退出不会触发 detach 删除。
 
-可选 `ifInput: {epoch,inputSeq}` 在队列接纳处同步比较；条件不符返回 `failed/conflict`，不接纳输入。短 CLI 和网页每次接纳输入都会递增 `inputSeq`，包括后来因期限或 detach 丢弃的输入；计数不回退。本机 tmux 和远程 `terminal attach` 的原生输入不经过这个计数。计数不意味着回显、独占或干净提示符：已经接纳但尚未回显的输入仍可与下一次输入混合。
+可选 `ifInput: {epoch,inputSeq}` 在队列接纳处同步比较；条件不符返回 `failed/conflict`，不接纳输入。短 CLI 和网页每次接纳输入都会递增 `inputSeq`，包括后来因期限或 detach 丢弃的输入；计数不回退。远程 `terminal attach` 的原生输入不经过这个计数。计数不意味着回显、独占或干净提示符：已经接纳但尚未回显的输入仍可与下一次输入混合。
 
 成功回执只表示 tmux 输入操作已处理，包含操作前的输出位置 `before` 和回复时当前输入位置 `input`，不表示前台命令返回。排队到期是明确失败；开始注入后不能确定结果时为 `unknown`。调用方先观察，再决定后续输入；没有请求去重或自动重发。Unix tmux 客户端须到 `close` 才让队列继续，避免中止后仍占用共享缓冲区。预算与可用按键见 [RPC 类型](../../shared/src/protocol/terminal-observation.ts)及入口校验，不另建执行状态。
 
@@ -155,9 +148,9 @@ CLI 在目标检查和连接成功后进入 raw，用异步写完成量确认消
 要点：
 
 - 粘贴正文由 recorder 规范化（`normalizePaste`）：CRLF 和 LF 变为 CR，ESC 换成可见的 U+241B，正文因此不会被程序当作按键，也不会提前结束括号粘贴。普通输入不做替换。
-- 粘贴带 `-p`：程序开启括号粘贴时加起止标记。`paste.patch` 让 tmux 按程序自己的模式（`wp->base.mode`）判断，本机客户端处于复制模式时网页粘贴仍带标记。
+- 粘贴带 `-p`：程序开启括号粘贴时加起止标记。`paste.patch` 让 tmux 按程序自己的模式（`wp->base.mode`）判断，远程 TTY 客户端处于复制模式时网页粘贴仍带标记。
 - 注入失败时网页收到结果未确认的 `input.error`，recorder 只删除自己的 `kiteline-web-input` 缓冲。输入不自动重试；网页在断开和恢复期间不缓存输入。
-- 网页输入不经过 tmux 键表，网页中的 Ctrl-b 直接交给程序。本机客户端使用 tmux 键表：`Ctrl-b d` 断开，`Ctrl-b Ctrl-b` 发送 Ctrl-b。
+- 网页输入不经过 tmux 键表，网页中的 Ctrl-b 直接交给程序。远程 TTY 客户端使用 tmux 键表：`Ctrl-b d` 断开，`Ctrl-b Ctrl-b` 发送 Ctrl-b。
 - 手机辅助键和待用修饰键用 xterm.js 的键盘编码函数生成，读取程序当前的应用光标键模式；虚拟 Alt 按 Meta 处理。
 - 多个客户端同时输入时按到达顺序交错写入。
 - 输出背压期间，输入队列在取出下一项之前等待 control 恢复读取；既有容量内的输入保持 FIFO，不清空或重发。关闭显示或结束会话的取消规则保持不变。
@@ -166,11 +159,11 @@ CLI 在目标检查和连接成功后进入 raw，用异步写完成量确认消
 
 真实 PTY 只有一组行列。tmux 使用 `window-size latest`，最近活动的客户端决定尺寸：
 
-- 本机客户端按自己终端的尺寸参与。
+- 远程 TTY 客户端按自己终端的尺寸参与。
 - 网页通过 recorder 的控制客户端参与：执行 `select-window` 和 `refresh-client -C <列>x<行>`，等控制流报告同样的实际尺寸后再处理队列中的下一项。命令和尺寸等待使用 `interactionTimeout` 的剩余期限，主动背压暂停计时，恢复后继续计时；control 关闭立即使等待失败。实际尺寸经控制流进入模型，再以 `resize` 帧发给所有显示。
-- 网页请求限制在 `terminalMaxCols` × `terminalMaxRows` 以内（见[限额](../guide/reference.md#限额)）。本机客户端可以让实际尺寸更大，所以恢复帧接受最大 10000 列和 10000 行。没有网页时控制客户端保留最后的尺寸。
+- 网页和远程 TTY 的尺寸请求限制在 `terminalMaxCols` × `terminalMaxRows` 以内（见[限额](../guide/reference.md#限额)）。恢复帧的接收上限为 10000 列和 10000 行。没有网页时控制客户端保留最后的尺寸。
 - 不使用 `resize-window`，它会把窗口切换为手动尺寸，客户端之后无法再调整。
-- 受管 control 输出堵塞时，本机客户端的实际尺寸调整也延后，复用 tmux 待调整尺寸只保留最后尚未执行的目标；恢复后执行该尺寸。已经执行的尺寸及其输出、通知不被丢弃，避免暂停期间布局通知无限积压。
+- 受管 control 输出堵塞时，远程 TTY 客户端的实际尺寸调整也延后，复用 tmux 待调整尺寸只保留最后尚未执行的目标；恢复后执行该尺寸。已经执行的尺寸及其输出、通知不被丢弃，避免暂停期间布局通知无限积压。
 
 网页一侧（`display.ts` 的 `resize()`）：先按会话的实际尺寸恢复画面，收到 `ready` 后按自己的可见区域发送第一次尺寸，再开放输入。隐藏或尺寸为 0 的显示不发送尺寸；滚动、选择和输出不重复提交尺寸。手机软键盘只缩短可见高度时，宽度和字号不变就保留打开键盘前的行列，终端只在本地裁切并跟随光标，不请求会话改变尺寸；宽度、旋转和字号变化会重新计算。
 
@@ -218,7 +211,7 @@ agent 被强制结束或崩溃时不执行清理，新启动的 agent 也不导�
 
 ## 已知差异
 
-`adaptTerminalScrolling()` 让 xterm.js 按 tmux 3.4 的上界处理计数：CSI S、T、L、M 不超过滚动区高度，REP 不超过当前行剩余列数（包含待换行状态），省略或 0 按 1，没有剩余列时直接消费序列；普通屏幕上滚动区从第 0 行开始时，CSI S 让滚出的行进入滚屏历史并保持保存的光标。以下情况本机画面与网页的画面、光标或历史仍可能不同：
+`adaptTerminalScrolling()` 让 xterm.js 按 tmux 3.4 的上界处理计数：CSI S、T、L、M 不超过滚动区高度，REP 不超过当前行剩余列数（包含待换行状态），省略或 0 按 1，没有剩余列时直接消费序列；普通屏幕上滚动区从第 0 行开始时，CSI S 让滚出的行进入滚屏历史并保持保存的光标。以下情况远程 TTY 与网页的画面、光标或历史仍可能不同：
 
 - 宽字符或组合字符后的 REP：tmux 遇到 UTF-8 字符时清除可重复的字符，xterm.js 重复整个字形。
 - soft hyphen、BOM、未知 CSI 或 ESC 之后的 REP：两边记录的“上一个字符”不同。

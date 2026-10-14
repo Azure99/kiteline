@@ -2,14 +2,14 @@ import { appVersion } from "@kiteline/shared/protocol";
 import { agentConfig, privateDirectory, readIdentity } from "./config.js";
 import { Agent } from "./agent.js";
 import { bindCli } from "./cli/bind.js";
-import { attachCli, attachUsage, terminalCli } from "./cli/terminal.js";
+import { terminalCli } from "./cli/terminal.js";
 import { scheduleCli } from "./cli/tasks.js";
 import { doctorCli } from "./cli/doctor.js";
 import { installCli } from "./install/commands.js";
 import { checkPrerequisites, checkWindowsShell } from "./prerequisites.js";
 import { lockAgentRuntime, lockAgentState } from "./state-lock.js";
 
-const commands = `check | bind --server HTTP_OR_HTTPS_ORIGIN [--if-unbound] | run | doctor | ${attachUsage} | terminal | workspace | schedule`;
+const commands = `check | bind --server HTTP_OR_HTTPS_ORIGIN [--if-unbound] | run | doctor | terminal | workspace | schedule`;
 const usage =
   process.platform === "win32"
     ? `Usage: kiteline-agent ${commands}
@@ -86,10 +86,6 @@ async function runAgent() {
 }
 async function main() {
   const command = process.argv[2];
-  if (command === "attach") {
-    await attachCli(process.argv.slice(3));
-    return;
-  }
   if (command === "bind") {
     await bindCli(process.argv.slice(3));
     return;

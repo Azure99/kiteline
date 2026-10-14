@@ -50,9 +50,8 @@ export interface Identity {
   deviceToken: string;
   server: string;
 }
-export async function agentPaths(runDirOverride?: string) {
-  const explicitRunDir = runDirOverride === undefined ? undefined : resolve(runDirOverride);
-  const installed = await installedPaths(explicitRunDir);
+export async function agentPaths() {
+  const installed = await installedPaths();
   if (installed) return installed;
   return applicationPaths(
     homedir(),
@@ -60,7 +59,7 @@ export async function agentPaths(runDirOverride?: string) {
       (process.platform === "win32"
         ? resolve(windowsNative().identity().localAppData, "kiteline-agent")
         : undefined),
-    explicitRunDir ?? process.env.KITELINE_AGENT_RUN_DIR,
+    process.env.KITELINE_AGENT_RUN_DIR,
   );
 }
 export async function privateDirectory(path: string) {

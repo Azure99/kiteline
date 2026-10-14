@@ -126,7 +126,7 @@ test("application state excludes another owner until cleanup releases it", async
 test("every installed command holds a shared lock before loading program files", async () => {
   const root = await directory();
   const entry = await launcher(root, 'console.log("loaded"); setInterval(() => {}, 1000);');
-  const running = child(entry.path, ["attach", "test"]);
+  const running = child(entry.path, ["run"]);
   await expect.poll(running.output).toContain("loaded");
   expect(spawnSync("flock", ["--exclusive", "--nonblock", entry.use, "true"]).status).toBe(1);
   running.process.kill("SIGTERM");

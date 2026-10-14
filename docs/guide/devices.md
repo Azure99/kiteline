@@ -419,7 +419,7 @@ docker compose up -d
 docker compose logs -f agent
 ```
 
-在网页添加工作区时选择 `/home/dev/projects` 下的目录。本机接续在宿主机上执行 `docker compose exec agent kiteline-agent attach SESSION_ID`。用其他方式运行的容器，用 `docker exec -it -u PROJECT_USER CONTAINER /usr/local/bin/kiteline-agent attach SESSION_ID`，其中 `-u` 指定与 agent 相同的用户。
+在网页添加工作区时选择 `/home/dev/projects` 下的目录。
 
 升级时把 `KITELINE_VERSION` 改为新版本，执行 `docker compose build` 和 `docker compose up -d`；绑定保留在卷中，不需要重新绑定。停止或重建容器与停止前台 agent 的效果相同（见[用网页命令接入](#用网页命令接入)）。
 
@@ -435,7 +435,7 @@ agent 的版本必须与 server 相同。先[升级 server](server.md#升级-ser
 
 - 前台运行的 agent：按 Ctrl-C。
 - 服务：用[后台运行](#后台运行)中的停止命令，它们同时阻止服务管理器自动重启。
-- 本机接续和其他正在执行的 `kiteline-agent` 命令：按 Ctrl-b d 断开附着，或等命令结束。
+- 其他正在执行的 `kiteline-agent` 命令：等待命令结束。
 - 使用其他数据目录运行的 agent 实例。
 
 停止 agent 会结束它的终端会话和定时任务运行；绑定、配置、工作区、定时任务定义和保留的运行记录都会保留。

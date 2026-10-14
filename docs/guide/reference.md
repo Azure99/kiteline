@@ -46,21 +46,20 @@ Linux 和 macOS 的命令入口是 `/usr/local/bin/kiteline-agent`；用 `sudo` 
 
 不带参数或带 `--help` 执行 `kiteline-agent` 会打印子命令概要，`--version` 打印版本号。只有 `schedule` 及其子命令提供 `--help`；其他子命令没有 `--help`，参数以下表为准。
 
-| 命令                      | 选项                                                                        | 执行者        | agent 进程   |
-| ------------------------- | --------------------------------------------------------------------------- | ------------- | ------------ |
-| `install`                 | `--user PROJECT_USER`；Windows 另有 `--data-dir PATH`、`--run-dir PATH`     | root 或管理员 | 无关         |
-| `upgrade`                 | `--archive FILE`（必填）、`--yes`                                           | root 或管理员 | 必须全部停止 |
-| `uninstall`               | `--purge`、`--yes`                                                          | root 或管理员 | 必须全部停止 |
-| `check`                   | 无                                                                          | 项目用户      | 无关         |
-| `bind`                    | `--server URL`（必填）、`--if-unbound`                                      | 项目用户      | 必须停止     |
-| `run`                     | 无                                                                          | 项目用户      | 由它启动     |
-| `doctor`                  | 无                                                                          | 项目用户      | 可选         |
-| `attach SESSION_ID`       | `--run-dir DIR`                                                             | 项目用户      | 必须运行     |
-| `workspace list`          | 无                                                                          | 项目用户      | 必须运行     |
-| `terminal list`           | `--workspace WORKSPACE_ID`                                                  | 项目用户      | 必须运行     |
-| `terminal new`            | `--workspace WORKSPACE_ID`（必填）、`--shortcut SHORTCUT_ID`、`--no-attach` | 项目用户      | 必须运行     |
-| `terminal end SESSION_ID` | 无                                                                          | 项目用户      | 必须运行     |
-| `schedule …`              | 见[定时任务的命令行](scheduled-tasks.md#命令行)                             | 项目用户      | 必须运行     |
+| 命令                      | 选项                                                                    | 执行者        | agent 进程   |
+| ------------------------- | ----------------------------------------------------------------------- | ------------- | ------------ |
+| `install`                 | `--user PROJECT_USER`；Windows 另有 `--data-dir PATH`、`--run-dir PATH` | root 或管理员 | 无关         |
+| `upgrade`                 | `--archive FILE`（必填）、`--yes`                                       | root 或管理员 | 必须全部停止 |
+| `uninstall`               | `--purge`、`--yes`                                                      | root 或管理员 | 必须全部停止 |
+| `check`                   | 无                                                                      | 项目用户      | 无关         |
+| `bind`                    | `--server URL`（必填）、`--if-unbound`                                  | 项目用户      | 必须停止     |
+| `run`                     | 无                                                                      | 项目用户      | 由它启动     |
+| `doctor`                  | 无                                                                      | 项目用户      | 可选         |
+| `workspace list`          | 无                                                                      | 项目用户      | 必须运行     |
+| `terminal list`           | `--workspace WORKSPACE_ID`                                              | 项目用户      | 必须运行     |
+| `terminal new`            | `--workspace WORKSPACE_ID`（必填）、`--shortcut SHORTCUT_ID`            | 项目用户      | 必须运行     |
+| `terminal end SESSION_ID` | 无                                                                      | 项目用户      | 必须运行     |
+| `schedule …`              | 见[定时任务的命令行](scheduled-tasks.md#命令行)                         | 项目用户      | 必须运行     |
 
 表中的项目用户指安装时记录的账户。安装后以其他账户执行会报错 `Use project user PROJECT_USER to run this command`。
 
@@ -79,9 +78,8 @@ Linux 和 macOS 的命令入口是 `/usr/local/bin/kiteline-agent`；用 `sudo` 
 
 - `workspace list` 每行输出 `WORKSPACE_ID`、名称和路径，以 Tab 分隔。工作区只能在网页中添加或移除。
 - `terminal list` 每行输出 `SESSION_ID`、`WORKSPACE_ID`、状态和名称；`--workspace` 只列出该工作区的会话。
-- `terminal new` 打印新会话的 `SESSION_ID`，然后附着到它；`--no-attach` 只创建不附着。`--shortcut` 用快捷方式启动：新设备预置的快捷方式 ID 是 `claude`、`codex` 和 `opencode`；在“终端设置”中新增的快捷方式使用随机 ID，可在 agent 数据目录的 `agent.json` 的 `shortcuts` 中查到。
+- `terminal new` 创建会话，打印 `SESSION_ID` 后退出，不要求交互终端。`--shortcut` 用快捷方式启动：新设备预置的快捷方式 ID 是 `claude`、`codex` 和 `opencode`；在“终端设置”中新增的快捷方式使用随机 ID，可在 agent 数据目录的 `agent.json` 的 `shortcuts` 中查到。
 - `terminal end SESSION_ID` 不经确认直接结束会话及其中的程序。
-- `attach SESSION_ID` 在当前终端附着到会话，按 `Ctrl-b d` 断开。附着需要交互终端；在容器中用 `docker exec -it`。`--run-dir` 指定运行目录，优先于环境变量。网页的“本机接续命令”已经包含正确的入口和运行目录。使用方法见[终端](usage.md#终端)。
 
 ## server 环境变量
 
@@ -115,7 +113,7 @@ Linux 和 macOS 的命令入口是 `/usr/local/bin/kiteline-agent`；用 `sudo` 
 
 目录按以下顺序确定，先找到的生效：
 
-1. 进程环境变量 `KITELINE_AGENT_HOME`、`KITELINE_AGENT_RUN_DIR`。`attach --run-dir` 对运行目录的优先级更高。
+1. 进程环境变量 `KITELINE_AGENT_HOME`、`KITELINE_AGENT_RUN_DIR`。
 2. Linux 和 macOS 读取 `/etc/kiteline-agent.env`；Windows 读取安装记录 `installation.json` 中由 `install` 写入的目录。
 3. 上表的默认值。Linux 和 macOS 的 HOME 取自安装记录中的项目用户，与执行命令时的 `HOME` 无关。
 
@@ -365,7 +363,7 @@ agent 正在运行时，`kiteline-agent doctor` 会显示 server 连接状态和
 | `UTF-8 locale: Character map is …`                                                   | 启动环境的 locale 不是 UTF-8                                                                  | 设置已安装的 UTF-8 locale，见[支持的系统与准备](devices.md#支持的系统与准备)     |
 | `git: spawn git ENOENT`                                                              | 启动环境的 `PATH` 中没有 Git                                                                  | 安装 Git 或修正 `PATH`，见[支持的系统与准备](devices.md#支持的系统与准备)        |
 | `git: Native executable not found in the current PATH: git`                          | Windows 上启动环境的 `PATH` 中没有 Git                                                        | 安装 Git 或修正 `PATH`                                                           |
-| `Agent installation is busy`；Windows 上为 `Installation is busy`                    | 升级或卸载时仍有 `kiteline-agent` 进程在使用这份安装                                          | 停止 `run`、`attach` 和服务后重试，见[升级 agent](devices.md#升级-agent)         |
+| `Agent installation is busy`；Windows 上为 `Installation is busy`                    | 升级或卸载时仍有 `kiteline-agent` 进程在使用这份安装                                          | 停止 `run` 和服务，等待其他命令结束后重试，见[升级 agent](devices.md#升级-agent) |
 | `… uses the installation configuration`                                              | 执行接入命令的 Shell 中设置了 `KITELINE_AGENT_HOME` 或 `KITELINE_AGENT_RUN_DIR`               | 取消这两个变量；自定义目录的设置方法见 [agent 环境变量](#agent-环境变量)         |
 | 本机命令报 `connect ENOENT …/agent.sock` 或 `connect ECONNREFUSED …/agent.sock`      | agent 未运行（ECONNREFUSED 表示 agent 异常退出后留下了旧 socket），或命令解析到不同的运行目录 | 启动 agent；确认用户和目录与 `run` 一致                                          |
 | `Device channel limit reached`                                                       | 该设备上同时打开的终端显示、文件传输和开发服务请求达到上限                                    | 关闭不用的终端显示和页面                                                         |

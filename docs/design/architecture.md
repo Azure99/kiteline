@@ -16,9 +16,8 @@ flowchart LR
   C["kiteline-agent 命令行"] -->|"本机 IPC"| A
   C -->|"HTTP：绑定"| P
   C -->|"HTTP：绑定"| S
-  C -->|"tmux attach"| T["tmux server：每个终端会话一个"]
   A -->|"stdin / stdout JSON 行"| R["terminal-recorder"]
-  R -->|"tmux control mode"| T
+  R -->|"tmux control mode"| T["tmux server：每个终端会话一个"]
   A -->|"TTY 附着 / 结束会话"| T
   A --> H["文件 helper：rename-noreplace、entry-name"]
   A --> G["Git、ripgrep、定时任务命令"]
@@ -32,7 +31,7 @@ flowchart LR
 - **远程 CLI**（`kiteline`）：通过 server 使用选定设备的操作凭据；短命令与工作台复用 HTTP/RPC 客户端，交互 attach 复用[终端数据通道](terminal.md#远程交互附着)，与 agent 复用 Node 网络传输。凭据导入与当前目录目标见[远程 CLI](../guide/cli.md)。
 - **agent**（`kiteline-agent run`）：每台设备一个 Node 进程，以项目用户身份运行。agent 主动连接 server：一条控制 WebSocket 承载 RPC 和事件，每次文件读写、终端附着和开发服务请求另开一条数据 WebSocket。agent 不监听 TCP 端口；同一用户的本机命令行通过[本机 IPC](protocol.md#本机-ipc) 访问它。
 - **recorder**（`terminal-recorder`）：agent 在第一次需要时启动的 Node 子进程，每个 agent 最多一个，通过 stdin 和 stdout 与 agent 通信。它为每个终端会话运行一个 tmux control 客户端，把输出写入 `@xterm/headless` 屏幕模型，浏览器附着时从这个模型恢复画面。
-- **tmux server**：每个终端会话一个私有 tmux server，socket 为 `<运行目录>/<sessionId>/tmux.sock`，会话名固定为 `kiteline`（`shared/src/terminal/node.ts` 的 `tmuxSession`）。终端程序运行在其中，浏览器断开或 recorder 退出都不会结束它；`kiteline-agent attach` 直接附着到这个 socket。Windows 上 tmux 运行在随包的私有 MSYS2 环境中，见[平台实现](platforms.md#windows)。
+- **tmux server**：每个终端会话一个私有 tmux server，socket 为 `<运行目录>/<sessionId>/tmux.sock`，会话名固定为 `kiteline`（`shared/src/terminal/node.ts` 的 `tmuxSession`）。终端程序运行在其中，浏览器断开或 recorder 退出都不会结束它。Windows 上 tmux 运行在随包的私有 MSYS2 环境中，见[平台实现](platforms.md#windows)。
 - **文件 helper**：Linux 和 macOS 上，不覆盖目标的改名由一次性进程 `rename-noreplace` 完成；macOS 另用 `entry-name` 查询目录项在磁盘上的实际名称。Windows 不使用 helper，同类能力由 agent 进程加载的原生 addon（`native/windows/`）提供。
 
 ## 仓库结构
@@ -101,12 +100,12 @@ agent 的 JSON 状态文件以原子替换写入，不调用 fsync，见[目录�
 
 ## 请求流程
 
-| 流程                   | 入口文件                                                                                                                 | 行为契约                                                                                                             |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| RPC                    | `web/src/lib/api.ts`、`server/src/app.ts`、`agent/src/agent.ts`                                                          | [RPC](protocol.md#rpc)、[结果语义](protocol.md#结果语义)                                                             |
-| 数据通道与文件下载     | `server/src/channels.ts`、`server/src/file-transfer.ts`、`agent/src/files/channels.ts`、`agent/src/terminal/channels.ts` | [数据通道](protocol.md#数据通道)、[网页附着](terminal.md#网页附着)                                                   |
-| 开发服务代理           | `server/src/http-proxy.ts`、`agent/src/http/channels.ts`                                                                 | [请求转发](http-access.md#请求转发)                                                                                  |
-| 本机终端与定时任务命令 | `agent/src/cli/terminal.ts`、`agent/src/cli/tasks.ts`、`agent/src/local.ts`                                              | [本机 IPC](protocol.md#本机-ipc)、[本机附着](terminal.md#本机附着)、[任务命令行](../guide/scheduled-tasks.md#命令行) |
+| 流程                   | 入口文件                                                                                                                 | 行为契约                                                                           |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| RPC                    | `web/src/lib/api.ts`、`server/src/app.ts`、`agent/src/agent.ts`                                                          | [RPC](protocol.md#rpc)、[结果语义](protocol.md#结果语义)                           |
+| 数据通道与文件下载     | `server/src/channels.ts`、`server/src/file-transfer.ts`、`agent/src/files/channels.ts`、`agent/src/terminal/channels.ts` | [数据通道](protocol.md#数据通道)、[网页附着](terminal.md#网页附着)                 |
+| 开发服务代理           | `server/src/http-proxy.ts`、`agent/src/http/channels.ts`                                                                 | [请求转发](http-access.md#请求转发)                                                |
+| 本机终端与定时任务命令 | `agent/src/cli/terminal.ts`、`agent/src/cli/tasks.ts`、`agent/src/local.ts`                                              | [本机 IPC](protocol.md#本机-ipc)、[任务命令行](../guide/scheduled-tasks.md#命令行) |
 
 ## 协调与失败边界
 
@@ -140,7 +139,7 @@ agent 的 JSON 状态文件以原子替换写入，不调用 fsync，见[目录�
 | 密码          | `bcryptjs`，cost 12                             | 纯 JavaScript。bcrypt 只使用前 72 字节，所以密码上限为 72 字节。                             |
 | 进程锁        | `proper-lockfile`、Windows 原生锁               | server 和 Linux/macOS agent 使用 proper-lockfile；Windows agent 使用 LockFileEx 和命名管道。 |
 | agent 出站    | `undici`、`https-proxy-agent`、`proxy-from-env` | 按 `http_proxy`、`no_proxy` 等环境变量走 HTTP 或 HTTPS 代理。                                |
-| 终端          | tmux、`@xterm/headless`、xterm.js               | 程序不依赖浏览器连接，可本机接续，重连能恢复画面。需随包携带打过补丁的 tmux。                |
+| 终端          | tmux、`@xterm/headless`、xterm.js               | 程序不依赖浏览器连接，可远程接续，重连能恢复画面。需随包携带打过补丁的 tmux。                |
 | 文件改名      | `rename-noreplace`、Windows addon               | Node 没有原子的不覆盖改名。Linux 和 macOS 上每次不覆盖改名要启动一个进程。                   |
 | 搜索          | 随包 ripgrep，`stream-json` 解析 `rg --json`    | 遵守忽略规则；结果逐条解析，不整份读入内存。                                                 |
 | 文件监听      | chokidar                                        | 跨平台。只监听正在查看的工作区，事件只用于提示刷新。                                         |

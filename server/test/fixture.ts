@@ -21,9 +21,7 @@ export const agentEnvironment: AgentEnvironment = {
   os: "linux",
   homePath: "/home/project",
   rootPaths: ["/"],
-  cliPath: "/usr/local/bin/kiteline-agent",
   dataDir: "/var/tmp/kiteline-data",
-  runDir: "/var/tmp/kiteline-run",
 };
 
 export function hello() {

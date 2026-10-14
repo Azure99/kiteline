@@ -5,13 +5,12 @@ import { agentConfig, agentPaths } from "../src/config.js";
 
 afterEach(() => vi.unstubAllEnvs());
 
-test("explicit attach directory wins over inherited directories without reading Shell configuration", async () => {
-  const root = await mkdtemp("/var/tmp/kiteline-attach-paths-");
+test("paths use environment directories without reading Shell configuration", async () => {
+  const root = await mkdtemp("/var/tmp/kiteline-config-paths-");
   vi.stubEnv("KITELINE_AGENT_HOME", root);
   vi.stubEnv("KITELINE_AGENT_RUN_DIR", join(root, "other"));
   try {
     await writeFile(join(root, "config.json"), "not JSON");
-    expect((await agentPaths(join(root, "actual run"))).runDir).toBe(join(root, "actual run"));
     expect((await agentPaths()).runDir).toBe(join(root, "other"));
   } finally {
     await rm(root, { recursive: true, force: true });

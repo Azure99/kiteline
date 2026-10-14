@@ -82,7 +82,7 @@ agent、recorder 和 pane 的启动脚本运行在随包的原生 Windows Node �
 
 ### 进程集合
 
-agent 和 recorder 在 Windows 上启动的每个进程（tmux server 和每次 tmux 调用、recorder、控制客户端、本机与远程附着客户端、Git、ripgrep、定时任务和检查命令）都放在自己的 Job 对象中（`shared/src/windows/job.ts`）：
+agent 和 recorder 在 Windows 上启动的每个进程（tmux server 和每次 tmux 调用、recorder、控制客户端、远程附着客户端、Git、ripgrep、定时任务和检查命令）都放在自己的 Job 对象中（`shared/src/windows/job.ts`）：
 
 - Job 设置 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`，不允许子进程脱离。进程以挂起状态直接创建在 Job 中，再恢复运行，不存在先运行、后加入的间隙。
 - 一个进程集合结束的判断是：主进程已退出，且 Job 中的活动进程数为 0。只看主进程退出不够。
@@ -95,7 +95,6 @@ agent 和 recorder 在 Windows 上启动的每个进程（tmux server 和每次 
 - agent 先在独立 Job 中启动空的 tmux server，工作目录为工作区目录；确认 server 可以应答后才让 recorder 创建会话。
 - recorder 用私有的 `script` 提供 PTY，在原始模式下运行 tmux control 客户端。所有 tmux 客户端都带 `-N`，不启动新的 server。
 - pane 中运行原生 Node 的 `shared/dist/terminal/pane.js`，从会话目录的 `pane.json` 读取启动信息，以参数数组和继承的标准输入输出启动配置的 PowerShell。普通终端加载用户 profile，快捷方式执行给定命令。PowerShell 退出后将 32 位退出码发布到 tmux pane；启动失败、被信号结束或发布失败时退出码为空。启动脚本忽略 Ctrl-C 和 Ctrl-Break，由 PowerShell 处理。
-- `kiteline-agent attach` 在自己的 Job 中通过 bash 的前台作业运行 `script` 和 tmux 附着客户端；它忽略 Ctrl-C 和 Ctrl-Break，让这两个键交给 tmux。
 - 远程 attach 使用与 Unix 同源的 `forkpty` 桥，在独立 Job 中运行普通 tmux client；原 server Job 不属于这次连接。
 - Windows CLI 通过现有 PowerShell 入口保存和恢复输入 Console mode。Node 在输出排空后把结果码写入本次临时文件并直接终止，避免原生退出清理被停读宿主阻塞；入口恢复后返回该结果并删除文件。未排空的期限退出不写完成结果，入口恢复残留 mode 和屏幕并报非零。宿主完全停读时，入口可等待消费恢复，Node 和远端桥仍有限退出。
 - 定时任务的启动参数见 [agent 配置文件](../guide/reference.md#agent-配置文件)，进程管理见[定时任务契约](scheduled-tasks.md#执行与停止)。

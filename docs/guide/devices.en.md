@@ -419,7 +419,7 @@ docker compose up -d
 docker compose logs -f agent
 ```
 
-When adding a workspace in the web app, choose a directory under `/home/dev/projects`. For local attach, run `docker compose exec agent kiteline-agent attach SESSION_ID` on the host. For containers launched another way, use `docker exec -it -u PROJECT_USER CONTAINER /usr/local/bin/kiteline-agent attach SESSION_ID`, with `-u` specifying the same user as the agent.
+When adding a workspace in the web app, choose a directory under `/home/dev/projects`.
 
 To upgrade, change `KITELINE_VERSION`, run `docker compose build`, then `docker compose up -d`. The volume keeps the binding, so no rebinding is needed. Stopping or recreating a container has the same effect as stopping a foreground agent (see [Connect using the web command](#connect-using-the-web-command)).
 
@@ -435,7 +435,7 @@ Before upgrading, wait for CLI calls using the shared package to finish, then st
 
 - Foreground agent: press Ctrl-C.
 - Service: use the stop commands in [Run in the background](#run-in-the-background); these also prevent automatic service-manager restarts.
-- Local attachments and other running `kiteline-agent` commands: detach with Ctrl-b d, or wait for the command to finish.
+- Other running `kiteline-agent` commands: wait for them to finish.
 - Agent instances using other data directories.
 
 Stopping the agent ends its terminal sessions and scheduled-task runs. Binding, configuration, workspaces, task definitions and retained run records are kept.

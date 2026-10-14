@@ -47,9 +47,7 @@ test("last connected records successful hello, not metadata updates or disconnec
     os: "windows",
     homePath: "C:\\Users\\Project",
     rootPaths: ["C:\\", "D:\\"],
-    cliPath: "C:\\Program Files\\Kiteline\\bin\\kiteline-agent.ps1",
     dataDir: "C:\\kiteline-state",
-    runDir: "C:\\kiteline-run",
   };
   next.send(
     JSON.stringify({

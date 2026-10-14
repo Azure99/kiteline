@@ -110,9 +110,7 @@ export interface AgentEnvironment {
   os: "linux" | "windows" | "macos";
   homePath: string;
   rootPaths: string[];
-  cliPath: string;
   dataDir: string;
-  runDir: string;
 }
 export interface Entry {
   name: string;
@@ -510,9 +508,7 @@ export function checkEnvironment(value: unknown): AgentEnvironment {
     os,
     homePath: absolutePath(input.homePath, os),
     rootPaths: input.rootPaths.map((path) => absolutePath(path, os)),
-    cliPath: absolutePath(input.cliPath, os),
     dataDir: absolutePath(input.dataDir, os),
-    runDir: absolutePath(input.runDir, os),
   };
 }
 export function checkShortcutIcon(value: unknown): ShortcutIcon | undefined {

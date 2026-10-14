@@ -16,7 +16,6 @@ import { atomicJson, readJson } from "@kiteline/shared/node/files";
 import { stateFiles, type AgentConfig } from "./config.js";
 import { windowsNative } from "@kiteline/shared/windows/native";
 import { devicePath, realPath, sameObject } from "./files/paths.js";
-import { publicCliPath } from "./install/paths.js";
 
 export class MetadataStore {
   value: Metadata = {
@@ -39,9 +38,7 @@ export class MetadataStore {
       os: windows ? "windows" : process.platform === "darwin" ? "macos" : "linux",
       homePath: windows?.home ?? homedir(),
       rootPaths: windows?.roots ?? ["/"],
-      cliPath: publicCliPath,
       dataDir: config.dataDir,
-      runDir: config.runDir,
     });
   }
   async load() {
