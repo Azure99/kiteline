@@ -272,7 +272,9 @@ export class Agent {
         controller.abort(new AppError("cancelled", "Control connection interrupted"));
       void this.watches.close();
       void this.repos.close();
-      this.terminalChannels.close();
+      void this.terminalChannels
+        .close()
+        .catch((error: unknown) => console.error("Terminal channel cleanup failed:", error));
       void this.fileChannels.close();
       this.httpChannels.close();
       void this.directories.close();

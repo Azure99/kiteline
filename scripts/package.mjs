@@ -174,7 +174,12 @@ function checksums(directory) {
       ? [
           "runtime/bin/node",
           ...(kind === "agent"
-            ? ["dist/native/bin/tmux", "dist/native/bin/rename-noreplace", "dist/native/bin/rg"]
+            ? [
+                "dist/native/bin/tmux",
+                "dist/native/bin/rename-noreplace",
+                "dist/native/bin/rg",
+                "dist/native/bin/pty-bridge",
+              ]
             : []),
         ]
       : [],

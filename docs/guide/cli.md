@@ -161,7 +161,7 @@ kiteline terminal send --key Down --if-input "$(jq -r '.result.input | "\(.epoch
 `--if-changed` 只复用同目标、同观察选项的完整 position；改变 tail/attrs 仍返回完整数据。
 `unchanged` 省略屏幕，但仍给当前 inputSeq；seq 推进也不一定意味着可见文字变化。
 recorder 换代返回 `reset` 全屏。`--if-input` 是可选的接纳条件：观察后若已有其他输入进入，
-返回 conflict；重新观察后由调用方决定是否再发。网页输入计数，本机直接 tmux 输入不计数。
+返回 conflict；重新观察后由调用方决定是否再发。网页输入计数，本机 tmux 和远程 attach 输入不计数。
 新 inputSeq 配旧画面仍可能意味着输入尚未回显，条件通过不保证不会混行。
 
 `wait` 默认等待 300ms 输出安静，总上限 1000ms，可用 `--quiet-ms` 和 `--timeout-ms`
@@ -213,13 +213,35 @@ kiteline files upload 'notes/设计副本.md' --file ./design.md --replace-versi
 在不区分大小写或 Unicode 等价拼写的文件系统中，异拼写可能在使用冲突版本后再次触发
 conflict。可通过共享终端核对实际名称，再决定是否替换。
 
+## 交互接续已有终端
+
+在 Linux/macOS 本机终端中接续 Linux/macOS 设备上已有的运行中会话：
+
+```sh
+kiteline terminal attach --device DEVICE_ID --workspace WORKSPACE_ID --session SESSION_ID
+# 已配置当前目录 .kiteline.json 时：
+kiteline terminal attach
+```
+
+stdin 和 stdout 都必须是 TTY，不能使用 `--json`。命令复用上述凭据和目标，不新建 Shell，
+不自动恢复记录。连接后直接输入；`Ctrl+C` 发给远端程序，`Ctrl+B d` 脱离，
+`Ctrl+B [` 进入 tmux 历史复制模式，`Ctrl+B Ctrl+B` 发送前缀键。
+
+Web 和 CLI 共用输入与尺寸，没有输入独占；`--if-input` 不计入 attach 输入。粘贴按
+本机终端与 tmux 的原生规则处理。脱离或断线只结束本次连接，原会话继续运行。
+输出积压超过[消费预算](reference.md#终端)时该连接会报错结束，重新执行 attach 接续当前画面。
+
+正常脱离、最后输出写完且本机状态恢复后返回 0；这不是远端命令的退出码。输出完全
+停止消费时，命令仍会以非 0 结束并恢复本机输入模式，尚未消费的画面复位无法立即生效。
+
 ## Web 接续与记录恢复
 
 `web url` 返回同一终端的链接，不创建交接状态。Web 登录后点击实际终端显示区再输入；
 “专注终端”按钮只调整布局。双方的输入与尺寸都影响同一终端，关闭 CLI 不关闭 Shell。
 `web url --path PATH` 返回文件链接，仅核实设备/workspace，不检查文件存在或版本。
 
-遇到 `recording_unavailable`，先看 `terminal list`，再按需显式 `terminal recover`。
+遇到 `recording_unavailable`，仍可用 attach 接续运行中的会话。需要 Web 或短命令观察时，
+先看 `terminal list`，再按需显式 `terminal recover`。
 恢复复用同一 pane，可能短暂改变尺寸以重绘，丢失旧 recorder 历史并更换 epoch。返回
 `recovering` 只表示受理，后续自行 list/snapshot 观察；CLI 不轮询或重发之前的输入。
 目标不匹配的 not_found 不能推断 Shell 已毁。超过 1MiB 的观察返回 limit_exceeded，终端
@@ -228,7 +250,7 @@ conflict。可通过共享终端核对实际名称，再决定是否替换。
 ## 输出和失败
 
 默认输出适合直接阅读；`--json` 的 stdout 是带 `outcome`、`result` 或 `error.code` 的
-结构化回复。提示和诊断使用 stderr。CLI 没有后台进程、自动重试或隐含交互。
+结构化回复；交互 attach 不接受 `--json`。提示和诊断使用 stderr，不自动重试。
 
 | 退出码 | 含义                                                               |
 | ------ | ------------------------------------------------------------------ |

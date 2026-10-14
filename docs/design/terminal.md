@@ -9,7 +9,7 @@
 - **recorder**（`terminal-recorder/src/`）：每个 agent 一个 Node 进程；每个会话一个 tmux 控制模式客户端（`tmux -C`）、一个 `@xterm/headless` 模型和一个输入队列。
 - **网页显示**（`web/src/terminal/display.ts`）：每次附着新建一个 xterm.js 实例，恢复画面后接收实时输出，发送输入和尺寸。
 - **本机客户端**（`agent/src/cli/terminal.ts`）：`kiteline-agent attach` 运行随包 tmux 客户端，附着到同一个 tmux 会话。
-- **远程 CLI**（`cli/src/`）：短 RPC 在 recorder 中观察和操作同一终端，不新建本地模拟器或网页附着；调用结束后终端继续运行。
+- **远程 CLI**（`cli/src/`）：短 RPC 在 recorder 中观察和操作同一终端；`terminal attach` 经 agent 的 PTY 桥运行普通 tmux client，接续已有画面和原始输入。两者结束后终端继续运行。
 
 tmux 使用会话目录下的私有配置，不加载用户的 tmux 配置或插件，并收窄 prefix 键表。具体设置由 `shared/src/terminal/node.ts` 的 `terminalPreset()` 定义。
 
@@ -115,6 +115,14 @@ recorder 只根据模型待解析量，按 `RecordedSession.pressure()` 的高�
 
 网页菜单“本机接续命令”生成的命令包含命令入口的绝对路径和 `--run-dir`；Windows 客户端的启动方式见[平台实现](platforms.md#windows)。
 
+### 远程交互附着
+
+`kiteline terminal attach` 使用已有 CLI 凭据和目标，经 `terminal.attach` 的 `mode:"tty"` 变体接续运行中的会话。当前支持 Linux/macOS 两端。agent 收到配对后的 `start` 才启动 PTY helper 和普通 tmux client；helper 使用与本机附着共用的 tmux 参数和环境，仅该 client 使用本机传来的 `TERM`。记录不可用不阻止 TTY 附着，recorder 故障也不关闭 TTY 通道。
+
+helper 持续读取 PTY，stdout 待发和 agent 待写输入受传输预算约束，helper 内部只保留一个待写输入帧。agent 在发送前核对累计未消费输出；超过显示预算就结束该 client，不向原 pane 传递显示背压。helper 退出时先排空最后输出，再发送 `ended{exitCode:0}`；启动、传输或清理失败发送 `error`。通道结束只关闭自己的 PTY client，helper 及其子进程有有限清理期限。
+
+CLI 在目标检查和连接成功后进入 raw，用异步写完成量确认消费。正常脱离和失败均立即开始有限输出排空期限；只有正常脱离且本机排空和恢复完成才退出 0，退出码不代表 pane 中最后一条命令。断线后复位本机显示模式；完全停读使复位序列无法生效时，POSIX 默认信号路径恢复 termios 并以非 0 结束。不自动重连或重放输入，操作方式见[远程 CLI](../guide/cli.md#交互接续已有终端)。
+
 ### 记录故障后的恢复
 
 `sessions.recover` 为同一个 pane 重建记录，不新建 Shell，也不重启程序：
@@ -131,7 +139,7 @@ recorder 只根据模型待解析量，按 `RecordedSession.pressure()` 的高�
 
 `sessions.send` 与网页输入使用同一个 recorder 队列和 tmux 注入函数。一次请求是字面文本、粘贴（可附加 Enter）或一个具名按键，不能组合任意动作。粘贴沿用 `normalizePaste` 与 tmux bracketed paste，方向键按当前应用光标键模式编码。CLI 请求不属于网页 attachment，短命令退出不会触发 detach 删除。
 
-可选 `ifInput: {epoch,inputSeq}` 在队列接纳处同步比较；条件不符返回 `failed/conflict`，不接纳输入。CLI 和网页每次接纳输入都会递增 `inputSeq`，包括后来因期限或 detach 丢弃的输入；计数不回退。本机直接操作 tmux 不经过这个计数。计数不意味着回显、独占或干净提示符：已经接纳但尚未回显的输入仍可与下一次输入混合。
+可选 `ifInput: {epoch,inputSeq}` 在队列接纳处同步比较；条件不符返回 `failed/conflict`，不接纳输入。短 CLI 和网页每次接纳输入都会递增 `inputSeq`，包括后来因期限或 detach 丢弃的输入；计数不回退。本机 tmux 和远程 `terminal attach` 的原生输入不经过这个计数。计数不意味着回显、独占或干净提示符：已经接纳但尚未回显的输入仍可与下一次输入混合。
 
 成功回执只表示 tmux 输入操作已处理，包含操作前的输出位置 `before` 和回复时当前输入位置 `input`，不表示前台命令返回。排队到期是明确失败；开始注入后不能确定结果时为 `unknown`。调用方先观察，再决定后续输入；没有请求去重或自动重发。Unix tmux 客户端须到 `close` 才让队列继续，避免中止后仍占用共享缓冲区。预算与可用按键见 [RPC 类型](../../shared/src/protocol/terminal-observation.ts)及入口校验，不另建执行状态。
 

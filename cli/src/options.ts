@@ -54,6 +54,7 @@ const commands: Record<string, readonly Option[]> = {
   inspect: workspace,
   "terminal list": workspace,
   "terminal create": [...workspace, "name"],
+  "terminal attach": session,
   "terminal snapshot": [...session, ...screen, "if-changed"],
   "terminal send": [...session, "text", "paste", "enter", "key", "if-input", "timeout-ms"],
   "terminal wait": [...session, ...screen, "mode", "after", "quiet-ms", "timeout-ms"],
@@ -159,6 +160,8 @@ export function parse(argv: string[]) {
       if (raw[local] === undefined)
         throw new AppError("invalid_argument", `${command} requires --${local} LOCAL`);
     }
+    if (command === "terminal attach" && raw.json)
+      throw new AppError("invalid_argument", "terminal attach does not accept --json");
     if (command === "web url" && raw.path !== undefined && raw.session !== undefined)
       throw new AppError("invalid_argument", "--path cannot be combined with --session");
     if (command === "terminal send") {
@@ -232,10 +235,11 @@ const commandHelp: Record<string, string> = {
   inspect: `inspect --device D --workspace W\nShow a workspace from the device metadata snapshot and its terminals.\nIgnores a cwd default session; rejects explicit --session.\n`,
   "terminal list": `terminal list --device D --workspace W\nList terminals with actual state and recorder webStatus.\nIgnores a cwd default session; rejects explicit --session.\n`,
   "terminal create": `terminal create --device D --workspace W [--name NAME]\nCreate a persistent terminal in the workspace, shared with Web.\nIgnores a cwd default session; rejects explicit --session.\n`,
+  "terminal attach": `terminal attach\n${targetHelp}Interact with an existing running terminal. Requires stdin and stdout TTYs.\nCtrl+B d detaches; Ctrl+B [ opens tmux history; Ctrl+B Ctrl+B sends the prefix.\nInput and size are shared with Web. --if-input does not count attach input.\nSlow output can end this connection; run attach again to reconnect.\nExit 0 means detached and local output drained, not the last remote command status.\n`,
   "terminal snapshot": `terminal snapshot [--tail N] [--attrs] [--if-changed JSON]\n${targetHelp}${observationHelp}Copy the entire position JSON into --if-changed, using the same target and options.\nunchanged has empty stdout but current input metadata; a new epoch returns reset\nwith a full screen. Changing tail/attrs returns full data. There is no position cache.\n`,
-  "terminal send": `terminal send (--text TEXT | --paste TEXT) [--enter] [--if-input EPOCH:INPUTSEQ] [--timeout-ms N]\nterminal send --key KEY [--if-input EPOCH:INPUTSEQ] [--timeout-ms N]\n${targetHelp}Keys: ${terminalKeys.join(", ")}. --key cannot use --enter.\n--text sends literal text; the word Enter is not a key. --paste uses terminal paste\nmode. --enter appends Enter after the text or paste. No stdin is read.\n--if-input compares input accepted by this recorder, including Web input; conflict\nmeans no input accepted. Reobserve before choosing a new condition. Acceptance\ndoes not mean echo, exclusivity or command completion. Local tmux input is uncounted.\nTimeout: 1..10000ms, default 5000ms. unknown may have sent input; observe before\ndeciding to repeat. No automatic resend or waiting. before is EPOCH:SEQ for wait,\nnot a conditional snapshot position. recording_unavailable requires explicit recover.\n`,
+  "terminal send": `terminal send (--text TEXT | --paste TEXT) [--enter] [--if-input EPOCH:INPUTSEQ] [--timeout-ms N]\nterminal send --key KEY [--if-input EPOCH:INPUTSEQ] [--timeout-ms N]\n${targetHelp}Keys: ${terminalKeys.join(", ")}. --key cannot use --enter.\n--text sends literal text; the word Enter is not a key. --paste uses terminal paste\nmode. --enter appends Enter after the text or paste. No stdin is read.\n--if-input compares input accepted by this recorder, including Web input; conflict\nmeans no input accepted. Reobserve before choosing a new condition. Acceptance\ndoes not mean echo, exclusivity or command completion. Local tmux and remote attach input is uncounted.\nTimeout: 1..10000ms, default 5000ms. unknown may have sent input; observe before\ndeciding to repeat. No automatic resend or waiting. before is EPOCH:SEQ for wait,\nnot a conditional snapshot position. recording_unavailable requires explicit recover.\n`,
   "terminal wait": `terminal wait [--mode quiet] [--quiet-ms N] [--timeout-ms N] [--tail N] [--attrs]\nterminal wait --mode change --after EPOCH:SEQ [--timeout-ms N] [--tail N] [--attrs]\n${targetHelp}${observationHelp}quiet defaults to 300ms within a total 1000ms; values are 1..10000ms and timeout\nmay be shorter than quiet. Output/resize activity resets quiet, even for identical\ntext. change requires --after from snapshot.position or send.before; it rejects\n--quiet-ms. quiet rejects --after. quiet/changed/timeout/reset return full screens.\nA quiet terminal does not confirm program or command completion.\n`,
-  "terminal resize": `terminal resize --cols N --rows N [--timeout-ms N]\n${targetHelp}Explicitly resize the same shared terminal; other CLI commands do not resize it.\ncols: 1..${limits.terminalMaxCols}; rows: 1..${limits.terminalMaxRows}. Timeout: 1..10000ms, default 5000ms.\nunknown requires observing the terminal before deciding to repeat.\n`,
+  "terminal resize": `terminal resize --cols N --rows N [--timeout-ms N]\n${targetHelp}Explicitly resize the same shared terminal.\ncols: 1..${limits.terminalMaxCols}; rows: 1..${limits.terminalMaxRows}. Timeout: 1..10000ms, default 5000ms.\nunknown requires observing the terminal before deciding to repeat.\n`,
   "terminal recover": `terminal recover\n${targetHelp}Request recorder recovery and show actual Session/webStatus. Acceptance does not\nconfirm availability; use terminal list/snapshot afterward. Recovery can reset\nepoch and report a history gap. Input is not resent; there is no automatic polling.\n`,
   "files download": `files download PATH --output LOCAL\n${fileTargetHelp}Stream the remote file into a new local file; an existing LOCAL is never overwritten.\nFailure may leave an empty or partial LOCAL. Download follows a leaf symlink.\nSuccess returns path, output and size; file bytes are not JSON output.\n`,
   "files upload": `files upload PATH --file LOCAL [--replace-version VERSION]\n${fileTargetHelp}Stream a local regular file. By default, create only; an existing target conflicts.\nTo choose replacement after conflict, copy error.details.current.targetVersion\nfrom the error into --replace-version. VERSION is not a download revision.\nReplacement checks the current target; a leaf symlink is replaced, not followed.\nAn unknown result may have published the file: observe through the terminal or\ndownload before deciding to repeat. Success returns path and size.\n`,
@@ -246,7 +250,9 @@ export function help(command = "") {
   if (commandHelp[command])
     return (
       commandHelp[command] +
-      "\nUse --json for structured outcome/error.code results. Help works offline.\n"
+      (command === "terminal attach"
+        ? "\n--json is not supported. Help works offline.\n"
+        : "\nUse --json for structured outcome/error.code results. Help works offline.\n")
     );
   return `Kiteline — remote access to shared workspaces
 
@@ -257,6 +263,7 @@ Commands:
   inspect --device D --workspace W           Show workspace and terminals
   terminal create [--name NAME]              Create a persistent shared terminal
   terminal list                             List terminals and recorder status
+  terminal attach                           Interact with an existing terminal
   terminal snapshot [--tail N] [--attrs]     Observe screen and current positions
   terminal send --text TEXT [--enter]        Send input; also --paste or --key
   terminal wait [--mode quiet|change]        Wait for terminal activity conditions
@@ -266,7 +273,7 @@ Commands:
   files upload PATH --file LOCAL            Create a remote file; see --help for replacement
   web url [--path PATH]                     Print a terminal or file Web URL
 
-Use COMMAND --help for parameters and behavior. All commands accept --json.
+Use COMMAND --help for parameters and behavior. All commands except attach accept --json.
 Help and --version work offline. Owner menu → CLI credentials in Web issues tokens.
 KITELINE_URL and KITELINE_TOKEN must be supplied together and override saved
 credentials. Saved credentials: ~/.kiteline/credentials.json; KITELINE_CLI_HOME

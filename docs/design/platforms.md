@@ -16,7 +16,7 @@
 
 ### 随包组件
 
-同一架构的发布包用于全部受支持发行版。随包 Node、tmux、ripgrep 和文件 helper 都静态链接 musl，不依赖目标机的 libc 或动态库。原生组件构建记录 `dist/native/identity.json` 的 `linkage` 为 `static-musl`，doctor 据此跳过动态库检查。包内 terminfo 的兼容方式见下节。
+同一架构的发布包用于全部受支持发行版。随包 Node、tmux、ripgrep、PTY 桥和文件 helper 都静态链接 musl，不依赖目标机的 libc 或动态库。原生组件构建记录 `dist/native/identity.json` 的 `linkage` 为 `static-musl`，doctor 据此跳过动态库检查。包内 terminfo 的兼容方式见下节。
 
 静态 musl 程序不加载 glibc 的 NSS 模块，只能从 `/etc/passwd`（以及 nscd）读取账户信息。agent 默认用账户的登录 Shell（`os.userInfo()`），账户只存在于 LDAP、SSSD 等目录服务时读取会失败，此时在 `config.json` 中设置 `shell`（见 [agent 配置文件](../guide/reference.md#agent-配置文件)）。
 
@@ -49,6 +49,7 @@ agent 启动 tmux 时设置 `TERMINFO_DIRS`，依次为随包现代目录、随�
 - tmux 静态链接 libevent，动态链接系统的 ncurses 和 libSystem；terminfo 用系统 `tic` 编译，只有一份。`TERMINFO_DIRS` 依次包含随包目录、用户原有值和系统默认目录。
 - 随包 `flock` 来自 discoteq/flock，构建时确认使用 `flock(2)`，而不是 `fcntl` 锁。
 - `rename-noreplace` 使用 `renamex_np(RENAME_EXCL)`，退出码约定与 Linux 相同；`entry-name` 用 `getattrlist(ATTR_CMN_NAME)` 且不跟随末端符号链接，输出文件系统中保存的名称原字节。
+- 远程 TTY 附着与 Linux 共用 `forkpty` 桥源码，链接系统 libSystem；原生组件只在 agent 包中，CLI 使用随包 Node 和系统终端。
 
 ### 安装与运行
 

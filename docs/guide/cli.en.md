@@ -191,7 +191,7 @@ options. Changing tail/attrs returns full data. `unchanged` omits the screen but
 still supplies current inputSeq. Advancing seq need not change visible text. A new
 recorder epoch returns a full `reset` screen. Optional `--if-input` checks admission:
 if another input was accepted since observation, it returns conflict. Observe again
-before choosing a new send. Web input counts; direct local tmux input does not.
+before choosing a new send. Web input counts; direct local tmux and remote attach input do not.
 A new inputSeq with an old screen can mean input has not echoed yet, so a successful
 condition does not prevent mixed input.
 
@@ -255,6 +255,32 @@ On filesystems that equate case or Unicode spellings, a different spelling can c
 another conflict even when using the version from the first conflict. Check the actual
 name through the shared terminal before deciding whether to replace it.
 
+## Interact with an existing terminal
+
+From a Linux/macOS terminal, attach to a running session on a Linux/macOS device:
+
+```sh
+kiteline terminal attach --device DEVICE_ID --workspace WORKSPACE_ID --session SESSION_ID
+# With defaults in the current directory's .kiteline.json:
+kiteline terminal attach
+```
+
+Both stdin and stdout must be TTYs; `--json` is not accepted. Attach uses the credentials
+and targets above without creating a shell or recovering recording. Type directly;
+`Ctrl+C` goes to the remote program, `Ctrl+B d` detaches, `Ctrl+B [` opens tmux history
+copy mode, and `Ctrl+B Ctrl+B` sends the prefix key.
+
+Web and CLI share input and size without exclusive control. `--if-input` does not
+count attach input. Paste follows the local terminal's and tmux's native behavior.
+Detaching or losing the connection leaves the original session running. If output
+exceeds its [consumption budget](reference.en.md#terminal), this connection fails;
+run attach again to reconnect.
+
+Exit 0 means normal detach, final output written and local terminal state restored;
+it is not the remote command's exit status. If output consumption stops entirely,
+the command still exits nonzero and restores local input mode. Unconsumed screen
+reset sequences cannot take effect until the terminal consumes them.
+
 ## Continue in Web and recover recording
 
 `web url` returns the same terminal's link without a handoff workflow. Log into Web
@@ -263,7 +289,8 @@ layout. Both sides share input and size. Closing the CLI leaves the shell runnin
 `web url --path PATH` returns a file link, validating only the device/workspace,
 without checking file existence or version.
 
-For `recording_unavailable`, check `terminal list`, then explicitly use
+For `recording_unavailable`, attach can still connect to a running session. To restore
+Web or short-command observation, check `terminal list`, then explicitly use
 `terminal recover` as needed. Recovery reuses the pane, may resize it briefly for a
 redraw, loses the old recorder history and changes epoch. A `recovering` reply is
 acceptance, not readiness; use later list/snapshot calls to observe. The CLI does
@@ -275,8 +302,8 @@ appropriate; the CLI does not crop automatically.
 ## Output and failures
 
 Default output is readable text. With `--json`, stdout contains a structured reply
-with `outcome`, `result`, or `error.code`. Prompts and diagnostics use stderr. The
-CLI has no background process, automatic retries, or implicit interaction.
+with `outcome`, `result`, or `error.code`; interactive attach does not accept `--json`.
+Prompts and diagnostics use stderr. Commands do not retry automatically.
 
 | Exit | Meaning                                                                                                |
 | ---- | ------------------------------------------------------------------------------------------------------ |

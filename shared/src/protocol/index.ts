@@ -309,8 +309,10 @@ export interface ChannelParams {
   "terminal.attach": {
     workspaceId: string;
     sessionId: string;
-    history?: "retained" | "screen";
-  };
+  } & (
+    | { mode?: "web"; history?: "retained" | "screen" }
+    | { mode: "tty"; cols: number; rows: number; term: string }
+  );
   "file.read": { workspaceId: string; path: string; purpose: FileReadPurpose };
   "file.write": {
     workspaceId: string;

@@ -7,9 +7,9 @@ import {
   msysDirectory,
   msysPath,
   shellWords,
+  tmuxAttachArgs,
   tmuxBinary,
   tmuxEnvironment,
-  tmuxSession,
 } from "@kiteline/shared/terminal/node";
 import { spawnJob, type JobChild } from "@kiteline/shared/windows/job";
 import { agentPaths, defaultAgentLimits, type AgentConfig } from "../config.js";
@@ -46,17 +46,7 @@ async function attachTerminal(config: Parameters<typeof localRequest>[0], id: st
     let child: JobChild | undefined;
     try {
       const command =
-        "exec " +
-        shellWords([
-          msysPath(tmuxBinary),
-          "-N",
-          "-S",
-          msysPath(identity.socket),
-          "attach-session",
-          "-E",
-          "-t",
-          tmuxSession,
-        ]);
+        "exec " + shellWords([msysPath(tmuxBinary), ...tmuxAttachArgs(identity.socket)]);
       child = await spawnJob(
         join(msysDirectory, "usr/bin/bash.exe"),
         [
@@ -76,11 +66,10 @@ async function attachTerminal(config: Parameters<typeof localRequest>[0], id: st
     return;
   }
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(
-      tmuxBinary,
-      ["-S", identity.socket, "attach-session", "-E", "-t", tmuxSession],
-      { env: tmuxEnvironment(), stdio: "inherit" },
-    );
+    const child = spawn(tmuxBinary, tmuxAttachArgs(identity.socket), {
+      env: tmuxEnvironment(),
+      stdio: "inherit",
+    });
     child.on("error", reject);
     child.on("exit", (code) => {
       process.exitCode = code ?? 1;

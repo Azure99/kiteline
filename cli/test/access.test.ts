@@ -137,6 +137,21 @@ const devices: Device[] = [
   { id: "other-device-full-id", name: "Shared name", status: "online", lastSeenAt: null },
 ];
 
+test("attach help is offline and JSON or redirected terminals fail before connecting", async () => {
+  const root = await directory();
+  const help = await cli(root, ["terminal", "attach", "--help"]);
+  expect(help.code, help.stderr).toBe(0);
+  expect(help.stdout).toContain("Ctrl+B d");
+  const json = await cli(root, ["terminal", "attach", "--json"]);
+  expect(json.code).toBe(2);
+  expect(JSON.parse(json.stdout)).toMatchObject({
+    error: { code: "invalid_argument", message: "terminal attach does not accept --json" },
+  });
+  const redirected = await cli(root, ["terminal", "attach"]);
+  expect(redirected.code).toBe(2);
+  expect(redirected.stderr).toContain("requires stdin and stdout TTYs");
+});
+
 test("help and version work offline with no credentials and a corrupt cwd target", async () => {
   const root = await directory();
   await writeFile(join(root, ".kiteline.json"), "{");

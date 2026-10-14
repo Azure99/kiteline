@@ -50,6 +50,8 @@ export type TerminalFrame =
   | { type: "ended"; exitCode: number | null }
   | { type: "error"; code: string; message: string }
   | { type: "input.error"; code: string; message: string; outcome: "failed" | "unknown" };
+export type TtyInput = Exclude<BrowserTerminalInput, { type: "paste" }>;
+export type TtyFrame = Extract<TerminalFrame, { type: "ended" | "error" }>;
 export type RecorderRequest =
   | ({ id: string; sessionId: string } & TerminalOperation)
   | {

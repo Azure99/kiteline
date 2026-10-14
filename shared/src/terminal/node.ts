@@ -12,6 +12,7 @@ export const tmuxBinary =
   process.platform === "win32"
     ? resolve(msysDirectory, "usr/bin/tmux.exe")
     : resolve(root, "dist/native/bin/tmux");
+export const ptyBridgeBinary = resolve(root, "dist/native/bin/pty-bridge");
 export const terminfoDirectory =
   process.platform === "win32"
     ? resolve(msysDirectory, "usr/share/terminfo")
@@ -21,6 +22,17 @@ export const exitCodeFormat =
 
 export function msysPath(path: string) {
   return path.replaceAll("\\", "/");
+}
+export function tmuxAttachArgs(socket: string) {
+  return [
+    ...(process.platform === "win32" ? ["-N"] : []),
+    "-S",
+    process.platform === "win32" ? msysPath(socket) : socket,
+    "attach-session",
+    "-E",
+    "-t",
+    tmuxSession,
+  ];
 }
 export function shellWords(args: string[]) {
   return args.map((value) => "'" + value.replaceAll("'", "'\\''") + "'").join(" ");

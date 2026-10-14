@@ -26,6 +26,7 @@ const sourceFiles = [
   "scripts/build-macos-native.sh",
   "native/macos/rename-noreplace.c",
   "native/macos/entry-name.c",
+  "native/terminal/pty-bridge.c",
   "native/tmux/paste.patch",
   "native/tmux/flow-control.patch",
   "native/tmux/tmux.terminfo",
@@ -47,7 +48,9 @@ function downloads(architecture) {
 }
 const binaries = [
   "runtime/bin/node",
-  ...["tmux", "rg", "flock", "rename-noreplace", "entry-name"].map((name) => `native/bin/${name}`),
+  ...["tmux", "rg", "flock", "rename-noreplace", "entry-name", "pty-bridge"].map(
+    (name) => `native/bin/${name}`,
+  ),
 ];
 const capture = (command, args) =>
   run(command, args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).trim();

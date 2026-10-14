@@ -158,13 +158,13 @@ Web owner 在 `POST /api/credentials` 提交 `{name, deviceIds, expiresAt}`，�
 
 ## WebSocket 连接
 
-| 路径                                | 发起方 | 检查               |
-| ----------------------------------- | ------ | ------------------ |
-| `/api/agent/control`                | agent  | Bearer，然后版本   |
-| `/api/agent/channels/:channelId`    | agent  | Bearer、通道归属   |
-| `/api/events`                       | 浏览器 | Origin、登录、版本 |
-| `/api/channels/:channelId/terminal` | 浏览器 | Origin、登录、版本 |
-| `/proxy/…`、`/absproxy/…`           | 浏览器 | 与 HTTP 请求相同   |
+| 路径                                | 发起方       | 检查               |
+| ----------------------------------- | ------------ | ------------------ |
+| `/api/agent/control`                | agent        | Bearer，然后版本   |
+| `/api/agent/channels/:channelId`    | agent        | Bearer、通道归属   |
+| `/api/events`                       | 浏览器       | Origin、登录、版本 |
+| `/api/channels/:channelId/terminal` | 浏览器或 CLI | Origin、登录、版本 |
+| `/proxy/…`、`/absproxy/…`           | 浏览器       | 与 HTTP 请求相同   |
 
 - 单条消息不超过 `controlMessageBytes`；`http.proxy` 的数据通道连接为 `dataChunkBytes`。
 - `/api/agent/channels/:channelId` 带 `?connectionId=`：通道必须属于该设备的当前控制连接且尚未有 agent 加入，否则返回 403。
@@ -243,7 +243,7 @@ Web owner 在 `POST /api/credentials` 提交 `{name, deviceIds, expiresAt}`，�
 
 数据通道是一条独立的 WebSocket，用于传输文件内容、终端数据和开发服务字节流，不占用控制连接。
 
-- `terminal.attach`：由 `POST …/channels` 创建，浏览器用 WebSocket `/api/channels/:channelId/terminal` 加入；agent 处理代码为 `agent/src/terminal/channels.ts`。
+- `terminal.attach`：由 `POST …/channels` 创建，浏览器或 CLI 用 WebSocket `/api/channels/:channelId/terminal` 加入；agent 处理代码为 `agent/src/terminal/channels.ts`。
 - `file.read`：`purpose` 为 `open`、`text`、`image` 时由 `POST …/channels` 创建，浏览器用 `GET /api/channels/:channelId/content` 接收；`purpose` 为 `download` 时由 `GET /api/devices/:deviceId/download` 在内部创建。agent 处理代码为 `agent/src/files/channels.ts`。
 - `file.write`：`purpose` 为 `save`、`upload`，由 `POST …/channels` 创建，浏览器用 `PUT /api/channels/:channelId/content` 发送。
 - `http.proxy`：由 `/proxy/`、`/absproxy/` 请求在内部创建；agent 处理代码为 `agent/src/http/channels.ts`。
@@ -264,13 +264,13 @@ Web owner 在 `POST /api/credentials` 提交 `{name, deviceIds, expiresAt}`，�
 
 - **`file.read`**：agent 发送二进制数据块，总长度等于 `meta.size`，没有表示成功的帧。agent 留住最后一块，直到读取完成且检查全部通过才发出；失败时改发 `error` 并关闭。server 收到恰好 `meta.size` 字节时结束 HTTP 响应，字节不足的断流按读取失败处理。细节见[上传与下载](files.md#上传与下载)。
 - **`file.write`**：server 把 PUT 请求体分块转发，请求体长度等于声明大小后发送 `end`。agent 校验并发布文件，发送 `result`，server 把这个 `Reply` 作为 PUT 的响应返回。
-- **`terminal.attach`**：agent 在连接后立即发送通道就绪帧 `ready`，收到 `start` 后才开始恢复。终端帧和浏览器输入类型见 `shared/src/protocol/ipc.ts` 的 `TerminalFrame` 与 `BrowserTerminalInput`；输出和普通输入使用二进制帧。恢复完成前不允许输入，帧的顺序和含义见[附着与恢复](terminal.md#附着与恢复)、[输入](terminal.md#输入)和[尺寸](terminal.md#尺寸)。
+- **`terminal.attach`**：agent 校验目标后发送通道就绪帧 `ready`，收到 `start` 后开始输出。省略 `mode` 或 `mode:"web"` 使用 recorder 恢复，帧和输入类型为 `TerminalFrame`、`BrowserTerminalInput`；恢复完成前不允许输入。`mode:"tty"` 带本机 `cols/rows/term`，启动普通 tmux client 的 PTY；双向二进制帧为原始字节，JSON 仅使用 `TtyInput`、`TtyFrame`，没有 Web 恢复帧或粘贴归一化。类型位于 `shared/src/protocol/ipc.ts`，行为见[附着与恢复](terminal.md#附着与恢复)。
 - **`http.proxy`**：`ready` 的 `meta` 为空对象。`start` 之后通道只传二进制帧，收到文本帧按失败处理；连接以 1000 或无关闭码关闭表示正常结束，其他关闭码表示失败。见[请求转发](http-access.md#请求转发)。
 
 ### 流控与期限
 
 - **文件**：接收端处理完一帧才读取下一帧，未处理的帧最多 `filePendingFrames` 帧、`filePendingBytes`，超过时以 `limit_exceeded` 结束；HTTP 一侧的写入背压同样传到数据通道。传输开始后，在 `fileIdleTimeout` 内没有进展时以 `timeout` 结束。
-- **终端**：二进制输出与有序 JSON 共用累计信用，浏览器完成处理后用 `consumed` 推进；每个显示的实时待发量超过 `terminalDisplayBytes` 时只结束该附着，不向会话传播显示背压；recorder 自身的模型积压仍通过真实 PTY 背压限制。server 和 agent 每条 socket 的发送积压超过 `terminalPendingBytes` 时，仍以 `limit_exceeded` 关闭异常附着。计量和暂停规则见[附着与恢复](terminal.md#附着与恢复)。
+- **终端**：Web 的二进制输出与有序 JSON 共用累计信用，浏览器完成处理后用 `consumed` 推进；TTY 的 `consumed.bytes` 是从零开始、已写入本机终端的累计二进制字节数，必须单调且不超过已发送量。Web live 待发量、TTY 未消费输出分别受 `terminalDisplayBytes` 限制，超限只结束该附着。TTY 不因等待 ACK 暂停 PTY 读取；recorder 自身的模型积压仍通过真实 PTY 背压限制。server 和 agent 每条 socket 的发送积压超过 `terminalPendingBytes` 时，以 `limit_exceeded` 关闭异常附着。计量和暂停规则见[附着与恢复](terminal.md#附着与恢复)。
 - **开发服务**：使用 WebSocket 流的背压，块大小为 `dataChunkBytes`，不设空闲期限，见[连接寿命](http-access.md#连接寿命)。
 
 ### 结束与取消

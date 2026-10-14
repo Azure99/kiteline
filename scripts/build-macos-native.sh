@@ -49,6 +49,8 @@ for helper in rename-noreplace entry-name; do
     "$inputs/native/macos/$helper.c" \
     -o "$output/native/bin/$helper"
 done
+"$CC" -Wall -Wextra -Werror -O2 "-mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET" \
+  "$inputs/native/terminal/pty-bridge.c" -o "$output/native/bin/pty-bridge"
 tic -x -o "$output/native/share/terminfo" "$inputs/native/tmux/tmux.terminfo"
 TERMINFO="$output/native/share/terminfo" infocmp -x -1 tmux-256color >"$build/terminfo.actual"
 for capability in 'pairs#32767,' 'AX,' 'BE=\E[?2004h,' 'BD=\E[?2004l,' \

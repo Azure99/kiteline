@@ -38,6 +38,16 @@ try {
     "-o",
     resolve(destination, "bin/rename-noreplace"),
   ]);
+  run("cc", [
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-O2",
+    resolve(root, "native/terminal/pty-bridge.c"),
+    "-lutil",
+    "-o",
+    resolve(destination, "bin/pty-bridge"),
+  ]);
   writeFileSync(
     resolve(destination, "identity.json"),
     JSON.stringify(
@@ -50,9 +60,11 @@ try {
         patch: digest(resolve(root, "native/tmux/paste.patch")),
         flowControlPatch: digest(resolve(root, "native/tmux/flow-control.patch")),
         helper: digest(resolve(root, "native/linux/rename-noreplace.c")),
+        ptyBridge: digest(resolve(root, "native/terminal/pty-bridge.c")),
         terminfo: digest(terminfoSource),
         tmuxBinary: digest(resolve(destination, "bin/tmux")),
         helperBinary: digest(resolve(destination, "bin/rename-noreplace")),
+        ptyBridgeBinary: digest(resolve(destination, "bin/pty-bridge")),
         helperFlags: ["-Wall", "-Wextra", "-Werror", "-O2"],
         configure: ["--disable-sixel"],
         ripgrep: prepareRipgrep(destination, process.arch === "x64" ? "amd64" : process.arch),

@@ -56,6 +56,9 @@ cd ..
 # shellcheck disable=SC2086
 cc -static -Wall -Wextra -Werror -O2 $cpu_flags \
   rename-noreplace.c -o /output/native/bin/rename-noreplace
+# shellcheck disable=SC2086
+cc -static -Wall -Wextra -Werror -O2 $cpu_flags \
+  pty-bridge.c -lutil -o /output/native/bin/pty-bridge
 "$prefix/bin/tic" -x -o /output/native/share/terminfo tmux.terminfo
 [ "$(grep -c 'pairs#0x10000,' tmux.terminfo)" -eq 1 ]
 sed 's/pairs#0x10000,/pairs#32767,/' tmux.terminfo >tmux-legacy.terminfo

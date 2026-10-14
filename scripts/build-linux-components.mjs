@@ -63,6 +63,7 @@ export function buildLinuxComponents(destination, architecture = "amd64") {
       "tmux-paste.patch": "native/tmux/paste.patch",
       "tmux-flow-control.patch": "native/tmux/flow-control.patch",
       "rename-noreplace.c": "native/linux/rename-noreplace.c",
+      "pty-bridge.c": "native/terminal/pty-bridge.c",
       "tmux.terminfo": "native/tmux/tmux.terminfo",
     };
     for (const [name, file] of Object.entries(files))
@@ -76,6 +77,7 @@ export function buildLinuxComponents(destination, architecture = "amd64") {
       patch: digest(join(temporary, "tmux-paste.patch")),
       flowControlPatch: digest(join(temporary, "tmux-flow-control.patch")),
       helper: digest(join(temporary, "rename-noreplace.c")),
+      ptyBridge: digest(join(temporary, "pty-bridge.c")),
       terminfo: digest(join(temporary, "tmux.terminfo")),
     };
     writeFileSync(
@@ -136,6 +138,7 @@ export function buildLinuxComponents(destination, architecture = "amd64") {
           patch: nativeInputs.patch,
           flowControlPatch: nativeInputs.flowControlPatch,
           helper: nativeInputs.helper,
+          ptyBridge: nativeInputs.ptyBridge,
           terminfo: nativeInputs.terminfo,
           terminfoResources: {
             modern: digest(join(native, "share/terminfo/t/tmux-256color")),
@@ -143,6 +146,7 @@ export function buildLinuxComponents(destination, architecture = "amd64") {
           },
           tmuxBinary: digest(join(native, "bin/tmux")),
           helperBinary: digest(join(native, "bin/rename-noreplace")),
+          ptyBridgeBinary: digest(join(native, "bin/pty-bridge")),
           ripgrep: prepareRipgrep(native, architecture),
         },
         null,
