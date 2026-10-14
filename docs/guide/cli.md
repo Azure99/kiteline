@@ -75,7 +75,7 @@ Node。便携目录可以直接调用这两个入口；系统安装后 CLI 位�
 
 server 的下载接口只提供共同 agent 包，独立 CLI 从 Release 下载。独立 CLI 的升级是
 校验并解开新归档后改用新入口，删除旧包即可移除旧程序。源码开发仍可用
-`node cli/dist/main.js` 代替入口。
+`node cli/dist/main.js` 代替入口；Windows 的交互 attach 必须用 `.ps1` 入口恢复本机终端状态。
 
 ## 接入
 
@@ -215,7 +215,7 @@ conflict。可通过共享终端核对实际名称，再决定是否替换。
 
 ## 交互接续已有终端
 
-在 Linux/macOS 本机终端中接续 Linux/macOS 设备上已有的运行中会话：
+在本机终端中接续设备上已有的运行中会话：
 
 ```sh
 kiteline terminal attach --device DEVICE_ID --workspace WORKSPACE_ID --session SESSION_ID
@@ -232,7 +232,9 @@ Web 和 CLI 共用输入与尺寸，没有输入独占；`--if-input` 不计入 
 输出积压超过[消费预算](reference.md#终端)时该连接会报错结束，重新执行 attach 接续当前画面。
 
 正常脱离、最后输出写完且本机状态恢复后返回 0；这不是远端命令的退出码。输出完全
-停止消费时，命令仍会以非 0 结束并恢复本机输入模式，尚未消费的画面复位无法立即生效。
+停止消费时，排空超时以非 0 结束本次 CLI 进程，尚未消费的画面复位无法立即生效。
+Linux/macOS 会恢复本机输入模式；Windows 的 PowerShell 入口可能需要等待宿主恢复消费后完成
+状态恢复并返回，若宿主一直停读，入口可能持续等待。远端桥会结束，原会话和其他客户端继续。
 
 ## Web 接续与记录恢复
 

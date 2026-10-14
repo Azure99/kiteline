@@ -18,7 +18,11 @@ interface Channel {
   started: boolean;
   backend?:
     | { mode: "web" }
-    | { mode: "tty"; options: { cols: number; rows: number; term: string }; bridge?: TtyBridge };
+    | {
+        mode: "tty";
+        options: { cols: number; rows: number; term: string };
+        bridge?: Promise<TtyBridge>;
+      };
 }
 export class TerminalChannels {
   private entries = new Map<string, Channel>();
@@ -50,8 +54,6 @@ export class TerminalChannels {
         if (item.session.state !== "running")
           throw new AppError("busy", "Terminal is still being created");
         if (params.mode === "tty") {
-          if (process.platform === "win32")
-            throw new AppError("unsupported", "Remote TTY attach is not available on Windows yet");
           if (params.history !== undefined)
             throw new AppError("invalid_argument", "TTY attach does not accept history");
           channel.backend = {
@@ -98,7 +100,8 @@ export class TerminalChannels {
           const item = this.sessions.get(channel.sessionId);
           if (channel.backend?.mode === "tty") {
             channel.started = true;
-            channel.backend.bridge = new TtyBridge(
+            socket.pause();
+            channel.backend.bridge = TtyBridge.start(
               item.identity.socket,
               channel.backend.options,
               (data) => sendFrame(socket, data),
@@ -115,6 +118,13 @@ export class TerminalChannels {
                 }
               },
               (error) => this.fail(id, error),
+            );
+            void channel.backend.bridge.then(
+              () => socket.resume(),
+              (error: unknown) => {
+                socket.resume();
+                this.fail(id, error);
+              },
             );
             return;
           }
@@ -154,11 +164,20 @@ export class TerminalChannels {
           };
         else throw new AppError("invalid_argument", "Invalid terminal input");
         if (channel.backend?.mode === "tty") {
-          const bridge = channel.backend.bridge!;
-          if (Buffer.isBuffer(input)) bridge.input(input);
-          else if (input.type === "resize") bridge.resize(input.cols, input.rows);
-          else if (input.type === "consumed") bridge.acknowledge(input.bytes);
-          else throw new AppError("invalid_argument", "Invalid TTY input");
+          void channel.backend.bridge!.then(
+            (bridge) => {
+              if (this.entries.get(id) !== channel) return;
+              try {
+                if (Buffer.isBuffer(input)) bridge.input(input);
+                else if (input.type === "resize") bridge.resize(input.cols, input.rows);
+                else if (input.type === "consumed") bridge.acknowledge(input.bytes);
+                else throw new AppError("invalid_argument", "Invalid TTY input");
+              } catch (error) {
+                this.fail(id, error);
+              }
+            },
+            (error: unknown) => this.fail(id, error),
+          );
         } else
           this.sessions.recorder.send({
             sessionId: channel.sessionId,
@@ -222,7 +241,10 @@ export class TerminalChannels {
     if (!channel) return;
     this.entries.delete(id);
     if (channel.backend?.mode === "tty") {
-      const stopped = channel.backend.bridge?.stop();
+      const stopped = channel.backend.bridge?.then(
+        (bridge) => bridge.stop(),
+        () => {}, // spawnJob already cleans up a failed startup.
+      );
       if (stopped) {
         this.closing.add(stopped);
         void stopped

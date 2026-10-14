@@ -1,4 +1,5 @@
 import { write } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { AppError, asError, limits, record, type ChannelReady } from "@kiteline/shared/protocol";
 import { ApiError, versionedPath } from "@kiteline/shared/protocol/client";
 import { heartbeat, sendFrame } from "@kiteline/shared/protocol/ws";
@@ -9,7 +10,7 @@ import { client, remote } from "./client.js";
 import type { Options } from "./options.js";
 
 // Cancel a partial control string before restoring modes after a broken connection.
-const reset = Buffer.from(
+export const terminalReset = Buffer.from(
   "\x18\x1b\\\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1004l\x1b[?2004l\x1b[?1l\x1b>\x1b[0m\x1b[?25h\x1b[?1049l",
 );
 
@@ -82,9 +83,16 @@ export async function attach(
         }
         try {
           if (error) {
-            if (raw) await output(1, reset);
+            if (raw) await output(1, terminalReset);
             const failure = error instanceof ApiError ? error : asError(error);
             await output(2, Buffer.from(`failed [${failure.code}] ${failure.message}\r\n`));
+          }
+          const code = error ? (error instanceof ApiError ? 1 : 2) : 0;
+          if (process.platform === "win32") {
+            // Even native exit cleanup can block behind a stopped ConPTY host.
+            await writeFile(process.env.KITELINE_ATTACH_RESULT!, String(code), { flag: "wx" });
+            process.kill(process.pid, "SIGINT");
+            return;
           }
           if (raw) process.stdin.setRawMode(false);
           process.stdin.pause();
@@ -94,7 +102,7 @@ export async function attach(
           process.stdout.off("resize", resize);
           process.off("SIGTERM", interrupted);
           clearTimeout(deadline);
-          process.exitCode = error ? (error instanceof ApiError ? 1 : 2) : 0;
+          process.exitCode = code;
           resolve();
         } catch {
           // Leave the deadline active if output or native terminal restoration failed.

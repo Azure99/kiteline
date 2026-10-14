@@ -7,6 +7,13 @@ const template = readFileSync(
 );
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
+export function windowsCliLauncher(terminalReset: Buffer) {
+  return readFileSync(new URL("../installer/kiteline.ps1", import.meta.url), "utf8").replace(
+    "__TERMINAL_RESET_BASE64__",
+    terminalReset.toString("base64"),
+  );
+}
+
 export function agentLauncher(
   source: string | undefined,
   paths: { directory: string; management: string; managementFd: number; use: string },

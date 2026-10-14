@@ -39,6 +39,7 @@ const sourceFiles = [
   "native/tmux/cygwin-outfd.patch",
   "native/msys/ctrl-c.patch",
   "native/tmux/tmux.terminfo",
+  "native/terminal/pty-bridge.c",
   ...readdirSync(join(root, "native/windows"))
     .filter((file) => /\.(cc|hpp|def)$/.test(file))
     .sort()
@@ -263,6 +264,7 @@ export function assembleWindowsComponents(directory, tmuxDirectory, addonDirecto
       for (const file of paths) copy(join(extracted, file), join(native, "msys", file));
     }
     copy(join(tmuxDirectory, "tmux.exe"), join(native, "msys/usr/bin/tmux.exe"));
+    copy(join(tmuxDirectory, "pty-bridge.exe"), join(native, "msys/usr/bin/pty-bridge.exe"));
     copy(join(tmuxDirectory, "msys-2.0.dll"), join(native, "msys/usr/bin/msys-2.0.dll"));
     copy(
       join(tmuxDirectory, "terminfo/74/tmux-256color"),

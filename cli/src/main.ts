@@ -31,8 +31,11 @@ async function run() {
   if (command === "terminal attach") {
     if (!process.stdin.isTTY || !process.stdout.isTTY)
       throw new AppError("invalid_argument", "terminal attach requires stdin and stdout TTYs");
-    if (process.platform === "win32")
-      throw new AppError("unsupported", "terminal attach is not available on Windows yet");
+    if (process.platform === "win32" && !process.env.KITELINE_ATTACH_RESULT)
+      throw new AppError(
+        "invalid_argument",
+        "Windows terminal attach requires the kiteline.ps1 entry",
+      );
   }
   if (command === "auth login") {
     const server = serverOrigin(options.server);

@@ -17,6 +17,7 @@ patch -p1 -i "$inputs/native/tmux/cygwin-outfd.patch"
 ./configure --disable-sixel --prefix=/usr/local
 make -j2
 cp tmux.exe "$output/tmux.exe"
+gcc $CFLAGS $LDFLAGS "$inputs/native/terminal/pty-bridge.c" -lutil -o "$output/pty-bridge.exe"
 cp COPYING "$output/tmux-LICENSE"
 tic -x -o "$output/terminfo" "$inputs/native/tmux/tmux.terminfo"
 ./tmux.exe -V

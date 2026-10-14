@@ -30,7 +30,7 @@ import {
 } from "./release-artifacts.mjs";
 import { digest, fetchPinned, run as execute } from "./release-inputs.mjs";
 import { windowsRuntimeFiles, windowsComponentPath } from "./windows-components.ts";
-import { agentLauncher, windowsAgentLaunchers } from "./agent-launcher.ts";
+import { agentLauncher, windowsAgentLaunchers, windowsCliLauncher } from "./agent-launcher.ts";
 
 const root = resolve(import.meta.dirname, "..");
 const release = JSON.parse(readFileSync(join(root, "release/inputs.json"), "utf8"));
@@ -405,7 +405,10 @@ try {
   if (kind !== "cli") chmodSync(launcher, 0o755);
   if (portable) {
     const name = `kiteline${windows ? ".ps1" : ""}`;
-    cpSync(join(root, "installer", name), join(destination, "bin", name));
+    if (windows) {
+      const { terminalReset } = await import("../cli/dist/attach.js");
+      writeFileSync(join(destination, "bin", name), windowsCliLauncher(terminalReset));
+    } else cpSync(join(root, "installer", name), join(destination, "bin", name));
     chmodSync(join(destination, "bin", name), 0o755);
   }
   writeFileSync(

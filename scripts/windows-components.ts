@@ -10,6 +10,7 @@ export const windowsRuntimeFiles = [
   "native/kiteline-windows.node",
   "native/bin/rg.exe",
   "native/msys/usr/bin/tmux.exe",
+  "native/msys/usr/bin/pty-bridge.exe",
   "native/msys/usr/share/terminfo/74/tmux-256color",
   ...Object.values(recipe.runtimeFiles)
     .flat()

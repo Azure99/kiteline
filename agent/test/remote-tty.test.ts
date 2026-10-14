@@ -93,8 +93,8 @@ test("TTY uses CLI credentials, shares the existing pane with Web, and detaches 
   const web = await f.open("web");
   await expect.poll(() => web.frames.some((frame) => frame.type === "ready"), polling).toBe(true);
   const tty = await f.open("tty");
-  await expect.poll(tty.output, polling).toContain("\x1b");
   tty.socket.send(Buffer.from("printf '中文\\n' > shared.txt\r"));
+  await expect.poll(tty.output, polling).toContain("\x1b");
   await expect
     .poll(() => readFile(join(f.root, "shared.txt"), "utf8").catch(() => ""), polling)
     .toBe("中文\n");
@@ -115,6 +115,9 @@ test("TTY uses CLI credentials, shares the existing pane with Web, and detaches 
   await expect.poll(second.output, polling).toContain("AFTER-CLI");
   second.socket.terminate();
   await second.closed;
+  const cancelled = await f.open("tty");
+  cancelled.socket.terminate();
+  await cancelled.closed;
   await expect
     .poll(() => tmux(identity.socket, ["list-clients", "-F", "#{client_control_mode}"]), polling)
     .toBe("1\n");
@@ -153,7 +156,7 @@ test("TTY rejects invalid targets and ACKs, but keeps working when recording is 
 test("blocked native input has a finite failure and cleanup without ending the pane", async () => {
   const f = await fixture();
   const identity = f.agent.sessions.get(f.session.id).identity;
-  const bridge = new TtyBridge(
+  const bridge = await TtyBridge.start(
     identity.socket,
     { cols: 80, rows: 24, term: "xterm-256color" },
     () => {},

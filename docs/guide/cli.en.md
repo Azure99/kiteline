@@ -87,7 +87,8 @@ CLI credentials are separate; removing the package does not revoke them.
 The server download endpoint provides only shared agent packages. Get the standalone
 CLI from Releases. To upgrade it, verify and extract a new archive, then switch to its
 launcher. Delete the old package to remove its programs. For source development,
-`node cli/dist/main.js` can still replace the launcher.
+`node cli/dist/main.js` can still replace the launcher, except that Windows interactive
+attach requires the `.ps1` entry to restore local terminal state.
 
 ## Connect
 
@@ -257,7 +258,7 @@ name through the shared terminal before deciding whether to replace it.
 
 ## Interact with an existing terminal
 
-From a Linux/macOS terminal, attach to a running session on a Linux/macOS device:
+From your local terminal, attach to an existing running session on a device:
 
 ```sh
 kiteline terminal attach --device DEVICE_ID --workspace WORKSPACE_ID --session SESSION_ID
@@ -278,8 +279,11 @@ run attach again to reconnect.
 
 Exit 0 means normal detach, final output written and local terminal state restored;
 it is not the remote command's exit status. If output consumption stops entirely,
-the command still exits nonzero and restores local input mode. Unconsumed screen
-reset sequences cannot take effect until the terminal consumes them.
+a drain timeout ends the CLI process with a nonzero result. Unconsumed screen reset
+sequences cannot take effect yet. Linux/macOS restores local input mode; the Windows
+PowerShell entry may need to wait for the host to resume consumption before restoring state
+and returning. It may keep waiting if consumption never resumes. The remote bridge
+ends while the original session and other clients continue.
 
 ## Continue in Web and recover recording
 

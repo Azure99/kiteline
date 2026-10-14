@@ -12,7 +12,10 @@ export const tmuxBinary =
   process.platform === "win32"
     ? resolve(msysDirectory, "usr/bin/tmux.exe")
     : resolve(root, "dist/native/bin/tmux");
-export const ptyBridgeBinary = resolve(root, "dist/native/bin/pty-bridge");
+export const ptyBridgeBinary =
+  process.platform === "win32"
+    ? resolve(msysDirectory, "usr/bin/pty-bridge.exe")
+    : resolve(root, "dist/native/bin/pty-bridge");
 export const terminfoDirectory =
   process.platform === "win32"
     ? resolve(msysDirectory, "usr/share/terminfo")

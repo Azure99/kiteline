@@ -117,11 +117,11 @@ recorder 只根据模型待解析量，按 `RecordedSession.pressure()` 的高�
 
 ### 远程交互附着
 
-`kiteline terminal attach` 使用已有 CLI 凭据和目标，经 `terminal.attach` 的 `mode:"tty"` 变体接续运行中的会话。当前支持 Linux/macOS 两端。agent 收到配对后的 `start` 才启动 PTY helper 和普通 tmux client；helper 使用与本机附着共用的 tmux 参数和环境，仅该 client 使用本机传来的 `TERM`。记录不可用不阻止 TTY 附着，recorder 故障也不关闭 TTY 通道。
+`kiteline terminal attach` 使用已有 CLI 凭据和目标，经 `terminal.attach` 的 `mode:"tty"` 变体接续运行中的会话。agent 收到配对后的 `start` 才启动 PTY helper 和普通 tmux client；helper 使用与本机附着共用的 tmux 参数和环境，仅该 client 使用本机传来的 `TERM`。记录不可用不阻止 TTY 附着，recorder 故障也不关闭 TTY 通道。
 
-helper 持续读取 PTY，stdout 待发和 agent 待写输入受传输预算约束，helper 内部只保留一个待写输入帧。agent 在发送前核对累计未消费输出；超过显示预算就结束该 client，不向原 pane 传递显示背压。helper 退出时先排空最后输出，再发送 `ended{exitCode:0}`；启动、传输或清理失败发送 `error`。通道结束只关闭自己的 PTY client，helper 及其子进程有有限清理期限。
+helper 持续读取 PTY，stdout 待发和 agent 待写输入受传输预算约束，helper 内部只保留一个待写输入帧。agent 在发送前核对累计未消费输出；超过显示预算就结束该 client，不向原 pane 传递显示背压。helper 退出时先排空最后输出，再发送 `ended{exitCode:0}`；启动、传输或清理失败发送 `error`。通道结束只关闭自己的 PTY client，helper 及其子进程有有限清理期限。Windows 使用现有 Job 持有整个桥进程集合，helper 主进程退出后先终止残余后代，再确认 Job 清空及输出排空。
 
-CLI 在目标检查和连接成功后进入 raw，用异步写完成量确认消费。正常脱离和失败均立即开始有限输出排空期限；只有正常脱离且本机排空和恢复完成才退出 0，退出码不代表 pane 中最后一条命令。断线后复位本机显示模式；完全停读使复位序列无法生效时，POSIX 默认信号路径恢复 termios 并以非 0 结束。不自动重连或重放输入，操作方式见[远程 CLI](../guide/cli.md#交互接续已有终端)。
+CLI 在目标检查和连接成功后进入 raw，用异步写完成量确认消费。正常脱离和失败均立即开始有限输出排空期限；只有正常脱离且本机排空和恢复完成才退出 0，退出码不代表 pane 中最后一条命令。断线后复位本机显示模式；完全停读使复位序列无法生效时，POSIX 默认信号路径恢复 termios 并以非 0 结束。Windows 的本机恢复和完全停读例外见[平台实现](platforms.md#终端)。不自动重连或重放输入，操作方式见[远程 CLI](../guide/cli.md#交互接续已有终端)。
 
 ### 记录故障后的恢复
 

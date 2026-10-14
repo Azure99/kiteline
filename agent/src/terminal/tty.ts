@@ -1,6 +1,9 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { finished } from "node:stream/promises";
 import { AppError, limits } from "@kiteline/shared/protocol";
+import { JobChild, spawnJob } from "@kiteline/shared/windows/job";
 import {
+  msysPath,
   ptyBridgeBinary,
   tmuxAttachArgs,
   tmuxBinary,
@@ -8,40 +11,47 @@ import {
 } from "@kiteline/shared/terminal/node";
 
 export class TtyBridge {
-  private child;
   private sent = 0;
   private consumed = 0;
   private stopping = false;
   private closed: Promise<void>;
+  private beginCleanup!: () => void;
 
-  constructor(
+  static async start(
     socket: string,
     options: { cols: number; rows: number; term: string },
     output: (data: Buffer) => void,
     ended: () => void,
     failed: (error: unknown) => void,
   ) {
-    const child = (this.child = spawn(
-      ptyBridgeBinary,
-      [
-        String(options.cols),
-        String(options.rows),
-        String(limits.dataChunkBytes),
-        String(limits.terminalPendingBytes),
-        tmuxBinary,
-        ...tmuxAttachArgs(socket),
-      ],
-      { env: { ...tmuxEnvironment(), TERM: options.term }, stdio: "pipe" },
-    ));
+    const args = [
+      String(options.cols),
+      String(options.rows),
+      String(limits.dataChunkBytes),
+      String(limits.terminalPendingBytes),
+      process.platform === "win32" ? msysPath(tmuxBinary) : tmuxBinary,
+      ...tmuxAttachArgs(socket),
+    ];
+    const env = { ...tmuxEnvironment(), TERM: options.term };
+    const child =
+      process.platform === "win32"
+        ? await spawnJob(ptyBridgeBinary, args, { env })
+        : spawn(ptyBridgeBinary, args, { env, stdio: "pipe" });
+    return new TtyBridge(child, output, ended, failed);
+  }
+
+  private constructor(
+    private child: ChildProcessWithoutNullStreams | JobChild,
+    output: (data: Buffer) => void,
+    ended: () => void,
+    failed: (error: unknown) => void,
+  ) {
     let error: Error | undefined;
     let diagnostic = Buffer.alloc(0);
-    child.once("error", (value) => {
-      error = value;
-    });
-    child.stderr.on("data", (data: Buffer) => {
+    child.stderr!.on("data", (data: Buffer) => {
       diagnostic = Buffer.concat([diagnostic, data.subarray(0, 8192 - diagnostic.length)]);
     });
-    child.stdout.on("data", (data: Buffer) => {
+    child.stdout!.on("data", (data: Buffer) => {
       if (this.stopping) return;
       try {
         if (this.sent - this.consumed + data.length > limits.terminalDisplayBytes)
@@ -52,13 +62,45 @@ export class TtyBridge {
         failed(error);
       }
     });
-    child.stdin.on("error", (error) => {
+    child.stdin!.on("error", (error) => {
       if (!this.stopping) failed(error);
     });
-    this.closed = new Promise((resolve) => {
-      child.once("close", (code, signal) => {
-        resolve();
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      this.beginCleanup = () => {
+        deadline ??= setTimeout(() => {
+          child.stdout!.destroy();
+          child.stderr!.destroy();
+          reject(new Error("Terminal client cleanup timed out"));
+        }, 2500);
+      };
+    });
+    let closed: Promise<{ code: number | null; signal?: string | null }>;
+    if (child instanceof JobChild) {
+      const drained = Promise.all([
+        finished(child.stdout!, { writable: false, cleanup: true }),
+        finished(child.stderr!, { writable: false, cleanup: true }),
+      ]);
+      void drained.catch(failed);
+      closed = child.exited.then(async (result) => {
+        // A surviving descendant may hold the pipes open after the helper exits.
+        this.beginCleanup();
+        await child.stop();
+        await drained;
+        return result;
+      });
+    } else {
+      child.once("error", (value) => {
+        error = value;
+      });
+      closed = new Promise((resolve) => {
+        child.once("close", (code, signal) => resolve({ code, signal }));
+      });
+    }
+    this.closed = Promise.race([closed, timeout])
+      .then(({ code, signal }) => {
         if (this.stopping) return;
+        this.stopping = true;
         if (error || code !== 0)
           failed(
             new AppError(
@@ -69,8 +111,9 @@ export class TtyBridge {
             ),
           );
         else ended();
-      });
-    });
+      })
+      .finally(() => clearTimeout(deadline));
+    void this.closed.catch(failed);
   }
 
   acknowledge(bytes: number) {
@@ -96,27 +139,26 @@ export class TtyBridge {
     frame.write(type);
     frame.writeUInt32BE(data.length, 1);
     data.copy(frame, 5);
-    if (this.child.stdin.writableLength + frame.length > limits.terminalPendingBytes)
+    if (this.child.stdin!.writableLength + frame.length > limits.terminalPendingBytes)
       throw new AppError("limit_exceeded", "Terminal input backlog exceeds the limit");
-    this.child.stdin.write(frame);
+    this.child.stdin!.write(frame);
   }
 
   async stop() {
+    if (this.stopping) return this.closed;
     this.stopping = true;
-    this.child.stdin.destroy();
-    this.child.kill("SIGTERM");
-    const kill = setTimeout(() => this.child.kill("SIGKILL"), 1500);
-    let deadline: ReturnType<typeof setTimeout>;
+    this.beginCleanup();
+    const child = this.child;
+    child.stdin!.destroy();
+    if (!(child instanceof JobChild)) child.kill("SIGTERM");
+    const kill = setTimeout(() => {
+      if (child instanceof JobChild) child.terminate();
+      else child.kill("SIGKILL");
+    }, 1500);
     try {
-      await Promise.race([
-        this.closed,
-        new Promise<never>((_, reject) => {
-          deadline = setTimeout(() => reject(new Error("Terminal client cleanup timed out")), 2500);
-        }),
-      ]);
+      await this.closed;
     } finally {
       clearTimeout(kill);
-      clearTimeout(deadline!);
     }
   }
 }

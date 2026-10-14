@@ -10,6 +10,7 @@ import {
   staticNodeInput,
 } from "./release-artifacts.mjs";
 import { digest, json } from "./release-inputs.mjs";
+import { windowsCliLauncher } from "./agent-launcher.ts";
 
 const [kind, target, archivePath, directoryPath, extra] = process.argv.slice(2);
 if (!archivePath || !directoryPath || extra || !["agent", "server", "cli"].includes(kind))
@@ -93,7 +94,14 @@ if (platform === "linux") {
 
 if (kind !== "server") {
   const entry = `kiteline${platform === "windows" ? ".ps1" : ""}`;
-  same(`bin/${entry}`, join(source, "installer", entry));
+  if (platform === "windows") {
+    const { terminalReset } = await import("../cli/dist/attach.js");
+    assert.equal(
+      readFileSync(join(directory, "bin", entry), "utf8"),
+      windowsCliLauncher(terminalReset),
+      entry,
+    );
+  } else same(`bin/${entry}`, join(source, "installer", entry));
   assert.ok(actual.has("cli/dist/main.js"));
   assert.deepEqual(
     [...actual.keys()].filter((file) => /(?:^|\/)node(?:\.exe)?$/.test(file)),
