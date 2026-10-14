@@ -93,27 +93,11 @@ Input is available after the session's display and history are restored. If a di
 
 "End session" in the session menu asks once, then ends the session and every program in it.
 
-### Local attach
+### Continue in CLI
 
-"Local attach command" in the web session menu gives a command to attach to that session. Run it in a real terminal on the device as the project user, without sudo. For example:
+The session menu’s “Continue in CLI” provides a command with the full device, workspace and session IDs. Select your local terminal type and run it after logging in to this server; Windows uses `kiteline.ps1`. If the CLI is not set up, choose “Install and log in” to open the guide. “CLI setup” is also available on Home and in the Owner menu.
 
-```sh
-/usr/local/bin/kiteline-agent attach SESSION_ID --run-dir '/home/PROJECT_USER/.local/share/kiteline-agent/run'
-```
-
-Once attached, Ctrl-b d detaches while the session continues, Ctrl-b Ctrl-b sends Ctrl-b, and Ctrl-b [ opens tmux copy mode to browse history. While the agent is running, you can also manage sessions locally:
-
-```sh
-kiteline-agent workspace list
-kiteline-agent terminal new --workspace WORKSPACE_ID
-kiteline-agent terminal list --workspace WORKSPACE_ID
-kiteline-agent attach SESSION_ID
-kiteline-agent terminal end SESSION_ID
-```
-
-`workspace list` gives workspace IDs. `terminal new` creates a session and immediately attaches. See [kiteline-agent commands](reference.en.md#kiteline-agent-commands) for output and options.
-
-For this section's interactive commands in a Windows PowerShell console, replace `kiteline-agent` with `& "$env:ProgramData\kiteline-agent\kiteline-agent.ps1"`; see [kiteline-agent commands](reference.en.md#kiteline-agent-commands) for choosing the invocation form. Local commands and the agent must resolve to the same runtime directory (see [Agent environment variables](reference.en.md#agent-environment-variables)). If `KITELINE_AGENT_RUN_DIR` is set only in service configuration, set it for local commands too. `attach` also accepts `--run-dir`, included in the copied web command. For containers, see [Run in a container](devices.en.md#run-in-a-container).
+CLI and Web operate the same shell. Ctrl+B d detaches while the session keeps running, Ctrl+B Ctrl+B sends Ctrl+B, and Ctrl+B [ opens tmux history copy mode. See [Remote CLI](cli.en.md) for installation, credentials and attach operations. Device-side workspace and session management commands are in the [command reference](reference.en.md#kiteline-agent-commands).
 
 ## Files
 

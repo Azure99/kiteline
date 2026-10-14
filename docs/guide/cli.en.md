@@ -260,7 +260,9 @@ name through the shared terminal before deciding whether to replace it.
 
 ## Interact with an existing terminal
 
-From your local terminal, attach to an existing running session on a device:
+In the Web session menu, choose “Continue in CLI” and copy the command with full
+target IDs. Run it in a local terminal logged in to this server. The dialog’s
+“Install and log in” opens CLI setup when needed. You can also specify targets manually:
 
 ```sh
 kiteline terminal attach --device DEVICE_ID --workspace WORKSPACE_ID --session SESSION_ID

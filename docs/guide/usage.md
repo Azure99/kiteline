@@ -93,27 +93,11 @@ server 升级后，已打开的页面显示 Web 和 Server 的版本并暂停远
 
 会话菜单的“结束会话”确认一次后，结束会话及其中的全部程序。
 
-### 本机接续
+### 在 CLI 中接续
 
-网页会话菜单的“本机接续命令”给出附着到该会话的命令，在设备上以项目用户、在真实终端中执行，不需要 sudo。例如：
+会话菜单的“在 CLI 中接续”提供当前设备、工作区和会话的完整命令。选择运行 CLI 的本机终端类型，在已登录此 server 的终端中执行；Windows 使用 `kiteline.ps1`。尚未配置 CLI 时，点“安装与登录”进入统一引导；首页和拥有者菜单也提供“CLI 接入”。
 
-```sh
-/usr/local/bin/kiteline-agent attach SESSION_ID --run-dir '/home/PROJECT_USER/.local/share/kiteline-agent/run'
-```
-
-附着后，Ctrl-b d 断开附着（会话继续），Ctrl-b Ctrl-b 发送 Ctrl-b，Ctrl-b [ 用 tmux 复制模式查看历史。agent 运行时也可以在本机管理会话：
-
-```sh
-kiteline-agent workspace list
-kiteline-agent terminal new --workspace WORKSPACE_ID
-kiteline-agent terminal list --workspace WORKSPACE_ID
-kiteline-agent attach SESSION_ID
-kiteline-agent terminal end SESSION_ID
-```
-
-`workspace list` 给出工作区 ID，`terminal new` 创建会话后立即附着。各命令的输出和选项见 [kiteline-agent 命令](reference.md#kiteline-agent-命令)。
-
-Windows 上在 PowerShell 控制台中执行本节交互命令时，把 `kiteline-agent` 换成 `& "$env:ProgramData\kiteline-agent\kiteline-agent.ps1"`；调用方式的选择见 [kiteline-agent 命令](reference.md#kiteline-agent-命令)。本机命令和 agent 必须解析到同一个运行目录（见 [agent 环境变量](reference.md#agent-环境变量)）；只在服务配置中设置了 `KITELINE_AGENT_RUN_DIR` 时，本机命令也要设置同样的变量，`attach` 也可以用 `--run-dir`（网页复制的命令已包含）。容器见[在容器中运行](devices.md#在容器中运行)。
+CLI 与 Web 操作同一个 Shell。Ctrl+B d 脱离后会话继续运行，Ctrl+B Ctrl+B 发送 Ctrl+B，Ctrl+B [ 进入 tmux 历史复制模式。安装、凭据和接续操作见[远程 CLI](cli.md)。设备端的工作区与会话管理命令见[命令参考](reference.md#kiteline-agent-命令)。
 
 ## 文件
 

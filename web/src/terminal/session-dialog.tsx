@@ -1,13 +1,10 @@
-import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
 import { useState } from "react";
-import { Copy } from "lucide-react";
-import { limits, type AgentEnvironment, type Session } from "@kiteline/shared/protocol";
+import { limits, type Device, type Session, type Workspace } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
-import { useCopyFeedback } from "../lib/use-copy-feedback";
-import { localCommand } from "./local-command";
+import { RemoteAttach } from "../cli/remote-attach";
 
 export interface SessionAction {
   kind: "rename" | "end" | "attach";
@@ -16,21 +13,24 @@ export interface SessionAction {
 export function SessionDialog({
   action,
   busy,
-  environment,
+  device,
+  workspace,
+  onCliSetup,
   onClose,
   onChange,
 }: {
   action: SessionAction;
   busy: boolean;
-  environment?: AgentEnvironment;
+  device: Device;
+  workspace: Workspace;
+  onCliSetup(): void;
   onClose(): void;
   onChange(kind: "rename" | "end", id: string, name: string): Promise<boolean>;
 }) {
   const { t } = useTranslation();
 
+  const { kind } = action;
   const [name, setName] = useState(action.session.name);
-  const { copied: copiedCommand, error, copy } = useCopyFeedback();
-  const command = environment && localCommand(environment, action.session.id);
   return (
     <Dialog
       open
@@ -41,14 +41,14 @@ export function SessionDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            {action.kind === "rename"
+            {kind === "rename"
               ? t(($) => $.terminal.rename)
-              : action.kind === "attach"
-                ? t(($) => $.terminal.localAttach)
+              : kind === "attach"
+                ? t(($) => $.terminal.cliAttach)
                 : t(($) => $.terminal.endSession)}
           </DialogTitle>
         </DialogHeader>
-        {action.kind === "rename" ? (
+        {kind === "rename" ? (
           <Input
             aria-label={t(($) => $.terminal.name)}
             value={name}
@@ -56,52 +56,39 @@ export function SessionDialog({
             onChange={(event) => setName(event.target.value)}
             autoFocus
           />
-        ) : action.kind === "attach" ? (
-          <>
-            <Input aria-label={t(($) => $.terminal.localCommand)} readOnly value={command ?? ""} />
-            <p className="text-sm text-muted-foreground">{t(($) => $.terminal.detachHint)}</p>
-            {!environment && <p role="alert">{t(($) => $.devices.environmentUnavailable)}</p>}
-          </>
+        ) : kind === "attach" ? (
+          <RemoteAttach
+            device={device}
+            workspace={workspace}
+            session={action.session}
+            onSetup={() => {
+              onClose();
+              onCliSetup();
+            }}
+          />
         ) : (
           <p className="break-words">
             {t(($) => $.terminal.endConfirm, { name: action.session.name })}
           </p>
         )}
-        {!!error && (
-          <div role="alert" className="text-sm text-destructive">
-            <ErrorNotice error={error.error} />
-          </div>
-        )}
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" disabled={busy} onClick={onClose}>
-            {action.kind === "attach" ? t(($) => $.common.close) : t(($) => $.common.cancel)}
-          </Button>
-          {action.kind === "attach" ? (
-            <Button
-              disabled={!command}
-              onPointerDown={(event) => event.preventDefault()}
-              onClick={() => void copy(command!)}
-            >
-              <Copy />
-              {command && copiedCommand === command
-                ? t(($) => $.common.copied)
-                : t(($) => $.common.copy)}
+        {kind !== "attach" && (
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" disabled={busy} onClick={onClose}>
+              {t(($) => $.common.cancel)}
             </Button>
-          ) : (
             <Button
-              variant={action.kind === "end" ? "destructive" : "default"}
-              disabled={busy || (action.kind === "rename" && !name.trim())}
+              variant={kind === "end" ? "destructive" : "default"}
+              disabled={busy || (kind === "rename" && !name.trim())}
               onClick={() => {
-                if (action.kind !== "attach")
-                  void onChange(action.kind, action.session.id, name).then((done) => {
-                    if (done) onClose();
-                  });
+                void onChange(kind, action.session.id, name).then((done) => {
+                  if (done) onClose();
+                });
               }}
             >
-              {action.kind === "rename" ? t(($) => $.common.save) : t(($) => $.terminal.end)}
+              {kind === "rename" ? t(($) => $.common.save) : t(($) => $.terminal.end)}
             </Button>
-          )}
-        </div>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );

@@ -20,6 +20,15 @@ export function loginCommand(origin: string, shell: CliShell) {
   return `${cliEntry(shell)} auth login --server ${quoteArgument(origin, shell)}`;
 }
 
+export function attachCommand(
+  deviceId: string,
+  workspaceId: string,
+  sessionId: string,
+  shell: CliShell,
+) {
+  return `${cliEntry(shell)} terminal attach --device ${quoteArgument(deviceId, shell)} --workspace ${quoteArgument(workspaceId, shell)} --session ${quoteArgument(sessionId, shell)}`;
+}
+
 export function cliDownload(version: string, target: CliTarget) {
   const extension = target === "windows-amd64" ? "zip" : "tar.gz";
   return `https://github.com/Azure99/kiteline/releases/download/v${version}/kiteline-cli-${version}-${target}.${extension}`;

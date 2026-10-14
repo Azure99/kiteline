@@ -67,6 +67,7 @@ export function WorkspaceView({
   visible,
   layouts,
   focusMode,
+  onCliSetup,
   children,
 }: {
   device: Device;
@@ -74,6 +75,7 @@ export function WorkspaceView({
   visible: boolean;
   layouts: Map<string, TerminalLayout>;
   focusMode: ReturnType<typeof useTerminalFocus>;
+  onCliSetup(): void;
   children: ReactNode;
 }) {
   const { t } = useTranslation();
@@ -747,7 +749,9 @@ export function WorkspaceView({
           key={`${action.kind}:${action.session.id}`}
           action={action}
           busy={remote.busy}
-          environment={device.status === "online" ? device.environment : undefined}
+          device={device}
+          workspace={workspace}
+          onCliSetup={onCliSetup}
           onClose={() => setAction(undefined)}
           onChange={remote.change}
         />

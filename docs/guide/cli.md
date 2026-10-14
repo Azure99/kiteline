@@ -218,7 +218,7 @@ conflict。可通过共享终端核对实际名称，再决定是否替换。
 
 ## 交互接续已有终端
 
-在本机终端中接续设备上已有的运行中会话：
+在 Web 会话菜单选择“在 CLI 中接续”，复制带完整目标 ID 的命令，在已登录此 server 的本机终端执行。尚未接入时可从该弹窗打开“安装与登录”。也可以手工指定目标：
 
 ```sh
 kiteline terminal attach --device DEVICE_ID --workspace WORKSPACE_ID --session SESSION_ID

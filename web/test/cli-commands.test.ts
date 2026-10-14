@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { expect, test } from "vitest";
-import { cliDownload, cliGuide, loginCommand } from "../src/cli/commands";
+import { attachCommand, cliDownload, cliGuide, loginCommand } from "../src/cli/commands";
 
 test.each([
   ["linux-amd64", "tar.gz"],
@@ -39,3 +39,15 @@ test.skipIf(process.platform === "win32")("Unix login preserves the server origi
   );
   expect(output.split("\n")).toEqual(["auth", "login", "--server", origin, ""]);
 });
+
+test.each(["unix", "powershell"] as const)(
+  "%s attach explicitly selects all three target IDs",
+  (shell) => {
+    const device = "2fca8b4b-cae4-4cf0-b7ae-776a63f68062";
+    const workspace = "decc7c39-3c7d-4489-b8c7-6cca6035d142";
+    const session = "ba649bfb0fd263ff";
+    expect(attachCommand(device, workspace, session, shell)).toBe(
+      `${shell === "powershell" ? "kiteline.ps1" : "kiteline"} terminal attach --device '${device}' --workspace '${workspace}' --session '${session}'`,
+    );
+  },
+);

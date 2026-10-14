@@ -152,7 +152,7 @@ export function SessionMenu({
                 </MenuItem>
                 <MenuItem onClick={() => onCommand("attach", id)}>
                   <Copy />
-                  {t(($) => $.terminal.localCommand)}
+                  {t(($) => $.terminal.cliAttach)}
                 </MenuItem>
               </>
             )}

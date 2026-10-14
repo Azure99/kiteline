@@ -289,6 +289,7 @@ export function Workbench({
             visible={route.tool === "terminal"}
             layouts={terminalLayouts.current}
             focusMode={terminalFocus}
+            onCliSetup={() => setCliSetup(true)}
           >
             <Files
               focusMode={terminalFocus}
