@@ -120,7 +120,6 @@ test("recovery respects the ACK window before tail, ready, live output, resize a
       return true;
     },
     () => (closed = true),
-    () => {},
   );
   const data = Buffer.alloc(terminalOutstandingBytes * 2 + 7, 65);
   const byteCount = () =>
@@ -172,7 +171,6 @@ test("small output and resize frames share the consumption window without losing
       return true;
     },
     () => {},
-    () => {},
   );
   const events = Array.from(
     { length: 3000 },
@@ -182,7 +180,6 @@ test("small output and resize frames share the consumption window without losing
   try {
     for (const event of events) attachment.output(event);
     expect(sent.length).toBe(terminalOutstandingBytes / 128);
-    expect(attachment.backlog).toBeGreaterThan(0);
     while (sent.length < events.length) {
       const consumed = sent.length * 128;
       attachment.acknowledge(consumed);
@@ -191,7 +188,6 @@ test("small output and resize frames share the consumption window without losing
     expect(sent.map((piece) => (Buffer.isBuffer(piece) ? piece.toString() : piece))).toEqual(
       events.map((event) => (event.type === "output" ? event.data : event)),
     );
-    expect(attachment.backlog).toBe(0);
   } finally {
     attachment.close();
   }

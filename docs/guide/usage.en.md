@@ -87,7 +87,7 @@ A session has one row/column size, determined by the client that most recently t
 
 ### Connection and recovery
 
-Input is available after the session's display and history are restored. Reconnect after a connection failure. If capacity is insufficient, retry with less history to restore only the current screen; history on the device is unchanged. A history gap means some output was lost during a recorder failure. Ended sessions are read-only and show their exit code.
+Input is available after the session's display and history are restored. If a display falls behind or stops consuming output in the background, it disconnects when its budget is exceeded; the session and other displays continue. Reconnect after a connection failure. If restoring history exceeds capacity, retry with less history to restore only the current screen; history on the device is unchanged. A history gap means some output was lost during a recorder failure. Ended sessions are read-only and show their exit code.
 
 "Recover terminal" rebuilds recording and reattaches to the same program without restarting it. If connected but the display is garbled, use "Redraw program" in the session menu. It briefly resizes the program to trigger a redraw, which can change other clients' displays and selections, so it requires confirmation. If that does not help, use "Close display" and reopen it.
 

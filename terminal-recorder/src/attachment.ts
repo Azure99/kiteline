@@ -41,11 +41,7 @@ export class Attachment {
     readonly id: string,
     private send: (piece: Piece) => boolean,
     private onClose: () => void,
-    private changed: () => void,
   ) {}
-  get backlog() {
-    return this.closed ? 0 : this.pendingBytes;
-  }
   start(snapshot: Snapshot, historyLines: number, historyGap: boolean) {
     this.restoration = restore(snapshot, historyLines, historyGap);
     this.pump();
@@ -53,7 +49,7 @@ export class Attachment {
   output = (event: TerminalEvent) => {
     if (this.closed) return;
     const bytes = eventCost(event);
-    if (this.pendingBytes + bytes > limits.terminalPendingBytes) {
+    if (this.pendingBytes + bytes > limits.terminalDisplayBytes) {
       this.fail(
         new AppError("limit_exceeded", "Display is receiving output too slowly; reconnect"),
       );
@@ -127,7 +123,6 @@ export class Attachment {
         return;
       }
     }
-    this.changed();
   }
   fail(error: Error) {
     if (this.closed) return;

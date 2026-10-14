@@ -99,13 +99,13 @@ recorder 为每个会话保存一个检查点和其后的完整尾段：
 - `retained`：解析器空闲且尚无检查点或尾段非空时，先生成新检查点；然后发送检查点和尾段副本。解析器不空闲但有检查点时，直接发送已有检查点和完整尾段，不等程序补完序列。两者都没有时等待下一次输出，`interactionTimeout` 内取不到返回 `busy`。
 - `screen`：只在解析器空闲时序列化当前屏幕（滚屏为 0），否则等待，超时返回 `busy`。它不替换检查点，也不改会话的 `historyLines`。
 
-agent 发往该显示的帧依次为：`restore.begin`（尺寸、`historyLines`、副本字节数、`historyLimited`、`historyGap`）、副本的二进制分块、尾段（二进制输出和 `resize`）、恢复完成帧 `ready`，然后是实时的二进制输出和 `resize`，最后是 `ended` 或 `error`（帧名列表见[数据通道](protocol.md#数据通道)）。恢复期间的新输出进入该显示自己的有界队列，参与会话背压。网页在 `restore.begin` 时新建 xterm.js 实例，副本字节数对不上就放弃该实例；收到恢复完成帧 `ready` 并发出第一次尺寸后才允许输入。
+agent 发往该显示的帧依次为：`restore.begin`（尺寸、`historyLines`、副本字节数、`historyLimited`、`historyGap`）、副本的二进制分块、尾段（二进制输出和 `resize`）、恢复完成帧 `ready`，然后是实时的二进制输出和 `resize`，最后是 `ended` 或 `error`（帧名列表见[数据通道](protocol.md#数据通道)）。恢复期间的新输出进入该显示自己的有界队列，超出显示预算则只结束该显示。网页在 `restore.begin` 时新建 xterm.js 实例，副本字节数对不上就放弃该实例；收到恢复完成帧 `ready` 并发出第一次尺寸后才允许输入。
 
 流量控制：二进制输出和有序 JSON 帧使用同一累计信用，计量规则为 `terminalOutputCost()`，见 [IPC 类型](../../shared/src/protocol/ipc.ts)。JSON 按 UTF-8 编码计量；每帧最低信用覆盖小帧的 IPC 封装成本。网页按 FIFO 处理帧，二进制须等 xterm write 回调后才回报 `consumed.bytes`；带外 `error`、`input.error` 不计入信用。达到 `terminalOutstandingBytes` 后暂停发送，不能先确认尚未处理的输出来腾出窗口。
 
-recorder 将模型待解析量与最慢显示的待发量相加，按 `RecordedSession.pressure()` 的高低水位同步暂停或恢复 control stdout。已经进入当前 Node chunk 的内容继续处理，预算为它留出余量。tmux 的受管 control 堵塞会阻止真实 PTY 继续读取，普通或更快的客户端不能绕过；受管 control 禁用上游五分钟积压淘汰。ACK 和关闭显示独立于输入队列，所以恢复消费或关闭慢显示可自动解除背压。
+每个显示的实时待发量由 `limits.terminalDisplayBytes` 限制，恢复期间也计入；初始副本和尾段沿用各自上限，通过信用窗口渐进发送。停止消费不会暂停会话，待发超限时只结束该显示，由用户重连。持续输出快于消费或历史恢复期间积压过多也会触发此终态；不跳过输出后继续显示。
 
-背压期间，程序输出、同会话其他显示和输入可能等待。未处理输出保序保留，已解析 scrollback 按配置行数淘汰。待发及传输容量检查保留为异常终态。
+recorder 只根据模型待解析量，按 `RecordedSession.pressure()` 的高低水位暂停或恢复 control stdout。已经进入当前 Node chunk 的内容继续处理，预算为它留出余量。tmux 的受管 control 堵塞会阻止真实 PTY 继续读取，普通或更快的客户端不能绕过；受管 control 禁用上游五分钟积压淘汰。因此记录器自身处理不过来时，程序输出和同会话输入仍可能等待，未处理输出保序保留，已解析 scrollback 按配置行数淘汰。
 
 显示在第一次打开时附着。切换分组、工具，或收起文件和 Git 视图下方的终端面板，只隐藏显示，隐藏的显示保持附着并继续消费输出；关闭显示、离开工作区或页面销毁时释放附着。断开后网页不自动重连，显示“连接已断开”，由用户点击“重新连接”。同一会话的多个显示各自维护视口、选区和搜索。
 
@@ -194,7 +194,7 @@ recorder 将模型待解析量与最慢显示的待发量相加，按 `RecordedS
 
 ## 资源与清理
 
-- 每个显示的待发队列、未确认窗口和 IPC 积压各有上限，在线慢消费通过真实 PTY 背压维持这些界限；异常越界仍明确失败。控制命令结果、IPC 单行和本机请求以 `controlMessageBytes` 为上限。超出记录能力时报告记录故障并保留程序。
+- 每个显示的待发队列、未确认窗口和 IPC 积压各有上限。显示超限只关闭该附着，共享 IPC 故障可能影响多个附着。控制命令结果、IPC 单行和本机请求以 `controlMessageBytes` 为上限。超出记录能力时报告记录故障并保留程序。
 - `terminalSnapshotBytes` 只限制序列化结果，不限制内存；内存还包括各会话的 tmux 和 headless 网格、尾段和队列。
 - 关闭显示会取消它尚未注入的输入、帧路由和恢复引用。会话结束时删除 `<运行目录>/<会话 ID>/`。
 

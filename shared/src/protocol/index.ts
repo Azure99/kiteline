@@ -32,6 +32,7 @@ export const limits = {
   heartbeatTimeout: 60_000,
   tcpKeepAliveDelayMs: 20_000,
   terminalPendingBytes: 1024 * 1024,
+  terminalDisplayBytes: 4 * 1024 * 1024,
   terminalSnapshotBytes: 16 * 1024 * 1024,
   terminalMaxCols: 500,
   terminalMaxRows: 200,

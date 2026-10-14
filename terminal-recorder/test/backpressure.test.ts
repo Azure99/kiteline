@@ -1,12 +1,11 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import { expect, test } from "vitest";
 import { terminalOutputCost, type RecorderMessage } from "@kiteline/shared/protocol/ipc";
 import { shellWords, tmux } from "@kiteline/shared/terminal/node";
 import { RecordedSession } from "../src/session.js";
 
-test("slow consumption pauses the producer and automatically drains input and the exit tail", async () => {
+test("slow displays recover within their budget or fail without blocking the producer and other displays", async () => {
   const directory = await mkdtemp("/var/tmp/kiteline-backpressure-");
   const socket = join(directory, "tmux.sock");
   const producer = join(directory, "producer.mjs");
@@ -25,11 +24,10 @@ process.stdin.on("data", data => {
   writeFileSync("input", input);
   if (input.includes("DONE")) { write("FINAL_TAIL_23"); process.exit(23); }
 });
-for (let round = 0; round < 3; round++) {
+for (let round = 0; round < 4; round++) {
   while (!existsSync("go-" + round)) await delay(5);
   for (let i = 0; i < 512; i++) {
     write("x".repeat(4094) + "\\r\\n");
-    writeFileSync("progress", round + ":" + i);
     if (i % 8 === 0) await delay(1);
   }
   write("ROUND_" + round + "\\r\\n");
@@ -37,7 +35,10 @@ for (let round = 0; round < 3; round++) {
 `,
   );
   const outputs = new Map(
-    ["slow", "fast"].map((id) => [id, { credit: 0, data: "", frames: [] as RecorderMessage[] }]),
+    ["slow", "fast", "reconnected"].map((id) => [
+      id,
+      { credit: 0, data: "", frames: [] as RecorderMessage[] },
+    ]),
   );
   let stopped = false;
   const session = new RecordedSession(
@@ -77,32 +78,33 @@ for (let round = 0; round < 3; round++) {
     await session.start();
     await session.attach("slow", "retained", false);
     await session.attach("fast", "retained", false);
-    for (let round = 0; round < 3; round++) {
-      stopped = true;
+    stopped = true;
+    await writeFile(join(directory, "go-0"), "");
+    await expect.poll(() => fast.data.includes("ROUND_0"), { timeout: 10000 }).toBe(true);
+    expect(slow.data.includes("ROUND_0")).toBe(false);
+    session.input.input("fast", Buffer.from("text\x03"));
+    session.input.paste("fast", "paste");
+    await expect.poll(() => readFile(join(directory, "input"), "utf8")).toBe("text\x03paste");
+    stopped = false;
+    session.consumed("slow", slow.credit);
+    await expect.poll(() => slow.data, { timeout: 10000 }).toBe(fast.data);
+    expect(
+      slow.frames.some((message) => message.type === "frame" && message.frame.type === "error"),
+    ).toBe(false);
+
+    stopped = true;
+    for (let round = 1; round < 4; round++) {
       await writeFile(join(directory, "go-" + round), "");
-      await expect
-        .poll(
-          async () => {
-            const progress = await readFile(join(directory, "progress"), "utf8");
-            await delay(200);
-            return (
-              progress.startsWith(round + ":") &&
-              progress !== round + ":511" &&
-              (await readFile(join(directory, "progress"), "utf8")) === progress
-            );
-          },
-          { timeout: 5000 },
-        )
-        .toBe(true);
-      session.input.input("slow", Buffer.from("text" + round + "\x03"));
-      session.input.paste("slow", "paste" + round);
-      stopped = false;
-      session.consumed("slow", slow.credit);
-      await expect.poll(() => slow.data.includes("ROUND_" + round)).toBe(true);
-      await expect.poll(() => fast.data).toBe(slow.data);
+      await expect.poll(() => fast.data.includes("ROUND_" + round), { timeout: 10000 }).toBe(true);
     }
-    session.input.input("slow", Buffer.from("DONE"));
-    for (const output of [slow, fast]) {
+    expect(slow.frames.at(-1)).toMatchObject({
+      frame: { type: "error", code: "limit_exceeded" },
+    });
+    const disconnectedData = slow.data;
+    await session.attach("reconnected", "retained", false);
+    await expect.poll(() => outputs.get("reconnected")!.data.includes("ROUND_3")).toBe(true);
+    session.input.input("fast", Buffer.from("DONE"));
+    for (const output of [fast, outputs.get("reconnected")!]) {
       await expect
         .poll(
           () =>
@@ -121,14 +123,13 @@ for (let round = 0; round < 3; round++) {
       ).toEqual([]);
       expect(output.frames.at(-1)).toMatchObject({ frame: { type: "ended", exitCode: 23 } });
       expect(output.data.endsWith("FINAL_TAIL_23")).toBe(true);
-      expect(output.data.match(/x/g)).toHaveLength(4094 * 512 * 3);
     }
-    expect(await readFile(join(directory, "input"), "utf8")).toBe(
-      "text0\x03paste0text1\x03paste1text2\x03paste2DONE",
-    );
+    expect(fast.data.match(/x/g)).toHaveLength(4094 * 512 * 4);
+    expect(slow.data).toBe(disconnectedData);
+    expect(await readFile(join(directory, "input"), "utf8")).toBe("text\x03pasteDONE");
   } finally {
     await session.close();
     await tmux(socket, ["kill-server"]);
     await rm(directory, { recursive: true, force: true });
   }
-}, 15000);
+}, 30000);
