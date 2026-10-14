@@ -131,6 +131,8 @@ PNG, JPEG, GIF and WebP images are detected by content and previewed; images exc
 
 The editor preserves the original BOM, line endings and final newline. For mixed line endings, it indicates whether saves will use LF or CRLF. An edit that would exceed the editing limit is rejected in full.
 
+New `.ps1` files on Windows devices use a UTF-8 BOM on their first save so Windows PowerShell 5.1 reads non-ASCII text correctly. Existing files and their saved copies keep their original format. UTF-16 files produced by default redirection in 5.1 can only be downloaded; use `Out-File -Encoding UTF8` when you need to edit the output in the workbench.
+
 Saving replaces the original with a new file, so its parent directory must allow file creation and renaming. Ordinary permission bits are preserved; ownership, group, ACLs and extended attributes follow the rules for new files. Other hard links still point to the old content. Saving through a symbolic link writes to its target.
 
 In narrow layouts, the Focus file button cycles through focus within the window, browser fullscreen, and exit. Focus hides workbench navigation and draft tabs while keeping editing, preview, and save actions available. Opening another file or leaving Files exits focus and keeps unsaved drafts.

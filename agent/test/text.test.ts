@@ -102,6 +102,24 @@ test("buffered text survives later disk changes, rejects non-text and enforces e
   await expect(
     readWorkspaceFile(root, "binary", "text", config.limits, signal),
   ).rejects.toMatchObject({ code: "unsupported" });
+  const utf16 = Buffer.from("\uFEFFWindows PowerShell 中文\r\n", "utf16le");
+  await writeFile(join(root, "redirected.txt"), utf16);
+  await expect(
+    readWorkspaceFile(root, "redirected.txt", "text", config.limits, signal),
+  ).rejects.toMatchObject({
+    code: "unsupported",
+    message:
+      "Only UTF-8 text without NUL characters can be edited. Download the original file to use it locally.",
+  });
+  const download = await readWorkspaceFile(
+    root,
+    "redirected.txt",
+    "download",
+    config.limits,
+    signal,
+  );
+  expect(await download.read(0, download.meta.size)).toEqual(utf16);
+  await download.finish();
   await writeFile(join(root, "invalid"), Buffer.from([0xff]));
   await expect(
     readWorkspaceFile(root, "invalid", "text", config.limits, signal),

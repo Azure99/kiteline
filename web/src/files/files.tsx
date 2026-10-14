@@ -573,6 +573,7 @@ export function Files({
                 key={draft.id}
                 store={store}
                 draft={draft}
+                targetOS={device.environment?.os}
                 editorVisible={!searching}
                 unavailable={!enabled ? t(($) => $.common.deviceOffline) : undefined}
               />

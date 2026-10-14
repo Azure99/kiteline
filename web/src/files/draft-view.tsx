@@ -1,4 +1,5 @@
 import { ErrorNotice } from "../components/error-notice";
+import type { AgentEnvironment } from "@kiteline/shared/protocol";
 import { useTranslation } from "react-i18next";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import {
@@ -49,6 +50,7 @@ const MarkdownPreview = deferredView(async () => ({
 export function DraftView({
   store,
   draft,
+  targetOS,
   unavailable,
   focusMode,
   editorVisible = true,
@@ -57,6 +59,7 @@ export function DraftView({
   editorVisible?: boolean;
   store: DraftStore;
   draft: Draft;
+  targetOS?: AgentEnvironment["os"];
   unavailable?: string;
 }) {
   const { t } = useTranslation();
@@ -117,7 +120,7 @@ export function DraftView({
       setSaveAs(true);
       return;
     }
-    if (await store.save(draft, target, revision ?? draft.revision)) setDisk(undefined);
+    if (await store.save(draft, target, revision ?? draft.revision, targetOS)) setDisk(undefined);
   }
   async function check() {
     const current = await store.check(draft);
@@ -359,6 +362,7 @@ export function DraftView({
         <SaveDraftDialog
           store={store}
           draft={draft}
+          targetOS={targetOS}
           onClose={() => setSaveAs(false)}
           onSaved={() => setSaveAs(false)}
         />

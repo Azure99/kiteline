@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { AgentEnvironment } from "@kiteline/shared/protocol";
 import { useTranslation } from "react-i18next";
 import { ErrorNotice } from "../components/error-notice";
 import { Button } from "../components/ui/button";
@@ -15,11 +16,13 @@ import type { Draft, DraftStore } from "./drafts";
 export function SaveDraftDialog({
   store,
   draft,
+  targetOS,
   onClose,
   onSaved,
 }: {
   store: DraftStore;
   draft: Draft;
+  targetOS?: AgentEnvironment["os"];
   onClose(): void;
   onSaved(): void;
 }) {
@@ -59,7 +62,7 @@ export function SaveDraftDialog({
             event.preventDefault();
             setError(undefined);
             const submitted = ++generation.current;
-            void store.save(draft, path, null).then((saved) => {
+            void store.save(draft, path, null, targetOS).then((saved) => {
               if (submitted !== generation.current || !store.has(draft)) return;
               if (saved) onSaved();
               else

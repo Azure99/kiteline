@@ -262,6 +262,7 @@ export function Workbench({
           <DraftView
             store={drafts}
             draft={orphan}
+            targetOS={devices.find((device) => device.id === orphan.deviceId)?.environment?.os}
             unavailable={
               !device
                 ? t(($) => $.shell.missingDeviceDraft)
@@ -545,7 +546,7 @@ export function Workbench({
           </main>
         </div>
       </div>
-      <OpenFiles store={drafts} open={openFiles} onOpenChange={setOpenFiles} />
+      <OpenFiles store={drafts} devices={devices} open={openFiles} onOpenChange={setOpenFiles} />
       <Dialog open={credentials} onOpenChange={setCredentials}>
         {credentials && <CredentialsDialog devices={devices} />}
       </Dialog>

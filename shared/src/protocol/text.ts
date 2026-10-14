@@ -1,7 +1,11 @@
 import { AppError, type TextFormat } from "./index.js";
 
 export function decodeText(bytes: Uint8Array): { text: string; format: TextFormat } {
-  if (bytes.includes(0)) throw new AppError("unsupported", "Binary files cannot be edited as text");
+  if (bytes.includes(0))
+    throw new AppError(
+      "unsupported",
+      "Only UTF-8 text without NUL characters can be edited. Download the original file to use it locally.",
+    );
   const bom = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf;
   let text: string;
   try {

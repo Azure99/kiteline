@@ -2,7 +2,12 @@ import { newId } from "../lib/id";
 import { useCallback, useSyncExternalStore } from "react";
 import { Compartment, type EditorState } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
-import type { KitelineError, Device, TextFormat } from "@kiteline/shared/protocol";
+import type {
+  AgentEnvironment,
+  KitelineError,
+  Device,
+  TextFormat,
+} from "@kiteline/shared/protocol";
 import { encodeText } from "@kiteline/shared/protocol/text";
 import { apiError, ApiError, errorMessage, rpc } from "../lib/api";
 import { emit } from "../lib/events";
@@ -335,11 +340,30 @@ export class DraftStore {
       this.finish(draft, request);
     }
   }
-  async save(draft: Draft, path = draft.path, revision: string | null = draft.revision ?? null) {
+  async save(
+    draft: Draft,
+    path = draft.path,
+    revision: string | null = draft.revision ?? null,
+    targetOS?: AgentEnvironment["os"],
+  ) {
     if (!this.canSave(draft) || !this.has(draft)) return false;
-    draft.diskActivity++;
     const text = draft.state!.doc.toString();
-    const bytes = encodeText(text, draft.format);
+    const format =
+      !draft.path && targetOS === "windows" && /\.ps1$/i.test(path)
+        ? { ...draft.format, bom: true }
+        : draft.format;
+    const bytes = encodeText(text, format);
+    const capacity = this.limitError(draft, bytes.length);
+    if (capacity) {
+      draft.notice = capacity;
+      draft.error = new ApiError(
+        "limit_exceeded",
+        "The text exceeds the available editor capacity",
+      );
+      this.changed();
+      return false;
+    }
+    draft.diskActivity++;
     const raw = new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes);
     const request = new AbortController();
     const sourcePath = draft.path;
@@ -375,6 +399,8 @@ export class DraftStore {
       const duplicate = this.hasDuplicate(draft, savedPath);
       if (!pending.replacesSource || draft.path !== savedPath) draft.sourceVersion++;
       draft.path = savedPath;
+      draft.format = format;
+      draft.bytes = encodeText(draft.state!.doc.toString(), format).length;
       draft.baseText = text;
       draft.baseRaw = raw;
       draft.revision = saved.revision;
@@ -462,6 +488,8 @@ export class DraftStore {
     if (!snapshot.replacesSource || draft.path !== disk.target.path) draft.sourceVersion++;
     draft.path = disk.target.path;
     draft.baseRaw = disk.raw;
+    draft.format = disk.meta as TextFormat;
+    draft.bytes = encodeText(draft.state!.doc.toString(), draft.format).length;
     draft.baseText = disk.text;
     draft.revision = disk.meta.revision;
     draft.resolvedPath = disk.meta.resolvedPath;

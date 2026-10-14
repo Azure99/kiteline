@@ -120,45 +120,144 @@ test("first save keeps a conflicting draft, then adopts its new path without los
   const id = draft.id;
   const conflict = new ApiError("conflict", "The path already exists");
   transport.write.mockRejectedValueOnce(conflict);
-  expect(await store.save(draft, "dir/taken.txt", null)).toBe(false);
+  expect(await store.save(draft, "dir/taken.ps1", null, "windows")).toBe(false);
   expect(draft.path).toBe("");
+  expect(draft.format.bom).toBe(false);
   expect(draft.error).toBe(conflict);
   expect(isDirty(draft)).toBe(true);
   const pending = deferred<{ path: string; size: number; revision: string }>();
   transport.write.mockReturnValueOnce(pending.promise);
-  const saving = store.save(draft, "dir/new.ts", null);
+  const saving = store.save(draft, "dir/new.PS1", null, "windows");
   const [, bytes, revision] = transport.write.mock.calls[1]!;
-  expect(new TextDecoder().decode(bytes)).toBe("sent");
+  expect(Buffer.from(bytes)).toEqual(Buffer.from("\uFEFFsent"));
   expect(revision).toBeUndefined();
   const edited = draft.state!.update({ changes: { from: 4, insert: " later" } }).state;
   store.update(draft, edited);
-  pending.resolve({ path: "dir/new.ts", size: 4, revision: "first" });
+  pending.resolve({ path: "dir/new.PS1", size: 7, revision: "first" });
   expect(await saving).toBe(true);
   expect(draft.id).toBe(id);
-  expect(draft.path).toBe("dir/new.ts");
+  expect(draft.path).toBe("dir/new.PS1");
   expect(draft.state).toBe(edited);
   expect(draft.baseText).toBe("sent");
   expect(isDirty(draft)).toBe(true);
+  expect(draft.format.bom).toBe(true);
+  expect(draft.bytes).toBe(Buffer.byteLength("\uFEFFsent later"));
+  transport.write.mockResolvedValueOnce({ path: draft.path, revision: "second" });
+  expect(await store.save(draft)).toBe(true);
+  expect(Buffer.from(transport.write.mock.lastCall![1])).toEqual(Buffer.from("\uFEFFsent later"));
 });
 
 test("an unknown first save checks its submitted path and keeps subsequent edits", async () => {
   const { store, draft } = untitled();
   store.update(draft, draft.state!.update({ changes: { from: 0, insert: "sent" } }).state);
   transport.write.mockRejectedValueOnce(new ApiError("io_error", "lost response", "unknown"));
-  expect(await store.save(draft, "dir/new.txt", null)).toBe(false);
+  expect(await store.save(draft, "dir/new.ps1", null, "windows")).toBe(false);
   expect(draft.path).toBe("");
-  expect(draft.unknownSave?.target.path).toBe("dir/new.txt");
+  expect(draft.format.bom).toBe(false);
+  expect(draft.unknownSave?.target.path).toBe("dir/new.ps1");
   const edited = draft.state!.update({ changes: { from: 4, insert: " later" } }).state;
   store.update(draft, edited);
-  transport.read.mockResolvedValueOnce(disk("sent", "first", "dir/new.txt"));
+  const saved = disk("sent", "first", "dir/new.ps1");
+  saved.raw = "\uFEFFsent";
+  saved.meta.bom = true;
+  saved.meta.size = 7;
+  transport.read.mockResolvedValueOnce(saved);
   await store.check(draft);
-  expect(transport.read.mock.calls[0]![0]).toEqual({ ...target, path: "dir/new.txt" });
-  expect(draft.path).toBe("dir/new.txt");
+  expect(transport.read.mock.calls[0]![0]).toEqual({ ...target, path: "dir/new.ps1" });
+  expect(draft.path).toBe("dir/new.ps1");
   expect(draft.unknownSave).toBeUndefined();
   expect(draft.state).toBe(edited);
   expect(draft.baseText).toBe("sent");
   expect(isDirty(draft)).toBe(true);
+  expect(draft.format.bom).toBe(true);
+  expect(draft.bytes).toBe(Buffer.byteLength("\uFEFFsent later"));
+  transport.write.mockResolvedValueOnce({ path: draft.path, revision: "second" });
+  expect(await store.save(draft)).toBe(true);
+  expect(Buffer.from(transport.write.mock.lastCall![1])).toEqual(Buffer.from("\uFEFFsent later"));
 });
+
+test.each([6, 7])("a new Windows script counts its BOM against a %i-byte limit", async (limit) => {
+  const { store, draft } = untitled();
+  store.limits([{ id: "device", editorBytes: limit } as Device]);
+  store.update(draft, draft.state!.update({ changes: { from: 0, insert: "sent" } }).state);
+  transport.write.mockResolvedValueOnce({ path: "new.ps1", revision: "saved" });
+  expect(await store.save(draft, "new.ps1", null, "windows")).toBe(limit === 7);
+  if (limit === 6) {
+    expect(transport.write).not.toHaveBeenCalled();
+    expect(draft.error).toMatchObject({ code: "limit_exceeded" });
+    expect(draft.format.bom).toBe(false);
+    expect(draft.bytes).toBe(4);
+  } else {
+    expect(Buffer.from(transport.write.mock.lastCall![1])).toEqual(Buffer.from("\uFEFFsent"));
+    expect(draft.bytes).toBe(7);
+  }
+});
+
+test("confirming a Windows script keeps later edits that now exceed capacity", async () => {
+  const { store, draft } = untitled();
+  store.limits([{ id: "device", editorBytes: 7 } as Device]);
+  store.update(draft, draft.state!.update({ changes: { from: 0, insert: "sent" } }).state);
+  transport.write.mockRejectedValueOnce(new ApiError("io_error", "lost response", "unknown"));
+  await store.save(draft, "new.ps1", null, "windows");
+  const edited = draft.state!.update({ changes: { from: 4, insert: "++" } }).state;
+  store.update(draft, edited);
+  const saved = disk("sent", "first", "new.ps1");
+  saved.raw = "\uFEFFsent";
+  saved.meta.bom = true;
+  saved.meta.size = 7;
+  transport.read.mockResolvedValueOnce(saved);
+  await store.check(draft);
+  expect(draft.state).toBe(edited);
+  expect(draft.bytes).toBe(9);
+  expect(store.canSave(draft)).toBe(false);
+  expect(store.limitError(draft, 7)).toBeUndefined();
+  store.update(draft, edited.update({ changes: { from: 4, to: 6 } }).state);
+  expect(store.canSave(draft)).toBe(true);
+});
+
+test("a different disk version after an unknown first save can be overwritten with a BOM", async () => {
+  const { store, draft } = untitled();
+  store.update(draft, draft.state!.update({ changes: { from: 0, insert: "sent" } }).state);
+  transport.write.mockRejectedValueOnce(new ApiError("io_error", "lost response", "unknown"));
+  await store.save(draft, "new.ps1", null, "windows");
+  transport.read.mockResolvedValueOnce(disk("external", "external-version", "new.ps1"));
+  const current = await store.check(draft);
+  expect(draft.path).toBe("");
+  expect(draft.format.bom).toBe(false);
+  transport.write.mockResolvedValueOnce({ path: "new.ps1", revision: "saved" });
+  expect(await store.save(draft, current!.target.path, current!.meta.revision, "windows")).toBe(
+    true,
+  );
+  expect(Buffer.from(transport.write.mock.lastCall![1])).toEqual(Buffer.from("\uFEFFsent"));
+});
+
+test.each([
+  ["linux", "new.ps1"],
+  ["macos", "new.ps1"],
+  [undefined, "new.ps1"],
+  ["windows", "new.txt"],
+] as const)("a new %s target named %s keeps its original format", async (os, path) => {
+  const { store, draft } = untitled();
+  store.update(draft, draft.state!.update({ changes: { from: 0, insert: "plain" } }).state);
+  transport.write.mockResolvedValueOnce({ path, revision: "saved" });
+  expect(await store.save(draft, path, null, os)).toBe(true);
+  expect(Buffer.from(transport.write.mock.lastCall![1])).toEqual(Buffer.from("plain"));
+  expect(draft.format.bom).toBe(false);
+});
+
+test.each(["existing.ps1", "copy.ps1"])(
+  "an existing Windows script saved to %s keeps no BOM",
+  async (path) => {
+    const { store, draft } = await opened();
+    store.adopt(draft, disk("existing", "original", "existing.ps1"));
+    transport.write.mockResolvedValueOnce({ path, revision: "saved" });
+    expect(
+      await store.save(draft, path, path === draft.path ? draft.revision : null, "windows"),
+    ).toBe(true);
+    expect(Buffer.from(transport.write.mock.lastCall![1])).toEqual(Buffer.from("existing"));
+    expect(draft.format.bom).toBe(false);
+  },
+);
 
 test("closing a duplicate-path draft does not clear the file-only target of another draft", async () => {
   const { store, draft } = await opened();

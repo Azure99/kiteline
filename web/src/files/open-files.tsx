@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import type { Device } from "@kiteline/shared/protocol";
 import { useEffect, useState } from "react";
 import { ErrorNotice } from "../components/error-notice";
 import { Circle, Copy, X } from "lucide-react";
@@ -20,10 +21,12 @@ import { useCopyFeedback } from "../lib/use-copy-feedback";
 
 export function OpenFiles({
   store,
+  devices,
   open,
   onOpenChange,
 }: {
   store: DraftStore;
+  devices: Device[];
   open: boolean;
   onOpenChange(open: boolean): void;
 }) {
@@ -160,6 +163,7 @@ export function OpenFiles({
         <SaveDraftDialog
           store={store}
           draft={naming}
+          targetOS={devices.find((device) => device.id === naming.deviceId)?.environment?.os}
           onClose={() => setNaming(undefined)}
           onSaved={() => {
             setNaming(undefined);
