@@ -218,7 +218,7 @@ For symptoms of proxy misconfiguration, such as `Origin mismatch`, `Invalid X-Fo
 
 ## Issue a CLI credential
 
-In the workbench’s Owner menu, open **CLI credentials**. Enter a name, select one or more devices, and choose the number of days or explicitly select **No expiry**. Copy the token when it is shown; the server retains only its digest. Import it into the matching Kiteline CLI release. The device agent’s binding code is a different credential.
+In the workbench’s Owner menu, open **CLI setup → CLI credentials**. Enter a name, select one or more devices, and choose the number of days or explicitly select **No expiry**. Copy the token when it is shown; the server retains only its digest. Import it into the matching Kiteline CLI release. The device agent’s binding code is a different credential.
 
 The token can operate the selected devices with the agent OS user’s permissions; a workspace is not a sandbox. It cannot manage device registrations, binding codes or other credentials. To end access, revoke that entry in the same dialog, or use the CLI’s logout. Revocation closes that credential’s connections but keeps shared terminals running and does not undo input already sent. Other credentials keep working.
 

@@ -38,6 +38,7 @@ export function Home({
   recents,
   onNavigate,
   onBind,
+  onCliSetup,
 }: {
   devices: Device[];
   loaded: boolean;
@@ -45,6 +46,7 @@ export function Home({
   recents: RecentWorkspace[];
   onNavigate: (path: string) => void;
   onBind: () => void;
+  onCliSetup: () => void;
 }) {
   const { t } = useTranslation();
   const recentTargets = recents.flatMap((entry) => {
@@ -61,6 +63,10 @@ export function Home({
           <Button variant="outline" onClick={() => onNavigate(tasksPath())}>
             <CalendarClock />
             {t(($) => $.schedules.title)}
+          </Button>
+          <Button variant="outline" onClick={onCliSetup}>
+            <Terminal />
+            {t(($) => $.cliSetup.title)}
           </Button>
           <Button onClick={() => onBind()}>
             <Plus />

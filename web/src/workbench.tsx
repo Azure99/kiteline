@@ -17,7 +17,6 @@ import {
   PanelLeftOpen,
   Files as FilesIcon,
   CalendarClock,
-  KeyRound,
 } from "lucide-react";
 import type { Device } from "@kiteline/shared/protocol";
 import type { LoginSession } from "./auth";
@@ -61,7 +60,7 @@ import { FileOperationDialog, type FileAction } from "./files/operation-dialog";
 import { PortDialog } from "./devices/port-dialog";
 import { ReleaseNotice } from "./components/release-notice";
 import { AgentReleaseNotice } from "./devices/agent-release-notice";
-import { CredentialsDialog } from "./credentials-dialog";
+import { CliSetupDialog } from "./cli/cli-setup-dialog";
 import { useTerminalFocus } from "./terminal/use-terminal-focus";
 import { deferredView, ViewBoundary } from "./components/deferred-view";
 
@@ -91,7 +90,7 @@ export function Workbench({
   const route = useRoute();
   const [error, setError] = useState<{ cause: unknown; downloadPath?: string }>();
   const [binding, setBinding] = useState(false);
-  const [credentials, setCredentials] = useState(false);
+  const [cliSetup, setCliSetup] = useState(false);
   const [picker, setPicker] = useState(false);
   const [openFiles, setOpenFiles] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -254,6 +253,7 @@ export function Workbench({
           recents={recents}
           onNavigate={choose}
           onBind={() => setBinding(true)}
+          onCliSetup={() => setCliSetup(true)}
         />
       );
     if (orphan)
@@ -477,9 +477,9 @@ export function Workbench({
               )}
             </MenuTrigger>
             <MenuContent>
-              <MenuItem onClick={() => setCredentials(true)}>
-                <KeyRound />
-                {t(($) => $.credentials.title)}
+              <MenuItem onClick={() => setCliSetup(true)}>
+                <Terminal />
+                {t(($) => $.cliSetup.title)}
               </MenuItem>
               <MenuItem onClick={() => setOpenFiles(true)}>
                 <FilesIcon />
@@ -547,8 +547,8 @@ export function Workbench({
         </div>
       </div>
       <OpenFiles store={drafts} devices={devices} open={openFiles} onOpenChange={setOpenFiles} />
-      <Dialog open={credentials} onOpenChange={setCredentials}>
-        {credentials && <CredentialsDialog devices={devices} />}
+      <Dialog open={cliSetup} onOpenChange={setCliSetup}>
+        {cliSetup && <CliSetupDialog devices={devices} />}
       </Dialog>
       {device && portDevice === device.id && (
         <PortDialog key={device.id} device={device} onClose={() => setPortDevice(undefined)} />

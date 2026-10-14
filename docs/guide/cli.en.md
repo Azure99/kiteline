@@ -27,12 +27,13 @@ curl -fLO "$url/$name.tar.gz.sha256"
 sha256sum -c "$name.tar.gz.sha256"       # Linux
 # shasum -a 256 -c "$name.tar.gz.sha256" # Use this instead on macOS
 tar -xpzf "$name.tar.gz" --no-same-owner
-"./$name/bin/kiteline" --version
-"./$name/bin/kiteline" --help
+export PATH="$PWD/$name/bin:$PATH"
+kiteline --version
+kiteline --help
 ```
 
-Add the extracted directory's `bin` to PATH, or replace `kiteline` below with the
-full launcher path. Keep the whole package directory; the launcher uses its bundled
+The PATH setting applies to this terminal. In a new terminal, set it again or use
+the full launcher path. Keep the whole package directory; the launcher uses its bundled
 runtime. For a macOS browser download blocked by quarantine, verify the checksum,
 then follow [manual installation](devices.en.md#linux-and-macos) to remove the
 extracted directory's quarantine attribute.
@@ -51,13 +52,14 @@ $expected = (Get-Content "$package.zip.sha256" -Raw).Trim().Split(' ')[0]
 if ((Get-FileHash "$package.zip" -Algorithm SHA256).Hash -ine $expected) { throw 'Checksum mismatch' }
 Expand-Archive -LiteralPath "$package.zip" -DestinationPath .
 Set-ExecutionPolicy -Scope Process Bypass -Force
-& ".\$package\bin\kiteline.ps1" --help
+$env:Path = (Resolve-Path -LiteralPath ".\$package\bin").Path + ';' + $env:Path
+kiteline.ps1 --help
 ```
 
-The execution policy is relaxed only for the current PowerShell window and expires
-when it closes. Below, `kiteline` means
-`& '.\package-directory\bin\kiteline.ps1' <arguments>`. No administrator privileges
-or installation step are needed.
+The execution policy and PATH settings apply only to this PowerShell window. In a
+new window, repeat those two steps, or set the execution policy and use the full
+launcher path. Replace `kiteline` in the commands below with `kiteline.ps1` on
+Windows. No administrator privileges are needed.
 Call ordinary commands directly and capture JSON. A PowerShell token pipeline
 must start a separate PowerShell process so that the token becomes CLI stdin;
 do not pipe directly to the script:
@@ -92,7 +94,7 @@ attach requires the `.ps1` entry to restore local terminal state.
 
 ## Connect
 
-In Web, open “Owner menu → CLI credentials”, select devices, and issue a token:
+In Web, open “Owner menu → CLI setup → CLI credentials”, select devices, and issue a token:
 
 ```sh
 kiteline auth login --server https://desk.example

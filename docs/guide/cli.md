@@ -24,11 +24,12 @@ curl -fLO "$url/$name.tar.gz.sha256"
 sha256sum -c "$name.tar.gz.sha256"       # Linux
 # shasum -a 256 -c "$name.tar.gz.sha256" # macOS 用这一行代替上一行
 tar -xpzf "$name.tar.gz" --no-same-owner
-"./$name/bin/kiteline" --version
-"./$name/bin/kiteline" --help
+export PATH="$PWD/$name/bin:$PATH"
+kiteline --version
+kiteline --help
 ```
 
-将解包目录的 `bin` 加入 PATH，或以下文 `kiteline` 为简写，调用该目录中的完整入口路径。
+上述 PATH 设置只对当前终端生效。新终端中重新设置，或调用解包目录中的完整入口路径。
 保留整个包目录；入口使用包内 runtime。macOS 浏览器下载的归档若被系统隔离，校验后按
 [手工安装说明](devices.md#linux-和-macos)移除解包目录的隔离属性。
 
@@ -46,11 +47,13 @@ $expected = (Get-Content "$package.zip.sha256" -Raw).Trim().Split(' ')[0]
 if ((Get-FileHash "$package.zip" -Algorithm SHA256).Hash -ine $expected) { throw 'Checksum mismatch' }
 Expand-Archive -LiteralPath "$package.zip" -DestinationPath .
 Set-ExecutionPolicy -Scope Process Bypass -Force
-& ".\$package\bin\kiteline.ps1" --help
+$env:Path = (Resolve-Path -LiteralPath ".\$package\bin").Path + ';' + $env:Path
+kiteline.ps1 --help
 ```
 
-执行策略仅对当前 PowerShell 窗口临时放宽，关闭窗口后失效。下文的 `kiteline` 代表
-`& '.\包目录\bin\kiteline.ps1' <参数>`；无需管理员权限或安装步骤。
+执行策略和 PATH 设置仅对当前 PowerShell 窗口生效。新窗口中重新执行这两步，
+或设置执行策略后用完整入口路径。下文命令中的 `kiteline` 在 Windows 上替换为
+`kiteline.ps1`；无需管理员权限。
 普通命令可直接调用脚本并捕获 JSON。传入 token 的 PowerShell 管道须启动独立
 PowerShell 进程，使 token 成为 CLI 的 stdin；不能直接把管道接到脚本：
 
@@ -79,7 +82,7 @@ server 的下载接口只提供共同 agent 包，独立 CLI 从 Release 下载�
 
 ## 接入
 
-在 Web 的“拥有者菜单 → CLI 凭据”中选择设备并签发 token，然后导入：
+在 Web 的“拥有者菜单 → CLI 接入 → CLI 凭据”中选择设备并签发 token，然后导入：
 
 ```sh
 kiteline auth login --server https://desk.example

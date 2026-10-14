@@ -228,7 +228,7 @@ Ignores a cwd default session; rejects explicit --session.
 PATH is workspace-relative, uses / separators and cannot contain .. segments.
 `;
 const commandHelp: Record<string, string> = {
-  "auth login": `auth login --server ORIGIN [--token-stdin]\nImport a token issued in Web: Owner menu → CLI credentials. Prompt requires a TTY;\n--token-stdin explicitly reads a piped token. KITELINE_URL/KITELINE_TOKEN override saved credentials.\n`,
+  "auth login": `auth login --server ORIGIN [--token-stdin]\nImport a token issued in Web: Owner menu → CLI setup → CLI credentials. Prompt requires a TTY;\n--token-stdin explicitly reads a piped token. KITELINE_URL/KITELINE_TOKEN override saved credentials.\n`,
   "auth status": `auth status\nShow current credential access, source and expiry.\n`,
   "auth logout": `auth logout\nRevoke the active credential. Environment credentials must also be removed from\nthe calling environment; saved credentials are removed after revocation.\n`,
   targets: `targets\nList authorized devices and workspace metadata snapshots, including offline devices.\n`,
@@ -274,7 +274,7 @@ Commands:
   web url [--path PATH]                     Print a terminal or file Web URL
 
 Use COMMAND --help for parameters and behavior. All commands except attach accept --json.
-Help and --version work offline. Owner menu → CLI credentials in Web issues tokens.
+Help and --version work offline. Owner menu → CLI setup → CLI credentials in Web issues tokens.
 KITELINE_URL and KITELINE_TOKEN must be supplied together and override saved
 credentials. Saved credentials: ~/.kiteline/credentials.json; KITELINE_CLI_HOME
 changes that directory. Logout revokes the active token, including an env token.
