@@ -8,7 +8,7 @@
 flowchart LR
   B["浏览器：工作台"] -->|"HTTP / WebSocket"| P["反向代理（可选）"]
   B -->|"HTTP / WebSocket"| S["kiteline-server"]
-  CLI["kiteline：远程 CLI"] -->|"HTTP：设备操作凭据"| S
+  CLI["kiteline：远程 CLI"] -->|"HTTP / WebSocket：设备操作凭据"| S
   P --> S
   S --> DB[("kiteline.sqlite")]
   A["kiteline-agent"] -->|"控制与数据 WebSocket"| P
@@ -19,7 +19,7 @@ flowchart LR
   C -->|"tmux attach"| T["tmux server：每个终端会话一个"]
   A -->|"stdin / stdout JSON 行"| R["terminal-recorder"]
   R -->|"tmux control mode"| T
-  A -->|"结束会话"| T
+  A -->|"TTY 附着 / 结束会话"| T
   A --> H["文件 helper：rename-noreplace、entry-name"]
   A --> G["Git、ripgrep、定时任务命令"]
   A -->|"TCP 127.0.0.1 或 ::1"| D["设备上的开发服务"]
@@ -29,7 +29,7 @@ flowchart LR
 
 - **server**（`kiteline-server`）：运行在 Linux 上的一个 Node 进程，提供工作台静态文件、`/api/` 接口、浏览器和 agent 的 WebSocket 连接、开发服务代理（`/proxy/`、`/absproxy/`）和 agent 安装资源。server 只监听 HTTP，HTTPS 由反向代理提供。管理数据保存在 server 数据目录的 `kiteline.sqlite` 中。
 - **工作台**：server 提供的单页应用。浏览器只与 server 同源通信，从不直接连接设备。
-- **远程 CLI**（`kiteline`）：短命令通过 server 使用选定设备的操作凭据；与工作台复用 HTTP/RPC 客户端，与 agent 复用 Node 网络传输。凭据导入与当前目录目标见[远程 CLI](../guide/cli.md)。
+- **远程 CLI**（`kiteline`）：通过 server 使用选定设备的操作凭据；短命令与工作台复用 HTTP/RPC 客户端，交互 attach 复用[终端数据通道](terminal.md#远程交互附着)，与 agent 复用 Node 网络传输。凭据导入与当前目录目标见[远程 CLI](../guide/cli.md)。
 - **agent**（`kiteline-agent run`）：每台设备一个 Node 进程，以项目用户身份运行。agent 主动连接 server：一条控制 WebSocket 承载 RPC 和事件，每次文件读写、终端附着和开发服务请求另开一条数据 WebSocket。agent 不监听 TCP 端口；同一用户的本机命令行通过[本机 IPC](protocol.md#本机-ipc) 访问它。
 - **recorder**（`terminal-recorder`）：agent 在第一次需要时启动的 Node 子进程，每个 agent 最多一个，通过 stdin 和 stdout 与 agent 通信。它为每个终端会话运行一个 tmux control 客户端，把输出写入 `@xterm/headless` 屏幕模型，浏览器附着时从这个模型恢复画面。
 - **tmux server**：每个终端会话一个私有 tmux server，socket 为 `<运行目录>/<sessionId>/tmux.sock`，会话名固定为 `kiteline`（`shared/src/terminal/node.ts` 的 `tmuxSession`）。终端程序运行在其中，浏览器断开或 recorder 退出都不会结束它；`kiteline-agent attach` 直接附着到这个 socket。Windows 上 tmux 运行在随包的私有 MSYS2 环境中，见[平台实现](platforms.md#windows)。
