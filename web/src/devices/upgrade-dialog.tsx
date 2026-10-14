@@ -15,16 +15,18 @@ interface Upgrade {
 
 export function UpgradeDialog({
   deviceName,
+  initialPlatform,
   trigger,
   onClose,
 }: {
   deviceName: string;
+  initialPlatform?: AgentPlatform;
   trigger: RefObject<HTMLButtonElement | null>;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
   const [upgrade, setUpgrade] = useState<Upgrade>();
-  const [platform, setPlatform] = useState<AgentPlatform>("linux");
+  const [platform, setPlatform] = useState<AgentPlatform | undefined>(initialPlatform);
   const [error, setError] = useState<unknown>();
   const { copied, error: copyError, copy, pending } = useCopyFeedback();
   const [attempt, setAttempt] = useState(0);
@@ -42,7 +44,7 @@ export function UpgradeDialog({
     return () => controller.abort();
   }, [attempt]);
 
-  const command = upgrade?.commands[platform];
+  const command = platform && upgrade?.commands[platform];
   const visibleCopyError = copyError?.id === command ? copyError?.error : undefined;
   return (
     <Dialog
@@ -64,18 +66,26 @@ export function UpgradeDialog({
               <AgentPlatformChoice value={platform} onChange={setPlatform} />
               <p>{t(($) => $.devices.upgradeTarget, { version: upgrade.version })}</p>
               <p className="text-muted-foreground">{t(($) => $.devices.upgradeHint)}</p>
-              <Button
-                variant="outline"
-                disabled={pending}
-                onPointerDown={(event) => event.preventDefault()}
-                onClick={() => void copy(command!)}
-              >
-                {copied === command ? <Check /> : <Copy />}
-                {copied === command ? t(($) => $.common.copied) : t(($) => $.devices.copyUpgrade)}
-              </Button>
-              <pre className="max-h-64 overflow-auto rounded bg-muted p-3 text-xs" tabIndex={0}>
-                {command}
-              </pre>
+              {command ? (
+                <>
+                  <Button
+                    variant="outline"
+                    disabled={pending}
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={() => void copy(command)}
+                  >
+                    {copied === command ? <Check /> : <Copy />}
+                    {copied === command
+                      ? t(($) => $.common.copied)
+                      : t(($) => $.devices.copyUpgrade)}
+                  </Button>
+                  <pre className="max-h-64 overflow-auto rounded bg-muted p-3 text-xs" tabIndex={0}>
+                    {command}
+                  </pre>
+                </>
+              ) : (
+                <p>{t(($) => $.devices.selectPlatform)}</p>
+              )}
             </>
           ) : (
             !error && <p role="status">{t(($) => $.common.loading)}</p>

@@ -368,6 +368,7 @@ export function DeviceDetail({
       {upgrade && (
         <UpgradeDialog
           deviceName={device.name}
+          initialPlatform={device.environment?.os}
           trigger={actionsTrigger}
           onClose={() => setUpgrade(false)}
         />

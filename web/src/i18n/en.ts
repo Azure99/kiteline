@@ -284,6 +284,7 @@ export const en = {
     bindingUnavailable: "This binding is no longer available",
     waitingDevice: "Waiting for device",
     platform: "Device platform",
+    selectPlatform: "Select the target device platform to show its command.",
     projectUser: "Your project user",
     copyInstall: "Copy install command",
     copiedInstall: "Install command copied",

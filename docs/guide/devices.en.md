@@ -442,7 +442,7 @@ Stopping the agent ends its terminal sessions and scheduled-task runs. Binding, 
 
 ### Upgrade using the web command
 
-Choose the platform in "Upgrade agent" on the device page, copy the upgrade command, and run it in an interactive terminal or SSH session on the device.
+Copy the command from "Upgrade agent" on the device page and run it in an interactive terminal or SSH session on the device. If the platform is unknown, select the target device’s platform first.
 
 On Linux and macOS, the command downloads the agent matching the server from the current origin, verifies it, then upgrades with sudo. On Windows, run it in PowerShell and confirm UAC; upgrading happens in a new administrator window. At `Type yes to continue:`, enter `yes`. The command includes the server version at generation time. If it subsequently changes, the command stops with `The server release changed`; copy a new command from the web app.
 
@@ -471,6 +471,8 @@ Adjust the version and filename to the downloaded package. Add `--yes` to skip c
 If replacing the program fails, the upgrade attempts to restore the previous installation; if restoration fails, the output gives the backup location. Upgrading does not start the agent automatically.
 
 ## Uninstall
+
+After deleting a device, the web app provides local uninstall commands. If the platform is unknown, select the target device’s platform first.
 
 First stop all users of the installation as in [Upgrade the agent](#upgrade-the-agent). The uninstall command does not manage service configuration; remove any service first:
 

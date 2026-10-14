@@ -6,7 +6,7 @@ export function AgentPlatformChoice({
   value,
   onChange,
 }: {
-  value: AgentPlatform;
+  value: AgentPlatform | undefined;
   onChange: (platform: AgentPlatform) => void;
 }) {
   const { t } = useTranslation();

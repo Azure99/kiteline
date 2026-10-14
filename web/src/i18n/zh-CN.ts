@@ -280,6 +280,7 @@ export const zhCN = {
     bindingUnavailable: "此绑定已不可用",
     waitingDevice: "等待设备",
     platform: "设备平台",
+    selectPlatform: "请选择目标设备的平台以显示命令。",
     projectUser: "当前项目用户",
     copyInstall: "复制接入命令",
     copiedInstall: "已复制接入命令",

@@ -15,11 +15,12 @@ export function UninstallInstructions({
   release?: Device["release"];
 }) {
   const { t, i18n } = useTranslation();
-  const [platform, setPlatform] = useState<AgentPlatform>(initialPlatform ?? "linux");
+  const [platform, setPlatform] = useState<AgentPlatform | undefined>(initialPlatform);
   const [purge, setPurge] = useState(false);
   const supportsPurge = appVersion !== "0.2.6" && release?.agentVersion === appVersion;
   const { copied, error, copy, pending } = useCopyFeedback();
   const command =
+    platform &&
     (platform === "windows"
       ? `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\\kiteline-agent\\kiteline-agent.ps1" uninstall`
       : "sudo /usr/local/bin/kiteline-agent uninstall") + (purge ? " --purge" : "");
@@ -48,19 +49,25 @@ export function UninstallInstructions({
           ))}
         </fieldset>
       )}
-      <div className="flex items-start gap-2">
-        <pre className="min-w-0 flex-1 whitespace-pre-wrap break-all rounded bg-muted p-3 text-xs">
-          {command}
-        </pre>
-        <IconButton
-          label={copied === command ? t(($) => $.common.copied) : t(($) => $.devices.copyUninstall)}
-          disabled={pending}
-          onPointerDown={(event) => event.preventDefault()}
-          onClick={() => void copy(command)}
-        >
-          {copied === command ? <Check /> : <Copy />}
-        </IconButton>
-      </div>
+      {command ? (
+        <div className="flex items-start gap-2">
+          <pre className="min-w-0 flex-1 whitespace-pre-wrap break-all rounded bg-muted p-3 text-xs">
+            {command}
+          </pre>
+          <IconButton
+            label={
+              copied === command ? t(($) => $.common.copied) : t(($) => $.devices.copyUninstall)
+            }
+            disabled={pending}
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={() => void copy(command)}
+          >
+            {copied === command ? <Check /> : <Copy />}
+          </IconButton>
+        </div>
+      ) : (
+        <p>{t(($) => $.devices.selectPlatform)}</p>
+      )}
       <p className="text-muted-foreground">
         {purge ? t(($) => $.devices.uninstallPurgesData) : t(($) => $.devices.uninstallKeepsData)}
       </p>
@@ -73,7 +80,7 @@ export function UninstallInstructions({
       >
         {t(($) => $.devices.uninstallGuide)}
       </a>
-      {error?.id === command && (
+      {error && error.id === command && (
         <div role="alert" className="break-words text-destructive">
           <ErrorNotice error={error.error} />
         </div>

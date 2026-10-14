@@ -44,7 +44,12 @@ export function AgentReleaseNotice({ device }: { device: Device }) {
         </div>
       )}
       {open && (
-        <UpgradeDialog deviceName={device.name} trigger={trigger} onClose={() => setOpen(false)} />
+        <UpgradeDialog
+          deviceName={device.name}
+          initialPlatform={device.environment?.os}
+          trigger={trigger}
+          onClose={() => setOpen(false)}
+        />
       )}
     </>
   );

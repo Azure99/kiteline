@@ -442,7 +442,7 @@ agent 的版本必须与 server 相同。先[升级 server](server.md#升级-ser
 
 ### 用网页命令升级
 
-在设备页的“升级 agent”中选择平台，复制升级命令，到设备上的交互式终端或 SSH 会话执行。
+在设备页的“升级 agent”中复制升级命令，到设备上的交互式终端或 SSH 会话执行。平台未知时，先选择目标设备的平台。
 
 Linux 和 macOS 上，命令从当前入口下载与 server 版本相同的发布包并校验，然后用 sudo 执行升级。Windows 上，在 PowerShell 中执行命令，确认 UAC 提示后，升级在新的管理员窗口中进行。升级前会提示 `Type yes to continue:`，输入 `yes` 继续。命令中写有生成时的 server 版本；server 版本之后又变化时，命令提示 `The server release changed` 并停止，重新在网页复制即可。
 
@@ -471,6 +471,8 @@ Expand-Archive -LiteralPath "$package.zip" -DestinationPath .
 替换程序失败时，升级会尝试恢复旧程序；恢复失败时，输出会给出备份位置。升级不会自动启动 agent。
 
 ## 卸载
+
+删除设备后，网页会提供本机卸载命令；平台未知时先选择目标设备的平台。
 
 先像[升级 agent](#升级-agent) 一样停止所有使用者。卸载命令不处理服务配置，用了服务时先删除它：
 
