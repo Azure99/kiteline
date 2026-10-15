@@ -81,6 +81,8 @@ Linux 和 macOS 的命令入口是 `/usr/local/bin/kiteline-agent`；用 `sudo` 
 - `terminal new` 创建会话，打印 `SESSION_ID` 后退出，不要求交互终端。`--shortcut` 用快捷方式启动：新设备预置的快捷方式 ID 是 `claude`、`codex` 和 `opencode`；在“终端设置”中新增的快捷方式使用随机 ID，可在 agent 数据目录的 `agent.json` 的 `shortcuts` 中查到。
 - `terminal end SESSION_ID` 不经确认直接结束会话及其中的程序。
 
+这些本机命令成功时退出 0，结果未确认（`unknown`）时退出 3，其他失败退出 1。失败诊断写入 stderr，格式为 `code: message`；回复已有 `sessionId` 时追加 ` (sessionId=...)`。遇到退出 3，先用 `terminal list` 核查状态再决定后续操作，不要直接重发；并非每次退出 3 都有会话 ID，退出 1 也不保证操作没有执行。
+
 ## server 环境变量
 
 | 变量                         | 默认值              | 说明                                              |

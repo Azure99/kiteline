@@ -1,4 +1,4 @@
-import { appVersion } from "@kiteline/shared/protocol";
+import { appVersion, asError, OperationError } from "@kiteline/shared/protocol";
 import { agentConfig, privateDirectory, readIdentity } from "./config.js";
 import { Agent } from "./agent.js";
 import { bindCli } from "./cli/bind.js";
@@ -91,7 +91,19 @@ async function main() {
     return;
   }
   if (command === "workspace" || command === "terminal") {
-    await terminalCli(await agentConfig(), process.argv.slice(2));
+    try {
+      await terminalCli(await agentConfig(), process.argv.slice(2));
+    } catch (error) {
+      const detail = asError(error);
+      const result =
+        error instanceof OperationError
+          ? (error.result as { sessionId?: string } | undefined)
+          : undefined;
+      console.error(
+        `${detail.code}: ${detail.message}${result?.sessionId ? ` (sessionId=${result.sessionId})` : ""}`,
+      );
+      process.exitCode = error instanceof OperationError && error.outcome === "unknown" ? 3 : 1;
+    }
     return;
   }
   if (process.argv.includes("--version")) {

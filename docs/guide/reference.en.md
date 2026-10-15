@@ -81,6 +81,8 @@ For procedures, prerequisites and data effects, see [Manual installation](device
 - `terminal new` creates a session, prints its `SESSION_ID`, and exits. It does not require an interactive terminal. `--shortcut` starts a shortcut: new devices have IDs `claude`, `codex` and `opencode`. Shortcuts added in "Terminal settings" have random IDs, available under `shortcuts` in the data directory's `agent.json`.
 - `terminal end SESSION_ID` ends the session and its programs without confirmation.
 
+These local commands exit 0 on success, 3 when the result is unconfirmed (`unknown`), and 1 for other failures. Failure diagnostics go to stderr as `code: message`, with ` (sessionId=...)` appended when the reply includes a `sessionId`. After exit 3, check state with `terminal list` before deciding what to do next; do not resend immediately. Exit 3 does not always include a session ID, and exit 1 does not guarantee that the operation did not execute.
+
 ## Server environment variables
 
 | Variable                     | Default             | Description                                          |
