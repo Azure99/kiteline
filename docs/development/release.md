@@ -141,14 +141,11 @@ CI 在与目标架构一致的 Mac 上完成组件构建和组包，步骤见 [`
 ```sh
 pnpm install --frozen-lockfile
 pnpm package agent linux-amd64
-pnpm package cli linux-amd64
 pnpm package server amd64 --agent-target=linux-amd64
 pnpm images amd64
 ```
 
 Linux arm64 主机可将上述 `amd64` 改为 `arm64`。完整多平台产物请运行 CI 的 `full`。
-
-`pnpm package cli <目标>` 支持与 agent 相同的五个平台，不需要 `--windows-components` 或 `--macos-components`，也不先编译 agent 原生组件。
 
 `--agent-target` 决定 server 携带哪些 agent；省略时要求全部五个平台。上述局部包不能提供其他平台的安装和升级资源，也不能通过要求五个平台齐全的 `verify-package server`。命令参数以 [`package.mjs`](../../scripts/package.mjs) 为准。
 
@@ -166,9 +163,10 @@ Linux arm64 主机可将上述 `amd64` 改为 `arm64`。完整多平台产物请
 
 ## 验证发布包
 
-以下命令接着本机 Linux amd64 构建执行。需要同一提交的干净 checkout、匹配的锁文件、压缩包旁的 `.sha256`，以及[agent 运行条件](../guide/devices.md#支持的系统与准备)。
+以下命令接着本机 Linux amd64 构建执行。需要同一提交的干净 checkout、匹配的锁文件、压缩包旁的 `.sha256`，以及[agent 运行条件](../guide/devices.md#支持的系统与准备)。独立 CLI 包另行构建：`pnpm package cli <目标>` 支持与 agent 相同的五个平台，不需要 `--windows-components` 或 `--macos-components`，也不先编译 agent 原生组件。
 
 ```sh
+pnpm package cli linux-amd64
 KITELINE_VERSION=$(node -p "require('./shared/src/version.json').version")
 CHECK=$(mktemp -d /var/tmp/kiteline-check-XXXXXX)
 tar -xzf "dist/releases/kiteline-agent-$KITELINE_VERSION-linux-amd64.tar.gz" -C "$CHECK"
@@ -215,8 +213,6 @@ node scripts/verify-server.mjs "$CHECK/kiteline-server-$KITELINE_VERSION-linux-a
 
 Linux agent 和 CLI 使用同一固定的静态 Node 输入，server 使用官方动态 Node；Windows 和 macOS 的 agent/CLI 使用各自固定的官方 Node。包内 `SHA256SUMS` 记录文件集合，agent 的 `dist/native/identity.json` 另记录原生组件；平台差异见[平台实现](../design/platforms.md)。
 
-共同 agent 包的 CLI 入口是 `bin/kiteline`（Windows 为 `bin/kiteline.ps1`），与 agent 共用 `runtime/`。系统安装、升级和卸载只注册 agent；CLI 程序随整包复制、替换和移除，不注册全局 `kiteline` 命令。CLI 凭据与 agent 数据独立，使用方式见[远程 CLI](../guide/cli.md)。
-
 ### 清单文件
 
 - `release.json` 记录包身份、源码提交、锁文件摘要和构建来源，供安装、升级和发布检查使用。
@@ -225,7 +221,7 @@ Linux agent 和 CLI 使用同一固定的静态 Node 输入，server 使用官�
 
 ### 第三方许可
 
-- 包根 `LICENSE` 是项目许可；`runtime/LICENSE` 是 Node 许可；生产依赖在 `node_modules` 中保留自己的许可文件。
+- 包根 `LICENSE` 是项目许可；`runtime/LICENSE` 是 Node 许可；生产依赖在 `node_modules` 中保留自己的许可文件，`proxy-agent-negotiate` 的许可另在 `shared/licenses/proxy-agent-negotiate.txt`。
 - server 的 `web/dist/licenses/` 包含 `dependencies.md`、`project.txt`、`tailwindcss.txt`、`vite.txt` 和 `xterm-css.txt`。
 - agent 的 `dist/native/licenses/` 保留原生组件许可：Linux 为 libevent、ncurses、tmux、musl 和 rg；macOS 为 libevent、tmux、flock 和 rg；Windows 为 tmux、rg、mingw-w64、bash、readline、coreutils、util-linux、gettext、libiconv、libevent、ncurses 和 msys2-runtime。
 - Windows 的 `dist/native/sources/` 还包含 bash、coreutils、util-linux、gettext、libiconv、readline 和 msys2-runtime 的 MSYS2 源码包，含构建配方和补丁。
@@ -282,7 +278,7 @@ runtime DLL 从固定源码包的 Cygwin tag 及有序 MSYS2 补丁重建，再�
 
 固定版本见 [`web/package.json`](../../web/package.json)、[`terminal-recorder/package.json`](../../terminal-recorder/package.json) 和 [`shared/package.json`](../../shared/package.json)。当前浏览器与 headless 版本来自同一上游源码提交，升级须联合核对两端和 addons。私有成员访问以 [`TerminalCore` 和 `core()`](../../shared/src/terminal/index.ts) 为检查入口，另须核对 [`auxiliary-input.ts`](../../web/src/terminal/auxiliary-input.ts) 使用的私有键盘编码。
 
-工作台直接编译 xterm 的 TypeScript 入口。现有补丁由 [`pnpm-workspace.yaml`](../../pnpm-workspace.yaml) 的 `patchedDependencies` 指向 `web/patches/`：`DomRenderer.ts` 和 `WidthCache.ts` 按设备像素比测量字形，修复 Windows 页面缩放后的中文选区错位；`Event.ts` 的非空断言适配项目的 `noUncheckedIndexedAccess`，不改变 DPR 行为。
+工作台直接编译 xterm 的 TypeScript 入口。现有补丁由 [`pnpm-workspace.yaml`](../../pnpm-workspace.yaml) 的 `patchedDependencies` 指向 `web/patches/`：`DomRenderer.ts` 和 `WidthCache.ts` 按设备像素比测量字形，修复 Windows 页面缩放后的中文选区错位；`Viewport.ts` 修复调整尺寸时的滚动位置跳动；`Event.ts` 的非空断言适配项目的 `noUncheckedIndexedAccess`，不改变 DPR 行为。
 
 维护当前版本的补丁时，在仓库根目录执行：
 
@@ -299,7 +295,7 @@ pnpm patch-commit --patches-dir web/patches EDIT_DIR
 
 ### Undici 与代理
 
-升级 Node、`undici`、`proxy-from-env` 或 `https-proxy-agent` 后，在直连、HTTP 代理和需要认证的代理下验证绑定和连接；`undici` 的 dispatcher 须兼容 Node 内置 `fetch`。实现见 [`agent/src/network.ts`](../../agent/src/network.ts)，配置见[出站代理与证书](../guide/devices.md#出站代理与证书)。
+升级 Node、`undici`、`proxy-from-env` 或 `https-proxy-agent` 后，在直连、HTTP 代理和需要认证的代理下验证绑定和连接；`undici` 的 dispatcher 须兼容 Node 内置 `fetch`。实现见 [`shared/src/node/network.ts`](../../shared/src/node/network.ts)，配置见[出站代理与证书](../guide/devices.md#出站代理与证书)。
 
 `https-proxy-agent` 的现有补丁在 [`agent/patches/`](../../agent/patches/) 中，修复 CONNECT 后 TLS 丢失目标 host、导致可信 IP-only 证书被误按 localhost 校验的问题。升级时核对上游是否修复，据此迁移或删除补丁及 `pnpm-workspace.yaml` 的旧登记，保留可信 IP-only 目标的连接验证。
 

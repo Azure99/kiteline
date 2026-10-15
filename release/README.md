@@ -19,7 +19,7 @@
 
 `agent-linux-packages.txt` 由 `xargs apk add` 直接读取，每行一个包名，不能写注释。文件的 SHA-256 记录在 Linux 原生组件的构建记录中。包版本不固定，跟随所选 Alpine 版本的软件源；每个 Linux agent 包的 `dist/native/build-packages.txt` 记录构建时安装的包和版本。
 
-独立 CLI 直接使用上述 Node 输入，不需要先构建 agent 的原生组件；共同 agent 包中的两个入口共用一份 runtime。
+独立 CLI 直接使用上述 Node 输入，不需要先构建 agent 的原生组件。
 
 ## 更新方法
 

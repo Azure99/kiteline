@@ -31,23 +31,20 @@ Node 安装在系统目录（如 `/usr/bin`、`/usr/local/bin`）时，以 root 
 
 本机 Node 版本与 `engines.node` 不同时，pnpm 只打印 `Unsupported engine` 警告并继续执行。CI 使用 `package.json` 中的 Node 版本，本机使用相同版本可以得到一致的结果。
 
-## 安装依赖与构建
+## 安装依赖
 
 在仓库根目录执行：
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm native:build
-pnpm build
 ```
 
-`pnpm install --frozen-lockfile` 按锁文件安装依赖，并应用 `pnpm-workspace.yaml` 中 `patchedDependencies` 登记的补丁。`pnpm native:build` 生成源码 agent 和测试所需的 `dist/native/`；开发构建动态链接系统的 libevent 和 ncurses。`pnpm build` 编译各包并构建工作台。
+`pnpm install --frozen-lockfile` 按锁文件安装依赖，并应用 `pnpm-workspace.yaml` 中 `patchedDependencies` 登记的补丁。`pnpm native:build` 生成源码 agent 和测试所需的 `dist/native/`；开发构建动态链接系统的 libevent 和 ncurses。
 
 修改原生源码、tmux 补丁、terminfo 或固定的 tmux/rg 输入后，重新运行 `pnpm native:build`。它每次重新下载并编译 tmux；rg 归档缓存在 `/var/tmp/kiteline-release-cache/ripgrep/`。
 
 ## 本地运行
-
-构建后运行 `pnpm cli --help` 可使用源码中的远程 CLI；接入与目标选择见[远程 CLI](../guide/cli.md)。
 
 server 的默认数据目录 `/var/lib/kiteline` 通常不可写，开发时用 `KITELINE_DATA_DIR` 指定一个目录，在仓库根目录执行：
 
@@ -55,7 +52,7 @@ server 的默认数据目录 `/var/lib/kiteline` 通常不可写，开发时用 
 KITELINE_DATA_DIR=/var/tmp/kiteline-dev/server pnpm dev
 ```
 
-`pnpm dev` 先编译一次，再持续编译源码、自动重启 `127.0.0.1:8080` 的 server，并在 `http://localhost:5173` 提供工作台热更新和 server 请求代理，入口见 [`scripts/dev/run.mjs`](../../scripts/dev/run.mjs)。本机的 8080 和 5173 端口需要空闲。按 Ctrl-C 或任一子进程退出都会结束整个开发环境。
+`pnpm dev` 先编译一次，再持续编译源码、自动重启 `127.0.0.1:8080` 的 server，并在 `http://localhost:5173` 提供工作台热更新和 server 请求代理，入口见 [`scripts/dev/run.mjs`](../../scripts/dev/run.mjs)。本机的 8080 和 5173 端口需要空闲。按 Ctrl-C 或任一子进程退出都会结束整个开发环境。编译完成后，`pnpm cli --help` 可运行源码中的远程 CLI，用法见[远程 CLI](../guide/cli.md)。
 
 server 首次启动时在输出中打印 `Kiteline setup token: …`。打开 `http://localhost:5173`，输入该 token 并设置密码。token 过期或丢失时，先停止 `pnpm dev`，再生成新的 token：
 
@@ -134,7 +131,7 @@ KITELINE_DATA_DIR=/var/tmp/kiteline-dev/server pnpm server setup-token
 | `pnpm test`         | 运行自动测试                       |
 | `pnpm build`        | 编译各包并构建工作台               |
 
-完整的 `pnpm test` 需要先完成[安装依赖与构建](#安装依赖与构建)，并使用 Git 2.23.0 及以上版本。
+完整的 `pnpm test` 需要先执行[安装依赖](#安装依赖)中的命令和 `pnpm build`，并使用 Git 2.23.0 及以上版本。
 
 只运行部分测试时，把文件或目录传给 `pnpm test`，例如 `pnpm test agent/test/git-read.test.ts`。
 
