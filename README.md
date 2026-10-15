@@ -44,7 +44,7 @@ docker compose logs server
 
 ## 文档
 
-[工作台使用](docs/guide/usage.md) · [设备维护](docs/guide/devices.md) · [定时任务](docs/guide/scheduled-tasks.md) · [命令与配置](docs/guide/reference.md) · [开发文档](docs/README.md)
+[工作台使用](docs/guide/usage.md) · [设备维护](docs/guide/devices.md) · [定时任务](docs/guide/scheduled-tasks.md) · [远程 CLI](docs/guide/cli.md) · [命令与配置](docs/guide/reference.md) · [开发文档](docs/README.md)
 
 ## 许可证
 

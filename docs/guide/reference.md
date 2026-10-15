@@ -15,16 +15,15 @@ kiteline-server --version
 | ---------------- | ------------------------------------------------------ |
 | `serve`          | 启动 server。省略子命令时执行它                        |
 | `setup-token`    | 生成新的初始化 token 并只打印 token 本身               |
-| `reset-password` | 重设拥有者密码，并使全部登录会话失效                   |
+| `reset-password` | 重设拥有者密码，并使全部登录会话和 CLI 凭据失效        |
 | `--data-dir DIR` | 本次使用的 server 数据目录，优先于 `KITELINE_DATA_DIR` |
 | `--version`      | 打印版本号，不能与子命令或 `--data-dir` 同时使用       |
 
 `kiteline-server` 没有 `--help`。未知参数或子命令会打印错误并以状态 1 退出。
 
-- `serve` 只在首次启动时打印一行 `Kiteline setup token: …`；监听成功后打印 `Kiteline listening on http://HOST:PORT`；收到 `SIGINT` 或 `SIGTERM` 后停止。
-- `setup-token` 会替换之前的 token，新 token 有效期见[限额](#限额)。拥有者已设置密码后，它报错 `Already initialized`。
-- `reset-password` 提示 `New password: `，在终端中输入不回显，按 Enter 提交；也可以从标准输入传入一行密码。初始化之前执行会报错 `Not initialized`。成功时打印 `Password updated. All web login sessions have been invalidated.`
-- 除 `--version` 外，每个命令都会把 server 数据目录的权限设为 `0700` 并占用其中的 `process.lock`。server 运行时执行 `setup-token` 或 `reset-password` 会报错 `Lock file is already being held`，因此必须先停止 server。Docker 与原生部署的完整步骤见[重置初始化 token 与密码](server.md#重置初始化-token-与密码)。
+- `serve` 收到 `SIGINT` 或 `SIGTERM` 后停止。
+- `reset-password` 提示 `New password: `，在终端中输入不回显；也可以从标准输入传入一行密码。
+- 除 `--version` 外，每个命令都占用数据目录中的 `process.lock`，所以 `setup-token` 和 `reset-password` 必须在 server 停止后执行。使用条件和 Docker、原生部署的步骤见[重置初始化 token 与密码](server.md#重置初始化-token-与密码)。
 
 Docker 镜像的 `ENTRYPOINT` 是 `kiteline-server`，默认参数是 `serve`，所以 `docker compose run` 之后直接写子命令。在 `compose.yaml` 所在目录执行，并使用与启动时相同的 `KITELINE_VERSION` 和 `KITELINE_IMAGE` 配置。
 
@@ -34,15 +33,13 @@ Docker 镜像的 `ENTRYPOINT` 是 `kiteline-server`，默认参数是 `serve`，
 
 ## kiteline-agent 命令
 
-Linux 和 macOS 的命令入口是 `/usr/local/bin/kiteline-agent`；用 `sudo` 执行时写这个绝对路径。Windows 日常用 `kiteline-agent run`，Machine PATH 中的薄 EXE 通过系统 Windows PowerShell 5.1 调用安装脚本。维护继续使用独立 PowerShell 命令，见[升级](devices.md#升级-agent)和[卸载](devices.md#卸载)。复杂参数调用也可使用完整脚本入口，例如：
+Linux 和 macOS 的命令入口是 `/usr/local/bin/kiteline-agent`；用 `sudo` 执行时写这个绝对路径。Windows 上日常命令直接执行 `kiteline-agent`；安装、升级和卸载使用独立的 PowerShell 命令，见[升级 agent](devices.md#升级-agent)和[卸载](devices.md#卸载)。参数复杂时也可以调用完整脚本入口，例如：
 
 ```powershell
 & (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" doctor
 ```
 
-完整脚本调用使用当前 PowerShell 版本。两种入口均只为子进程设置 `Bypass`，不修改持久执行策略；组策略仍优先。
-
-直接用 `& "$env:ProgramData\kiteline-agent\kiteline-agent.ps1"` 调用只适用于真实控制台交互，执行策略须允许运行本地脚本。它的程序输出不进入 PowerShell 对象管道；需要捕获、管道或重定向时使用上面的完整调用。
+两种入口都只为子进程放宽执行策略，不修改持久设置，组策略仍优先。直接用 `& "$env:ProgramData\kiteline-agent\kiteline-agent.ps1"` 调用只适用于控制台交互，要求执行策略允许本地脚本，而且输出不进入 PowerShell 管道；需要捕获、管道或重定向时用上面的完整调用。
 
 不带参数或带 `--help` 执行 `kiteline-agent` 会打印子命令概要，`--version` 打印版本号。只有 `schedule` 及其子命令提供 `--help`；其他子命令没有 `--help`，参数以下表为准。
 
@@ -104,7 +101,7 @@ Linux 和 macOS 的命令入口是 `/usr/local/bin/kiteline-agent`；用 `sudo` 
 | `KITELINE_HTTP_PORT`         | `8080`                     | 主机上发布的端口，映射到容器内的 8080                    |
 | `KITELINE_TRUST_PROXY_PROTO` | `0`                        | 传给容器内的 server                                      |
 
-必须设置 `KITELINE_VERSION`，否则 Compose 报错 `Set KITELINE_VERSION to the release version`。Compose 使用 `KITELINE_IMAGE:KITELINE_VERSION`，不读取 `KITELINE_ARCH`；原生包下载示例中的 `KITELINE_ARCH` 仍用于选择归档。
+Release 附件中的 `compose.yaml` 已把 `KITELINE_VERSION` 默认值固定为该发布版本；直接使用仓库中的源文件时必须设置它，否则 Compose 报错 `Set KITELINE_VERSION to the release version`。
 
 ## agent 环境变量
 
@@ -179,7 +176,7 @@ Windows 上支持 Windows PowerShell 5.1 Desktop 和 PowerShell 7.4 及以上 7.
 
 ### limits
 
-`limits` 中的每个值都是不小于 1 的整数。名称以 `Bytes` 结尾的单位是字节，以 `Timeout` 结尾的单位是毫秒，`imagePixels` 是像素数，其余是个数。`tasksPerDevice` 最大 300，`rpcTimeout` 最大 2147482647，其他 `*Timeout` 最大 2147483647，其余键没有上限。未列出的键被忽略。可用的键、默认值和含义见[限额](#限额)。
+`limits` 中的每个值都是不小于 1 的整数。名称以 `Bytes` 结尾的单位是字节，以 `Timeout` 结尾的单位是毫秒，`imagePixels` 是像素数，其余是个数。`tasksPerDevice` 最大 300，超时值不能超过约 24.8 天，其余键没有上限。未列出的键被忽略。可用的键、默认值和含义见[限额](#限额)。
 
 调低 `tasksPerDevice` 只限制新建任务，已有任务仍可管理。调低输出限额只影响之后写入的输出。
 
@@ -258,12 +255,12 @@ agent 数据目录中的 `agent.json`、`connection.json`、`temporary-files.jso
 
 ### 连接与请求
 
-| 项目                   | 值                                              | 配置         |
-| ---------------------- | ----------------------------------------------- | ------------ |
-| 一般设备操作时限       | 30 秒                                           | `rpcTimeout` |
-| 每台设备同时处理的请求 | 32                                              | 固定         |
-| 每台设备的数据通道     | 128，终端显示、文件传输和开发服务请求合计       | 固定         |
-| 单条请求或结果         | 1 MiB；请求超出返回 413，结果超出时为结果未确认 | 固定         |
+| 项目                   | 值                                        | 配置         |
+| ---------------------- | ----------------------------------------- | ------------ |
+| 一般设备操作时限       | 30 秒                                     | `rpcTimeout` |
+| 每台设备同时处理的请求 | 32                                        | 固定         |
+| 每台设备的数据通道     | 128，终端显示、文件传输和开发服务请求合计 | 固定         |
+| 单条请求或结果         | 1 MiB；请求超出返回 413                   | 固定         |
 
 一般设备操作包括文件列表与重命名、Git 读取、定时任务管理和本机命令行请求。复制、移动和删除没有总时限。
 
@@ -310,7 +307,7 @@ agent 数据目录中的 `agent.json`、`connection.json`、`temporary-files.jso
 | `run/`                             | 默认的运行目录                                             |
 | `launchd.log`、`launchd-error.log` | 使用 launchd 示例时的日志                                  |
 
-数据目录权限为 `0700`（Windows 上只允许项目用户、SYSTEM 和管理员访问）。备份设备时保留 `connection.json`、`agent.json`、`config.json` 和 `tasks/`。
+Linux 和 macOS 上，新建的数据目录权限为 `0700`，已有目录保留原权限；Windows 上只允许项目用户、SYSTEM 和管理员访问。备份设备时保留 `connection.json`、`agent.json`、`config.json` 和 `tasks/`。
 
 ### 运行目录
 
@@ -376,7 +373,7 @@ agent 正在运行时，`kiteline-agent doctor` 会显示 server 连接状态和
 
 agent 被强制结束或崩溃时（Windows 上包括直接关闭前台 agent 的 PowerShell 窗口），不会清理它的终端会话：
 
-- Linux 和 macOS：每个会话的 tmux server 是独立的守护进程，agent 异常退出后它和其中的程序继续运行，新启动的 agent 不接管它们。使用示例 systemd 单元时，agent 主进程一旦退出（包括崩溃），systemd 就按 `KillMode=control-group` 结束这些 tmux server；前台运行、使用 launchd，或容器在 agent 退出后仍继续运行时，它们会留下来。以 agent 为主进程的容器（例如[在容器中运行](devices.md#在容器中运行)中的示例）在 agent 退出时整体停止，其中的进程一并结束。
+- Linux 和 macOS：会话中的程序继续运行，新启动的 agent 不接管它们。使用示例 systemd 单元或以 agent 为主进程的容器（如[在容器中运行](devices.md#在容器中运行)中的示例）时，它们随 agent 一起结束；前台运行或使用 launchd 时会留下来。
 - Windows：会话中的程序随 agent 一起结束，但会话目录留在运行目录中。其中的 `pane.json` 保存了 agent 的完整环境变量，可能含有令牌等敏感信息。
 
 清理前先确认没有 agent 在使用这个运行目录：`kiteline-agent terminal list` 报 `connect ENOENT` 或 `connect ECONNREFUSED`。

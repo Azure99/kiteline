@@ -107,7 +107,7 @@ If the agent cannot read files under `tasks/` at startup, the device's task feat
 
 `kiteline-agent schedule` manages the same tasks locally on the device. Managing tasks requires a running agent. Run commands as the same operating-system user and resolve to the same runtime directory as the agent. Commands do not start the agent.
 
-The existing English help covers all subcommands, arguments and output formats. Help does not require a configured or running agent:
+The English help covers all subcommands, arguments and output formats. Help does not require a configured or running agent:
 
 ```sh
 kiteline-agent schedule --help

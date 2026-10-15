@@ -107,7 +107,7 @@ agent 启动时无法读取 `tasks/` 中的文件时，该设备的任务功能�
 
 `kiteline-agent schedule` 在设备本机管理同一份任务。管理任务需要 agent 已运行；命令必须由运行 agent 的同一操作系统用户执行，并解析到相同的运行目录。命令不会启动 agent。
 
-完整子命令、参数和输出格式见现有英文帮助；查看帮助不需要配置或运行 agent：
+完整子命令、参数和输出格式见英文帮助；查看帮助不需要配置或运行 agent：
 
 ```sh
 kiteline-agent schedule --help

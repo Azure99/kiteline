@@ -11,9 +11,9 @@ This guide explains how to deploy and maintain the server (`kiteline-server`), w
   - Native release package `kiteline-server-<version>-linux-<architecture>.tar.gz`, available from [GitHub Releases](https://github.com/Azure99/kiteline/releases). It includes the official Node runtime, a dynamically linked build requiring glibc, and targets Ubuntu 24.04.
 - The server provides HTTP only and does not manage TLS certificates. For HTTPS, place a reverse proxy in front of it; see [HTTPS and reverse proxies](#https-and-reverse-proxies).
 - By default, the server accepts connections only at `127.0.0.1:8080`. For access from other machines, see [LAN access and ports](#lan-access-and-ports).
-- The owner password, login sessions and device registrations are stored in the server data directory (default `/var/lib/kiteline`, database file `kiteline.sqlite`). The server sets this directory's permissions to `0700` at every startup. Only one server process can use a data directory at a time.
+- The owner password, login sessions, CLI credentials and device registrations are stored in the server data directory (default `/var/lib/kiteline`). Only one server process can use a data directory at a time.
 - One server can be accessed through several origins. An origin combines the scheme, hostname and port, such as `http://192.168.1.10:8080` or `https://kiteline.example.com`. The server must be deployed at the origin's root path; subpaths such as `https://example.com/kiteline/` are not supported.
-- Server release packages and images contain agent release packages for every platform. Devices download the agent matching the server's version from the server when connecting or upgrading, without needing access to GitHub.
+- Server release packages and images contain agent release packages for every platform, so devices do not need access to GitHub when connecting or upgrading.
 
 For server environment variables, see [Reference](reference.en.md#server-environment-variables).
 
@@ -206,7 +206,7 @@ kiteline.example.com {
 
 Caddy obtains certificates automatically, preserves `Host`, replaces `X-Forwarded-Proto` with the actual scheme, and supports WebSocket. `flush_interval` delivers streaming responses promptly. `keepalive off` prevents upstream connection reuse, avoiding automatic request replay when a reused connection closes. `enable_full_duplex` lets the server respond before an upload completes.
 
-This example requires Caddy 2.7 or later. Caddy 2.6.2 from the Ubuntu 24.04 and Debian 12 repositories does not support `enable_full_duplex`; install from Caddy's official repository.
+This example requires an official Caddy release of 2.7.4 or later. Caddy 2.6.2 from the Ubuntu 24.04 and Debian 12 repositories does not support `enable_full_duplex`; install from Caddy's official repository.
 
 ### Multiple origins
 
@@ -215,12 +215,6 @@ One server can have several origins at once, such as `http://192.168.1.10:8080` 
 ### Common errors
 
 For symptoms of proxy misconfiguration, such as `Origin mismatch`, `Invalid X-Forwarded-Proto`, terminals failing to connect or downloads not responding, and their remedies, see [Troubleshooting](reference.en.md#troubleshooting).
-
-## Issue a CLI credential
-
-In the workbench’s Owner menu, open **CLI setup → CLI credentials**. Enter a name, select one or more devices, and choose the number of days or explicitly select **No expiry**. Copy the token when it is shown; the server retains only its digest. Import it into the matching Kiteline CLI release. The device agent’s binding code is a different credential.
-
-The token can operate the selected devices with the agent OS user’s permissions; a workspace is not a sandbox. It cannot manage device registrations, binding codes or other credentials. To end access, revoke that entry in the same dialog, or use the CLI’s logout. Revocation closes that credential’s connections but keeps shared terminals running and does not undo input already sent. Other credentials keep working.
 
 ## Reset the setup token or password
 
@@ -249,9 +243,11 @@ To reset the password, replace `setup-token` in the middle command with `reset-p
 
 ## Backup and restore
 
-The server data directory stores the owner password, device registrations and scheduled-task summaries. Device binding credentials, workspace registrations and scheduled tasks are in each device's agent data directory (see [File locations](reference.en.md#file-locations)); back these up separately on the device. Back up project files using your existing process.
+The server data directory stores the owner password, login sessions, CLI credentials, device registrations and scheduled-task summaries. Device binding credentials, workspace registrations and scheduled tasks are in each device's agent data directory (see [File locations](reference.en.md#file-locations)); back these up separately on the device. Back up project files using your existing process.
 
 Stop the server and back up the entire data directory for a consistent copy.
+
+Restoring first deletes everything in the current data directory, then extracts the backup. The owner password, login sessions, CLI credentials and device registrations return to their state at backup time. Devices bound since the backup cannot connect and must be [bound again](devices.en.md#bind-again). Devices deleted since the backup reappear in the list and can be deleted again in the web app.
 
 Docker (run in the deployment directory): the backup and restore commands below use the default volume `kiteline_server-data`. If you changed the data mount, replace that volume name in both commands with the actual volume name or the absolute host-directory path.
 
@@ -262,7 +258,7 @@ docker run --rm -v kiteline_server-data:/data:ro -v "$PWD":/backup ubuntu:24.04 
 docker compose start server
 ```
 
-Restore:
+Restore (clears the current data directory first):
 
 ```sh
 docker compose stop server
@@ -279,7 +275,7 @@ sudo tar -czf kiteline-server-data.tar.gz -C /var/lib/kiteline .
 sudo systemctl start kiteline-server
 ```
 
-Restore:
+Restore (clears the current data directory first):
 
 ```sh
 sudo systemctl stop kiteline-server
@@ -287,8 +283,6 @@ sudo find /var/lib/kiteline -mindepth 1 -delete
 sudo tar -xzf kiteline-server-data.tar.gz -C /var/lib/kiteline
 sudo systemctl start kiteline-server
 ```
-
-Restoring returns device registrations to their state at backup time. Devices bound since the backup cannot connect and must be [bound again](devices.en.md#bind-again). Devices deleted since the backup reappear in the list and can be deleted again in the web app.
 
 ## Upgrade the server
 

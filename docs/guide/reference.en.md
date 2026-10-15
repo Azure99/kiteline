@@ -11,20 +11,19 @@ kiteline-server [serve | setup-token | reset-password] [--data-dir DIR]
 kiteline-server --version
 ```
 
-| Command or option | Purpose                                                                 |
-| ----------------- | ----------------------------------------------------------------------- |
-| `serve`           | Start the server; the default when no subcommand is supplied            |
-| `setup-token`     | Generate a new setup token and print only the token                     |
-| `reset-password`  | Reset the owner password and invalidate all login sessions              |
-| `--data-dir DIR`  | Data directory for this invocation; overrides `KITELINE_DATA_DIR`       |
-| `--version`       | Print the version; cannot be combined with a subcommand or `--data-dir` |
+| Command or option | Purpose                                                                        |
+| ----------------- | ------------------------------------------------------------------------------ |
+| `serve`           | Start the server; the default when no subcommand is supplied                   |
+| `setup-token`     | Generate a new setup token and print only the token                            |
+| `reset-password`  | Reset the owner password and invalidate all login sessions and CLI credentials |
+| `--data-dir DIR`  | Data directory for this invocation; overrides `KITELINE_DATA_DIR`              |
+| `--version`       | Print the version; cannot be combined with a subcommand or `--data-dir`        |
 
 `kiteline-server` has no `--help`. Unknown arguments or subcommands print an error and exit with status 1.
 
-- `serve` prints `Kiteline setup token: …` only at first startup, and `Kiteline listening on http://HOST:PORT` after it starts listening. It stops on `SIGINT` or `SIGTERM`.
-- `setup-token` replaces the previous token. See [Limits](#limits) for its lifetime. After the owner has set a password, it reports `Already initialized`.
-- `reset-password` prompts `New password: `. Terminal input is not echoed; Enter submits. You can also pass one password line on stdin. Before setup it reports `Not initialized`. Success prints `Password updated. All web login sessions have been invalidated.`
-- Every command except `--version` sets the data directory's permissions to `0700` and holds its `process.lock`. Running `setup-token` or `reset-password` while the server runs produces `Lock file is already being held`, so stop the server first. See [Reset the setup token or password](server.en.md#reset-the-setup-token-or-password) for Docker and native procedures.
+- `serve` stops on `SIGINT` or `SIGTERM`.
+- `reset-password` prompts `New password: `. Terminal input is not echoed; you can also pass one password line on stdin.
+- Every command except `--version` holds `process.lock` in the data directory, so `setup-token` and `reset-password` must run with the server stopped. See [Reset the setup token or password](server.en.md#reset-the-setup-token-or-password) for usage conditions and Docker and native procedures.
 
 The Docker image's `ENTRYPOINT` is `kiteline-server`, with default argument `serve`, so pass the subcommand after the service name in `docker compose run`. Run in the directory containing `compose.yaml`, with the same `KITELINE_VERSION` and `KITELINE_IMAGE` settings used to start the server.
 
@@ -34,15 +33,13 @@ The Docker image's `ENTRYPOINT` is `kiteline-server`, with default argument `ser
 
 ## kiteline-agent commands
 
-On Linux and macOS, the public launcher is `/usr/local/bin/kiteline-agent`; use this absolute path with `sudo`. On Windows, use `kiteline-agent run` for daily startup. The thin EXE in Machine PATH invokes the installed script through system Windows PowerShell 5.1. Maintenance uses separate PowerShell commands; see [Upgrade](devices.en.md#upgrade-the-agent) and [Uninstall](devices.en.md#uninstall). Use the full script entry for complex arguments as well, for example:
+On Linux and macOS, the public launcher is `/usr/local/bin/kiteline-agent`; use this absolute path with `sudo`. On Windows, run `kiteline-agent` directly for daily commands. Installation, upgrades and uninstallation use separate PowerShell commands; see [Upgrade the agent](devices.en.md#upgrade-the-agent) and [Uninstall](devices.en.md#uninstall). You can also use the full script entry for complex arguments, for example:
 
 ```powershell
 & (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" doctor
 ```
 
-The full script invocation uses the current PowerShell version. Both entries set `Bypass` only for the child process without changing persistent execution policy; Group Policy still takes precedence.
-
-Direct `& "$env:ProgramData\kiteline-agent\kiteline-agent.ps1"` invocation is for interaction in a real console and requires an execution policy that permits local scripts. Its program output does not enter the PowerShell object pipeline; use the full invocation above for capture, pipelines or redirection.
+Both entries relax execution policy only for the child process without changing persistent settings; Group Policy still takes precedence. Direct `& "$env:ProgramData\kiteline-agent\kiteline-agent.ps1"` invocation is for console interaction, requires a policy that permits local scripts, and does not send output into the PowerShell pipeline. Use the full invocation above for capture, pipelines or redirection.
 
 Running `kiteline-agent` with no arguments or with `--help` prints a subcommand summary; `--version` prints its version. Only `schedule` and its subcommands provide `--help`. Other subcommands have no `--help`; their arguments are listed below.
 
@@ -104,7 +101,7 @@ The repository's original `deploy/compose.yaml` also reads:
 | `KITELINE_HTTP_PORT`         | `8080`                     | Host port, mapped to container port 8080                                                    |
 | `KITELINE_TRUST_PROXY_PROTO` | `0`                        | Passed to the server inside the container                                                   |
 
-`KITELINE_VERSION` is required, or Compose reports `Set KITELINE_VERSION to the release version`. Compose uses `KITELINE_IMAGE:KITELINE_VERSION`, not `KITELINE_ARCH`. Native-package download examples still use `KITELINE_ARCH` to choose the archive.
+The `compose.yaml` release attachment pins the default `KITELINE_VERSION` to that release. When using the repository's source file directly, you must set it, or Compose reports `Set KITELINE_VERSION to the release version`.
 
 ## Agent environment variables
 
@@ -179,7 +176,7 @@ Windows PowerShell 5.1 Desktop and PowerShell 7.x starting at 7.4 are supported.
 
 ### Limit settings
 
-Every `limits` value is an integer of at least 1. Names ending in `Bytes` use bytes; names ending in `Timeout` use milliseconds; `imagePixels` counts pixels; all others are counts. `tasksPerDevice` has a maximum of 300, `rpcTimeout` a maximum of 2147482647, and other `*Timeout` keys a maximum of 2147483647. Other keys have no upper bound. Unlisted keys are ignored. See [Limits](#limits) for available keys, defaults and meanings.
+Every `limits` value is an integer of at least 1. Names ending in `Bytes` use bytes; names ending in `Timeout` use milliseconds; `imagePixels` counts pixels; all others are counts. `tasksPerDevice` has a maximum of 300, and timeout values cannot exceed approximately 24.8 days. Other keys have no upper bound. Unlisted keys are ignored. See [Limits](#limits) for available keys, defaults and meanings.
 
 Lowering `tasksPerDevice` restricts only new tasks; existing tasks remain manageable. Lowering output limits affects only subsequently written output.
 
@@ -263,7 +260,7 @@ Writes include stage, unstage, discard, commit, branch operations, fetch, pull, 
 | General device-operation deadline | 30 seconds                                                                       | `rpcTimeout`  |
 | Concurrent requests per device    | 32                                                                               | Fixed         |
 | Data channels per device          | 128 total for terminal displays, file transfers and development-service requests | Fixed         |
-| One request or result             | 1 MiB; oversized requests return 413, oversized results are unconfirmed          | Fixed         |
+| One request or result             | 1 MiB; oversized requests return 413                                             | Fixed         |
 
 General device operations include file listing and renaming, Git reads, scheduled-task management and local CLI requests. Copy, move and delete have no overall deadline.
 
@@ -310,7 +307,7 @@ See [Uninstall](devices.en.md#uninstall) for files retained after removal. If up
 | `run/`                             | Default runtime directory                                                                 |
 | `launchd.log`, `launchd-error.log` | Logs when using the launchd example                                                       |
 
-Data directory permissions are `0700` (on Windows, only the project user, SYSTEM and administrators have access). Keep `connection.json`, `agent.json`, `config.json` and `tasks/` when backing up a device.
+On Linux and macOS, new data directories have permissions `0700`; existing directories keep their permissions. On Windows, only the project user, SYSTEM and administrators have access. Keep `connection.json`, `agent.json`, `config.json` and `tasks/` when backing up a device.
 
 ### Runtime directory
 
@@ -376,7 +373,7 @@ Original errors are in English; this table quotes their key parts.
 
 Forced termination or an agent crash, including directly closing a foreground agent's PowerShell window on Windows, does not clean up terminal sessions:
 
-- Linux/macOS: each session's tmux server is an independent daemon. It and its programs continue after an abnormal agent exit, and a new agent does not take them over. With the example systemd unit, systemd terminates these tmux servers under `KillMode=control-group` as soon as the agent's main process exits, including a crash. They remain with foreground execution, launchd, or a container that keeps running after the agent exits. A container whose main process is the agent, such as the example in [Run in a container](devices.en.md#run-in-a-container), stops entirely when the agent exits, ending its processes too.
+- Linux/macOS: session programs keep running, and a new agent does not take them over. With the example systemd unit or a container whose main process is the agent, such as the example in [Run in a container](devices.en.md#run-in-a-container), they end with the agent. They remain with foreground execution or launchd.
 - Windows: session programs end with the agent, but session directories remain in the runtime directory. Their `pane.json` contains the agent's complete environment, potentially including sensitive information such as tokens.
 
 Before cleanup, confirm no agent is using this runtime directory: `kiteline-agent terminal list` should report `connect ENOENT` or `connect ECONNREFUSED`.

@@ -1,15 +1,12 @@
 # 远程 CLI
 
-`kiteline` 使用 Web 签发的设备操作凭据连接 server。设备上的运行与维护仍使用
-`kiteline-agent`，server 管理仍使用 `kiteline-server`。
+[English](cli.en.md)
 
-## 下载与运行
+本文面向在自己电脑的终端中操作工作台设备的拥有者。`kiteline` 经 server 连接选定设备，用工作台签发的凭据认证；设备上的运行与维护使用 `kiteline-agent`，server 管理使用 `kiteline-server`。
 
-从 [GitHub Releases](https://github.com/Azure99/kiteline/releases) 下载与 server 版本和本机
-系统、架构匹配的 `kiteline-cli-<版本>-<平台>-<架构>` 归档及同名 `.sha256`。系统与架构
-范围见[支持的系统](devices.md#支持的系统与准备)；Windows 使用 PowerShell 5.1 或
-7.4 及以上 7.x。CLI 包自带 Node，不需要预装 Node、Git、tmux 或本机 agent；设备指南
-中的 Git、SSH 等前置条件用于运行设备 agent。
+## 下载
+
+从 [GitHub Releases](https://github.com/Azure99/kiteline/releases) 下载与 server 版本相同、匹配本机系统和架构的 `kiteline-cli-<版本>-<平台>-<架构>` 归档及同名 `.sha256`。支持的系统和架构与[设备 agent](devices.md#支持的系统与准备) 相同；Windows 需要 PowerShell 5.1 或 7.4 及以上 7.x。CLI 包自带 Node，本机不需要 Git、tmux 或 agent。
 
 ### Linux 和 macOS
 
@@ -26,12 +23,9 @@ sha256sum -c "$name.tar.gz.sha256"       # Linux
 tar -xpzf "$name.tar.gz" --no-same-owner
 export PATH="$PWD/$name/bin:$PATH"
 kiteline --version
-kiteline --help
 ```
 
-上述 PATH 设置只对当前终端生效。新终端中重新设置，或调用解包目录中的完整入口路径。
-保留整个包目录；入口使用包内 runtime。macOS 浏览器下载的归档若被系统隔离，校验后按
-[手工安装说明](devices.md#linux-和-macos)移除解包目录的隔离属性。
+`PATH` 设置只对当前终端生效；新终端中重新设置，或使用解包目录中的完整路径。保留整个包目录，入口依赖包内的 runtime。macOS 上用浏览器下载的归档被系统隔离时，按[手工安装](devices.md#手工安装)中的方法移除隔离属性。
 
 ### Windows
 
@@ -51,11 +45,9 @@ $env:Path = (Resolve-Path -LiteralPath ".\$package\bin").Path + ';' + $env:Path
 kiteline.ps1 --help
 ```
 
-执行策略和 PATH 设置仅对当前 PowerShell 窗口生效。新窗口中重新执行这两步，
-或设置执行策略后用完整入口路径。下文命令中的 `kiteline` 在 Windows 上替换为
-`kiteline.ps1`；无需管理员权限。
-普通命令可直接调用脚本并捕获 JSON。传入 token 的 PowerShell 管道须启动独立
-PowerShell 进程，使 token 成为 CLI 的 stdin；不能直接把管道接到脚本：
+执行策略和 `PATH` 只对当前窗口生效。下文的 `kiteline` 在 Windows 上换成 `kiteline.ps1`，不需要管理员权限；交互接续必须经 `.ps1` 入口，由它恢复本机终端状态。
+
+用管道把 token 传给 CLI 时，要启动独立的 PowerShell 进程，token 才会成为 CLI 的标准输入；直接把管道接到脚本不行。文本或 JSON 参数直接传给 `& $cli`，避免外层 PowerShell 再解析引号：
 
 ```powershell
 $cli = 'C:\包目录\bin\kiteline.ps1'
@@ -65,46 +57,57 @@ $reply = & $cli targets --json
 $reply | ConvertFrom-Json
 ```
 
-文本或 JSON 参数直接传给 `& $cli`，避免外层 PowerShell 再解析引号。
+### 使用 agent 包中的 CLI
 
-### 已有共同 agent 包
+agent 发布包也带有同一个 CLI：`bin/kiteline`（Windows 为 `bin/kiteline.ps1`），与 agent 共用 Node。安装 agent 后它位于 `/opt/kiteline-agent/bin/kiteline` 或 `C:\Program Files\kiteline-agent\bin\kiteline.ps1`，随 agent 程序包一起升级和卸载，不注册全局 `kiteline` 命令；升级或卸载 agent 前先等这里的 CLI 调用结束。移除程序包不会撤销 CLI 凭据。
 
-agent 发布包也带有 `bin/kiteline`（Windows 为 `bin/kiteline.ps1`），与 agent 共用一份
-Node。便携目录可以直接调用这两个入口；系统安装后 CLI 位于
-`/opt/kiteline-agent/bin/kiteline`，Windows 位于
-`C:\Program Files\kiteline-agent\bin\kiteline.ps1`。安装、升级和卸载以整个 agent
-程序包为单位，只注册 `kiteline-agent`；不注册全局 `kiteline`，也不单独更新 CLI。
-操作前等待该包中的 CLI 调用结束。CLI 凭据独立，移除程序包不会撤销凭据。
-
-server 的下载接口只提供共同 agent 包，独立 CLI 从 Release 下载。独立 CLI 的升级是
-校验并解开新归档后改用新入口，删除旧包即可移除旧程序。源码开发仍可用
-`node cli/dist/main.js` 代替入口；Windows 的交互 attach 必须用 `.ps1` 入口恢复本机终端状态。
+独立 CLI 的升级：校验并解开新版本归档，改用新入口，删除旧目录。
 
 ## 接入
 
-在 Web 的“拥有者菜单 → CLI 接入 → CLI 凭据”中选择设备并签发 token，然后导入：
+### 签发凭据
+
+在工作台右上角的拥有者菜单中打开 **CLI 接入 → CLI 凭据**，填写名称、选择一台或多台设备，再填写有效天数或选择 **无到期**。token 只显示这一次，server 只保存摘要。
+
+凭据能以 agent 运行账户的权限操作选定设备，工作区不是沙箱；它不能管理设备登记、绑定码或其他凭据。设备 agent 使用的绑定码是另一种凭据。
+
+### 登录
 
 ```sh
 kiteline auth login --server https://desk.example
-# 无交互环境必须明确指定输入来源：
+# 没有终端时必须明确指定输入来源：
 kiteline auth login --server https://desk.example --token-stdin < credential.txt
 kiteline auth status
 ```
 
-第一条只在 TTY 中提示粘贴 token，无 TTY 时立即报错。导入核验成功后才保存。
-凭据位于 `~/.kiteline/credentials.json`，与设备 agent 身份独立；可用
-`KITELINE_CLI_HOME` 指定专用凭据目录。Unix 新建目录为 0700、文件为 0600；Windows
-沿用所在用户目录的访问权限。凭据文件不能放进共享工作目录或版本库。
+- 第一种写法只在终端中提示粘贴 token；没有终端时立即报错。核验成功后才保存。
+- 凭据保存在 `~/.kiteline/credentials.json`，用 `KITELINE_CLI_HOME` 可以指定其他目录。Linux 和 macOS 上新建的目录为 0700、文件为 0600；Windows 沿用所在用户目录的权限。不要把凭据放进共享目录或版本库。
+- 也可以成组设置 `KITELINE_URL` 和 `KITELINE_TOKEN`，它们优先于保存的凭据；只设置其中一个会报错，不会补用文件中的另一个值。
+- CLI 使用 `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY` 和 `NODE_EXTRA_CA_CERTS`。它不跟随重定向，`--server` 要写准确的工作台地址。
 
-无人值守也可成组设置 `KITELINE_URL` 和 `KITELINE_TOKEN`，优先于已保存凭据；只设置
-一个会报错，不会补用文件中的另一个值。CLI 沿用 `HTTP_PROXY`、`HTTPS_PROXY`、
-`NO_PROXY` 和 Node 的 `NODE_EXTRA_CA_CERTS`，使用准确的 server origin，不跟随重定向。
+### 退出与撤销
 
-`auth logout` 撤销当前 token，并删除当前使用的本地凭据文件。环境凭据的退出不删除
-另一份磁盘凭据，调用方需自行移除环境变量。token 已失效时也可清除本地保存；网络结果
-不明时保留文件。Web owner 可以定向撤销凭据。权限含义及期限见[设备操作凭据](server.md#签发-cli-凭据)。
+- `auth logout` 撤销当前 token，并删除正在使用的本地凭据文件。token 已失效时也会清除本地文件；网络结果不明时保留文件。使用环境变量凭据时，退出不删除磁盘上的凭据，环境变量要自行移除。
+- 在签发凭据的对话框中可以撤销任一凭据。撤销会断开该凭据的连接，不结束共享的终端，也不撤回已经发送的输入；其他凭据继续有效。
+- [重置拥有者密码](server.md#重置初始化-token-与密码)会使全部 CLI 凭据失效。
 
-## 发现和选择目标
+## 接续已有终端
+
+在工作台会话菜单中选择“在 CLI 中接续”，复制带完整目标 ID 的命令，在已登录此 server 的本机终端执行；尚未接入时可从同一弹窗打开“安装与登录”。也可以手工指定目标：
+
+```sh
+kiteline terminal attach --device DEVICE_ID --workspace WORKSPACE_ID --session SESSION_ID
+# 当前目录已有 .kiteline.json 时：
+kiteline terminal attach
+```
+
+- 需要在真实终端中运行（stdin 和 stdout 都是 TTY），不接受 `--json`。不新建 Shell。
+- 连接后直接输入：`Ctrl+C` 发给远端程序，`Ctrl+B d` 脱离，`Ctrl+B [` 进入 tmux 历史复制模式，`Ctrl+B Ctrl+B` 发送 Ctrl+B。
+- 输入和终端尺寸与工作台共享，没有输入独占，同时输入的字符会交错。
+- 脱离或断线只结束本次连接，会话继续运行。本机终端长时间跟不上输出时，连接报错结束，重新执行 attach 即可接续当前画面；Windows 上所在终端一直不读取输出时，入口可能一直等待。
+- 正常脱离返回 0，这不是远端命令的退出码。
+
+## 选择目标
 
 ```sh
 kiteline targets
@@ -112,27 +115,21 @@ kiteline inspect --device DEVICE_ID --workspace WORKSPACE_ID
 kiteline terminal list --device DEVICE_ID --workspace WORKSPACE_ID
 ```
 
-`targets` 列出完整 ID、名称、在线状态及工作区路径。工作区来自设备元数据快照，离线
-设备的路径不是当前文件系统检查结果。`inspect` 附加选中工作区的实际终端列表；设备离线
-时无法获取该列表。相同名称的目标通过完整 ID 区分，不按名称猜测。
+`targets` 列出设备和工作区的完整 ID、名称、在线状态和路径；离线设备的工作区路径来自最后一次快照。`inspect` 另外列出该工作区当前的终端会话，需要设备在线。名称相同时用完整 ID 区分，CLI 不按名称猜测。
 
-在调用进程的当前工作目录放置 `.kiteline.json` 可减少多轮调用中的重复参数：
+在当前目录放一个 `.kiteline.json`，可以省去反复输入目标：
 
 ```json
 { "device": "DEVICE_ID", "workspace": "WORKSPACE_ID", "session": "SESSION_ID" }
 ```
 
-CLI 只读当前目录，不搜索父目录、Git 根目录或 home。它是目录共享的默认值；显式
-`--device`、`--workspace`、`--session` 逐字段覆盖本次调用，不回写。组合不匹配时明确失败。
-`inspect`、`terminal list`、`terminal create` 和 `files` 忽略默认 session，不接受显式
-`--session`。`web url --path` 也忽略默认 session，不能与显式 `--session` 同用。
-`auth`、`targets`、`--help` 和 `--version` 不读取目标文件。
+CLI 只读取当前目录中的这个文件，不向上级目录查找。命令行参数逐项覆盖文件中的值，不回写文件。不需要会话的命令忽略其中的 `session`，具体规则见各命令的 `--help`。
 
-## 操作同一个终端
+## 用短命令操作终端
 
 ```sh
 kiteline terminal create --name work
-# 将返回的 session ID 写入当前目录的 .kiteline.json 后：
+# 把返回的会话 ID 写入当前目录的 .kiteline.json 后：
 kiteline terminal snapshot
 kiteline terminal send --text 'pwd; git status --short' --enter
 kiteline terminal wait
@@ -140,55 +137,23 @@ kiteline terminal snapshot --tail 40
 kiteline web url
 ```
 
-每次调用都是短命令，终端和 Shell 状态持续存在。默认不改变尺寸，`terminal resize
---cols 100 --rows 30` 会改变所有参与者共享的终端。目录浏览、阅读、编辑、Git、构建和
-测试直接使用终端中的原生工具；CLI 仅另提供文件传输，不提供 Git 或 task/run 命令。
+每次调用都是独立的短命令，终端和 Shell 状态保留在设备上。
 
-`send` 恰好选择一个 `--text TEXT`、`--paste TEXT` 或 `--key KEY`。文本与粘贴可加
-`--enter`；文字 `Enter` 不会变成回车。具名按键见 `terminal send --help`。粘贴使用
-现有 bracketed paste 行为，程序启用此模式时会收到粘贴边界。成功仅表示远端输入操作已
-处理，不表示命令执行完成。调用方观察屏幕，决定下一步；没有自动重发、输入独占或完成检测。
+- `terminal send` 成功只表示输入已经送达，不表示命令执行完毕；用 `snapshot` 或 `wait` 观察结果后再决定下一步。CLI 不会自动重发输入。
+- `terminal wait` 在输出安静或超时后返回当前画面；安静不代表任务已经完成。
+- `terminal resize` 会改变所有客户端共享的终端尺寸。
+- CLI 不提供 Git、定时任务等命令，在终端中使用原生工具完成。
+- `kiteline web url` 返回同一终端在工作台中的链接，`web url --path PATH` 返回文件链接（不检查文件是否存在）。在工作台中点一下终端画面即可输入。
 
-`snapshot` 返回当前活动屏。默认 stdout 仅有屏幕文本，按需请求的 normal 历史尾部位于
-屏幕之前；两部分实际行数、折行、尺寸、光标和观察位置在 stderr，正文不插入标记。
-末尾空行可以省略，内部空行、缩进和物理行保持。`--attrs` 在 stderr 附加非默认样式区间，
-可用于判断仅靠高亮区分选中项的 TUI；需要明确区分屏幕与历史或程序处理时用 `--json`。
-区间是 0-based cell 列，`end` 不含，不能当字符串字符索引。
+条件输入（`--if-input`）、增量观察（`--if-changed`）、样式区间（`--attrs`）和各项期限见 `kiteline terminal <命令> --help`，机制见[远程观察](../design/terminal.md#远程观察)。
 
-```sh
-kiteline terminal snapshot --attrs --json > observation.json
-kiteline terminal snapshot --attrs --if-changed "$(jq -c .result.position observation.json)"
-kiteline terminal send --key Down --if-input "$(jq -r '.result.input | "\(.epoch):\(.inputSeq)"' observation.json)"
-```
+### 记录不可用时
 
-`--if-changed` 只复用同目标、同观察选项的完整 position；改变 tail/attrs 仍返回完整数据。
-`unchanged` 省略屏幕，但仍给当前 inputSeq；seq 推进也不一定意味着可见文字变化。
-recorder 换代返回 `reset` 全屏。`--if-input` 是可选的接纳条件：观察后若已有其他输入进入，
-返回 conflict；重新观察后由调用方决定是否再发。网页输入计数，本机 tmux 和远程 attach 输入不计数。
-新 inputSeq 配旧画面仍可能意味着输入尚未回显，条件通过不保证不会混行。
+命令返回 `recording_unavailable` 时，终端程序通常仍在运行，attach 照常可用。需要短命令或工作台观察时，先用 `terminal list` 确认状态，再执行 `terminal recover`。恢复不重启程序，但会丢弃之前的网页历史，并可能短暂改变尺寸让程序重绘；返回 `recovering` 只表示已受理。
 
-`wait` 默认等待 300ms 输出安静，总上限 1000ms，可用 `--quiet-ms` 和 `--timeout-ms`
-调整，最长 10000ms。`--mode change --after EPOCH:SEQ` 等待输出位置变化，after 可来自
-snapshot 或 send.before。quiet/changed/timeout/reset 都返回当前画面；quiet 不表示业务完成。
-send/resize 的预算默认 5000ms，亦可用 `--timeout-ms`，范围 1–10000ms。
+超过 1 MiB 的观察返回 `limit_exceeded`，终端继续运行；减少 `--tail`、去掉 `--attrs` 或缩小终端后再试。
 
-可选的 Bash 日志示例须先进入 `targets` 所列 workspace 路径，日志才能通过文件能力访问：
-
-```bash
-cd '/absolute/workspace/path'
-(set +e
-  mkdir -p logs || exit
-  make test 2>&1 | tee logs/test.log
-  rc=${PIPESTATUS[0]}
-  printf '\nFOREGROUND_RETURNED rc=%s\n' "$rc"
-  exit "$rc"
-)
-```
-
-必须紧接管道读取 `PIPESTATUS[0]`。该标记只代表这次前台命令返回，不表示它启动的后台
-工作完成。CLI 不自动包装输入或解析该标记。
-
-## 文件传输
+## 传输文件
 
 ```sh
 kiteline files download 'notes/设计.md' --output ./design.md
@@ -196,75 +161,23 @@ kiteline files upload 'notes/设计副本.md' --file ./design.md
 kiteline web url --path 'notes/设计副本.md'
 ```
 
-`PATH` 相对选定 workspace，使用 `/` 分隔，不能是绝对路径或含 `..` 段；本地路径由
-`--output` 或 `--file` 明确指定。下载以新建方式写入，不覆盖已有本地文件；失败可能留下
-空文件或部分内容，不能当作完整下载。文件内容直接流式传输，成功结果只给 `path`、`size`，
-下载另给 `output`；`--json` 不包含文件正文。
+- 远端路径相对选定的工作区，使用 `/` 分隔，不能是绝对路径或含 `..`；本地路径用 `--output` 或 `--file` 指定。
+- 下载不覆盖已有的本地文件。下载失败时可能留下空文件或部分内容，不能当作完整文件使用。
+- 上传默认只创建新文件。目标已存在时返回冲突，诊断中给出可用于替换的版本；确认要替换时再执行 `kiteline files upload 'notes/设计副本.md' --file ./design.md --replace-version VERSION`。这个版本用于检查替换目标，不能证明你下载之后没人改过。
+- 上传替换符号链接本身，下载跟随链接。
+- 上传结果未确认时文件可能已经写入；先下载或在终端中检查，CLI 不会自动重传。
 
-上传读取本地普通文件，默认只创建新目标。目标存在时返回 conflict，纯文本诊断及
-`--json` 的 `error.details.current.targetVersion` 提供可选择的替换版本。确认要替换后再用：
+## 输出与退出码
 
-```sh
-kiteline files upload 'notes/设计副本.md' --file ./design.md --replace-version VERSION
-```
+默认输出供阅读；`--json` 在 stdout 输出带 `outcome`、`result` 或 `error.code` 的结构化结果。提示和诊断写到 stderr。CLI 不自动重试。
 
-`VERSION` 是该上传目标的替换条件，不是下载得到的内容 revision。设备在准备上传和发布前
-检查版本；这不保证从下载至今无人修改，最后一次检查到发布之间仍可能有外部写入。
-上传替换叶节点符号链接本身，下载则跟随该链接。上传结果为 unknown 时可能已发布，先通过
-终端或下载观察，再决定下一步；CLI 不自动重传。
+| 退出码 | 含义                                                                                          |
+| ------ | --------------------------------------------------------------------------------------------- |
+| 0      | 操作或观察成功。                                                                              |
+| 1      | 远端失败（包括 `invalid_argument`）、部分失败，或读取请求的传输失败；部分结果和诊断仍会输出。 |
+| 2      | 本地错误，例如参数、配置、默认目标或本地文件读写错误。                                        |
+| 3      | 请求可能已经生效，但没有得到确定结果。先观察，再决定下一步。                                  |
 
-在不区分大小写或 Unicode 等价拼写的文件系统中，异拼写可能在使用冲突版本后再次触发
-conflict。可通过共享终端核对实际名称，再决定是否替换。
+结果未确认时总是退出 3，例如上传中本地读取失败、写入结果不确定。本地缺少或配置了无效的默认目标退出 2；设备上查不到目标退出 1。
 
-## 交互接续已有终端
-
-在 Web 会话菜单选择“在 CLI 中接续”，复制带完整目标 ID 的命令，在已登录此 server 的本机终端执行。尚未接入时可从该弹窗打开“安装与登录”。也可以手工指定目标：
-
-```sh
-kiteline terminal attach --device DEVICE_ID --workspace WORKSPACE_ID --session SESSION_ID
-# 已配置当前目录 .kiteline.json 时：
-kiteline terminal attach
-```
-
-stdin 和 stdout 都必须是 TTY，不能使用 `--json`。命令复用上述凭据和目标，不新建 Shell，
-不自动恢复记录。连接后直接输入；`Ctrl+C` 发给远端程序，`Ctrl+B d` 脱离，
-`Ctrl+B [` 进入 tmux 历史复制模式，`Ctrl+B Ctrl+B` 发送前缀键。
-
-Web 和 CLI 共用输入与尺寸，没有输入独占；`--if-input` 不计入 attach 输入。粘贴按
-本机终端与 tmux 的原生规则处理。脱离或断线只结束本次连接，原会话继续运行。
-输出积压超过[消费预算](reference.md#终端)时该连接会报错结束，重新执行 attach 接续当前画面。
-
-正常脱离、最后输出写完且本机状态恢复后返回 0；这不是远端命令的退出码。输出完全
-停止消费时，排空超时以非 0 结束本次 CLI 进程，尚未消费的画面复位无法立即生效。
-Linux/macOS 会恢复本机输入模式；Windows 的 PowerShell 入口可能需要等待宿主恢复消费后完成
-状态恢复并返回，若宿主一直停读，入口可能持续等待。远端桥会结束，原会话和其他客户端继续。
-
-## Web 接续与记录恢复
-
-`web url` 返回同一终端的链接，不创建交接状态。Web 登录后点击实际终端显示区再输入；
-“专注终端”按钮只调整布局。双方的输入与尺寸都影响同一终端，关闭 CLI 不关闭 Shell。
-`web url --path PATH` 返回文件链接，仅核实设备/workspace，不检查文件存在或版本。
-
-遇到 `recording_unavailable`，仍可用 attach 接续运行中的会话。需要 Web 或短命令观察时，
-先看 `terminal list`，再按需显式 `terminal recover`。
-恢复复用同一 pane，可能短暂改变尺寸以重绘，丢失旧 recorder 历史并更换 epoch。返回
-`recovering` 只表示受理，后续自行 list/snapshot 观察；CLI 不轮询或重发之前的输入。
-目标不匹配的 not_found 不能推断 Shell 已毁。超过 1MiB 的观察返回 limit_exceeded，终端
-继续运行；可显式减少 tail/attrs 或尺寸后观察，CLI 不自动裁屏。
-
-## 输出和失败
-
-默认输出适合直接阅读；`--json` 的 stdout 是带 `outcome`、`result` 或 `error.code` 的
-结构化回复；交互 attach 不接受 `--json`。提示和诊断使用 stderr，不自动重试。
-
-| 退出码 | 含义                                                                                        |
-| ------ | ------------------------------------------------------------------------------------------- |
-| 0      | 操作或观察成功。                                                                            |
-| 1      | 远端失败（包括 `invalid_argument`）、部分失败，或读取请求的传输失败；部分结果和诊断仍保留。 |
-| 2      | 本地处理错误，例如参数、配置、默认目标或文件 I/O 错误。                                     |
-| 3      | 请求可能生效，但未取得确定结果。先观察，再决定下一步，不自动重发。                          |
-
-`unknown` 优先退出 3，不按错误码或来源改成 1/2；例如上传过程中本地读取失败，使写入结果不确定时也退出 3。本地缺少或配置了无效的目标退出 2；从远端设备快照或会话列表中查无目标退出 1。
-
-JSON 交互最多等待 30 秒；文件正文传输在连续 120 秒无进度时结束等待。
-`--help` 和 `--version` 离线可用。
+JSON 请求最多等待 30 秒；文件传输连续 120 秒没有进展时结束。`--help` 和 `--version` 不需要连接 server。

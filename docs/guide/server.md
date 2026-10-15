@@ -11,9 +11,9 @@
   - 原生发布包 `kiteline-server-<版本>-linux-<架构>.tar.gz`，从 [GitHub Releases](https://github.com/Azure99/kiteline/releases) 下载。包内带有官方 Node 运行时（依赖 glibc 的动态链接构建），目标系统是 Ubuntu 24.04。
 - server 只提供 HTTP，不处理 TLS 证书。需要 HTTPS 时在前面放一个反向代理，见 [HTTPS 与反向代理](#https-与反向代理)。
 - server 默认只在本机地址 `127.0.0.1:8080` 上接受连接。从其他机器访问的设置见[局域网访问与端口](#局域网访问与端口)。
-- 拥有者密码、登录会话和设备登记都保存在 server 数据目录中（默认 `/var/lib/kiteline`，数据库文件 `kiteline.sqlite`）。server 每次启动时把该目录权限设为 `0700`。同一个数据目录同时只能由一个 server 进程使用。
+- 拥有者密码、登录会话、CLI 凭据和设备登记都保存在 server 数据目录中（默认 `/var/lib/kiteline`），同一个数据目录同时只能由一个 server 进程使用。
 - 一个 server 可以同时通过多个入口访问。入口是协议、主机名和端口的组合，例如 `http://192.168.1.10:8080` 和 `https://kiteline.example.com`。server 只能部署在入口的根路径上，不支持 `https://example.com/kiteline/` 这样的子路径。
-- server 的发布包和镜像内含全部平台的 agent 发布包。设备接入和升级时从 server 下载与 server 版本相同的 agent，不需要访问 GitHub。
+- server 的发布包和镜像内含全部平台的 agent 发布包，设备接入和升级时不需要访问 GitHub。
 
 server 的环境变量见[参考](reference.md#server-环境变量)。
 
@@ -206,7 +206,7 @@ kiteline.example.com {
 
 Caddy 自动申请证书、原样转发 `Host`、用实际协议覆盖 `X-Forwarded-Proto`，并支持 WebSocket。`flush_interval` 让流式响应及时送达；`keepalive off` 使 Caddy 不复用上游连接，避免在复用连接断开时自动重发请求；`enable_full_duplex` 允许 server 在上传完成前返回响应。
 
-示例需要 Caddy 2.7 或更高版本。Ubuntu 24.04 和 Debian 12 软件源中的 Caddy 2.6.2 不支持 `enable_full_duplex`，请从 Caddy 官方软件源安装。
+示例需要 Caddy 官方发布的 2.7.4 或更高版本。Ubuntu 24.04 和 Debian 12 软件源中的 Caddy 2.6.2 不支持 `enable_full_duplex`，请从 Caddy 官方软件源安装。
 
 ### 多个入口
 
@@ -215,12 +215,6 @@ Caddy 自动申请证书、原样转发 `Host`、用实际协议覆盖 `X-Forwar
 ### 常见错误
 
 反向代理配置错误时的现象（例如 `Origin mismatch`、`Invalid X-Forwarded-Proto`、终端无法连接、下载没有响应）和处理见[常见问题](reference.md#常见问题)。
-
-## 签发 CLI 凭据
-
-在工作台右上角的“拥有者菜单”打开 **CLI 接入 → CLI 凭据**，填写名称、选择一台或多台设备，再填写有效天数或显式选择 **无到期**。token 只展示这一次，请复制并导入相同版本的 Kiteline CLI；server 只保存摘要。设备 agent 使用的绑定码是另一种凭据。
-
-token 可按 agent 操作系统用户的权限操作选定设备，工作区不是沙箱；它不能管理设备登记、绑定码或其他凭据。结束授权时，在同一对话框撤销对应条目，或从 CLI 退出。撤销会关闭该凭据的连接，保留共享终端，不撤回已经发送的输入；其他凭据继续有效。
 
 ## 重置初始化 token 与密码
 
@@ -249,9 +243,11 @@ sudo systemctl start kiteline-server
 
 ## 备份与恢复
 
-server 数据目录保存拥有者密码、设备登记和定时任务摘要。设备的绑定凭据、工作区登记和定时任务保存在各设备的 agent 数据目录中（见[文件位置](reference.md#文件位置)），需要在设备上另行备份；项目文件按你原有的方式备份。
+server 数据目录保存拥有者密码、登录会话、CLI 凭据、设备登记和定时任务摘要。设备的绑定凭据、工作区登记和定时任务保存在各设备的 agent 数据目录中（见[文件位置](reference.md#文件位置)），需要在设备上另行备份；项目文件按你原有的方式备份。
 
 停止 server 后备份整个数据目录，可以得到一致的副本。
+
+恢复会先删除当前数据目录中的全部内容，再解开备份：拥有者密码、登录会话、CLI 凭据和设备登记都回到备份时的状态。备份之后绑定的设备无法再连接，需要[重新绑定](devices.md#重新绑定)；备份之后删除的设备会重新出现在列表中，可以在网页再次删除。
 
 Docker（在部署目录中执行）：下面的备份和恢复命令使用默认卷 `kiteline_server-data`。改过数据挂载时，把两处该卷名换成实际卷名或宿主机目录的绝对路径。
 
@@ -262,7 +258,7 @@ docker run --rm -v kiteline_server-data:/data:ro -v "$PWD":/backup ubuntu:24.04 
 docker compose start server
 ```
 
-恢复：
+恢复（会先清空当前数据目录）：
 
 ```sh
 docker compose stop server
@@ -279,7 +275,7 @@ sudo tar -czf kiteline-server-data.tar.gz -C /var/lib/kiteline .
 sudo systemctl start kiteline-server
 ```
 
-恢复：
+恢复（会先清空当前数据目录）：
 
 ```sh
 sudo systemctl stop kiteline-server
@@ -287,8 +283,6 @@ sudo find /var/lib/kiteline -mindepth 1 -delete
 sudo tar -xzf kiteline-server-data.tar.gz -C /var/lib/kiteline
 sudo systemctl start kiteline-server
 ```
-
-恢复后，设备登记回到备份时的状态：备份之后绑定的设备无法再连接，需要[重新绑定](devices.md#重新绑定)；备份之后删除的设备会重新出现在列表中，可以在网页再次删除。
 
 ## 升级 server
 

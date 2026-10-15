@@ -44,7 +44,7 @@ The install command runs the agent in the foreground. For continued use, configu
 
 ## Documentation
 
-[Workbench](docs/guide/usage.en.md) · [Device maintenance](docs/guide/devices.en.md) · [Scheduled tasks](docs/guide/scheduled-tasks.en.md) · [Commands and configuration](docs/guide/reference.en.md) · [Development docs (Chinese)](docs/README.md)
+[Workbench](docs/guide/usage.en.md) · [Device maintenance](docs/guide/devices.en.md) · [Scheduled tasks](docs/guide/scheduled-tasks.en.md) · [Remote CLI](docs/guide/cli.en.md) · [Commands and configuration](docs/guide/reference.en.md) · [Development docs (Chinese)](docs/README.md)
 
 ## License
 

@@ -77,9 +77,9 @@ On the phone key row, tap SHIFT, CTRL or ALT once to apply it to the next key, a
 
 ### Search and display
 
-The Focus terminal button cycles through focus within the window, browser fullscreen, and exit. The first step hides the rest of the workbench while keeping the browser window's position and size, so several windows can monitor output at once. Leaving fullscreen through the browser keeps window focus active; click the button again to exit.
+The Focus terminal button cycles through focus within the window, browser fullscreen, and exit. The first step hides the rest of the workbench while keeping the browser window's position and size, so several windows can monitor output at once. The Focus file button works the same way when editing files in narrow layouts.
 
-Terminal search covers currently loaded display content, including history, without case sensitivity. Search temporarily hides the session picker and other toolbar controls. Close search to use them; this clears the query. In desktop split view, you can switch directly to another pane.
+Terminal search covers currently loaded display content, including history, without case sensitivity.
 
 "Scrollback lines for new sessions" in "Terminal settings" controls the history retained per session (range in [Limits](reference.en.md#limits)). It affects only sessions created afterward.
 
@@ -87,17 +87,20 @@ A session has one row/column size, determined by the client that most recently t
 
 ### Connection and recovery
 
-Input is available after the session's display and history are restored. If a display falls behind or stops consuming output in the background, it disconnects when its budget is exceeded; the session and other displays continue. Reconnect after a connection failure. If restoring history exceeds capacity, retry with less history to restore only the current screen; history on the device is unchanged. A history gap means some output was lost during a recorder failure. Ended sessions are read-only and show their exit code.
+Input is available after the session's display and history are restored. If a problem occurs:
 
-"Recover terminal" rebuilds recording and reattaches to the same program without restarting it. If connected but the display is garbled, use "Redraw program" in the session menu. It briefly resizes the program to trigger a redraw, which can change other clients' displays and selections, so it requires confirmation. If that does not help, use "Close display" and reopen it.
+- "Connection closed": click "Reconnect". A display that falls behind output for too long also disconnects on its own; the session and other displays are unaffected.
+- Recording unavailable: click "Recover terminal". It rebuilds recording for the same program without restarting it; previous web history is no longer retained.
+- History restoration exceeds capacity or times out: click "Retry with less history" to restore only the current screen; history on the device is unchanged.
+- Connected but the display is garbled: use "Redraw program" in the session menu. It briefly resizes the program to trigger a redraw, which can change other clients' displays and selections, so it requires confirmation. If that does not help, use "Close display" and reopen it.
+
+A history gap means some output during a recorder failure was not captured in web history. Ended sessions are read-only and show their exit code.
 
 "End session" in the session menu asks once, then ends the session and every program in it.
 
 ### Continue in CLI
 
-The session menu’s “Continue in CLI” provides a command with the full device, workspace and session IDs. Select your local terminal type and run it after logging in to this server; Windows uses `kiteline.ps1`. If the CLI is not set up, choose “Install and log in” to open the guide. “CLI setup” is also available on Home and in the Owner menu.
-
-CLI and Web operate the same shell. Ctrl+B d detaches while the session keeps running, Ctrl+B Ctrl+B sends Ctrl+B, and Ctrl+B [ opens tmux history copy mode. See [Remote CLI](cli.en.md) for installation, credentials and attach operations. Device-side workspace and session management commands are in the [command reference](reference.en.md#kiteline-agent-commands).
+The session menu’s “Continue in CLI” provides a complete command for the current device, workspace and session. Run it in a local terminal logged in to this server. If the CLI is not set up, choose “Install and log in” to open the guide; “CLI setup” is also available on Home and in the Owner menu. CLI and Web operate the same shell, and the session keeps running after detaching. See [Remote CLI](cli.en.md#attach-to-an-existing-terminal) for keys, installation and credentials. Device-side workspace and session management commands are in the [command reference](reference.en.md#kiteline-agent-commands).
 
 ## Files
 
@@ -107,7 +110,7 @@ Files browses and edits the current workspace, with list paths relative to its d
 
 Handle names that are not valid UTF-8, FIFOs, sockets and device nodes in a terminal.
 
-The list refreshes automatically when other programs change files, and periodically while the page is visible. Periodic refresh remains available if the device cannot watch directories. You can dismiss "Live updates limited" for this visit. While updates are limited, open the current diagnostic from the toolbar warning icon; exit focus mode first. Returning to the workspace or reloading the page shows the banner again if updates are still limited.
+The list refreshes automatically when other programs change files, and periodically while the page is visible. If the device cannot watch directory changes, "Live updates limited" appears; periodic refresh remains available.
 
 ### Open and edit
 
@@ -119,15 +122,9 @@ New `.ps1` files on Windows devices use a UTF-8 BOM on their first save so Windo
 
 Saving replaces the original with a new file, so its parent directory must allow file creation and renaming. Ordinary permission bits are preserved; ownership, group, ACLs and extended attributes follow the rules for new files. Other hard links still point to the old content. Saving through a symbolic link writes to its target.
 
-In narrow layouts, the Focus file button cycles through focus within the window, browser fullscreen, and exit. Focus hides workbench navigation and draft tabs while keeping editing, preview, and save actions available. Opening another file or leaving Files exits focus and keeps unsaved drafts.
-
 ### Markdown preview
 
-Switch `.md` and `.markdown` files between source and preview. The preview includes unsaved edits and supports tables, task lists, strikethrough, local images and section links. Relative file links open their targets in Files. Returning to source locates the paragraph you were reading; switching back to preview lets you continue there.
-
-Fenced `mermaid` blocks render as diagrams. Scroll wide diagrams horizontally, or expand their source to inspect it. External images within diagrams load automatically. Invalid diagram syntax shows an error and keeps the source visible.
-
-Raw HTML appears as text. External images in ordinary Markdown appear as links that open in a new tab.
+Switch `.md` and `.markdown` files between source and preview. The preview includes unsaved edits and renders `mermaid` code blocks as diagrams. Relative file links open their targets in Files. Raw HTML appears as text; external images in ordinary Markdown appear as links, while external images within diagrams load automatically.
 
 ### Drafts
 
@@ -135,7 +132,7 @@ Drafts are kept only in the current page's memory:
 
 - They survive switching files, tools, workspaces and devices. "Open files" lets you find open drafts across all devices.
 - Closing a file tab with unsaved content offers Cancel, Discard changes, or Save and close. Empty unnamed drafts close directly.
-- With unsaved changes, reloading, navigating away, or closing the browser page uses the browser's native prompt, which requires prior page interaction and uses text chosen by the browser. Confirming that you want to leave loses the drafts. On mobile, the prompt may be skipped when you close the app or the system discards the page.
+- With unsaved changes, the browser prompts before reloading, navigating away, or closing the page. Confirming that you want to leave loses the drafts. On mobile, the prompt may be skipped when you close the app or the system discards the page.
 - If a device goes offline or a device/workspace is deleted, content remains viewable and copyable, but cannot be saved to its original location.
 
 ### Save conflicts
@@ -155,8 +152,6 @@ File search searches the workspace's files on disk by content or file name, with
 - Results and search duration are limited (see [Limits](reference.en.md#limits)). Reaching a limit shows "incomplete results". Results with non-UTF-8 paths are omitted and also mark the results incomplete.
 
 When you open a content result, if the text at its original position no longer matches the query, the editor opens Find. Click “next” to search the current content.
-
-On phones, the back button, search mode, and query field scroll with the results. Scroll back up to use them.
 
 ### Create and rename
 
@@ -199,13 +194,11 @@ Git uses the device's Git installation and the project user's Git configuration,
 
 Git scans the workspace directory and all subdirectories, listing repositories including initialized submodules and linked worktrees within the workspace (marked `worktree`). Repositories outside the workspace are not used. If the workspace is only a subdirectory of a repository, it shows "No Git repositories found"; add the repository root as a workspace.
 
-With several repositories, the first is selected automatically. Switch by path in the repository menu. Opening Git for the first time automatically continues the scan; an error stops that continuous run and is displayed. After the initial scan completes, later scans advance with each refresh. You can also click "Continue scan" when "Repository scan incomplete" appears. "Discover repositories again" rescans. Bare repositories are not supported.
+With several repositories, the first is selected automatically; switch by path in the repository menu. If "Repository scan incomplete" appears, click "Continue scan". "Discover repositories again" rescans from the beginning. Bare repositories are not supported.
 
 ### Status and diff
 
 Diffs exceeding the limit show only part of the raw patch. Changes are paginated. The Staged changes count covers the whole repository; other group counts cover the current page. Entries with non-UTF-8 paths cannot be operated on.
-
-Hover over or focus a submodule path to see its full path and status. On touchscreens, open the row menu to view these details.
 
 ### Stage and commit
 
