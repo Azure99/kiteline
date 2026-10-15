@@ -58,7 +58,7 @@ export function BranchesView({
   useEffect(() => {
     return () => request.current?.abort();
   }, [active, load]);
-  useWorkspaceRefresh(deviceId, workspaceId, active, "git", load);
+  useWorkspaceRefresh(deviceId, workspaceId, active, load);
   useEffect(() => {
     if (active && (activity.revision || refreshKey)) void load();
   }, [active, activity.revision, refreshKey, load]);

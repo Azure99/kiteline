@@ -245,13 +245,7 @@ export class Connections {
             const workspaceId = string(message.workspaceId);
             let event: WorkspaceEvent;
             if (message.type === "workspace.changed") {
-              const scopes = message.scopes;
-              if (
-                !Array.isArray(scopes) ||
-                !scopes.every((scope) => scope === "files" || scope === "git" || scope === "repos")
-              )
-                throw new AppError("invalid_argument", "Invalid workspace change scopes");
-              event = { type: "workspace.changed", workspaceId, scopes };
+              event = { type: "workspace.changed", workspaceId };
             } else if (message.type === "sessions.changed") {
               event = { type: "sessions.changed", workspaceId };
             } else {

@@ -112,7 +112,7 @@ test("subscribed workspace events and request progress retain their defined fiel
       completedItems: 0,
       bytes: 0,
     },
-    { type: "workspace.changed", workspaceId: "work", scopes: ["files", "git", "repos"] },
+    { type: "workspace.changed", workspaceId: "work" },
     { type: "sessions.changed", workspaceId: "work" },
     { type: "watch.status", workspaceId: "work", status: "degraded", reason: "" },
     { type: "watch.status", workspaceId: "work", status: "normal" },

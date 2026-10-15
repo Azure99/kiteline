@@ -115,7 +115,7 @@ export function Files({
   const draft =
     drafts.find((item) => item.id === queryDraft) ?? drafts.find((item) => item.path === queryFile);
   const hasFile = !!queryFile || !!draft;
-  useWorkspaceRefresh(device.id, workspace.id, visible && enabled, "files", async (signal) => {
+  useWorkspaceRefresh(device.id, workspace.id, visible && enabled, async (signal) => {
     await refresh(signal, true);
     if (draft && !signal.aborted) await store.observe(draft, signal);
   });

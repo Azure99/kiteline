@@ -298,7 +298,7 @@ export interface FileProgress {
   bytes?: number;
 }
 export type WorkspaceEvent =
-  | { type: "workspace.changed"; workspaceId: string; scopes: ("files" | "git" | "repos")[] }
+  | { type: "workspace.changed"; workspaceId: string }
   | { type: "sessions.changed"; workspaceId: string }
   | { type: "watch.status"; workspaceId: string; status: "normal" | "degraded"; reason?: string };
 export type AgentEvent = WorkspaceEvent | ({ type: "request.progress"; id: string } & FileProgress);

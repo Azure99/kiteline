@@ -176,7 +176,7 @@ stage、unstage、review 和 discard 的路径最多 `listPageEntries × 2` 个�
 
 ## 自动刷新
 
-- 事件的产生和浏览器的刷新节奏见[变化监听](files.md#变化监听)。工作树和 Git 元数据的变化都会产生包含 `git` 和 `repos` 范围的 `workspace.changed`，agent 自己的 Git 写操作结束时立即发送。
+- 事件的产生和浏览器的刷新节奏见[变化监听](files.md#变化监听)。工作树和 Git 元数据的变化都会产生 `workspace.changed`，agent 自己的 Git 写操作结束时立即发送。
 - 状态视图在收到刷新时于当前 offset 重新读取（见[翻页](#翻页)），仓库发现按[首轮与后续扫描规则](#扫描)推进。
 - 自己发起的写操作结束后（无论结果如何），浏览器立即重读状态。写操作结果未确认时，刷新后显示的 HEAD、index 和 refs 就是判断依据。
 

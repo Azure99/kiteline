@@ -105,7 +105,7 @@ export function useGitStatus(
       request.current?.abort();
     };
   }, [active, load]);
-  useWorkspaceRefresh(deviceId, workspaceId, active, "git", () =>
+  useWorkspaceRefresh(deviceId, workspaceId, active, () =>
     load(undefined, undefined, undefined, false, true),
   );
   return {

@@ -159,9 +159,9 @@ test("shared Git metadata invalidates both active worktrees", async () => {
   await expect
     .poll(() => events.some((event) => event.type === "workspace.changed"), pollOptions)
     .toBe(true);
-  expect(
-    events.filter((event) => event.type === "workspace.changed").map((event) => event.workspaceId),
-  ).toEqual(["b"]);
+  expect(events.filter((event) => event.type === "workspace.changed")).toEqual([
+    { type: "workspace.changed", workspaceId: "b" },
+  ]);
 });
 test("dependencies stay ignored while repositories join metadata watching before scan completion", async () => {
   const { root, watches, events, workspace } = await setup();

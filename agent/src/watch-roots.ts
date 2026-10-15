@@ -79,7 +79,7 @@ export class WatchRoots {
   }
 
   private emit(workspaceId: string) {
-    this.send({ type: "workspace.changed", workspaceId, scopes: ["files", "git", "repos"] });
+    this.send({ type: "workspace.changed", workspaceId });
   }
 
   private reconcile() {

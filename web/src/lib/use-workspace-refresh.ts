@@ -4,7 +4,6 @@ export function useWorkspaceRefresh(
   deviceId: string,
   workspaceId: string,
   active: boolean,
-  scope: "files" | "git" | "repos",
   refresh: (signal: AbortSignal) => unknown,
 ) {
   const callback = useRef(refresh);
@@ -41,8 +40,7 @@ export function useWorkspaceRefresh(
       if (
         value.type === "workspace.changed" &&
         value.deviceId === deviceId &&
-        value.workspaceId === workspaceId &&
-        value.scopes.includes(scope)
+        value.workspaceId === workspaceId
       )
         schedule();
     };
@@ -62,7 +60,7 @@ export function useWorkspaceRefresh(
       window.removeEventListener("kiteline:connected", schedule);
       document.removeEventListener("visibilitychange", visible);
     };
-  }, [deviceId, workspaceId, active, scope]);
+  }, [deviceId, workspaceId, active]);
 }
 
 export function useWatchStatus(deviceId: string, workspaceId: string) {

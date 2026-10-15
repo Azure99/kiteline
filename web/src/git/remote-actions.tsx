@@ -45,7 +45,7 @@ export function RemoteActions({
     }
   }, [deviceId, workspaceId, repoId]);
   useEffect(() => () => request.current?.abort(), [active, load]);
-  useWorkspaceRefresh(deviceId, workspaceId, active, "git", load);
+  useWorkspaceRefresh(deviceId, workspaceId, active, load);
   const disabled = !active || !!activity.request;
   const pullLabel = value?.upstream
     ? t(($) => $.git.pullTarget, { target: value.upstream })

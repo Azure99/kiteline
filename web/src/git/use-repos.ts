@@ -77,6 +77,6 @@ export function useRepos(deviceId: string, workspaceId: string, enabled: boolean
       scanCursor.current = undefined;
     };
   }, [enabled, discover, deviceId]);
-  useWorkspaceRefresh(deviceId, workspaceId, enabled, "repos", discover);
+  useWorkspaceRefresh(deviceId, workspaceId, enabled, discover);
   return { repos, scan, busy, error, discover };
 }
