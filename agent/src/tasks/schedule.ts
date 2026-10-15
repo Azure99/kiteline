@@ -1,4 +1,3 @@
-import { taskLimits } from "../limits.js";
 import { Cron } from "croner";
 import { homedir } from "node:os";
 import { stat } from "node:fs/promises";
@@ -8,6 +7,7 @@ import {
   AppError,
   record,
   string,
+  taskTextLimits,
   type ScheduledTaskInput,
   type TaskSchedule,
 } from "@kiteline/shared/protocol";
@@ -97,8 +97,8 @@ export function previewSchedule(input: unknown, timezone?: unknown) {
 
 function taskFields(value: unknown): Required<ScheduledTaskInput> {
   const input = record(value);
-  const name = text(input.name, "name", taskLimits.nameBytes);
-  const command = text(input.command, "command", taskLimits.commandBytes);
+  const name = text(input.name, "name", taskTextLimits.nameBytes);
+  const command = text(input.command, "command", taskTextLimits.commandBytes);
   const schedule = checkSchedule(input.schedule);
   const timezone = checkTimezone(input.timezone);
   const cwd = devicePath(

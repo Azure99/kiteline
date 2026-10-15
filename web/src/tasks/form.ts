@@ -1,6 +1,23 @@
-import type { ScheduledTask, ScheduledTaskInput, TaskSchedule } from "@kiteline/shared/protocol";
+import {
+  taskTextLimits,
+  type ScheduledTask,
+  type ScheduledTaskInput,
+  type TaskSchedule,
+} from "@kiteline/shared/protocol";
 import { ApiError } from "../lib/api";
 import { i18n } from "../i18n";
+
+export function taskTextSize(name: string, command: string) {
+  const encoder = new TextEncoder();
+  const nameBytes = encoder.encode(name).byteLength;
+  const commandBytes = encoder.encode(command).byteLength;
+  return {
+    nameBytes,
+    commandBytes,
+    nameTooLong: nameBytes > taskTextLimits.nameBytes,
+    commandTooLong: commandBytes > taskTextLimits.commandBytes,
+  };
+}
 
 export type SchedulePreset = "once" | "hourly" | "daily" | "weekly" | "cron";
 export interface ScheduleForm {

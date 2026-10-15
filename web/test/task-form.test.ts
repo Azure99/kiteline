@@ -5,8 +5,28 @@ import {
   localDateTime,
   scheduleForm,
   taskChanges,
+  taskTextSize,
   taskTime,
 } from "../src/tasks/form";
+
+test.each([
+  ["a".repeat(256), "x".repeat(16384), 256, 16384, false, false],
+  ["a".repeat(257), "x".repeat(16385), 257, 16385, true, true],
+  ["界".repeat(85) + "a", "x", 256, 1, false, false],
+  ["界".repeat(86), "x", 258, 1, true, false],
+  ["😀".repeat(64), "x".repeat(16385), 256, 16385, false, true],
+  [" e\u0301 ", " \n😀\n ", 5, 8, false, false],
+])(
+  "task text counts raw UTF-8 bytes at the field limits (%#)",
+  (name, command, nameBytes, commandBytes, nameTooLong, commandTooLong) => {
+    expect(taskTextSize(name, command)).toEqual({
+      nameBytes,
+      commandBytes,
+      nameTooLong,
+      commandTooLong,
+    });
+  },
+);
 
 test("editing an elapsed one-time task preserves its original timestamp and consumption", () => {
   const task: ScheduledTask = {

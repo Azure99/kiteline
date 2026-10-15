@@ -79,6 +79,8 @@ export const zhCN = {
     weekday_5: "星期五",
     weekday_6: "星期六",
     command: "命令",
+    textBytes: "{{bytes, number}} / {{limit, number}} UTF-8 字节",
+    textTooLong: "超过上限",
     advanced: "工作目录与调度时区",
     cwd: "工作目录",
     cwdRequired: "请填写工作目录",

@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { Device, ScheduledTask, ScheduledTaskInput } from "@kiteline/shared/protocol";
+import {
+  taskTextLimits,
+  type Device,
+  type ScheduledTask,
+  type ScheduledTaskInput,
+} from "@kiteline/shared/protocol";
 import { Save } from "lucide-react";
 import { ApiError, rpc } from "../lib/api";
 import { newId } from "../lib/id";
@@ -15,7 +20,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../components/ui/dialog";
-import { formSchedule, scheduleForm, taskChanges, taskTime, type SchedulePreset } from "./form";
+import {
+  formSchedule,
+  scheduleForm,
+  taskChanges,
+  taskTextSize,
+  taskTime,
+  type SchedulePreset,
+} from "./form";
 
 export const scheduleSelectClass =
   "min-h-9 w-full min-w-0 rounded border border-border bg-background px-2 text-sm max-desk:min-h-11";
@@ -50,6 +62,8 @@ export function TaskEditor({
   const [baseline, setBaseline] = useState(task);
   const [name, setName] = useState(task?.name ?? "");
   const [command, setCommand] = useState(task?.command ?? "");
+  const textSize = taskTextSize(name, command);
+  const textTooLong = textSize.nameTooLong || textSize.commandTooLong;
   const [cwd, setCwd] = useState(task?.cwd ?? "");
   const [timezone, setTimezone] = useState(task?.timezone ?? "");
   const [form, setForm] = useState(() => scheduleForm(task?.schedule));
@@ -113,7 +127,7 @@ export function TaskEditor({
   }, [deviceId, enabled, parsed.schedule, timezone, baseline?.schedule, baseline?.timezone]);
   const unknown = uncertain;
   async function save() {
-    if (!parsed.schedule || !enabled || busy || unknown) return;
+    if (!parsed.schedule || !enabled || busy || unknown || textTooLong) return;
     if (baseline && !cwd) {
       setError("cwdRequired");
       return;
@@ -214,11 +228,25 @@ export function TaskEditor({
               <label className="block space-y-1 text-sm">
                 <span>{t(($) => $.common.name)}</span>
                 <Input
+                  aria-label={t(($) => $.common.name)}
+                  aria-invalid={textSize.nameTooLong || undefined}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   required
-                  maxLength={256}
                 />
+                <p
+                  className={
+                    textSize.nameTooLong
+                      ? "text-xs text-destructive"
+                      : "text-xs text-muted-foreground"
+                  }
+                >
+                  {t(($) => $.schedules.textBytes, {
+                    bytes: textSize.nameBytes,
+                    limit: taskTextLimits.nameBytes,
+                  })}
+                  {textSize.nameTooLong && ` · ${t(($) => $.schedules.textTooLong)}`}
+                </p>
               </label>
               <label className="block space-y-1 text-sm">
                 <span>{t(($) => $.schedules.schedule)}</span>
@@ -286,12 +314,27 @@ export function TaskEditor({
               <label className="block space-y-1 text-sm">
                 <span>{t(($) => $.schedules.command)}</span>
                 <Textarea
+                  aria-label={t(($) => $.schedules.command)}
+                  aria-invalid={textSize.commandTooLong || undefined}
                   className="min-h-24 font-mono"
                   value={command}
                   required
                   onChange={(e) => setCommand(e.target.value)}
                   spellCheck={false}
                 />
+                <p
+                  className={
+                    textSize.commandTooLong
+                      ? "text-xs text-destructive"
+                      : "text-xs text-muted-foreground"
+                  }
+                >
+                  {t(($) => $.schedules.textBytes, {
+                    bytes: textSize.commandBytes,
+                    limit: taskTextLimits.commandBytes,
+                  })}
+                  {textSize.commandTooLong && ` · ${t(($) => $.schedules.textTooLong)}`}
+                </p>
               </label>
               <details className="text-sm">
                 <summary className="min-h-9 cursor-pointer py-2">
@@ -415,7 +458,9 @@ export function TaskEditor({
             </Button>
             <Button
               type="submit"
-              disabled={busy || !enabled || !parsed.schedule || unknown || !!previewError}
+              disabled={
+                busy || !enabled || !parsed.schedule || unknown || !!previewError || textTooLong
+              }
             >
               <Save />
               {t(($) => $.common.save)}

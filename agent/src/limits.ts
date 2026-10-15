@@ -18,8 +18,6 @@ export const agentLimits = {
 } as const;
 
 export const taskLimits = {
-  nameBytes: 256,
-  commandBytes: 16 * 1024,
   outputReadBytes: 32 * 1024,
   diagnosticBytes: 2048,
   pageEntries: 50,

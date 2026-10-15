@@ -1,3 +1,8 @@
+export const taskTextLimits = {
+  nameBytes: 256,
+  commandBytes: 16 * 1024,
+} as const;
+
 type TaskValues = {
   state: "active" | "paused";
   runState:

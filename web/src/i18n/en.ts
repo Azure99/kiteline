@@ -82,6 +82,8 @@ export const en = {
     weekday_5: "Friday",
     weekday_6: "Saturday",
     command: "Command",
+    textBytes: "{{bytes, number}} / {{limit, number}} UTF-8 bytes",
+    textTooLong: "Limit exceeded",
     advanced: "Working directory and schedule time zone",
     cwd: "Working directory",
     cwdRequired: "Working directory is required",
