@@ -138,7 +138,7 @@ export function parse(argv: string[]) {
   const command = (fileCommand ? positionals.slice(0, 2) : positionals).join(" ");
   const showHelp = !!raw.help || argv.length === 0;
   if (!showHelp && !(raw.version && !positionals.length)) {
-    const allowed = commands[command];
+    const allowed = Object.hasOwn(commands, command) ? commands[command] : undefined;
     if (!allowed)
       throw new AppError(
         "invalid_argument",
@@ -247,7 +247,7 @@ const commandHelp: Record<string, string> = {
 };
 
 export function help(command = "") {
-  if (commandHelp[command])
+  if (Object.hasOwn(commandHelp, command))
     return (
       commandHelp[command] +
       (command === "terminal attach"

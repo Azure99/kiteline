@@ -152,6 +152,19 @@ test("attach help is offline and JSON or redirected terminals fail before connec
   expect(redirected.stderr).toContain("requires stdin and stdout TTYs");
 });
 
+test("prototype property names are unknown commands and fall back to general help", async () => {
+  const root = await directory();
+  for (const name of ["toString", "__proto__", "constructor"]) {
+    const rejected = await cli(root, [name]);
+    expect(rejected.code, rejected.stderr).toBe(2);
+    expect(rejected.stderr).toContain(`Unknown command: ${name}`);
+    const help = await cli(root, [name, "--help"]);
+    expect(help.code, help.stderr).toBe(0);
+    expect(help.stdout).toContain("Kiteline — remote access to shared workspaces");
+    expect(help.stdout).not.toContain("[native code]");
+  }
+});
+
 test("help and version work offline with no credentials and a corrupt cwd target", async () => {
   const root = await directory();
   await writeFile(join(root, ".kiteline.json"), "{");
