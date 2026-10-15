@@ -64,7 +64,13 @@ export async function agentPaths() {
 }
 export async function privateDirectory(path: string) {
   if (process.platform === "win32") {
-    await mkdir(dirname(path), { recursive: true });
+    const parent = dirname(path);
+    if (parent === path)
+      throw new AppError(
+        "invalid_argument",
+        "Private application directory must not be a drive or share root",
+      );
+    if (dirname(parent) !== parent) await mkdir(parent, { recursive: true });
     windowsNative().privateDirectory(path);
   } else await mkdir(path, { recursive: true, mode: 0o700 });
 }

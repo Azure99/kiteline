@@ -238,8 +238,9 @@ jobs:
           Expand-Archive -LiteralPath $archive -DestinationPath $root
           $package = Join-Path $root $name
           node scripts/verify-package.mjs agent windows-amd64 $archive $package
-          $env:KITELINE_AGENT_HOME = Join-Path $root 'check-state'
-          $env:KITELINE_AGENT_RUN_DIR = Join-Path $root 'check-run'
+          $drive = [System.IO.Path]::GetPathRoot($root)
+          $env:KITELINE_AGENT_HOME = Join-Path $drive 'kiteline-ci-check-state'
+          $env:KITELINE_AGENT_RUN_DIR = Join-Path $drive 'kiteline-ci-check-run'
           $actual = & pwsh -NoProfile -ExecutionPolicy Bypass -File "$package/bin/kiteline-agent.ps1" --version
           if ($actual -ne $version) { throw "Version mismatch: $actual" }
           & pwsh -NoProfile -ExecutionPolicy Bypass -File "$package/bin/kiteline-agent.ps1" check
