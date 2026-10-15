@@ -8,11 +8,15 @@ Kiteline 是一个自托管的 coding agent 工作台。Claude Code、Codex 等�
   <a href="docs/assets/readme-desktop.png"><img src="docs/assets/readme-desktop.png" width="820" alt="桌面端：Lantern API 项目，三台设备、十个工作区，终端分组与左一右二三分屏"></a>
 </p>
 
-<p align="center">
-  <a href="docs/assets/readme-mobile-terminal.png"><img src="docs/assets/readme-mobile-terminal.png" width="270" alt="手机端打开 Lantern API 正在运行的同一 Codex 会话"></a>
-  <a href="docs/assets/readme-mobile-files.png"><img src="docs/assets/readme-mobile-files.png" width="270" alt="手机端浏览 Lantern API 的文件"></a>
-  <a href="docs/assets/readme-mobile-git.png"><img src="docs/assets/readme-mobile-git.png" width="270" alt="手机端查看 Lantern API 的 Git diff"></a>
-</p>
+<table align="center">
+  <tr>
+    <td nowrap>
+      <a href="docs/assets/readme-mobile-terminal.png"><img src="docs/assets/readme-mobile-terminal.png" width="260" alt="手机端打开 Lantern API 正在运行的同一 Codex 会话"></a>
+      <a href="docs/assets/readme-mobile-files.png"><img src="docs/assets/readme-mobile-files.png" width="260" alt="手机端浏览 Lantern API 的文件"></a>
+      <a href="docs/assets/readme-mobile-git.png"><img src="docs/assets/readme-mobile-git.png" width="260" alt="手机端查看 Lantern API 的 Git diff"></a>
+    </td>
+  </tr>
+</table>
 
 - **原生 TUI**：agent 运行在真实终端中，保留其原有界面与交互，任何命令行工具无需适配即可使用。
 - **多端无缝流转**：同一个终端会话可同时在电脑、手机和设备本机终端中打开，输出实时同步，切换设备时任务不中断。

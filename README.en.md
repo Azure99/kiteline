@@ -8,11 +8,15 @@ Kiteline is a self-hosted workbench for coding agents. Claude Code, Codex, and a
   <a href="docs/assets/readme-desktop.png"><img src="docs/assets/readme-desktop.png" width="820" alt="Desktop: the Lantern API project, three machines, ten workspaces, terminal groups, and one pane on the left with two stacked on the right"></a>
 </p>
 
-<p align="center">
-  <a href="docs/assets/readme-mobile-terminal.png"><img src="docs/assets/readme-mobile-terminal.png" width="270" alt="Opening the same running Lantern API Codex session on a phone"></a>
-  <a href="docs/assets/readme-mobile-files.png"><img src="docs/assets/readme-mobile-files.png" width="270" alt="Browsing Lantern API files on a phone"></a>
-  <a href="docs/assets/readme-mobile-git.png"><img src="docs/assets/readme-mobile-git.png" width="270" alt="Viewing the Lantern API Git diff on a phone"></a>
-</p>
+<table align="center">
+  <tr>
+    <td nowrap>
+      <a href="docs/assets/readme-mobile-terminal.png"><img src="docs/assets/readme-mobile-terminal.png" width="260" alt="Opening the same running Lantern API Codex session on a phone"></a>
+      <a href="docs/assets/readme-mobile-files.png"><img src="docs/assets/readme-mobile-files.png" width="260" alt="Browsing Lantern API files on a phone"></a>
+      <a href="docs/assets/readme-mobile-git.png"><img src="docs/assets/readme-mobile-git.png" width="260" alt="Viewing the Lantern API Git diff on a phone"></a>
+    </td>
+  </tr>
+</table>
 
 - **Native TUIs**: agents run in real terminals, preserving their original interfaces and interactions. Any command-line tool works without adaptation.
 - **Seamless switching**: open the same terminal session on your computer, phone, and the machine's local terminal at the same time. Output stays in sync, and tasks keep running as you switch devices.
