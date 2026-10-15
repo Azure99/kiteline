@@ -50,7 +50,6 @@ export class TerminalDisplay {
   private observer: ResizeObserver;
   private queue: Promise<unknown> = Promise.resolve();
   private receivedEnd = false;
-  private finalFrame = false;
   private connectionLost = false;
   private ready = false;
   private disposed = false;
@@ -116,7 +115,7 @@ export class TerminalDisplay {
       this.socket = socket;
       socket.binaryType = "arraybuffer";
       socket.onmessage = (event: MessageEvent<ArrayBuffer | string>) => {
-        if (this.disposed || this.finalFrame) return;
+        if (this.disposed || this.receivedEnd || this.connectionLost) return;
         try {
           if (event.data instanceof ArrayBuffer) {
             const data = new Uint8Array(event.data);
@@ -128,7 +127,6 @@ export class TerminalDisplay {
             const credit = terminalOutputCost(encoder.encode(event.data).length);
             const ordered = frame.type !== "input.error" && frame.type !== "error";
             if (frame.type === "ended" || frame.type === "error") {
-              this.finalFrame = true;
               this.receivedEnd = frame.type === "ended";
               this.connectionLost = frame.type === "error";
               if (this.terminal) this.terminal.options.disableStdin = true;
@@ -145,10 +143,11 @@ export class TerminalDisplay {
         }
       };
       socket.onerror = () => {
-        if (!this.finalFrame) this.fail(new Error("Terminal connection failed"));
+        if (!this.receivedEnd && !this.connectionLost)
+          this.fail(new Error("Terminal connection failed"));
       };
       socket.onclose = () => {
-        if (!this.finalFrame && !this.disposed) {
+        if (!this.receivedEnd && !this.connectionLost && !this.disposed) {
           this.connectionLost = true;
           this.ready = false;
           if (this.terminal) this.terminal.options.disableStdin = true;
@@ -457,7 +456,6 @@ export class TerminalDisplay {
   };
   private fail(error: unknown) {
     if (this.disposed) return;
-    this.finalFrame = true;
     this.connectionLost = true;
     this.ready = false;
     if (this.terminal) this.terminal.options.disableStdin = true;
