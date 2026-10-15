@@ -1,5 +1,7 @@
 import { run } from "./release-inputs.mjs";
 
+export const executablePathPattern = /^(?:bin|runtime\/bin|dist\/native\/bin)\//;
+
 export const agentTargets = [
   "linux-amd64",
   "linux-arm64",

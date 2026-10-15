@@ -3,6 +3,7 @@ import { readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import {
   agentTargets,
+  executablePathPattern,
   expectedRelease,
   packageNames,
   releaseMatches,
@@ -60,7 +61,7 @@ function walk(relative = "") {
     if (entry.isDirectory()) walk(key + "/");
     else if (entry.isFile()) {
       if (key !== "SHA256SUMS") actual.set(key, digest(file));
-      if (platform !== "windows" && /^(bin|runtime\/bin|dist\/native\/bin)\//.test(key))
+      if (platform !== "windows" && executablePathPattern.test(key))
         assert.ok(statSync(file).mode & 0o111, `Missing executable permission: ${key}`);
     } else if (entry.isSymbolicLink()) {
       assert.notEqual(platform, "windows", `Windows package contains a link: ${key}`);

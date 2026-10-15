@@ -22,6 +22,7 @@ import { verifyWindowsComponents } from "./build-windows-components.mjs";
 import { verifyMacosComponents } from "./build-macos-components.mjs";
 import {
   agentTargets as allAgentTargets,
+  executablePathPattern,
   expectedRelease,
   packageNames,
   releaseMatches,
@@ -193,8 +194,7 @@ function checksums(directory) {
       if (stat.isDirectory()) walk(file);
       else if (stat.isFile()) {
         const name = relative(directory, file);
-        const executable =
-          !!(stat.mode & 0o111) || /^(?:bin|runtime\/bin|dist\/native\/bin)\//.test(name);
+        const executable = !!(stat.mode & 0o111) || executablePathPattern.test(name);
         if (!windows) {
           // pnpm can hard-link both store entries and local workspace dependencies.
           if (stat.nlink > 1) {
