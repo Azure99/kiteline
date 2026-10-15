@@ -22,7 +22,7 @@ export default tseslint.config(
   {
     files: [
       "web/src/**/*.{ts,tsx}",
-      "shared/src/protocol/{index,rpc,tasks,text,client}.ts",
+      "shared/src/protocol/{index,rpc,tasks,text,client,ipc,navigation,terminal-observation}.ts",
       "shared/src/terminal/index.ts",
     ],
     rules: {
