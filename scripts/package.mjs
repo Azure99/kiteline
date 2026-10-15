@@ -31,6 +31,7 @@ import {
 import { digest, fetchPinned, run as execute } from "./release-inputs.mjs";
 import { windowsRuntimeFiles, windowsComponentPath } from "./windows-components.ts";
 import { agentLauncher, windowsAgentLaunchers, windowsCliLauncher } from "./agent-launcher.ts";
+import { terminalReset } from "../cli/src/terminal-reset.ts";
 
 const root = resolve(import.meta.dirname, "..");
 const release = JSON.parse(readFileSync(join(root, "release/inputs.json"), "utf8"));
@@ -405,7 +406,6 @@ try {
   if (portable) {
     const name = `kiteline${windows ? ".ps1" : ""}`;
     if (windows) {
-      const { terminalReset } = await import("../cli/dist/attach.js");
       writeFileSync(join(destination, "bin", name), windowsCliLauncher(terminalReset));
     } else cpSync(join(root, "installer", name), join(destination, "bin", name));
     chmodSync(join(destination, "bin", name), 0o755);
