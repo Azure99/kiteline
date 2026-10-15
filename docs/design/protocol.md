@@ -38,10 +38,10 @@ RPC、文件写入和本机 IPC 返回 `Reply`，字段定义见 `shared/src/pro
 以下情况产生结果未确认：
 
 - 控制连接在 RPC 返回前断开或被替换：server 返回 `unknown` 和 `offline`。
-- agent 的成功结果超过 `controlMessageBytes`：agent 返回 `unknown` 和 `limit_exceeded`，不返回结果正文；非成功结果超限时，agent 保留该结果的 `outcome`，同样返回 `limit_exceeded`。
+- agent 的成功结果超过 `controlMessageBytes`：agent 返回 `unknown` 和 `limit_exceeded`，不返回结果正文；`sessions.snapshot` 和 `sessions.wait` 是例外，超限时返回 `failed` 和 `limit_exceeded`。非成功结果超限时，agent 保留该结果的 `outcome`，同样返回 `limit_exceeded`。
 - 文件写入在 server 发出 `end` 之后失败；在此之前失败为 `failed`。
 - recorder 请求超时或 recorder 退出。
-- 工作台发出写请求后没有收到可解析的响应（网络中断、反向代理返回非 JSON 错误页）：工作台记为 `io_error` 和 `unknown`。写请求指 `rpcMutates` 为 `true` 的 RPC 和其他非 GET、非 HEAD 请求。本机命令行对写方法采用同样规则。
+- 工作台发出写请求后没有收到可解析的响应（网络中断、反向代理返回非 JSON 错误页）：工作台记为 `io_error` 和 `unknown`。写请求指 `rpcMutates` 为 `true` 的 RPC 和其他非 GET、非 HEAD 请求；打开数据通道的 POST 仅预约通道，不按写请求处理。本机命令行对写方法采用同样规则。
 
 **不自动重放。** server、agent、工作台和命令行都不会自动重发写请求：结果为 `failed` 或 `unknown` 时不重发，连接恢复后也不补发。正确的处理是先重新读取实际状态，再由拥有者决定是否重试。读取请求可以重试：工作台把读取遇到的网络错误和 502、503、504，以及 server 在转发前以 502、503、504 拒绝的请求，标为可重试（`ApiError.retryable`）。
 

@@ -124,7 +124,14 @@ kiteline-agent schedule status RUN_ID --json
 kiteline-agent schedule output RUN_ID --stream stdout --offset 0 --json
 ```
 
-Task and run IDs stay unchanged throughout their records' lifetimes. Keep IDs from results for queries, stopping and review. Exit code 3 means the outcome is unconfirmed. Query the `taskId` or `runId` in the output instead of immediately resending the operation.
+Task and run IDs stay unchanged throughout their records' lifetimes. Keep IDs from results for queries, stopping and review.
+
+| Exit | Meaning                                                                                                                                                           |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | The CLI operation succeeded; accepting a run does not mean its command succeeded.                                                                                 |
+| 1    | A failure or partial failure outside the following two categories.                                                                                                |
+| 2    | Argument parsing failed, or the error code is `invalid_argument` (including errors returned by the local agent).                                                  |
+| 3    | The outcome is unknown. This takes precedence over other error categories. Query the output's `taskId` or `runId` instead of immediately resending the operation. |
 
 See [kiteline-agent commands](reference.en.md#kiteline-agent-commands) for Windows invocation forms. To read the JSON list in PowerShell:
 

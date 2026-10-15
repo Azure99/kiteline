@@ -313,12 +313,17 @@ Default output is readable text. With `--json`, stdout contains a structured rep
 with `outcome`, `result`, or `error.code`; interactive attach does not accept `--json`.
 Prompts and diagnostics use stderr. Commands do not retry automatically.
 
-| Exit | Meaning                                                                                                |
-| ---- | ------------------------------------------------------------------------------------------------------ |
-| 0    | The operation or observation succeeded.                                                                |
-| 1    | A remote failure or partial failure; partial results and diagnostics remain available.                 |
-| 2    | A local argument, configuration, target, or file I/O error.                                            |
-| 3    | The request may have taken effect, but its result is unknown. Observe before deciding what to do next. |
+| Exit | Meaning                                                                                                                                        |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | The operation or observation succeeded.                                                                                                        |
+| 1    | A remote failure (including `invalid_argument`), partial failure, or read transport failure; partial results and diagnostics remain available. |
+| 2    | A local processing error, such as an argument, configuration, default-target, or file I/O error.                                               |
+| 3    | The request may have taken effect, but its result is unknown. Observe before deciding what to do next.                                         |
+
+An `unknown` outcome takes precedence and exits 3 regardless of the error code or
+source. For example, a local read failure during upload can leave the write outcome
+unknown and exit 3. Missing or invalid local target configuration exits 2; a target
+absent from a remote device snapshot or session list exits 1.
 
 JSON interactions have a 30-second deadline. File body transfers stop waiting after
 120 consecutive seconds without progress.

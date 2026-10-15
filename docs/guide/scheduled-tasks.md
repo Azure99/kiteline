@@ -124,7 +124,14 @@ kiteline-agent schedule status RUN_ID --json
 kiteline-agent schedule output RUN_ID --stream stdout --offset 0 --json
 ```
 
-任务和运行 ID 在各自记录的生命周期内不变；保留结果中的 ID，用于查询、停止和核查。退出码为 3 表示结果未确认，应按输出中的 `taskId` 或 `runId` 查询，不要直接重发同一操作。
+任务和运行 ID 在各自记录的生命周期内不变；保留结果中的 ID，用于查询、停止和核查。
+
+| 退出码 | 含义                                                                                        |
+| ------ | ------------------------------------------------------------------------------------------- |
+| 0      | 命令行操作成功；启动请求成功不代表任务命令执行成功。                                        |
+| 1      | 不属于以下两类的失败或部分失败。                                                            |
+| 2      | 参数解析失败，或错误码为 `invalid_argument`（包括本机 agent 返回的错误）。                  |
+| 3      | 结果未确认，优先于其他错误分类；按输出中的 `taskId` 或 `runId` 查询，不要直接重发同一操作。 |
 
 Windows 上的调用方式见 [kiteline-agent 命令](reference.md#kiteline-agent-命令)。在 PowerShell 中读取 JSON 列表：
 
