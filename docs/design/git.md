@@ -124,7 +124,7 @@ stage、unstage、review 和 discard 的路径最多 `listPageEntries × 2` 个�
 ### commit
 
 - `git.commit` 执行 `git commit -F -`，提交说明从 stdin 传入，不传路径，不加 `-a`；hooks、签名和身份照常生效。
-- 提交说明不能是空白，长度上限见[限额](../guide/reference.md#限额)。agent 在队列内重新计算 indexToken，与请求中的 `indexToken` 不同时返回 `conflict`；存在未解决的冲突，或没有暂存的变化时也返回 `conflict`，所以网页不能创建空提交。
+- 提交说明不能是空白，长度不超过 `controlMessageBytes`。agent 在队列内重新计算 indexToken，与请求中的 `indexToken` 不同时返回 `conflict`；存在未解决的冲突，或没有暂存的变化时也返回 `conflict`，所以网页不能创建空提交。
 - 成功时返回新提交的 OID；提交后读取 HEAD 失败时为结果未确认，结果带 `committed: true`。
 
 ### 分支

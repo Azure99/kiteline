@@ -6,11 +6,11 @@
 
 `installer/` 中的文件按以下三种方式进入运行环境：
 
-| 类别     | 文件                                                              | 渲染者、时机与去向                                                                                                                                                                                                              |
-| -------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 组包模板 | `kiteline-agent.in.sh`、`kiteline-agent.in.ps1`、`launcher.in.cs` | [`scripts/agent-launcher.ts`](../../scripts/agent-launcher.ts) 在组包时生成 portable/installed 两个 agent 入口；C# 内嵌在 PowerShell 中，在入口运行时由 `Add-Type` 编译。Windows 的状态文件和 Node 环境键来自构建后的现有模块。 |
-| 请求模板 | `connect.in.sh`、`upgrade.in.sh`、`windows-entry.in.ps1`          | [`server/src/agent-installation.ts`](../../server/src/agent-installation.ts) 在请求时填入版本、入口地址与模式，返回 `/connect.sh`、`/upgrade.sh`、`/connect.ps1` 或 `/upgrade.ps1`。                                            |
-| 原样分发 | `install.sh`、`install.ps1`、`kiteline-server`                    | [`scripts/package.mjs`](../../scripts/package.mjs) 将安装器复制到 server 的 downloads，供 `/install.sh`、`/install.ps1` 分发；`kiteline-server` 复制到 server 包的 `bin/kiteline-server`。                                      |
+| 类别     | 文件                                                              | 渲染者、时机与去向                                                                                                                                                                                                                                  |
+| -------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 组包模板 | `kiteline-agent.in.sh`、`kiteline-agent.in.ps1`、`launcher.in.cs` | [`scripts/agent-launcher.ts`](../../scripts/agent-launcher.ts) 在组包时生成 portable/installed 两个 agent 入口；C# 内嵌在 PowerShell 中，在入口运行时由 `Add-Type` 编译。Windows 入口使用的 Node 环境变量键取自构建后的 shared/terminal/node 模块。 |
+| 请求模板 | `connect.in.sh`、`upgrade.in.sh`、`windows-entry.in.ps1`          | [`server/src/agent-installation.ts`](../../server/src/agent-installation.ts) 在请求时填入版本、入口地址与模式，返回 `/connect.sh`、`/upgrade.sh`、`/connect.ps1` 或 `/upgrade.ps1`。                                                                |
+| 原样分发 | `install.sh`、`install.ps1`、`kiteline-server`                    | [`scripts/package.mjs`](../../scripts/package.mjs) 将安装器复制到 server 的 downloads，供 `/install.sh`、`/install.ps1` 分发；`kiteline-server` 复制到 server 包的 `bin/kiteline-server`。                                                          |
 
 ## Linux
 
@@ -18,7 +18,7 @@
 
 同一架构的发布包用于全部受支持发行版。随包 Node、tmux、ripgrep、PTY 桥和文件 helper 都静态链接 musl，不依赖目标机的 libc 或动态库。原生组件构建记录 `dist/native/identity.json` 的 `linkage` 为 `static-musl`，doctor 据此跳过动态库检查。包内 terminfo 的兼容方式见下节。
 
-静态 musl 程序不加载 glibc 的 NSS 模块，只能从 `/etc/passwd`（以及 nscd）读取账户信息。agent 默认用账户的登录 Shell（`os.userInfo()`），账户只存在于 LDAP、SSSD 等目录服务时读取会失败，此时在 `config.json` 中设置 `shell`（见 [agent 配置文件](../guide/reference.md#agent-配置文件)）。
+静态 musl 程序不加载 glibc 的 NSS 模块，只能从 `/etc/passwd`（以及 nscd）读取账户信息。agent 默认用账户的登录 Shell（`os.userInfo()`），账户只存在于 LDAP、SSSD 等目录服务且无法经 nscd 取得时，读取会失败，此时在 `config.json` 中设置 `shell`（见 [agent 配置文件](../guide/reference.md#agent-配置文件)）。
 
 ### terminfo
 
@@ -67,7 +67,7 @@ agent 启动 tmux 时设置 `TERMINFO_DIRS`，依次为随包现代目录、随�
 
 ### 系统保护
 
-- Gatekeeper：本仓库构建的 tmux、`flock` 和文件辅助程序没有经过 Apple 公证。curl 下载的文件不带隔离属性 `com.apple.quarantine`，不触发检查，接入命令和升级命令因此不受影响；浏览器下载的发布包带有隔离属性，运行随包程序时 macOS 可能以无法验证开发者为由拒绝。处理方法见[手工安装](../guide/devices.md#手工安装)。
+- Gatekeeper：本仓库构建的 tmux、`flock` 和文件辅助程序没有经过 Apple 公证。接入命令和升级命令使用 curl 下载，文件不带隔离属性 `com.apple.quarantine`；浏览器下载的发布包带有隔离属性，运行随包程序时 macOS 可能以无法验证开发者为由拒绝。处理方法见[手工安装](../guide/devices.md#手工安装)。
 - 隐私保护（TCC）：“桌面”“文稿”“下载”等受保护目录可能拒绝 agent 访问，文件和 Git 操作报告 `Operation not permitted`。在“终端”App 中前台运行时，系统以“终端”的名义请求授权；作为 LaunchDaemon 运行时没有授权提示，访问直接失败。
 
 ## Windows
@@ -96,7 +96,7 @@ agent 和 recorder 在 Windows 上启动的每个进程（tmux server 和每次 
 - recorder 用私有的 `script` 提供 PTY，在原始模式下运行 tmux control 客户端。所有 tmux 客户端都带 `-N`，不启动新的 server。
 - pane 中运行原生 Node 的 `shared/dist/terminal/pane.js`，从会话目录的 `pane.json` 读取启动信息，以参数数组和继承的标准输入输出启动配置的 PowerShell。普通终端加载用户 profile，快捷方式执行给定命令。PowerShell 退出后将 32 位退出码发布到 tmux pane；启动失败、被信号结束或发布失败时退出码为空。启动脚本忽略 Ctrl-C 和 Ctrl-Break，由 PowerShell 处理。
 - 远程 attach 使用与 Unix 同源的 `forkpty` 桥，在独立 Job 中运行普通 tmux client；原 server Job 不属于这次连接。
-- Windows CLI 通过现有 PowerShell 入口保存和恢复输入 Console mode。Node 在输出排空后把结果码写入本次临时文件并直接终止，避免原生退出清理被停读宿主阻塞；入口恢复后返回该结果并删除文件。未排空的期限退出不写完成结果，入口恢复残留 mode 和屏幕并报非零。宿主完全停读时，入口可等待消费恢复，Node 和远端桥仍有限退出。
+- Windows CLI 由 `kiteline.ps1` 入口保存和恢复控制台输入模式。Node 排空输出后通过临时文件把结果交给入口并直接退出，避免退出清理被不读取输出的宿主卡住；排空超时时入口恢复控制台并以非 0 退出。宿主完全不读取输出时，入口可能一直等待，但 Node 和远端桥在期限内退出。
 - 定时任务的启动参数见 [agent 配置文件](../guide/reference.md#agent-配置文件)，进程管理见[定时任务契约](scheduled-tasks.md#执行与停止)。
 
 ### 环境

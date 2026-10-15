@@ -4,7 +4,7 @@
 
 ## 布局
 
-工作台宽度小于 960 CSS 像素时使用窄布局，至少 960 像素时使用桌面布局。样式共用 `styles.css` 的 `desk` 断点；`web/src/lib/use-mobile.ts` 的 `useMobile()` 和命令式读取 `isMobile()` 共用桌面媒体查询的反值。布局只看可用宽度，不看设备类型或 UA，横屏手机按实际宽度使用对应布局。
+工作台宽度小于 960 CSS 像素时使用窄布局，至少 960 像素时使用桌面布局。样式使用 `styles.css` 的 `desk` 断点，脚本通过 `useMobile()`（`web/src/lib/use-mobile.ts`）读取同一媒体查询。布局只看可用宽度，不看设备类型或 UA，横屏手机按实际宽度使用对应布局。
 
 | 区域       | 桌面布局                                                               | 窄布局                                                         |
 | ---------- | ---------------------------------------------------------------------- | -------------------------------------------------------------- |
@@ -89,23 +89,23 @@
 
 - **键盘。** 只有图标的按钮使用 `IconButton`（`web/src/components/icon-button.tsx`），同时提供 `aria-label` 和 tooltip。对话框、菜单和 tooltip 基于 `@base-ui/react`：对话框打开时焦点进入对话框（需要时用 `initialFocus` 指向输入框），关闭后焦点回到触发元素；没有触发元素的对话框用 `finalFocus` 指定返回位置。分屏分隔条可以获得焦点。
 - **保持编辑焦点。** 作用于终端或编辑器的按钮在 `pointerdown` 时调用 `preventDefault()`，点击不会夺走终端或编辑器的焦点，手机软键盘也不会因此收起。
-- **软键盘与视口高度。** `trackViewport()`（`web/src/lib/viewport.ts`）根据 `visualViewport` 和浏览器支持时的 VirtualKeyboard API 计算可见区域，写入 CSS 变量 `--app-height` 和 `--app-top`。浏览器支持 `dvh`、页面没有缩放、可见区域顶端为 0 且软键盘没有遮住页面时，`--app-height` 为 `100dvh`，否则为测得的像素高度。工作台主体按这两个变量定位，始终占满可见区域，底部操作不被软键盘遮住。终端的软键盘和输入规则见[终端](terminal.md#输入)。
+- **软键盘与视口高度。** 工作台主体始终占满可见区域，底部操作不被软键盘遮住。`trackViewport()`（`web/src/lib/viewport.ts`）根据 `visualViewport` 和 VirtualKeyboard API 写入 `--app-height` 和 `--app-top`：能用 `dvh` 时取 `100dvh`，否则取测得的像素高度（Chromium 97 没有 `dvh`）。终端的软键盘和输入规则见[终端](terminal.md#输入)。
 - **触控。** 窄布局加大按钮和输入框，尺寸见[尺寸](#尺寸)。
-- **剪贴板。** 复制统一使用 `copyText()`（`web/src/lib/clipboard.ts`）：有 `navigator.clipboard.writeText` 时直接使用；没有时在本次用户操作中用临时只读文本框和 `execCommand("copy")` 复制，之后恢复原焦点、选区及其方向。复制失败时调用方就地显示错误，原文保留供手动选择。终端的粘贴按钮只在 `navigator.clipboard.readText` 可调用时显示，浏览器拒绝读取时显示错误，不预先请求权限。是否可用按 API 能力判断，不按访问协议判断。
+- **剪贴板。** 复制统一使用 `copyText()`（`web/src/lib/clipboard.ts`），没有 Clipboard API 时也能在本次用户操作中复制，并恢复原焦点和选区。复制失败时调用方就地显示错误，原文保留供手动选择。终端的粘贴按钮只在 `navigator.clipboard.readText` 可用时显示，不预先请求权限。是否可用按 API 能力判断，不按访问协议判断。
 - **新标签页。** 打开开发服务链接使用 `window.open(url, "_blank", "noopener,noreferrer")`，在点击事件中同步调用，不先等待异步请求。
 - **终端专注模式。** 专注模式收起顶栏、设备侧栏和工具导航，只留终端控制行和终端区域。所有宽度中同一按钮依次切换窗口内专注、浏览器全屏、退出；浏览器自身退出全屏后保留窗口内专注，下一次点击退出。专注状态绑定当前设备和工作区的终端工具，切换设备、工作区或工具时自动退出。全屏请求失败时保留窗口内专注并就地显示错误。
-- **文件专注模式。** 窄布局的已打开草稿复用同一专注管理，隐藏文件标题行与草稿标签。其 context 包含设备、工作区与工具；相对文件导航清除草稿路由或布局变宽时退出，源码与预览切换、保存仍保持专注。
+- **文件专注模式。** 窄布局中已打开的草稿复用同一专注管理，隐藏文件标题行与草稿标签。切换设备、工作区或工具，或布局变宽时退出；切换源码与预览、保存时保持专注。
 
 ## 语言
 
 工作台提供简体中文和英文两份资源：`web/src/i18n/en.ts` 和 `web/src/i18n/zh-CN.ts`，由 i18next 和 react-i18next 加载（`web/src/i18n/index.ts`）。
 
 - **选择规则。** 语言是浏览器级设置。没有手动选择时，首选语言为 `zh` 或 `zh-` 开头的标签（包括繁体中文标签）时使用简体中文，其他使用英文；浏览器语言变化时重新判断。手动选择保存在 localStorage，选择跟随浏览器时移除手动偏好。`<html lang>` 随当前语言更新。登录页和工作台的更多菜单都提供语言选择。
-- **键与类型。** 英文资源是键的来源，`zh-CN.ts` 以 `satisfies TranslationResources` 保证两份资源的键一致。代码用选择器形式 `t(($) => $.group.key)` 引用文案，不存在的键和缺少插值参数会在类型检查中报错（`web/test/i18n.typecheck.ts`）。`web/test/i18n.test.ts` 检查每个键都有非空译文、两种语言的插值参数一致。
+- **键与类型。** 英文资源是键的来源，`zh-CN.ts` 必须有同样的键。代码用选择器形式 `t(($) => $.group.key)` 引用文案，缺少的键和插值参数在类型检查中报错；`web/test/i18n.test.ts` 检查每个键都有非空译文、两种语言的插值参数一致。
 - **插值与复数。** 插值写作 `{{name}}`，数字用 `{{count, number}}` 按当前语言格式化。复数使用 i18next 的 `_one`、`_other` 后缀键。i18next 的转义关闭（`escapeValue: false`），由 React 负责转义，路径和用户输入原样显示。
 - **渲染时翻译。** 文案在渲染时生成，组件通过 `useTranslation()` 订阅语言变化。错误对象只保存错误码、原始消息和附加数据，`errorMessage()` 在显示时才翻译，所以切换语言后已经显示的错误也会更新。切换语言只触发重新渲染，不重新挂载终端、编辑器或其他视图，草稿、撤销历史、选区和终端内容都保留。
 - **不翻译的内容。** 文件内容、路径、用户起的名称、提交消息、命令输出、来自 server 和 agent 的原始诊断（英文）保持原样。开发服务代理的错误页由 server 生成，只有英文，见[错误响应](http-access.md#错误响应)。
-- **第三方组件。** CodeMirror 的界面文字通过 Compartment 重新配置 `EditorState.phrases`，不重建编辑器状态，见 `web/src/files/editor-locale.ts`、`editor-state.ts` 和 `text-editor.tsx`。xterm.js 的无障碍文字与终端输入框的 `aria-label` 在 `web/src/terminal/terminal-view.tsx` 中随语言更新。
+- **第三方组件。** CodeMirror 和 xterm.js 的界面文字随语言就地更新，不重建编辑器状态或终端（`web/src/files/editor-locale.ts`、`web/src/terminal/terminal-view.tsx`）。
 - **尺寸稳定。** 工作台提示行和终端提示行按提示状态使用固定高度（`.workbench-notice`、`.terminal-notice`，数值见 `web/src/styles.css`）。同一状态下，译文长短不同也不会改变终端尺寸，从而不会清除终端选区。
 
 ## 视觉

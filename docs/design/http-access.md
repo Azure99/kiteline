@@ -22,7 +22,7 @@ agent 只连接自己网络命名空间里的回环地址：先连 `127.0.0.1:<p
 
 一次代理请求按以下顺序处理（[请求流程](architecture.md#请求流程)有全局视图）：
 
-1. server 依次检查：方法是否为 CONNECT、路径格式、入口的 Host 与 `X-Forwarded-Proto`（规则见[请求入口与认证](protocol.md#请求入口与认证)）、登录 Cookie、写请求和所有 WebSocket 升级请求的 Origin、设备是否存在、是否需要 308、Upgrade 是否为 `websocket`。不升级的 GET 和 HEAD 请求不要求 Origin。代理入口不检查浏览器的 `appVersion` 参数，版本不一致通过设备状态反映为 426（见[错误响应](#错误响应)）。
+1. server 依次检查：方法是否为 CONNECT、路径格式、入口的 Host 与 `X-Forwarded-Proto`（规则见[请求入口与认证](protocol.md#请求入口与认证)）、登录 Cookie 或 CLI Bearer 凭据、设备授权范围、写请求和所有 WebSocket 升级请求的 Origin、设备是否存在、是否需要 308、Upgrade 是否为 `websocket`。不升级的 GET 和 HEAD 请求不要求 Origin。代理入口不检查浏览器的 `appVersion` 参数，版本不一致通过设备状态反映为 426（见[错误响应](#错误响应)）。
 2. server 为这次请求创建一个 `http.proxy` 类型的内部数据通道，绑定当前登录会话、设备和设备当前的控制连接，向 agent 发送 `channel.open`。浏览器不参与配对，公开的通道接口也不能创建或加入这种通道。
 3. agent 先建立到 `/api/agent/channels/<channelId>` 的数据 WebSocket，再连接本地端口。连接成功后发送文本帧 `ready`，失败时发送 `error` 后关闭。
 4. server 发送 `start`。之后数据 WebSocket 只传二进制帧，server 用 Node 的 `http.request()` 发出请求，`createConnection` 直接返回这条字节流；agent 在字节流和本地 TCP 连接之间双向复制。帧大小、文本帧拒绝和关闭码规则见[数据通道](protocol.md#数据通道)。
@@ -31,15 +31,16 @@ agent 只连接自己网络命名空间里的回环地址：先连 `127.0.0.1:<p
 
 ### 请求头
 
-| 头                                            | 处理                                                                           |
-| --------------------------------------------- | ------------------------------------------------------------------------------ |
-| `Host`、`X-Forwarded-Host`                    | 设为浏览器访问工作台用的 host，含非默认端口                                    |
-| `X-Forwarded-Proto`                           | 设为入口的 scheme，`http` 或 `https`                                           |
-| `Forwarded`、浏览器发来的其他 `X-Forwarded-*` | 删除；代理不添加 `X-Forwarded-For` 和 `X-Forwarded-Prefix`                     |
-| `Cookie`                                      | 删除 `kiteline_session` 和 `kiteline_session_http`，其他 Cookie 原样保留       |
-| 逐跳头（见表下）                              | 删除；WebSocket 升级时重建 `Connection: Upgrade` 和 `Upgrade: websocket`       |
-| `Content-Length`                              | 保留；没有 `Content-Length` 的分块请求重新以 `Transfer-Encoding: chunked` 发送 |
-| `Origin`、`Referer`、`Authorization` 及其他头 | 原样转发                                                                       |
+| 头                                            | 处理                                                                                  |
+| --------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `Host`、`X-Forwarded-Host`                    | 设为浏览器访问工作台用的 host，含非默认端口                                           |
+| `X-Forwarded-Proto`                           | 设为入口的 scheme，`http` 或 `https`                                                  |
+| `Forwarded`、浏览器发来的其他 `X-Forwarded-*` | 删除；代理不添加 `X-Forwarded-For` 和 `X-Forwarded-Prefix`                            |
+| `Cookie`                                      | 删除 `kiteline_session` 和 `kiteline_session_http`，其他 Cookie 原样保留              |
+| 逐跳头（见表下）                              | 删除；WebSocket 升级时重建 `Connection: Upgrade` 和 `Upgrade: websocket`              |
+| `Content-Length`                              | 保留；没有 `Content-Length` 的分块请求重新以 `Transfer-Encoding: chunked` 发送        |
+| `Authorization`                               | 由 CLI 凭据认证的请求删除；由登录 Cookie 认证的请求原样转发，供开发服务自己的认证使用 |
+| `Origin`、`Referer` 及其他头                  | 原样转发                                                                              |
 
 逐跳头指 `Connection`、`Proxy-Connection`、`Keep-Alive`、`Proxy-Authenticate`、`Proxy-Authorization`、`TE`、`Trailer`、`Transfer-Encoding`、`Upgrade`，以及 `Connection` 列出的头。入口 host 与 scheme 的确定方式见[请求入口与认证](protocol.md#请求入口与认证)。
 
@@ -80,7 +81,7 @@ agent 只连接自己网络命名空间里的回环地址：先连 `127.0.0.1:<p
 
 ## 端口建议
 
-“访问端口”对话框打开时通过 RPC `ports.list` 读取一次设备的 TCP 监听快照，之后只有点击“刷新监听端口”才再次读取（`web/src/devices/port-dialog.tsx`）。关闭对话框或切换设备会取消正在进行的读取。工作台不保存端口列表，agent 不持续扫描，也不向端口发送 HTTP 探测。点击候选端口只填入输入框。
+“访问端口”对话框通过 RPC `ports.list` 按需读取设备的 TCP 监听快照（`web/src/devices/port-dialog.tsx`）。工作台不保存端口列表，agent 不持续扫描，也不向端口发送 HTTP 探测。
 
 | 系统    | 来源                                                                        | 计入的监听地址                      |
 | ------- | --------------------------------------------------------------------------- | ----------------------------------- |
@@ -102,7 +103,7 @@ server 在向浏览器发出响应头之前遇到的错误按下表返回（映�
 | 路径格式不符、端口越界，或 Host、`X-Forwarded-Proto` 无效         | 400                                   | `invalid_argument` |
 | 未登录或登录已过期，且请求是页面导航                              | 302 到 `/login?returnTo=<原请求目标>` | `unauthenticated`  |
 | 未登录或登录已过期，其他请求                                      | 401                                   | `unauthenticated`  |
-| 写请求或 WebSocket 升级的 Origin 与入口不符                       | 403                                   | `forbidden`        |
+| 无设备权限，或写请求或 WebSocket 升级的 Origin 与入口不符         | 403                                   | `forbidden`        |
 | 设备 ID 不存在                                                    | 404                                   | `not_found`        |
 | 设备未连接，且它最近一次连接尝试报告的 agent 版本与 server 不一致 | 426                                   | `version_mismatch` |
 | 设备未连接，或控制连接在准备期间断开                              | 503                                   | `offline`          |
@@ -126,4 +127,4 @@ server 在向浏览器发出响应头之前遇到的错误按下表返回（映�
 - **目标只在设备本机。** 代理只连接 agent 所在网络命名空间的回环地址，不接受其他主机。agent 只主动发起出站连接，不监听 TCP 端口。
 - **代理不保存数据。** 请求和响应正文只以数据块经过 server 和 agent 的内存，不写入磁盘。
 
-修改代理时必须保持以上性质，并保持：登录 Cookie 既不转给上游，也不接受上游设置同名 Cookie；写请求和升级请求检查 Origin；代理请求只通过当前控制连接创建的通道到达设备。
+修改代理时必须保持：登录 Cookie 既不转给上游，也不接受上游设置同名 Cookie；由 CLI 凭据认证的请求不向上游转发 `Authorization`；写请求和升级请求检查 Origin；代理请求必须登录，只通过设备当前控制连接创建的通道到达设备回环地址。

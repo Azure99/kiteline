@@ -100,11 +100,11 @@ recorder 为每个会话保存一个检查点和其后的完整尾段：
 
 agent 发往该显示的帧依次为：`restore.begin`（尺寸、`historyLines`、副本字节数、`historyLimited`、`historyGap`）、副本的二进制分块、尾段（二进制输出和 `resize`）、恢复完成帧 `ready`，然后是实时的二进制输出和 `resize`，最后是 `ended` 或 `error`（帧名列表见[数据通道](protocol.md#数据通道)）。恢复期间的新输出进入该显示自己的有界队列，超出显示预算则只结束该显示。网页在 `restore.begin` 时新建 xterm.js 实例，副本字节数对不上就放弃该实例；收到恢复完成帧 `ready` 并发出第一次尺寸后才允许输入。
 
-流量控制：二进制输出和有序 JSON 帧使用同一累计信用，计量规则为 `terminalOutputCost()`，见 [IPC 类型](../../shared/src/protocol/ipc.ts)。JSON 按 UTF-8 编码计量；每帧最低信用覆盖小帧的 IPC 封装成本。网页按 FIFO 处理帧，二进制须等 xterm write 回调后才回报 `consumed.bytes`；带外 `error`、`input.error` 不计入信用。达到 `terminalOutstandingBytes` 后暂停发送，不能先确认尚未处理的输出来腾出窗口。
+流量控制：二进制输出和有序 JSON 帧共用一份累计信用（计量见 `shared/src/protocol/ipc.ts` 的 `terminalOutputCost()`）。网页对二进制输出等待 xterm 写入回调完成，对有序 JSON 帧等待处理完成，再回报 `consumed.bytes`，不能先确认尚未处理的输出来腾出窗口；未确认量达到 `terminalOutstandingBytes` 后暂停发送。带外的 `error`、`input.error` 不占信用。
 
-每个显示的实时待发量由 `limits.terminalDisplayBytes` 限制，恢复期间也计入；初始副本和尾段沿用各自上限，通过信用窗口渐进发送。停止消费不会暂停会话，待发超限时只结束该显示，由用户重连。持续输出快于消费或历史恢复期间积压过多也会触发此终态；不跳过输出后继续显示。
+每个显示的实时待发量受 `terminalDisplayBytes` 限制，恢复期间也计入。显示停止消费不会暂停会话：待发超限时只结束该显示，由用户重连；不会跳过部分输出后继续显示。
 
-recorder 只根据模型待解析量，按 `RecordedSession.pressure()` 的高低水位暂停或恢复 control stdout。已经进入当前 Node chunk 的内容继续处理，预算为它留出余量。tmux 的受管 control 堵塞会阻止真实 PTY 继续读取，普通或更快的客户端不能绕过；受管 control 禁用上游五分钟积压淘汰。因此记录器自身处理不过来时，程序输出和同会话输入仍可能等待，未处理输出保序保留，已解析 scrollback 按配置行数淘汰。
+记录器自身的背压只看模型待解析量：超过高水位时暂停读取 control 输出（`RecordedSession.pressure()`）。`flow-control.patch` 让受管 control 客户端的堵塞阻止 tmux 继续读取真实 PTY，其他客户端不能绕过，也不触发 tmux 的五分钟积压淘汰。因此记录器处理不过来时，程序输出和同会话输入会等待，但输出不丢失、不乱序；已解析的滚屏历史按配置行数淘汰。
 
 显示在第一次打开时附着。切换分组、工具，或收起文件和 Git 视图下方的终端面板，只隐藏显示，隐藏的显示保持附着并继续消费输出；关闭显示、离开工作区或页面销毁时释放附着。断开后网页不自动重连，显示“连接已断开”，由用户点击“重新连接”。同一会话的多个显示各自维护视口、选区和搜索。
 
@@ -112,9 +112,9 @@ recorder 只根据模型待解析量，按 `RecordedSession.pressure()` 的高�
 
 `kiteline terminal attach` 使用已有 CLI 凭据和目标，经 `terminal.attach` 的 `mode:"tty"` 变体接续运行中的会话。agent 收到配对后的 `start` 才启动 PTY helper 和普通 tmux client；helper 使用 `tmux attach-session -E` 保持原会话环境，仅该 client 使用本机传来的 `TERM`。记录不可用不阻止 TTY 附着，recorder 故障也不关闭 TTY 通道。
 
-helper 持续读取 PTY，stdout 待发和 agent 待写输入受传输预算约束，helper 内部只保留一个待写输入帧。agent 在发送前核对累计未消费输出；超过显示预算就结束该 client，不向原 pane 传递显示背压。helper 退出时先排空最后输出，再发送 `ended{exitCode:0}`；启动、传输或清理失败发送 `error`。通道结束只关闭自己的 PTY client，helper 及其子进程有有限清理期限。Windows 使用现有 Job 持有整个桥进程集合，helper 主进程退出后先终止残余后代，再确认 Job 清空及输出排空。
+helper 持续读取 PTY。agent 在发送前核对累计未消费输出，超过显示预算就结束这个 client，不把显示背压传给原 pane。helper 退出时先排空最后的输出，再发送 `ended{exitCode:0}`；启动、传输或清理失败时发送 `error`。通道结束只关闭自己的 PTY client，清理有期限。Windows 上整个桥进程集合放在一个 Job 中，确认 Job 清空和输出排空后才结束。
 
-CLI 在目标检查和连接成功后进入 raw，用异步写完成量确认消费。正常脱离和失败均立即开始有限输出排空期限；只有正常脱离且本机排空和恢复完成才退出 0，退出码不代表 pane 中最后一条命令。断线后复位本机显示模式；完全停读使复位序列无法生效时，POSIX 默认信号路径恢复 termios 并以非 0 结束。Windows 的本机恢复和完全停读例外见[平台实现](platforms.md#终端)。不自动重连或重放输入，操作方式见[远程 CLI](../guide/cli.md#接续已有终端)。
+CLI 在目标检查和连接成功后才进入 raw 模式，以本机终端实际写完的字节确认消费。脱离或失败后在有限期限内排空输出并恢复本机终端；只有正常脱离且排空、恢复都完成时才退出 0，退出码不代表 pane 中最后一条命令。本机终端完全不读取时复位序列无法生效，POSIX 上恢复 termios 后以非 0 退出；Windows 的处理见[平台实现](platforms.md#终端)。CLI 不自动重连或重放输入，操作见[远程 CLI](../guide/cli.md#接续已有终端)。
 
 ### 记录故障后的恢复
 
@@ -134,7 +134,7 @@ CLI 在目标检查和连接成功后进入 raw，用异步写完成量确认消
 
 可选 `ifInput: {epoch,inputSeq}` 在队列接纳处同步比较；条件不符返回 `failed/conflict`，不接纳输入。短 CLI 和网页每次接纳输入都会递增 `inputSeq`，包括后来因期限或 detach 丢弃的输入；计数不回退。远程 `terminal attach` 的原生输入不经过这个计数。计数不意味着回显、独占或干净提示符：已经接纳但尚未回显的输入仍可与下一次输入混合。
 
-成功回执只表示 tmux 输入操作已处理，包含操作前的输出位置 `before` 和回复时当前输入位置 `input`，不表示前台命令返回。排队到期是明确失败；开始注入后不能确定结果时为 `unknown`。调用方先观察，再决定后续输入；没有请求去重或自动重发。Unix tmux 客户端须到 `close` 才让队列继续，避免中止后仍占用共享缓冲区。预算与可用按键见 [RPC 类型](../../shared/src/protocol/terminal-observation.ts)及入口校验，不另建执行状态。
+成功回执只表示 tmux 输入操作已处理，包含操作前的输出位置 `before` 和回复时当前输入位置 `input`，不表示前台命令返回。排队到期是明确失败；开始注入后不能确定结果时为 `unknown`。调用方先观察，再决定后续输入；没有请求去重或自动重发。Unix 上要等这次 tmux 调用的进程关闭后队列才继续，避免中止的调用仍占用共享缓冲区。期限与可用按键见 [RPC 类型](../../shared/src/protocol/terminal-observation.ts)。
 
 ### 网页输入
 
@@ -161,7 +161,7 @@ CLI 在目标检查和连接成功后进入 raw，用异步写完成量确认消
 
 - 远程 TTY 客户端按自己终端的尺寸参与。
 - 网页通过 recorder 的控制客户端参与：执行 `select-window` 和 `refresh-client -C <列>x<行>`，等控制流报告同样的实际尺寸后再处理队列中的下一项。命令和尺寸等待使用 `interactionTimeout` 的剩余期限，主动背压暂停计时，恢复后继续计时；control 关闭立即使等待失败。实际尺寸经控制流进入模型，再以 `resize` 帧发给所有显示。
-- 网页和远程 TTY 的尺寸请求限制在 `terminalMaxCols` × `terminalMaxRows` 以内（见[限额](../guide/reference.md#限额)）。恢复帧的接收上限为 10000 列和 10000 行。没有网页时控制客户端保留最后的尺寸。
+- 网页和远程 TTY 的尺寸请求限制在 `terminalMaxCols` × `terminalMaxRows`（500 × 200）以内。恢复帧的接收上限为 10000 列和 10000 行。没有网页时控制客户端保留最后的尺寸。
 - 不使用 `resize-window`，它会把窗口切换为手动尺寸，客户端之后无法再调整。
 - 受管 control 输出堵塞时，远程 TTY 客户端的实际尺寸调整也延后，复用 tmux 待调整尺寸只保留最后尚未执行的目标；恢复后执行该尺寸。已经执行的尺寸及其输出、通知不被丢弃，避免暂停期间布局通知无限积压。
 
@@ -175,16 +175,16 @@ CLI 在目标检查和连接成功后进入 raw，用异步写完成量确认消
 
 `sessions.wait` 使用相同输出事件和有序队列。quiet 从 recorder 完成已有解析后计时，输出与 resize 重置窗口；change 比较 `after` 的 epoch/seq，能看到请求到达前已发生的变化。quiet 默认 300ms、总等待默认 1000ms，总等待始终有限，默认仅在 RPC 入口补齐。quiet、changed、timeout、reset 都返回当时完整画面；quiet 只表示近期没有输出活动，不表示业务完成。
 
-观察超过现有 1MiB IPC/control 包络上限时返回 `failed/limit_exceeded`，保留终端运行；不截屏、不自动调整尺寸。等待中的 model 关闭以 `recording_unavailable` 结束。显式 `sessions.recover` 后的新 model 使用新 epoch，能观察时直接返回 reset，不要求先返回错误再抓屏。
+观察结果超过 `controlMessageBytes`（1 MiB）时返回 `failed/limit_exceeded`，保留终端运行；不截屏、不自动调整尺寸。等待中的 model 关闭以 `recording_unavailable` 结束。显式 `sessions.recover` 后的新 model 使用新 epoch，能观察时直接返回 reset，不要求先返回错误再抓屏。
 
 ## 恢复动作
 
-| 动作             | 出现条件                                       |
-| ---------------- | ---------------------------------------------- |
-| “重新连接”       | 显示出错，错误码不是 `recording_unavailable`   |
-| “恢复终端”       | 错误码为 `recording_unavailable`               |
-| “减少历史后重试” | 错误码为 `limit_exceeded`、`timeout` 或 `busy` |
-| “重绘程序”       | 会话菜单，确认后执行                           |
+| 动作             | 出现条件                                                    |
+| ---------------- | ----------------------------------------------------------- |
+| “重新连接”       | 显示出错，错误码不是 `recording_unavailable` 或 `not_found` |
+| “恢复终端”       | 错误码为 `recording_unavailable`                            |
+| “减少历史后重试” | 错误码为 `limit_exceeded`、`timeout` 或 `busy`              |
+| “重绘程序”       | 会话菜单，确认后执行                                        |
 
 - 重新连接：确认登录仍有效后关闭当前显示，新建显示并以 `retained` 重新附着。不触及 recorder、共享历史和程序。
 - 恢复终端：调用 `sessions.recover`，`recovering` 期间读取会话列表，变为可用后重新附着（见[记录故障后的恢复](#记录故障后的恢复)）。

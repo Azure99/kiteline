@@ -28,7 +28,7 @@ flowchart LR
 
 - **server**（`kiteline-server`）：运行在 Linux 上的一个 Node 进程，提供工作台静态文件、`/api/` 接口、浏览器和 agent 的 WebSocket 连接、开发服务代理（`/proxy/`、`/absproxy/`）和 agent 安装资源。server 只监听 HTTP，HTTPS 由反向代理提供。管理数据保存在 server 数据目录的 `kiteline.sqlite` 中。
 - **工作台**：server 提供的单页应用。浏览器只与 server 同源通信，从不直接连接设备。
-- **远程 CLI**（`kiteline`）：通过 server 使用选定设备的操作凭据；短命令与工作台复用 HTTP/RPC 客户端，交互 attach 复用[终端数据通道](terminal.md#远程交互附着)，与 agent 复用 Node 网络传输。凭据导入与当前目录目标见[远程 CLI](../guide/cli.md)。
+- **远程 CLI**（`kiteline`）：用选定设备的操作凭据经 server 访问设备。短命令走设备 RPC，交互接续走[终端数据通道](terminal.md#远程交互附着)，与工作台共用结果解释，与 agent 共用网络传输。使用方法见[远程 CLI](../guide/cli.md)。
 - **agent**（`kiteline-agent run`）：每台设备一个 Node 进程，以项目用户身份运行。agent 主动连接 server：一条控制 WebSocket 承载 RPC 和事件，每次文件读写、终端附着和开发服务请求另开一条数据 WebSocket。agent 不监听 TCP 端口；同一用户的本机命令行通过[本机 IPC](protocol.md#本机-ipc) 访问它。
 - **recorder**（`terminal-recorder`）：agent 在第一次需要时启动的 Node 子进程，每个 agent 最多一个，通过 stdin 和 stdout 与 agent 通信。它为每个终端会话运行一个 tmux control 客户端，把输出写入 `@xterm/headless` 屏幕模型，浏览器附着时从这个模型恢复画面。
 - **tmux server**：每个终端会话一个私有 tmux server，socket 为 `<运行目录>/<sessionId>/tmux.sock`，会话名固定为 `kiteline`（`shared/src/terminal/node.ts` 的 `tmuxSession`）。终端程序运行在其中，浏览器断开或 recorder 退出都不会结束它。Windows 上 tmux 运行在随包的私有 MSYS2 环境中，见[平台实现](platforms.md#windows)。
@@ -96,7 +96,7 @@ deploy/                  Compose、systemd、launchd、WinSW 示例
 
 server 不保存文件内容、diff、终端输出、定时任务的命令和输出。这些内容在 agent 与浏览器之间经过 server 转发，只停留在内存中的固定大小队列里（见[数据通道](protocol.md#数据通道)）。
 
-agent 的 JSON 状态文件以原子替换写入，不调用 fsync，见[目录与权限](agent-lifecycle.md#目录与权限)。`agent.json` 不是合法 JSON 时，agent 启动失败并保留原文件。
+agent 的 JSON 状态文件以原子替换写入，不调用 fsync；文件损坏时的处理见[目录与权限](agent-lifecycle.md#目录与权限)。
 
 ## 请求流程
 
@@ -164,7 +164,7 @@ agent 的出站代理规则见[出站代理与证书](../guide/devices.md#出站
 支持的浏览器见[浏览器与界面](../guide/usage.md#浏览器与界面)。实现方式如下：
 
 - **构建目标**：`web/vite.config.ts` 把 `build.target` 和 `build.cssTarget` 设为 `chrome97`，JavaScript 语法和 CSS 都转换到 Chromium 97 可用的形式。
-- **CSS layer**：Chromium 97 不支持 `@layer`，构建时 `@csstools/postcss-cascade-layers` 把 layer 展开为选择器权重。展开后，Tailwind 的 `base` 重置和应用的 `kiteline-editor-reset` 重置权重变高，会覆盖 CodeMirror 运行时注入的无 layer 样式。`web/postcss/editor-reset-compat.ts` 在转换前把这两类重置拆开：编辑器外保留原规则；编辑器内改用 `:where(.cm-editor, .cm-editor *)` 限定的低权重副本，放在样式表末尾，CodeMirror 的样式因此仍然生效。`!important` 声明保持原规则的作用范围。
+- **CSS layer**：Chromium 97 不支持 `@layer`，构建时 `@csstools/postcss-cascade-layers` 把 layer 展开为选择器权重。展开后，Tailwind 的 `base` 重置和应用的 `kiteline-editor-reset` 重置权重变高，会覆盖 CodeMirror 运行时注入的无 layer 样式；`web/postcss/editor-reset-compat.ts` 因此让编辑器内只使用低权重的重置副本，编辑器外保留原规则。
 - **运行时补充**：`web/src/lib/browser-compat.ts` 在 `main.tsx` 中最先导入，补上 Chromium 97 缺少的 `structuredClone`。`eslint.config.mjs` 对 Web 及其消费的 shared 入口禁用 Chromium 97 不可用的 API，并限制 Web 导入仅能在 Node 运行的 shared 入口。
 - **视口高度**：Chromium 97 没有 `dvh`，`web/src/lib/viewport.ts` 此时用 `visualViewport` 测得的像素高度设置 `--app-height`，规则见[输入与焦点](interaction.md#输入与焦点)。
 

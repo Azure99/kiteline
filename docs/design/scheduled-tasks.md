@@ -86,7 +86,7 @@ ID 直接用作文件名，因此唯一性按 ASCII 大小写不敏感判断：�
 | `<runId>.stdout` | 这次运行的标准输出，权限 0600                              |
 | `<runId>.stderr` | 这次运行的标准错误，权限 0600                              |
 
-JSON 按 [JSON 状态](agent-lifecycle.md#目录与权限)的规则原子写入（`atomicJson()`）。输出文件以独占方式创建，只由这次运行写入。同一数据目录只运行一个 agent 实例，所有写入都经过上述串行队列。
+JSON 按 [JSON 状态](agent-lifecycle.md#目录与权限)的规则原子写入（`atomicJson()`）。输出文件以独占方式创建，只由这次运行写入。同一数据目录只运行一个 agent 实例。
 
 **启动加载。** agent 在开放任务 RPC 和设置定时器之前完成以下步骤：
 
@@ -126,7 +126,7 @@ server 只保存每台设备的任务摘要，用于离线时显示最近状态�
 - **发送。** agent 在每次收到 `welcome` 后，以及连接期间每次任务状态变化后，发送 `tasks.snapshot`。摘要的 `revision` 是 agent 内存中的计数器，每次变化加 1，agent 重启后从 0 开始。输出增长不产生摘要。
 - **内容。** 摘要类型见 `shared/src/protocol/tasks.ts` 的 `ScheduledTaskSummary` 与 `TaskRunSummary`。命令、工作目录、诊断文本和输出不在其中。
 - **接收。** server 用 `projectTaskSnapshot()`（`server/src/task-summary.ts`）投影允许的字段，带 `storageError` 时保存错误标记和空列表。server 只接受设备当前控制连接发来的摘要：每条连接的第一份摘要整体替换已有摘要，之后只接受 `revision` 更大的摘要。
-- **保存与通知。** 摘要写入 SQLite 表 `taskSummaries`，每台设备一行，新摘要整体替换旧摘要；然后向所有网页事件连接发送 `tasks.changed`，网页收到后重新读取。
+- **保存与通知。** 摘要写入 SQLite 表 `taskSummaries`，每台设备一行，新摘要整体替换旧摘要；然后向有该设备权限的网页事件连接发送 `tasks.changed`，网页收到后重新读取。
 - **读取。** `GET /api/tasks` 返回各设备摘要，可按设备筛选；类型见 `DeviceTaskSummary`。从未收到摘要时，观察时间和摘要为 `null`；`current` 只在设备当前控制连接已经报告过摘要时为 true，不由设备在线状态推断。
 - **详细数据。** 定义、运行列表和输出只通过设备 RPC 读取，经 server 内存转发，不写入 SQLite 或设备快照。
 - **删除设备。** server 删除该设备的摘要行；设备上的任务定义、记录和定时不受影响。
