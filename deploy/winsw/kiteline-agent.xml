@@ -11,8 +11,6 @@
   <env name="USERPROFILE" value="C:\Users\PROJECT_USER" />
   <env name="HOME" value="C:\Users\PROJECT_USER" />
   <env name="PATH" value="C:\Program Files\PowerShell\7;C:\Program Files\Git\cmd;C:\Windows\System32;C:\Windows" />
-  <env name="KITELINE_AGENT_HOME" value="C:\Users\PROJECT_USER\AppData\Local\kiteline-agent" />
-  <env name="KITELINE_AGENT_RUN_DIR" value="C:\Users\PROJECT_USER\AppData\Local\kiteline-agent\run" />
   <hidewindow>false</hidewindow>
   <stopparentprocessfirst>true</stopparentprocessfirst>
   <stoptimeout>45sec</stoptimeout>

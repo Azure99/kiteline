@@ -12,8 +12,6 @@
         <key>HOME</key><string>/Users/YOUR_PROJECT_USER</string>
         <key>PATH</key><string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
         <key>LANG</key><string>en_US.UTF-8</string>
-        <key>KITELINE_AGENT_HOME</key><string>/Users/YOUR_PROJECT_USER/.local/share/kiteline-agent</string>
-        <key>KITELINE_AGENT_RUN_DIR</key><string>/Users/YOUR_PROJECT_USER/.local/share/kiteline-agent/run</string>
     </dict>
     <key>StandardOutPath</key><string>/Users/YOUR_PROJECT_USER/.local/share/kiteline-agent/launchd.log</string>
     <key>StandardErrorPath</key><string>/Users/YOUR_PROJECT_USER/.local/share/kiteline-agent/launchd-error.log</string>

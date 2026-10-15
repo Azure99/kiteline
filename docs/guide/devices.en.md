@@ -256,7 +256,9 @@ sudo sed -i '' "s/YOUR_PROJECT_USER/$(id -un)/g" /Library/LaunchDaemons/com.kite
 sudo -e /Library/LaunchDaemons/com.kiteline.agent.plist
 ```
 
-Check `HOME`, `WorkingDirectory` (default `/Users/<username>`), `PATH` and `LANG`. `KITELINE_AGENT_HOME` and `KITELINE_AGENT_RUN_DIR` must match `/etc/kiteline-agent.env`; keep the example values if you have not customized the directories. Load it:
+Check `HOME`, `WorkingDirectory` (default `/Users/<username>`), `PATH` and `LANG`. The agent reads its data and runtime directories from `/etc/kiteline-agent.env`; the service example no longer repeats them.
+
+Previously copied service configurations are not updated automatically during an upgrade. If an older plist sets `KITELINE_AGENT_HOME` or `KITELINE_AGENT_RUN_DIR`, first confirm that `/etc/kiteline-agent.env` points to the directories currently in use, then remove the plist overrides. Do not switch data directories as part of this change. Load it:
 
 ```sh
 sudo chown root:wheel /Library/LaunchDaemons/com.kiteline.agent.plist
@@ -291,9 +293,11 @@ notepad "$service\kiteline-agent.xml"
 WinSW finds configuration by its own filename, so `kiteline-agent.exe` and `kiteline-agent.xml` must share a basename and directory. Check in Notepad:
 
 - `PATH`: include Git's `cmd` directory and your project tools; include the PS7 directory when using it.
-- `KITELINE_AGENT_HOME` and `KITELINE_AGENT_RUN_DIR`: use the actual `dataDir` and `runDir` values from `%ProgramData%\kiteline-agent\installation.json`, respectively.
+- The agent reads its data and runtime directories from `dataDir` and `runDir` in `%ProgramData%\kiteline-agent\installation.json`; the service does not need to repeat them.
 - Proxy: add lines such as `<env name="HTTPS_PROXY" value="http://proxy.example.com:3128" />` as needed.
 - Keep `<hidewindow>false</hidewindow>`, `<stopparentprocessfirst>true</stopparentprocessfirst>` and `<stoptimeout>45sec</stoptimeout>`. WinSW relies on them to send Ctrl-C to the agent when stopping the service and allow enough time to end terminal sessions and scheduled-task runs.
+
+Previously copied service configurations are not updated automatically during an upgrade. If an older XML sets `KITELINE_AGENT_HOME` or `KITELINE_AGENT_RUN_DIR`, first confirm that the installation record's `dataDir` and `runDir` point to the directories currently in use, then remove the XML overrides. Do not switch data directories as part of this change.
 
 Save and register the service:
 

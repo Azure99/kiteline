@@ -256,7 +256,9 @@ sudo sed -i '' "s/YOUR_PROJECT_USER/$(id -un)/g" /Library/LaunchDaemons/com.kite
 sudo -e /Library/LaunchDaemons/com.kiteline.agent.plist
 ```
 
-检查 `HOME`、`WorkingDirectory`（默认 `/Users/<用户名>`）、`PATH` 和 `LANG`。`KITELINE_AGENT_HOME` 和 `KITELINE_AGENT_RUN_DIR` 必须与 `/etc/kiteline-agent.env` 中的目录一致；没有修改过目录时保持示例值即可。然后加载：
+检查 `HOME`、`WorkingDirectory`（默认 `/Users/<用户名>`）、`PATH` 和 `LANG`。agent 从 `/etc/kiteline-agent.env` 读取数据和运行目录，服务示例不再重复设置这两个目录。
+
+已复制的服务配置不会随升级自动更新。如果旧 plist 中设置了 `KITELINE_AGENT_HOME` 或 `KITELINE_AGENT_RUN_DIR`，先确认 `/etc/kiteline-agent.env` 指向当前使用的目录，再删除 plist 中的覆盖项；不要因此切换数据目录。然后加载：
 
 ```sh
 sudo chown root:wheel /Library/LaunchDaemons/com.kiteline.agent.plist
@@ -291,9 +293,11 @@ notepad "$service\kiteline-agent.xml"
 WinSW 按自身文件名查找配置，所以程序名 `kiteline-agent.exe` 必须与 `kiteline-agent.xml` 同名并放在同一目录。在记事本中检查：
 
 - `PATH`：包含 Git 的 `cmd` 目录和项目工具所在的目录；使用 PS7 时也包含它的目录。
-- `KITELINE_AGENT_HOME` 和 `KITELINE_AGENT_RUN_DIR`：分别使用 `%ProgramData%\kiteline-agent\installation.json` 中 `dataDir` 和 `runDir` 的实际值。
+- agent 从 `%ProgramData%\kiteline-agent\installation.json` 的 `dataDir` 和 `runDir` 读取数据和运行目录，无需在服务中重复设置。
 - 代理：需要时加入 `<env name="HTTPS_PROXY" value="http://proxy.example.com:3128" />` 等行。
 - 保留 `<hidewindow>false</hidewindow>`、`<stopparentprocessfirst>true</stopparentprocessfirst>` 和 `<stoptimeout>45sec</stoptimeout>`。停止服务时，WinSW 依靠它们把 Ctrl-C 送到 agent，并给 agent 足够的时间结束终端会话和定时任务运行。
+
+已复制的服务配置不会随升级自动更新。如果旧 XML 中设置了 `KITELINE_AGENT_HOME` 或 `KITELINE_AGENT_RUN_DIR`，先确认安装记录中的 `dataDir` 和 `runDir` 指向当前使用的目录，再删除 XML 中的覆盖项；不要因此切换数据目录。
 
 保存后注册服务：
 
