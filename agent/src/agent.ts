@@ -311,7 +311,7 @@ export class Agent {
           break;
         default: {
           const unhandled: never = kind;
-          this.fileChannels.open(channelId, connectionId, unhandled, params);
+          throw new AppError("invalid_argument", `Unknown channel kind: ${unhandled}`);
         }
       }
     } else if (message.type === "channel.cancel") {

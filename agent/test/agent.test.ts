@@ -296,6 +296,51 @@ test("control reconnects after handshake rejection, retains valid watches and sc
   }
 }, 20000);
 
+test("unknown channel kinds close control without opening a data connection and reconnect", async () => {
+  const root = await mkdtemp("/var/tmp/kiteline-unknown-channel-");
+  const server = createHttpServer();
+  const sockets = new WebSocketServer({ server });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const paths: string[] = [];
+  sockets.on("connection", (_peer, request) => {
+    paths.push(new URL(request.url!, "http://localhost").pathname);
+  });
+  const agent = new Agent(testConfig(root), {
+    deviceId: "test",
+    deviceToken: "test",
+    server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+  });
+  try {
+    const connected = once(sockets, "connection");
+    for (const path of [agent.config.dataDir, agent.config.runDir]) await privateDirectory(path);
+    await agent.start();
+    const [peer] = (await connected) as [WebSocket];
+    peer.send(JSON.stringify({ type: "welcome", connectionId: "test", serverVersion: appVersion }));
+    const closed = once(peer, "close");
+    peer.send(
+      JSON.stringify({
+        type: "channel.open",
+        channelId: "unknown-channel",
+        connectionId: "test",
+        kind: "unknown",
+        params: {},
+      }),
+    );
+    const [code, reason] = await closed;
+    expect(code).toBe(1008);
+    expect(reason.toString()).toBe("invalid_control_message");
+    await expect.poll(() => paths.length, { timeout: 4000 }).toBe(2);
+    expect(paths).toEqual(["/api/agent/control", "/api/agent/control"]);
+  } finally {
+    await agent.close();
+    for (const peer of sockets.clients) peer.terminate();
+    await new Promise<void>((resolve) => sockets.close(() => resolve()));
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("bulk file requests outlive the RPC timeout and still cancel while publication is blocked", async () => {
   const root = await mkdtemp("/var/tmp/kiteline-bulk-control-");
   const server = createHttpServer();
