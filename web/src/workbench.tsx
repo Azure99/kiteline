@@ -1,5 +1,5 @@
 import { newId } from "./lib/id";
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { trackViewport } from "./lib/viewport";
 import { useMobile } from "./lib/use-mobile";
@@ -186,21 +186,27 @@ export function Workbench({
     };
   }, [drafts]);
   useEffect(trackViewport, []);
+  const clearTransient = useCallback(() => {
+    setBinding(false);
+    setCliSetup(false);
+    setPicker(false);
+    setOpenFiles(false);
+    setDirectoryDevice(undefined);
+    setAction(undefined);
+    setPortDevice(undefined);
+    setUploads([]);
+    setActiveUpload(undefined);
+    setFileOperation(undefined);
+    drafts.setClosing();
+  }, [drafts]);
   useEffect(() => {
     const expire = () => {
       setSession(undefined);
-      setBinding(false);
-      setPicker(false);
-      setDirectoryDevice(undefined);
-      setAction(undefined);
-      setPortDevice(undefined);
-      setUploads([]);
-      setActiveUpload(undefined);
-      setFileOperation(undefined);
+      clearTransient();
     };
     window.addEventListener("kiteline:unauthenticated", expire);
     return () => window.removeEventListener("kiteline:unauthenticated", expire);
-  }, [setSession]);
+  }, [setSession, clearTransient]);
   async function logout() {
     if (drafts.snapshot().some(isDirty) && !window.confirm(t(($) => $.shell.discardLogout))) return;
     try {
@@ -208,9 +214,7 @@ export function Workbench({
       terminalLayouts.current.clear();
       drafts.clear();
       gitActions.clear();
-      setUploads([]);
-      setActiveUpload(undefined);
-      setFileOperation(undefined);
+      clearTransient();
       setSession(undefined);
     } catch (error) {
       setError({ cause: error });
