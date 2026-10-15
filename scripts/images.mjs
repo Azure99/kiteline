@@ -44,6 +44,7 @@ try {
     "docker",
     [
       "build",
+      "--provenance=false",
       "--platform",
       `linux/${arch}`,
       "--target",
