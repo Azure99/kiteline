@@ -74,6 +74,7 @@ if (
     "Usage: pnpm package server amd64|arm64 [--agent-target=linux-amd64,linux-arm64,windows-amd64,macos-amd64,macos-arm64] | agent linux-amd64|linux-arm64 | agent windows-amd64 --windows-components=PATH | agent macos-amd64|macos-arm64 --macos-components=PATH | cli linux-amd64|linux-arm64|windows-amd64|macos-amd64|macos-arm64",
   );
 const node = release.nodeArchives[arch];
+const projects = ["shared", kind, ...(kind === "agent" ? ["cli", "terminal-recorder"] : [])];
 const { version } = JSON.parse(readFileSync(join(root, "shared/src/version.json"), "utf8"));
 const output = join(root, "dist/releases");
 const cache = "/var/tmp/kiteline-release-cache";
@@ -269,9 +270,9 @@ function cliRuntime() {
 }
 try {
   const sourceCommit = readSourceCommit(root);
-  for (const name of ["shared", "server", "agent", "terminal-recorder", "cli"])
-    rmSync(join(root, name, "dist"), { recursive: true, force: true });
-  run("pnpm", ["build"]);
+  for (const name of projects) rmSync(join(root, name, "dist"), { recursive: true, force: true });
+  run("pnpm", ["exec", "tsc", "-b", ...projects]);
+  if (kind === "server") run("pnpm", ["--filter", "@kiteline/web", "build"]);
   const agents = kind === "server" ? await agentArchives(sourceCommit) : [];
   mkdirSync(cache, { recursive: true });
   mkdirSync(output, { recursive: true });
@@ -339,11 +340,8 @@ try {
   const destination = join(temporary, name);
   mkdirSync(destination);
   cpSync(join(root, "LICENSE"), join(destination, "LICENSE"));
-  deploy("shared", join(destination, "shared"));
-  deploy(kind, join(destination, kind));
+  for (const name of projects) deploy(name, join(destination, name));
   if (kind === "agent") {
-    deploy("cli", join(destination, "cli"));
-    deploy("terminal-recorder", join(destination, "terminal-recorder"));
     cpSync(native, join(destination, "dist/native"), { recursive: true });
     mkdirSync(join(destination, "deploy"));
     const manager = windowsAgent ? "xml" : macosAgent ? "plist" : "service";

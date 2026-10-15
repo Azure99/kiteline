@@ -107,7 +107,7 @@ server 任务失败时，可在该运行下载 `server-diagnostics-<架构>` 日
 
 ## 构建机准备
 
-本机构建在仓库根目录执行，使用 [`package.json`](../../package.json) 指定的 Node 与 pnpm，通过 `corepack enable pnpm` 启用 pnpm。组包会删除各包的开发编译输出并重新构建，因此先停止 `pnpm dev`。
+本机构建在仓库根目录执行，使用 [`package.json`](../../package.json) 指定的 Node 与 pnpm，通过 `corepack enable pnpm` 启用 pnpm。组包会删除当前产物所需包的开发编译输出并重新构建，因此先停止 `pnpm dev`。
 
 Linux 本机构建需要 Docker Engine、BuildKit，以及下列工具。Ubuntu 24.04 上以 root 权限安装：
 
