@@ -116,7 +116,6 @@ function deploy(name, target) {
       `@kiteline/${name}`,
       "deploy",
       "--prod",
-      "--offline",
       "--config.inject-workspace-packages=true",
       `--config.node-linker=${windows ? "hoisted" : "isolated"}`,
       target,
