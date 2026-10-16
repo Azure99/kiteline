@@ -1,14 +1,9 @@
 import { useTranslation } from "react-i18next";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import {
-  Decoration,
-  Diff,
-  Hunk,
-  parseDiff,
-  type FileData,
-  type HunkTokens,
-  type ViewType,
-} from "react-diff-view";
+import { Decoration, Diff, Hunk, parseDiff, type FileData, type ViewType } from "react-diff-view";
+import type { LanguageSupport } from "@codemirror/language";
+import { codeLanguage } from "../lib/code-language";
+import { diffTokens } from "./highlight";
 import { type GitDiff } from "@kiteline/shared/protocol";
 import { ApiError, errorMessage, rpc } from "../lib/api";
 import { ErrorNotice, ErrorDetails } from "../components/error-notice";
@@ -209,31 +204,57 @@ export function Patch({ value, viewType }: { value: GitDiff; viewType: ViewType 
         </>
       ) : (
         parsed.files?.map((file, index) => (
-          <DiffBlock key={index} file={file} viewType={viewType} />
+          <DiffBlock key={index} file={file} viewType={viewType} patch={value.patch} />
         ))
       )}
     </>
   );
 }
-function DiffBlock({ file, viewType }: { file: FileData; viewType: ViewType }) {
+function DiffBlock({
+  file,
+  viewType,
+  patch,
+}: {
+  file: FileData;
+  viewType: ViewType;
+  patch: string;
+}) {
   const { t } = useTranslation();
-
-  const tokens: HunkTokens = { old: [], new: [] };
-  for (const hunk of file.hunks)
-    for (const change of hunk.changes)
-      if (change.content === "") {
-        if (change.type !== "insert")
-          tokens.old[(change.type === "delete" ? change.lineNumber : change.oldLineNumber) - 1] = [
-            { type: "empty" },
-          ];
-        if (change.type !== "delete")
-          tokens.new[(change.type === "insert" ? change.lineNumber : change.newLineNumber) - 1] = [
-            { type: "empty" },
-          ];
-      }
+  const [support, setSupport] = useState<{
+    oldPath: string;
+    newPath: string;
+    old?: LanguageSupport;
+    new?: LanguageSupport;
+    error?: unknown;
+  }>();
+  const { oldPath, newPath } = file;
+  useEffect(() => {
+    let active = true;
+    void Promise.all([codeLanguage(oldPath)?.load(), codeLanguage(newPath)?.load()]).then(
+      ([old, next]) => {
+        if (active) setSupport({ oldPath, newPath, old, new: next });
+      },
+      (error) => {
+        if (active) setSupport({ oldPath, newPath, error });
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [oldPath, newPath]);
+  const matching =
+    support?.oldPath === file.oldPath && support?.newPath === file.newPath ? support : undefined;
+  const tokens = useMemo(() => diffTokens(file, matching?.old, matching?.new), [file, matching]);
   return (
     <>
+      {!!matching?.error && (
+        <div role="status" className="px-4 py-2 text-xs text-muted-foreground">
+          {t(($) => $.common.syntaxUnavailable)}: <ErrorNotice error={matching.error} />
+        </div>
+      )}
       <Diff
+        // Replacing the token subtree avoids React's quadratic sibling insertion on long lines.
+        key={matching?.old || matching?.new ? patch : "plain"}
         viewType={viewType}
         optimizeSelection
         diffType={file.type}

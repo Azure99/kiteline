@@ -1,10 +1,10 @@
 import { useTranslation } from "react-i18next";
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { EditorView } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { openSearchPanel, SearchQuery, setSearchQuery } from "@codemirror/search";
-import { LanguageDescription } from "@codemirror/language";
-import { languages } from "@codemirror/language-data";
+import { codeLanguage } from "../lib/code-language";
+import { ErrorNotice } from "../components/error-notice";
 import { encodeText } from "@kiteline/shared/protocol/text";
 import type { Draft, DraftStore } from "./drafts";
 import { editorPhrases } from "./editor-locale";
@@ -20,6 +20,7 @@ export function TextEditor({
 }) {
   const { t, i18n } = useTranslation();
 
+  const [languageError, setLanguageError] = useState<unknown>();
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView>(undefined);
   const save = useRef(onSave);
@@ -105,7 +106,8 @@ export function TextEditor({
   useEffect(() => {
     let active = true;
     const editor = view.current;
-    const language = LanguageDescription.matchFilename(languages, draft.path);
+    const language = codeLanguage(draft.path);
+    setLanguageError(undefined);
     editor?.dispatch({ effects: draft.language.reconfigure([]) });
     if (language && editor)
       void language
@@ -114,16 +116,25 @@ export function TextEditor({
           if (active && view.current === editor)
             editor.dispatch({ effects: draft.language.reconfigure(support) });
         })
-        .catch(() => {});
+        .catch((error) => {
+          if (active && view.current === editor) setLanguageError(error);
+        });
     return () => {
       active = false;
     };
   }, [draft, draft.path, draft.language]);
   return (
-    <div
-      ref={host}
-      className="min-h-0 min-w-0 flex-1 overflow-hidden text-[13px] max-desk:text-[16px]"
-      aria-label={t(($) => $.files.editor)}
-    />
+    <>
+      {!!languageError && (
+        <div role="status" className="px-4 py-2 text-xs text-muted-foreground">
+          {t(($) => $.common.syntaxUnavailable)}: <ErrorNotice error={languageError} />
+        </div>
+      )}
+      <div
+        ref={host}
+        className="min-h-0 min-w-0 flex-1 overflow-hidden text-[13px] max-desk:text-[16px]"
+        aria-label={t(($) => $.files.editor)}
+      />
+    </>
   );
 }

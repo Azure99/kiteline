@@ -28,6 +28,24 @@
   --muted-foreground: var(--color-muted-foreground);
   --terminal: #20242b;
   --terminal-foreground: #d6dce5;
+  --code-selection: #d8e6f8;
+  --code-active: #f1f4f840;
+  --search-match: #f7e8b7;
+  --tok-keyword: #7c3c9c;
+  --tok-string: #176a43;
+  --tok-number: #805500;
+  --tok-comment: #586777;
+  --tok-definition: #235e8f;
+  --tok-type: #795400;
+  --diff-omit-gutter-line-color: var(--color-destructive);
+  --diff-background-color: var(--background);
+  --diff-text-color: var(--foreground);
+  --diff-selection-background-color: var(--code-selection);
+  --diff-selection-text-color: var(--foreground);
+  --diff-code-insert-background-color: #e7f4eb;
+  --diff-gutter-insert-background-color: #d6eadd;
+  --diff-code-delete-background-color: #fceced;
+  --diff-gutter-delete-background-color: #f5dee1;
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-family:
     Inter,
@@ -97,7 +115,7 @@ body {
     -webkit-tap-highlight-color: transparent;
   }
   ::selection {
-    background: #bbd1f4;
+    background: var(--code-selection);
   }
 }
 @supports not (color: color-mix(in oklab, black, transparent)) {
@@ -425,4 +443,51 @@ body {
   .desktop-rail {
     display: none;
   }
+}
+
+.tok-keyword,
+.tok-atom,
+.tok-bool {
+  color: var(--tok-keyword);
+}
+.tok-string,
+.tok-string2,
+.tok-regexp {
+  color: var(--tok-string);
+}
+.tok-number,
+.tok-literal {
+  color: var(--tok-number);
+}
+.tok-comment,
+.tok-meta {
+  color: var(--tok-comment);
+}
+.tok-variableName.tok-definition,
+.tok-variableName2,
+.tok-labelName {
+  color: var(--tok-definition);
+}
+.tok-typeName,
+.tok-className,
+.tok-namespace,
+.tok-tagName {
+  color: var(--tok-type);
+}
+.tok-link {
+  color: var(--tok-definition);
+  text-decoration: underline;
+}
+.tok-heading,
+.tok-strong {
+  font-weight: bold;
+}
+.tok-emphasis {
+  font-style: italic;
+}
+.tok-strikethrough {
+  text-decoration: line-through;
+}
+.tok-invalid {
+  text-decoration: underline wavy var(--color-destructive);
 }

@@ -116,6 +116,8 @@ The list refreshes automatically when other programs change files, and periodica
 
 PNG, JPEG, GIF and WebP images are detected by content and previewed; images exceeding preview byte or pixel limits can only be downloaded. Other files open as UTF-8 text. Files containing NUL bytes, invalid UTF-8 or content exceeding editing limits (see [Limits](reference.en.md#limits)) can be downloaded but not edited.
 
+The file editor and Git diffs highlight syntax by filename. Diffs contain partial context, so multiline comments or strings can be colored incorrectly; use the source text to interpret them.
+
 The editor preserves the original BOM, line endings and final newline. For mixed line endings, it indicates whether saves will use LF or CRLF. An edit that would exceed the editing limit is rejected in full.
 
 New `.ps1` files on Windows devices use a UTF-8 BOM on their first save so Windows PowerShell 5.1 reads non-ASCII text correctly. Existing files and their saved copies keep their original format. UTF-16 files produced by default redirection in 5.1 can only be downloaded; use `Out-File -Encoding UTF8` when you need to edit the output in the workbench.

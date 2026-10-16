@@ -7,7 +7,8 @@ import {
   lineNumbers,
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
-import { bracketMatching, defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { bracketMatching, syntaxHighlighting } from "@codemirror/language";
+import { classHighlighter } from "@lezer/highlight";
 import { searchKeymap } from "@codemirror/search";
 import { editorPhrases } from "./editor-locale";
 
@@ -22,8 +23,11 @@ const theme = EditorView.theme({
     color: "var(--muted-foreground)",
     border: "none",
   },
-  ".cm-activeLineGutter": { background: "var(--muted)" },
-  ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": { background: "#c7dce9" },
+  ".cm-selectionBackground, &.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground":
+    { background: "var(--code-selection)" },
+  ".cm-activeLine": { background: "var(--code-active)" },
+  ".cm-searchMatch": { background: "var(--search-match)" },
+  ".cm-searchMatch-selected": { outline: "1px solid var(--primary)" },
 });
 
 export function textState(
@@ -41,7 +45,7 @@ export function textState(
       drawSelection(),
       highlightActiveLine(),
       bracketMatching(),
-      syntaxHighlighting(defaultHighlightStyle),
+      syntaxHighlighting(classHighlighter),
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
       language.of(languageSupport),
       phrases.of(EditorState.phrases.of(editorPhrases())),

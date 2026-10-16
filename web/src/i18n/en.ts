@@ -160,6 +160,7 @@ export const en = {
     reloadDrafts: "Copy any unsaved content before reloading.",
   },
   common: {
+    syntaxUnavailable: "Syntax highlighting unavailable",
     language: "Language",
     browserLanguage: "Use browser language",
     close: "Close",
