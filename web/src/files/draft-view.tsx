@@ -132,9 +132,11 @@ export function DraftView({
   return (
     <>
       <DraftTabs store={store} tabs={tabs} draft={draft} hidden={focusMode?.active} />
-      <div className="flex min-h-10 shrink-0 items-center gap-1 border-b border-border px-3 max-sm:flex-wrap">
+      <div
+        className={`flex min-h-10 shrink-0 items-center gap-1 border-b border-border px-3 max-sm:flex-wrap ${focusMode?.active ? "" : "max-sm:justify-end"}`}
+      >
         <span
-          className="min-w-0 flex-1 truncate text-xs max-sm:basis-full max-sm:pt-1"
+          className={`min-w-0 flex-1 truncate text-xs ${focusMode?.active ? "max-sm:basis-full max-sm:pt-1" : "max-sm:hidden"}`}
           title={`${draft.deviceName} / ${draft.workspaceName}\n${draft.resolvedPath ?? draftLabel(draft)}`}
         >
           {draftLabel(draft)}
