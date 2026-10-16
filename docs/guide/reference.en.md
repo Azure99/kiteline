@@ -203,13 +203,13 @@ A source is the TCP peer address connected to the server. Requests arriving thro
 
 ### Terminal
 
-| Item                                             | Value                             | Configuration               |
-| ------------------------------------------------ | --------------------------------- | --------------------------- |
-| Terminal sessions per device                     | 32                                | `terminalSessionsPerDevice` |
-| Web/short-command single paste and queued input  | 256 KiB                           | `terminalInputBytes`        |
-| Web live backlog or unconsumed CLI attach output | 4 MiB per connection              | Fixed                       |
-| New-session scrollback lines                     | Default 10,000; range 0 to 50,000 | Web "Terminal settings"     |
-| Runtime directory path                           | 76 bytes (UTF-8)                  | Fixed                       |
+| Item                                             | Value                            | Configuration               |
+| ------------------------------------------------ | -------------------------------- | --------------------------- |
+| Terminal sessions per device                     | 32                               | `terminalSessionsPerDevice` |
+| Web/short-command single paste and queued input  | 256 KiB                          | `terminalInputBytes`        |
+| Web live backlog or unconsumed CLI attach output | 4 MiB per connection             | Fixed                       |
+| New-session scrollback lines                     | Default 5,000; range 0 to 50,000 | Web "Terminal settings"     |
+| Runtime directory path                           | 76 bytes (UTF-8)                 | Fixed                       |
 
 ### Files
 

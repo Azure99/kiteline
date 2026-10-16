@@ -15,6 +15,19 @@ async function directory() {
   return path;
 }
 
+test("new device scrollback defaults to 5000 and saved settings keep their value", async () => {
+  const dataDir = await directory();
+  const metadata = new MetadataStore(config(dataDir));
+  await metadata.load();
+  expect(metadata.value.settings.historyLines).toBe(5_000);
+  for (const historyLines of [0, 1_234, 10_000]) {
+    await metadata.updateSettings(historyLines);
+    const restored = new MetadataStore(config(dataDir));
+    await restored.load();
+    expect(restored.value.settings.historyLines).toBe(historyLines);
+  }
+});
+
 test("workspace registration deduplicates canonical paths and failed budgets do not publish", async () => {
   const dataDir = await directory();
   const project = join(dataDir, "project");

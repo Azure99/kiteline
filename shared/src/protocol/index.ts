@@ -3,6 +3,7 @@ import type { TaskSnapshot } from "./tasks.js";
 
 export const appVersion = release.version;
 export const terminalProfile = "xterm-c2-unicode11";
+export const defaultTerminalHistoryLines = 5_000;
 export { rpcMutates, gitWriteMethods } from "./rpc.js";
 export * from "./tasks.js";
 export * from "./terminal-observation.js";

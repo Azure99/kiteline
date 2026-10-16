@@ -6,6 +6,7 @@ import {
   AppError,
   checkEnvironment,
   checkMetadata,
+  defaultTerminalHistoryLines,
   limits,
   type AgentEnvironment,
   type AgentControlMessage,
@@ -27,7 +28,7 @@ export class MetadataStore {
       { id: "codex", name: "Codex", command: "codex", icon: "code" },
       { id: "opencode", name: "OpenCode", command: "opencode", icon: "terminal" },
     ],
-    settings: { historyLines: 10_000 },
+    settings: { historyLines: defaultTerminalHistoryLines },
   };
   onChange?: (snapshot: Metadata) => void;
   private queue: Promise<unknown> = Promise.resolve();

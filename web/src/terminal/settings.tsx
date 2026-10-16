@@ -2,7 +2,13 @@ import { useTranslation } from "react-i18next";
 import { ErrorNotice } from "../components/error-notice";
 import { useState } from "react";
 import { Pencil, Plus, Save, Trash2, X } from "lucide-react";
-import { limits, shortcutIcons, type Device, type RpcParams } from "@kiteline/shared/protocol";
+import {
+  defaultTerminalHistoryLines,
+  limits,
+  shortcutIcons,
+  type Device,
+  type RpcParams,
+} from "@kiteline/shared/protocol";
 import { rpc } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -20,7 +26,9 @@ import { ShortcutIcon } from "./shortcut-icon";
 export function TerminalSettings({ device, onClose }: { device: Device; onClose: () => void }) {
   const { t } = useTranslation();
 
-  const [history, setHistory] = useState(String(device.snapshot?.settings.historyLines ?? 10000));
+  const [history, setHistory] = useState(
+    String(device.snapshot?.settings.historyLines ?? defaultTerminalHistoryLines),
+  );
   const [shortcuts, setShortcuts] = useState(device.snapshot?.shortcuts ?? []);
   const [editing, setEditing] = useState<RpcParams<"shortcuts.put">>();
   const [busy, setBusy] = useState(false);
