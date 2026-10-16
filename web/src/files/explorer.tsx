@@ -1,6 +1,7 @@
 import { memo, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ErrorNotice } from "../components/error-notice";
+import { FileIcon } from "../components/file-icon";
 import {
   ChevronDown,
   ChevronRight,
@@ -102,10 +103,14 @@ export function FileExplorer({
                   ) : (
                     <ChevronRight size={13} className="shrink-0" />
                   ))}
-                <Icon
-                  size={16}
-                  className={`shrink-0 ${folder ? "text-primary" : "text-muted-foreground"}`}
-                />
+                {entry.kind === "file" ? (
+                  <FileIcon path={entry.name} />
+                ) : (
+                  <Icon
+                    size={16}
+                    className={`shrink-0 ${folder ? "text-primary" : "text-muted-foreground"}`}
+                  />
+                )}
                 <span className="min-w-0 flex-1 truncate whitespace-pre text-sm">{entry.name}</span>
                 {(entry.unavailableReason || entry.kind === "file" || entry.kind === "other") && (
                   <span className="shrink-0 text-[11px] text-muted-foreground">

@@ -2,6 +2,7 @@ import { ArrowLeft, FilePenLine, MoreHorizontal, Plus, RefreshCw } from "lucide-
 import { useTranslation } from "react-i18next";
 import type { ViewType } from "react-diff-view";
 import { IconButton } from "../components/icon-button";
+import { FileIcon } from "../components/file-icon";
 import {
   Menu,
   MenuContent,
@@ -26,24 +27,24 @@ export function GitFilePath({
 }) {
   const split = path.lastIndexOf("/");
   return (
-    <span
-      className={stacked ? "min-w-0 flex-1 py-px" : "flex min-w-0 flex-1 items-center gap-2"}
-      title={title}
-    >
-      <span className={stacked ? "block truncate leading-4" : "truncate"}>
-        {path.slice(split + 1)}
-      </span>
-      {split >= 0 && (
-        <span
-          className={
-            stacked
-              ? "block truncate text-[11px] leading-[14px] text-muted-foreground"
-              : "truncate text-muted-foreground"
-          }
-        >
-          {path.slice(0, split)}
+    <span className="flex min-w-0 flex-1 items-center gap-2" title={title}>
+      <FileIcon path={path} />
+      <span className={stacked ? "min-w-0 flex-1 py-px" : "flex min-w-0 flex-1 items-center gap-2"}>
+        <span className={stacked ? "block truncate leading-4" : "truncate"}>
+          {path.slice(split + 1)}
         </span>
-      )}
+        {split >= 0 && (
+          <span
+            className={
+              stacked
+                ? "block truncate text-[11px] leading-[14px] text-muted-foreground"
+                : "truncate text-muted-foreground"
+            }
+          >
+            {path.slice(0, split)}
+          </span>
+        )}
+      </span>
     </span>
   );
 }

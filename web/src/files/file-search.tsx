@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Fragment, useEffect, useEffectEvent, useRef, useState } from "react";
-import { ArrowLeft, File, Search, X } from "lucide-react";
+import { ArrowLeft, Search, X } from "lucide-react";
+import { FileIcon } from "../components/file-icon";
 import type { SearchMatch, SearchResult } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
 import { Button } from "../components/ui/button";
@@ -174,7 +175,7 @@ export function FileSearch({
             className="block w-full border-b border-border px-4 py-3 text-left hover:bg-muted"
           >
             <span className="flex items-start gap-2 text-xs">
-              <File className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+              <FileIcon path={match.path} size={14} className="mt-0.5" />
               <span className="min-w-0 break-all">
                 {match.path}
                 {match.line ? `:${match.line}` : ""}
