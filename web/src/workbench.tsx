@@ -257,8 +257,6 @@ export function Workbench({
           connectionError={connectionError}
           recents={recents}
           onNavigate={choose}
-          onBind={() => setBinding(true)}
-          onCliSetup={() => setCliSetup(true)}
         />
       );
     if (orphan)

@@ -11,8 +11,6 @@ export const en = {
     "windows-amd64": "Windows · x64",
     download: "Download v{{version}}",
     installGuide: "Installation guide",
-    installHint:
-      "Verify and extract the package, then add its bin directory to this terminal’s PATH using the guide. Keep the whole package directory.",
     credentialStep: "2. Get a credential",
     credentialHint:
       "Select the devices you want to access and issue a token, or use one you already saved.",
@@ -24,8 +22,6 @@ export const en = {
   },
   credentials: {
     title: "CLI credentials",
-    scope:
-      "A credential can operate the selected devices with the agent OS user’s permissions. Workspaces are not a sandbox.",
     copyOnce: "Copy this token now. It will not be displayed again.",
     token: "Operation token",
     copy: "Copy token",

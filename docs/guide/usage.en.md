@@ -102,7 +102,7 @@ A history gap means some output during a recorder failure was not captured in we
 
 ### Continue in CLI
 
-The session menu’s “Continue in CLI” provides a complete command for the current device, workspace and session. Run it in a local terminal logged in to this server. If the CLI is not set up, choose “Install and log in” to open the guide; “CLI setup” is also available on Home and in the Owner menu. CLI and Web operate the same shell, and the session keeps running after detaching. See [Remote CLI](cli.en.md#attach-to-an-existing-terminal) for keys, installation and credentials. Device-side workspace and session management commands are in the [command reference](reference.en.md#kiteline-agent-commands).
+The session menu’s “Continue in CLI” provides a complete command for the current device, workspace and session. Run it in a local terminal logged in to this server. If the CLI is not set up, choose “Install and log in” to open the guide; “CLI setup” is also available in the Owner menu. CLI and Web operate the same shell, and the session keeps running after detaching. See [Remote CLI](cli.en.md#attach-to-an-existing-terminal) for keys, installation and credentials. Device-side workspace and session management commands are in the [command reference](reference.en.md#kiteline-agent-commands).
 
 ## Files
 

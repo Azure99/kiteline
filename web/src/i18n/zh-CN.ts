@@ -12,7 +12,6 @@ export const zhCN = {
     "windows-amd64": "Windows · x64",
     download: "下载 v{{version}}",
     installGuide: "安装指南",
-    installHint: "按指南校验、解压，并将包内 bin 加入当前终端的 PATH。请保留完整包目录。",
     credentialStep: "2. 获取凭据",
     credentialHint: "选择要访问的设备并签发 token，或使用已保存的 token。",
     login: "3. 登录此 server",
@@ -22,7 +21,6 @@ export const zhCN = {
   },
   credentials: {
     title: "CLI 凭据",
-    scope: "凭据可按 agent 操作系统用户的权限操作选定设备；工作区不是沙箱。",
     copyOnce: "请现在复制 token，关闭后无法再次查看。",
     token: "操作 token",
     copy: "复制 token",

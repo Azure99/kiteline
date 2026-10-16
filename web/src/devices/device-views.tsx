@@ -7,7 +7,6 @@ import {
   Monitor,
   MoreHorizontal,
   Pencil,
-  Plus,
   Server,
   Settings,
   Trash2,
@@ -37,16 +36,12 @@ export function Home({
   connectionError,
   recents,
   onNavigate,
-  onBind,
-  onCliSetup,
 }: {
   devices: Device[];
   loaded: boolean;
   connectionError?: unknown;
   recents: RecentWorkspace[];
   onNavigate: (path: string) => void;
-  onBind: () => void;
-  onCliSetup: () => void;
 }) {
   const { t } = useTranslation();
   const recentTargets = recents.flatMap((entry) => {
@@ -57,23 +52,6 @@ export function Home({
 
   return (
     <section className="scroll-area overflow-auto p-5">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-base font-semibold">Kiteline</h1>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => onNavigate(tasksPath())}>
-            <CalendarClock />
-            {t(($) => $.schedules.title)}
-          </Button>
-          <Button variant="outline" onClick={onCliSetup}>
-            <Terminal />
-            {t(($) => $.cliSetup.title)}
-          </Button>
-          <Button onClick={() => onBind()}>
-            <Plus />
-            {t(($) => $.devices.bind)}
-          </Button>
-        </div>
-      </div>
       {recentTargets.length > 0 && (
         <section className="mb-7" aria-label={t(($) => $.home.recentWorkspaces)}>
           <h2 className="mb-3 text-sm font-semibold">{t(($) => $.home.recentWorkspaces)}</h2>

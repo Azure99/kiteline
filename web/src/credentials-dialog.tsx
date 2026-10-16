@@ -75,7 +75,6 @@ export function Credentials({
   }
   return (
     <div className="space-y-5">
-      <p className="text-muted-foreground">{t(($) => $.credentials.scope)}</p>
       {issued ? (
         <div className="space-y-3 rounded border border-border p-3">
           <CliLogin command={loginCommand} />
@@ -109,9 +108,7 @@ export function Credentials({
             {devices.map((device) => (
               <label key={device.id} className="flex min-h-9 items-center gap-2 break-all">
                 <input type="checkbox" name="device" value={device.id} />
-                <span>
-                  {device.name} <span className="text-xs text-muted-foreground">{device.id}</span>
-                </span>
+                <span>{device.name}</span>
               </label>
             ))}
           </fieldset>

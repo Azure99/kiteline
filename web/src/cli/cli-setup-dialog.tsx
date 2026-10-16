@@ -53,9 +53,6 @@ export function CliSetupDialog({ devices }: { devices: Device[] }) {
                 <Download />
                 {t(($) => $.cliSetup.download, { version })}
               </Button>
-              <a className="text-primary underline" href={`${download}.sha256`}>
-                SHA256
-              </a>
               <a
                 className="text-primary underline"
                 href={cliGuide(version, target, i18n.language)}
@@ -65,7 +62,6 @@ export function CliSetupDialog({ devices }: { devices: Device[] }) {
                 {t(($) => $.cliSetup.installGuide)}
               </a>
             </div>
-            <p className="text-muted-foreground">{t(($) => $.cliSetup.installHint)}</p>
           </section>
           <section className="space-y-3">
             <h3 className="font-medium">{t(($) => $.cliSetup.credentialStep)}</h3>
