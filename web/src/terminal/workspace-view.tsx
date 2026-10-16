@@ -425,7 +425,7 @@ export function WorkspaceView({
     <>
       <div
         hidden={focusMode.active}
-        className="flex shrink-0 items-center border-b border-border bg-muted/60 px-4 max-desk:px-0"
+        className="flex shrink-0 items-center border-b border-border bg-muted px-4 max-desk:px-0"
       >
         <div
           role="tablist"
@@ -475,7 +475,7 @@ export function WorkspaceView({
       {!!remote.error && (visible || dockExpanded || remote.error !== remote.listError) && (
         <div
           role="alert"
-          className="workbench-notice flex shrink-0 items-start gap-2 bg-red-50 px-3 py-2 text-sm text-destructive"
+          className="workbench-notice flex shrink-0 items-start gap-2 bg-danger-soft px-3 py-2 text-sm text-destructive"
         >
           <div className="min-w-0 flex-1 break-words">
             <ErrorNotice error={remote.error} />
@@ -497,7 +497,7 @@ export function WorkspaceView({
         <div ref={setMainSearchHost} className="relative shrink-0">
           <div
             data-search-controls
-            className="flex min-h-10 shrink-0 items-center gap-1 border-b border-border bg-muted/50 px-2 max-desk:gap-0 max-desk:px-1"
+            className="flex min-h-10 shrink-0 items-center gap-1 border-b border-border bg-muted px-2 max-desk:gap-0 max-desk:px-1"
           >
             {picker()}
             {!mobile && (multipleGroups || drag.dragging) ? (
@@ -679,7 +679,7 @@ export function WorkspaceView({
                   id="companion-terminal"
                   className={
                     dockExpanded
-                      ? "flex min-h-9 shrink-0 items-center gap-1 border-b border-border bg-muted/50 px-2"
+                      ? "flex min-h-9 shrink-0 items-center gap-1 border-b border-border bg-muted px-2"
                       : "hidden"
                   }
                 >

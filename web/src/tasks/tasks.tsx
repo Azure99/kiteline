@@ -170,7 +170,7 @@ export function TasksPage({
                 const current = available && device.status === "online" && group?.current;
                 return (
                   <div key={device.id} className="border-b border-border">
-                    <div className="space-y-1 bg-muted/50 px-3 py-2">
+                    <div className="space-y-1 bg-muted px-3 py-2">
                       <p className="break-words text-xs font-medium">{device.name}</p>
                       {!current && group?.snapshot && (
                         <p className="text-xs text-muted-foreground">
@@ -225,7 +225,7 @@ export function TasksPage({
                                       result.state === "failed"
                                         ? "text-destructive"
                                         : result.state === "unknown"
-                                          ? "text-[#8c6515]"
+                                          ? "text-warning"
                                           : undefined
                                     }
                                   >

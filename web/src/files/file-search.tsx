@@ -206,7 +206,7 @@ function MatchText({ match }: { match: SearchMatch }) {
         return (
           <Fragment key={index}>
             {plain}
-            <mark className="bg-amber-200/70 text-foreground">{text.slice(start, end)}</mark>
+            <mark className="bg-search-match text-foreground">{text.slice(start, end)}</mark>
           </Fragment>
         );
       })}

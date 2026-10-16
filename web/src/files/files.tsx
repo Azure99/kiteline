@@ -532,7 +532,7 @@ export function Files({
             <aside
               ref={list}
               key={mobile ? folder : undefined}
-              className="scroll-area w-full overflow-auto border-border bg-muted/25 desk:w-72 desk:shrink-0 desk:border-r"
+              className="scroll-area w-full overflow-auto border-border bg-muted desk:w-72 desk:shrink-0 desk:border-r"
               aria-label={t(($) => $.files.list)}
             >
               {(!mobile || !hasFile) && (

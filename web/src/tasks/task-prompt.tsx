@@ -60,7 +60,7 @@ export function TaskPrompt({
             lang={language}
             value={text}
             aria-label={t(($) => $.schedules.promptText)}
-            className="min-h-28 resize-none bg-muted/40 p-3"
+            className="min-h-28 resize-none bg-muted p-3"
           />
           {error?.id === text && (
             <p role="alert" className="break-words text-sm text-destructive">

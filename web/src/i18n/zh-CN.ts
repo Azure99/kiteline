@@ -153,6 +153,11 @@ export const zhCN = {
     reloadDrafts: "刷新前请复制未保存的内容。",
   },
   common: {
+    appearance: "外观",
+    systemAppearance: "跟随系统",
+    lightAppearance: "浅色",
+    darkAppearance: "深色",
+
     syntaxUnavailable: "语法高亮不可用",
     language: "语言",
     browserLanguage: "跟随浏览器",

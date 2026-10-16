@@ -59,7 +59,7 @@ export function ChangeSection({
   if (side === "conflict" && !entries.length) return null;
   return (
     <div>
-      <div className="flex items-center gap-2 bg-muted/65 px-3 py-2 text-xs">
+      <div className="flex items-center gap-2 bg-muted px-3 py-2 text-xs">
         <ChevronDown size={13} />
         {label}
         <span className="ml-auto">
@@ -113,7 +113,7 @@ export function ChangeSection({
           return (
             <div
               key={`invalid:${entry.pathError}`}
-              className="border-b border-border/50 px-3 py-2 text-xs break-all text-muted-foreground"
+              className="border-b border-border px-3 py-2 text-xs break-all text-muted-foreground"
             >
               <span className="mr-2 font-mono">
                 {side === "staged" ? entry.indexStatus : entry.worktreeStatus}
@@ -141,7 +141,7 @@ export function ChangeSection({
         return (
           <div
             key={`path:${entry.path}`}
-            className={`flex min-h-8 items-center gap-1 border-b border-border/50 px-2 max-desk:min-h-11 ${target?.path === entry.path && (target.side === side || side === "conflict") ? "bg-primary-soft" : ""}`}
+            className={`flex min-h-8 items-center gap-1 border-b border-border px-2 max-desk:min-h-11 ${target?.path === entry.path && (target.side === side || side === "conflict") ? "bg-primary-soft" : ""}`}
           >
             <label className="flex min-h-8 items-center justify-center max-desk:min-h-11 max-desk:min-w-11">
               <input
@@ -152,7 +152,7 @@ export function ChangeSection({
               />
             </label>
             <span
-              className={`w-3 shrink-0 font-mono text-xs ${side === "staged" ? "text-green-700" : "text-amber-700"}`}
+              className={`w-3 shrink-0 font-mono text-xs ${side === "staged" ? "text-success" : "text-warning"}`}
             >
               {side === "staged" ? entry.indexStatus : entry.worktreeStatus}
             </span>

@@ -6,6 +6,8 @@ import { i18nReady } from "./i18n";
 import { TooltipProvider } from "./components/ui/tooltip";
 import "./styles.css";
 
+window.kitelineAppearance.syncThemeColor();
+
 void i18nReady.then(() => {
   createRoot(document.getElementById("root")!).render(
     <StrictMode>

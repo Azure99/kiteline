@@ -1,25 +1,51 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useState } from "react";
 import mermaid from "mermaid";
 import { useTranslation } from "react-i18next";
+import { newId } from "../lib/id";
+import { useTheme } from "../lib/appearance";
 import { ErrorNotice } from "../components/error-notice";
 
-mermaid.initialize({
-  startOnLoad: false,
-  securityLevel: "strict",
-  theme: "neutral",
-  layout: "dagre",
-  flowchart: { useMaxWidth: false },
-  sequence: { useMaxWidth: false },
-  suppressErrorRendering: true,
-});
 export function MermaidDiagram({ text }: { text: string }) {
   const { t } = useTranslation();
-  const id = "diagram-" + useId().replace(/[^a-zA-Z0-9]/g, "");
+  const theme = useTheme();
   const [svg, setSvg] = useState<string>();
   const [error, setError] = useState<unknown>();
   useEffect(() => {
     let current = true;
-    mermaid.render(id, text).then(
+    setError(undefined);
+    const css = getComputedStyle(document.documentElement);
+    const color = (name: string) => css.getPropertyValue(name).trim();
+    const textColor = color("--color-foreground");
+    const lineColor = color("--color-muted-foreground");
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: "strict",
+      theme: "base",
+      themeVariables: {
+        darkMode: theme === "dark",
+        background: color("--color-background"),
+        primaryColor: color("--color-primary-soft"),
+        primaryTextColor: textColor,
+        primaryBorderColor: lineColor,
+        secondaryColor: color("--color-muted"),
+        secondaryTextColor: textColor,
+        secondaryBorderColor: lineColor,
+        tertiaryColor: color("--color-muted"),
+        tertiaryTextColor: textColor,
+        tertiaryBorderColor: lineColor,
+        lineColor,
+        textColor,
+        noteBkgColor: color("--color-warning-soft"),
+        noteTextColor: textColor,
+        noteBorderColor: lineColor,
+        edgeLabelBackground: color("--color-background"),
+      },
+      layout: "dagre",
+      flowchart: { useMaxWidth: false },
+      sequence: { useMaxWidth: false },
+      suppressErrorRendering: true,
+    });
+    mermaid.render(`diagram-${newId()}`, text).then(
       (result) => {
         if (current) setSvg(result.svg);
       },
@@ -30,12 +56,12 @@ export function MermaidDiagram({ text }: { text: string }) {
     return () => {
       current = false;
     };
-  }, [id, text]);
+  }, [text, theme]);
   return (
     <>
       {svg && (
         <div
-          className="overflow-x-auto rounded bg-white p-2 text-black"
+          className="overflow-x-auto rounded bg-background p-2 text-foreground"
           dangerouslySetInnerHTML={{ __html: svg }}
         />
       )}

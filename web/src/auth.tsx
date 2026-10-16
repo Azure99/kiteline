@@ -2,6 +2,7 @@ import { ErrorNotice } from "./components/error-notice";
 import { useState, type FormEvent } from "react";
 import { ArrowRight, Terminal } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { AppearanceMenu } from "./components/appearance-menu";
 import { LanguageMenu } from "./components/language-menu";
 import { post } from "./lib/api";
 import { Button } from "./components/ui/button";
@@ -45,11 +46,12 @@ export function Auth({ initialized, onLogin }: { initialized: boolean; onLogin: 
       <div className="w-full max-w-80">
         <ReleaseNotice />
         <div className="mb-9 flex items-center gap-3">
-          <span className="flex size-9 items-center justify-center rounded bg-primary text-white">
+          <span className="flex size-9 items-center justify-center rounded bg-primary text-primary-foreground">
             <Terminal size={22} />
           </span>
           <h1 className="text-xl font-semibold">Kiteline</h1>
-          <div className="ml-auto">
+          <div className="ml-auto flex">
+            <AppearanceMenu />
             <LanguageMenu />
           </div>
         </div>

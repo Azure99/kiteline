@@ -41,7 +41,7 @@ export function DraftTabs({
       ref={tabStrip}
       role="group"
       aria-label={t(($) => $.files.openFiles)}
-      className="flex min-h-9 shrink-0 overflow-x-auto border-b border-border bg-muted/40"
+      className="flex min-h-9 shrink-0 overflow-x-auto border-b border-border bg-muted"
     >
       {tabs.map((item) => (
         <div

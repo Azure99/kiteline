@@ -160,6 +160,11 @@ export const en = {
     reloadDrafts: "Copy any unsaved content before reloading.",
   },
   common: {
+    appearance: "Appearance",
+    systemAppearance: "System appearance",
+    lightAppearance: "Light appearance",
+    darkAppearance: "Dark appearance",
+
     syntaxUnavailable: "Syntax highlighting unavailable",
     language: "Language",
     browserLanguage: "Use browser language",

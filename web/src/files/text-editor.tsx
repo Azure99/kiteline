@@ -7,6 +7,8 @@ import { codeLanguage } from "../lib/code-language";
 import { ErrorNotice } from "../components/error-notice";
 import { encodeText } from "@kiteline/shared/protocol/text";
 import type { Draft, DraftStore } from "./drafts";
+import { useTheme } from "../lib/appearance";
+import { editorAppearance } from "./editor-state";
 import { editorPhrases } from "./editor-locale";
 
 export function TextEditor({
@@ -20,6 +22,7 @@ export function TextEditor({
 }) {
   const { t, i18n } = useTranslation();
 
+  const dark = useTheme() === "dark";
   const [languageError, setLanguageError] = useState<unknown>();
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView>(undefined);
@@ -66,6 +69,8 @@ export function TextEditor({
   useLayoutEffect(() => {
     const editor = view.current;
     if (editor && draft.state && editor.state !== draft.state) editor.setState(draft.state);
+    if (editor && editor.state.facet(EditorView.darkTheme) !== dark)
+      editor.dispatch({ effects: editorAppearance.reconfigure(EditorView.darkTheme.of(dark)) });
   });
   useLayoutEffect(() => {
     const editor = view.current;

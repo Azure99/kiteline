@@ -20,13 +20,15 @@ The address bar records the device, workspace, tool and open file, repository an
 
 After a server upgrade, an already open page shows the Web and Server versions and pauses remote operations. Copy unsaved content before clicking "Reload page".
 
+Choose system, light or dark appearance from the owner menu or the login page. The default follows the system; a manual choice is saved in the current browser. Choose system again to resume automatic changes. Switching appearance preserves open file drafts, undo history and selections; terminal content keeps its dark colors.
+
 Layout follows the available window width. Below 960 CSS pixels, it shows one terminal session at a time, without a terminal panel in Files or Git. At 960 pixels or wider, split terminals and the terminal panel are available.
 
 ### Where settings are stored
 
 | Content                                                      | Storage                               |
 | ------------------------------------------------------------ | ------------------------------------- |
-| Language, recent workspaces, terminal font size              | Current browser                       |
+| Language, appearance, recent workspaces, terminal font size  | Current browser                       |
 | Terminal groups and splits, unsaved changes, commit messages | Current page; lost on reload or close |
 | New-session scrollback lines, terminal shortcuts             | Device; shared across origins         |
 | Device name                                                  | Server                                |

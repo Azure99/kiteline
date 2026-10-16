@@ -12,6 +12,8 @@ import { classHighlighter } from "@lezer/highlight";
 import { searchKeymap } from "@codemirror/search";
 import { editorPhrases } from "./editor-locale";
 
+export const editorAppearance = new Compartment();
+
 const theme = EditorView.theme({
   "&": { height: "100%", background: "var(--background)" },
   "&.cm-focused": { outline: "none" },
@@ -25,6 +27,17 @@ const theme = EditorView.theme({
   },
   ".cm-selectionBackground, &.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground":
     { background: "var(--code-selection)" },
+  ".cm-cursor": { borderLeftColor: "var(--foreground)" },
+  ".cm-panels": {
+    background: "var(--muted)",
+    color: "var(--foreground)",
+    borderColor: "var(--border)",
+  },
+  ".cm-textfield": { background: "var(--background)", borderColor: "var(--border)" },
+  ".cm-button, .cm-button:active": {
+    background: "var(--background)",
+    borderColor: "var(--border)",
+  },
   ".cm-activeLine": { background: "var(--code-active)" },
   ".cm-searchMatch": { background: "var(--search-match)" },
   ".cm-searchMatch-selected": { outline: "1px solid var(--primary)" },
@@ -40,6 +53,7 @@ export function textState(
     doc: text,
     extensions: [
       theme,
+      editorAppearance.of([]),
       lineNumbers(),
       history(),
       drawSelection(),

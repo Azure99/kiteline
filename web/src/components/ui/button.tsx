@@ -7,10 +7,11 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "border-primary bg-primary text-white hover:brightness-95",
+        default: "border-primary bg-primary text-primary-foreground hover:brightness-95",
         outline: "border-border bg-background hover:bg-muted",
         ghost: "border-transparent hover:bg-muted",
-        destructive: "border-destructive bg-destructive text-white hover:brightness-95",
+        destructive:
+          "border-destructive bg-destructive text-destructive-foreground hover:brightness-95",
       },
       size: {
         default: "min-h-8 px-3 py-1.5 max-desk:min-h-11",

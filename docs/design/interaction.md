@@ -114,7 +114,11 @@
 
 ### 颜色
 
-主题变量在 `styles.css` 的 `@theme` 中定义，组件使用 `bg-background`、`border-border` 等主题类。页面使用浅色主题；终端页面同时把 `html` 和 `body` 背景设为终端色，避免软键盘动画露出的区域闪白。
+主题变量集中在 `styles.css`，组件使用 `bg-background`、`border-border` 等语义类，明暗主题共用布局。工作台默认跟随系统，也可手动选择浅色或深色，偏好只保存在当前浏览器。`public/appearance.js` 在 head 同步应用偏好并拥有唯一状态；React通过 `lib/appearance.ts` 订阅，主入口在CSS就绪后同步浏览器主题色。
+
+编辑器通过现有状态同步点热切换 CodeMirror 的明暗 facet，保留草稿、撤销和选区。Mermaid 从语义变量取得配色，每次渲染使用新的ID，防止上游删除仍在显示的旧图。
+
+终端内容保持深色；终端页面同时把 `html` 和 `body` 背景设为终端色，避免软键盘动画露出的区域闪白。
 
 ### 尺寸
 

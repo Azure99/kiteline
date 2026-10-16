@@ -3,6 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
 import { useTranslation } from "react-i18next";
 import { trackViewport } from "./lib/viewport";
 import { useMobile } from "./lib/use-mobile";
+import { AppearanceOptions } from "./components/appearance-menu";
 import { LanguageOptions } from "./components/language-menu";
 import {
   ChevronDown,
@@ -376,7 +377,7 @@ export function Workbench({
               aria-label={t(($) => $.home.open)}
               onClick={() => choose("/devices")}
             >
-              <span className="flex size-6 items-center justify-center rounded bg-primary text-white">
+              <span className="flex size-6 items-center justify-center rounded bg-primary text-primary-foreground">
                 <Terminal size={17} />
               </span>
               <span className="max-desk:hidden">Kiteline</span>
@@ -493,6 +494,8 @@ export function Workbench({
               <div className="my-1 border-t border-border" />
               <LanguageOptions />
               <div className="my-1 border-t border-border" />
+              <AppearanceOptions />
+              <div className="my-1 border-t border-border" />
               <div className="desk:hidden">
                 {uploads.map((item) => (
                   <MenuItem key={item.id} onClick={() => setActiveUpload(item.id)}>
@@ -515,7 +518,7 @@ export function Workbench({
           <aside
             id="device-sidebar"
             hidden={!sidebarOpen || terminalFocus.active}
-            className="desktop-rail scroll-area shrink-0 overflow-auto border-r border-border bg-muted/60"
+            className="desktop-rail scroll-area shrink-0 overflow-auto border-r border-border bg-muted"
           >
             <DeviceNavigation {...navigationProps} />
           </aside>
@@ -526,7 +529,7 @@ export function Workbench({
             {!!(error || connectionError) && (
               <div
                 role="alert"
-                className="workbench-notice flex shrink-0 items-start gap-2 border-b border-border bg-red-50 px-4 py-2 text-sm text-destructive"
+                className="workbench-notice flex shrink-0 items-start gap-2 border-b border-border bg-danger-soft px-4 py-2 text-sm text-destructive"
               >
                 <div className="min-w-0 flex-1 break-words">
                   {error?.downloadPath

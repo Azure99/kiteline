@@ -379,7 +379,7 @@ function CommitView({
                   <GitFilePath path={file.path} stacked />
                   {!file.binary && file.additions !== undefined && file.deletions !== undefined && (
                     <span className="shrink-0 whitespace-nowrap font-mono text-[11px]">
-                      <span className="text-green-800">+{file.additions}</span>{" "}
+                      <span className="text-success">+{file.additions}</span>{" "}
                       <span className="text-destructive">−{file.deletions}</span>
                     </span>
                   )}
