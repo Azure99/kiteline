@@ -2,6 +2,7 @@ import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, ChevronDown, GitCommitHorizontal, GitBranch } from "lucide-react";
+import type { ViewType } from "react-diff-view";
 import type { Commit, CommitFiles, GitHistory } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
 import { IconButton } from "../components/icon-button";
@@ -20,6 +21,7 @@ interface Props {
   active: boolean;
   visible: boolean;
   refreshKey: number;
+  diffView: ViewType;
   renderHeader(target?: DiffTarget, onBack?: () => void): ReactNode;
   onBranch?: (oid: string) => void;
 }
@@ -186,6 +188,7 @@ function CommitView({
   renderHeader,
   onBack,
   onBranch,
+  diffView,
 }: Props & { commit: Commit; onBack: () => void }) {
   const { t } = useTranslation();
 
@@ -410,6 +413,7 @@ function CommitView({
             {...{ deviceId, workspaceId, repoId, target }}
             refreshKey={refreshKey}
             active={active}
+            viewType={diffView}
           />
         )}
       </div>

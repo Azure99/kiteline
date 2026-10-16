@@ -70,6 +70,7 @@
 
 ### 浏览器显示
 
+- diff 布局选择只保存在当前仓库视图中，不持久化。窄窗口派生统一布局而不覆盖桌面选择；两种布局使用相同 patch，只有双列按相邻增删行配对，统一视图保持 patch 顺序。
 - patch 已截断、物理行数超过 `diffRenderLines`、解析失败或含无法解释的正文时，浏览器（`web/src/git/diff-view.tsx`）不渲染结构化 diff，只显示原因、summary 和不超过 `diffRawBytes` 的原始 patch 前缀。
 - 没有文本 hunk 的纯 rename、mode 变化和二进制文件只显示 summary，不当作没有变化。
 - 自己发起的 stage 或 unstage 成功且涉及当前预览的文件时，预览切到该文件的另一侧；期间用户另选了文件时不跳转。

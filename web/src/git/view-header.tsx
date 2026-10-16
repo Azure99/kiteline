@@ -1,5 +1,6 @@
 import { ArrowLeft, FilePenLine, MoreHorizontal, Plus, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import type { ViewType } from "react-diff-view";
 import { IconButton } from "../components/icon-button";
 import {
   Menu,
@@ -57,8 +58,12 @@ export function GitViewHeader({
   onRefresh,
   onFile,
   onCreateBranch,
+  diffView,
+  onDiffView,
 }: {
   view: GitView;
+  diffView: ViewType;
+  onDiffView(view: ViewType): void;
   count?: number;
   target?: DiffTarget;
   disabled: boolean;
@@ -141,6 +146,20 @@ export function GitViewHeader({
         </>
       ) : (
         <span className="flex-1" />
+      )}
+      {!mobile && target && (
+        <div className="flex shrink-0 gap-1" role="group" aria-label={t(($) => $.git.diffLayout)}>
+          {(["unified", "split"] as const).map((mode) => (
+            <button
+              key={mode}
+              aria-pressed={diffView === mode}
+              onClick={() => onDiffView(mode)}
+              className={`min-h-8 rounded px-2 ${diffView === mode ? "bg-primary-soft text-primary" : "text-muted-foreground"}`}
+            >
+              {t(($) => $.git[mode])}
+            </button>
+          ))}
+        </div>
       )}
       {onCreateBranch && (
         <IconButton

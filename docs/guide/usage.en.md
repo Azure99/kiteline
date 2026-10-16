@@ -198,6 +198,8 @@ With several repositories, the first is selected automatically; switch by path i
 
 ### Status and diff
 
+Diffs start in Unified view. On wide screens, you can switch to Split view, which wraps long lines within each column; Unified view keeps horizontal scrolling. Narrow windows use Unified view and restore your previous choice when widened. Worktree, staged and history diffs share this choice.
+
 Diffs exceeding the limit show only part of the raw patch. Changes are paginated. The Staged changes count covers the whole repository; other group counts cover the current page. Entries with non-UTF-8 paths cannot be operated on.
 
 ### Stage and commit

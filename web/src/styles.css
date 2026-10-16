@@ -232,6 +232,14 @@ body {
   overflow-wrap: normal;
   padding-right: 16px;
 }
+.kiteline-diff.diff-split {
+  width: 100%;
+  table-layout: fixed;
+}
+.kiteline-diff.diff-split .diff-code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .kiteline-diff .diff-gutter {
   min-width: 5ch;
   color: var(--muted-foreground);

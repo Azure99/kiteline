@@ -2,6 +2,7 @@ import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, FolderGit2, GitBranch, RefreshCw } from "lucide-react";
+import type { ViewType } from "react-diff-view";
 import type { Device, DiscardScope, GitEntry, Repo, Workspace } from "@kiteline/shared/protocol";
 import { ToolHeader, ToolSidebar } from "../components/tool-layout";
 import { Button } from "../components/ui/button";
@@ -212,6 +213,8 @@ function RepoView({
   const state = useGitStatus(device.id, workspace.id, repo.id, visible && enabled);
   const [target, setTarget] = useState<DiffTarget>();
   const [view, setView] = useState<GitView>("changes");
+  const [diffView, setDiffView] = useState<ViewType>("unified");
+  const effectiveDiffView = mobile ? "unified" : diffView;
   const [historyVisited, setHistoryVisited] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const selectionVersion = useRef(0);
@@ -262,6 +265,8 @@ function RepoView({
   const renderHeader = (preview?: DiffTarget, onBack?: () => void) => (
     <GitViewHeader
       view={view}
+      diffView={diffView}
+      onDiffView={setDiffView}
       count={value?.totalCount}
       target={preview}
       disabled={!enabled}
@@ -393,6 +398,7 @@ function RepoView({
             visible={visible && view === "history"}
             refreshKey={refresh}
             renderHeader={renderHeader}
+            diffView={effectiveDiffView}
             onBranch={(oid) => {
               if (!disabled) setBranchStart(oid);
             }}
@@ -473,6 +479,7 @@ function RepoView({
             repoId={repo.id}
             target={target}
             refreshKey={diffRefresh}
+            viewType={effectiveDiffView}
           />
         ) : (
           !mobile && (

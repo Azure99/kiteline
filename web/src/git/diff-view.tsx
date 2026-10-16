@@ -1,6 +1,14 @@
 import { useTranslation } from "react-i18next";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { Decoration, Diff, Hunk, parseDiff, type FileData, type HunkTokens } from "react-diff-view";
+import {
+  Decoration,
+  Diff,
+  Hunk,
+  parseDiff,
+  type FileData,
+  type HunkTokens,
+  type ViewType,
+} from "react-diff-view";
 import { type GitDiff } from "@kiteline/shared/protocol";
 import { ApiError, errorMessage, rpc } from "../lib/api";
 import { ErrorNotice, ErrorDetails } from "../components/error-notice";
@@ -21,6 +29,7 @@ export function DiffView({
   workspaceId,
   repoId,
   target,
+  viewType,
   refreshKey,
   active = true,
 }: {
@@ -28,6 +37,7 @@ export function DiffView({
   workspaceId: string;
   repoId: string;
   target: DiffTarget;
+  viewType: ViewType;
   refreshKey?: unknown;
   active?: boolean;
 }) {
@@ -122,12 +132,12 @@ export function DiffView({
             {t(($) => $.common.reading)}
           </p>
         )}
-        {value && <Patch value={value} />}
+        {value && <Patch value={value} viewType={viewType} />}
       </div>
     </section>
   );
 }
-export function Patch({ value }: { value: GitDiff }) {
+export function Patch({ value, viewType }: { value: GitDiff; viewType: ViewType }) {
   const { t } = useTranslation();
 
   const parsed = useMemo(() => {
@@ -135,7 +145,10 @@ export function Patch({ value }: { value: GitDiff }) {
     if (value.patch.split("\n").length > diffRenderLines)
       return { reason: "diffLineLimit" as const };
     try {
-      const files = parseDiff(value.patch);
+      const files = parseDiff(
+        value.patch,
+        viewType === "split" ? { nearbySequences: "zip" } : undefined,
+      );
       if (!files.length && value.patch.trim()) return { reason: "diffUnstructured" as const };
       if (
         !files.some((file) => file.hunks.length) &&
@@ -154,7 +167,7 @@ export function Patch({ value }: { value: GitDiff }) {
     } catch {
       return { reason: "diffParseFailed" as const };
     }
-  }, [value.patch, value.truncated]);
+  }, [value.patch, value.truncated, viewType]);
   const fallback = useMemo(() => {
     if (!parsed.reason) return;
     const bytes = new TextEncoder().encode(value.patch);
@@ -195,20 +208,25 @@ export function Patch({ value }: { value: GitDiff }) {
           <pre className="w-max min-w-full px-4 py-3 font-mono text-xs">{fallback?.text}</pre>
         </>
       ) : (
-        parsed.files?.map((file, index) => <DiffBlock key={index} file={file} />)
+        parsed.files?.map((file, index) => (
+          <DiffBlock key={index} file={file} viewType={viewType} />
+        ))
       )}
     </>
   );
 }
-function DiffBlock({ file }: { file: FileData }) {
+function DiffBlock({ file, viewType }: { file: FileData; viewType: ViewType }) {
   const { t } = useTranslation();
 
   const tokens: HunkTokens = { old: [], new: [] };
   for (const hunk of file.hunks)
     for (const change of hunk.changes)
       if (change.content === "") {
-        if (change.type === "delete") tokens.old[change.lineNumber - 1] = [{ type: "empty" }];
-        else
+        if (change.type !== "insert")
+          tokens.old[(change.type === "delete" ? change.lineNumber : change.oldLineNumber) - 1] = [
+            { type: "empty" },
+          ];
+        if (change.type !== "delete")
           tokens.new[(change.type === "insert" ? change.lineNumber : change.newLineNumber) - 1] = [
             { type: "empty" },
           ];
@@ -216,7 +234,8 @@ function DiffBlock({ file }: { file: FileData }) {
   return (
     <>
       <Diff
-        viewType="unified"
+        viewType={viewType}
+        optimizeSelection
         diffType={file.type}
         hunks={file.hunks}
         tokens={tokens}
@@ -224,7 +243,7 @@ function DiffBlock({ file }: { file: FileData }) {
         renderGutter={({ change, side, renderDefault }) => (
           <span aria-hidden="true" className="select-none">
             {renderDefault()}
-            {side === "new"
+            {side === "new" || (viewType === "split" && side === "old")
               ? change.type === "insert"
                 ? " +"
                 : change.type === "delete"
