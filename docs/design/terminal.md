@@ -211,7 +211,9 @@ agent 被强制结束或崩溃时不执行清理，新启动的 agent 也不导�
 
 ## 已知差异
 
-`adaptTerminalScrolling()` 让 xterm.js 按 tmux 3.4 的上界处理计数：CSI S、T、L、M 不超过滚动区高度，REP 不超过当前行剩余列数（包含待换行状态），省略或 0 按 1，没有剩余列时直接消费序列；普通屏幕上滚动区从第 0 行开始时，CSI S 让滚出的行进入滚屏历史并保持保存的光标。以下情况远程 TTY 与网页的画面、光标或历史仍可能不同：
+`adaptTerminalProfile()` 在 recorder 与网页中统一适配 xterm.js：`ESC k … ST` 窗口标题进入现有的流式丢弃状态，避免标题文字进入正文；OSC 2 标题仍按原语义处理。这使用 xterm 私有 parser transition table，表在同模块的终端间共享，升级两端依赖时需一起核验。
+
+该 profile 也按 tmux 3.4 的上界处理计数：CSI S、T、L、M 不超过滚动区高度，REP 不超过当前行剩余列数（包含待换行状态），省略或 0 按 1，没有剩余列时直接消费序列；普通屏幕上滚动区从第 0 行开始时，CSI S 让滚出的行进入滚屏历史并保持保存的光标。以下情况远程 TTY 与网页的画面、光标或历史仍可能不同：
 
 - 宽字符或组合字符后的 REP：tmux 遇到 UTF-8 字符时清除可重复的字符，xterm.js 重复整个字形。
 - soft hyphen、BOM、未知 CSI 或 ESC 之后的 REP：两边记录的“上一个字符”不同。

@@ -20,7 +20,10 @@ interface TerminalCore {
     scroll(attr: unknown): void;
   };
   _inputHandler: {
-    _parser: { currentState: number };
+    _parser: {
+      currentState: number;
+      _transitions: { add(code: number, state: number, action: number, next: number): void };
+    };
     _eraseAttrData(): unknown;
     markRangeDirty(start: number, end: number): void;
     scrollUp(params: CsiParameters): boolean;
@@ -61,10 +64,13 @@ export function initializeTerminalUnicode(terminal: {
   terminal.loadAddon(new Unicode11Addon());
   terminal.unicode.activeVersion = "11";
 }
-// These private reads belong to the fixed terminal profile; upgrade both consumers together.
-export function adaptTerminalScrolling(terminal: AdaptableTerminal) {
+// These private APIs belong to the fixed terminal profile; upgrade both consumers together.
+export function adaptTerminalProfile(terminal: AdaptableTerminal) {
   const internal = core(terminal);
   const input = internal._inputHandler;
+  // ESC k names a tmux window. Consume it with xterm's streaming discard-string state.
+  // ESCAPE=1, IGNORE=0, DCS_IGNORE=11; this table is shared by all terminals in the module.
+  input._parser._transitions.add(0x6b, 1, 0, 11);
   for (const name of [
     "scrollUp",
     "scrollDown",

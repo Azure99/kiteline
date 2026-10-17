@@ -19,7 +19,7 @@ import { AppError, limits } from "@kiteline/shared/protocol";
 import {
   atGround,
   mouseEncodingVT,
-  adaptTerminalScrolling,
+  adaptTerminalProfile,
   terminalOptions,
   initializeTerminalUnicode,
 } from "@kiteline/shared/terminal";
@@ -69,7 +69,7 @@ export class Model {
   ) {
     this.terminal = new Terminal({ ...terminalOptions(historyLines), cols, rows });
     initializeTerminalUnicode(this.terminal);
-    adaptTerminalScrolling(this.terminal);
+    adaptTerminalProfile(this.terminal);
     this.terminal.loadAddon(this.serializer);
     for (const code of [9, 777, 7501])
       this.terminal.parser.registerOscHandler(code, (body) => {

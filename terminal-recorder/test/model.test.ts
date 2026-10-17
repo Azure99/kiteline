@@ -6,7 +6,7 @@ import type { TerminalEvent, TerminalFrame } from "@kiteline/shared/protocol/ipc
 import { terminalOutputCost } from "@kiteline/shared/protocol/ipc";
 import {
   mouseEncodingVT,
-  adaptTerminalScrolling,
+  adaptTerminalProfile,
   terminalOptions,
   initializeTerminalUnicode,
 } from "@kiteline/shared/terminal";
@@ -18,7 +18,7 @@ function screen(cols = 80, rows = 24, history = 100, adapt = true) {
   initializeTerminalUnicode(terminal);
   const addon = new serialize.SerializeAddon();
   terminal.loadAddon(addon);
-  if (adapt) adaptTerminalScrolling(terminal);
+  if (adapt) adaptTerminalProfile(terminal);
   return {
     terminal,
     text: () => addon.serialize() + mouseEncodingVT(terminal),
@@ -30,6 +30,67 @@ async function apply(target: ReturnType<typeof screen>, event: TerminalEvent) {
   if (event.type === "output") await target.write(event.data);
   else target.terminal.resize(event.cols, event.rows);
 }
+
+test("window titles stay out of text without hiding repeated output or OSC titles", async () => {
+  const target = screen();
+  const titles: string[] = [];
+  target.terminal.onTitleChange((title) => titles.push(title));
+  try {
+    const output = "PROBE> ls\r\n\x1b]2;ls\x1b\\\x1bkls\x1b\\alpha.txt\r\n";
+    await target.write(output.repeat(2));
+    expect(
+      Array.from({ length: 4 }, (_, row) =>
+        target.terminal.buffer.active.getLine(row)?.translateToString(true),
+      ),
+    ).toEqual(["PROBE> ls", "alpha.txt", "PROBE> ls", "alpha.txt"]);
+    expect(titles).toContain("ls");
+  } finally {
+    target.terminal.dispose();
+  }
+});
+
+test("retained recovery consumes a window title split across UTF-8 and escape boundaries", async () => {
+  const faults: Error[] = [];
+  const model = new Model(
+    80,
+    24,
+    100,
+    (error) => faults.push(error),
+    () => {},
+  );
+  const restored = screen();
+  let snapshot!: Snapshot;
+  const live: TerminalEvent[] = [];
+  try {
+    model.output(Buffer.from("BEFORE\r\n"));
+    await model.checkpointNow();
+    for (const byte of Buffer.from("\x1bk窗口标题")) {
+      model.output(Buffer.from([byte]));
+      await model.ordered(() => {});
+    }
+    await model.attach(
+      "retained",
+      1000,
+      (value) => (snapshot = value),
+      (event) => live.push(event),
+      new AbortController().signal,
+    );
+    for (const byte of Buffer.from("\x1b\\AFTER\r\n")) {
+      model.output(Buffer.from([byte]));
+      await model.ordered(() => {});
+    }
+    await restored.write(snapshot.data);
+    for (const event of [...snapshot.tail, ...live]) await apply(restored, event);
+    for (const terminal of [model.terminal, restored.terminal]) {
+      expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toBe("BEFORE");
+      expect(terminal.buffer.active.getLine(1)?.translateToString(true)).toBe("AFTER");
+    }
+    expect(faults).toEqual([]);
+  } finally {
+    await model.dispose();
+    restored.terminal.dispose();
+  }
+});
 
 test("batched output preserves UTF-8, non-ground recovery, resize and live order", async () => {
   const faults: Error[] = [];

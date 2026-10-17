@@ -16,7 +16,7 @@ import {
   forwardUserInput,
   freezeMouse,
   normalizePaste,
-  adaptTerminalScrolling,
+  adaptTerminalProfile,
   terminalOptions,
   initializeTerminalUnicode,
 } from "@kiteline/shared/terminal";
@@ -222,7 +222,7 @@ export class TerminalDisplay {
         initializeTerminalUnicode(terminal);
         terminal.loadAddon(this.fitAddon);
         terminal.loadAddon(new WebLinksAddon(openLink, { hover: hoverLink, leave: leaveLink }));
-        adaptTerminalScrolling(terminal);
+        adaptTerminalProfile(terminal);
         forwardUserInput(terminal, (text) => {
           const value = this.auxiliary ? this.auxiliary.forward(text) : text;
           if (value !== undefined) this.bytes(new TextEncoder().encode(value));
