@@ -49,6 +49,7 @@ export class TerminalDisplay {
   private abort = new AbortController();
   private observer: ResizeObserver;
   private queue: Promise<unknown> = Promise.resolve();
+  private parsed: Promise<void> = Promise.resolve();
   private receivedEnd = false;
   private connectionLost = false;
   private ready = false;
@@ -120,7 +121,10 @@ export class TerminalDisplay {
           if (event.data instanceof ArrayBuffer) {
             const data = new Uint8Array(event.data);
             this.queue = this.queue
-              .then(() => this.output(data))
+              .then(() => {
+                if (!this.ready) return this.output(data);
+                this.parsed = this.output(data).catch((error: unknown) => this.fail(error));
+              })
               .catch((error: unknown) => this.fail(error));
           } else {
             const frame = record(JSON.parse(event.data));
@@ -133,6 +137,7 @@ export class TerminalDisplay {
             }
             this.queue = this.queue
               .then(async () => {
+                await this.parsed;
                 await this.frame(frame);
                 if (ordered) this.acknowledge(credit);
               })
@@ -151,14 +156,15 @@ export class TerminalDisplay {
           this.connectionLost = true;
           this.ready = false;
           if (this.terminal) this.terminal.options.disableStdin = true;
-          this.queue = this.queue.then(() =>
+          this.queue = this.queue.then(async () => {
+            await this.parsed;
             this.change({
               ...this.state,
               status: "error",
               notice: "connectionLost",
               error: undefined,
-            }),
-          );
+            });
+          });
         }
       };
     } catch (error) {

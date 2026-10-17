@@ -100,7 +100,7 @@ recorder 为每个会话保存一个检查点和其后的完整尾段：
 
 agent 发往该显示的帧依次为：`restore.begin`（尺寸、`historyLines`、副本字节数、`historyLimited`、`historyGap`）、副本的二进制分块、尾段（二进制输出和 `resize`）、恢复完成帧 `ready`，然后是实时的二进制输出和 `resize`，最后是 `ended` 或 `error`（帧名列表见[数据通道](protocol.md#数据通道)）。恢复期间的新输出进入该显示自己的有界队列，超出显示预算则只结束该显示。网页在 `restore.begin` 时新建 xterm.js 实例，副本字节数对不上就放弃该实例；收到恢复完成帧 `ready` 并发出第一次尺寸后才允许输入。
 
-流量控制：二进制输出和有序 JSON 帧共用一份累计信用（计量见 `shared/src/protocol/ipc.ts` 的 `terminalOutputCost()`）。网页对二进制输出等待 xterm 写入回调完成，对有序 JSON 帧等待处理完成，再回报 `consumed.bytes`，不能先确认尚未处理的输出来腾出窗口；未确认量达到 `terminalOutstandingBytes` 后暂停发送。带外的 `error`、`input.error` 不占信用。
+流量控制：二进制输出和有序 JSON 帧共用一份累计信用（计量见 `shared/src/protocol/ipc.ts` 的 `terminalOutputCost()`）。网页恢复完成后将连续输出按顺序提交给 xterm 自带写队列，JSON 控制帧和连接关闭状态等待此前输出解析完成；恢复阶段仍逐块等待。每个二进制输出在其 xterm 写入回调完成后、有序 JSON 帧在处理完成后，才回报 `consumed.bytes`，不能先确认尚未处理的输出来腾出窗口；未确认量达到 `terminalOutstandingBytes` 后暂停发送。带外的 `error`、`input.error` 不占信用。
 
 每个显示的实时待发量受 `terminalDisplayBytes` 限制，恢复期间也计入。显示停止消费不会暂停会话：待发超限时只结束该显示，由用户重连；不会跳过部分输出后继续显示。
 
