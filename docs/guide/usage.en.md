@@ -147,6 +147,14 @@ Saving replaces the original with a new file, so its parent directory must allow
 
 Switch `.md` and `.markdown` files between source and preview. The preview includes unsaved edits and renders `mermaid` code blocks as diagrams. Relative file links open their targets in Files. Raw HTML appears as text; external images in ordinary Markdown appear as links, while external images within diagrams load automatically.
 
+### HTML preview
+
+`.html` and `.htm` files open as source. Preview HTML runs the current draft, including unsaved edits. It supports inline JavaScript, styles, SVG/data images and external CDN resources allowed by the browser. Relative resources do not read neighboring workspace files. For a project server or multiple local resources, use [Access development services](#access-development-services).
+
+The preview is isolated from the workbench, but document and CDN scripts can read and send the entire preview content. Modules, fetch and fonts remain subject to browser CORS rules; localStorage/sessionStorage are unavailable. Links, scripts and meta refresh can navigate within the frame, and browser Back may traverse frame history first. Form submission, new windows and top-level navigation are not enabled.
+
+Switching to source, another tool or draft, or file search ends the current preview. Showing the preview again runs it anew, resetting form values and chart selections while preserving the source draft and undo history. Terminal line links return to source. Save writes the draft, while Download reads the file on disk; interactions inside the preview do not change the source.
+
 ### Drafts
 
 Drafts are kept only in the current page's memory:

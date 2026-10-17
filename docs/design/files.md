@@ -63,6 +63,8 @@ Markdown 预览按需加载，直接读取同一草稿的正文。切换到源�
 
 Mermaid 只在遇到对应代码块时加载，保留上游的 `strict` 安全配置，允许图内外链图片加载。
 
+HTML 预览直接以当前稿件构造 `srcdoc`，只授予 iframe `sandbox="allow-scripts"`，不给 same-origin，因此脚本可运行而不能访问工作台 DOM 或存储。初始 doctype 和 `about:srcdoc` base 用于标准排版及页内锚点，不映射相邻文件。Files 正文不可见时卸载 HTML iframe，避免 CSS 隐藏后脚本仍继续运行；重新进入会重执行，源码与 undo 仍由同一草稿保存。HTML 不参与 Markdown 的渲染块行号映射，资源和交互边界见[使用工作台](../guide/usage.md#html-预览)。
+
 ## 保存
 
 ### 保存流程

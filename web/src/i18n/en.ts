@@ -550,6 +550,7 @@ export const en = {
     saveFile: "Save file",
     enterFocus: "Focus file",
     previewMarkdown: "Preview Markdown",
+    previewHtml: "Preview HTML",
     editSource: "Edit source",
     markdownPreview: "Markdown preview",
     mermaidSource: "Mermaid source",

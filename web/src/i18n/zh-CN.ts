@@ -540,6 +540,7 @@ export const zhCN = {
     saveFile: "保存文件",
     enterFocus: "专注文件",
     previewMarkdown: "预览 Markdown",
+    previewHtml: "预览 HTML",
     editSource: "编辑源码",
     markdownPreview: "Markdown 预览",
     mermaidSource: "Mermaid 源码",

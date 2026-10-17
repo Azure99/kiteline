@@ -57,9 +57,11 @@ export function DraftView({
   unavailable,
   focusMode,
   editorVisible = true,
+  htmlPreviewVisible = true,
 }: {
   focusMode?: ReturnType<typeof useTerminalFocus>;
   editorVisible?: boolean;
+  htmlPreviewVisible?: boolean;
   store: DraftStore;
   draft: Draft;
   targetOS?: AgentEnvironment["os"];
@@ -72,13 +74,18 @@ export function DraftView({
   useDraftVersion(store, draft);
   const busy = draft.operation?.kind;
   const canCheckDisk = !!(draft.path || draft.unknownSave);
-  const markdown = /\.(md|markdown)$/i.test(draft.path);
-  const [preview, setPreview] = useState(false);
+  const previewType = /\.html?$/i.test(draft.path)
+    ? "html"
+    : /\.(md|markdown)$/i.test(draft.path)
+      ? "markdown"
+      : undefined;
+  const [preview, setPreview] = useState<typeof previewType>();
+  if (preview && preview !== previewType) setPreview(undefined);
   const previewElement = useRef<HTMLElement>(null);
   const previewPosition = useRef<{ line: number; offset: number }>(undefined);
   const rememberPreviewPosition = useCallback(() => {
     const article = previewElement.current;
-    if (preview && article) {
+    if (preview === "markdown" && article) {
       const viewport = article.getBoundingClientRect();
       let nearest: HTMLElement | undefined;
       let distance = Infinity;
@@ -103,12 +110,12 @@ export function DraftView({
   function togglePreview() {
     const line = rememberPreviewPosition();
     if (line) draft.location = { line };
-    setPreview(!preview);
+    setPreview(preview ? undefined : previewType);
   }
   useLayoutEffect(() => {
     if (preview && draft.location) {
       rememberPreviewPosition();
-      setPreview(false);
+      setPreview(undefined);
     }
   }, [preview, draft.location, rememberPreviewPosition]);
   const [disk, setDisk] = useState<DiskText>();
@@ -144,9 +151,15 @@ export function DraftView({
         >
           {draftLabel(draft)}
         </span>
-        {markdown && (
+        {previewType && (
           <IconButton
-            label={preview ? t(($) => $.files.editSource) : t(($) => $.files.previewMarkdown)}
+            label={
+              preview
+                ? t(($) => $.files.editSource)
+                : previewType === "html"
+                  ? t(($) => $.files.previewHtml)
+                  : t(($) => $.files.previewMarkdown)
+            }
             onClick={togglePreview}
           >
             {preview ? <Code /> : <Eye />}
@@ -167,7 +180,7 @@ export function DraftView({
         >
           <Copy />
         </IconButton>
-        {editorVisible && !(markdown && preview) && (
+        {editorVisible && !preview && (
           <IconButton
             label={t(($) => $.files.copyCodeLineReference)}
             disabled={!draft.state}
@@ -273,7 +286,16 @@ export function DraftView({
           )}
         </div>
       )}
-      {draft.state && markdown && preview ? (
+      {draft.state && preview === "html" ? (
+        htmlPreviewVisible && (
+          <iframe
+            title={t(($) => $.files.previewHtml)}
+            className="min-h-0 w-full flex-1 border-0 bg-white"
+            sandbox="allow-scripts"
+            srcDoc={'<!doctype html><base href="about:srcdoc">' + draft.state.doc.toString()}
+          />
+        )
+      ) : draft.state && preview === "markdown" ? (
         <MarkdownPreview
           target={draft}
           text={draft.state.doc.toString()}
