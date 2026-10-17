@@ -1,6 +1,14 @@
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type Ref,
+} from "react";
 import {
   ArrowDown,
   ArrowLeft,
@@ -221,10 +229,87 @@ export function TerminalView({
       setNotice(error);
     }
   }
-  const auxiliary = (value: string) => {
-    display.current?.key(value);
-    if (!mobile) display.current?.focus();
-  };
+  const auxiliary = useCallback(
+    (value: string) => {
+      display.current?.key(value);
+      if (!mobile) display.current?.focus();
+    },
+    [mobile],
+  );
+  const arrowRoot = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const root = arrowRoot.current!;
+    let timer = 0;
+    let held: { id: number; button: HTMLElement; key: string } | undefined;
+    const stop = () => {
+      clearTimeout(timer);
+      held = undefined;
+    };
+    const repeat = () => {
+      if (!held) return;
+      auxiliary(held.key);
+      timer = window.setTimeout(repeat, 80);
+    };
+    const down = (event: PointerEvent) => {
+      const button = (event.target as Element).closest<HTMLElement>("[data-repeat-arrow]");
+      if (
+        !button ||
+        event.pointerType !== "touch" ||
+        !event.isPrimary ||
+        held ||
+        !searchActive ||
+        state.status !== "ready"
+      )
+        return;
+      event.preventDefault();
+      held = { id: event.pointerId, button, key: button.dataset.repeatArrow! };
+      auxiliary(held.key);
+      if (mobile) navigator.vibrate?.(10);
+      timer = window.setTimeout(repeat, 400);
+    };
+    const move = (event: PointerEvent) => {
+      if (!held || held.id !== event.pointerId) return;
+      const box = held.button.getBoundingClientRect();
+      if (
+        event.clientX < box.left ||
+        event.clientX >= box.right ||
+        event.clientY < box.top ||
+        event.clientY >= box.bottom
+      )
+        stop();
+    };
+    const end = (event: PointerEvent) => {
+      if (held?.id === event.pointerId) stop();
+    };
+    // Cancel the gesture's click even if its terminal is replaced before release.
+    const preventArrowDefault = (event: Event) => {
+      if ((event.target as Element).closest("[data-repeat-arrow]")) event.preventDefault();
+    };
+    const visibility = () => {
+      if (document.hidden) stop();
+    };
+    root.addEventListener("pointerdown", down);
+    root.addEventListener("pointermove", move);
+    root.addEventListener("pointerup", end);
+    root.addEventListener("pointercancel", end);
+    root.addEventListener("lostpointercapture", end);
+    root.addEventListener("touchstart", preventArrowDefault, { passive: false });
+    root.addEventListener("contextmenu", preventArrowDefault);
+    window.addEventListener("blur", stop);
+    document.addEventListener("visibilitychange", visibility);
+    return () => {
+      stop();
+      root.removeEventListener("pointerdown", down);
+      root.removeEventListener("pointermove", move);
+      root.removeEventListener("pointerup", end);
+      root.removeEventListener("pointercancel", end);
+      root.removeEventListener("lostpointercapture", end);
+      root.removeEventListener("touchstart", preventArrowDefault);
+      root.removeEventListener("contextmenu", preventArrowDefault);
+      window.removeEventListener("blur", stop);
+      document.removeEventListener("visibilitychange", visibility);
+    };
+  }, [auxiliary, mobile, searchActive, state.status, terminal, expanded]);
   return (
     <section
       className="terminal-surface flex min-h-0 flex-1 flex-col"
@@ -352,6 +437,7 @@ export function TerminalView({
         )}
       </div>
       <div
+        ref={arrowRoot}
         className="terminal-aux shrink-0 border-t"
         onPointerDown={(event) => event.preventDefault()}
         onClick={(event) => {
@@ -377,7 +463,8 @@ export function TerminalView({
               key === "ArrowUp" ? (
                 <IconButton
                   key={key}
-                  className="aux-key"
+                  className="aux-key touch-none"
+                  data-repeat-arrow={key}
                   label={t(($) => $.terminal.up)}
                   disabled={state.status !== "ready"}
                   onClick={() => auxiliary(key!)}
@@ -417,7 +504,8 @@ export function TerminalView({
             return (
               <IconButton
                 key={value}
-                className="aux-key"
+                className="aux-key touch-none"
+                data-repeat-arrow={value}
                 label={label}
                 disabled={state.status !== "ready"}
                 onClick={() => auxiliary(value)}

@@ -84,7 +84,7 @@ Scroll up to read retained history; new output does not pull you back to the bot
 
 Oversized pastes are not sent and show "Pasted text exceeds the input limit". Programs cannot display images or write to the clipboard through OSC 52 in the web terminal.
 
-On the phone key row, tap SHIFT, CTRL or ALT once to apply it to the next key, and again to cancel. In the web app, Ctrl-b goes directly to the program; it is not a tmux prefix.
+On the phone key row, tap an arrow for one step or hold it to repeat. Repeating stops when you release, move outside the button, or switch terminals. Tap SHIFT, CTRL or ALT once to apply it only to the next key, including the first step of a hold, and again to cancel. In the web app, Ctrl-b goes directly to the program; it is not a tmux prefix.
 
 ### Search and display
 
