@@ -71,6 +71,8 @@ export function TerminalView({
   const [attempt, setAttempt] = useState(0);
   const [state, setState] = useState<DisplayState>({ status: "connecting" });
   const code = state.error instanceof ApiError ? state.error.code : undefined;
+  const screenRetry =
+    state.status === "error" && ["limit_exceeded", "timeout", "busy"].includes(code ?? "");
   const [notice, setNotice] = useState<unknown>();
   const [modifiers, setModifiers] = useState<Modifiers>(releasedModifiers);
   const [expanded, setExpanded] = useState(true);
@@ -238,6 +240,7 @@ export function TerminalView({
       ) && (
         <div
           className="terminal-notice flex flex-wrap items-start gap-2 px-3 py-1 text-xs"
+          data-two-actions={screenRetry}
           data-compact={
             !notice &&
             !state.error &&
@@ -281,7 +284,7 @@ export function TerminalView({
                     ? t(($) => $.terminal.recover)
                     : t(($) => $.terminal.reconnect)}
               </Button>
-              {["limit_exceeded", "timeout", "busy"].includes(code ?? "") && (
+              {screenRetry && (
                 <Button
                   variant="ghost"
                   onClick={() => redisplay("screen")}

@@ -331,7 +331,6 @@ body {
 }
 .terminal-notice,
 .workbench-notice {
-  /* Language changes must not resize xterm and clear its selection. */
   height: 4rem;
   flex-shrink: 0;
   overflow: auto;
@@ -343,6 +342,27 @@ body {
 .terminal-notice[data-compact="true"] {
   height: 32px;
   align-items: center;
+}
+@variant max-desk {
+  .workbench-notice,
+  .terminal-notice:not([data-compact="true"]) {
+    height: auto;
+    align-items: center;
+    padding-block: 4px;
+  }
+  .workbench-notice {
+    flex-shrink: 1;
+  }
+  .workbench-notice > * {
+    margin-block: auto;
+  }
+  .terminal-notice[data-two-actions="true"] {
+    align-items: flex-start;
+    row-gap: 4px;
+  }
+  .terminal-notice[data-two-actions="true"] > div:first-child {
+    flex-basis: 100%;
+  }
 }
 .terminal-aux {
   border-color: #39414c;
