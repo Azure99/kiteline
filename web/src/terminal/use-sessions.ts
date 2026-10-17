@@ -28,12 +28,12 @@ export function useSessions(device: Device, workspaceId: string) {
         setSessions(result.sessions);
         setLoaded(true);
         setListError(undefined);
+        setListErrorDismissed(false);
       }
       return result.sessions;
     } catch (error) {
       if (read === revision.current) {
         setListError(error);
-        setListErrorDismissed(false);
       }
     } finally {
       if (read === revision.current) setRefreshing(false);
@@ -118,12 +118,15 @@ export function useSessions(device: Device, workspaceId: string) {
     refreshing,
     busy,
     uncertainCreate,
-    refresh,
+    refresh: () => {
+      setListErrorDismissed(false);
+      return refresh();
+    },
     create,
     change,
     clearError: () => {
       setError(undefined);
-      setListErrorDismissed(true);
+      if (listError) setListErrorDismissed(true);
     },
   };
 }

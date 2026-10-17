@@ -53,7 +53,7 @@ Removing a workspace deletes only the registration, keeping directories and file
 
 A workspace is not a sandbox. Terminal, file and Git operations use the project user's permissions and can access any path that user can access.
 
-Terminal sessions keep running when you switch tools, workspaces or devices. Leaving a workspace closes its terminal displays; returning attaches again. Unsaved changes and Git commit messages remain until the page closes. Terminal layouts restore after a reload or page discard in the same tab, with explicit session URLs taking precedence. Retention after closing the tab or restarting the browser depends on the browser. Signing out clears saved layouts. Storage failures show an error; layouts can still be changed in the current page.
+Terminal sessions keep running when you switch tools, workspaces or devices. Leaving a workspace closes its terminal displays; returning attaches again. Unsaved changes and Git commit messages remain until the page closes. Terminal layouts restore after a reload or page discard in the same tab, with explicit session URLs taking precedence. Retention after closing the tab or restarting the browser depends on the browser. Signing out clears saved layouts. When browser storage is unavailable, no warning appears; layouts can still be changed and retained in the current page.
 
 ## Terminal
 

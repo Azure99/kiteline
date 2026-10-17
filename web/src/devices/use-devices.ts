@@ -99,5 +99,5 @@ export function useDevices(
       setConnected(false);
     };
   }, [active, refresh, onSession, serverVersion, invalidateReads]);
-  return { devices: devices ?? [], loaded: devices !== undefined, connected, error, refresh };
+  return { devices: devices ?? [], loaded: devices !== undefined, connected, error };
 }

@@ -134,11 +134,11 @@ export function Workbench({
   authentication: ReactNode;
 }) {
   const { t, i18n } = useTranslation();
-  const [{ layouts: terminalLayouts, error: layoutReadError }] = useState(() => {
+  const [terminalLayouts] = useState(() => {
     try {
-      return { layouts: readTerminalLayouts(sessionStorage), error: undefined };
-    } catch (error) {
-      return { layouts: new Map<string, TerminalLayout>(), error };
+      return readTerminalLayouts(sessionStorage);
+    } catch {
+      return new Map<string, TerminalLayout>();
     }
   });
   const [drafts] = useState(() => new DraftStore());
@@ -158,23 +158,14 @@ export function Workbench({
     return () => window.removeEventListener("kiteline:event", receive);
   }, [authenticated]);
   const route = useRoute();
-  const [error, setError] = useState<
-    | {
-        cause: unknown;
-        downloadPath?: string;
-        layoutStorage?: "layoutReadFailed" | "layoutWriteFailed" | "layoutClearFailed";
-      }
-    | undefined
-  >(() =>
-    layoutReadError ? { cause: layoutReadError, layoutStorage: "layoutReadFailed" } : undefined,
-  );
+  const [error, setError] = useState<{ cause: unknown; downloadPath?: string }>();
   const saveLayout = useCallback(
     (key: string, layout: TerminalLayout) => {
       terminalLayouts.set(key, layout);
       try {
         writeTerminalLayouts(sessionStorage, terminalLayouts);
-      } catch (cause) {
-        setError({ cause, layoutStorage: "layoutWriteFailed" });
+      } catch {
+        // The in-memory layout remains available.
       }
     },
     [terminalLayouts],
@@ -212,7 +203,6 @@ export function Workbench({
     loaded: devicesLoaded,
     connected,
     error: connectionError,
-    refresh,
   } = useDevices(!!session, route.deviceId, route.workspaceId, setSession);
   const recents = useRecentWorkspaces(route, devices, devicesLoaded, !!session);
   const device = devices.find((d) => d.id === route.deviceId);
@@ -312,8 +302,8 @@ export function Workbench({
       terminalLayouts.clear();
       try {
         sessionStorage.removeItem(terminalLayoutsKey);
-      } catch (cause) {
-        setError({ cause, layoutStorage: "layoutClearFailed" });
+      } catch {
+        // Storage failure does not prevent signing out.
       }
       drafts.clear();
       gitActions.clear();
@@ -468,36 +458,7 @@ export function Workbench({
       />
     );
   }
-  const notice = !!(error || (session && connectionError)) && (
-    <div
-      role="alert"
-      className="workbench-notice flex shrink-0 items-start gap-2 border-b border-border bg-danger-soft px-4 py-2 text-sm text-destructive"
-    >
-      <div className="min-w-0 flex-1 break-words">
-        {error?.layoutStorage
-          ? t(($) => $.shell[error.layoutStorage!], { error: errorMessage(error.cause) })
-          : error?.downloadPath
-            ? t(($) => $.shell.downloadFailed, {
-                path: error.downloadPath,
-                error: errorMessage(error.cause),
-              })
-            : errorMessage(error ? error.cause : connectionError)}
-        <ErrorDetails error={error ? error.cause : connectionError} />
-      </div>
-      {!!error && (
-        <IconButton label={t(($) => $.common.dismiss)} onClick={() => setError(undefined)}>
-          <X />
-        </IconButton>
-      )}
-    </div>
-  );
-  if (!session)
-    return (
-      <>
-        {notice}
-        {authentication}
-      </>
-    );
+  if (!session) return authentication;
   return (
     <>
       <div
@@ -676,7 +637,30 @@ export function Workbench({
             {route.valid && !route.tasks && device && (!route.workspaceId || workspace) && (
               <AgentReleaseNotice key={`agent-release:${device.id}`} device={device} />
             )}
-            {notice}
+            {!!(error || connectionError) && (
+              <div
+                role="alert"
+                className="workbench-notice flex shrink-0 items-start gap-2 border-b border-border bg-danger-soft px-4 py-2 text-sm text-destructive"
+              >
+                <div className="min-w-0 flex-1 break-words">
+                  {error?.downloadPath
+                    ? t(($) => $.shell.downloadFailed, {
+                        path: error.downloadPath,
+                        error: errorMessage(error.cause),
+                      })
+                    : errorMessage(error ? error.cause : connectionError)}
+                  <ErrorDetails error={error ? error.cause : connectionError} />
+                </div>
+                {!!error && (
+                  <IconButton
+                    label={t(($) => $.common.dismiss)}
+                    onClick={() => setError(undefined)}
+                  >
+                    <X />
+                  </IconButton>
+                )}
+              </div>
+            )}
             {renderMain()}
           </main>
         </div>
@@ -744,15 +728,7 @@ export function Workbench({
           }}
         />
       )}
-      {action && (
-        <DeviceActionDialog
-          action={action}
-          onClose={() => setAction(undefined)}
-          onDone={() => {
-            void refresh().catch((error: unknown) => setError({ cause: error }));
-          }}
-        />
-      )}
+      {action && <DeviceActionDialog action={action} onClose={() => setAction(undefined)} />}
     </>
   );
 }

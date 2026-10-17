@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Save,
   Scan,
+  X,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
@@ -113,7 +114,7 @@ export function DraftView({
   const [disk, setDisk] = useState<DiskText>();
   const [saveAs, setSaveAs] = useState(false);
   const [error, setError] = useState<unknown>();
-  const { copied, error: copyError, copy } = useCopyFeedback();
+  const { copied, error: copyError, copy, reset: resetCopy } = useCopyFeedback();
   const tabs = all.filter(
     (item) => item.deviceId === draft.deviceId && item.workspaceId === draft.workspaceId,
   );
@@ -244,8 +245,17 @@ export function DraftView({
             </div>
           )}
           {copyError && (
-            <div role="alert" className="break-words text-destructive">
-              <ErrorNotice error={copyError.error} />
+            <div role="alert" className="flex items-start gap-2 text-destructive">
+              <div className="min-w-0 flex-1 break-words">
+                <ErrorNotice error={copyError.error} />
+              </div>
+              <IconButton
+                label={t(($) => $.common.dismiss)}
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={resetCopy}
+              >
+                <X />
+              </IconButton>
             </div>
           )}
           {!!(

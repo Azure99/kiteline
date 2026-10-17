@@ -20,11 +20,9 @@ export type DeviceAction =
   | { type: "workspace-rename" | "workspace-remove"; device: Device; workspace: Workspace };
 export function DeviceActionDialog({
   action,
-  onDone,
   onClose,
 }: {
   action: DeviceAction;
-  onDone: () => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
@@ -68,7 +66,6 @@ export function DeviceActionDialog({
       else if (action.type === "workspace-remove")
         await rpc(action.device.id, "workspaces.remove", { workspaceId: action.workspace.id });
       if (mounted.current) {
-        onDone();
         if (action.type === "delete") setDeleted(true);
         else onClose();
       }
