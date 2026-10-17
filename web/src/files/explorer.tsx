@@ -166,12 +166,12 @@ export function FileExplorer({
           <ErrorNotice error={page.error} />
         </div>
       )}
-      {page?.busy && (
+      {page?.busy && !page.listing && (
         <p role="status" className="px-3 py-2 text-xs text-muted-foreground">
           {t(($) => $.common.reading)}
         </p>
       )}
-      {!page?.busy && page?.listing?.entries.items.length === 0 && (
+      {page?.listing?.entries.items.length === 0 && (
         <p className="px-3 py-3 text-xs text-muted-foreground">
           {t(($) => $.files.emptyDirectory)}
         </p>
