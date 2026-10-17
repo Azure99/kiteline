@@ -23,6 +23,7 @@ export interface PaneEvents {
 export function SplitPanes({
   deviceId,
   workspaceId,
+  workspacePath,
   groups,
   current,
   opened,
@@ -34,6 +35,7 @@ export function SplitPanes({
 }: {
   deviceId: string;
   workspaceId: string;
+  workspacePath: string;
   groups: TerminalGroup[];
   current?: string;
   opened: ReadonlySet<string>;
@@ -154,6 +156,7 @@ export function SplitPanes({
                   id={id}
                   deviceId={deviceId}
                   workspaceId={workspaceId}
+                  workspacePath={workspacePath}
                   active={id === owner.active}
                   group={owner}
                   showHeader={!mobile && !owner.maximized && members(owner).length > 1}
@@ -185,6 +188,7 @@ function TerminalPane({
   id,
   deviceId,
   workspaceId,
+  workspacePath,
   active,
   group,
   showHeader,
@@ -195,6 +199,7 @@ function TerminalPane({
   id: string;
   deviceId: string;
   workspaceId: string;
+  workspacePath: string;
   active: boolean;
   group: TerminalGroup;
   showHeader: boolean;
@@ -273,6 +278,7 @@ function TerminalPane({
         onCapabilities={events.capabilities}
         deviceId={deviceId}
         workspaceId={workspaceId}
+        workspacePath={workspacePath}
         sessionId={id}
         searchHost={searchHost}
         searchActive={active && !hidden}

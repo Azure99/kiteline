@@ -619,6 +619,7 @@ export function WorkspaceView({
           <SplitPanes
             deviceId={device.id}
             workspaceId={workspace.id}
+            workspacePath={workspace.path}
             groups={groups}
             current={targetPending ? undefined : group?.id}
             opened={opened.main}
@@ -743,6 +744,7 @@ export function WorkspaceView({
                     }}
                     deviceId={device.id}
                     workspaceId={workspace.id}
+                    workspacePath={workspace.path}
                     sessionId={id}
                     onCapabilities={reportDock}
                     searchHost={dockSearchHost}

@@ -40,6 +40,7 @@ export function useRoute() {
 }
 export function parseRoute(url: URL) {
   const params = url.searchParams;
+  const line = Number(params.get("line"));
   const tasks: TasksRoute | undefined =
     url.pathname === "/tasks"
       ? {
@@ -53,6 +54,7 @@ export function parseRoute(url: URL) {
     session: params.get("session") ?? undefined,
     repo: params.get("repo") ?? undefined,
     file: params.get("file") ?? undefined,
+    line: Number.isSafeInteger(line) && line > 0 ? line : undefined,
     draft: params.get("draft") ?? undefined,
     folder: params.get("folder") ?? undefined,
     reveal: params.get("reveal") ?? undefined,

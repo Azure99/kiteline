@@ -398,6 +398,8 @@ export const zhCN = {
     play: "运行",
   },
   terminal: {
+    openFile: "打开文件 · 工作区根目录",
+    openFileHint: "Ctrl/Cmd 点击在文件中打开 · 路径相对工作区根目录",
     search: "搜索终端",
     searchPrevious: "上一个结果",
     searchNext: "下一个结果",

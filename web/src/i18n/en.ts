@@ -407,6 +407,8 @@ export const en = {
     play: "Run",
   },
   terminal: {
+    openFile: "Open file · workspace root",
+    openFileHint: "Ctrl/Cmd-click to open in Files · paths use the workspace root",
     search: "Search terminal",
     searchPrevious: "Previous result",
     searchNext: "Next result",

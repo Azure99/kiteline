@@ -27,6 +27,8 @@ import { useWebCompatible, webCompatible } from "../lib/release";
 import { Terminal } from "@xterm/xterm";
 import { ErrorNotice } from "../components/error-notice";
 import { TouchControls } from "./touch-controls";
+import { terminalFileLinks } from "./file-links";
+import { showFile } from "../files/navigation";
 import { useMobile } from "../lib/use-mobile";
 import { cn } from "../lib/utils";
 import { terminalKeyboard } from "./keyboard-input";
@@ -54,6 +56,7 @@ export interface TerminalCapabilities {
 export function TerminalView({
   deviceId,
   workspaceId,
+  workspacePath,
   sessionId,
   ref,
   onCapabilities,
@@ -62,6 +65,7 @@ export function TerminalView({
 }: {
   deviceId: string;
   workspaceId: string;
+  workspacePath: string;
   sessionId: string;
   ref?: Ref<TerminalActions>;
   onCapabilities?(id: string, value: TerminalCapabilities | undefined): void;
@@ -75,6 +79,22 @@ export function TerminalView({
   const display = useRef<TerminalDisplay>(undefined);
   const [title, setTitle] = useState("");
   const [terminal, setTerminal] = useState<Terminal>();
+  useEffect(() => {
+    if (!terminal) return;
+    const canvas = element.current!;
+    const provider = terminal.registerLinkProvider(
+      terminalFileLinks(
+        terminal,
+        workspacePath,
+        (target) => showFile({ deviceId, workspaceId, path: target.path }, target.line),
+        () => {
+          canvas.title = t(($) => $.terminal.openFileHint);
+        },
+        () => canvas.removeAttribute("title"),
+      ),
+    );
+    return () => provider.dispose();
+  }, [terminal, deviceId, workspaceId, workspacePath, t]);
   const [reading, setReading] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [state, setState] = useState<DisplayState>({ status: "connecting" });
@@ -412,6 +432,8 @@ export function TerminalView({
           <TouchControls
             terminal={terminal}
             deviceId={deviceId}
+            workspaceId={workspaceId}
+            workspacePath={workspacePath}
             onPaste={
               state.status === "ready" && typeof navigator.clipboard?.readText === "function"
                 ? paste

@@ -86,6 +86,12 @@ Oversized pastes are not sent and show "Pasted text exceeds the input limit". Pr
 
 On the phone key row, tap an arrow for one step or hold it to repeat. Repeating stops when you release, move outside the button, or switch terminals. Tap SHIFT, CTRL or ALT once to apply it only to the next key, including the first step of a hold, and again to cancel. In the web app, Ctrl-b goes directly to the program; it is not a tmux prefix.
 
+### Open files from terminal output
+
+On desktop, Ctrl/Cmd-click a path to open it in Files in the source workspace. On a phone, select the full path with a long press, then choose Open file from the menu. Relative paths always start at the workspace root; they do not follow shell `cd`, SSH or container directories.
+
+Supported forms are `/`-separated relative paths, POSIX absolute paths inside the workspace, and local `file://` URIs. `:line` and `:line:column` position only the line in the existing unsaved draft; a line beyond the document goes to its last line. Ordinary paths containing `..` are not recognized. Desktop detection accepts complete ASCII paths without spaces; an exact phone selection may include spaces and Unicode. Use `./README` for an extensionless name. Windows workspaces accept `/`-separated relative paths, without drive letters or backslashes.
+
 ### Search and display
 
 The Focus terminal button cycles through focus within the window, browser fullscreen, and exit. The first step hides the rest of the workbench while keeping the browser window's position and size, so several windows can monitor output at once. The Focus file button works the same way when editing files in narrow layouts.

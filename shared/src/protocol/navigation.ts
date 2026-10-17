@@ -3,6 +3,7 @@ export interface WorkspaceQuery {
   session?: string;
   repo?: string;
   file?: string;
+  line?: number;
   draft?: string;
   folder?: string;
   reveal?: string;
@@ -20,7 +21,7 @@ export function workspacePath(
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
     if (value === undefined || value === false || (key === "folder" && value === ".")) continue;
-    params.set(key, value === true ? "1" : value);
+    params.set(key, value === true ? "1" : String(value));
   }
   const search = params.toString();
   return `${devicePath(deviceId)}/workspaces/${encodeURIComponent(workspaceId)}/${tool}${search ? `?${search}` : ""}`;

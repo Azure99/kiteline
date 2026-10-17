@@ -8,9 +8,10 @@ import { isDirty, type Draft, type DraftStore } from "./drafts";
 import { parentPath } from "./paths";
 import type { FileTarget } from "./content";
 
-export function showFile(target: FileTarget) {
+export function showFile(target: FileTarget, line?: number) {
   navigateWorkspace(target, "files", {
     file: target.path,
+    line,
     folder: parentPath(target.path),
     draft: undefined,
     search: undefined,
@@ -24,6 +25,7 @@ export function showDraft(draft: Draft, replace = false) {
     "files",
     {
       file: draft.path || undefined,
+      line: undefined,
       draft: draft.id,
       folder: draft.path ? parentPath(draft.path) : draft.untitled?.folder,
       search: undefined,

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Download, RefreshCw } from "lucide-react";
 import { ErrorNotice } from "../components/error-notice";
@@ -15,10 +15,12 @@ export function FileContent({
   target,
   store,
   active,
+  onResolvePath,
 }: {
   target: FileTarget & { deviceName: string; workspaceName: string };
   store: DraftStore;
   active: boolean;
+  onResolvePath: (path: string) => void;
 }) {
   const { t } = useTranslation();
   const [image, setImage] = useState<DiskImage>();
@@ -26,6 +28,7 @@ export function FileContent({
   const [attempt, setAttempt] = useState(0);
   const [busy, setBusy] = useState(true);
   const { deviceId, workspaceId, path, deviceName, workspaceName } = target;
+  const resolvePath = useEffectEvent(onResolvePath);
   useEffect(() => {
     if (!active) return;
     const controller = new AbortController();
@@ -53,6 +56,7 @@ export function FileContent({
         if (content.kind === "text") {
           const actual = { ...target, path: content.value.target.path };
           const draft = store.open(actual, content.value);
+          if (actual.path !== path) resolvePath(actual.path);
           showDraft(draft, true);
         } else {
           setImage(content.value);

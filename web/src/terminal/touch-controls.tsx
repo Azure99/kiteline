@@ -1,21 +1,27 @@
 import { useTranslation } from "react-i18next";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
-import { Copy, ClipboardPaste, X, ExternalLink } from "lucide-react";
+import { Copy, ClipboardPaste, X, ExternalLink, FileText } from "lucide-react";
 import type { Terminal } from "@xterm/xterm";
 import { TouchSelection, type SelectionHandles } from "./touch-selection";
 import { IconButton } from "../components/icon-button";
 import { deviceServiceLink } from "../lib/device-service";
 import { ErrorNotice } from "../components/error-notice";
 import { copyText } from "../lib/clipboard";
+import { terminalFileTarget } from "./file-links";
+import { showFile } from "../files/navigation";
 
 export function TouchControls({
   terminal,
   deviceId,
+  workspaceId,
+  workspacePath,
   onTap,
   onPaste,
 }: {
   terminal: Terminal;
   deviceId: string;
+  workspaceId: string;
+  workspacePath: string;
   onTap: () => void;
   onPaste?: () => Promise<void>;
 }) {
@@ -27,7 +33,8 @@ export function TouchControls({
   const selection = useRef<TouchSelection>(undefined);
   const layer = useRef<HTMLDivElement>(null);
   const service = handles ? deviceServiceLink(terminal.getSelection(), deviceId) : undefined;
-  const halfWidth = (2 + Number(!!service) + Number(!!onPaste)) * 22 + 6;
+  const file = handles ? terminalFileTarget(terminal.getSelection(), workspacePath) : undefined;
+  const halfWidth = (2 + Number(!!service) + Number(!!file) + Number(!!onPaste)) * 22 + 6;
   const tapped = useEffectEvent(onTap);
   useEffect(() => {
     const current = new TouchSelection(terminal, setHandles, tapped);
@@ -145,6 +152,14 @@ export function TouchControls({
                 onClick={() => window.open(service.url, "_blank", "noopener,noreferrer")}
               >
                 <ExternalLink />
+              </IconButton>
+            )}
+            {file && (
+              <IconButton
+                label={t(($) => $.terminal.openFile)}
+                onClick={() => showFile({ deviceId, workspaceId, path: file.path }, file.line)}
+              >
+                <FileText />
               </IconButton>
             )}
           </div>

@@ -108,6 +108,8 @@ agent 发往该显示的帧依次为：`restore.begin`（尺寸、`historyLines`
 
 显示在第一次打开时附着。切换分组、工具，或收起文件和 Git 视图下方的终端面板，只隐藏显示，隐藏的显示保持附着并继续消费输出；关闭显示、离开工作区或页面销毁时释放附着。断开后网页不自动重连，显示“连接已断开”，由用户点击“重新连接”。同一会话的多个显示各自维护视口、选区和搜索。
 
+终端路径通过 xterm 的公开 cell API 识别完整逻辑行，将宽字符和软换行映射回链接范围。来源设备、工作区和根目录由发起显示的 pane 或配套面板传入，不从当前 URL 或 Shell 输出推断；桌面和手机菜单共用路径解析，格式和操作见[使用工作台](../guide/usage.md#从终端输出打开文件)。本地 file URI 先按 URL 规则标准化，再匹配来源根目录；根目录定义 Files 命名空间，沿用已有软链接语义。
+
 ### 远程交互附着
 
 `kiteline terminal attach` 使用已有 CLI 凭据和目标，经 `terminal.attach` 的 `mode:"tty"` 变体接续运行中的会话。agent 收到配对后的 `start` 才启动 PTY helper 和普通 tmux client；helper 使用 `tmux attach-session -E` 保持原会话环境，仅该 client 使用本机传来的 `TERM`。记录不可用不阻止 TTY 附着，recorder 故障也不关闭 TTY 通道。

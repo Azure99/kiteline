@@ -105,6 +105,7 @@ export function Files({
   }, [initialRoot, load]);
   const queryFile = route.query.file;
   const queryDraft = route.query.draft;
+  const queryLine = route.query.line;
   const [location, setLocation] = useState<{ path: string; position: Draft["location"] }>();
   const searching = route.query.search === true;
   const drafts = useDrafts(store).filter(
@@ -118,6 +119,15 @@ export function Files({
     if (draft && !signal.aborted) await store.observe(draft, signal);
   });
   useEffect(() => {
+    if (visible && !searching && queryLine !== undefined) {
+      setLocation(queryFile ? { path: queryFile, position: { line: queryLine } } : undefined);
+      updateWorkspaceQuery(
+        { deviceId: device.id, workspaceId: workspace.id },
+        { line: undefined },
+        true,
+      );
+      return;
+    }
     if (location && (!visible || searching || queryFile !== location.path)) {
       setLocation(undefined);
       return;
@@ -129,7 +139,18 @@ export function Files({
       setLocation(undefined);
     }
     if (queryDraft !== draft.id) showDraft(draft, true);
-  }, [visible, searching, draft, queryFile, queryDraft, location, store]);
+  }, [
+    visible,
+    searching,
+    draft,
+    queryFile,
+    queryDraft,
+    queryLine,
+    location,
+    store,
+    device.id,
+    workspace.id,
+  ]);
   useEffect(() => {
     if (!visible || !enabled || folder === ".") return;
     const deviceTarget = { deviceId: device.id, workspaceId: workspace.id };
@@ -569,6 +590,11 @@ export function Files({
             ) : queryFile ? (
               <FileContent
                 key={queryFile}
+                onResolvePath={(path) =>
+                  setLocation((current) =>
+                    current?.path === queryFile ? { ...current, path } : current,
+                  )
+                }
                 target={{
                   ...target,
                   path: queryFile,

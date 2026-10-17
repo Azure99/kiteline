@@ -6,6 +6,7 @@ import {
   updateWorkspaceQuery,
   tasksPath,
 } from "../src/lib/navigation";
+import { showFile } from "../src/files/navigation";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -43,6 +44,7 @@ test("workspace navigation retains known tool targets only within the same works
     session: "s",
     repo: "r",
     file: "a #%.txt",
+    line: 61,
     draft: "d",
     folder: "src",
     reveal: "src/entry",
@@ -64,4 +66,33 @@ test("workspace navigation retains known tool targets only within the same works
   updateWorkspaceQuery({ ...target, workspaceId: "other" }, { file: "late.txt" }, true);
   expect(history.replaceState).not.toHaveBeenCalled();
   expect(history.pushState).not.toHaveBeenCalled();
+});
+
+test("file line requests reject invalid numbers and normal file opens clear the old request", () => {
+  for (const line of ["0", "-1", "1.5", "Infinity", "NaN", "9007199254740992"])
+    expect(parseRoute(new URL(`https://kiteline.test/?line=${line}`)).query.line).toBeUndefined();
+  const target = { deviceId: "d", workspaceId: "w", path: "src/main.ts" };
+  const browser = Object.assign(new EventTarget(), {
+    location: new URL(
+      "https://kiteline.test/devices/d/workspaces/w/terminal?draft=old&search=1&reveal=old&line=5",
+    ),
+  });
+  vi.stubGlobal("window", browser);
+  vi.stubGlobal("PopStateEvent", Event);
+  vi.stubGlobal("history", {
+    pushState: (_state: unknown, _title: string, path: string) => {
+      browser.location = new URL(path, browser.location);
+    },
+  });
+  showFile(target, 61);
+  expect(parseRoute(browser.location).query).toMatchObject({
+    file: target.path,
+    folder: "src",
+    line: 61,
+    draft: undefined,
+    search: undefined,
+    reveal: undefined,
+  });
+  showFile(target);
+  expect(parseRoute(browser.location).query.line).toBeUndefined();
 });
