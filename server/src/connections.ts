@@ -215,6 +215,34 @@ export class Connections {
             }
             break;
           }
+          case "terminal.notice": {
+            const notice = record(message.notice);
+            if (
+              typeof notice.title !== "string" ||
+              typeof notice.body !== "string" ||
+              typeof notice.blocked !== "boolean"
+            )
+              throw new AppError("invalid_argument", "Invalid terminal report");
+            const event: BrowserEvent = {
+              type: "terminal.notice",
+              deviceId: id,
+              workspaceId: string(message.workspaceId),
+              sessionId: string(message.sessionId),
+              name: string(message.name, "session name", limits.nameLength),
+              notice: { title: notice.title, body: notice.body, blocked: notice.blocked },
+            };
+            const text = JSON.stringify(event);
+            if (Buffer.byteLength(text) > limits.controlMessageBytes) {
+              console.error(`Terminal report dropped for ${id}: control message exceeds limit`);
+              break;
+            }
+            for (const browser of this.browsers) {
+              if (!permitsDevice(browser.login, id)) continue;
+              if (controlWritable(browser.socket)) browser.socket.send(text);
+              else console.error(`Terminal report dropped for ${id}: browser unavailable`);
+            }
+            break;
+          }
           case "request.progress": {
             const requestId = string(message.id);
             const pending = this.pending.get(requestId);

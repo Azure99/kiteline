@@ -1,4 +1,9 @@
-import { appVersion, type AgentEnvironment, type AgentEvent } from "@kiteline/shared/protocol";
+import {
+  appVersion,
+  limits,
+  type AgentEnvironment,
+  type AgentEvent,
+} from "@kiteline/shared/protocol";
 import { once } from "node:events";
 import { afterEach, expect, test } from "vitest";
 import { WebSocket } from "ws";
@@ -334,4 +339,98 @@ test("absolute expiry cancels RPC without an event socket and connection replace
   );
   expect(await (await old).json()).toMatchObject({ id: "old", outcome: "unknown" });
   await expect.poll(() => peer.socket.readyState).toBe(WebSocket.CLOSED);
+});
+
+test("terminal reports reach permitted devices without workspace subscriptions and use connection identity", async () => {
+  const f = await fixture();
+  const peers = [await f.device("First"), await f.device("Second")];
+  const received: Record<string, unknown>[][] = [[], [], []];
+  const owner = f.store.createLogin(60_000);
+  const tokens = peers.map(
+    (peer) => f.store.createCredential("Reports", [peer.deviceId], null).token,
+  );
+  for (let i = 0; i < received.length; i++) {
+    const socket = new WebSocket(f.origin.replace("http:", "ws:") + webPath("/api/events"), {
+      headers:
+        i === 2
+          ? { cookie: `kiteline_session_http=${owner.token}`, origin: f.origin }
+          : { authorization: `Bearer ${tokens[i]}`, origin: f.origin },
+    });
+    socket.on("message", (data) => received[i]!.push(JSON.parse(data.toString())));
+    await once(socket, "open");
+    await expect.poll(() => received[i]!.length).toBe(1);
+  }
+  for (const peer of peers)
+    peer.socket.send(
+      JSON.stringify({
+        type: "terminal.notice",
+        deviceId: "spoofed",
+        workspaceId: "work",
+        sessionId: "source",
+        name: peer.deviceId,
+        notice: { title: "", body: "A report; with text", blocked: false },
+        diagnostic: "not forwarded",
+      }),
+    );
+  const reports = (index: number) =>
+    received[index]!.filter((event) => event.type === "terminal.notice");
+  await expect.poll(() => reports(2)).toHaveLength(2);
+  for (let i = 0; i < 2; i++) {
+    await expect
+      .poll(() => reports(i))
+      .toEqual([
+        {
+          type: "terminal.notice",
+          deviceId: peers[i]!.deviceId,
+          workspaceId: "work",
+          sessionId: "source",
+          name: peers[i]!.deviceId,
+          notice: { title: "", body: "A report; with text", blocked: false },
+        },
+      ]);
+    expect(
+      peers[i]!.messages.filter((message) => message.type === "watch.set").every(
+        (message) => (message.workspaceIds as string[]).length === 0,
+      ),
+    ).toBe(true);
+  }
+});
+
+test("oversized browser report is dropped without disconnecting the device; malformed fields close it", async () => {
+  const f = await fixture();
+  const peer = await f.device();
+  const login = f.store.createLogin(60_000);
+  const socket = new WebSocket(f.origin.replace("http:", "ws:") + webPath("/api/events"), {
+    headers: { cookie: `kiteline_session_http=${login.token}`, origin: f.origin },
+  });
+  const received: Record<string, unknown>[] = [];
+  socket.on("message", (data) => received.push(JSON.parse(data.toString())));
+  await once(socket, "open");
+  const event = {
+    type: "terminal.notice",
+    workspaceId: "work",
+    sessionId: "source",
+    name: "Shell",
+    notice: { title: "", body: "", blocked: false },
+  };
+  event.notice.body = "x".repeat(
+    limits.controlMessageBytes - Buffer.byteLength(JSON.stringify(event)),
+  );
+  peer.socket.send(JSON.stringify(event));
+  peer.socket.send(
+    JSON.stringify({ ...event, notice: { title: "", body: "after oversized", blocked: true } }),
+  );
+  await expect
+    .poll(() => received.filter((message) => message.type === "terminal.notice"))
+    .toEqual([
+      {
+        ...event,
+        deviceId: peer.deviceId,
+        notice: { title: "", body: "after oversized", blocked: true },
+      },
+    ]);
+  expect(f.app.connections.devices()[0]!.status).toBe("online");
+  const closed = once(peer.socket, "close");
+  peer.socket.send(JSON.stringify({ ...event, notice: { title: "", body: 1, blocked: true } }));
+  expect((await closed)[0]).toBe(1008);
 });

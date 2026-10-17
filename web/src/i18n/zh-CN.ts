@@ -270,6 +270,13 @@ export const zhCN = {
     unknown: "结果未确认。请刷新核查后再决定是否重试。",
     partial: "操作部分完成。",
   },
+  reports: {
+    received: "已收报告",
+    count: "已收报告：{{count}}",
+    returnTo: "返回 {{name}}",
+    blocked: "程序报告了 blocked",
+    notification: "终端通知",
+  },
   devices: {
     filterWorkspaces: "筛选工作区",
     filterWorkspacesHint: "工作区名称或路径",

@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { mkdtemp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { AppError, limits } from "@kiteline/shared/protocol";
+import { AppError, limits, type AgentEvent } from "@kiteline/shared/protocol";
 import { tmux } from "@kiteline/shared/terminal/node";
 import {
   terminalOutputCost,
@@ -507,4 +507,60 @@ test("a failed tmux kill marks the session unavailable and can recover the same 
     .toBe(true);
   await agent.sessions.end(workspace.id, session.id);
   expect(agent.sessions.list().sessions).toEqual([]);
+}, 15000);
+
+test("unattached terminal reports retain real source identity and survive an oversized report", async () => {
+  const { agent, workspace, dataDir, signal } = await fixture();
+  const reports: Extract<AgentEvent, { type: "terminal.notice" }>[] = [];
+  agent.sessions.onNotice = (report) => reports.push(report);
+  const session = await agent.sessions.create(workspace.id, "Actual source", undefined, signal);
+  const body = Buffer.from("Confirm?").toString("base64");
+  const path = join(dataDir, "reports.bin");
+  await writeFile(
+    path,
+    `\x1b]9;first\x07\x1b]9;${"x".repeat(limits.controlMessageBytes)}\x07\x1b]7501;state=blocked:app=unrelated:id=another/source:msg=${body}\x07NOTICE_END\r\n`,
+  );
+  await agent.dispatch(
+    "sessions.send",
+    {
+      workspaceId: workspace.id,
+      sessionId: session.id,
+      input: { type: "text", text: `cat '${path}'`, enter: true },
+    },
+    signal,
+  );
+  await expect
+    .poll(() => reports, pollOptions)
+    .toEqual([
+      {
+        type: "terminal.notice",
+        workspaceId: workspace.id,
+        sessionId: session.id,
+        name: "Actual source",
+        notice: { title: "", body: "first", blocked: false },
+      },
+      {
+        type: "terminal.notice",
+        workspaceId: workspace.id,
+        sessionId: session.id,
+        name: "Actual source",
+        notice: { title: "", body: "Confirm?", blocked: true },
+      },
+    ]);
+  const snapshot = await agent.dispatch(
+    "sessions.snapshot",
+    { workspaceId: workspace.id, sessionId: session.id },
+    signal,
+  );
+  expect(JSON.stringify(snapshot)).toContain("NOTICE_END");
+  expect(agent.sessions.get(session.id).session.webStatus).toBe("available");
+  process.kill(agent.sessions.recorder.pid!, "SIGKILL");
+  await expect
+    .poll(() => agent.sessions.get(session.id).session.webStatus, pollOptions)
+    .toBe("unavailable");
+  agent.sessions.recover(workspace.id, session.id);
+  await expect
+    .poll(() => agent.sessions.get(session.id).session.webStatus, pollOptions)
+    .toBe("available");
+  expect(reports).toHaveLength(2);
 }, 15000);

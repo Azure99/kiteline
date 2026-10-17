@@ -16,7 +16,7 @@ Origins with different hostnames or schemes, such as `http://192.168.1.10:8080` 
 
 Language follows the browser by default: Simplified Chinese for Chinese locales, English otherwise. Switching language does not affect open files or terminals.
 
-The address bar records the device, workspace, tool and open file, repository and session, so you can use Back, Forward and bookmarks. The top bar's status dot represents the browser's connection to the server, not whether a device is online. The browser tab title shows the current workspace, tool and device to help distinguish open pages.
+The address bar records the device, workspace, tool and open file, repository and session, so you can use Back, Forward and bookmarks. The browser tab title shows the current workspace, tool and device to help distinguish open pages.
 
 After a server upgrade, an already open page shows the Web and Server versions and pauses remote operations. Copy unsaved content before clicking "Reload page".
 
@@ -60,6 +60,12 @@ Terminal sessions keep running when you switch tools, workspaces or devices. Lea
 Terminal sessions run on the device. Closing the page, losing the network, signing out, restarting the server or deleting the device does not end them. A session ends when its shell or shortcut command exits, you end it, the agent shuts down normally, or the device restarts. For abnormal exit, see [Clean up leftover terminal sessions](reference.en.md#clean-up-leftover-terminal-sessions). The same session can be open in multiple browsers and local terminals at once. All clients can type directly; simultaneous input is interleaved.
 
 If the terminal remains unresponsive, close displays of the same session that you are not using, then try again.
+
+### Online reports
+
+When a program sends an OSC 9 or OSC 777 notification, or an unsolicited OSC 7501 blocked report, a marker appears beside its workspace in the desktop sidebar. On mobile, the workspace picker shows a count and lists sources by workspace when opened. Sessions can report without an open display. Each entry shows "Report received" and its receipt time, keeping only the latest report from that source. It does not mean the program is still waiting.
+
+Opening the list or navigating between workspaces does not clear reports. Selecting a source clears that entry and returns to its original session; a later report can appear again. Reports live only in the current page and clear on reload, close or sign-out. Events missed while disconnected are not replayed. Programs that do not send these terminal events do not automatically appear in the list.
 
 ### Create sessions and shortcuts
 

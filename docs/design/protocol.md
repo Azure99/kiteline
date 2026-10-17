@@ -197,11 +197,20 @@ Web owner 在 `POST /api/credentials` 提交 `{name, deviceIds, expiresAt}`，�
 | ------------------------------------------------------- | ------------------------ |
 | `devices.changed`（当前登录可见的完整设备列表）         | 所有浏览器               |
 | `tasks.changed`                                         | 有该设备权限的浏览器     |
+| `terminal.notice`                                       | 有该设备权限的浏览器     |
 | `workspace.changed`、`sessions.changed`、`watch.status` | 正在查看该工作区的浏览器 |
 | `request.progress`                                      | 发起请求的登录           |
 | `channel.failed`                                        | 发起文件读取的登录       |
 
 断线期间的事件不会补发。连接关闭后，工作台等待 1.5 秒，读取 `/api/session` 和设备列表后重新连接；这两次读取失败时，3 秒后再试（`web/src/devices/use-devices.ts`）。
+
+### 在线终端报告
+
+recorder 在现有终端解析器中接收 OSC 9 通知、`OSC 777;notify;title;body` 和程序主动发送的 OSC 7501 `state=blocked` 报告。OSC 9 的 `4`、`4;` 前缀留给进度协议；777 正文保留后续分号。7501 按 [Program Status Protocol rev 0.4](https://www.superlogical.com/rex/docs/build/program-status) 解码字段、base64 UTF-8 和尺寸限制，按较长的 ST 计接收上限；不探测、不回复、不维护程序状态记录。其他状态不会撤销已经收到的报告。
+
+报告独立于终端显示和工作区 watch。recorder 只发送解码后的展示内容与真实 session ID；agent 从会话记录补工作区和会话名称；server 从已认证的连接补设备 ID，按设备权限分发 `terminal.notice`，不信任程序提供的 app、id 或路径作为来源。恢复 capture 不产生新报告。报告沿现有控制消息和队列预算传输，超限或连接不可写时丢弃并记录原因，不中断终端记录或建立重发队列。
+
+工作台仅在当前页面保存每个设备/工作区/session 的最近报告及本页接收时间。展开入口和普通导航不清除；选择来源立即移除该条并导航，不等待附着确认。刷新、关闭、退出或登录失效清空，普通重连保留。它表示收到的历史消息，不表示程序当前仍在等待。
 
 ### 心跳与背压
 

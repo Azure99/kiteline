@@ -3,7 +3,14 @@ import { randomBytes } from "node:crypto";
 import { access, rm } from "node:fs/promises";
 import { constants, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { AppError, OperationError, asError, limits, type Session } from "@kiteline/shared/protocol";
+import {
+  AppError,
+  OperationError,
+  asError,
+  limits,
+  type Session,
+  type AgentEvent,
+} from "@kiteline/shared/protocol";
 import type {
   CreateTerminal,
   RecorderMessage,
@@ -59,6 +66,7 @@ export class Sessions {
   private lifeTimer: NodeJS.Timeout;
   onChanged?: (workspaceId: string) => void;
   onFrame?: (message: RecorderMessage) => void;
+  onNotice?: (message: Extract<AgentEvent, { type: "terminal.notice" }>) => void;
   constructor(
     private config: AgentConfig,
     private metadata: MetadataStore,
@@ -321,6 +329,18 @@ export class Sessions {
     this.onChanged?.(item.session.workspaceId);
   }
   private message(message: RecorderMessage) {
+    if (message.type === "notice") {
+      const item = this.records.get(message.sessionId);
+      if (item)
+        this.onNotice?.({
+          type: "terminal.notice",
+          workspaceId: item.session.workspaceId,
+          sessionId: item.session.id,
+          name: item.session.name,
+          notice: message.notice,
+        });
+      return;
+    }
     if (message.type === "fault") {
       const item = this.records.get(message.sessionId);
       if (item) this.unavailable(item, message.error.message);

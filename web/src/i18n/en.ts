@@ -276,6 +276,13 @@ export const en = {
     unknown: "Result unconfirmed. Refresh and check before trying again.",
     partial: "The operation was only partially completed.",
   },
+  reports: {
+    received: "Report received",
+    count: "Reports received: {{count}}",
+    returnTo: "Return to {{name}}",
+    blocked: "Program reported blocked",
+    notification: "Terminal notification",
+  },
   devices: {
     filterWorkspaces: "Filter workspaces",
     filterWorkspacesHint: "Workspace name or path",

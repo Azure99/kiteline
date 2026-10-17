@@ -10,6 +10,7 @@ import type {
   SnapshotResult,
   InputPosition,
   CellStyle,
+  TerminalNotice,
 } from "@kiteline/shared/protocol";
 import { StringDecoder } from "node:string_decoder";
 import headless from "@xterm/headless";
@@ -23,6 +24,7 @@ import {
   initializeTerminalUnicode,
 } from "@kiteline/shared/terminal";
 import type { TerminalEvent } from "@kiteline/shared/protocol/ipc";
+import { terminalNotice } from "./notice.js";
 
 const { Terminal } = headless;
 const { SerializeAddon } = serialize;
@@ -63,11 +65,18 @@ export class Model {
     readonly historyLines: number,
     private fault: (error: Error) => void,
     private changed: () => void,
+    notice?: (notice: TerminalNotice) => void,
   ) {
     this.terminal = new Terminal({ ...terminalOptions(historyLines), cols, rows });
     initializeTerminalUnicode(this.terminal);
     adaptTerminalScrolling(this.terminal);
     this.terminal.loadAddon(this.serializer);
+    for (const code of [9, 777, 7501])
+      this.terminal.parser.registerOscHandler(code, (body) => {
+        const report = terminalNotice(code, body);
+        if (report) notice?.(report);
+        return true;
+      });
     this.rotate();
   }
   get backlog() {

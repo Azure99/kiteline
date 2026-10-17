@@ -3,6 +3,9 @@ import { ChevronDown, ChevronRight, Folder, Plus, Server } from "lucide-react";
 import { useState } from "react";
 import type { Device } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
+import { Button } from "../components/ui/button";
+import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
+import { ReportContent, type ReceivedReport } from "../terminal/reports";
 import { devicePath, workspaceDestination, type WorkspaceTool } from "../lib/navigation";
 
 export function DeviceNavigation({
@@ -12,6 +15,8 @@ export function DeviceNavigation({
   tool,
   showPaths = false,
   query = "",
+  reports,
+  onReport,
   onNavigate,
   onBind,
 }: {
@@ -21,6 +26,8 @@ export function DeviceNavigation({
   tool?: WorkspaceTool;
   showPaths?: boolean;
   query?: string;
+  reports: ReceivedReport[];
+  onReport: (report: ReceivedReport) => void;
   onNavigate: (path: string) => void;
   onBind: () => void;
 }) {
@@ -97,35 +104,85 @@ export function DeviceNavigation({
             </IconButton>
           </div>
           {!collapsed.includes(d.id) &&
-            workspaces.map((w) => (
-              <button
-                key={w.id}
-                className={`flex min-h-9 w-full items-center gap-2 rounded py-1.5 pl-8 pr-2 text-left text-xs hover:bg-muted max-desk:min-h-11 max-desk:text-sm ${deviceId === d.id && workspaceId === w.id ? "bg-primary-soft text-primary" : "text-muted-foreground"}`}
-                onClick={() =>
-                  onNavigate(
-                    workspaceDestination({ deviceId: d.id, workspaceId: w.id }, tool ?? "terminal"),
-                  )
-                }
-              >
-                <Folder size={14} className="shrink-0" />
-                <span className="min-w-0 flex-1" title={w.path}>
-                  <span
-                    className={
-                      showPaths
-                        ? "block break-words"
-                        : "block truncate max-desk:whitespace-normal max-desk:break-all"
-                    }
-                  >
-                    {w.name}
-                  </span>
-                  {showPaths && (
-                    <span className="block break-all text-xs font-normal text-muted-foreground">
-                      {w.path}
-                    </span>
-                  )}
-                </span>
-              </button>
-            ))}
+            workspaces.map((w) => {
+              const sources = reports.filter(
+                (report) => report.deviceId === d.id && report.workspaceId === w.id,
+              );
+              return (
+                <div key={w.id}>
+                  <div className="flex items-center">
+                    <button
+                      className={`flex min-h-9 min-w-0 flex-1 items-center gap-2 rounded py-1.5 pl-8 pr-2 text-left text-xs hover:bg-muted max-desk:min-h-11 max-desk:text-sm ${deviceId === d.id && workspaceId === w.id ? "bg-primary-soft text-primary" : "text-muted-foreground"}`}
+                      onClick={() =>
+                        onNavigate(
+                          workspaceDestination(
+                            { deviceId: d.id, workspaceId: w.id },
+                            tool ?? "terminal",
+                          ),
+                        )
+                      }
+                    >
+                      <Folder size={14} className="shrink-0" />
+                      <span className="min-w-0 flex-1" title={w.path}>
+                        <span
+                          className={
+                            showPaths
+                              ? "block break-words"
+                              : "block truncate max-desk:whitespace-normal max-desk:break-all"
+                          }
+                        >
+                          {w.name}
+                        </span>
+                        {showPaths && (
+                          <span className="block break-all text-xs font-normal text-muted-foreground">
+                            {w.path}
+                          </span>
+                        )}
+                      </span>
+                    </button>
+                    {!showPaths && sources.length > 0 && (
+                      <Menu>
+                        <MenuTrigger
+                          render={
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              aria-label={`${w.name} · ${t(($) => $.reports.count, { count: sources.length })}`}
+                            />
+                          }
+                        >
+                          <span className="rounded-full bg-primary px-1.5 text-xs text-primary-foreground">
+                            {sources.length}
+                          </span>
+                        </MenuTrigger>
+                        <MenuContent>
+                          {sources.map((report) => (
+                            <MenuItem
+                              key={report.sessionId}
+                              aria-label={t(($) => $.reports.returnTo, { name: report.name })}
+                              onClick={() => onReport(report)}
+                            >
+                              <ReportContent report={report} />
+                            </MenuItem>
+                          ))}
+                        </MenuContent>
+                      </Menu>
+                    )}
+                  </div>
+                  {showPaths &&
+                    sources.map((report) => (
+                      <button
+                        key={report.sessionId}
+                        className="ml-8 block w-[calc(100%_-_2rem)] rounded border-l-2 border-primary px-3 py-2 text-sm hover:bg-muted"
+                        aria-label={t(($) => $.reports.returnTo, { name: report.name })}
+                        onClick={() => onReport(report)}
+                      >
+                        <ReportContent report={report} />
+                      </button>
+                    ))}
+                </div>
+              );
+            })}
         </div>
       ))}
     </nav>

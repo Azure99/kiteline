@@ -1,4 +1,4 @@
-import { AppError, asError, limits } from "@kiteline/shared/protocol";
+import { AppError, asError, limits, type TerminalNotice } from "@kiteline/shared/protocol";
 import { setTimeout as delay } from "node:timers/promises";
 import type {
   TerminalSource,
@@ -42,6 +42,7 @@ export class RecordedSession {
       options.historyLines,
       (error) => this.fault(error),
       () => this.pressure(),
+      (notice) => this.notice(notice),
     );
     this.control = new Control(
       options,
@@ -69,6 +70,21 @@ export class RecordedSession {
   }
   start() {
     return (this.starting ??= this.initialize());
+  }
+  private notice(notice: TerminalNotice) {
+    if (!this.initialized || this.ended || this.failed) return;
+    try {
+      if (
+        !this.emit(
+          { type: "notice", sessionId: this.options.sessionId, notice },
+          `notice:${this.options.sessionId}`,
+        )
+      )
+        console.error(`Terminal report dropped for ${this.options.sessionId}: IPC unavailable`);
+    } catch (error) {
+      if (!(error instanceof AppError) || error.code !== "limit_exceeded") throw error;
+      console.error(`Terminal report dropped for ${this.options.sessionId}: ${error.message}`);
+    }
   }
   private async initialize() {
     const identity = await this.control.start();

@@ -135,6 +135,15 @@ export class Agent {
     );
     this.httpChannels = new HttpChannels(identity);
     this.sessions.onFrame = (message) => this.terminalChannels.frame(message);
+    this.sessions.onNotice = (message) => {
+      try {
+        if (!this.send(message))
+          console.error(`Terminal report dropped for ${message.sessionId}: server unavailable`);
+      } catch (error) {
+        if (!(error instanceof AppError) || error.code !== "limit_exceeded") throw error;
+        console.error(`Terminal report dropped for ${message.sessionId}: ${error.message}`);
+      }
+    };
     this.sessions.onChanged = (workspaceId) =>
       this.send({ type: "sessions.changed", workspaceId } satisfies AgentEvent);
     this.local = new LocalServer(config, (method, params, signal) =>
@@ -185,7 +194,9 @@ export class Agent {
     const text = JSON.stringify(message);
     if (Buffer.byteLength(text) > limits.controlMessageBytes)
       throw new AppError("limit_exceeded", "Control message exceeds the size limit");
-    if (this.socket && controlWritable(this.socket)) this.socket.send(text);
+    if (!this.socket || !controlWritable(this.socket)) return false;
+    this.socket.send(text);
+    return true;
   }
   private connect() {
     if (this.stopped) return;

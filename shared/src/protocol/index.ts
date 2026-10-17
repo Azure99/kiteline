@@ -302,7 +302,21 @@ export type WorkspaceEvent =
   | { type: "workspace.changed"; workspaceId: string }
   | { type: "sessions.changed"; workspaceId: string }
   | { type: "watch.status"; workspaceId: string; status: "normal" | "degraded"; reason?: string };
-export type AgentEvent = WorkspaceEvent | ({ type: "request.progress"; id: string } & FileProgress);
+export interface TerminalNotice {
+  title: string;
+  body: string;
+  blocked: boolean;
+}
+export type AgentEvent =
+  | WorkspaceEvent
+  | ({ type: "request.progress"; id: string } & FileProgress)
+  | {
+      type: "terminal.notice";
+      workspaceId: string;
+      sessionId: string;
+      name: string;
+      notice: TerminalNotice;
+    };
 export type FileReadPurpose = "open" | "text" | "image" | "download";
 export interface ChannelParams {
   "terminal.attach": {

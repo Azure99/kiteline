@@ -39,6 +39,7 @@ import {
   useRoute,
   workspacePath,
   tasksPath,
+  workspaceDestination,
 } from "./lib/navigation";
 import { useDevices } from "./devices/use-devices";
 import { Button } from "./components/ui/button";
@@ -61,6 +62,7 @@ import { Home, DeviceDetail } from "./devices/device-views";
 import { useRecentWorkspaces } from "./devices/recent-workspaces";
 import { WorkspaceView } from "./terminal/workspace-view";
 import type { TerminalLayout } from "./terminal/groups";
+import { reportKey, type ReceivedReport } from "./terminal/reports";
 import {
   readTerminalLayouts,
   terminalLayoutsKey,
@@ -141,6 +143,20 @@ export function Workbench({
   });
   const [drafts] = useState(() => new DraftStore());
   const [gitActions] = useState(() => new GitActions());
+  const [reports, setReports] = useState(new Map<string, ReceivedReport>());
+  const authenticated = !!session;
+  useEffect(() => {
+    if (!authenticated) return;
+    const receive = (event: WindowEventMap["kiteline:event"]) => {
+      const message = event.detail;
+      if (message.type !== "terminal.notice") return;
+      setReports((previous) =>
+        new Map(previous).set(reportKey(message), { ...message, receivedAt: Date.now() }),
+      );
+    };
+    window.addEventListener("kiteline:event", receive);
+    return () => window.removeEventListener("kiteline:event", receive);
+  }, [authenticated]);
   const route = useRoute();
   const [error, setError] = useState<
     | {
@@ -268,6 +284,7 @@ export function Workbench({
   }, [drafts]);
   useEffect(trackViewport, []);
   const clearTransient = useCallback(() => {
+    setReports(new Map());
     setBinding(false);
     setCliSetup(false);
     setPicker(false);
@@ -311,7 +328,25 @@ export function Workbench({
     setPicker(false);
     setError(undefined);
   }
+  const navigationReports = [...reports.values()]
+    .filter((report) =>
+      devices.some(
+        (device) =>
+          device.id === report.deviceId &&
+          device.snapshot?.workspaces.some((workspace) => workspace.id === report.workspaceId),
+      ),
+    )
+    .sort((a, b) => b.receivedAt - a.receivedAt);
   const navigationProps = {
+    reports: navigationReports,
+    onReport: (report: ReceivedReport) => {
+      setReports((previous) => {
+        const next = new Map(previous);
+        next.delete(reportKey(report));
+        return next;
+      });
+      choose(workspaceDestination(report, "terminal", { session: report.sessionId }));
+    },
     devices,
     deviceId: device?.id,
     workspaceId: workspace?.id,
@@ -502,7 +537,12 @@ export function Workbench({
                 <Button
                   variant="ghost"
                   className="min-w-0 flex-1 shrink justify-start px-2 text-left"
-                  aria-label={t(($) => $.shell.switchWorkspace)}
+                  aria-label={
+                    t(($) => $.shell.switchWorkspace) +
+                    (navigationReports.length
+                      ? ` · ${t(($) => $.reports.count, { count: navigationReports.length })}`
+                      : "")
+                  }
                   title={workspace ? `${device?.name} / ${workspace.name}` : device?.name}
                 />
               }
@@ -519,6 +559,11 @@ export function Workbench({
                 )}
               </span>
               <ChevronDown />
+              {navigationReports.length > 0 && (
+                <span className="shrink-0 rounded-full bg-primary px-1.5 text-xs text-primary-foreground desk:hidden">
+                  {navigationReports.length}
+                </span>
+              )}
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
@@ -527,12 +572,6 @@ export function Workbench({
               <WorkspacePickerContent {...navigationProps} />
             </DialogContent>
           </Dialog>
-          <span
-            className="status-dot"
-            data-status={connected ? "online" : "offline"}
-            title={connected ? t(($) => $.common.connected) : t(($) => $.common.disconnected)}
-            aria-label={connected ? t(($) => $.common.connected) : t(($) => $.common.disconnected)}
-          />
           <IconButton
             label={t(($) => $.schedules.title)}
             aria-current={route.tasks ? "page" : undefined}
