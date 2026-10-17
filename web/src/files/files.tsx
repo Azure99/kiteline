@@ -585,7 +585,9 @@ export function Files({
                 draft={draft}
                 targetOS={device.environment?.os}
                 editorVisible={!searching}
-                htmlPreviewVisible={visible && !searching}
+                htmlPreviewVisible={
+                  visible && !searching && queryLine === undefined && !location && !draft.location
+                }
                 unavailable={!enabled ? t(($) => $.common.deviceOffline) : undefined}
               />
             ) : queryFile ? (
