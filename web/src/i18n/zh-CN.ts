@@ -268,7 +268,6 @@ export const zhCN = {
     partial: "操作部分完成。",
   },
   reports: {
-    received: "已收报告",
     count: "已收报告：{{count}}",
     returnTo: "返回 {{name}}",
     blocked: "程序报告了 blocked",
