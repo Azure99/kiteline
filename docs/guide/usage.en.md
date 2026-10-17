@@ -65,7 +65,7 @@ If the terminal remains unresponsive, close displays of the same session that yo
 
 When a program sends an OSC 9 or OSC 777 notification, or an unsolicited OSC 7501 blocked report, a marker appears beside its workspace in the desktop sidebar. On mobile, the workspace picker shows a count and lists sources by workspace when opened. Sessions can report without an open display. Each entry shows "Report received" and its receipt time, keeping only the latest report from that source. It does not mean the program is still waiting.
 
-Opening the list or navigating between workspaces does not clear reports. Selecting a source clears that entry and returns to its original session; a later report can appear again. Reports live only in the current page and clear on reload, close or sign-out. Events missed while disconnected are not replayed. Programs that do not send these terminal events do not automatically appear in the list.
+Opening the list does not clear reports. Selecting a source clears that entry and returns to its original session. Activating a terminal through ordinary navigation also clears only that terminal's report, leaving other terminals' reports intact. A companion terminal clears its report when selected, expanded or focused from outside; merely showing it alongside Files or Git does not clear it. New reports still appear while the terminal remains active; leaving and activating it again clears them. Reports live only in the current page and clear on reload, close or sign-out. Events missed while disconnected are not replayed. Programs that do not send these terminal events do not automatically appear in the list.
 
 ### Create sessions and shortcuts
 

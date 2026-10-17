@@ -67,6 +67,7 @@ export function WorkspaceView({
   visible,
   layouts,
   onLayout,
+  onActivateTerminal,
   focusMode,
   onCliSetup,
   children,
@@ -76,6 +77,7 @@ export function WorkspaceView({
   visible: boolean;
   layouts: ReadonlyMap<string, TerminalLayout>;
   onLayout(key: string, layout: TerminalLayout): void;
+  onActivateTerminal(deviceId: string, workspaceId: string, sessionId: string): void;
   focusMode: ReturnType<typeof useTerminalFocus>;
   onCliSetup(): void;
   children: ReactNode;
@@ -154,6 +156,10 @@ export function WorkspaceView({
     );
     return () => cancelAnimationFrame(frame);
   }, [visible, dockExpanded, layout.dockSize]);
+  const activatedSession = visible && !targetPending ? selected : undefined;
+  useLayoutEffect(() => {
+    if (activatedSession) onActivateTerminal(device.id, workspace.id, activatedSession);
+  }, [activatedSession, device.id, workspace.id, onActivateTerminal]);
   const enabled = device.status === "online" && !remote.busy;
   const split = !mobile && members.length > 1 && !group?.maximized;
   const multipleGroups = !mobile && layout.groups.length > 1;
@@ -265,6 +271,7 @@ export function WorkspaceView({
     if (!find(id) && !(dock ? opened.dock.has(id) : opened.main.has(id))) return;
     if (dock) {
       selectionEpoch.current.dock++;
+      onActivateTerminal(device.id, workspace.id, id);
       setLayout((old) => ({ ...old, dock: id, dockOpen: true }));
     } else applyMain(selectSession(layout, id));
   }
@@ -464,6 +471,8 @@ export function WorkspaceView({
             aria-controls="companion-terminal"
             onClick={() => {
               selectionEpoch.current.dock++;
+              const opening = layout.dock ?? selected;
+              if (!layout.dockOpen && opening) onActivateTerminal(device.id, workspace.id, opening);
               setLayout((old) => ({ ...old, dockOpen: !old.dockOpen, dock: old.dock ?? selected }));
             }}
           >
@@ -719,6 +728,10 @@ export function WorkspaceView({
                 <div
                   key={id}
                   data-dock-session-id={id}
+                  onFocusCapture={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget))
+                      onActivateTerminal(device.id, workspace.id, id);
+                  }}
                   className={
                     dockExpanded && dockId === id ? "flex min-h-0 flex-1 flex-col" : "hidden"
                   }

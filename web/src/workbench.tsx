@@ -144,6 +144,15 @@ export function Workbench({
   const [drafts] = useState(() => new DraftStore());
   const [gitActions] = useState(() => new GitActions());
   const [reports, setReports] = useState(new Map<string, ReceivedReport>());
+  const clearReport = useCallback((deviceId: string, workspaceId: string, sessionId: string) => {
+    setReports((previous) => {
+      const key = reportKey({ deviceId, workspaceId, sessionId });
+      if (!previous.has(key)) return previous;
+      const next = new Map(previous);
+      next.delete(key);
+      return next;
+    });
+  }, []);
   const authenticated = !!session;
   useEffect(() => {
     if (!authenticated) return;
@@ -330,11 +339,7 @@ export function Workbench({
   const navigationProps = {
     reports: navigationReports,
     onReport: (report: ReceivedReport) => {
-      setReports((previous) => {
-        const next = new Map(previous);
-        next.delete(reportKey(report));
-        return next;
-      });
+      clearReport(report.deviceId, report.workspaceId, report.sessionId);
       choose(workspaceDestination(report, "terminal", { session: report.sessionId }));
     },
     devices,
@@ -402,6 +407,7 @@ export function Workbench({
             visible={route.tool === "terminal"}
             layouts={terminalLayouts}
             onLayout={saveLayout}
+            onActivateTerminal={clearReport}
             focusMode={terminalFocus}
             onCliSetup={() => setCliSetup(true)}
           >
