@@ -131,6 +131,13 @@ export function Workbench({
   const directoryEnvironment =
     directoryTarget?.status === "online" ? directoryTarget.environment : undefined;
   const workspace = device?.snapshot?.workspaces.find((w) => w.id === route.workspaceId);
+  const title =
+    session && route.valid && device && workspace && route.tool
+      ? `${workspace.name} · ${t(($) => $.common[route.tool!])} · ${device.name} · Kiteline`
+      : "Kiteline";
+  useEffect(() => {
+    document.title = title;
+  }, [title]);
   const terminalPage =
     !!session && route.valid && !!device && !!workspace && route.tool === "terminal";
   useLayoutEffect(() => {

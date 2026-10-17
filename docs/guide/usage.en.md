@@ -16,7 +16,7 @@ Origins with different hostnames or schemes, such as `http://192.168.1.10:8080` 
 
 Language follows the browser by default: Simplified Chinese for Chinese locales, English otherwise. Switching language does not affect open files or terminals.
 
-The address bar records the device, workspace, tool and open file, repository and session, so you can use Back, Forward and bookmarks. The top bar's status dot represents the browser's connection to the server, not whether a device is online.
+The address bar records the device, workspace, tool and open file, repository and session, so you can use Back, Forward and bookmarks. The top bar's status dot represents the browser's connection to the server, not whether a device is online. The browser tab title shows the current workspace, tool and device to help distinguish open pages.
 
 After a server upgrade, an already open page shows the Web and Server versions and pauses remote operations. Copy unsaved content before clicking "Reload page".
 
