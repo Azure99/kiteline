@@ -240,6 +240,10 @@ export const en = {
     uploadStatus_other: "{{count, number}} uploads",
     ownerMenu: "Owner menu",
     logout: "Sign out",
+    layoutReadFailed: "Could not read this tab’s terminal layouts: {{error}}",
+    layoutWriteFailed: "Could not save this tab’s terminal layouts: {{error}}",
+    layoutClearFailed:
+      "Signed out, but could not clear this tab’s saved terminal layouts: {{error}}",
     discardLogout: "Discard unsaved changes and sign out?",
     pageMissing: "Page not found",
     backDevices: "Back to devices",

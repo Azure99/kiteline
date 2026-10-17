@@ -108,6 +108,7 @@ export function SplitPanes({
           <Panel
             key={child.id}
             id={child.id}
+            defaultSize={`${node.sizes[child.id]}%`}
             minSize={minimumSize(child)[node.direction === "horizontal" ? "width" : "height"]}
           >
             {skeleton(child)}

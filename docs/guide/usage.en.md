@@ -26,13 +26,14 @@ Layout follows the available window width. Below 960 CSS pixels, it shows one te
 
 ### Where settings are stored
 
-| Content                                                      | Storage                               |
-| ------------------------------------------------------------ | ------------------------------------- |
-| Language, appearance, recent workspaces, terminal font size  | Current browser                       |
-| Terminal groups and splits, unsaved changes, commit messages | Current page; lost on reload or close |
-| New-session scrollback lines, terminal shortcuts             | Device; shared across origins         |
-| Device name                                                  | Server                                |
-| Workspace names and paths                                    | Device                                |
+| Content                                                     | Storage                               |
+| ----------------------------------------------------------- | ------------------------------------- |
+| Language, appearance, recent workspaces, terminal font size | Current browser                       |
+| Terminal groups, splits and terminal panel                  | Current browser tab                   |
+| Unsaved changes, commit messages                            | Current page; lost on reload or close |
+| New-session scrollback lines, terminal shortcuts            | Device; shared across origins         |
+| Device name                                                 | Server                                |
+| Workspace names and paths                                   | Device                                |
 
 ## Devices and workspaces
 
@@ -50,7 +51,7 @@ Removing a workspace deletes only the registration, keeping directories and file
 
 A workspace is not a sandbox. Terminal, file and Git operations use the project user's permissions and can access any path that user can access.
 
-Terminal sessions keep running when you switch tools, workspaces or devices. Leaving a workspace closes its terminal displays; returning attaches again. Groups, splits, unsaved changes and Git commit messages remain until the page closes.
+Terminal sessions keep running when you switch tools, workspaces or devices. Leaving a workspace closes its terminal displays; returning attaches again. Unsaved changes and Git commit messages remain until the page closes. Terminal layouts restore after a reload or page discard in the same tab, with explicit session URLs taking precedence. Retention after closing the tab or restarting the browser depends on the browser. Signing out clears saved layouts. Storage failures show an error; layouts can still be changed in the current page.
 
 ## Terminal
 

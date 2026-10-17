@@ -66,6 +66,7 @@ export function WorkspaceView({
   workspace,
   visible,
   layouts,
+  onLayout,
   focusMode,
   onCliSetup,
   children,
@@ -73,7 +74,8 @@ export function WorkspaceView({
   device: Device;
   workspace: Workspace;
   visible: boolean;
-  layouts: Map<string, TerminalLayout>;
+  layouts: ReadonlyMap<string, TerminalLayout>;
+  onLayout(key: string, layout: TerminalLayout): void;
   focusMode: ReturnType<typeof useTerminalFocus>;
   onCliSetup(): void;
   children: ReactNode;
@@ -169,8 +171,8 @@ export function WorkspaceView({
         names.current.delete(id);
   }, [sessions, opened]);
   useEffect(() => {
-    layouts.set(key, layout);
-  }, [key, layout, layouts]);
+    onLayout(key, layout);
+  }, [key, layout, onLayout]);
   useEffect(() => {
     if (!remote.loaded) return;
     const kept = new Set([...sessions.map((session) => session.id), ...opened.main]);
