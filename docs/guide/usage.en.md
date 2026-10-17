@@ -120,6 +120,8 @@ PNG, JPEG, GIF and WebP images are detected by content and previewed; images exc
 
 The file editor and Git diffs highlight syntax by filename. Diffs contain partial context, so multiline comments or strings can be colored incorrectly; use the source text to interpret them.
 
+In the file source toolbar, “Copy code line reference” copies the whole lines touched by the selection, or the cursor line when nothing is selected, with the device, workspace, relative path and line numbers. It uses the current editor text, including unsaved edits, without changing the selection or saving the file. Paste it manually into the target terminal.
+
 The editor preserves the original BOM, line endings and final newline. For mixed line endings, it indicates whether saves will use LF or CRLF. An edit that would exceed the editing limit is rejected in full.
 
 New `.ps1` files on Windows devices use a UTF-8 BOM on their first save so Windows PowerShell 5.1 reads non-ASCII text correctly. Existing files and their saved copies keep their original format. UTF-16 files produced by default redirection in 5.1 can only be downloaded; use `Out-File -Encoding UTF8` when you need to edit the output in the workbench.

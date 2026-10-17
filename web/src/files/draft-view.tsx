@@ -10,6 +10,7 @@ import {
   FileOutput,
   Fullscreen,
   Minimize,
+  Quote,
   RefreshCw,
   Save,
   Scan,
@@ -37,6 +38,7 @@ import {
 } from "./drafts";
 import { DraftTabs } from "./draft-tabs";
 import { draftLabel } from "./draft-label";
+import { codeLineReference } from "./code-line-reference";
 import { SaveDraftDialog } from "./save-draft-dialog";
 import { TextEditor } from "./text-editor";
 import { formatBytes } from "./format";
@@ -164,6 +166,16 @@ export function DraftView({
         >
           <Copy />
         </IconButton>
+        {editorVisible && !(markdown && preview) && (
+          <IconButton
+            label={t(($) => $.files.copyCodeLineReference)}
+            disabled={!draft.state}
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={() => void copy(codeLineReference(draft), draft.id)}
+          >
+            <Quote />
+          </IconButton>
+        )}
         <IconButton
           label={t(($) => $.files.checkDisk)}
           disabled={!!busy || !!unavailable || !canCheckDisk}

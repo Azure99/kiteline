@@ -532,6 +532,7 @@ export const en = {
     openFiles: "Open files",
     unsaved: "Unsaved",
     copyText: "Copy text",
+    copyCodeLineReference: "Copy code line reference (whole lines; cursor line when unselected)",
     checkDisk: "Check disk content",
     saveAs: "Save as",
     saveFile: "Save file",

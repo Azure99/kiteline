@@ -522,6 +522,7 @@ export const zhCN = {
     openFiles: "打开的文件",
     unsaved: "未保存",
     copyText: "复制文本",
+    copyCodeLineReference: "复制代码行引用（所选整行，未选择时为光标行）",
     checkDisk: "核对磁盘内容",
     saveAs: "另存为",
     saveFile: "保存文件",
