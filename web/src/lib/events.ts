@@ -6,7 +6,6 @@ declare global {
   interface WindowEventMap {
     "kiteline:event": CustomEvent<BrowserEvent>;
     "kiteline:file-written": CustomEvent<FileTarget>;
-    "kiteline:download": CustomEvent<FileTarget>;
     "kiteline:files-operated": CustomEvent<FileOperationResult>;
     "kiteline:connected": Event;
     "kiteline:unauthenticated": Event;

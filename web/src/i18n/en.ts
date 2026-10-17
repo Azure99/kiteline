@@ -627,7 +627,6 @@ export const en = {
     actionsNamed: "File actions for {{name}}",
     mixedEol: "Mixed line endings; saves use {{format}}",
     nameRequired: "Enter a single file or directory name",
-    downloadStarted: "Download handed to the browser: {{path}}",
     copyCount_one: "Copy {{count, number}} item",
     copyCount_other: "Copy {{count, number}} items",
     moveCount_one: "Move {{count, number}} item",

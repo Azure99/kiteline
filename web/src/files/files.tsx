@@ -78,9 +78,7 @@ export function Files({
   const [action, setAction] = useState<NameAction>();
   const [details, setDetails] = useState<Entry>();
   const [directoryDrop, setDirectoryDrop] = useState(false);
-  const [notice, setNotice] = useState<
-    { kind: "downloadStarted"; path: string } | { kind: "renamed" | "created" }
-  >();
+  const [notice, setNotice] = useState<"renamed" | "created">();
   const fileInput = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLElement>(null);
   const previousFolder = useRef(folder);
@@ -190,15 +188,8 @@ export function Files({
         void load(parentPath(target.path));
     };
     window.addEventListener("kiteline:file-written", written);
-    const downloaded = (event: WindowEventMap["kiteline:download"]) => {
-      const target = event.detail;
-      if (target.deviceId === device.id && target.workspaceId === workspace.id)
-        setNotice({ kind: "downloadStarted", path: target.path });
-    };
-    window.addEventListener("kiteline:download", downloaded);
     return () => {
       window.removeEventListener("kiteline:file-written", written);
-      window.removeEventListener("kiteline:download", downloaded);
     };
   }, [device.id, workspace.id, load]);
   const target = { deviceId: device.id, workspaceId: workspace.id };
@@ -504,9 +495,7 @@ export function Files({
             role="status"
             className="border-b border-border px-3 py-1 text-xs text-muted-foreground"
           >
-            {notice.kind === "downloadStarted"
-              ? t(($) => $.files.downloadStarted, { path: notice.path })
-              : t(($) => $.files[notice.kind])}
+            {t(($) => $.files[notice])}
           </p>
         )}
         {!enabled && (
@@ -612,7 +601,7 @@ export function Files({
           onClose={() => setAction(undefined)}
           onDone={(result) => {
             setAction(undefined);
-            setNotice({ kind: result.from ? "renamed" : "created" });
+            setNotice(result.from ? "renamed" : "created");
             if (result.from) {
               moveViewPaths([{ from: result.from, to: result.to }]);
             }

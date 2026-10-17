@@ -10,7 +10,6 @@ import type {
 } from "@kiteline/shared/protocol";
 import { decodeText } from "@kiteline/shared/protocol/text";
 import { ApiError, api, apiError, fileChannel, request } from "../lib/api";
-import { emit } from "../lib/events";
 import { observeServerVersion, webCompatible } from "../lib/release";
 
 export type { FileTarget } from "@kiteline/shared/protocol";
@@ -114,7 +113,6 @@ export function downloadFile(target: FileTarget) {
   document.body.append(link);
   link.click();
   link.remove();
-  emit("kiteline:download", target);
 }
 
 export async function uploadFile(

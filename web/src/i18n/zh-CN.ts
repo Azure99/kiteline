@@ -617,7 +617,6 @@ export const zhCN = {
     actionsNamed: "{{name}} 文件操作",
     mixedEol: "混合换行；保存采用 {{format}}",
     nameRequired: "请输入单个文件或目录名称",
-    downloadStarted: "已交给浏览器下载：{{path}}",
     copyCount_one: "复制 · {{count, number}}",
     copyCount_other: "复制 · {{count, number}}",
     moveCount_one: "移动 · {{count, number}}",
