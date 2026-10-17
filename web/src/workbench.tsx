@@ -1,5 +1,13 @@
 import { newId } from "./lib/id";
-import { useCallback, useEffect, useLayoutEffect, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { trackViewport } from "./lib/viewport";
 import { useMobile } from "./lib/use-mobile";
@@ -34,6 +42,7 @@ import {
 } from "./lib/navigation";
 import { useDevices } from "./devices/use-devices";
 import { Button } from "./components/ui/button";
+import { Input } from "./components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -79,6 +88,39 @@ const GitTool = deferredView(async () => ({ default: (await import("./git/git"))
 const TasksPage = deferredView(async () => ({
   default: (await import("./tasks/tasks")).TasksPage,
 }));
+
+function WorkspacePickerContent(props: ComponentProps<typeof DeviceNavigation>) {
+  const { t } = useTranslation();
+  const [query, setQuery] = useState("");
+  const input = useRef<HTMLInputElement>(null);
+  return (
+    <>
+      <div className="flex shrink-0 items-center gap-2 px-4 pt-3">
+        <Input
+          ref={input}
+          value={query}
+          aria-label={t(($) => $.devices.filterWorkspaces)}
+          placeholder={t(($) => $.devices.filterWorkspacesHint)}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+        {query && (
+          <IconButton
+            label={t(($) => $.devices.clearWorkspaceFilter)}
+            onClick={() => {
+              setQuery("");
+              input.current?.focus();
+            }}
+          >
+            <X />
+          </IconButton>
+        )}
+      </div>
+      <div className="scroll-area overflow-auto">
+        <DeviceNavigation {...props} showPaths query={query} />
+      </div>
+    </>
+  );
+}
 
 export function Workbench({
   session,
@@ -482,9 +524,7 @@ export function Workbench({
               <DialogHeader>
                 <DialogTitle>{t(($) => $.shell.deviceWorkspaces)}</DialogTitle>
               </DialogHeader>
-              <div className="scroll-area overflow-auto">
-                <DeviceNavigation {...navigationProps} showPaths />
-              </div>
+              <WorkspacePickerContent {...navigationProps} />
             </DialogContent>
           </Dialog>
           <span

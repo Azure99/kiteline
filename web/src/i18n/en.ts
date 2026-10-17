@@ -277,6 +277,10 @@ export const en = {
     partial: "The operation was only partially completed.",
   },
   devices: {
+    filterWorkspaces: "Filter workspaces",
+    filterWorkspacesHint: "Workspace name or path",
+    clearWorkspaceFilter: "Clear workspace filter",
+    noMatchingWorkspaces: "No matching workspaces",
     sessionObservation: "Session observation details",
     sessionDetails: "Details for {{name}}",
     sessionId: "Session ID",

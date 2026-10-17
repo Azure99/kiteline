@@ -11,6 +11,7 @@ export function DeviceNavigation({
   workspaceId,
   tool,
   showPaths = false,
+  query = "",
   onNavigate,
   onBind,
 }: {
@@ -19,12 +20,24 @@ export function DeviceNavigation({
   workspaceId?: string;
   tool?: WorkspaceTool;
   showPaths?: boolean;
+  query?: string;
   onNavigate: (path: string) => void;
   onBind: () => void;
 }) {
   const { t } = useTranslation();
 
   const [collapsed, setCollapsed] = useState<string[]>([]);
+  const filter = query.trim().toLowerCase();
+  const matches = devices
+    .map((device) => ({
+      device,
+      workspaces: (device.snapshot?.workspaces ?? []).filter(
+        (workspace) =>
+          workspace.name.toLowerCase().includes(filter) ||
+          workspace.path.toLowerCase().includes(filter),
+      ),
+    }))
+    .filter(({ workspaces }) => !filter || workspaces.length > 0);
   return (
     <nav aria-label={t(($) => $.shell.deviceWorkspaces)} className="space-y-1 p-2">
       <div className="flex items-center justify-between px-2 py-2">
@@ -43,7 +56,12 @@ export function DeviceNavigation({
           <Plus />
         </IconButton>
       </div>
-      {devices.map((d) => (
+      {filter && matches.length === 0 && (
+        <p className="px-2 py-4 text-sm text-muted-foreground">
+          {t(($) => $.devices.noMatchingWorkspaces)}
+        </p>
+      )}
+      {matches.map(({ device: d, workspaces }) => (
         <div key={d.id}>
           <div
             className={`flex items-center rounded ${deviceId === d.id && !tool ? "bg-primary-soft" : ""}`}
@@ -79,7 +97,7 @@ export function DeviceNavigation({
             </IconButton>
           </div>
           {!collapsed.includes(d.id) &&
-            d.snapshot?.workspaces.map((w) => (
+            workspaces.map((w) => (
               <button
                 key={w.id}
                 className={`flex min-h-9 w-full items-center gap-2 rounded py-1.5 pl-8 pr-2 text-left text-xs hover:bg-muted max-desk:min-h-11 max-desk:text-sm ${deviceId === d.id && workspaceId === w.id ? "bg-primary-soft text-primary" : "text-muted-foreground"}`}

@@ -47,6 +47,8 @@ Deleting a device removes its record, binding and scheduled-task summaries from 
 
 A workspace is a registered project directory on a device. Select the project directory in "Add workspace" on an online device. The registered path is the real directory after resolving symbolic links. Adding the same directory again returns the existing workspace.
 
+The workspace picker in the top bar filters all registered workspaces by name or path, including workspaces without terminal sessions. Matching is case-insensitive.
+
 Removing a workspace deletes only the registration, keeping directories and files. A workspace cannot be removed while the device is offline or it still has terminal sessions.
 
 A workspace is not a sandbox. Terminal, file and Git operations use the project user's permissions and can access any path that user can access.

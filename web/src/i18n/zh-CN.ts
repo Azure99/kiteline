@@ -271,6 +271,10 @@ export const zhCN = {
     partial: "操作部分完成。",
   },
   devices: {
+    filterWorkspaces: "筛选工作区",
+    filterWorkspacesHint: "工作区名称或路径",
+    clearWorkspaceFilter: "清除工作区筛选",
+    noMatchingWorkspaces: "没有匹配的工作区",
     sessionObservation: "会话读取详情",
     sessionDetails: "{{name}} 详情",
     sessionId: "会话 ID",
