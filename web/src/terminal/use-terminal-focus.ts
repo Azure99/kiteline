@@ -38,15 +38,24 @@ export function useTerminalFocus(context: string | undefined) {
     if (intent.current?.target !== context) exit();
   }, [context, exit]);
   useEffect(() => {
+    const viewport = document.querySelector<HTMLMetaElement>('meta[name="viewport"]')!;
+    const originalViewport = viewport.content;
     const changed = () => {
       const current = intent.current;
       const entered = document.fullscreenElement === document.documentElement;
+      viewport.content =
+        entered && document.documentElement.hasAttribute("data-terminal-active")
+          ? `${originalViewport}, viewport-fit=cover`
+          : originalViewport;
       setFullscreen(entered);
       if (entered && (!current || (pending.current && pending.current !== current)))
         leaveFullscreen();
     };
     document.addEventListener("fullscreenchange", changed);
-    return () => document.removeEventListener("fullscreenchange", changed);
+    return () => {
+      document.removeEventListener("fullscreenchange", changed);
+      viewport.content = originalViewport;
+    };
   }, [leaveFullscreen]);
   useEffect(
     () => () => {

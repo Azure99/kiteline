@@ -24,7 +24,7 @@ export function trackViewport() {
   let scale = viewport?.scale ?? 1;
   let fullscreen = !!document.fullscreenElement;
   let fullHeight = viewport?.height ?? window.innerHeight;
-  const fullHeights = new Map([[fullscreen, fullHeight]]);
+  const fullHeights = new Map([[fullscreen, { width, scale, height: fullHeight }]]);
   const resize = () => {
     const nextWidth = viewport?.width ?? window.innerWidth;
     const nextScale = viewport?.scale ?? 1;
@@ -40,12 +40,16 @@ export function trackViewport() {
       focused instanceof HTMLInputElement ||
       (focused instanceof HTMLElement && focused.isContentEditable);
     const nextFullscreen = !!document.fullscreenElement;
+    const known = fullHeights.get(nextFullscreen);
+    const knownHeight =
+      known && Math.abs(known.width - nextWidth) <= 1 && known.scale === nextScale
+        ? known.height
+        : undefined;
     const changedAxis = Math.abs(width - nextWidth) > 1 || scale !== nextScale;
     if (changedAxis) {
-      fullHeights.clear();
       fullHeight = height;
     } else if (fullscreen !== nextFullscreen) {
-      fullHeight = fullHeights.get(nextFullscreen) ?? fullHeight;
+      fullHeight = knownHeight ?? fullHeight;
     }
     const mobile = isMobile();
     keyboardOpen =
@@ -62,9 +66,9 @@ export function trackViewport() {
       (nextFullscreen || !document.querySelector("[data-terminal-focus]"))
     ) {
       fullHeight = height;
-      fullHeights.set(nextFullscreen, height);
+      fullHeights.set(nextFullscreen, { width: nextWidth, scale: nextScale, height });
     } else {
-      fullHeight = fullHeights.get(nextFullscreen) ?? Math.max(fullHeight, height);
+      fullHeight = knownHeight ?? Math.max(fullHeight, height);
     }
     width = nextWidth;
     scale = nextScale;
