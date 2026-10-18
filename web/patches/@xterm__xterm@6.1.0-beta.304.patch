@@ -11,6 +11,59 @@ index 18c275ccbe583f48ccb5c5f66cd26d0bd8621e39..d695f43c0ecde21df4d87577d35ecba7
        scrollHeight: this._renderService.dimensions.css.cell.height * this._bufferService.buffer.lines.length
      });
      this._suppressOnScrollHandler = false;
+diff --git a/src/browser/input/CompositionHelper.ts b/src/browser/input/CompositionHelper.ts
+index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..f0121cd4e81f337edf429ac87f3b15cb6103874a 100644
+--- a/src/browser/input/CompositionHelper.ts
++++ b/src/browser/input/CompositionHelper.ts
+@@ -50,7 +50,7 @@ export class CompositionHelper {
+   /**
+    * The pending textarea change timer, if any.
+    */
+-  private _textareaChangeTimer?: number;
++  private _textareaChangeTimer?: { id: number; callback: () => void };
+ 
+   constructor(
+     private readonly _textarea: HTMLTextAreaElement,
+@@ -71,11 +71,19 @@ export class CompositionHelper {
+    * Handles the compositionstart event, activating the composition view.
+    */
+   public compositionstart(): void {
+-    this._isComposing = true;
+     // It's important to use the selection here instead of textarea length to avoid conflicts with
+     // screen reader mode
+     const start = this._textarea.selectionStart ?? this._textarea.value.length;
+     const end = this._textarea.selectionEnd ?? start;
++    // Apply pending trailing text before the new composition owns its range. A pending
++    // finalizer still owns its text, and middle edits retain the existing diff behavior.
++    if (this._textareaChangeTimer && !this._isSendingComposition &&
++        start === end && start === this._textarea.value.length) {
++      const pending = this._textareaChangeTimer;
++      window.clearTimeout(pending.id);
++      pending.callback();
++    }
++    this._isComposing = true;
+     this._compositionPosition.start = Math.min(start, end);
+     this._compositionPosition.end = Math.max(start, end);
+     this._compositionSuffix = this._textarea.value.substring(this._compositionPosition.end);
+@@ -214,7 +222,7 @@ export class CompositionHelper {
+       return;
+     }
+     const oldValue = this._textarea.value;
+-    this._textareaChangeTimer = window.setTimeout(() => {
++    const callback = () => {
+       this._textareaChangeTimer = undefined;
+       // Ignore if a composition has started since the timeout
+       if (!this._isComposing) {
+@@ -233,7 +241,8 @@ export class CompositionHelper {
+         }
+ 
+       }
+-    }, 0);
++    };
++    this._textareaChangeTimer = { id: window.setTimeout(callback, 0), callback };
+   }
+ 
+   /**
 diff --git a/src/browser/renderer/dom/DomRenderer.ts b/src/browser/renderer/dom/DomRenderer.ts
 index 657217f7104c97ce54b98e88b381b325b061604c..3c520efe00d80c86698a0345ecbda910ccb4951f 100644
 --- a/src/browser/renderer/dom/DomRenderer.ts
