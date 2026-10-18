@@ -103,6 +103,7 @@ public static class __KITELINE_DOWNLOAD_WAIT__ {
     }
 }
 function Get-KitelineArchive {
+    $ProgressPreference = 'SilentlyContinue'
     $null = [IO.Directory]::CreateDirectory($temporary)
     $name = "kiteline-agent-$Version-windows-amd64.zip"
     $archive = Join-Path $temporary $name
