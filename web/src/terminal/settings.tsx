@@ -220,7 +220,7 @@ export function TerminalSettings({ device, onClose }: { device: Device; onClose:
               role={error ? "alert" : "status"}
               className={
                 error
-                  ? "w-full break-words text-sm text-destructive"
+                  ? "w-full max-h-[calc(var(--viewport-height)*0.4)] overflow-auto break-words text-sm text-destructive"
                   : "w-full text-sm text-muted-foreground"
               }
             >
