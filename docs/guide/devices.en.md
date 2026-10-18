@@ -14,14 +14,14 @@ This guide explains how to connect Linux, macOS and Windows machines to the work
 
 All four Linux distributions use the same release package for a given architecture.
 
-The agent runs on the device as the project user: the operating-system account you normally use and that owns your project files. Workbench terminals, file operations, Git and scheduled tasks run with this account's permissions. Installing, upgrading and uninstalling the agent require administrator privileges (sudo on Linux and macOS, UAC elevation on Windows). Binding, running and other `kiteline-agent` commands must be performed by the project user.
+The agent runs on the device as the project user: the operating-system account you normally use and that owns your project files. Workbench terminals, file operations, Git and scheduled tasks run with this account's permissions. Installing the agent in system directories, and running `upgrade` or `uninstall` on that installation, require administrator privileges (sudo on Linux and macOS, UAC elevation on Windows). The project user can also extract the complete release package into a directory they own and [run it directly](#manual-installation), without administrator privileges or running `install`. Binding, running and other `kiteline-agent` commands must be performed by the project user.
 
 The package includes Node, tmux, the terminal recorder, terminfo, ripgrep and file-operation helpers. You do not need to install these, npm or a compiler. The device must provide:
 
 - Git 2.23.0 or later.
 - The project user's shell: the account's login shell on Linux and macOS, PowerShell on Windows. See [Shell](reference.en.md#shell) for the default selection.
 - Linux and macOS: an SSH client (`ssh`) and a UTF-8 locale.
-- Linux: `flock` (util-linux), `infocmp` (ncurses), `curl`, `tar`, `gzip`, `sha256sum` and `getent`; sudo access is also required when the project user is not root.
+- Linux: `flock` (util-linux), `infocmp` (ncurses), `curl`, `tar`, `gzip`, `sha256sum` and `getent`; installing in system directories also requires sudo access when the project user is not root.
 - Tools used by your projects, such as compilers and AI CLIs.
 
 The install command checks the agent's prerequisites and lists missing items; see [Install system dependencies](#install-system-dependencies) for each system's installation steps.
@@ -69,7 +69,7 @@ Once the device is online, register a project directory as described in [Devices
 
 A foreground agent stops when its terminal closes, on Ctrl-C or when the user signs out. To start at boot and keep terminals and scheduled tasks running after the project user signs out, use a service manager: systemd on Linux, launchd on macOS, or WinSW on Windows.
 
-Example configurations are in the installation's `deploy/` directory (`/opt/kiteline-agent/deploy/` on Linux and macOS, `C:\Program Files\kiteline-agent\deploy\` on Windows). The project does not install, start or remove services for you. Upgrades replace the whole installation directory, so copy examples elsewhere before editing. Alpine uses OpenRC by default rather than systemd; write a service using the user, directories and environment variables in the systemd example as a reference.
+The following steps apply to system installations. Example configurations are in the installation's `deploy/` directory (`/opt/kiteline-agent/deploy/` on Linux and macOS, `C:\Program Files\kiteline-agent\deploy\` on Windows). The project does not install, start or remove services for you. Upgrades replace the whole installation directory, so copy examples elsewhere before editing. Alpine uses OpenRC by default rather than systemd; write a service using the user, directories and environment variables in the systemd example as a reference.
 
 Before configuring a service, complete installation and binding in the foreground, confirm that the agent connects, then stop it with Ctrl-C. Only one agent can use a data directory at a time.
 
@@ -213,7 +213,7 @@ For SCL Git, run `source /opt/rh/rh-git227/enable` in the shell before starting 
 
 ### macOS
 
-Run as the project user. This user must be an administrator to install with sudo during connection; otherwise, have an administrator follow [Manual installation](#manual-installation) for that user.
+Prepare Git as the project user:
 
 ```sh
 xcode-select --install
@@ -246,13 +246,15 @@ Choose one line. `LC_ALL` and `LC_CTYPE` override `LANG`; change them too if set
 
 ## Manual installation
 
-If you need control over downloading and installing, for example because downloaded content cannot be passed directly to a shell or an administrator installs for the project user, install manually and then use the [bind-only command](#bind-only-command).
+After downloading, verifying and extracting the complete release package, the project user can run it directly in the foreground, or an administrator can install it in system directories. Both use the web app's [bind-only command](#bind-only-command).
+
+Direct execution uses the default data and runtime directories listed in [Agent environment variables](reference.en.md#agent-environment-variables). To customize them, set `KITELINE_AGENT_HOME` and `KITELINE_AGENT_RUN_DIR` in the same shell used for `check`, binding and `run`. Keep both the data and runtime directories outside the program directory and retain the same directory settings when replacing the package.
 
 The agent version must match the server or the device cannot connect. Check the server version with `curl -fsS https://YOUR_SERVER/healthz`. Download packages from the server (`https://YOUR_SERVER/downloads/agent/<version>/<filename>`, no sign-in required) or [GitHub Releases](https://github.com/Azure99/kiteline/releases). Each package has a matching `.sha256` checksum file.
 
 ### Linux and macOS
 
-Run as the project user:
+Run as the project user in a new directory they own:
 
 ```sh
 KITELINE_SERVER=https://YOUR_SERVER  # Replace with the workbench address
@@ -266,12 +268,25 @@ sha256sum -c "$name.tar.gz.sha256"            # Linux
 # shasum -a 256 -c "$name.tar.gz.sha256"      # On macOS, use this instead of the previous line
 tar -xpzf "$name.tar.gz" --no-same-owner
 "./$name/bin/kiteline-agent" check
+```
+
+Bundled programs such as tmux and `flock` are not notarized by Apple. A package downloaded in a macOS browser carries `com.apple.quarantine`; macOS may refuse to run bundled programs. Files downloaded with the curl commands above do not carry that attribute. For a browser download, verify SHA-256, then run `xattr -dr com.apple.quarantine "./$name"` on the extracted directory before `check`. For an installed copy, run `sudo xattr -dr com.apple.quarantine /opt/kiteline-agent`.
+
+To run without a system installation, expand the web app's [bind-only command](#bind-only-command), replace both occurrences of `kiteline-agent` with `"./$name/bin/kiteline-agent"`, and execute it in the current shell. After binding, run:
+
+```sh
+"./$name/bin/kiteline-agent" run
+```
+
+Keep the entire extracted directory and use this entry for subsequent commands.
+
+To install in system directories instead, run:
+
+```sh
 sudo "./$name/bin/kiteline-agent" install --user "$(id -un)"
 ```
 
-An administrator installing for another account runs the last command with the project username in place of `"$(id -un)"`; the project user still runs `check`.
-
-Bundled programs such as tmux and `flock` are not notarized by Apple. A package downloaded in a macOS browser carries `com.apple.quarantine`; macOS may refuse to run bundled programs. Files downloaded with the curl commands above do not carry that attribute. For a browser download, verify SHA-256, then run `xattr -dr com.apple.quarantine "./$name"` on the extracted directory before `check`. For an installed copy, run `sudo xattr -dr com.apple.quarantine /opt/kiteline-agent`.
+An administrator installing for another account runs this command with the project username in place of `"$(id -un)"`; the project user still runs `check`.
 
 `install` records the agent data directory in `/etc/kiteline-agent.env`. It defaults to the project user's `~/.local/share/kiteline-agent`, with `run` inside it as the runtime directory. To use other directories, edit `KITELINE_AGENT_HOME` and `KITELINE_AGENT_RUN_DIR` in this file before binding; see [Directory configuration file](reference.en.md#directory-configuration-file) for the format. The runtime directory path has a length limit (see [Limits](reference.en.md#limits)).
 
@@ -287,21 +302,28 @@ Download, verify and check in the project user's regular PowerShell window:
 $server = 'https://YOUR_SERVER'  # Replace with the workbench address
 $version = 'X.Y.Z'               # Replace with the server version
 $package = "kiteline-agent-$version-windows-amd64"
-Set-Location "$HOME\Downloads"
+Set-Location 'C:\Users\PROJECT_USER\AGENT_PACKAGE_DIR'  # Replace with a new directory you created
 Invoke-WebRequest -UseBasicParsing "$server/downloads/agent/$version/$package.zip" -OutFile "$package.zip"
 Invoke-WebRequest -UseBasicParsing "$server/downloads/agent/$version/$package.zip.sha256" -OutFile "$package.zip.sha256"
 $expected = (Get-Content "$package.zip.sha256" -Raw).Trim().Split(' ')[0]
 if ((Get-FileHash "$package.zip" -Algorithm SHA256).Hash -ine $expected) { throw 'Checksum mismatch' }
 Expand-Archive -LiteralPath "$package.zip" -DestinationPath .
 & (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File ".\$package\bin\kiteline-agent.ps1" check
-whoami
 ```
 
-`whoami` prints the project user's account name, such as `desktop-1234\alice`. Open PowerShell as administrator (right-click and choose "Run as administrator"), go to the same download directory and install, using that account name for `--user`:
+To run without a system installation, expand the web app's [bind-only command](#bind-only-command), replace the script path after each of its two `-File` arguments with `".\$package\bin\kiteline-agent.ps1"`, and execute it in the current window. After binding, run:
+
+```powershell
+& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File ".\$package\bin\kiteline-agent.ps1" run
+```
+
+Keep the entire extracted directory and use this entry for subsequent commands.
+
+To install in system directories instead, first run `whoami` in the current window and note the project user's account name, such as `desktop-1234\alice`. Open PowerShell as administrator (right-click and choose "Run as administrator"), go to the same download directory and install, using that account name for `--user`:
 
 ```powershell
 # Replace X.Y.Z with the version downloaded above
-Set-Location 'C:\Users\PROJECT_USER\Downloads'
+Set-Location 'C:\Users\PROJECT_USER\AGENT_PACKAGE_DIR'
 & (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File '.\kiteline-agent-X.Y.Z-windows-amd64\bin\kiteline-agent.ps1' install --user 'COMPUTER\PROJECT_USER'
 ```
 
@@ -425,7 +447,9 @@ To upgrade, change `KITELINE_VERSION`, run `docker compose build`, then `docker 
 
 The agent version must match the server. [Upgrade the server](server.en.md#upgrade-the-server) first, then each device showing "Version mismatch".
 
-Before upgrading, stop all processes using this installation, or the upgrade is rejected (`Agent installation is busy`, or `Installation is busy` on Windows):
+If you run directly from an extracted directory, use [Manual package replacement](#manual-package-replacement). For a system installation, use the web or manual upgrade commands below.
+
+Before upgrading a system installation, stop all processes using it, or the upgrade is rejected (`Agent installation is busy`, or `Installation is busy` on Windows):
 
 - Foreground agent: press Ctrl-C.
 - Service: use the stop commands in [Run in the background](#run-in-the-background); these also prevent automatic service-manager restarts.
@@ -433,6 +457,12 @@ Before upgrading, stop all processes using this installation, or the upgrade is 
 - Other running `kiteline-agent` commands and CLI calls using the package: wait for them to finish.
 
 Stopping the agent ends its terminal sessions and scheduled-task runs. Binding, configuration, workspaces, task definitions and retained run records are kept.
+
+### Manual package replacement
+
+Press Ctrl-C to stop the old agent and wait for the command to finish. Follow [Manual installation](#manual-installation) to download and verify the complete package matching the server, and extract it into a new directory. As the same project user, run `check` and `run` through the new package entry, retaining the original data and runtime directory settings without binding again. Binding, configuration, task definitions and retained run records continue to use the original data; workspace files stay in their original locations.
+
+Use a new directory when re-extracting the same version too, rather than merging files into the old program directory. Once the new package checks and runs successfully, you can delete the old program directory you own.
 
 ### Upgrade using the web command
 
@@ -462,7 +492,9 @@ Adjust the version and filename to the downloaded package. Add `--yes` to skip c
 
 ## Uninstall
 
-After deleting a device, the web app provides local uninstall commands. If the platform is unknown, select the target device’s platform first.
+If you run directly from an extracted directory, press Ctrl-C to stop the agent, then delete the program directory you own. Agent data and workspace files outside it are kept.
+
+The following uninstall commands apply to system installations. After deleting a device, the web app provides local uninstall commands. If the platform is unknown, select the target device’s platform first.
 
 First stop all users of the installation as in [Upgrade the agent](#upgrade-the-agent). The uninstall command does not manage service configuration; remove any service first:
 

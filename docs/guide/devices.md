@@ -14,14 +14,14 @@
 
 同一架构的四个 Linux 发行版使用同一个发布包。
 
-agent 在设备上以项目用户运行。项目用户是你日常使用、拥有项目文件的操作系统账户；工作台中的终端、文件操作、Git 和定时任务都以这个账户的权限执行。安装、升级和卸载 agent 需要管理员权限（Linux 和 macOS 用 sudo，Windows 用 UAC 提升）；绑定、运行和其他 `kiteline-agent` 命令只能由项目用户执行。
+agent 在设备上以项目用户运行。项目用户是你日常使用、拥有项目文件的操作系统账户；工作台中的终端、文件操作、Git 和定时任务都以这个账户的权限执行。把 agent 安装到系统目录，以及对这份安装执行 `upgrade`、`uninstall`，需要管理员权限（Linux 和 macOS 用 sudo，Windows 用 UAC 提升）。也可以由项目用户在自己拥有的目录解包完整发布包，[直接运行](#手工安装)，无需管理员权限或执行 `install`。绑定、运行和其他 `kiteline-agent` 命令只能由项目用户执行。
 
 发布包自带 Node、tmux、终端记录器（recorder）、terminfo、ripgrep 和文件操作辅助程序，设备上不需要安装这些程序，也不需要 npm 或编译器。设备需要自己提供：
 
 - Git 2.23.0 或更高版本。
 - 项目用户的 Shell：Linux 和 macOS 使用账户的登录 Shell，Windows 使用 PowerShell，默认选择见 [shell](reference.md#shell)。
 - Linux 和 macOS：SSH 客户端（`ssh`）和 UTF-8 locale。
-- Linux：`flock`（util-linux）、`infocmp`（ncurses）、`curl`、`tar`、`gzip`、`sha256sum`、`getent`；项目用户不是 root 时还需要能使用 `sudo`。
+- Linux：`flock`（util-linux）、`infocmp`（ncurses）、`curl`、`tar`、`gzip`、`sha256sum`、`getent`；安装到系统目录时，非 root 用户还需要能使用 `sudo`。
 - 项目实际使用的工具，例如编译器和 AI CLI。
 
 接入命令会检查 agent 所需的前置条件，缺少时列出缺失项；各系统的安装方法见[安装系统依赖](#安装系统依赖)。
@@ -69,7 +69,7 @@ kiteline-agent run
 
 前台运行的 agent 随终端关闭、Ctrl-C 或用户注销而停止。要让 agent 开机自动运行，并在项目用户注销后继续运行终端和定时任务，需要用服务管理器运行它：Linux 用 systemd，macOS 用 launchd，Windows 用 WinSW。
 
-程序目录的 `deploy/` 中附带示例配置（Linux 和 macOS 为 `/opt/kiteline-agent/deploy/`，Windows 为 `C:\Program Files\kiteline-agent\deploy\`）。项目不会替你安装、启动或删除服务。程序目录在升级时整体替换，所以先把示例复制到别处再修改。Alpine 默认使用 OpenRC，可以参照 systemd 示例中的用户、目录和环境变量自行编写服务。
+以下步骤用于系统目录安装。程序目录的 `deploy/` 中附带示例配置（Linux 和 macOS 为 `/opt/kiteline-agent/deploy/`，Windows 为 `C:\Program Files\kiteline-agent\deploy\`）。项目不会替你安装、启动或删除服务。程序目录在升级时整体替换，所以先把示例复制到别处再修改。Alpine 默认使用 OpenRC，可以参照 systemd 示例中的用户、目录和环境变量自行编写服务。
 
 配置服务之前，先在前台完成安装和绑定、确认 agent 能连接，然后按 Ctrl-C 停止它。同一个数据目录同时只能运行一个 agent。
 
@@ -213,7 +213,7 @@ yum install -y rh-git227
 
 ### macOS
 
-以项目用户执行。项目用户需要是管理员，才能在接入时用 sudo 安装；否则由管理员按[手工安装](#手工安装)为该用户安装。
+以项目用户准备 Git：
 
 ```sh
 xcode-select --install
@@ -246,13 +246,15 @@ export LANG=en_US.UTF-8  # CentOS 7、macOS
 
 ## 手工安装
 
-需要自己控制下载和安装步骤时（例如不允许把下载内容直接交给 Shell 执行，或由管理员替项目用户安装），可以手工安装，再用[仅绑定命令](#仅绑定命令)绑定。
+手工下载、校验并解包完整发布包后，可以以项目用户直接前台运行，也可以由管理员安装到系统目录。两种方式都使用网页上的[仅绑定命令](#仅绑定命令)。
+
+直接运行时，数据目录和运行目录使用 [agent 环境变量](reference.md#agent-环境变量)所列的默认值。需要自定义时，在执行 `check`、绑定和 `run` 的同一 Shell 中设置 `KITELINE_AGENT_HOME` 和 `KITELINE_AGENT_RUN_DIR`。数据目录和运行目录都放在程序目录外，换包时沿用原来的目录设置。
 
 agent 版本必须与 server 版本相同，否则设备无法连接。用 `curl -fsS https://YOUR_SERVER/healthz` 查看 server 版本。发布包可以从 server 下载（`https://YOUR_SERVER/downloads/agent/<版本>/<文件名>`，不需要登录），也可以从 [GitHub Releases](https://github.com/Azure99/kiteline/releases) 下载。每个发布包都有同名的 `.sha256` 校验文件。
 
 ### Linux 和 macOS
 
-以项目用户执行：
+以项目用户在自己拥有的新目录中执行：
 
 ```sh
 KITELINE_SERVER=https://YOUR_SERVER  # 替换为工作台地址
@@ -266,12 +268,25 @@ sha256sum -c "$name.tar.gz.sha256"            # Linux
 # shasum -a 256 -c "$name.tar.gz.sha256"      # macOS 用这一行代替上一行
 tar -xpzf "$name.tar.gz" --no-same-owner
 "./$name/bin/kiteline-agent" check
+```
+
+随包的 tmux、`flock` 等程序没有经过 Apple 公证。macOS 上用浏览器下载的发布包带有隔离属性 `com.apple.quarantine`，运行随包程序时可能被拒绝；用上面的 curl 命令下载的文件不带这个属性。已经用浏览器下载时，核对 SHA-256 后对解包目录执行 `xattr -dr com.apple.quarantine "./$name"`，再运行 `check`；已经安装的程序目录执行 `sudo xattr -dr com.apple.quarantine /opt/kiteline-agent`。
+
+无需系统安装时，展开网页上的[仅绑定命令](#仅绑定命令)，把其中两处 `kiteline-agent` 改成 `"./$name/bin/kiteline-agent"`，在当前 Shell 中执行；绑定后执行：
+
+```sh
+"./$name/bin/kiteline-agent" run
+```
+
+保留整个解包目录，后续命令也使用这个入口。
+
+需要安装到系统目录时，执行：
+
+```sh
 sudo "./$name/bin/kiteline-agent" install --user "$(id -un)"
 ```
 
-由管理员替其他账户安装时，管理员执行最后一条命令并把 `"$(id -un)"` 换成项目用户名，`check` 仍由项目用户执行。
-
-随包的 tmux、`flock` 等程序没有经过 Apple 公证。macOS 上用浏览器下载的发布包带有隔离属性 `com.apple.quarantine`，运行随包程序时可能被拒绝；用上面的 curl 命令下载的文件不带这个属性。已经用浏览器下载时，核对 SHA-256 后对解包目录执行 `xattr -dr com.apple.quarantine "./$name"`，再运行 `check`；已经安装的程序目录执行 `sudo xattr -dr com.apple.quarantine /opt/kiteline-agent`。
+由管理员替其他账户安装时，管理员执行这条命令并把 `"$(id -un)"` 换成项目用户名，`check` 仍由项目用户执行。
 
 `install` 在 `/etc/kiteline-agent.env` 中记录 agent 数据目录，默认为项目用户的 `~/.local/share/kiteline-agent`，运行目录默认为其中的 `run`。需要使用其他目录时，在绑定前编辑这个文件中的 `KITELINE_AGENT_HOME` 和 `KITELINE_AGENT_RUN_DIR`，格式见[目录配置文件](reference.md#目录配置文件)。运行目录的路径长度有上限（见[限额](reference.md#限额)）。
 
@@ -287,21 +302,28 @@ sudo "./$name/bin/kiteline-agent" install --user "$(id -un)"
 $server = 'https://YOUR_SERVER'  # 替换为工作台地址
 $version = 'X.Y.Z'               # 替换为 server 的版本
 $package = "kiteline-agent-$version-windows-amd64"
-Set-Location "$HOME\Downloads"
+Set-Location 'C:\Users\PROJECT_USER\AGENT_PACKAGE_DIR'  # 替换为自己创建的新目录
 Invoke-WebRequest -UseBasicParsing "$server/downloads/agent/$version/$package.zip" -OutFile "$package.zip"
 Invoke-WebRequest -UseBasicParsing "$server/downloads/agent/$version/$package.zip.sha256" -OutFile "$package.zip.sha256"
 $expected = (Get-Content "$package.zip.sha256" -Raw).Trim().Split(' ')[0]
 if ((Get-FileHash "$package.zip" -Algorithm SHA256).Hash -ine $expected) { throw 'Checksum mismatch' }
 Expand-Archive -LiteralPath "$package.zip" -DestinationPath .
 & (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File ".\$package\bin\kiteline-agent.ps1" check
-whoami
 ```
 
-`whoami` 输出项目用户的账户名，例如 `desktop-1234\alice`。然后以管理员身份打开 PowerShell（右键“以管理员身份运行”），进入同一个下载目录安装，`--user` 填这个账户名：
+无需系统安装时，展开网页上的[仅绑定命令](#仅绑定命令)，把其中两处 `-File` 后的脚本路径改成 `".\$package\bin\kiteline-agent.ps1"`，在当前窗口执行；绑定后执行：
+
+```powershell
+& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File ".\$package\bin\kiteline-agent.ps1" run
+```
+
+保留整个解包目录，后续命令也使用这个入口。
+
+需要安装到系统目录时，先在当前窗口执行 `whoami`，记下项目用户的账户名，例如 `desktop-1234\alice`。然后以管理员身份打开 PowerShell（右键“以管理员身份运行”），进入同一个下载目录安装，`--user` 填这个账户名：
 
 ```powershell
 # 把 X.Y.Z 换成上一步下载的版本
-Set-Location 'C:\Users\PROJECT_USER\Downloads'
+Set-Location 'C:\Users\PROJECT_USER\AGENT_PACKAGE_DIR'
 & (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File '.\kiteline-agent-X.Y.Z-windows-amd64\bin\kiteline-agent.ps1' install --user 'COMPUTER\PROJECT_USER'
 ```
 
@@ -425,7 +447,9 @@ docker compose logs -f agent
 
 agent 的版本必须与 server 相同。先[升级 server](server.md#升级-server)，再升级显示“版本不匹配”的每台设备。
 
-升级前，停止所有使用这份安装的进程，否则升级会拒绝执行（提示 `Agent installation is busy`，Windows 上为 `Installation is busy`）：
+直接运行解包目录的用户按[手工换包](#手工换包)更新；系统目录安装使用下面的网页命令或手工升级命令。
+
+升级系统目录安装前，停止所有使用这份安装的进程，否则升级会拒绝执行（提示 `Agent installation is busy`，Windows 上为 `Installation is busy`）：
 
 - 前台运行的 agent：按 Ctrl-C。
 - 服务：用[后台运行](#后台运行)中的停止命令，它们同时阻止服务管理器自动重启。
@@ -433,6 +457,12 @@ agent 的版本必须与 server 相同。先[升级 server](server.md#升级-ser
 - 正在执行的其他 `kiteline-agent` 命令和包内 CLI 调用：等待它们结束。
 
 停止 agent 会结束它的终端会话和定时任务运行；绑定、配置、工作区、定时任务定义和保留的运行记录都会保留。
+
+### 手工换包
+
+按 Ctrl-C 停止旧 agent，等命令结束后，再按[手工安装](#手工安装)下载、校验与 server 同版的完整发布包，解到新目录。以同一项目用户使用新包入口执行 `check` 和 `run`，沿用原数据目录与运行目录设置，不重新绑定。绑定、配置、定时任务定义和保留的运行记录继续使用原数据；工作区文件仍在原位置。
+
+同版重解包也使用新目录，不向旧程序目录合并文件。新包检查和运行正常后，可以删除自己拥有的旧程序目录。
 
 ### 用网页命令升级
 
@@ -462,7 +492,9 @@ Expand-Archive -LiteralPath "$package.zip" -DestinationPath .
 
 ## 卸载
 
-删除设备后，网页会提供本机卸载命令；平台未知时先选择平台。
+直接运行解包目录时，按 Ctrl-C 停止 agent，然后删除自己拥有的程序目录即可。程序目录外的 agent 数据和工作区文件保留。
+
+下面的卸载命令用于系统目录安装。删除设备后，网页会提供本机卸载命令；平台未知时先选择平台。
 
 先像[升级 agent](#升级-agent) 一样停止所有使用者。卸载命令不处理服务配置，用了服务时先删除它：
 
