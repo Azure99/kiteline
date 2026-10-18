@@ -10,6 +10,7 @@ import {
   FileOutput,
   Fullscreen,
   Minimize,
+  MoreHorizontal,
   Quote,
   RefreshCw,
   Save,
@@ -17,6 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
+import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
 import { Textarea } from "../components/ui/textarea";
 import {
   Dialog,
@@ -137,6 +139,11 @@ export function DraftView({
     if (current && (draft.unknownSave !== undefined || current.meta.revision !== draft.revision))
       setDisk(current);
   }
+  const downloadDisabled = !!unavailable || !draft.path;
+  const checkDisabled = !!busy || !!unavailable || !canCheckDisk;
+  const saveAsDisabled = !draft.state || !!busy || !!unavailable;
+  const download = () => downloadFile(draft);
+  const openSaveAs = () => setSaveAs(true);
   if (!store.has(draft))
     return <div className="p-4 text-sm text-muted-foreground">{t(($) => $.files.closed)}</div>;
   return (
@@ -167,8 +174,9 @@ export function DraftView({
         )}
         <IconButton
           label={t(($) => $.files.downloadFile)}
-          disabled={!!unavailable || !draft.path}
-          onClick={() => downloadFile(draft)}
+          className="hidden sm:inline-flex"
+          disabled={downloadDisabled}
+          onClick={download}
         >
           <Download />
         </IconButton>
@@ -192,15 +200,17 @@ export function DraftView({
         )}
         <IconButton
           label={t(($) => $.files.checkDisk)}
-          disabled={!!busy || !!unavailable || !canCheckDisk}
+          className="hidden sm:inline-flex"
+          disabled={checkDisabled}
           onClick={() => void check()}
         >
           <RefreshCw />
         </IconButton>
         <IconButton
           label={t(($) => $.files.saveAs)}
-          disabled={!draft.state || !!busy || !!unavailable}
-          onClick={() => setSaveAs(true)}
+          className="hidden sm:inline-flex"
+          disabled={saveAsDisabled}
+          onClick={openSaveAs}
         >
           <FileOutput />
         </IconButton>
@@ -229,6 +239,34 @@ export function DraftView({
             )}
           </IconButton>
         )}
+        <Menu>
+          <MenuTrigger
+            render={
+              <Button
+                className="sm:hidden"
+                variant="ghost"
+                size="icon"
+                aria-label={t(($) => $.files.moreActions)}
+              />
+            }
+          >
+            <MoreHorizontal />
+          </MenuTrigger>
+          <MenuContent>
+            <MenuItem disabled={downloadDisabled} onClick={download}>
+              <Download />
+              {t(($) => $.files.downloadFile)}
+            </MenuItem>
+            <MenuItem disabled={checkDisabled} onClick={() => void check()}>
+              <RefreshCw />
+              {t(($) => $.files.checkDisk)}
+            </MenuItem>
+            <MenuItem disabled={saveAsDisabled} onClick={openSaveAs}>
+              <FileOutput />
+              {t(($) => $.files.saveAs)}
+            </MenuItem>
+          </MenuContent>
+        </Menu>
       </div>
       {focusMode?.error && (
         <div role="alert" className="shrink-0 text-destructive">

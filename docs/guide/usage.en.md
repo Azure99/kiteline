@@ -135,6 +135,8 @@ PNG, JPEG, GIF and WebP images are detected by content and previewed; images exc
 
 The file editor and Git diffs highlight syntax by filename. Diffs contain partial context, so multiline comments or strings can be colored incorrectly; use the source text to interpret them.
 
+On narrow screens, “More file actions” in the file toolbar contains Download file, Check disk content, and Save as.
+
 In the file source toolbar, “Copy code line reference” copies the whole lines touched by the selection, or the cursor line when nothing is selected, with the device, workspace, relative path and line numbers. It uses the current editor text, including unsaved edits, without changing the selection or saving the file. Paste it manually into the target terminal.
 
 The editor preserves the original BOM, line endings and final newline. For mixed line endings, it indicates whether saves will use LF or CRLF. An edit that would exceed the editing limit is rejected in full.
