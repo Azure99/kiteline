@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import { parseDiff, type TokenNode } from "react-diff-view";
 import { codeLanguage } from "../src/lib/code-language";
 import { diffTokens } from "../src/git/highlight";
+import { inlineDiff } from "../src/git/inline-diff";
 
 const text = (tokens: TokenNode[]) => tokens.map((token) => token.value ?? "").join("");
 
@@ -63,4 +64,67 @@ test("multiline syntax stays within its hunk without leaking across missing cont
   expect(tokens.new[1]!.some((token) => token.className === "tok-comment")).toBe(true);
   expect(tokens.new[19]!.some((token) => token.className === "tok-keyword")).toBe(true);
   expect(text(tokens.new[19]!)).toBe("const other = 2;");
+});
+
+test("inline emphasis preserves text and syntax colors while covering complete graphemes", async () => {
+  const old = 'const message = "👩🏽‍💻 é";';
+  const next = 'const message = "👩🏻‍💻 è";';
+  const file = parseDiff(
+    [
+      "diff --git a/a.js b/a.js",
+      "--- a/a.js",
+      "+++ b/a.js",
+      "@@ -1 +1 @@",
+      "-" + old,
+      "+" + next,
+      "",
+    ].join("\n"),
+  )[0]!;
+  const inline = file.hunks.map(inlineDiff);
+  for (const support of [undefined, await codeLanguage("a.js")!.load()]) {
+    const tokens = diffTokens(file, support, support, inline);
+    expect(text(tokens.old[0]!)).toBe(old);
+    expect(text(tokens.new[0]!)).toBe(next);
+    for (const [side, emoji, combining] of [
+      ["old", "👩🏽‍💻", "é"],
+      ["new", "👩🏻‍💻", "è"],
+    ] as const) {
+      const marked = tokens[side][0]!.filter((token) => token.className?.includes("inline-edit"));
+      expect(text(marked)).toContain(emoji);
+      expect(text(marked)).toContain(combining);
+      if (support) {
+        expect(marked.every((token) => token.className.includes("tok-string"))).toBe(true);
+        expect(
+          tokens[side][0]!.some(
+            (token) => token.className === "tok-keyword" && token.value === "const",
+          ),
+        ).toBe(true);
+      }
+    }
+  }
+});
+
+test("whole-line additions, deletions and actual empty lines keep only the row emphasis", () => {
+  for (const [old, next] of [
+    [[], ["", "newCall();"]],
+    [["", "oldCall();"], []],
+  ]) {
+    const file = parseDiff(
+      [
+        "diff --git a/a.js b/a.js",
+        "--- a/a.js",
+        "+++ b/a.js",
+        `@@ -1,${old!.length} +1,${next!.length} @@`,
+        ...old!.map((line) => "-" + line),
+        ...next!.map((line) => "+" + line),
+        "",
+      ].join("\n"),
+    )[0]!;
+    const tokens = diffTokens(file, undefined, undefined, file.hunks.map(inlineDiff));
+    expect(tokens.old.map(text)).toEqual(old);
+    expect(tokens.new.map(text)).toEqual(next);
+    const populated = old!.length ? tokens.old : tokens.new;
+    expect(populated[0]).toEqual([{ type: "empty" }]);
+    expect(populated.flat().some((token) => token.className?.includes("inline-edit"))).toBe(false);
+  }
 });

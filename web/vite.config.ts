@@ -38,6 +38,8 @@ export default defineConfig({
             new URL("./LICENSE", import.meta.resolve("tailwindcss/package.json")),
           ],
           ["vite.txt", new URL("./LICENSE.md", import.meta.resolve("vite/package.json"))],
+          // build.license covers the main bundle, but merge is only in the diff worker.
+          ["codemirror-merge.txt", new URL("../LICENSE", import.meta.resolve("@codemirror/merge"))],
         ] as const)
           this.emitFile({
             type: "asset",

@@ -720,6 +720,8 @@ export const zhCN = {
     index: "暂存区",
     worktree: "工作树",
     diffTruncated: "Diff 读取已截断",
+    inlineComputing: "正在计算行内差异",
+    inlineUnavailable: "行内差异不可用",
     diffLineLimit: "Diff 超过显示行数",
     diffUnstructured: "Diff 无法结构化显示",
     diffUnparsed: "Diff 含未解析内容",

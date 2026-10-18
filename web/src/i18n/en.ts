@@ -732,6 +732,8 @@ export const en = {
     index: "Index",
     worktree: "Worktree",
     diffTruncated: "Diff data was truncated",
+    inlineComputing: "Computing inline differences",
+    inlineUnavailable: "Inline differences unavailable",
     diffLineLimit: "Diff exceeds the display line limit",
     diffUnstructured: "Diff cannot be shown as structured changes",
     diffUnparsed: "Diff contains unparsed content",

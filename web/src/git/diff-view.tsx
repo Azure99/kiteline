@@ -4,6 +4,7 @@ import { Decoration, Diff, Hunk, parseDiff, type FileData, type ViewType } from 
 import type { LanguageSupport } from "@codemirror/language";
 import { codeLanguage } from "../lib/code-language";
 import { diffTokens } from "./highlight";
+import type { InlineHunk } from "./inline-diff";
 import { type GitDiff } from "@kiteline/shared/protocol";
 import { ApiError, errorMessage, rpc } from "../lib/api";
 import { ErrorNotice, ErrorDetails } from "../components/error-notice";
@@ -140,10 +141,7 @@ export function Patch({ value, viewType }: { value: GitDiff; viewType: ViewType 
     if (value.patch.split("\n").length > diffRenderLines)
       return { reason: "diffLineLimit" as const };
     try {
-      const files = parseDiff(
-        value.patch,
-        viewType === "split" ? { nearbySequences: "zip" } : undefined,
-      );
+      const files = parseDiff(value.patch);
       if (!files.length && value.patch.trim()) return { reason: "diffUnstructured" as const };
       if (
         !files.some((file) => file.hunks.length) &&
@@ -162,7 +160,43 @@ export function Patch({ value, viewType }: { value: GitDiff; viewType: ViewType 
     } catch {
       return { reason: "diffParseFailed" as const };
     }
-  }, [value.patch, value.truncated, viewType]);
+  }, [value.patch, value.truncated]);
+  const files = parsed.files;
+  const [inline, setInline] = useState<
+    { files: FileData[] } & (
+      | { result: InlineHunk[][]; error?: never }
+      | { result?: never; error: unknown }
+    )
+  >();
+  const matching = inline?.files === files ? inline : undefined;
+  const needsInline = files?.some((file) => file.hunks.length);
+  useEffect(() => {
+    if (!files?.some((file) => file.hunks.length)) return;
+    let worker: Worker | undefined;
+    const dispose = () => {
+      if (!worker) return;
+      worker.onmessage = null;
+      worker.onerror = null;
+      worker.terminate();
+    };
+    try {
+      worker = new Worker(new URL("./inline-diff.worker.ts", import.meta.url), { type: "module" });
+      worker.onmessage = ({ data }: MessageEvent<InlineHunk[][]>) => {
+        setInline({ files, result: data });
+        dispose();
+      };
+      worker.onerror = (event) => {
+        event.preventDefault();
+        setInline({ files, error: event.error ?? new Error(event.message) });
+        dispose();
+      };
+      worker.postMessage(files);
+    } catch (error) {
+      setInline({ files, error });
+      dispose();
+    }
+    return dispose;
+  }, [files]);
   const fallback = useMemo(() => {
     if (!parsed.reason) return;
     const bytes = new TextEncoder().encode(value.patch);
@@ -192,6 +226,16 @@ export function Patch({ value, viewType }: { value: GitDiff; viewType: ViewType 
           </p>
         </div>
       )}
+      {needsInline && !matching && (
+        <p role="status" className="px-4 py-2 text-xs text-muted-foreground">
+          {t(($) => $.git.inlineComputing)}
+        </p>
+      )}
+      {matching && !matching.result && (
+        <div role="status" className="px-4 py-2 text-xs text-muted-foreground">
+          {t(($) => $.git.inlineUnavailable)}: <ErrorNotice error={matching.error} />
+        </div>
+      )}
       {parsed.reason ? (
         <>
           <p role="status" className="px-4 py-2 text-xs">
@@ -204,7 +248,13 @@ export function Patch({ value, viewType }: { value: GitDiff; viewType: ViewType 
         </>
       ) : (
         parsed.files?.map((file, index) => (
-          <DiffBlock key={index} file={file} viewType={viewType} patch={value.patch} />
+          <DiffBlock
+            key={index}
+            file={file}
+            viewType={viewType}
+            patch={value.patch}
+            inline={matching?.result?.[index]}
+          />
         ))
       )}
     </>
@@ -214,10 +264,12 @@ function DiffBlock({
   file,
   viewType,
   patch,
+  inline,
 }: {
   file: FileData;
   viewType: ViewType;
   patch: string;
+  inline?: InlineHunk[];
 }) {
   const { t } = useTranslation();
   const [support, setSupport] = useState<{
@@ -244,7 +296,10 @@ function DiffBlock({
   }, [oldPath, newPath]);
   const matching =
     support?.oldPath === file.oldPath && support?.newPath === file.newPath ? support : undefined;
-  const tokens = useMemo(() => diffTokens(file, matching?.old, matching?.new), [file, matching]);
+  const tokens = useMemo(
+    () => diffTokens(file, matching?.old, matching?.new, inline),
+    [file, matching, inline],
+  );
   return (
     <>
       {!!matching?.error && (
@@ -254,7 +309,7 @@ function DiffBlock({
       )}
       <Diff
         // Replacing the token subtree avoids React's quadratic sibling insertion on long lines.
-        key={matching?.old || matching?.new ? patch : "plain"}
+        key={`${matching?.old || matching?.new ? patch : "plain"}:${!!inline}`}
         viewType={viewType}
         optimizeSelection
         diffType={file.type}
@@ -278,12 +333,26 @@ function DiffBlock({
         }
       >
         {(hunks) =>
-          hunks.map((hunk) => (
+          hunks.map((hunk, index) => (
             <Fragment key={hunk.content}>
               <Decoration className="bg-primary-soft text-muted-foreground">
                 <span className="block px-2 py-1">{hunk.content}</span>
               </Decoration>
-              <Hunk hunk={hunk} />
+              {viewType === "split" && inline ? (
+                inline[index]!.rows.map(([old, next], row) => (
+                  <Hunk
+                    key={row}
+                    hunk={{
+                      ...hunk,
+                      changes: (old === next ? [old] : [old, next])
+                        .filter((change) => change !== null)
+                        .map((change) => hunk.changes[change]!),
+                    }}
+                  />
+                ))
+              ) : (
+                <Hunk hunk={hunk} />
+              )}
             </Fragment>
           ))
         }

@@ -50,8 +50,10 @@
   --diff-selection-background-color: var(--code-selection);
   --diff-selection-text-color: var(--foreground);
   --diff-code-insert-background-color: #e7f4eb;
+  --diff-code-insert-edit-background-color: #8ee6aa;
   --diff-gutter-insert-background-color: #d6eadd;
   --diff-code-delete-background-color: #fceced;
+  --diff-code-delete-edit-background-color: #ffa8a3;
   --diff-gutter-delete-background-color: #f5dee1;
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-family:
@@ -92,8 +94,10 @@
   --tok-definition: #9acbfa;
   --tok-type: #f2c779;
   --diff-code-insert-background-color: #18362a;
+  --diff-code-insert-edit-background-color: #2e6544;
   --diff-gutter-insert-background-color: #204632;
   --diff-code-delete-background-color: #41252b;
+  --diff-code-delete-edit-background-color: #713d48;
   --diff-gutter-delete-background-color: #51303a;
 }
 
@@ -304,6 +308,12 @@ body {
 .kiteline-diff .diff-gutter {
   min-width: 5ch;
   color: var(--muted-foreground);
+}
+.kiteline-diff .diff-code-insert .inline-edit {
+  background: var(--diff-code-insert-edit-background-color);
+}
+.kiteline-diff .diff-code-delete .inline-edit {
+  background: var(--diff-code-delete-edit-background-color);
 }
 .terminal-surface {
   background: var(--terminal);
