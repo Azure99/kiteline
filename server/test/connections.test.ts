@@ -125,7 +125,11 @@ test("subscribed workspace events and request progress retain their defined fiel
   for (const event of events)
     peer.socket.send(JSON.stringify({ ...event, diagnostic: "local detail" }));
   await expect
-    .poll(() => received.filter((message) => message.type !== "devices.changed"))
+    .poll(() =>
+      received.filter(
+        (message) => !["devices.changed", "notices.reset"].includes(String(message.type)),
+      ),
+    )
     .toEqual(events.map((event) => ({ ...event, deviceId: peer.deviceId })));
   peer.socket.send(
     JSON.stringify({ type: "rpc.result", reply: { id: "progress", outcome: "succeeded" } }),
@@ -358,7 +362,7 @@ test("terminal reports reach permitted devices without workspace subscriptions a
     });
     socket.on("message", (data) => received[i]!.push(JSON.parse(data.toString())));
     await once(socket, "open");
-    await expect.poll(() => received[i]!.length).toBe(1);
+    await expect.poll(() => received[i]!.length).toBe(2);
   }
   for (const peer of peers)
     peer.socket.send(
@@ -381,6 +385,8 @@ test("terminal reports reach permitted devices without workspace subscriptions a
       .toEqual([
         {
           type: "terminal.notice",
+          noticeId: expect.any(String),
+          receivedAt: expect.any(Number),
           deviceId: peers[i]!.deviceId,
           workspaceId: "work",
           sessionId: "source",
@@ -425,6 +431,8 @@ test("oversized browser report is dropped without disconnecting the device; malf
     .toEqual([
       {
         ...event,
+        noticeId: expect.any(String),
+        receivedAt: expect.any(Number),
         deviceId: peer.deviceId,
         notice: { title: "", body: "after oversized", blocked: true },
       },

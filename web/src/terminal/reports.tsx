@@ -1,13 +1,8 @@
 import type { BrowserEvent } from "@kiteline/shared/protocol";
 import { useTranslation } from "react-i18next";
 
-export type ReceivedReport = Extract<BrowserEvent, { type: "terminal.notice" }> & {
-  receivedAt: number;
-};
-
-export function reportKey(source: Pick<ReceivedReport, "deviceId" | "workspaceId" | "sessionId">) {
-  return JSON.stringify([source.deviceId, source.workspaceId, source.sessionId]);
-}
+export type ReceivedReport = Extract<BrowserEvent, { type: "terminal.notice" }>;
+export { reportKey } from "@kiteline/shared/protocol";
 
 export function ReportContent({ report }: { report: ReceivedReport }) {
   const { t, i18n } = useTranslation();

@@ -359,14 +359,29 @@ export type ServerControlMessage =
       params: Record<string, unknown>;
     }
   | { type: "channel.cancel"; channelId: string };
-export type BrowserControlMessage = {
-  type: "watch.set";
-  targets: { deviceId: string; workspaceId: string }[];
-};
+export type BrowserControlMessage =
+  | { type: "notices.sync" }
+  | {
+      type: "watch.set";
+      targets: { deviceId: string; workspaceId: string }[];
+    };
 export type BrowserEvent =
   | { type: "devices.changed"; devices: Device[] }
   | { type: "tasks.changed"; deviceId: string }
-  | (AgentEvent & { deviceId: string })
+  | (Exclude<AgentEvent, { type: "terminal.notice" }> & { deviceId: string })
+  | (Extract<AgentEvent, { type: "terminal.notice" }> & {
+      deviceId: string;
+      noticeId: string;
+      receivedAt: number;
+    })
+  | { type: "notices.reset" }
+  | {
+      type: "notice.cleared";
+      deviceId: string;
+      workspaceId: string;
+      sessionId: string;
+      noticeId: string;
+    }
   | {
       type: "channel.failed";
       channelId: string;
@@ -377,6 +392,14 @@ export type BrowserEvent =
       error: KitelineError;
       outcome: "failed";
     };
+export function reportKey(
+  source: Pick<
+    Extract<BrowserEvent, { type: "terminal.notice" }>,
+    "deviceId" | "workspaceId" | "sessionId"
+  >,
+) {
+  return JSON.stringify([source.deviceId, source.workspaceId, source.sessionId]);
+}
 export interface TextFormat {
   bom: boolean;
   lineEnding: "lf" | "crlf";

@@ -189,7 +189,7 @@ Git 写操作经过 `GitWriteQueue`；工作区变化通知分别发生在 RPC �
 
 在 `shared/src/protocol/index.ts` 定义协议事件，在接收边界检查新增字段，并按接收者构造允许转发的字段。
 
-浏览器发往 server 的消息目前只接受 `watch.set`。本地 window 事件的名称和载荷由 `web/src/lib/events.ts` 的 `WindowEventMap` 维护。
+浏览器与 server 的事件消息见[浏览器事件](protocol.md#浏览器事件)。本地 window 事件的名称和载荷由 `web/src/lib/events.ts` 的 `WindowEventMap` 维护。
 
 ### 添加数据通道种类
 

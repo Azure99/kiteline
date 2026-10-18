@@ -144,24 +144,23 @@ export function Workbench({
   const [drafts] = useState(() => new DraftStore());
   const [gitActions] = useState(() => new GitActions());
   const [reports, setReports] = useState(new Map<string, ReceivedReport>());
-  const clearReport = useCallback((deviceId: string, workspaceId: string, sessionId: string) => {
-    setReports((previous) => {
-      const key = reportKey({ deviceId, workspaceId, sessionId });
-      if (!previous.has(key)) return previous;
-      const next = new Map(previous);
-      next.delete(key);
-      return next;
-    });
-  }, []);
+  const [activationRequest, setActivationRequest] = useState(0);
   const authenticated = !!session;
   useEffect(() => {
     if (!authenticated) return;
     const receive = (event: WindowEventMap["kiteline:event"]) => {
       const message = event.detail;
-      if (message.type !== "terminal.notice") return;
-      setReports((previous) =>
-        new Map(previous).set(reportKey(message), { ...message, receivedAt: Date.now() }),
-      );
+      if (message.type === "notices.reset") setReports(new Map());
+      if (message.type === "terminal.notice")
+        setReports((previous) => new Map(previous).set(reportKey(message), message));
+      if (message.type === "notice.cleared")
+        setReports((previous) => {
+          const key = reportKey(message);
+          if (previous.get(key)?.noticeId !== message.noticeId) return previous;
+          const next = new Map(previous);
+          next.delete(key);
+          return next;
+        });
     };
     window.addEventListener("kiteline:event", receive);
     return () => window.removeEventListener("kiteline:event", receive);
@@ -213,6 +212,15 @@ export function Workbench({
     connected,
     error: connectionError,
   } = useDevices(!!session, route.deviceId, route.workspaceId, setSession);
+  const activateTerminal = useCallback(
+    (deviceId: string, workspaceId: string, sessionId: string) => {
+      void post(`/api/devices/${encodeURIComponent(deviceId)}/notices/activate`, {
+        workspaceId,
+        sessionId,
+      }).catch((cause: unknown) => setError({ cause }));
+    },
+    [],
+  );
   const recents = useRecentWorkspaces(route, devices, devicesLoaded, !!session);
   const device = devices.find((d) => d.id === route.deviceId);
   const directoryTarget = devices.find((item) => item.id === directoryDevice?.device.id);
@@ -339,8 +347,8 @@ export function Workbench({
   const navigationProps = {
     reports: navigationReports,
     onReport: (report: ReceivedReport) => {
-      clearReport(report.deviceId, report.workspaceId, report.sessionId);
       choose(workspaceDestination(report, "terminal", { session: report.sessionId }));
+      setActivationRequest((value) => value + 1);
     },
     devices,
     deviceId: device?.id,
@@ -407,7 +415,8 @@ export function Workbench({
             visible={route.tool === "terminal"}
             layouts={terminalLayouts}
             onLayout={saveLayout}
-            onActivateTerminal={clearReport}
+            onActivateTerminal={activateTerminal}
+            activationRequest={activationRequest}
             focusMode={terminalFocus}
             onCliSetup={() => setCliSetup(true)}
           >

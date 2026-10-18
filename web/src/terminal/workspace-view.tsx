@@ -68,6 +68,7 @@ export function WorkspaceView({
   layouts,
   onLayout,
   onActivateTerminal,
+  activationRequest,
   focusMode,
   onCliSetup,
   children,
@@ -78,6 +79,7 @@ export function WorkspaceView({
   layouts: ReadonlyMap<string, TerminalLayout>;
   onLayout(key: string, layout: TerminalLayout): void;
   onActivateTerminal(deviceId: string, workspaceId: string, sessionId: string): void;
+  activationRequest: number;
   focusMode: ReturnType<typeof useTerminalFocus>;
   onCliSetup(): void;
   children: ReactNode;
@@ -156,10 +158,42 @@ export function WorkspaceView({
     );
     return () => cancelAnimationFrame(frame);
   }, [visible, dockExpanded, layout.dockSize]);
-  const activatedSession = visible && !targetPending ? selected : undefined;
+  const [pageVisible, setPageVisible] = useState(() => !document.hidden);
+  useEffect(() => {
+    const change = () => setPageVisible(!document.hidden);
+    const visibility = () => {
+      change();
+      const focusedDock = document.activeElement?.closest<HTMLElement>("[data-dock-session-id]");
+      if (
+        !document.hidden &&
+        !visible &&
+        dockExpanded &&
+        dockId &&
+        focusedDock?.dataset.dockSessionId === dockId
+      )
+        onActivateTerminal(device.id, workspace.id, dockId);
+    };
+    const hide = () => setPageVisible(false);
+    document.addEventListener("visibilitychange", visibility);
+    window.addEventListener("pageshow", change);
+    window.addEventListener("pagehide", hide);
+    return () => {
+      document.removeEventListener("visibilitychange", visibility);
+      window.removeEventListener("pageshow", change);
+      window.removeEventListener("pagehide", hide);
+    };
+  }, [visible, dockExpanded, dockId, device.id, workspace.id, onActivateTerminal]);
+  const activatedSession =
+    pageVisible &&
+    visible &&
+    !targetPending &&
+    selected &&
+    (find(selected) || opened.main.has(selected))
+      ? selected
+      : undefined;
   useLayoutEffect(() => {
     if (activatedSession) onActivateTerminal(device.id, workspace.id, activatedSession);
-  }, [activatedSession, device.id, workspace.id, onActivateTerminal]);
+  }, [activatedSession, visible, activationRequest, device.id, workspace.id, onActivateTerminal]);
   const enabled = device.status === "online" && !remote.busy;
   const split = !mobile && members.length > 1 && !group?.maximized;
   const multipleGroups = !mobile && layout.groups.length > 1;
@@ -271,9 +305,12 @@ export function WorkspaceView({
     if (!find(id) && !(dock ? opened.dock.has(id) : opened.main.has(id))) return;
     if (dock) {
       selectionEpoch.current.dock++;
-      onActivateTerminal(device.id, workspace.id, id);
+      if (!visible && pageVisible) onActivateTerminal(device.id, workspace.id, id);
       setLayout((old) => ({ ...old, dock: id, dockOpen: true }));
-    } else applyMain(selectSession(layout, id));
+    } else {
+      if (activatedSession === id && visible) onActivateTerminal(device.id, workspace.id, id);
+      applyMain(selectSession(layout, id));
+    }
   }
   function focus(id: string) {
     if (selected !== id) applyMain(selectSession(layout, id), route.tool, true);
@@ -474,7 +511,8 @@ export function WorkspaceView({
             onClick={() => {
               selectionEpoch.current.dock++;
               const opening = layout.dock ?? selected;
-              if (!layout.dockOpen && opening) onActivateTerminal(device.id, workspace.id, opening);
+              if (!layout.dockOpen && opening && (find(opening) || opened.dock.has(opening)))
+                onActivateTerminal(device.id, workspace.id, opening);
               setLayout((old) => ({ ...old, dockOpen: !old.dockOpen, dock: old.dock ?? selected }));
             }}
           >
@@ -734,7 +772,15 @@ export function WorkspaceView({
                   key={id}
                   data-dock-session-id={id}
                   onFocusCapture={(event) => {
-                    if (!event.currentTarget.contains(event.relatedTarget))
+                    const dockRegion = event.currentTarget.parentElement!;
+                    if (
+                      event.currentTarget.contains(event.target) &&
+                      !dockRegion.contains(event.relatedTarget) &&
+                      !visible &&
+                      pageVisible &&
+                      dockExpanded &&
+                      dockId === id
+                    )
                       onActivateTerminal(device.id, workspace.id, id);
                   }}
                   className={

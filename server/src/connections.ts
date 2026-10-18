@@ -10,6 +10,7 @@ import {
   integer,
   limits,
   record,
+  reportKey,
   string,
   type ServerControlMessage,
   type AgentControlMessage,
@@ -50,13 +51,17 @@ interface Pending {
 interface Browser {
   socket: WebSocket;
   login: Login;
-  targets: BrowserControlMessage["targets"];
+  targets: Extract<BrowserControlMessage, { type: "watch.set" }>["targets"];
+  syncing?: boolean;
 }
 
 export function send(socket: WebSocket, value: ServerControlMessage | BrowserEvent) {
   if (controlWritable(socket)) socket.send(JSON.stringify(value));
 }
+type Report = Extract<BrowserEvent, { type: "terminal.notice" }>;
+
 export class Connections {
+  private readonly reports = new Map<string, Report>();
   private readonly agents = new Map<string, OnlineAgentConnection>();
   private readonly handshakes = new Set<AgentConnection>();
   private readonly releases = new Map<string, NonNullable<Device["release"]>>();
@@ -230,6 +235,8 @@ export class Connections {
               throw new AppError("invalid_argument", "Invalid terminal report");
             const event: BrowserEvent = {
               type: "terminal.notice",
+              noticeId: randomUUID(),
+              receivedAt: Date.now(),
               deviceId: id,
               workspaceId: string(message.workspaceId),
               sessionId: string(message.sessionId),
@@ -241,6 +248,7 @@ export class Connections {
               console.error(`Terminal report dropped for ${id}: control message exceeds limit`);
               break;
             }
+            this.reports.set(reportKey(event), event);
             for (const browser of this.browsers) {
               if (!permitsDevice(browser.login, id)) continue;
               if (controlWritable(browser.socket)) browser.socket.send(text);
@@ -327,15 +335,62 @@ export class Connections {
     this.onAgentClosed?.(connection);
     this.broadcastDevices();
   }
+  activateReport(deviceId: string, workspaceId: string, sessionId: string) {
+    const current = this.reports.get(reportKey({ deviceId, workspaceId, sessionId }));
+    if (current) this.clearReport(current);
+  }
+  private clearReport(report: Report) {
+    this.reports.delete(reportKey(report));
+    const { deviceId, workspaceId, sessionId, noticeId } = report;
+    for (const browser of this.browsers)
+      if (permitsDevice(browser.login, deviceId))
+        send(browser.socket, {
+          type: "notice.cleared",
+          deviceId,
+          workspaceId,
+          sessionId,
+          noticeId,
+        });
+  }
+  private syncReports(browser: Browser) {
+    if (browser.syncing) return;
+    browser.syncing = true;
+    send(browser.socket, { type: "notices.reset" });
+    const keys = [...this.reports.keys()];
+    let cursor = 0;
+    const next = () => {
+      while (cursor < keys.length) {
+        const report = this.reports.get(keys[cursor++]!);
+        if (!report || !permitsDevice(browser.login, report.deviceId)) continue;
+        if (!controlWritable(browser.socket)) {
+          browser.syncing = false;
+          return;
+        }
+        browser.socket.send(JSON.stringify(report), (error) => {
+          if (error) {
+            browser.syncing = false;
+            console.error(error);
+            browser.socket.close(1011, "snapshot_send_failed");
+          } else next();
+        });
+        return;
+      }
+      browser.syncing = false;
+    };
+    next();
+  }
   acceptBrowser(socket: WebSocket, login: Login) {
     const browser: Browser = { socket, login, targets: [] };
     this.browsers.add(browser);
     heartbeat(socket);
     send(socket, { type: "devices.changed", devices: this.devices(login) } satisfies BrowserEvent);
+    this.syncReports(browser);
     socket.on("message", (data, binary) => {
       try {
         if (binary) throw new Error("Expected JSON");
         const message = record(JSON.parse(data.toString()));
+        if (socket.readyState !== WebSocket.OPEN) return;
+        if (message.type === "notices.sync") return this.syncReports(browser);
         if (
           message.type !== "watch.set" ||
           !Array.isArray(message.targets) ||
@@ -356,6 +411,7 @@ export class Connections {
       }
     });
     socket.on("close", () => {
+      browser.syncing = false;
       this.browsers.delete(browser);
       for (const { deviceId } of browser.targets) this.updateWatch(deviceId);
     });
@@ -423,6 +479,8 @@ export class Connections {
   }
   deleteDevice(deviceId: string) {
     this.store.deleteDevice(deviceId);
+    for (const report of this.reports.values())
+      if (report.deviceId === deviceId) this.clearReport(report);
     this.releases.delete(deviceId);
     for (const candidate of this.handshakes)
       if (candidate.id === deviceId) {

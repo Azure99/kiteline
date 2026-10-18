@@ -19,7 +19,7 @@ export function useDevices(
   const socketRef = useRef<WebSocket | null>(null);
   const readGeneration = useRef(0);
   const invalidateReads = useCallback(() => ++readGeneration.current, []);
-  const targets = useRef<BrowserControlMessage["targets"]>([]);
+  const targets = useRef<Extract<BrowserControlMessage, { type: "watch.set" }>["targets"]>([]);
   const refresh = useCallback(async () => {
     const generation = invalidateReads();
     try {
@@ -89,8 +89,21 @@ export function useDevices(
         }
       }
     }
+    const visible = () => {
+      if (
+        document.visibilityState === "visible" &&
+        socketRef.current?.readyState === WebSocket.OPEN
+      )
+        socketRef.current.send(
+          JSON.stringify({ type: "notices.sync" } satisfies BrowserControlMessage),
+        );
+    };
+    document.addEventListener("visibilitychange", visible);
+    window.addEventListener("pageshow", visible);
     void connect();
     return () => {
+      document.removeEventListener("visibilitychange", visible);
+      window.removeEventListener("pageshow", visible);
       stopped = true;
       invalidateReads();
       clearTimeout(retry);

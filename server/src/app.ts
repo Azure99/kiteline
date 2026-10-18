@@ -227,6 +227,11 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
           connections.deleteDevice(id);
           return json(response, 200, {});
         }
+        if (suffix === "/notices/activate" && method === "POST") {
+          const input = await loginBody(request, entryOrigin, login);
+          connections.activateReport(id, string(input.workspaceId), string(input.sessionId));
+          return json(response, 200, {});
+        }
         if (suffix === "/rpc" && method === "POST") {
           const input = await loginBody(request, entryOrigin, login);
           const requestId = string(input.id, "request id", 128);

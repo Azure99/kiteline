@@ -139,6 +139,7 @@ Web owner 在 `POST /api/credentials` 提交 `{name, deviceIds, expiresAt}`，�
 | PATCH  | `/api/devices/:deviceId`                     | 修改设备名称             | owner、Origin、版本 |
 | DELETE | `/api/devices/:deviceId`                     | 删除设备                 | owner、Origin、版本 |
 | POST   | `/api/devices/:deviceId/rpc`                 | 调用 RPC                 | 登录、Origin、版本  |
+| POST   | `/api/devices/:deviceId/notices/activate`    | 激活终端并清除已有报告   | 登录、Origin、版本  |
 | DELETE | `/api/devices/:deviceId/requests/:requestId` | 取消进行中的 RPC         | 登录、Origin、版本  |
 | POST   | `/api/devices/:deviceId/channels`            | 建立数据通道             | 登录、Origin、版本  |
 | GET    | `/api/devices/:deviceId/download`            | 下载文件                 | 登录、版本          |
@@ -191,26 +192,31 @@ Web owner 在 `POST /api/credentials` 提交 `{name, deviceIds, expiresAt}`，�
 
 ### 浏览器事件
 
-连接建立后，server 立即发送一次 `devices.changed`。浏览器只能发送 `watch.set`，声明正在查看的设备和工作区，每次替换上一次的列表；消息定义见 `BrowserControlMessage`。目标数超过 server 的上限或发送其他消息时，server 以 1008 `invalid_event_message` 关闭连接。
+连接建立后，server 立即发送一次 `devices.changed`，再同步待处理终端报告。浏览器发送 `watch.set` 声明正在查看的设备和工作区，每次替换上一次的列表；发送 `notices.sync` 请求重新同步报告。消息定义见 `BrowserControlMessage`。watch 目标数超过 server 的上限或发送其他消息时，server 以 1008 `invalid_event_message` 关闭连接。
 
 | 事件                                                    | 接收者                   |
 | ------------------------------------------------------- | ------------------------ |
 | `devices.changed`（当前登录可见的完整设备列表）         | 所有浏览器               |
 | `tasks.changed`                                         | 有该设备权限的浏览器     |
-| `terminal.notice`                                       | 有该设备权限的浏览器     |
+| `terminal.notice`、`notice.cleared`                     | 有该设备权限的浏览器     |
+| `notices.reset`                                         | 正在同步报告的浏览器     |
 | `workspace.changed`、`sessions.changed`、`watch.status` | 正在查看该工作区的浏览器 |
 | `request.progress`                                      | 发起请求的登录           |
 | `channel.failed`                                        | 发起文件读取的登录       |
 
-断线期间的事件不会补发。连接关闭后，工作台等待 1.5 秒，读取 `/api/session` 和设备列表后重新连接；这两次读取失败时，3 秒后再试（`web/src/devices/use-devices.ts`）。
+连接关闭后，工作台等待 1.5 秒，读取 `/api/session` 和设备列表后重新连接；这两次读取失败时，3 秒后再试（`web/src/devices/use-devices.ts`）。重连和页面恢复时同步尚待处理的终端报告，其他断线期间的事件不补发。
 
 ### 在线终端报告
 
 recorder 在现有终端解析器中接收 OSC 9 通知、`OSC 777;notify;title;body` 和程序主动发送的 OSC 7501 `state=blocked` 报告。OSC 9 的 `4`、`4;` 前缀留给进度协议；777 正文保留后续分号。7501 按 [Program Status Protocol rev 0.4](https://www.superlogical.com/rex/docs/build/program-status) 解码字段、base64 UTF-8 和尺寸限制，按较长的 ST 计接收上限；不探测、不回复、不维护程序状态记录。其他状态不会撤销已经收到的报告。
 
-报告独立于终端显示和工作区 watch。recorder 只发送解码后的展示内容与真实 session ID；agent 从会话记录补工作区和会话名称；server 从已认证的连接补设备 ID，按设备权限分发 `terminal.notice`，不信任程序提供的 app、id 或路径作为来源。恢复 capture 不产生新报告。报告沿现有控制消息和队列预算传输，超限或连接不可写时丢弃并记录原因，不中断终端记录或建立重发队列。
+报告独立于终端显示和工作区 watch。recorder 只发送解码后的展示内容与真实 session ID；agent 从会话记录补工作区和会话名称；server 从已认证的连接补设备 ID，并生成 `noticeId` 和接收时间 `receivedAt`，按设备权限分发 `terminal.notice`。不信任程序提供的 app、id 或路径作为来源。恢复 capture 不产生新报告。报告沿现有控制消息和队列预算传输，超限时丢弃并记录原因，不中断终端记录；未到达 server 的消息不补发。
 
-工作台仅在当前页面保存每个设备/工作区/session 的最近报告及本页接收时间。展开报告入口不清除；选择来源或通过普通导航激活终端时，只移除该终端已有报告，不等待附着确认。主区域只以当前活动会话为目标，分屏中的其他会话保留。配套终端在明确选择、展开或焦点从外部进入时清除；仅随文件/Git 页面显示不清除。持续活动期间的新报告可以再次出现，离开后重新激活才再次清除。刷新、关闭、退出或登录失效清空，普通重连保留。它表示收到的历史消息，不表示程序当前仍在等待。
+server 在内存中保留每个设备/工作区/session 的最新待处理报告，重启后丢失。会话结束或设备断线保留历史，删除设备时移除其报告。浏览器初接或请求 `notices.sync` 时先收到 `notices.reset`，再收到有权限查看的当前报告。快照按发送回调逐条推进，每条发送前重读当前项，避免恢复已清除的旧报告；实时新增和清除仍正常发送。浏览器只投影这些事件，`notice.cleared` 只移除 ID 匹配的报告。
+
+展开报告入口不清除。选择来源、从文件返回、切换或重新选择终端、重新进入页面，以及页面从隐藏恢复到当前终端，都会发起一次激活。主区确认目标后发送 `POST /api/devices/:deviceId/notices/activate`，正文为 `{workspaceId, sessionId}`，不等待终端附着；目标未确认且加载取消或失败时不发送。server 在处理请求时清除该终端当前的报告，并向有权限的浏览器发送 `notice.cleared`；请求发出后、处理前到达的报告也在此边界内，处理后新增的报告保留。成功响应为 `{}`，没有待处理项时不产生清除事件。
+
+主区域只激活当前会话，分屏其他会话保留。配套终端在明确选择、展开、焦点从外部进入内容区，或页面恢复时焦点仍在该终端内才激活；内部搜索与回焦、仅随文件/Git 页面显示不激活。持续停留、普通窗口 focus 和事件连接重连不会再次清除新报告。激活失败或结果未确认时显示错误，通知以 server 事件或后续同步为准。退出或登录失效只清本页投影。报告表示历史消息，不表示程序当前仍在等待。
 
 ### 心跳与背压
 
