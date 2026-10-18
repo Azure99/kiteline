@@ -440,7 +440,7 @@ export function TerminalView({
                 : undefined
             }
             onTap={() => {
-              if (mobile) input.current();
+              input.current();
             }}
           />
         )}
