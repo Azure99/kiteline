@@ -157,7 +157,7 @@ Web owner 在 `POST /api/credentials` 提交 `{name, deviceIds, expiresAt}`，�
 
 **请求体**：JSON 请求体不能超过 `controlMessageBytes`，否则返回 413；从开始读取起 30 秒内必须接收完毕，超时后 server 断开连接。server 在请求体读完之前结束响应时，带上 `Connection: close`。
 
-**静态文件**：带 `Cache-Control: no-cache` 和 `X-Content-Type-Options: nosniff`；不存在的路径返回 `index.html`（状态 200），`/assets/` 下不存在的文件返回 404。
+**静态文件**：`assets/` 目录用于带内容 hash 的构建资源，成功读取的非 HTML 文件带 `Cache-Control: public, max-age=31536000, immutable`；HTML 和其他静态文件带 `Cache-Control: no-cache`。所有成功静态响应带 `X-Content-Type-Options: nosniff`。不存在的路径返回 `index.html`（状态 200），`/assets/` 下不存在的文件返回 404 和 `Cache-Control: no-store`。
 
 ## WebSocket 连接
 

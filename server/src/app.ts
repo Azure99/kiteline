@@ -286,7 +286,11 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
     closeIfBodyUnread(response);
     response.writeHead(200, {
       "content-type": type,
-      "cache-control": "no-cache",
+      "cache-control":
+        type !== "text/html; charset=utf-8" &&
+        file.startsWith(resolve(config.webDir, "assets") + sep)
+          ? "public, max-age=31536000, immutable"
+          : "no-cache",
       "x-content-type-options": "nosniff",
     });
     response.end(method === "HEAD" ? undefined : content);

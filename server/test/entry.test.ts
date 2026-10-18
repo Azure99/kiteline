@@ -1,6 +1,6 @@
 import { appVersion } from "@kiteline/shared/protocol";
 import { once } from "node:events";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { Agent as HttpAgent, request, type OutgoingHttpHeaders } from "node:http";
 import { connect } from "node:net";
 import { join } from "node:path";
@@ -497,32 +497,51 @@ test("static resources keep their content and GET/HEAD types while navigation re
   const f = await httpFixture();
   const text = Buffer.from("Sample text\n");
   const html = Buffer.from("<!doctype html><main>Kiteline</main>");
+  const immutable = "public, max-age=31536000, immutable";
+  await mkdir(join(f.config.webDir, "assets"));
   const files = [
-    ["sample.txt", text, "text/plain; charset=utf-8"],
-    ["sample.md", text, "text/plain; charset=utf-8"],
-    ["index.html", html, "text/html; charset=utf-8"],
-    ["main.js", Buffer.from("console.log('kiteline')"), "text/javascript"],
-    ["main.css", Buffer.from("body { color: black; }"), "text/css"],
-    ["resource.bin", Buffer.from([0, 1, 2]), "application/octet-stream"],
+    ["sample.txt", text, "text/plain; charset=utf-8", "no-cache"],
+    ["sample.md", text, "text/plain; charset=utf-8", "no-cache"],
+    ["index.html", html, "text/html; charset=utf-8", "no-cache"],
+    ["main.js", Buffer.from("console.log('kiteline')"), "text/javascript", "no-cache"],
+    ["main.css", Buffer.from("body { color: black; }"), "text/css", "no-cache"],
+    ["resource.bin", Buffer.from([0, 1, 2]), "application/octet-stream", "no-cache"],
+    ["assets/main-abc123.js", text, "text/javascript", immutable],
+    ["assets/main-abc123.css", text, "text/css", immutable],
+    ["assets/font-abc123.woff2", Buffer.from([0, 1, 2]), "font/woff2", immutable],
+    ["assets/page.html", html, "text/html; charset=utf-8", "no-cache"],
   ] as const;
-  for (const [name, bytes, type] of files) {
+  for (const [name, bytes, type, cache] of files) {
     await writeFile(join(f.config.webDir, name), bytes);
     for (const method of ["GET", "HEAD"]) {
       const response = await f.call(`/${name}`, method);
       expect(response.status).toBe(200);
       expect(response.headers.get("content-type")).toBe(type);
+      expect(response.headers.get("cache-control")).toBe(cache);
       expect(response.headers.get("x-content-type-options")).toBe("nosniff");
       expect(Buffer.from(await response.arrayBuffer())).toEqual(
         method === "HEAD" ? Buffer.alloc(0) : bytes,
       );
     }
   }
-  for (const path of ["/", "/devices"]) {
-    const response = await f.call(path);
-    expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
-    expect(Buffer.from(await response.arrayBuffer())).toEqual(html);
+  for (const path of ["/", "/devices", "/%61ssets/missing.js"])
+    for (const method of ["GET", "HEAD"]) {
+      const response = await f.call(path, method);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+      expect(response.headers.get("cache-control")).toBe("no-cache");
+      expect(Buffer.from(await response.arrayBuffer())).toEqual(
+        method === "HEAD" ? Buffer.alloc(0) : html,
+      );
+    }
+  for (const method of ["GET", "HEAD"]) {
+    const response = await f.call("/assets/missing.js", method);
+    expect(response.status).toBe(404);
+    expect(response.headers.get("cache-control")).toBe("no-store");
   }
-  expect((await f.call("/assets/missing.js")).status).toBe(404);
+  const api = await f.call("/api/bootstrap");
+  expect(api.status).toBe(200);
+  expect(api.headers.get("cache-control")).toBe("no-store");
   const post = await f.call("/sample.txt", "POST");
   expect(post.status).toBe(405);
   expect(post.headers.get("allow")).toBe("GET, HEAD");
