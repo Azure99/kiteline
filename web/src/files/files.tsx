@@ -570,7 +570,7 @@ export function Files({
         )}
         {(!mobile || hasFile) && (
           <section
-            className="flex min-w-0 flex-1 flex-col"
+            className="flex min-w-0 flex-1 flex-col max-desk:min-h-0 max-desk:overflow-y-auto"
             aria-label={t(($) => $.files.fileContent)}
           >
             {draft ? (
