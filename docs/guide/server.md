@@ -159,6 +159,10 @@ map $http_upgrade $connection_upgrade {
     ''      close;
 }
 
+upstream kiteline {
+    server 127.0.0.1:8080;
+}
+
 server {
     listen 443 ssl;
     server_name kiteline.example.com;
@@ -168,7 +172,7 @@ server {
     client_max_body_size 0;
 
     location / {
-        proxy_pass http://127.0.0.1:8080;
+        proxy_pass http://kiteline;
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-Proto https;
@@ -179,6 +183,13 @@ server {
         proxy_read_timeout 1h;
         proxy_send_timeout 1h;
         proxy_next_upstream off;
+
+        location /assets/ {
+            proxy_pass http://kiteline;
+            gzip on;
+            gzip_types text/css text/javascript;
+            gzip_vary on;
+        }
     }
 }
 ```
@@ -195,6 +206,7 @@ server {
 }
 
 kiteline.example.com {
+	encode /assets/* gzip
 	reverse_proxy 127.0.0.1:8080 {
 		flush_interval 10ms
 		transport http {
