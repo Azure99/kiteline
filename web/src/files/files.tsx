@@ -298,12 +298,16 @@ export function Files({
     window.addEventListener("kiteline:files-operated", operated);
     return () => window.removeEventListener("kiteline:files-operated", operated);
   }, []);
+  const entries = new Map(
+    Object.values(pages)
+      .flatMap((page) => page.listing?.entries.items ?? [])
+      .map((entry) => [entry.path, entry]),
+  );
+  const downloadable = [...selected].filter((path) => {
+    const entry = entries.get(path);
+    return entry?.kind === "file" || entry?.kind === "symlink";
+  });
   function selectedAction(kind: FileAction["kind"]) {
-    const entries = new Map(
-      Object.values(pages)
-        .flatMap((page) => page.listing?.entries.items ?? [])
-        .map((entry) => [entry.path, entry]),
-    );
     const paths = [...selected].filter(
       (path) =>
         ![...selected].some(
@@ -473,17 +477,9 @@ export function Files({
             </span>
             <IconButton
               label={t(($) => $.files.downloadSelected)}
-              disabled={!enabled}
+              disabled={!enabled || !downloadable.length}
               onClick={() => {
-                const entries = new Map(
-                  Object.values(pages)
-                    .flatMap((page) => page.listing?.entries.items ?? [])
-                    .map((entry) => [entry.path, entry]),
-                );
-                for (const path of selected) {
-                  const entry = entries.get(path);
-                  if (entry?.kind === "file" || entry?.kind === "symlink") download(path);
-                }
+                for (const path of downloadable) download(path);
               }}
             >
               <Download />
