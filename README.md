@@ -2,27 +2,28 @@
 
 [English](README.en.md)
 
-Kiteline 是一个自托管的 coding agent 工作台。Claude Code、Codex 等任意命令行工具以原生 TUI 运行在你自己的设备上，通过浏览器即可管理多台设备和项目；同一个终端会话可在电脑与手机之间无缝流转。
+Kiteline 是一个自托管的 coding agent 工作台。Claude Code、Codex 等命令行工具以原生 TUI 运行在你自己的设备上，通过浏览器即可管理多台设备和项目；同一个终端会话可在电脑、手机与远程 CLI 之间接续。
 
 <p align="center">
-  <a href="docs/assets/readme-desktop.png"><img src="docs/assets/readme-desktop.png" width="820" alt="桌面端：Lantern API 项目，三台设备、十个工作区，终端分组与左一右二三分屏"></a>
+  <a href="docs/assets/readme-desktop.png"><img src="docs/assets/readme-desktop.png" width="820" alt="桌面端：Lantern Studio 的 Codex、开发预览服务与测试三分屏，侧栏展示工作区通知"></a>
 </p>
 
 <table align="center">
   <tr>
     <td nowrap>
-      <a href="docs/assets/readme-mobile-terminal.png"><img src="docs/assets/readme-mobile-terminal.png" width="260" alt="手机端打开 Lantern API 正在运行的同一 Codex 会话"></a>
-      <a href="docs/assets/readme-mobile-files.png"><img src="docs/assets/readme-mobile-files.png" width="260" alt="手机端浏览 Lantern API 的文件"></a>
-      <a href="docs/assets/readme-mobile-git.png"><img src="docs/assets/readme-mobile-git.png" width="260" alt="手机端查看 Lantern API 的 Git diff"></a>
+      <a href="docs/assets/readme-mobile-terminal.png"><img src="docs/assets/readme-mobile-terminal.png" width="260" alt="手机端接续 Lantern Studio 的同一 Codex 会话，工具栏显示任务标题"></a>
+      <a href="docs/assets/readme-mobile-files.png"><img src="docs/assets/readme-mobile-files.png" width="260" alt="手机端文件管理器展示多种文件类型图标，展开工作区通知并折叠无通知设备"></a>
+      <a href="docs/assets/readme-mobile-git.png"><img src="docs/assets/readme-mobile-git.png" width="260" alt="手机端查看 Lantern Studio 中 gallery.test.js 的 Git diff"></a>
     </td>
   </tr>
 </table>
 
-- **原生 TUI**：agent 运行在真实终端中，保留其原有界面与交互，任何命令行工具无需适配即可使用。
-- **多端无缝流转**：同一个终端会话可同时在电脑、手机和设备本机终端中打开，输出实时同步，切换设备时任务不中断。
-- **多设备与工作区**：接入 Linux、Windows 和 macOS 设备，按项目切换工作区，沿用各设备已有的工具链与环境。
-- **终端、文件与 Git**：终端支持分组和分屏；查看代码改动、编辑文件时，agent 会话保持运行。
-- **开发预览**：在浏览器中直接访问设备上运行的 Web 服务，支持 WebSocket 与热更新。
+- **原生 TUI**：agent 运行在真实终端中，保留其原有界面与交互，沿用设备已有的工具链与环境。
+- **多设备与工作区**：接入 Linux、Windows 和 macOS 设备，按项目切换工作区；切换电脑或手机时，会话继续运行。
+- **远程 CLI**：在本机终端接续同一个会话，也可用短命令发送输入、查看输出和上传下载文件。
+- **终端通知**：在工作区列表查看程序主动发出的通知与等待报告，点击来源回到对应终端。
+- **终端、文件与 Git**：终端分组和分屏，编辑文件、预览图片与 Markdown/HTML 草稿，查看 Git 改动；agent 会话保持运行。
+- **开发预览**：在浏览器中访问设备上的 Web 服务，支持 WebSocket 与热更新。
 - **定时任务**：按 cron 计划在设备上运行脚本或 agent，并保留运行记录；agent 也可自行创建任务。
 
 ## 开始使用
