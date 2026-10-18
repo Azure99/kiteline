@@ -114,8 +114,13 @@ export class Connections {
     return new AppError("offline", "Device offline");
   }
   broadcastDevices() {
+    if (this.browsers.size === 0) return;
+    const devices = this.devices();
     for (const browser of this.browsers)
-      send(browser.socket, { type: "devices.changed", devices: this.devices(browser.login) });
+      send(browser.socket, {
+        type: "devices.changed",
+        devices: devices.filter((device) => permitsDevice(browser.login, device.id)),
+      });
   }
   taskSummaries(deviceId?: string, login?: Login) {
     return this.store
