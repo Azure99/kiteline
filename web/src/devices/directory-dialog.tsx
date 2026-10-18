@@ -160,7 +160,7 @@ export function DirectoryDialog({
         <DialogHeader>
           <DialogTitle>{t(($) => $.devices.addWorkspace)}</DialogTitle>
         </DialogHeader>
-        <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
+        <div className="scroll-area flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-4">
           <form
             className="flex items-center gap-1"
             onSubmit={(event) => {
@@ -252,7 +252,7 @@ export function DirectoryDialog({
               <ErrorNotice error={error} />
             </div>
           )}
-          <div className="scroll-area min-h-40 flex-1 overflow-auto" aria-busy={busy}>
+          <div className="min-h-40 shrink-0" aria-busy={busy}>
             {listing?.entries.items.map((entry, index) => (
               <button
                 className="flex min-h-9 w-full items-center gap-3 rounded px-2 py-1.5 text-left hover:bg-muted disabled:opacity-50 max-desk:min-h-11"
