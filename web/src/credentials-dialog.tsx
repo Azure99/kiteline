@@ -151,6 +151,11 @@ export function Credentials({
             {t(($) => $.common.refresh)}
           </Button>
         </div>
+        {busy && (
+          <p role="status" className="text-muted-foreground">
+            {t(($) => $.common.processing)}
+          </p>
+        )}
         {credentials?.length === 0 && (
           <p className="text-muted-foreground">{t(($) => $.credentials.empty)}</p>
         )}
