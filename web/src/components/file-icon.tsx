@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { File } from "lucide-react";
 import audio from "../assets/file-icons/audio.svg";
 import console from "../assets/file-icons/console.svg";
@@ -100,7 +101,7 @@ const extensions = new Map([
   ["env", settings],
 ]);
 
-export function FileIcon({
+export const FileIcon = memo(function FileIcon({
   path,
   size = 16,
   className,
@@ -121,4 +122,4 @@ export function FileIcon({
       className={cn("shrink-0 text-muted-foreground", className)}
     />
   );
-}
+});

@@ -1,4 +1,5 @@
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { ErrorNotice } from "../components/error-notice";
 import { FileIcon } from "../components/file-icon";
@@ -65,6 +66,7 @@ export function FileExplorer({
 
   const [menuHandle] = useState(() => createMenuHandle<string>());
   const page = pages[path];
+  const rowStyle = useMemo(() => ({ paddingLeft: 8 + depth * 14 }), [depth]);
   return (
     <div aria-busy={page?.busy}>
       {page?.listing?.entries.items.map((entry, index) => {
@@ -76,7 +78,7 @@ export function FileExplorer({
             <div
               data-entry-path={entry.path}
               className={`flex min-h-8 items-center pr-1 max-desk:min-h-11 ${currentFile === entry.path ? "bg-primary-soft" : "hover:bg-muted"}`}
-              style={{ paddingLeft: 8 + depth * 14 }}
+              style={rowStyle}
             >
               {selecting && (
                 <label className="flex size-8 shrink-0 cursor-pointer items-center justify-center max-desk:size-11">
@@ -129,7 +131,8 @@ export function FileExplorer({
                 <EntryMenuTrigger
                   handle={menuHandle}
                   path={entry.path}
-                  label={t(($) => $.files.actionsNamed, { name: entry.name })}
+                  name={entry.name}
+                  t={t}
                   disabled={disabled}
                 />
               )}
@@ -248,19 +251,28 @@ export function FileExplorer({
 const EntryMenuTrigger = memo(function EntryMenuTrigger({
   handle,
   path,
-  label,
+  name,
+  t,
   disabled,
 }: {
   handle: ReturnType<typeof createMenuHandle<string>>;
   path: string;
-  label: string;
+  name: string;
+  t: TFunction;
   disabled: boolean;
 }) {
   return (
     <MenuTrigger
       handle={handle}
       payload={path}
-      render={<Button variant="ghost" size="icon" aria-label={label} disabled={disabled} />}
+      render={
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={t(($) => $.files.actionsNamed, { name })}
+          disabled={disabled}
+        />
+      }
     >
       <MoreHorizontal />
     </MenuTrigger>
