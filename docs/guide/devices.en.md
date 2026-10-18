@@ -331,6 +331,16 @@ The data directory defaults to the project user's `%LOCALAPPDATA%\kiteline-agent
 
 Close the administrator window after installation. Open a new ordinary PowerShell window as the project user from the Windows Start menu, then run the web app's [bind-only command](#bind-only-command), then `kiteline-agent run`.
 
+### Restore Windows repository ownership
+
+After running the agent elevated, the root of your repository may be owned by `Administrators`. Git may report `dubious ownership` when you return to ordinary permissions, even if you can still read and write files. Use the following only for your own repository, when its root is owned by `Administrators` and your account already has `FullControl` on that directory. In your ordinary PowerShell session, enter the repository root and restore its owner:
+
+```powershell
+icacls . /setowner ([Security.Principal.WindowsIdentity]::GetCurrent().Name)
+```
+
+This does not recursively change child-file owners, grant additional access, or add a Git trust exception.
+
 ## Outbound proxies and certificates
 
 Agent traffic to the server (binding requests and control/data WebSocket connections) uses proxies configured through environment variables. Connections to development services on the device are always direct. Programs started in terminals inherit the agent's environment but decide for themselves whether to use proxies.

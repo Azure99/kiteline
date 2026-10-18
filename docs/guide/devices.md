@@ -331,6 +331,16 @@ agent 数据目录默认为项目用户的 `%LOCALAPPDATA%\kiteline-agent`，运
 
 安装完成后关闭管理员窗口，从开始菜单新开项目用户的普通 PowerShell 窗口，执行网页上的[仅绑定命令](#仅绑定命令)，再执行 `kiteline-agent run`。
 
+### 恢复 Windows 仓库所有者
+
+曾提权运行 agent 后，本人仓库的根目录可能属于 `Administrators`。恢复普通权限后，即使文件仍能读写，Git 也可能报 `dubious ownership`。仅当这是你本人的仓库、根目录 owner 确为 `Administrators`，且本人已拥有该目录的 `FullControl` 权限时，在本人的普通 PowerShell 中进入该仓库根目录，恢复根目录 owner：
+
+```powershell
+icacls . /setowner ([Security.Principal.WindowsIdentity]::GetCurrent().Name)
+```
+
+这不会递归更改子文件 owner，也不新增访问权限或 Git 信任例外。
+
 ## 出站代理与证书
 
 agent 访问 server 的流量（绑定请求，以及控制和数据 WebSocket 连接）按环境变量使用代理。agent 访问设备本机开发服务时总是直连。终端中启动的程序继承 agent 的环境变量，是否使用代理由程序自己决定。
