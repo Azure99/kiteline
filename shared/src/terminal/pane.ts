@@ -1,7 +1,8 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import type { PaneLaunch } from "./windows.js";
-import { msysPath, tmuxBinary, tmuxEnvironment } from "./node.js";
+import { dirname, join } from "node:path";
+import { paneExitFile, type PaneLaunch } from "./windows.js";
 
 async function main() {
   const launch = JSON.parse(await readFile(process.argv[2]!, "utf8")) as PaneLaunch;
@@ -33,23 +34,12 @@ async function main() {
       process.exitCode = 1;
       return;
     }
-    const published = spawnSync(
-      tmuxBinary,
-      [
-        "-N",
-        "-S",
-        msysPath(launch.socket),
-        "set-option",
-        "-p",
-        "-t",
-        pane,
-        "@kiteline-exit-dword",
-        String(code),
-      ],
-      { env: tmuxEnvironment(), stdio: "inherit", timeout: 3000 },
-    );
-    if (published.error || published.status !== 0) {
-      console.error(published.error?.message ?? "Could not publish the terminal exit code");
+    try {
+      const status = Buffer.allocUnsafe(4);
+      status.writeUInt32LE(code);
+      writeFileSync(join(dirname(process.argv[2]!), paneExitFile), status, { mode: 0o600 });
+    } catch (error) {
+      console.error("Could not publish the terminal exit code:", error);
       process.exitCode = 1;
     }
   });

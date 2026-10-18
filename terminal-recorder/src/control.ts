@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { finished } from "node:stream/promises";
@@ -6,7 +7,6 @@ import type { Readable, Writable } from "node:stream";
 import { AppError, limits } from "@kiteline/shared/protocol";
 import { readLines } from "@kiteline/shared/protocol/stdio";
 import {
-  exitCodeFormat,
   msysDirectory,
   msysPath,
   shellWords,
@@ -15,7 +15,7 @@ import {
   tmuxEnvironment,
   tmuxSession,
 } from "@kiteline/shared/terminal/node";
-import { paneCommand } from "@kiteline/shared/terminal/windows";
+import { paneCommand, paneExitFile } from "@kiteline/shared/terminal/windows";
 import { spawnJob, type JobChild } from "@kiteline/shared/windows/job";
 import type { TerminalSource, TerminalIdentity } from "@kiteline/shared/protocol/ipc";
 
@@ -235,9 +235,11 @@ export class Control {
       paneId: match[1]!,
       windowId: match[2]!,
     };
-    await this.command(`refresh-client -B 'life:%*:#{pane_dead} ${exitCodeFormat}'`);
+    const lifeFormat =
+      process.platform === "win32" ? "#{pane_dead}" : "#{pane_dead} #{pane_dead_status}";
+    await this.command(`refresh-client -B 'life:%*:${lifeFormat}'`);
     const life = await this.command(
-      `display-message -p -t ${this.identity.paneId} '#{pane_dead} ${exitCodeFormat}'`,
+      `display-message -p -t ${this.identity.paneId} '${lifeFormat}'`,
     );
     this.life(life[0] ?? "");
     this.initializing = false;
@@ -297,8 +299,19 @@ export class Control {
   private life(value: string) {
     const match = /^1(?: (\d*))?$/.exec(value.trimEnd());
     if (match) {
-      const value = match[1] ? Number(match[1]) : null;
-      const code = value !== null && value <= 0xffffffff ? value : null;
+      let code: number | null;
+      if (process.platform === "win32") {
+        try {
+          code = readFileSync(join(dirname(this.options.socket), paneExitFile)).readUInt32LE();
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+            console.error("Could not read the terminal exit code:", error);
+          code = null;
+        }
+      } else {
+        const value = match[1] ? Number(match[1]) : null;
+        code = value !== null && value <= 0xffffffff ? value : null;
+      }
       if (this.initializing) this.initialDeath = code;
       else this.events.dead(code);
     }

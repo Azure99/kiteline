@@ -54,7 +54,7 @@ Shell 的选择和执行参数见 [agent 配置文件](../guide/reference.md#age
 
 agent 正常停止（包括停止或重启服务）时，`Agent.close()` 在每个会话的私有 socket 上执行 `kill-server`，会话中的程序随之结束。新启动的 agent 会话表为空，不导入旧会话。停止顺序见[启动与停止](agent-lifecycle.md#启动与停止)，异常退出见[资源与清理](#资源与清理)。
 
-程序退出后，`remain-on-exit on` 让 pane 保留到 agent 读取退出码。受管 pane 必须同时得到子进程退出状态、PTY 读取 EOF 并排空原始输出后才变为 dead，避免慢消费期间提前关闭 PTY 丢失尾部。recorder 订阅 `#{pane_dead}` 和退出码，在控制流中排在之前的输出之后处理结束：先把结束帧（含退出码）送给所有显示，再通知 agent。agent 在私有 socket 上执行 `kill-server`（Windows 还要结束 tmux server 的进程集合并等它清空），删除登记，推送 `sessions.changed`，再删除会话目录。退出码在 Linux 和 macOS 上取 `#{pane_dead_status}`，在 Windows 上取 pane 选项 `@kiteline-exit-dword`，读不到时为空。明确结束会话时，agent 先等进行中的创建或恢复，再让 recorder 关闭控制客户端并执行 `kill-server`，退出码为空。
+程序退出后，`remain-on-exit on` 让 pane 保留到 agent 读取退出码。受管 pane 必须同时得到子进程退出状态、PTY 读取 EOF 并排空原始输出后才变为 dead，避免慢消费期间提前关闭 PTY 丢失尾部。recorder 订阅 `#{pane_dead}`，在控制流中排在之前的输出之后处理结束：先把结束帧（含退出码）送给所有显示，再通知 agent。agent 在私有 socket 上执行 `kill-server`（Windows 还要结束 tmux server 的进程集合并等它清空），删除登记，推送 `sessions.changed`，再删除会话目录。退出码在 Linux 和 macOS 上取同次订阅的 `#{pane_dead_status}`；Windows 的 pane 包装进程在 shell 退出后、自己结束前，将完整 DWORD 以四字节 UInt32LE 同步写入会话目录的 `pane.exit`，recorder 在 pane 变为 dead 时读取，读不到时为空。明确结束会话时，agent 先等进行中的创建或恢复，再让 recorder 关闭控制客户端并执行 `kill-server`，退出码为空。
 
 不变量：
 

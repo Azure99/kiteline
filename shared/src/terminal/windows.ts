@@ -17,8 +17,9 @@ export interface PaneLaunch {
   shell: string;
   args: string[];
   environment: NodeJS.ProcessEnv;
-  socket: string;
 }
+export const paneExitFile = "pane.exit";
+
 export function paneCommand(socket: string) {
   return [
     msysPath(process.execPath),
@@ -34,7 +35,6 @@ export async function startTerminalServer(options: CreateTerminal, timeout: numb
     shell: options.shell,
     args: options.command === undefined ? ["-NoLogo"] : ["-NoLogo", "-Command", options.command],
     environment: { ...process.env },
-    socket: options.socket,
   };
   await writeFile(config, terminalPreset(options), { mode: 0o600 });
   await writeFile(join(directory, "pane.json"), JSON.stringify(launch), { mode: 0o600 });

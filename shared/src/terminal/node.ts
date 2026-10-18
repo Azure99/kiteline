@@ -20,8 +20,6 @@ export const terminfoDirectory =
   process.platform === "win32"
     ? resolve(msysDirectory, "usr/share/terminfo")
     : resolve(root, "dist/native/share/terminfo");
-export const exitCodeFormat =
-  process.platform === "win32" ? "#{@kiteline-exit-dword}" : "#{pane_dead_status}";
 
 export function msysPath(path: string) {
   return path.replaceAll("\\", "/");
