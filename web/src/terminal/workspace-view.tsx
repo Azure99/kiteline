@@ -364,6 +364,7 @@ export function WorkspaceView({
     else {
       const session = find(id);
       if (!session) return;
+      if (kind !== "attach") remote.clearMutationError();
       setAction({ kind, session });
     }
   }
@@ -383,6 +384,7 @@ export function WorkspaceView({
         id={id}
         session={find(id)}
         layout={layout}
+        busy={remote.busy}
         mobile={mobile}
         dock={dock}
         label={label}
@@ -483,19 +485,21 @@ export function WorkspaceView({
       {!watchDismissed && (
         <WatchStatus reason={watchReason} onDismiss={() => setWatchDismissed(true)} />
       )}
-      {!!remote.error && (visible || dockExpanded || remote.error !== remote.listError) && (
-        <div
-          role="alert"
-          className="workbench-notice flex shrink-0 items-start gap-2 bg-danger-soft px-3 py-2 text-sm text-destructive"
-        >
-          <div className="min-w-0 flex-1 break-words">
-            <ErrorNotice error={remote.error} />
+      {!!remote.error &&
+        (!action || action.kind === "attach" || remote.error !== remote.mutationError) &&
+        (visible || dockExpanded || remote.error !== remote.listError) && (
+          <div
+            role="alert"
+            className="workbench-notice flex shrink-0 items-start gap-2 bg-danger-soft px-3 py-2 text-sm text-destructive"
+          >
+            <div className="min-w-0 flex-1 break-words">
+              <ErrorNotice error={remote.error} />
+            </div>
+            <IconButton label={t(($) => $.common.dismiss)} onClick={remote.clearError}>
+              <X />
+            </IconButton>
           </div>
-          <IconButton label={t(($) => $.common.dismiss)} onClick={remote.clearError}>
-            <X />
-          </IconButton>
-        </div>
-      )}
+        )}
       <div className={visible ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
         {focusMode.error && (
           <div role="status" className="flex shrink-0 items-center gap-2 px-3 text-sm">
@@ -766,6 +770,7 @@ export function WorkspaceView({
           key={`${action.kind}:${action.session.id}`}
           action={action}
           busy={remote.busy}
+          error={remote.mutationError}
           device={device}
           workspace={workspace}
           onCliSetup={onCliSetup}

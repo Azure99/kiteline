@@ -118,6 +118,8 @@ export function useSessions(device: Device, workspaceId: string) {
     refreshing,
     busy,
     uncertainCreate,
+    mutationError: error,
+    clearMutationError: () => setError(undefined),
     refresh: () => {
       setListErrorDismissed(false);
       return refresh();

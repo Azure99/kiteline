@@ -39,6 +39,7 @@ export function SessionMenu({
   id,
   session,
   layout,
+  busy,
   mobile,
   dock,
   label,
@@ -50,6 +51,7 @@ export function SessionMenu({
   id?: string;
   session?: Session;
   layout: TerminalLayout;
+  busy: boolean;
   mobile: boolean;
   dock?: boolean;
   label?: string;
@@ -146,7 +148,7 @@ export function SessionMenu({
             </MenuItem>
             {session && (
               <>
-                <MenuItem onClick={() => onCommand("rename", id)}>
+                <MenuItem disabled={busy} onClick={() => onCommand("rename", id)}>
                   <Pencil />
                   {t(($) => $.common.rename)}
                 </MenuItem>
@@ -161,7 +163,7 @@ export function SessionMenu({
               {t(($) => $.terminal.closeDisplay)}
             </MenuItem>
             {session && (
-              <MenuItem onClick={() => onCommand("end", id)}>
+              <MenuItem disabled={busy} onClick={() => onCommand("end", id)}>
                 <Trash2 />
                 {t(($) => $.terminal.endSession)}
               </MenuItem>
