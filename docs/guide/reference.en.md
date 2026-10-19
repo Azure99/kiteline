@@ -87,9 +87,11 @@ These local commands exit 0 on success, 3 when the result is unconfirmed (`unkno
 | `KITELINE_LISTEN_ADDR`       | `127.0.0.1:8080`    | Listen address as `HOST:PORT`; IPv6 uses `[::]:8080` |
 | `KITELINE_DATA_DIR`          | `/var/lib/kiteline` | Server data directory                                |
 | `KITELINE_TRUST_PROXY_PROTO` | `0`                 | `1` uses the reverse proxy's `X-Forwarded-Proto`     |
+| `KITELINE_TRUSTED_PROXIES`   | Empty               | Trusted direct proxies for setup/sign-in source IP   |
 
 - Omitting the port in `KITELINE_LISTEN_ADDR` uses port 80. The Docker image sets `0.0.0.0:8080`; the repository's systemd example sets `127.0.0.1:8080`, overridable in `/etc/kiteline-server.env`.
 - `KITELINE_TRUST_PROXY_PROTO` accepts only `0` or `1`. Other values prevent startup with `KITELINE_TRUST_PROXY_PROTO must be 0 or 1`. See [HTTPS and reverse proxies](server.en.md#https-and-reverse-proxies) for when to use `1`.
+- `KITELINE_TRUSTED_PROXIES` accepts comma-separated IPs/CIDRs and trusts no proxies by default; invalid IP/CIDR entries prevent startup. It controls source identification for setup and sign-in only; `KITELINE_TRUST_PROXY_PROTO` controls the protocol header separately.
 
 The repository's original `deploy/compose.yaml` also reads:
 
@@ -100,6 +102,7 @@ The repository's original `deploy/compose.yaml` also reads:
 | `KITELINE_HTTP_BIND`         | `127.0.0.1`                | Host address for the published port                                                         |
 | `KITELINE_HTTP_PORT`         | `8080`                     | Host port, mapped to container port 8080                                                    |
 | `KITELINE_TRUST_PROXY_PROTO` | `0`                        | Passed to the server inside the container                                                   |
+| `KITELINE_TRUSTED_PROXIES`   | Empty                      | Passed to the server inside the container                                                   |
 
 The `compose.yaml` release attachment pins the default `KITELINE_VERSION` to that release. When using the repository's source file directly, you must set it, or Compose reports `Set KITELINE_VERSION to the release version`.
 
@@ -199,7 +202,7 @@ This section lists limits relevant to configuration, capacity and troubleshootin
 | Sign-in and setup attempts | 10 per source per minute, 30 across all sources per minute | Fixed         |
 | Binding attempts           | Same as sign-in, counted separately                        | Fixed         |
 
-A source is the TCP peer address connected to the server. Requests arriving through the same reverse-proxy address share one per-source allowance.
+By default, a source is the TCP peer address, so requests through one reverse-proxy address share an allowance. Setup and sign-in can use client IPs through the [trusted direct proxy setting](server.en.md#https-and-reverse-proxies); binding always counts by TCP peer.
 
 ### Terminal
 
@@ -352,6 +355,7 @@ Original errors are in English; this table quotes their key parts.
 | `Already initialized`                                                                               | Owner password already set; `setup-token` is only available beforehand                                                     | Use `reset-password`                                                                                                             |
 | `Lock file is already being held`                                                                   | A server or agent already uses the same data directory                                                                     | Stop the running process first                                                                                                   |
 | 429 `Too many attempts; try again later`                                                            | Attempts exceed the per-minute limit                                                                                       | Wait a minute before retrying                                                                                                    |
+| 400 `Expected one valid X-Real-IP from the trusted proxy`                                           | A trusted direct proxy did not supply one valid client IP                                                                  | Set the proxy’s `X-Real-IP`; see [proxy setup](server.en.md#https-and-reverse-proxies)                                           |
 | `Binding code is invalid, expired, or already used`                                                 | Binding code expired or used                                                                                               | Generate a new command in the web app; see [Connect using the web command](devices.en.md#connect-using-the-web-command)          |
 | `This installation is already bound`                                                                | Install command uses `--if-unbound`, but device is already bound                                                           | Run `kiteline-agent run`; to rebind, see [Bind again](devices.en.md#bind-again)                                                  |
 | `Binding result is unknown`                                                                         | Connection lost after sending the binding request                                                                          | Check the web device list; see [Bind again](devices.en.md#bind-again)                                                            |

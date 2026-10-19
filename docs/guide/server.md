@@ -49,7 +49,7 @@ server 的环境变量见[参考](reference.md#server-环境变量)。
 
 4. 打开 `http://127.0.0.1:8080`，按[初始化拥有者](#初始化拥有者)设置密码。
 
-需要自定义设置时，在同一目录创建 `.env`，Docker Compose 会自动读取它。可以设置 `KITELINE_HTTP_BIND`、`KITELINE_HTTP_PORT` 和 `KITELINE_TRUST_PROXY_PROTO`，用法见[局域网访问与端口](#局域网访问与端口)和 [HTTPS 与反向代理](#https-与反向代理)，默认值见[参考](reference.md#server-环境变量)。修改 `.env` 后再次执行 `docker compose up -d`，Compose 会用新设置重建容器。
+需要自定义设置时，在同一目录创建 `.env`，Docker Compose 会自动读取它。可以设置 `KITELINE_HTTP_BIND`、`KITELINE_HTTP_PORT`、`KITELINE_TRUST_PROXY_PROTO` 和 `KITELINE_TRUSTED_PROXIES`，用法见[局域网访问与端口](#局域网访问与端口)和 [HTTPS 与反向代理](#https-与反向代理)，默认值见[参考](reference.md#server-环境变量)。修改 `.env` 后再次执行 `docker compose up -d`，Compose 会用新设置重建容器。
 
 Compose 默认使用官方 GHCR 镜像，Docker 自动选择主机架构。在 `.env` 中设置 `KITELINE_VERSION` 可以覆盖默认版本；使用自建或 fork 镜像时，同时把 `KITELINE_IMAGE` 设为镜像路径，`KITELINE_VERSION` 设为对应标签。本机构建方法和标签见[构建与发布](../development/release.md#构建-linux-包与镜像)。
 
@@ -138,6 +138,12 @@ HTTPS 由部署者自己的反向代理（nginx、Caddy 等）提供，反向代
 
 设为 `1` 后，server 也信任直接连接的客户端发来的 `X-Forwarded-Proto`，所以 server 的 HTTP 端口应只让反向代理访问（保持 `127.0.0.1` 绑定，或只在反向代理所在的网络中开放）。
 
+让初始化和登录按客户端 IP 计数时，还需在同一环境文件设置 `KITELINE_TRUSTED_PROXIES`，填入 server 实际看到的直接代理 IP 或 CIDR，多个值用逗号分隔。代理与原生 server 同机且经 IPv4 loopback 连接时可用 `127.0.0.1`；Docker 转发后的对端可能是网桥地址，应按实际网络填写，不要直接信任所有私网地址。重启 server 后生效。
+
+下面的示例会覆盖客户端传入的 `X-Real-IP`。只有直接对端受信时，server 才读取该单 IP 头；头缺失或无效会使初始化和登录返回 400。默认未配置时仍按 TCP 对端计数。[每来源和全局额度](reference.md#限额)保持不变，所有来源仍可能一起耗尽全局额度。
+
+多个代理或 CDN 串联时，先在最后一跳配置 [nginx realip](https://nginx.org/en/docs/http/ngx_http_realip_module.html) 或 [Caddy trusted proxies](https://caddyserver.com/docs/caddyfile/options#trusted-proxies)，再用可信解析结果覆盖 `X-Real-IP`；Caddy 此时使用 `{client_ip}`；对于追加式 `X-Forwarded-For` 链，使用 2.8 或更新版本并开启 `trusted_proxies_strict`，避免采用客户端伪造的最左地址。
+
 反向代理必须满足以下要求：
 
 1. 把入口的整个根路径 `/` 转发到 server，包括 `/api/`、`/proxy/`、`/absproxy/`、`/downloads/` 和安装脚本，路径和查询参数保持原样。
@@ -176,6 +182,7 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
         proxy_buffering off;
@@ -208,6 +215,7 @@ server {
 kiteline.example.com {
 	encode /assets/* gzip
 	reverse_proxy 127.0.0.1:8080 {
+		header_up X-Real-IP {remote_host}
 		flush_interval 10ms
 		transport http {
 			keepalive off

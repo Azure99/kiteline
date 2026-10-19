@@ -1,4 +1,5 @@
 import type { IncomingMessage, OutgoingHttpHeaders, ServerResponse } from "node:http";
+import { isIP, SocketAddress, type BlockList } from "node:net";
 import type { Store, Login } from "./store.js";
 import {
   AppError,
@@ -143,6 +144,18 @@ export function requestOrigin(request: IncomingMessage, trustProxyProto: boolean
   } catch {
     throw new AppError("invalid_argument", "Invalid Host header");
   }
+}
+export function clientAddress(request: IncomingMessage, trustedProxies: BlockList) {
+  const peer = request.socket.remoteAddress;
+  if (
+    !peer ||
+    !trustedProxies.check(peer, request.socket.remoteFamily === "IPv6" ? "ipv6" : "ipv4")
+  )
+    return peer ?? "unknown";
+  const address = request.headers["x-real-ip"];
+  if (typeof address !== "string" || !isIP(address))
+    throw new AppError("invalid_argument", "Expected one valid X-Real-IP from the trusted proxy");
+  return new SocketAddress({ address, family: address.includes(":") ? "ipv6" : "ipv4" }).address;
 }
 export const loginCookieNames = ["kiteline_session", "kiteline_session_http"] as const;
 function cookieName(entryOrigin: string) {

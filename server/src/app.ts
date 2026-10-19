@@ -8,6 +8,7 @@ import type { ServerConfig } from "./config.js";
 import { Store, password, type Login } from "./store.js";
 import {
   AttemptLimiter,
+  clientAddress,
   requireAgent,
   body,
   requireLogin,
@@ -78,7 +79,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       if (path === "/api/bootstrap" && method === "GET")
         return json(response, 200, { initialized: store.initialized() });
       if ((path === "/api/setup" || path === "/api/login") && method === "POST") {
-        authenticationLimiter.check(request.socket.remoteAddress ?? "unknown");
+        authenticationLimiter.check(clientAddress(request, config.trustedProxies));
         const input = record(await body(request));
         const value = password(input.password);
         if (path === "/api/setup")

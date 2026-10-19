@@ -1,6 +1,6 @@
 import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
-import type { AddressInfo } from "node:net";
+import { BlockList, type AddressInfo } from "node:net";
 import { expect } from "vitest";
 import { WebSocket } from "ws";
 import { appVersion, limits, type AgentEnvironment } from "@kiteline/shared/protocol";
@@ -43,21 +43,22 @@ export const agentPath = `/api/agent/control?appVersion=${appVersion}`;
 export const webPath = (path: string) =>
   `${path}${path.includes("?") ? "&" : "?"}appVersion=${appVersion}`;
 
-export async function serverFixture(trustProxyProto = false) {
+export async function serverFixture(trustProxyProto = false, hostname = "127.0.0.1") {
   const dataDir = await mkdtemp("/var/tmp/kiteline-server-test-");
   const store = new Store(dataDir);
   const config: ServerConfig = {
     dataDir,
     trustProxyProto,
-    hostname: "127.0.0.1",
+    trustedProxies: new BlockList(),
+    hostname,
     port: 0,
     webDir: dataDir,
     downloadsDir: dataDir,
   };
   const app = createKitelineServer(config, store);
-  await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => app.server.listen(0, hostname, resolve));
   const port = (app.server.address() as AddressInfo).port;
-  const origin = `http://127.0.0.1:${port}`;
+  const origin = `http://${hostname.includes(":") ? `[${hostname}]` : hostname}:${port}`;
   let closing: Promise<void> | undefined;
   const close = () =>
     (closing ??= (async () => {

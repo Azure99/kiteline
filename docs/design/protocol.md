@@ -105,7 +105,7 @@ Web owner 在 `POST /api/credentials` 提交 `{name, deviceIds, expiresAt}`，�
 
 ### 尝试次数限制
 
-`/api/setup` 和 `/api/login` 共用一个限制器，`/api/agent/bind` 使用另一个。每个限制器分别统计全局和每个来源的尝试次数，成功和失败都计数，超过后返回 429 `busy`。来源是 TCP 连接的对端地址；经过同一反向代理地址的请求共用一个来源额度，全局额度仍分别检查。数值见[限额](../guide/reference.md#限额)。
+`/api/setup` 和 `/api/login` 共用一个限制器，`/api/agent/bind` 使用另一个。每个限制器分别统计全局和每个来源的尝试次数，成功和失败都计数，超过后返回 429 `busy`。默认来源是 TCP 连接的对端地址。初始化和登录在直接对端匹配 `KITELINE_TRUSTED_PROXIES` 时，改用代理覆盖的单个 `X-Real-IP`；该头缺失或无效时返回 400。设备绑定始终按 TCP 对端计数，全局额度仍分别检查。数值见[限额](../guide/reference.md#限额)。
 
 ### 设备认证
 

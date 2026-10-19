@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { request } from "node:http";
-import type { AddressInfo } from "node:net";
+import { BlockList, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, expect, test } from "vitest";
@@ -96,6 +96,7 @@ test("legacy owner sessions migrate and a credential with no expiry survives reo
   const config = {
     dataDir,
     trustProxyProto: false,
+    trustedProxies: new BlockList(),
     hostname: "127.0.0.1",
     port: 0,
     webDir: dataDir,

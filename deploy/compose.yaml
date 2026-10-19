@@ -7,6 +7,7 @@ services:
     stop_grace_period: 45s
     environment:
       KITELINE_TRUST_PROXY_PROTO: "${KITELINE_TRUST_PROXY_PROTO:-0}"
+      KITELINE_TRUSTED_PROXIES: "${KITELINE_TRUSTED_PROXIES:-}"
     ports:
       - "${KITELINE_HTTP_BIND:-127.0.0.1}:${KITELINE_HTTP_PORT:-8080}:8080"
     volumes:

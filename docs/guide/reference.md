@@ -87,9 +87,11 @@ Linux 和 macOS 的命令入口是 `/usr/local/bin/kiteline-agent`；用 `sudo` 
 | `KITELINE_LISTEN_ADDR`       | `127.0.0.1:8080`    | 监听地址，格式 `HOST:PORT`，IPv6 写成 `[::]:8080` |
 | `KITELINE_DATA_DIR`          | `/var/lib/kiteline` | server 数据目录                                   |
 | `KITELINE_TRUST_PROXY_PROTO` | `0`                 | 设为 `1` 时采用反向代理传入的 `X-Forwarded-Proto` |
+| `KITELINE_TRUSTED_PROXIES`   | 空                  | 初始化/登录来源识别的可信直接代理 IP/CIDR         |
 
 - `KITELINE_LISTEN_ADDR` 省略端口时监听 80 端口。Docker 镜像把它设为 `0.0.0.0:8080`；仓库中的 systemd 示例把它设为 `127.0.0.1:8080`，可在 `/etc/kiteline-server.env` 中覆盖。
 - `KITELINE_TRUST_PROXY_PROTO` 只接受 `0` 和 `1`，其他值使 server 启动失败并报错 `KITELINE_TRUST_PROXY_PROTO must be 0 or 1`。何时设为 `1` 见 [HTTPS 与反向代理](server.md#https-与反向代理)。
+- `KITELINE_TRUSTED_PROXIES` 接受逗号分隔的 IP/CIDR，默认不信任任何代理；无效 IP/CIDR 使 server 启动失败。此设置只控制初始化与登录的来源识别，协议头仍由 `KITELINE_TRUST_PROXY_PROTO` 单独控制。
 
 仓库原版 `deploy/compose.yaml` 另外读取以下变量：
 
@@ -100,6 +102,7 @@ Linux 和 macOS 的命令入口是 `/usr/local/bin/kiteline-agent`；用 `sudo` 
 | `KITELINE_HTTP_BIND`         | `127.0.0.1`                | 主机上发布端口所用的地址                                 |
 | `KITELINE_HTTP_PORT`         | `8080`                     | 主机上发布的端口，映射到容器内的 8080                    |
 | `KITELINE_TRUST_PROXY_PROTO` | `0`                        | 传给容器内的 server                                      |
+| `KITELINE_TRUSTED_PROXIES`   | 空                         | 传给容器内的 server                                      |
 
 Release 附件中的 `compose.yaml` 已把 `KITELINE_VERSION` 默认值固定为该发布版本；直接使用仓库中的源文件时必须设置它，否则 Compose 报错 `Set KITELINE_VERSION to the release version`。
 
@@ -199,7 +202,7 @@ agent 数据目录中的 `agent.json`、`connection.json`、`temporary-files.jso
 | 登录与初始化尝试    | 每个来源每分钟 10 次，全部来源合计每分钟 30 次 | 固定 |
 | 绑定尝试            | 与登录相同，单独计数                           | 固定 |
 
-来源是连到 server 的 TCP 对端地址。经同一个反向代理地址接入的请求共用一个来源额度。
+默认来源是连到 server 的 TCP 对端地址，同一反向代理地址的请求共用来源额度。初始化和登录可通过[可信直接代理设置](server.md#https-与反向代理)改用客户端 IP；绑定始终按 TCP 对端计数。
 
 ### 终端
 
@@ -352,6 +355,7 @@ agent 正在运行时，`kiteline-agent doctor` 会显示 server 连接状态和
 | `Already initialized`                                                                | 已设置拥有者密码，`setup-token` 只能在此之前使用                                              | 用 `reset-password`                                                              |
 | `Lock file is already being held`                                                    | 同一数据目录上已有 server 或 agent 在运行                                                     | 先停止正在运行的进程                                                             |
 | 429 `Too many attempts; try again later`                                             | 一分钟内尝试次数超限                                                                          | 等待一分钟后重试                                                                 |
+| 400 `Expected one valid X-Real-IP from the trusted proxy`                            | 可信直接代理没有覆盖一个有效的客户端 IP                                                       | 按[反代配置](server.md#https-与反向代理)覆盖 `X-Real-IP`                         |
 | `Binding code is invalid, expired, or already used`                                  | 绑定码已过期或已被使用                                                                        | 在网页重新生成命令，见[用网页命令接入](devices.md#用网页命令接入)                |
 | `This installation is already bound`                                                 | 接入命令带 `--if-unbound`，而设备已经绑定                                                     | 直接 `kiteline-agent run`；要重新绑定见[重新绑定](devices.md#重新绑定)           |
 | `Binding result is unknown`                                                          | 绑定请求发出后连接中断                                                                        | 在网页核对设备列表，见[重新绑定](devices.md#重新绑定)                            |

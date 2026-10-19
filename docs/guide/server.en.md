@@ -49,7 +49,7 @@ Docker Engine and Docker Compose v2 (the `docker compose` command) are required.
 
 4. Open `http://127.0.0.1:8080` and set a password as described in [Set up the owner](#set-up-the-owner).
 
-For custom settings, create `.env` in the same directory; Docker Compose reads it automatically. You can set `KITELINE_HTTP_BIND`, `KITELINE_HTTP_PORT` and `KITELINE_TRUST_PROXY_PROTO` there. See [LAN access and ports](#lan-access-and-ports) and [HTTPS and reverse proxies](#https-and-reverse-proxies) for usage, and [Reference](reference.en.md#server-environment-variables) for defaults. After changing `.env`, run `docker compose up -d` again; Compose recreates the container with the new settings.
+For custom settings, create `.env` in the same directory; Docker Compose reads it automatically. You can set `KITELINE_HTTP_BIND`, `KITELINE_HTTP_PORT`, `KITELINE_TRUST_PROXY_PROTO` and `KITELINE_TRUSTED_PROXIES` there. See [LAN access and ports](#lan-access-and-ports) and [HTTPS and reverse proxies](#https-and-reverse-proxies) for usage, and [Reference](reference.en.md#server-environment-variables) for defaults. After changing `.env`, run `docker compose up -d` again; Compose recreates the container with the new settings.
 
 Compose uses the official GHCR image by default, and Docker selects the host architecture automatically. Set `KITELINE_VERSION` in `.env` to override the default version. For a locally built or fork image, also set `KITELINE_IMAGE` to its image path and `KITELINE_VERSION` to its tag. See [Build and release (Chinese)](../development/release.md#构建-linux-包与镜像) for local builds and tags.
 
@@ -138,6 +138,12 @@ First configure the server to trust the protocol header from the reverse proxy:
 
 With this set to `1`, the server also trusts `X-Forwarded-Proto` sent by directly connected clients. Therefore, only the reverse proxy should be able to access the HTTP port: keep the `127.0.0.1` binding or expose it only within the proxy's network.
 
+To count setup and sign-in attempts by client IP, also set `KITELINE_TRUSTED_PROXIES` in the same environment file to the direct proxy IPs or CIDRs seen by the server, separated by commas. Use `127.0.0.1` when a proxy on the same host connects to a native server over IPv4 loopback. With Docker port forwarding, the peer may be a bridge address; use the actual network address rather than trusting all private networks. Restart the server after changing this setting.
+
+The examples below overwrite the client's `X-Real-IP`. The server reads this single IP only from a trusted direct peer; a missing or invalid header makes setup and sign-in return 400. Without this setting, attempts are still counted by TCP peer. The [source and global limits](reference.en.md#limits) remain unchanged, so all sources can still exhaust the global budget together.
+
+For multiple proxies or a CDN, first configure [nginx realip](https://nginx.org/en/docs/http/ngx_http_realip_module.html) or [Caddy trusted proxies](https://caddyserver.com/docs/caddyfile/options#trusted-proxies) on the final proxy, then overwrite `X-Real-IP` with the trusted result; Caddy uses `{client_ip}` in that case. For appended `X-Forwarded-For` chains, use Caddy 2.8 or later and enable `trusted_proxies_strict` to avoid selecting a client-supplied leftmost address.
+
 The reverse proxy must meet these requirements:
 
 1. Forward the origin's entire root path `/`, including `/api/`, `/proxy/`, `/absproxy/`, `/downloads/` and installation scripts, preserving paths and query parameters.
@@ -176,6 +182,7 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
         proxy_buffering off;
@@ -208,6 +215,7 @@ Place `map` in the `http` block (files under `conf.d` are inside it by default).
 kiteline.example.com {
 	encode /assets/* gzip
 	reverse_proxy 127.0.0.1:8080 {
+		header_up X-Real-IP {remote_host}
 		flush_interval 10ms
 		transport http {
 			keepalive off
