@@ -14,29 +14,40 @@ function Loading() {
     </div>
   );
 }
-function Failure({ error, releaseNotice = false }: { error: unknown; releaseNotice?: boolean }) {
+function Failure({
+  error,
+  releaseNotice = false,
+  actions,
+}: {
+  error: unknown;
+  releaseNotice?: boolean;
+  actions?: ReactNode;
+}) {
   const { t } = useTranslation();
   const compatible = useWebCompatible();
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto bg-background p-4">
       {releaseNotice && <ReleaseNotice />}
       <ErrorNotice error={error} />
       {compatible && (
-        <>
-          <p className="text-sm text-muted-foreground">{t(($) => $.release.reloadDrafts)}</p>
-          <div className="flex flex-wrap gap-2">
+        <p className="text-sm text-muted-foreground">{t(($) => $.release.reloadDrafts)}</p>
+      )}
+      {(actions || compatible) && (
+        <div className="flex flex-wrap gap-2">
+          {actions}
+          {compatible && (
             <Button variant="outline" onClick={() => location.reload()}>
               <RefreshCw />
               {t(($) => $.release.reload)}
             </Button>
-          </div>
-        </>
+          )}
+        </div>
       )}
     </div>
   );
 }
 export class ViewBoundary extends Component<
-  { children: ReactNode; active: boolean },
+  { children: ReactNode; active: boolean; releaseNotice?: boolean; actions?: ReactNode },
   { failed: boolean; error?: unknown }
 > {
   state = { failed: false, error: undefined as unknown };
@@ -45,7 +56,13 @@ export class ViewBoundary extends Component<
   }
   render() {
     return this.state.failed
-      ? this.props.active && <Failure error={this.state.error} />
+      ? this.props.active && (
+          <Failure
+            error={this.state.error}
+            releaseNotice={this.props.releaseNotice}
+            actions={this.props.actions}
+          />
+        )
       : this.props.children;
   }
 }
@@ -53,7 +70,6 @@ export function deferredView<P extends object>(
   load: () => Promise<{ default: ComponentType<P> }>,
   options: {
     active?: (props: P) => boolean;
-    isolateRenderErrors?: boolean;
     releaseNotice?: boolean;
   } = {},
 ) {
@@ -94,10 +110,10 @@ export function deferredView<P extends object>(
           <Loading />
         )
       ) : null;
-    return options.isolateRenderErrors === false ? (
-      content
-    ) : (
-      <ViewBoundary active={visible}>{content}</ViewBoundary>
+    return (
+      <ViewBoundary active={visible} releaseNotice={options.releaseNotice}>
+        {content}
+      </ViewBoundary>
     );
   };
 }

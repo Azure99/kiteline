@@ -150,10 +150,9 @@ export const en = {
     recentWorkspaces: "Recent workspaces",
   },
   release: {
-    webMismatch:
-      "Web {{web}} / Server {{server}}: remote operations are paused. Copy any unsaved content before reloading.",
+    webMismatch: "Web {{web}} / Server {{server}}: remote operations are paused.",
     reload: "Reload page",
-    reloadDrafts: "Copy any unsaved content before reloading.",
+    reloadDrafts: "Reloading the page does not preserve unsaved content.",
   },
   common: {
     appearance: "Appearance",

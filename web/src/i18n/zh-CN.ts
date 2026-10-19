@@ -146,9 +146,9 @@ export const zhCN = {
     recentWorkspaces: "最近工作区",
   },
   release: {
-    webMismatch: "Web {{web}} / Server {{server}}：远程操作已暂停。刷新前请复制未保存的内容。",
+    webMismatch: "Web {{web}} / Server {{server}}：远程操作已暂停。",
     reload: "刷新页面",
-    reloadDrafts: "刷新前请复制未保存的内容。",
+    reloadDrafts: "刷新页面不会保留未保存的内容。",
   },
   common: {
     appearance: "外观",

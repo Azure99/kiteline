@@ -14,7 +14,8 @@ export function ReleaseNotice() {
       className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-warning-soft px-4 py-2 text-sm"
     >
       <p className="min-w-0 flex-1 basis-60 break-words">
-        {t(($) => $.release.webMismatch, { web: appVersion, server: serverVersion! })}
+        {t(($) => $.release.webMismatch, { web: appVersion, server: serverVersion! })}{" "}
+        {t(($) => $.release.reloadDrafts)}
       </p>
       <Button variant="outline" onClick={() => location.reload()}>
         <RefreshCw />

@@ -26,6 +26,7 @@ import {
   PanelLeftOpen,
   Files as FilesIcon,
   CalendarClock,
+  ArrowLeft,
 } from "lucide-react";
 import type { Device } from "@kiteline/shared/protocol";
 import type { LoginSession } from "./auth";
@@ -407,9 +408,17 @@ export function Workbench({
       if (!workspace)
         return <p className="p-6 text-muted-foreground">{t(($) => $.shell.workspaceRemoved)}</p>;
       return (
-        <>
+        <ViewBoundary
+          key={`${device.id}:${workspace.id}`}
+          active
+          actions={
+            <Button variant="outline" onClick={() => choose("/devices")}>
+              <ArrowLeft />
+              {t(($) => $.shell.backDevices)}
+            </Button>
+          }
+        >
           <WorkspaceView
-            key={`${device.id}:${workspace.id}`}
             device={device}
             workspace={workspace}
             visible={route.tool === "terminal"}
@@ -460,7 +469,7 @@ export function Workbench({
               actions={gitActions}
             />
           </WorkspaceView>
-        </>
+        </ViewBoundary>
       );
     }
     return (

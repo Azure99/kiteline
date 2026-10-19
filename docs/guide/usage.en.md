@@ -167,6 +167,7 @@ Drafts are kept only in the current page's memory:
 - Closing a file tab with unsaved content offers Cancel, Discard changes, or Save and close. Empty unnamed drafts close directly.
 - With unsaved changes, the browser prompts before reloading, navigating away, or closing the page. Confirming that you want to leave loses the drafts. On mobile, the prompt may be skipped when you close the app or the system discards the page.
 - If a device goes offline or a device/workspace is deleted, content remains viewable and copyable, but cannot be saved to its original location.
+- If a workspace shows a render error, use "Back to devices" to continue navigating. If the entire workbench shows an error page, drafts held in memory cannot be recovered.
 
 ### Save conflicts
 
