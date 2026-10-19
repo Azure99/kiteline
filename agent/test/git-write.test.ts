@@ -572,7 +572,7 @@ test.each(["cancelled", "timeout"] as const)(
     await cli("add", ".");
     await write(
       ".git/hooks/pre-commit",
-      "#!/bin/sh\ntrap '' TERM\nexec >/dev/null 2>&1\necho ready >.git/hook-ready\nsleep 2\necho leaked >.git/hook-leaked\n",
+      "#!/bin/sh\ntrap '' TERM\nexec >/dev/null 2>&1\necho $PPID $$ >.git/hook-ready\nsleep 2\necho leaked >.git/hook-leaked\n",
     );
     await exec("chmod", ["+x", join(root, ".git/hooks/pre-commit")]);
     const queue = new GitWriteQueue(repos),
@@ -581,26 +581,42 @@ test.each(["cancelled", "timeout"] as const)(
       git(root, ["commit", "-m", "cancel"], controller.signal, { write: true }),
     );
     const assertion = expect(running).rejects.toMatchObject({ code: reason, outcome: "unknown" });
-    for (let i = 0; ; i++) {
-      try {
-        await readFile(join(root, ".git/hook-ready"));
-        break;
-      } catch (error) {
-        if (i === 100) throw error;
-        await new Promise((resolve) => setTimeout(resolve, 20));
+    let group: number | undefined;
+    let hook: number | undefined;
+    try {
+      for (let i = 0; ; i++) {
+        try {
+          [group, hook] = (await readFile(join(root, ".git/hook-ready"), "utf8"))
+            .trim()
+            .split(/\s+/)
+            .map(Number);
+          if (group && group > 0 && hook && hook > 0) break;
+          throw new Error("Hook readiness has not reported both process IDs");
+        } catch (error) {
+          if (i === 100) throw error;
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
       }
+      controller.abort(new AppError(reason, "Stop test Git operation"));
+      await assertion;
+      await rm(join(root, ".git/hooks/pre-commit"));
+      await queue.run(workspace.id, repo.id, signal(), async () => {
+        const state = await exec("ps", ["-p", String(hook), "-o", "stat="]).catch((error) => {
+          if (error.code !== 1) throw error;
+          return { stdout: "" };
+        });
+        expect(state.stdout.trim()).toMatch(/^(Z.*)?$/);
+        return git(root, ["commit", "-m", "next"], signal(), { write: true });
+      });
+      await expect(readFile(join(root, ".git/hook-leaked"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      expect(await cli("log", "-1", "--format=%s")).toBe("next\n");
+    } finally {
+      controller.abort(new AppError("cancelled", "Clean up test Git operation"));
+      await Promise.allSettled([running, assertion]);
+      if (group) killTestProcess(-group);
     }
-    controller.abort(new AppError(reason, "Stop test Git operation"));
-    await assertion;
-    await rm(join(root, ".git/hooks/pre-commit"));
-    await queue.run(workspace.id, repo.id, signal(), () =>
-      git(root, ["commit", "-m", "next"], signal(), { write: true }),
-    );
-    await new Promise((resolve) => setTimeout(resolve, 1200));
-    await expect(readFile(join(root, ".git/hook-leaked"))).rejects.toMatchObject({
-      code: "ENOENT",
-    });
-    expect(await cli("log", "-1", "--format=%s")).toBe("next\n");
   },
 );
 
