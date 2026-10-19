@@ -278,7 +278,7 @@ runtime DLL 从固定源码包的 Cygwin tag 及有序 MSYS2 补丁重建，再�
 
 固定版本见 [`web/package.json`](../../web/package.json)、[`terminal-recorder/package.json`](../../terminal-recorder/package.json) 和 [`shared/package.json`](../../shared/package.json)。当前浏览器与 headless 版本来自同一上游源码提交，升级须联合核对两端和 addons。私有成员访问以 [`TerminalCore` 和 `core()`](../../shared/src/terminal/index.ts) 为检查入口，另须核对 [`auxiliary-input.ts`](../../web/src/terminal/auxiliary-input.ts) 使用的私有键盘编码。
 
-工作台直接编译 xterm 的 TypeScript 入口。现有补丁由 [`pnpm-workspace.yaml`](../../pnpm-workspace.yaml) 的 `patchedDependencies` 指向 `web/patches/`：`DomRenderer.ts` 和 `WidthCache.ts` 按设备像素比测量字形，修复 Windows 页面缩放后的中文选区错位；`Viewport.ts` 修复调整尺寸时的滚动位置跳动；`CompositionHelper.ts` 在新的组合输入开始前发送待处理的尾部独立文本，修复 Android 候选词之间漏发空格；`Event.ts` 的非空断言适配项目的 `noUncheckedIndexedAccess`，不改变 DPR 行为。
+工作台直接编译 xterm 的 TypeScript 入口。现有补丁由 [`pnpm-workspace.yaml`](../../pnpm-workspace.yaml) 的 `patchedDependencies` 指向 `web/patches/`：`DomRenderer.ts` 和 `WidthCache.ts` 按设备像素比测量字形，修复 Windows 页面缩放后的中文选区错位；`DomRenderer.ts` 还在清空选区时更新模型并重绘旧行，移除文字残留的选区背景；`Viewport.ts` 修复调整尺寸时的滚动位置跳动；`CompositionHelper.ts` 在新的组合输入开始前发送待处理的尾部独立文本，修复 Android 候选词之间漏发空格；`Event.ts` 的非空断言适配项目的 `noUncheckedIndexedAccess`，不改变 DPR 行为。
 
 维护当前版本的补丁时，在仓库根目录执行：
 

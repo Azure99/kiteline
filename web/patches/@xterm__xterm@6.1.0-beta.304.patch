@@ -65,7 +65,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..f0121cd4e81f337edf429ac87f3b15cb
  
    /**
 diff --git a/src/browser/renderer/dom/DomRenderer.ts b/src/browser/renderer/dom/DomRenderer.ts
-index 657217f7104c97ce54b98e88b381b325b061604c..3c520efe00d80c86698a0345ecbda910ccb4951f 100644
+index 657217f7104c97ce54b98e88b381b325b061604c..062faf3c09fea6940634a8b0c430f74bfaf7e1c4 100644
 --- a/src/browser/renderer/dom/DomRenderer.ts
 +++ b/src/browser/renderer/dom/DomRenderer.ts
 @@ -128,7 +128,8 @@ export class DomRenderer extends Disposable implements IRenderer {
@@ -93,7 +93,20 @@ index 657217f7104c97ce54b98e88b381b325b061604c..3c520efe00d80c86698a0345ecbda910
      this._setDefaultSpacing();
    }
  
-@@ -500,7 +507,8 @@ export class DomRenderer extends Disposable implements IRenderer {
+@@ -399,11 +406,8 @@ export class DomRenderer extends Disposable implements IRenderer {
+     // Determine new selection viewport band and create overlays
+     let newViewportStart = 0;
+     let newViewportEnd = -1;
+-    if (!start || !end) {
+-      return;
+-    }
+     this._selectionRenderModel.update(this._terminal, start, end, columnSelectMode);
+-    if (this._selectionRenderModel.hasSelection) {
++    if (start && end && this._selectionRenderModel.hasSelection) {
+       const viewportStartRow = this._selectionRenderModel.viewportStartRow;
+       const viewportEndRow = this._selectionRenderModel.viewportEndRow;
+       const viewportCappedStartRow = this._selectionRenderModel.viewportCappedStartRow;
+@@ -500,7 +504,8 @@ export class DomRenderer extends Disposable implements IRenderer {
        this._optionsService.rawOptions.fontFamily,
        this._optionsService.rawOptions.fontSize,
        this._optionsService.rawOptions.fontWeight,
