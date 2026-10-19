@@ -11,6 +11,7 @@ This guide explains how to deploy and maintain the server (`kiteline-server`), w
   - Native release package `kiteline-server-<version>-linux-<architecture>.tar.gz`, available from [GitHub Releases](https://github.com/Azure99/kiteline/releases). It includes the official Node runtime, a dynamically linked build requiring glibc, and targets Ubuntu 24.04.
 - The server provides HTTP only and does not manage TLS certificates. For HTTPS, place a reverse proxy in front of it; see [HTTPS and reverse proxies](#https-and-reverse-proxies).
 - By default, the server accepts connections only at `127.0.0.1:8080`. For access from other machines, see [LAN access and ports](#lan-access-and-ports).
+- The workbench cannot be embedded in an iframe, including on same-origin pages. Development-service proxies retain the upstream's own embedding policy.
 - The owner password, login sessions, CLI credentials and device registrations are stored in the server data directory (default `/var/lib/kiteline`). Only one server process can use a data directory at a time.
 - One server can be accessed through several origins. An origin combines the scheme, hostname and port, such as `http://192.168.1.10:8080` or `https://kiteline.example.com`. The server must be deployed at the origin's root path; subpaths such as `https://example.com/kiteline/` are not supported.
 - Server release packages and images contain agent release packages for every platform, so devices do not need access to GitHub when connecting or upgrading.

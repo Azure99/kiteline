@@ -11,6 +11,7 @@
   - 原生发布包 `kiteline-server-<版本>-linux-<架构>.tar.gz`，从 [GitHub Releases](https://github.com/Azure99/kiteline/releases) 下载。包内带有官方 Node 运行时（依赖 glibc 的动态链接构建），目标系统是 Ubuntu 24.04。
 - server 只提供 HTTP，不处理 TLS 证书。需要 HTTPS 时在前面放一个反向代理，见 [HTTPS 与反向代理](#https-与反向代理)。
 - server 默认只在本机地址 `127.0.0.1:8080` 上接受连接。从其他机器访问的设置见[局域网访问与端口](#局域网访问与端口)。
+- 工作台不能通过 iframe 嵌入其他页面，包括同源页面。开发服务代理仍保留上游自己的嵌入策略。
 - 拥有者密码、登录会话、CLI 凭据和设备登记都保存在 server 数据目录中（默认 `/var/lib/kiteline`），同一个数据目录同时只能由一个 server 进程使用。
 - 一个 server 可以同时通过多个入口访问。入口是协议、主机名和端口的组合，例如 `http://192.168.1.10:8080` 和 `https://kiteline.example.com`。server 只能部署在入口的根路径上，不支持 `https://example.com/kiteline/` 这样的子路径。
 - server 的发布包和镜像内含全部平台的 agent 发布包，设备接入和升级时不需要访问 GitHub。

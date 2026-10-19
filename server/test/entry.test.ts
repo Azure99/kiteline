@@ -151,10 +151,12 @@ test("installer resources stream GET/HEAD, reject other methods and never fall b
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe(type);
     expect(Number(response.headers.get("content-length"))).toBe(bytes.length);
+    expect(response.headers.get("content-security-policy")).toBeNull();
     expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes);
     const head = await fetch(origin + path, { method: "HEAD" });
     expect(head.status).toBe(200);
     expect(head.headers.get("content-length")).toBe(String(bytes.length));
+    expect(head.headers.get("content-security-policy")).toBeNull();
     expect(head.headers.get("cache-control")).toBe("no-cache");
     expect(await head.text()).toBe("");
     const post = await fetch(origin + path, { method: "POST" });
@@ -519,6 +521,9 @@ test("static resources keep their content and GET/HEAD types while navigation re
       expect(response.headers.get("content-type")).toBe(type);
       expect(response.headers.get("cache-control")).toBe(cache);
       expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(response.headers.get("content-security-policy")).toBe(
+        type === "text/html; charset=utf-8" ? "frame-ancestors 'none'" : null,
+      );
       expect(Buffer.from(await response.arrayBuffer())).toEqual(
         method === "HEAD" ? Buffer.alloc(0) : bytes,
       );
@@ -530,6 +535,7 @@ test("static resources keep their content and GET/HEAD types while navigation re
       expect(response.status).toBe(200);
       expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
       expect(response.headers.get("cache-control")).toBe("no-cache");
+      expect(response.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
       expect(Buffer.from(await response.arrayBuffer())).toEqual(
         method === "HEAD" ? Buffer.alloc(0) : html,
       );
@@ -538,10 +544,12 @@ test("static resources keep their content and GET/HEAD types while navigation re
     const response = await f.call("/assets/missing.js", method);
     expect(response.status).toBe(404);
     expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("content-security-policy")).toBeNull();
   }
   const api = await f.call("/api/bootstrap");
   expect(api.status).toBe(200);
   expect(api.headers.get("cache-control")).toBe("no-store");
+  expect(api.headers.get("content-security-policy")).toBeNull();
   const post = await f.call("/sample.txt", "POST");
   expect(post.status).toBe(405);
   expect(post.headers.get("allow")).toBe("GET, HEAD");

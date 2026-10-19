@@ -159,6 +159,26 @@ async function fixture(handler: RequestListener, channels = 128) {
   };
 }
 
+test("development HTML preserves the upstream CSP or its absence", async () => {
+  const policy = "default-src 'self'; frame-ancestors 'self'";
+  const html = "<!doctype html><main>Development preview</main>";
+  const f = await fixture((req, res) => {
+    res.setHeader("content-type", "text/html; charset=utf-8");
+    if (req.url?.endsWith("/policy")) res.setHeader("content-security-policy", policy);
+    res.end(html);
+  });
+  for (const prefix of [f.prefix, f.prefix.replace("/proxy/", "/absproxy/")])
+    for (const path of ["policy", "plain"])
+      for (const method of ["GET", "HEAD"]) {
+        const response = await f.call(`${prefix}/${path}`, method);
+        expect(response.status).toBe(200);
+        expect(response.headers["content-security-policy"]).toBe(
+          path === "policy" ? policy : undefined,
+        );
+        expect(response.text).toBe(method === "HEAD" ? "" : html);
+      }
+});
+
 test("real HTTP tunnel preserves raw paths, bodies, finite header rules and application errors", async () => {
   const f = await fixture(async (req, res) => {
     const parts: Buffer[] = [];

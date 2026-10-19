@@ -289,6 +289,8 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       content = await readFile(resolve(config.webDir, "index.html"));
       type = "text/html; charset=utf-8";
     }
+    if (type === "text/html; charset=utf-8")
+      response.setHeader("content-security-policy", "frame-ancestors 'none'");
     closeIfBodyUnread(response);
     response.writeHead(200, {
       "content-type": type,
