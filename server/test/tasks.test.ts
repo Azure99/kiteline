@@ -304,7 +304,10 @@ test("summary DWORD results, ownership, revision and nested whitelist are indepe
     expect(f.store.taskSummaries()[0]?.snapshot?.items[0]?.latestRun?.exitCode).toBe(0xffffffff);
     const observedAt = (await f.summaries())[0]!.observedAt;
     first.send(JSON.stringify({ ...snapshot, revision: 8, items: [] }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Snapshot handling is synchronous, so this pong follows the preceding snapshot.
+    const pong = once(first, "pong");
+    first.ping();
+    await pong;
     expect((await f.summaries())[0]).toMatchObject({ observedAt, snapshot: { revision: 9 } });
     const oldConnection = f.app.connections.online(f.identity.deviceId)!;
     const second = await connect();
