@@ -432,6 +432,14 @@ export function WorkspaceView({
           if (owner) setLayout((old) => arrangeGroup(old, owner.id, direction));
         }}
         onSettings={includeSettings ? () => setSettings(true) : undefined}
+        onSearch={
+          mobile && includeSettings && !dock
+            ? () => {
+                if (id) displays.current.get(id)?.search();
+              }
+            : undefined
+        }
+        searchDisabled={!id || !capabilities.main[id]?.hasTerminal}
       />
     );
   }
@@ -608,15 +616,17 @@ export function WorkspaceView({
                 <Minimize2 />
               </IconButton>
             )}
-            <IconButton
-              label={t(($) => $.terminal.search)}
-              disabled={targetPending || !selected || !capabilities.main[selected]?.hasTerminal}
-              onClick={() => {
-                if (selected && !targetPending) displays.current.get(selected)?.search();
-              }}
-            >
-              <Search />
-            </IconButton>
+            {!mobile && (
+              <IconButton
+                label={t(($) => $.terminal.search)}
+                disabled={targetPending || !selected || !capabilities.main[selected]?.hasTerminal}
+                onClick={() => {
+                  if (selected && !targetPending) displays.current.get(selected)?.search();
+                }}
+              >
+                <Search />
+              </IconButton>
+            )}
             <IconButton
               label={t(($) => $.terminal[focusMode.next])}
               aria-pressed={focusMode.active || focusMode.fullscreen}

@@ -9,6 +9,7 @@ import {
   Pencil,
   RefreshCw,
   Rows2,
+  Search,
   Settings,
   Split,
   Trash2,
@@ -47,6 +48,8 @@ export function SessionMenu({
   onMove,
   onDirection,
   onSettings,
+  onSearch,
+  searchDisabled,
 }: {
   id?: string;
   session?: Session;
@@ -59,6 +62,8 @@ export function SessionMenu({
   onMove(id: string, target?: string, position?: MemberPosition): void;
   onDirection(direction: SplitDirection): void;
   onSettings?(): void;
+  onSearch?(): void;
+  searchDisabled?: boolean;
 }) {
   const { t } = useTranslation();
 
@@ -85,6 +90,12 @@ export function SessionMenu({
           <MenuItem onClick={onSettings}>
             <Settings />
             {t(($) => $.terminal.settings)}
+          </MenuItem>
+        )}
+        {onSearch && (
+          <MenuItem disabled={searchDisabled} onClick={onSearch}>
+            <Search />
+            {t(($) => $.terminal.search)}
           </MenuItem>
         )}
         {id && (

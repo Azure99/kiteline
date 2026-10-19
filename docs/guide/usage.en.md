@@ -98,7 +98,7 @@ Supported forms are `/`-separated relative paths, POSIX absolute paths inside th
 
 The Focus terminal button cycles through focus within the window, browser fullscreen, and exit. The first step hides the rest of the workbench while keeping the browser window's position and size, so several windows can monitor output at once. The Focus file button works the same way when editing files in narrow layouts.
 
-Terminal search covers currently loaded display content, including history, without case sensitivity.
+Terminal search covers currently loaded display content, including history, without case sensitivity. On desktop, use the toolbar search button. On a phone, open the terminal menu and choose Search terminal below Terminal settings.
 
 "Scrollback lines for new sessions" in "Terminal settings" controls the history retained per session (range in [Limits](reference.en.md#limits)). It affects only sessions created afterward.
 
