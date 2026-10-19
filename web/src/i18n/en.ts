@@ -571,6 +571,7 @@ export const en = {
     savePath: "File path",
     saveCopy: "Save copy",
     nameEncoding: "Unsupported name encoding",
+    unsupportedReparsePoint: "Unsupported type",
     specialFile: "Special file",
     openLinkDirectory: "Open linked directory",
     emptyDirectory: "Empty directory",

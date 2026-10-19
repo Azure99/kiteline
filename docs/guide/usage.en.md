@@ -127,7 +127,7 @@ Files browses and edits the current workspace, with list paths relative to its d
 
 ### Browse
 
-Handle names that are not valid UTF-8, FIFOs, sockets and device nodes in a terminal.
+Handle names that are not valid UTF-8, FIFOs, sockets and device nodes in a terminal. Windows reparse points unsupported by the workbench remain listed as “Unsupported type” and cannot be operated on.
 
 The list refreshes automatically when other programs change files, and periodically while the page is visible. If the device cannot watch directory changes, "Live updates limited" appears; periodic refresh remains available.
 

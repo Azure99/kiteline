@@ -22,6 +22,7 @@ import {
 } from "../components/ui/dialog";
 import { IconButton } from "../components/icon-button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
+import { unavailableEntryLabel } from "../files/format";
 
 export function DirectoryDialog({
   deviceId,
@@ -263,8 +264,8 @@ export function DirectoryDialog({
                 <Folder size={17} className="shrink-0 text-primary" />
                 <span className="min-w-0 break-all">{entry.name}</span>
                 {entry.unavailableReason && (
-                  <span className="ml-auto text-xs text-destructive">
-                    {t(($) => $.files.nameEncoding)}
+                  <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                    {unavailableEntryLabel(entry.unavailableReason)}
                   </span>
                 )}
                 {entry.kind === "symlink" && (

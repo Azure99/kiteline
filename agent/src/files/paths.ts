@@ -113,22 +113,21 @@ export function devicePath(value: unknown) {
   );
 }
 
-function windowsLinkType(
-  path: string | Buffer,
-  { attributes, tag }: { attributes: number; tag: number },
-) {
+function windowsLinkType({ attributes, tag }: { attributes: number; tag: number }) {
   if (!(attributes & 0x400)) return;
   if (tag === 0xa0000003) return "junction";
   if (tag === 0xa000000c) return attributes & 0x10 ? "dir" : "file";
-  throw new AppError("unsupported", `Unsupported Windows reparse point: ${String(path)}`);
+  return "unsupported";
 }
 
 export async function linkType(path: string | Buffer) {
   if (process.platform !== "win32") return;
-  return windowsLinkType(
-    path,
+  const type = windowsLinkType(
     await windowsNative().fileAttributes(toNamespacedPath(String(path))),
   );
+  if (type === "unsupported")
+    throw new AppError("unsupported", `Unsupported Windows reparse point: ${String(path)}`);
+  return type;
 }
 
 export async function entryInfo(path: string | Buffer) {
@@ -248,7 +247,17 @@ export async function readDirectoryEntry(
   const absolute = join(parent, name);
   // Enumeration can read metadata for entries whose attribute handles are locked or denied.
   const info = await windowsNative().directoryEntry(toNamespacedPath(absolute));
-  const link = windowsLinkType(absolute, info);
+  const link = windowsLinkType(info);
+  if (link === "unsupported") {
+    return {
+      name,
+      path: null,
+      kind: "other",
+      size: info.size,
+      mtime: new Date(info.mtimeMs).toISOString(),
+      unavailableReason: "unsupported_reparse_point",
+    };
+  }
   let linkTarget: string | undefined;
   if (link) {
     try {

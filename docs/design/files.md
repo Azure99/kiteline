@@ -10,7 +10,7 @@
 
 - 请求中的路径相对工作区根目录，使用 UTF-8 和 `/` 分隔，根目录写作 `.`。agent 拒绝绝对路径和含 `..` 段的路径（`relativePath`），名称中的空格、换行和 Unicode 原样保留。路径等字符串参数的长度限制由 `shared/src/protocol/index.ts` 的 `string()` 检查。
 - 只有 Windows 上的 agent 检查 Windows 的保留名称和字符。Windows 路径规则和 macOS 的名称拼写解析见[平台实现](platforms.md)。
-- agent 按原始字节读取目录项名称。名称不是合法 UTF-8 时，条目返回 `path: null` 和 `unavailableReason: "invalid_utf8"`；显示名只用于展示，浏览器不能用它构造请求路径。
+- agent 按原始字节读取目录项名称。名称不是合法 UTF-8 或 Windows 重解析点类型不受支持时，条目返回 `path: null`，`unavailableReason` 分别为 `invalid_utf8` 或 `unsupported_reparse_point`；显示名只用于展示，浏览器不能用它构造请求路径。
 - agent 解析路径时跟随符号链接，工作区内的链接可以指向工作区外。文件工具不是沙箱，访问范围就是项目用户的权限。
 - 读取和保存跟随整条路径，保存写入链接指向的文件并保留链接本身。整理操作只解析父目录，最后一级按 `lstat` 处理：删除、重命名、移动和替换作用于链接本身，复制把链接复制为链接。
 

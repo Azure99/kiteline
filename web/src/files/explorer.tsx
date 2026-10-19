@@ -21,7 +21,7 @@ import type { Entry } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger, createMenuHandle } from "../components/ui/menu";
 import type { DirectoryPage } from "./use-browser";
-import { formatBytes } from "./format";
+import { formatBytes, unavailableEntryLabel } from "./format";
 
 export function FileExplorer({
   path,
@@ -117,7 +117,7 @@ export function FileExplorer({
                 {(entry.unavailableReason || entry.kind === "file" || entry.kind === "other") && (
                   <span className="shrink-0 text-[11px] text-muted-foreground">
                     {entry.unavailableReason
-                      ? t(($) => $.files.nameEncoding)
+                      ? unavailableEntryLabel(entry.unavailableReason)
                       : entry.kind === "other"
                         ? t(($) => $.files.specialFile)
                         : formatBytes(entry.size)}

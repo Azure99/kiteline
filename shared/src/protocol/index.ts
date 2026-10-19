@@ -120,7 +120,7 @@ export interface Entry {
   size?: number;
   mtime?: string;
   linkTarget?: string;
-  unavailableReason?: "invalid_utf8";
+  unavailableReason?: "invalid_utf8" | "unsupported_reparse_point";
 }
 export interface Page<T> {
   items: T[];

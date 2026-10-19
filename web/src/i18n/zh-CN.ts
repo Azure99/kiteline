@@ -561,6 +561,7 @@ export const zhCN = {
     savePath: "文件路径",
     saveCopy: "另存",
     nameEncoding: "名称编码不支持",
+    unsupportedReparsePoint: "类型不支持",
     specialFile: "特殊文件",
     openLinkDirectory: "进入链接目录",
     emptyDirectory: "空目录",
