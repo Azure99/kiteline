@@ -20,9 +20,11 @@ The address bar records the device, workspace, tool and open file, repository an
 
 After a server upgrade, an already open page shows the Web and Server versions and pauses remote operations. Copy unsaved content before clicking "Reload page".
 
-Choose system, light or dark appearance from the owner menu or the login page. The default follows the system; a manual choice is saved in the current browser. Choose system again to resume automatic changes. Switching appearance preserves open file drafts, undo history and selections; terminal content keeps its dark colors.
+Choose system, light or dark appearance from Settings at the bottom of the left sidebar or the login page. The default follows the system; a manual choice is saved in the current browser. Choose system again to resume automatic changes. Switching appearance preserves open file drafts, undo history and selections; terminal content keeps its dark colors.
 
 Layout follows the available window width. Below 960 CSS pixels, it shows one terminal session at a time, without a terminal panel in Files or Git. At 960 pixels or wider, split terminals and the terminal panel are available.
+
+Device names and workspaces support context menus for the pointed object. On a phone, long-press an object or use its More button; device management is also available from More at the top right of device details. Editor content, diff content and terminal screens keep their existing text selection and copy interactions.
 
 ### Where settings are stored
 
@@ -47,7 +49,7 @@ Deleting a device removes its record, binding and scheduled-task summaries from 
 
 A workspace is a registered project directory on a device. Select the project directory in "Add workspace" on an online device. The registered path is the real directory after resolving symbolic links. Adding the same directory again returns the existing workspace.
 
-The workspace picker in the top bar filters all registered workspaces by name or path, including workspaces without terminal sessions. Matching is case-insensitive.
+Use Search beside Devices and workspaces to filter registered workspaces by name or path, including those without terminal sessions. Matching is case-insensitive. X clears the query and keeps search open; Search or Escape closes it and clears the filter. Navigation entries show names; full paths are available in the object menu and device details. The button at the left edge of the main area opens or closes navigation. On mobile, choosing a destination returns to the main area.
 
 Removing a workspace deletes only the registration, keeping directories and files. A workspace cannot be removed while the device is offline or it still has terminal sessions.
 
@@ -63,7 +65,7 @@ If the terminal remains unresponsive, close displays of the same session that yo
 
 ### Online reports
 
-When a program sends an OSC 9 or OSC 777 notification, or an unsolicited OSC 7501 blocked report, a marker appears beside its workspace in the desktop sidebar. On mobile, the workspace picker shows a count and lists sources by workspace when opened. Sessions can report without an open display. Each entry shows its source and server receipt time in your local timezone: `HH:mm` for the same day, or `MM-DD HH:mm` for another day. Only the latest report from each terminal is kept. It does not mean the program is still waiting.
+When a program sends an OSC 9 or OSC 777 notification, or an unsolicited OSC 7501 blocked report, a marker appears beside its workspace in the desktop sidebar. On mobile, the navigation button at the left edge of the main area shows a count; opening navigation lists sources by workspace. Sessions can report without an open display. Each entry shows its source and server receipt time in your local timezone: `HH:mm` for the same day, or `MM-DD HH:mm` for another day. Only the latest report from each terminal is kept. It does not mean the program is still waiting.
 
 Opening the list does not clear reports. Selecting a source returns to its original session. Returning from Files, switching or reselecting a terminal, reopening the page, and returning to a page showing that terminal activate it. When the server processes the activation request, it clears that terminal's existing report across clients; reports arriving afterward remain. Staying in the terminal does not automatically clear new reports. A companion terminal activates when selected, expanded or focused in its content area from outside; internal search or merely showing it alongside Files or Git does not clear reports.
 
@@ -293,7 +295,7 @@ The workbench opens HTTP services listening on local device ports, including Web
 
 ### Open a port
 
-Enter a port in the device's "Open port" dialog. Candidates are a snapshot and may include non-HTTP services; unlisted ports can be entered manually.
+Choose "Open port" beside the device name in the left navigation, then enter a port in that device's dialog. Open navigation first if it is collapsed. Candidates are a snapshot and may include non-HTTP services; unlisted ports can be entered manually.
 
 The service must listen on `127.0.0.1`, `::1`, `0.0.0.0` or `::` on the agent's machine or container. See [Run in a container](devices.en.md#run-in-a-container).
 

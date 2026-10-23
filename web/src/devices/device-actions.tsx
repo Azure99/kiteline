@@ -105,6 +105,17 @@ export function DeviceActionDialog({
               <DialogTitle>{title}</DialogTitle>
             </DialogHeader>
             <div className="space-y-3 overflow-auto p-5">
+              <p className="break-all text-xs text-muted-foreground">
+                {"workspace" in action ? (
+                  <>
+                    {action.device.name} / {action.workspace.name}
+                    <br />
+                    {action.workspace.path}
+                  </>
+                ) : (
+                  t(($) => $.devices.deviceIdentity, { id: action.device.id })
+                )}
+              </p>
               {renaming ? (
                 <label className="block space-y-2">
                   <span>{t(($) => $.common.name)}</span>

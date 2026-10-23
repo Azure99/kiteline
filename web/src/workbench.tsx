@@ -1,32 +1,23 @@
 import { newId } from "./lib/id";
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ComponentProps,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { trackViewport } from "./lib/viewport";
 import { useMobile } from "./lib/use-mobile";
 import { AppearanceOptions } from "./components/appearance-menu";
 import { LanguageOptions } from "./components/language-menu";
 import {
-  ChevronDown,
   LogOut,
-  MoreHorizontal,
-  Server,
   Terminal,
   X,
   Upload,
-  Globe,
   PanelLeftClose,
   PanelLeftOpen,
   Files as FilesIcon,
   CalendarClock,
   ArrowLeft,
+  ChevronRight,
+  LayoutDashboard,
+  Settings,
 } from "lucide-react";
 import type { Device } from "@kiteline/shared/protocol";
 import type { LoginSession } from "./auth";
@@ -44,14 +35,7 @@ import {
 } from "./lib/navigation";
 import { useDevices } from "./devices/use-devices";
 import { Button } from "./components/ui/button";
-import { Input } from "./components/ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "./components/ui/dialog";
+import { Dialog } from "./components/ui/dialog";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "./components/ui/menu";
 import { IconButton } from "./components/icon-button";
 import { BindingDialog } from "./devices/binding-dialog";
@@ -91,39 +75,6 @@ const GitTool = deferredView(async () => ({ default: (await import("./git/git"))
 const TasksPage = deferredView(async () => ({
   default: (await import("./tasks/tasks")).TasksPage,
 }));
-
-function WorkspacePickerContent(props: ComponentProps<typeof DeviceNavigation>) {
-  const { t } = useTranslation();
-  const [query, setQuery] = useState("");
-  const input = useRef<HTMLInputElement>(null);
-  return (
-    <>
-      <div className="flex shrink-0 items-center gap-2 px-4 pt-3">
-        <Input
-          ref={input}
-          value={query}
-          aria-label={t(($) => $.devices.filterWorkspaces)}
-          placeholder={t(($) => $.devices.filterWorkspacesHint)}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-        {query && (
-          <IconButton
-            label={t(($) => $.devices.clearWorkspaceFilter)}
-            onClick={() => {
-              setQuery("");
-              input.current?.focus();
-            }}
-          >
-            <X />
-          </IconButton>
-        )}
-      </div>
-      <div className="scroll-area overflow-auto">
-        <DeviceNavigation {...props} showPaths query={query} />
-      </div>
-    </>
-  );
-}
 
 export function Workbench({
   session,
@@ -181,9 +132,12 @@ export function Workbench({
   );
   const [binding, setBinding] = useState(false);
   const [cliSetup, setCliSetup] = useState(false);
-  const [picker, setPicker] = useState(false);
   const [openFiles, setOpenFiles] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [mobileNavigation, setMobileNavigation] = useState(false);
+  const navigationToggle = useRef<HTMLButtonElement>(null);
+  const routePath = currentPath();
+  useEffect(() => setMobileNavigation(false), [routePath]);
   const [directoryDevice, setDirectoryDevice] = useState<{ device: Device; origin: string }>();
   const [action, setAction] = useState<DeviceAction>();
   const [portDevice, setPortDevice] = useState<string>();
@@ -224,6 +178,7 @@ export function Workbench({
   );
   const recents = useRecentWorkspaces(route, devices, devicesLoaded, !!session);
   const device = devices.find((d) => d.id === route.deviceId);
+  const portTarget = devices.find((d) => d.id === portDevice);
   const directoryTarget = devices.find((item) => item.id === directoryDevice?.device.id);
   const directoryEnvironment =
     directoryTarget?.status === "online" ? directoryTarget.environment : undefined;
@@ -295,7 +250,7 @@ export function Workbench({
     setReports(new Map());
     setBinding(false);
     setCliSetup(false);
-    setPicker(false);
+    setMobileNavigation(false);
     setOpenFiles(false);
     setDirectoryDevice(undefined);
     setAction(undefined);
@@ -333,7 +288,7 @@ export function Workbench({
   }
   function choose(path: string) {
     navigate(path);
-    setPicker(false);
+    setMobileNavigation(false);
     setError(undefined);
   }
   const navigationReports = [...reports.values()]
@@ -352,12 +307,16 @@ export function Workbench({
       setActivationRequest((value) => value + 1);
     },
     devices,
+    drafts,
+    onPort: setPortDevice,
+    onAction: setAction,
+    onAdd: (device: Device) => setDirectoryDevice({ device, origin: currentPath() }),
     deviceId: device?.id,
     workspaceId: workspace?.id,
     tool: route.tool,
     onNavigate: choose,
     onBind: () => {
-      setPicker(false);
+      setMobileNavigation(false);
       setBinding(true);
     },
   };
@@ -479,6 +438,7 @@ export function Workbench({
         onNavigate={choose}
         onAdd={(device) => setDirectoryDevice({ device, origin: currentPath() })}
         onAction={setAction}
+        onPort={setPortDevice}
       />
     );
   }
@@ -487,214 +447,191 @@ export function Workbench({
     <>
       <div
         data-terminal-focus={terminalFocus.active ? "" : undefined}
-        className="fixed top-[var(--app-top,0px)] left-0 flex h-[var(--app-height,100vh)] w-full min-h-0 flex-col overflow-hidden bg-background"
+        className="fixed top-[var(--app-top,0px)] left-0 flex h-[var(--app-height,100vh)] w-full min-h-0 overflow-hidden bg-background"
       >
-        <header
-          hidden={terminalFocus.active}
-          className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3 max-desk:gap-1 max-desk:px-2"
+        <aside
+          id="device-sidebar"
+          hidden={terminalFocus.active || (mobile ? !mobileNavigation : !sidebarOpen)}
+          className="workbench-sidebar flex min-h-0 shrink-0 flex-col border-r border-border bg-muted"
         >
-          <div className="flex shrink-0 items-center gap-2">
-            <IconButton
-              className="max-desk:hidden"
-              label={
-                sidebarOpen ? t(($) => $.shell.collapseSidebar) : t(($) => $.shell.expandSidebar)
-              }
-              aria-expanded={sidebarOpen}
-              aria-controls="device-sidebar"
-              onClick={() => setSidebarOpen((open) => !open)}
-            >
-              {sidebarOpen ? <PanelLeftClose /> : <PanelLeftOpen />}
-            </IconButton>
-            <button
-              className="flex min-h-9 items-center justify-center gap-2 text-sm font-semibold max-desk:size-11"
-              aria-label={t(($) => $.home.open)}
-              onClick={() => choose("/devices")}
-            >
-              <span className="flex size-6 items-center justify-center rounded bg-primary text-primary-foreground">
-                <Terminal size={17} />
-              </span>
-              <span className="max-desk:hidden">Kiteline</span>
-            </button>
-          </div>
-          <Dialog open={picker} onOpenChange={setPicker}>
-            <DialogTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  className="min-w-0 flex-1 shrink justify-start px-2 text-left"
-                  aria-label={
-                    t(($) => $.shell.switchWorkspace) +
-                    (navigationReports.length
-                      ? ` · ${t(($) => $.reports.count, { count: navigationReports.length })}`
-                      : "")
-                  }
-                  title={workspace ? `${device?.name} / ${workspace.name}` : device?.name}
-                />
-              }
-            >
-              <Server className="max-[360px]:hidden" />
-              <span className="flex min-w-0 flex-col desk:flex-row desk:items-center desk:gap-2">
-                <span className="truncate">
-                  {workspace?.name ?? device?.name ?? t(($) => $.common.devices)}
-                </span>
-                {workspace && (
-                  <span className="truncate text-xs font-normal text-muted-foreground">
-                    {device?.name}
-                  </span>
-                )}
-              </span>
-              <ChevronDown />
-              {navigationReports.length > 0 && (
-                <span className="shrink-0 rounded-full bg-primary px-1.5 text-xs text-primary-foreground desk:hidden">
-                  {navigationReports.length}
-                </span>
-              )}
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>{t(($) => $.shell.deviceWorkspaces)}</DialogTitle>
-              </DialogHeader>
-              <WorkspacePickerContent {...navigationProps} />
-            </DialogContent>
-          </Dialog>
-          <IconButton
-            label={t(($) => $.schedules.title)}
-            aria-current={route.tasks ? "page" : undefined}
-            className={route.tasks ? "bg-muted text-primary" : undefined}
-            onClick={() => {
-              if (!route.tasks) choose(tasksPath({ filter: device?.id }));
-            }}
-          >
-            <CalendarClock />
-          </IconButton>
-          {device && (
-            <IconButton label={t(($) => $.shell.openPort)} onClick={() => setPortDevice(device.id)}>
-              <Globe />
-            </IconButton>
-          )}
-          <div className="hidden items-center gap-2 desk:flex">
-            {!!uploads.length && (
-              <Menu>
-                <MenuTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label={t(($) => $.shell.uploadStatus, { count: uploads.length })}
-                    />
-                  }
-                >
-                  <Upload />
-                </MenuTrigger>
-                <MenuContent>
-                  {uploads.map((item) => (
-                    <MenuItem key={item.id} onClick={() => setActiveUpload(item.id)}>
-                      <span className="min-w-0 break-all" title={item.label}>
-                        {item.label} · {item.files.length.toLocaleString(i18n.resolvedLanguage)}
-                      </span>
-                    </MenuItem>
-                  ))}
-                </MenuContent>
-              </Menu>
+          <div className="flex min-h-12 shrink-0 items-center gap-2 px-4">
+            <span className="flex size-6 items-center justify-center rounded bg-foreground text-sm font-semibold text-background">
+              k
+            </span>
+            <strong className="min-w-0 flex-1 text-sm">Kiteline</strong>
+            {mobile && mobileNavigation && (
+              <IconButton
+                autoFocus
+                label={t(($) => $.shell.returnToContent)}
+                onClick={() => {
+                  setMobileNavigation(false);
+                  requestAnimationFrame(() => navigationToggle.current?.focus());
+                }}
+              >
+                <ArrowLeft />
+              </IconButton>
             )}
           </div>
-          <Menu>
-            <MenuTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="relative"
-                  aria-label={t(($) => $.shell.ownerMenu)}
-                />
+          <div className="shrink-0 space-y-1 px-2 pb-4">
+            <Button
+              variant="ghost"
+              className={
+                "w-full justify-start " +
+                (!route.tasks && !route.deviceId ? "bg-background hover:bg-background" : "")
               }
+              aria-current={!route.tasks && !route.deviceId ? "page" : undefined}
+              onClick={() => choose("/devices")}
             >
-              <MoreHorizontal />
-              {!!uploads.length && (
-                <span
-                  className="absolute right-1 top-1 size-1.5 rounded-full bg-primary desk:hidden"
-                  aria-label={t(($) => $.shell.uploadStatus, { count: uploads.length })}
-                />
-              )}
-            </MenuTrigger>
-            <MenuContent>
-              <MenuItem onClick={() => setCliSetup(true)}>
-                <Terminal />
-                {t(($) => $.cliSetup.title)}
-              </MenuItem>
-              <MenuItem onClick={() => setOpenFiles(true)}>
-                <FilesIcon />
-                {t(($) => $.files.openFiles)}
-              </MenuItem>
-              <div className="my-1 border-t border-border" />
-              <LanguageOptions />
-              <div className="my-1 border-t border-border" />
-              <AppearanceOptions />
-              <div className="my-1 border-t border-border" />
-              <div className="desk:hidden">
+              <LayoutDashboard />
+              {t(($) => $.shell.home)}
+            </Button>
+            <Button
+              variant="ghost"
+              className={
+                "w-full justify-start " +
+                (route.tasks ? "bg-background text-primary hover:bg-background" : "")
+              }
+              aria-current={route.tasks ? "page" : undefined}
+              onClick={() => choose(tasksPath())}
+            >
+              <CalendarClock />
+              <span className="min-w-0 flex-1 truncate text-left">
+                {t(($) => $.schedules.title)}
+              </span>
+            </Button>
+          </div>
+          <div className="scroll-area min-h-0 flex-1 overflow-auto">
+            <DeviceNavigation {...navigationProps} />
+          </div>
+          <div className="shrink-0 border-t border-border p-2">
+            <Menu>
+              <MenuTrigger render={<Button variant="ghost" className="w-full justify-start" />}>
+                <Settings />
+                <span className="flex-1 text-left">{t(($) => $.shell.settings)}</span>
+                {!!uploads.length && (
+                  <span
+                    aria-label={t(($) => $.shell.uploadStatus, { count: uploads.length })}
+                    className="text-xs text-primary"
+                  >
+                    {uploads.length}
+                  </span>
+                )}
+              </MenuTrigger>
+              <MenuContent>
+                <MenuItem onClick={() => setCliSetup(true)}>
+                  <Terminal />
+                  {t(($) => $.cliSetup.title)}
+                </MenuItem>
+                <MenuItem
+                  onClick={() => {
+                    setMobileNavigation(false);
+                    setOpenFiles(true);
+                  }}
+                >
+                  <FilesIcon />
+                  {t(($) => $.files.openFiles)}
+                </MenuItem>
+                <div className="my-1 border-t border-border" />
+                <LanguageOptions />
+                <div className="my-1 border-t border-border" />
+                <AppearanceOptions />
+                <div className="my-1 border-t border-border" />
                 {uploads.map((item) => (
                   <MenuItem key={item.id} onClick={() => setActiveUpload(item.id)}>
                     <Upload />
-                    <span className="min-w-0 break-all">
+                    <span className="min-w-0 break-all" title={item.label}>
                       {item.label} · {item.files.length.toLocaleString(i18n.resolvedLanguage)}
                     </span>
                   </MenuItem>
                 ))}
-              </div>
-              <MenuItem onClick={() => void logout()}>
-                <LogOut />
-                {t(($) => $.shell.logout)}
-              </MenuItem>
-            </MenuContent>
-          </Menu>
-        </header>
-        <ReleaseNotice />
-        <div className="flex min-h-0 flex-1">
-          <aside
-            id="device-sidebar"
-            hidden={!sidebarOpen || terminalFocus.active}
-            className="desktop-rail scroll-area shrink-0 overflow-auto border-r border-border bg-muted"
+                <MenuItem onClick={() => void logout()}>
+                  <LogOut />
+                  {t(($) => $.shell.logout)}
+                </MenuItem>
+              </MenuContent>
+            </Menu>
+          </div>
+        </aside>
+        <main hidden={mobile && mobileNavigation} className="flex min-w-0 flex-1 flex-col">
+          <ReleaseNotice />
+          <header
+            hidden={terminalFocus.active}
+            className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border px-1 max-desk:min-h-11"
           >
-            <DeviceNavigation {...navigationProps} />
-          </aside>
-          <main className="flex min-w-0 flex-1 flex-col">
-            {route.valid && !route.tasks && device && (!route.workspaceId || workspace) && (
-              <AgentReleaseNotice key={`agent-release:${device.id}`} device={device} />
+            <IconButton
+              ref={navigationToggle}
+              label={
+                (mobile || !sidebarOpen
+                  ? t(($) => $.shell.expandSidebar)
+                  : t(($) => $.shell.collapseSidebar)) +
+                (mobile && navigationReports.length
+                  ? " · " + t(($) => $.reports.count, { count: navigationReports.length })
+                  : "")
+              }
+              aria-expanded={mobile ? mobileNavigation : sidebarOpen}
+              aria-controls="device-sidebar"
+              className="relative"
+              onClick={() => (mobile ? setMobileNavigation(true) : setSidebarOpen((open) => !open))}
+            >
+              {mobile || !sidebarOpen ? <PanelLeftOpen /> : <PanelLeftClose />}
+              {mobile && navigationReports.length > 0 && (
+                <span className="absolute top-0 right-0 rounded-full bg-primary px-1 text-[10px] text-primary-foreground">
+                  {navigationReports.length}
+                </span>
+              )}
+            </IconButton>
+            {workspace && (
+              <span className="hidden min-w-0 max-w-40 items-center gap-2 text-xs text-muted-foreground desk:flex">
+                <span className="truncate">{device?.name}</span>
+                <ChevronRight size={12} className="shrink-0" />
+              </span>
             )}
-            {!!(error || connectionError) && (
-              <div
-                role="alert"
-                className="workbench-notice flex shrink-0 items-start gap-2 border-b border-border bg-danger-soft px-4 py-2 text-sm text-destructive"
-              >
-                <div className="min-w-0 flex-1 break-words">
-                  {error?.downloadPath
-                    ? t(($) => $.shell.downloadFailed, {
-                        path: error.downloadPath,
-                        error: errorMessage(error.cause),
-                      })
-                    : errorMessage(error ? error.cause : connectionError)}
-                  <ErrorDetails error={error ? error.cause : connectionError} />
-                </div>
-                {!!error && (
-                  <IconButton
-                    label={t(($) => $.common.dismiss)}
-                    onClick={() => setError(undefined)}
-                  >
-                    <X />
-                  </IconButton>
-                )}
+            <strong
+              className="min-w-0 flex-1 truncate text-xs font-medium"
+              title={workspace?.name ?? device?.name}
+            >
+              {route.tasks
+                ? t(($) => $.schedules.title)
+                : (workspace?.name ?? device?.name ?? "Kiteline")}
+            </strong>
+          </header>
+          {route.valid && !route.tasks && device && (!route.workspaceId || workspace) && (
+            <AgentReleaseNotice key={`agent-release:${device.id}`} device={device} />
+          )}
+          {!!(error || connectionError) && (
+            <div
+              role="alert"
+              className="workbench-notice flex shrink-0 items-start gap-2 border-b border-border bg-danger-soft px-4 py-2 text-sm text-destructive"
+            >
+              <div className="min-w-0 flex-1 break-words">
+                {error?.downloadPath
+                  ? t(($) => $.shell.downloadFailed, {
+                      path: error.downloadPath,
+                      error: errorMessage(error.cause),
+                    })
+                  : errorMessage(error ? error.cause : connectionError)}
+                <ErrorDetails error={error ? error.cause : connectionError} />
               </div>
-            )}
-            {renderMain()}
-          </main>
-        </div>
+              {!!error && (
+                <IconButton label={t(($) => $.common.dismiss)} onClick={() => setError(undefined)}>
+                  <X />
+                </IconButton>
+              )}
+            </div>
+          )}
+          {renderMain()}
+        </main>
       </div>
       <OpenFiles store={drafts} devices={devices} open={openFiles} onOpenChange={setOpenFiles} />
       <Dialog open={cliSetup} onOpenChange={setCliSetup}>
         {cliSetup && <CliSetupDialog devices={devices} />}
       </Dialog>
-      {device && portDevice === device.id && (
-        <PortDialog key={device.id} device={device} onClose={() => setPortDevice(undefined)} />
+      {portTarget && (
+        <PortDialog
+          key={portTarget.id}
+          device={portTarget}
+          onClose={() => setPortDevice(undefined)}
+        />
       )}
       <Dialog open={binding} onOpenChange={setBinding}>
         {binding && (

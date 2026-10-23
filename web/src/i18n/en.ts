@@ -230,14 +230,16 @@ export const en = {
     invalidCredentials: "Check your sign-in credentials.",
   },
   shell: {
+    home: "Workbench",
+    settings: "Settings",
+    returnToContent: "Back to workspace content",
     collapseSidebar: "Collapse device sidebar",
     expandSidebar: "Expand device sidebar",
-    switchWorkspace: "Switch device and workspace",
     deviceWorkspaces: "Devices and workspaces",
     openPort: "Open port",
+    openDevicePort: "Open port · Device: {{name}}",
     uploadStatus_one: "{{count, number}} upload",
     uploadStatus_other: "{{count, number}} uploads",
-    ownerMenu: "Owner menu",
     logout: "Sign out",
     discardLogout: "Discard unsaved changes and sign out?",
     pageMissing: "Page not found",
@@ -280,6 +282,7 @@ export const en = {
   devices: {
     filterWorkspaces: "Filter workspaces",
     filterWorkspacesHint: "Workspace name or path",
+    closeWorkspaceFilter: "Close workspace filter",
     clearWorkspaceFilter: "Clear workspace filter",
     noMatchingWorkspaces: "No matching workspaces",
     sessionObservation: "Session observation details",
@@ -356,10 +359,9 @@ export const en = {
     deleteHint:
       "Delete this device, its binding records and task summaries, and disconnect access. Tasks and local data stay on the device. Bind again to reconnect.",
     removeHint:
-      "Only the workspace registration is removed. Directories and files stay on the device.",
+      "End the terminal sessions in this workspace first; closing a display does not end its session. Only the registration is removed. The directory and files remain on the device.",
     remove: "Remove",
     noDevices: "No devices connected",
-    deviceActions: "Device actions",
     runningTerminals: "Running or starting terminals",
     addWorkspace: "Add workspace",
     absolutePath: "Absolute directory path",

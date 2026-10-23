@@ -269,8 +269,13 @@ body {
 .status-dot[data-status="online"] {
   background: #438568;
 }
-.desktop-rail {
-  width: 210px;
+.workbench-sidebar {
+  width: 228px;
+}
+@media (min-width: 960px) and (max-width: 1199px) {
+  .workbench-sidebar {
+    width: 196px;
+  }
 }
 .tool-tab {
   min-width: 90px;
@@ -438,6 +443,19 @@ body {
 .split-divider[data-separator="active"] {
   background: var(--primary);
 }
+@media (hover: hover) and (pointer: fine) {
+  .workspace-navigation-more {
+    display: none;
+  }
+  .row-more {
+    opacity: 0;
+  }
+  .group:hover .row-more,
+  .group:focus-within .row-more,
+  .row-more[data-popup-open] {
+    opacity: 1;
+  }
+}
 @variant desk {
   .terminal-aux {
     display: none;
@@ -514,8 +532,9 @@ body {
     flex: 1;
     min-height: 44px;
   }
-  .desktop-rail {
-    display: none;
+  .workbench-sidebar {
+    width: 100%;
+    border-right: 0;
   }
 }
 

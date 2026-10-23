@@ -1,39 +1,59 @@
 import { useTranslation } from "react-i18next";
-import { ChevronDown, ChevronRight, Folder, Plus, Server } from "lucide-react";
-import { useState } from "react";
+import { ChevronDown, ChevronRight, Circle, Globe, Plus, Search, Server, X } from "lucide-react";
+import { useRef, useState } from "react";
 import type { Device } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
 import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
 import { ReportContent, type ReceivedReport } from "../terminal/reports";
 import { devicePath, workspaceDestination, type WorkspaceTool } from "../lib/navigation";
+import { isDirty, useDrafts, type DraftStore } from "../files/drafts";
+import { useMobile } from "../lib/use-mobile";
+import type { DeviceAction } from "./device-actions";
+import { DeviceMenu } from "./device-menu";
+import { WorkspaceMenu } from "./workspace-menu";
 
 export function DeviceNavigation({
   devices,
   deviceId,
   workspaceId,
   tool,
-  showPaths = false,
-  query = "",
+  drafts,
   reports,
   onReport,
   onNavigate,
   onBind,
+  onPort,
+  onAdd,
+  onAction,
 }: {
   devices: Device[];
   deviceId?: string;
   workspaceId?: string;
   tool?: WorkspaceTool;
-  showPaths?: boolean;
-  query?: string;
+  drafts: DraftStore;
   reports: ReceivedReport[];
   onReport: (report: ReceivedReport) => void;
   onNavigate: (path: string) => void;
   onBind: () => void;
+  onPort: (deviceId: string) => void;
+  onAdd: (device: Device) => void;
+  onAction: (action: DeviceAction) => void;
 }) {
   const { t } = useTranslation();
-
+  const mobile = useMobile();
+  const openDrafts = useDrafts(drafts);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const searchButton = useRef<HTMLButtonElement>(null);
+  const input = useRef<HTMLInputElement>(null);
   const [collapsed, setCollapsed] = useState<string[]>([]);
+  function closeSearch() {
+    setSearchOpen(false);
+    setQuery("");
+    searchButton.current?.focus();
+  }
   const filter = query.trim().toLowerCase();
   const matches = devices
     .map((device) => ({
@@ -47,12 +67,12 @@ export function DeviceNavigation({
     .filter(({ workspaces }) => !filter || workspaces.length > 0);
   return (
     <nav aria-label={t(($) => $.shell.deviceWorkspaces)} className="space-y-1 p-2">
-      <div className="flex items-center justify-between px-2 py-2">
+      <div className="flex items-center justify-between gap-1 px-1">
         <button
-          className="text-xs font-medium text-muted-foreground"
+          className="flex-1 text-left text-xs font-medium text-muted-foreground"
           onClick={() => onNavigate("/devices")}
         >
-          {t(($) => $.common.devices)}
+          {t(($) => $.shell.deviceWorkspaces)}
         </button>
         <IconButton
           label={t(($) => $.devices.bind)}
@@ -62,7 +82,52 @@ export function DeviceNavigation({
         >
           <Plus />
         </IconButton>
+        <IconButton
+          ref={searchButton}
+          label={t(($) =>
+            searchOpen ? $.devices.closeWorkspaceFilter : $.devices.filterWorkspaces,
+          )}
+          aria-expanded={searchOpen}
+          aria-controls="workspace-filter"
+          onClick={() => {
+            if (searchOpen) closeSearch();
+            else setSearchOpen(true);
+          }}
+        >
+          <Search />
+        </IconButton>
       </div>
+      {searchOpen && (
+        <div className="flex items-center gap-1 pb-2">
+          <Input
+            id="workspace-filter"
+            ref={input}
+            autoFocus
+            value={query}
+            aria-label={t(($) => $.devices.filterWorkspaces)}
+            placeholder={t(($) => $.devices.filterWorkspacesHint)}
+            className="min-w-0 text-xs"
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.stopPropagation();
+                closeSearch();
+              }
+            }}
+          />
+          {query && (
+            <IconButton
+              label={t(($) => $.devices.clearWorkspaceFilter)}
+              onClick={() => {
+                setQuery("");
+                input.current?.focus();
+              }}
+            >
+              <X />
+            </IconButton>
+          )}
+        </div>
+      )}
       {filter && matches.length === 0 && (
         <p className="px-2 py-4 text-sm text-muted-foreground">
           {t(($) => $.devices.noMatchingWorkspaces)}
@@ -73,24 +138,12 @@ export function DeviceNavigation({
           <div
             className={`flex items-center rounded ${deviceId === d.id && !tool ? "bg-primary-soft" : ""}`}
           >
-            <button
-              className="flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded px-2 text-left text-sm hover:bg-muted max-desk:min-h-11"
-              onClick={() => onNavigate(devicePath(d.id))}
-            >
-              <span className="status-dot" data-status={d.status} />
-              <Server size={15} className="shrink-0 text-muted-foreground" />
-              <span
-                className="min-w-0 flex-1 truncate max-desk:whitespace-normal max-desk:break-all"
-                title={d.name}
-              >
-                {d.name}
-              </span>
-            </button>
             <IconButton
               label={t(
                 ($) => (collapsed.includes(d.id) ? $.common.expandNamed : $.common.collapseNamed),
                 { name: d.name },
               )}
+              className="size-6 max-desk:w-8"
               aria-expanded={!collapsed.includes(d.id)}
               onClick={() =>
                 setCollapsed((previous) =>
@@ -102,45 +155,81 @@ export function DeviceNavigation({
             >
               {collapsed.includes(d.id) ? <ChevronRight /> : <ChevronDown />}
             </IconButton>
+            <DeviceMenu
+              device={d}
+              onNavigate={onNavigate}
+              onAdd={onAdd}
+              onAction={onAction}
+              onPort={onPort}
+            >
+              <button
+                className={`flex min-h-9 min-w-0 flex-1 items-center gap-1.5 rounded text-left text-xs max-desk:min-h-11 max-desk:text-sm ${deviceId === d.id && !tool ? "" : "hover:bg-muted"}`}
+                onClick={() => onNavigate(devicePath(d.id))}
+              >
+                <Server size={15} className="shrink-0 text-muted-foreground" />
+                <span
+                  className="min-w-0 flex-1 truncate max-desk:whitespace-normal max-desk:break-all"
+                  title={d.name}
+                >
+                  {d.name}
+                </span>
+                <span
+                  className="status-dot"
+                  data-status={d.status}
+                  aria-label={t(($) => $.common[d.status])}
+                />
+              </button>
+            </DeviceMenu>
+            <IconButton
+              label={t(($) => $.shell.openDevicePort, { name: d.name })}
+              onClick={() => onPort(d.id)}
+            >
+              <Globe />
+            </IconButton>
           </div>
           {!collapsed.includes(d.id) &&
             workspaces.map((w) => {
               const sources = reports.filter(
                 (report) => report.deviceId === d.id && report.workspaceId === w.id,
               );
+              const open = () =>
+                onNavigate(
+                  workspaceDestination({ deviceId: d.id, workspaceId: w.id }, tool ?? "terminal"),
+                );
               return (
                 <div key={w.id}>
-                  <div className="flex items-center">
-                    <button
-                      className={`flex min-h-9 min-w-0 flex-1 items-center gap-2 rounded py-1.5 pl-8 pr-2 text-left text-xs hover:bg-muted max-desk:min-h-11 max-desk:text-sm ${deviceId === d.id && workspaceId === w.id ? "bg-primary-soft text-primary" : "text-muted-foreground"}`}
-                      onClick={() =>
-                        onNavigate(
-                          workspaceDestination(
-                            { deviceId: d.id, workspaceId: w.id },
-                            tool ?? "terminal",
-                          ),
-                        )
-                      }
+                  <div className="group flex items-center">
+                    <WorkspaceMenu
+                      navigation
+                      device={d}
+                      workspace={w}
+                      onOpen={open}
+                      onAction={onAction}
                     >
-                      <Folder size={14} className="shrink-0" />
-                      <span className="min-w-0 flex-1" title={w.path}>
-                        <span
-                          className={
-                            showPaths
-                              ? "block break-words"
-                              : "block truncate max-desk:whitespace-normal max-desk:break-all"
-                          }
-                        >
+                      <button
+                        aria-current={
+                          deviceId === d.id && workspaceId === w.id ? "page" : undefined
+                        }
+                        className={`flex min-h-9 min-w-0 flex-1 items-center gap-2 rounded border-l-2 pl-3 pr-2 text-left text-sm max-desk:min-h-11 ${deviceId === d.id && workspaceId === w.id ? "border-primary bg-primary-soft text-primary" : "border-transparent hover:bg-muted"}`}
+                        onClick={open}
+                      >
+                        <span className="min-w-0 flex-1 truncate" title={w.name}>
                           {w.name}
                         </span>
-                        {showPaths && (
-                          <span className="block break-all text-xs font-normal text-muted-foreground">
-                            {w.path}
-                          </span>
+                        {openDrafts.some(
+                          (draft) =>
+                            draft.deviceId === d.id && draft.workspaceId === w.id && isDirty(draft),
+                        ) && (
+                          <Circle
+                            size={7}
+                            fill="currentColor"
+                            aria-label={t(($) => $.files.unsaved)}
+                          />
                         )}
-                      </span>
-                    </button>
-                    {!showPaths && sources.length > 0 && (
+                      </button>
+                    </WorkspaceMenu>
+
+                    {!mobile && sources.length > 0 && (
                       <Menu>
                         <MenuTrigger
                           render={
@@ -169,7 +258,7 @@ export function DeviceNavigation({
                       </Menu>
                     )}
                   </div>
-                  {showPaths &&
+                  {mobile &&
                     sources.map((report) => (
                       <button
                         key={report.sessionId}

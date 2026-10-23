@@ -24,11 +24,17 @@ export function MenuContent({ children }: { children: React.ReactNode }) {
   return (
     <Primitive.Portal>
       <Primitive.Positioner sideOffset={4} align="end" className="z-50">
-        <Primitive.Popup className="menu-content max-h-[var(--available-height)] min-w-40 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-md border border-border bg-background p-1 shadow-lg outline-none">
-          {children}
-        </Primitive.Popup>
+        <MenuPopup>{children}</MenuPopup>
       </Primitive.Positioner>
     </Primitive.Portal>
+  );
+}
+export function MenuPopup(props: Primitive.Popup.Props) {
+  return (
+    <Primitive.Popup
+      className="menu-content max-h-[var(--available-height)] min-w-40 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-md border border-border bg-background p-1 shadow-lg outline-none"
+      {...props}
+    />
   );
 }
 export function MenuItem(props: Primitive.Item.Props) {
