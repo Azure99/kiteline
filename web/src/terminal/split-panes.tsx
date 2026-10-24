@@ -1,24 +1,14 @@
-import { ApplicationTitle } from "./application-title";
 import { useTranslation } from "react-i18next";
 import { useCallback, useLayoutEffect, useRef, type ReactNode } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
-import { Maximize2, SquareTerminal, X } from "lucide-react";
-import { IconButton } from "../components/icon-button";
 import type { TerminalActions, TerminalCapabilities } from "./terminal-view";
 import { TerminalView } from "./lazy-terminal-view";
-import { members, parentSplit, type TerminalGroup, type TerminalNode } from "./groups";
-import { memberTarget, type useTerminalDrag } from "./group-tabs";
+import { members, type TerminalGroup, type TerminalNode } from "./groups";
 
 export interface PaneEvents {
-  title(id: string): string | undefined;
   actions(id: string, value: TerminalActions | null): void;
   capabilities(id: string, value: TerminalCapabilities | undefined): void;
   focus(id: string): void;
-  close(id: string): void;
-  maximize(): void;
-  menu(id: string): ReactNode;
-  name(id: string, fallback?: string): string;
-  drag: ReturnType<typeof useTerminalDrag>;
 }
 export function SplitPanes({
   deviceId,
@@ -103,7 +93,7 @@ export function SplitPanes({
           index > 0 && (
             <Separator
               key={`divider:${child.id}`}
-              className="split-divider"
+              className="split-divider terminal-divider"
               aria-label={t(($) => $.terminal.resize)}
             />
           ),
@@ -158,8 +148,6 @@ export function SplitPanes({
                   workspaceId={workspaceId}
                   workspacePath={workspacePath}
                   active={id === owner.active}
-                  group={owner}
-                  showHeader={!mobile && !owner.maximized && members(owner).length > 1}
                   hidden={!shown}
                   searchHost={searchHost}
                   events={events}
@@ -190,8 +178,6 @@ function TerminalPane({
   workspaceId,
   workspacePath,
   active,
-  group,
-  showHeader,
   hidden,
   searchHost,
   events,
@@ -201,24 +187,13 @@ function TerminalPane({
   workspaceId: string;
   workspacePath: string;
   active: boolean;
-  group: TerminalGroup;
-  showHeader: boolean;
   hidden: boolean;
   searchHost: HTMLDivElement | null;
   events: PaneEvents;
 }) {
-  const { t } = useTranslation();
-  const direction = parentSplit(group.root, id)?.direction ?? "horizontal";
-  const name = events.name(
-    id,
-    t(($) => $.common.terminal),
-  );
-  const title = events.title(id);
-  const actions = useRef<TerminalActions>(null);
   const register = events.actions;
   const setActions = useCallback(
     (value: TerminalActions | null) => {
-      actions.current = value;
       register(id, value);
     },
     [id, register],
@@ -226,53 +201,10 @@ function TerminalPane({
   return (
     <div
       className={hidden ? "hidden" : "terminal-pane flex min-h-0 min-w-0 flex-1 flex-col"}
-      data-active={active}
       data-session-id={id}
       onPointerDown={() => events.focus(id)}
       onFocusCapture={() => events.focus(id)}
     >
-      {showHeader && (
-        <header
-          className="terminal-pane-header flex min-h-8 shrink-0 items-center gap-1 px-2"
-          data-direction={direction}
-          data-drop-before={events.drag.target?.key === `${id}:before`}
-          data-drop-after={events.drag.target?.key === `${id}:after`}
-          onDragOver={(event) =>
-            events.drag.over(event, memberTarget(event, group, id, direction === "horizontal"))
-          }
-          onDrop={(event) =>
-            events.drag.drop(event, memberTarget(event, group, id, direction === "horizontal"))
-          }
-        >
-          <button
-            draggable
-            onDragStart={(event) => events.drag.start(event, id)}
-            onDragEnd={events.drag.end}
-            onClick={() => {
-              events.focus(id);
-              actions.current?.focus();
-            }}
-            className="flex min-w-0 flex-1 items-center gap-2 text-left text-xs"
-            title={name}
-          >
-            <SquareTerminal size={13} className="shrink-0" />
-            <span className={title ? "shrink-0 max-w-[40%] truncate" : "truncate"}>{name}</span>
-            <ApplicationTitle title={title} />
-          </button>
-          <IconButton label={t(($) => $.terminal.maximize)} onClick={events.maximize}>
-            <Maximize2 />
-          </IconButton>
-          {events.menu(id)}
-          <IconButton
-            label={t(($) => $.terminal.closeNamed, {
-              name,
-            })}
-            onClick={() => events.close(id)}
-          >
-            <X />
-          </IconButton>
-        </header>
-      )}
       <TerminalView
         ref={setActions}
         onCapabilities={events.capabilities}

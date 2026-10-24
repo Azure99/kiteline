@@ -16,7 +16,10 @@ import {
   ArrowUp,
   ChevronDown,
   ChevronUp,
+  ClipboardPaste,
+  Copy,
   RefreshCw,
+  TextSelect,
   X,
 } from "lucide-react";
 import { TerminalDisplay, type DisplayState } from "./display";
@@ -34,6 +37,10 @@ import { cn } from "../lib/utils";
 import { terminalKeyboard } from "./keyboard-input";
 import { releasedModifiers, type Modifiers } from "./auxiliary-input";
 import { TerminalSearch } from "./terminal-search";
+import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
+import { ContextMenuContent } from "../components/ui/context-menu";
+import { MenuItem } from "../components/ui/menu";
+import { copyText } from "../lib/clipboard";
 import {
   Dialog,
   DialogContent,
@@ -105,6 +112,8 @@ export function TerminalView({
   const [modifiers, setModifiers] = useState<Modifiers>(releasedModifiers);
   const [expanded, setExpanded] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [contextSelection, setContextSelection] = useState("");
+  const contextMenu = useRef<ContextMenuPrimitive.Root.Actions>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   useLayoutEffect(() => {
     if (!searchOpen || !searchActive || !searchHost) return;
@@ -115,7 +124,11 @@ export function TerminalView({
     };
   }, [searchOpen, searchActive, searchHost]);
   const mobile = useMobile();
+  const canPaste = state.status === "ready" && typeof navigator.clipboard?.readText === "function";
   const input = useRef<() => void>(() => {});
+  useEffect(() => {
+    if (mobile) contextMenu.current?.close();
+  }, [mobile]);
   useEffect(() => {
     if (!mobile) display.current?.releaseModifiers();
   }, [mobile]);
@@ -245,6 +258,13 @@ export function TerminalView({
     try {
       current?.focus();
       current?.paste(await navigator.clipboard.readText());
+    } catch (error) {
+      setNotice(error);
+    }
+  }
+  async function copySelection() {
+    try {
+      await copyText(contextSelection);
     } catch (error) {
       setNotice(error);
     }
@@ -413,7 +433,31 @@ export function TerminalView({
           state.status === "ended" && "flex-col",
         )}
       >
-        <div ref={element} className="terminal-canvas min-h-0 min-w-0 flex-1" />
+        <ContextMenuPrimitive.Root
+          actionsRef={contextMenu}
+          disabled={mobile}
+          onOpenChange={(open) => {
+            if (open) setContextSelection(terminal?.getSelection() ?? "");
+          }}
+        >
+          <ContextMenuPrimitive.Trigger
+            render={<div ref={element} className="terminal-canvas min-h-0 min-w-0 flex-1" />}
+          />
+          <ContextMenuContent>
+            <MenuItem disabled={!contextSelection} onClick={() => void copySelection()}>
+              <Copy />
+              {t(($) => $.terminal.copySelected)}
+            </MenuItem>
+            <MenuItem disabled={!canPaste} onClick={() => void paste()}>
+              <ClipboardPaste />
+              {t(($) => $.terminal.paste)}
+            </MenuItem>
+            <MenuItem disabled={!terminal} onClick={() => terminal?.selectAll()}>
+              <TextSelect />
+              {t(($) => $.terminal.selectAll)}
+            </MenuItem>
+          </ContextMenuContent>
+        </ContextMenuPrimitive.Root>
         {searchOpen &&
           searchHost &&
           createPortal(
@@ -434,11 +478,7 @@ export function TerminalView({
             deviceId={deviceId}
             workspaceId={workspaceId}
             workspacePath={workspacePath}
-            onPaste={
-              state.status === "ready" && typeof navigator.clipboard?.readText === "function"
-                ? paste
-                : undefined
-            }
+            onPaste={canPaste ? paste : undefined}
             onTap={() => {
               input.current();
             }}

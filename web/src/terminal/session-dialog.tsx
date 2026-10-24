@@ -19,6 +19,8 @@ export interface SessionAction {
 }
 export function SessionDialog({
   action,
+  identity,
+  mutationDisabled,
   busy,
   error,
   device,
@@ -28,6 +30,8 @@ export function SessionDialog({
   onChange,
 }: {
   action: SessionAction;
+  identity: string;
+  mutationDisabled: boolean;
   busy: boolean;
   error?: unknown;
   device: Device;
@@ -56,6 +60,11 @@ export function SessionDialog({
                 ? t(($) => $.terminal.cliAttach)
                 : t(($) => $.terminal.endSession)}
           </DialogTitle>
+          {kind !== "attach" && (
+            <p className="mt-2 text-xs break-all text-muted-foreground">
+              {workspace.name} / {identity}
+            </p>
+          )}
         </DialogHeader>
         {kind === "attach" ? (
           <RemoteAttach
@@ -68,7 +77,15 @@ export function SessionDialog({
             }}
           />
         ) : (
-          <>
+          <form
+            className="flex min-h-0 flex-col"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void onChange(kind, action.session.id, name).then((done) => {
+                if (done) onClose();
+              });
+            }}
+          >
             <div className="scroll-area min-h-0 space-y-3 overflow-auto p-5">
               {kind === "rename" ? (
                 <Input
@@ -90,22 +107,18 @@ export function SessionDialog({
               )}
             </div>
             <DialogFooter>
-              <Button variant="ghost" disabled={busy} onClick={onClose}>
+              <Button type="button" variant="ghost" disabled={busy} onClick={onClose}>
                 {t(($) => $.common.cancel)}
               </Button>
               <Button
                 variant={kind === "end" ? "destructive" : "default"}
-                disabled={busy || (kind === "rename" && !name.trim())}
-                onClick={() => {
-                  void onChange(kind, action.session.id, name).then((done) => {
-                    if (done) onClose();
-                  });
-                }}
+                disabled={mutationDisabled || (kind === "rename" && !name.trim())}
+                type="submit"
               >
                 {kind === "rename" ? t(($) => $.common.save) : t(($) => $.terminal.end)}
               </Button>
             </DialogFooter>
-          </>
+          </form>
         )}
       </DialogContent>
     </Dialog>

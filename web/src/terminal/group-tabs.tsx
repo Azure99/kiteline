@@ -1,19 +1,20 @@
 import { useTranslation } from "react-i18next";
-import { useEffect, useRef, useState, type DragEvent } from "react";
+import {
+  Fragment,
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { SquareTerminal } from "lucide-react";
 import { members, type MemberPosition, type TerminalGroup, type TerminalLayout } from "./groups";
 
 type Target = { groupId?: string; position?: MemberPosition; key: string };
-export function memberTarget(
-  event: DragEvent,
-  group: TerminalGroup,
-  id: string,
-  horizontal = true,
-): Target {
+function memberTarget(event: DragEvent, group: TerminalGroup, id: string): Target {
   const bounds = event.currentTarget.getBoundingClientRect();
-  const after = horizontal
-    ? event.clientX > bounds.left + bounds.width / 2
-    : event.clientY > bounds.top + bounds.height / 2;
+  const after = event.clientX > bounds.left + bounds.width / 2;
   return {
     groupId: group.id,
     position: { anchor: id, side: after ? "after" : "before" },
@@ -65,25 +66,27 @@ export function GroupTabs({
   canDrag,
   drag,
   onSelect,
+  objectMenu,
 }: {
   layout: TerminalLayout;
   name(id: string): string;
   canDrag(id: string): boolean;
   drag: ReturnType<typeof useTerminalDrag>;
   onSelect(id: string): void;
+  objectMenu(id: string, trigger: ReactElement): ReactNode;
 }) {
   const { t } = useTranslation();
+  const active = layout.groups.find((group) => group.id === layout.current)?.active;
 
-  if (!layout.groups.length) return null;
   return (
-    <div className="terminal-groups scroll-area flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
-      {layout.groups.map((group, index) => {
+    <div className="terminal-groups scroll-area flex min-w-0 shrink items-center gap-2 overflow-x-auto">
+      {layout.groups.map((group) => {
+        const index = layout.groups.indexOf(group);
         const target = { groupId: group.id, key: group.id };
         return (
           <div
             key={group.id}
             className="terminal-group flex shrink-0 items-center rounded border"
-            data-current={group.id === layout.current}
             data-drop={drag.target?.key === group.id}
             aria-label={t(($) => $.terminal.group, { number: index + 1 })}
             onDragOver={(event) => drag.over(event, target)}
@@ -91,30 +94,35 @@ export function GroupTabs({
           >
             {members(group).map((id) => {
               return (
-                <button
-                  key={id}
-                  type="button"
-                  className="terminal-member flex min-h-7 max-w-44 items-center gap-1.5 px-2 text-xs max-desk:min-h-11 max-desk:min-w-11"
-                  data-selected={group.id === layout.current && id === group.active}
-                  data-drop-before={drag.target?.key === `${id}:before`}
-                  data-drop-after={drag.target?.key === `${id}:after`}
-                  onClick={() => onSelect(id)}
-                  draggable={canDrag(id)}
-                  onDragStart={(event) => drag.start(event, id)}
-                  onDragEnd={drag.end}
-                  onDragOver={(event) => {
-                    event.stopPropagation();
-                    drag.over(event, memberTarget(event, group, id));
-                  }}
-                  onDrop={(event) => {
-                    event.stopPropagation();
-                    drag.drop(event, memberTarget(event, group, id));
-                  }}
-                  title={name(id)}
-                >
-                  <SquareTerminal size={13} className="shrink-0" />
-                  <span className="truncate">{name(id)}</span>
-                </button>
+                <Fragment key={id}>
+                  {objectMenu(
+                    id,
+                    <button
+                      type="button"
+                      className="terminal-member flex min-h-7 max-w-44 items-center gap-1.5 px-2 text-xs max-desk:min-h-11 max-desk:min-w-11"
+                      data-selected={group.id === layout.current && id === group.active}
+                      aria-pressed={id === active}
+                      data-drop-before={drag.target?.key === `${id}:before`}
+                      data-drop-after={drag.target?.key === `${id}:after`}
+                      onClick={() => onSelect(id)}
+                      draggable={canDrag(id)}
+                      onDragStart={(event) => drag.start(event, id)}
+                      onDragEnd={drag.end}
+                      onDragOver={(event) => {
+                        event.stopPropagation();
+                        drag.over(event, memberTarget(event, group, id));
+                      }}
+                      onDrop={(event) => {
+                        event.stopPropagation();
+                        drag.drop(event, memberTarget(event, group, id));
+                      }}
+                      title={name(id)}
+                    >
+                      <SquareTerminal size={13} className="shrink-0" />
+                      <span className="truncate">{name(id)}</span>
+                    </button>,
+                  )}
+                </Fragment>
               );
             })}
           </div>

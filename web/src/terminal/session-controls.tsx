@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { useState, type DragEvent } from "react";
+import type { ReactNode } from "react";
 import { Check, ChevronDown, Plus, RefreshCw, SquareTerminal } from "lucide-react";
 import type { Session, Shortcut } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
@@ -11,32 +11,29 @@ import { ShortcutIcon } from "./shortcut-icon";
 export function SessionPicker({
   sessions,
   selected,
-  uncertain,
   groups = [],
   retained = [],
   name,
-  iconOnly = false,
   refreshDisabled,
   onRefresh,
-  onDragStart,
-  onDragEnd,
   onSelect,
+  objectMenu,
+  showLabel = false,
+  showName = false,
 }: {
   sessions: Session[];
   selected?: string;
-  uncertain: boolean;
   groups?: TerminalGroup[];
   retained?: string[];
   name(id: string): string;
-  iconOnly?: boolean;
   refreshDisabled: boolean;
   onRefresh(): void;
-  onDragStart?(event: DragEvent): void;
-  onDragEnd?(): void;
   onSelect(id: string): void;
+  objectMenu(id: string): ReactNode;
+  showLabel?: boolean;
+  showName?: boolean;
 }) {
-  const { t, i18n } = useTranslation();
-  const [open, setOpen] = useState(false);
+  const { t } = useTranslation();
   const available = new Set([...sessions.map((session) => session.id), ...retained]);
   const grouped = new Set(groups.flatMap(members));
   const other = [...available].filter((id) => !grouped.has(id));
@@ -44,51 +41,42 @@ export function SessionPicker({
   function item(id: string) {
     const session = sessions.find((value) => value.id === id);
     return (
-      <MenuItem key={id} onClick={() => onSelect(id)}>
-        <SquareTerminal />
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="max-w-60 truncate" title={name(id)}>
-            {name(id)}
+      <div key={id} className="session-picker-row" role="none">
+        <MenuItem aria-current={id === selected ? "true" : undefined} onClick={() => onSelect(id)}>
+          <SquareTerminal />
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="max-w-60 truncate" title={name(id)}>
+              {name(id)}
+            </span>
           </span>
-          {uncertain && session && (
+          {(!session || session.state === "starting") && (
             <span className="text-xs text-muted-foreground">
-              {new Date(session.createdAt).toLocaleString(i18n.resolvedLanguage)}
+              {session ? t(($) => $.terminal.starting) : t(($) => $.terminal.ended)}
             </span>
           )}
-        </span>
-        {(!session || session.state === "starting") && (
-          <span className="text-xs text-muted-foreground">
-            {session ? t(($) => $.terminal.starting) : t(($) => $.terminal.ended)}
-          </span>
-        )}
-        {id === selected && <Check />}
-      </MenuItem>
+          {id === selected && <Check />}
+        </MenuItem>
+        {objectMenu(id)}
+      </div>
     );
   }
 
   return (
-    <Menu open={open} onOpenChange={setOpen}>
+    <Menu>
       <MenuTrigger
         render={
-          iconOnly ? (
-            <IconButton label={label} />
+          showLabel ? (
+            <Button variant="outline" aria-label={label} />
+          ) : showName ? (
+            <Button variant="ghost" className="min-w-0 max-w-[45%] shrink" aria-label={label} />
           ) : (
-            <Button
-              variant="ghost"
-              className="min-w-0 max-w-64 shrink"
-              aria-label={label}
-              draggable={!!onDragStart}
-              onDragStart={(event) => {
-                setOpen(false);
-                onDragStart?.(event);
-              }}
-              onDragEnd={onDragEnd}
-            />
+            <IconButton label={label} />
           )
         }
       >
         <SquareTerminal />
-        {!iconOnly && (
+        {showLabel && label}
+        {!showLabel && showName && (
           <>
             <span className="truncate">
               {selected ? name(selected) : t(($) => $.common.terminal)}
@@ -104,11 +92,9 @@ export function SessionPicker({
             role="group"
             aria-label={t(($) => $.terminal.group, { number: index + 1 })}
           >
-            {(groups.length > 1 || members(group).length > 1) && (
-              <div className="px-2 py-1 text-xs text-muted-foreground">
-                {t(($) => $.terminal.group, { number: index + 1 })}
-              </div>
-            )}
+            <p className="px-2 py-1 text-xs text-muted-foreground">
+              {t(($) => $.terminal.group, { number: index + 1 })}
+            </p>
             {members(group)
               .filter((id) => available.has(id))
               .map(item)}

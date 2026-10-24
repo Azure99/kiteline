@@ -357,7 +357,7 @@ export function Files({
       <ToolHeader visible={browsing}>
         <div
           className={
-            searching || focusMode?.active
+            searching
               ? "hidden"
               : "flex min-h-10 shrink-0 items-center gap-1 border-b border-border px-2"
           }

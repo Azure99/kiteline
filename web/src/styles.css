@@ -335,6 +335,20 @@ body {
   background: var(--terminal);
   color: var(--terminal-foreground);
 }
+.terminal-toolbar > [data-slot="button"] {
+  flex-shrink: 1;
+  min-width: 28px;
+}
+.session-picker-row {
+  display: flex;
+  min-width: 0;
+  max-width: min(22rem, calc(100vw - 2rem));
+  align-items: center;
+}
+.session-picker-row > [role="menuitem"]:first-child {
+  flex: 1;
+  min-width: 0;
+}
 .terminal-viewport {
   padding: 10px 8px 4px;
 }
@@ -398,20 +412,9 @@ body {
 .terminal-aux {
   border-color: #39414c;
 }
-.terminal-pane-header {
-  background: var(--muted);
-  border-bottom: 1px solid var(--border);
-}
-.terminal-pane[data-active="true"] > .terminal-pane-header {
-  box-shadow: inset 0 2px var(--primary);
-}
 .terminal-group {
   border-color: var(--border);
   background: var(--muted);
-}
-.terminal-group[data-current="true"] {
-  border-color: var(--primary);
-  background: var(--color-primary-soft);
 }
 .terminal-member + .terminal-member {
   border-left: 1px solid var(--border);
@@ -425,19 +428,11 @@ body {
   outline: 2px solid var(--primary);
   outline-offset: -2px;
 }
-.terminal-member[data-drop-before="true"],
-.terminal-pane-header[data-drop-before="true"] {
+.terminal-member[data-drop-before="true"] {
   box-shadow: inset 3px 0 var(--primary);
 }
-.terminal-member[data-drop-after="true"],
-.terminal-pane-header[data-drop-after="true"] {
+.terminal-member[data-drop-after="true"] {
   box-shadow: inset -3px 0 var(--primary);
-}
-.terminal-pane-header[data-direction="vertical"][data-drop-before="true"] {
-  box-shadow: inset 0 3px var(--primary);
-}
-.terminal-pane-header[data-direction="vertical"][data-drop-after="true"] {
-  box-shadow: inset 0 -3px var(--primary);
 }
 .split-divider {
   flex-shrink: 0;
@@ -453,6 +448,33 @@ body {
 .split-divider:focus-visible,
 .split-divider[data-separator="active"] {
   background: var(--primary);
+}
+.split-divider.terminal-divider {
+  position: relative;
+  background: var(--terminal);
+}
+.terminal-divider::after {
+  content: "";
+  position: absolute;
+  background: #39414c;
+  pointer-events: none;
+}
+.terminal-divider[aria-orientation="vertical"]::after {
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+}
+.terminal-divider[aria-orientation="horizontal"]::after {
+  top: 50%;
+  right: 0;
+  left: 0;
+  height: 1px;
+}
+.terminal-divider:hover::after,
+.terminal-divider:focus-visible::after,
+.terminal-divider[data-separator="active"]::after {
+  background: #5c7596;
 }
 @media (hover: hover) and (pointer: fine) {
   .workspace-navigation-more {

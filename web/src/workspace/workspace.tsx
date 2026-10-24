@@ -169,6 +169,7 @@ export function Workspace({
     return () => document.documentElement.removeAttribute("data-terminal-active");
   }, [terminalVisible]);
   function chooseMode(next: Mode) {
+    if (focusMode.active) focusMode.exit();
     setView((old) => ({
       ...old,
       ...(mobile ? { mobileMode: next as "work" | "terminal" } : { mode: next }),
@@ -201,8 +202,8 @@ export function Workspace({
             {(["work", "both", "terminal"] as const).map((id) => (
               <button
                 key={id}
-                aria-pressed={view.mode === id}
-                className={`min-h-8 rounded px-2 text-xs ${view.mode === id ? "bg-primary-soft text-primary" : "text-muted-foreground hover:bg-muted"}`}
+                aria-pressed={mode === id}
+                className={`min-h-8 rounded px-2 text-xs ${mode === id ? "bg-primary-soft text-primary" : "text-muted-foreground hover:bg-muted"}`}
                 onClick={() => chooseMode(id)}
               >
                 {t(($) =>
@@ -215,7 +216,7 @@ export function Workspace({
               </button>
             ))}
           </div>
-          {view.mode === "both" && (
+          {mode === "both" && (
             <IconButton
               label={t(($) =>
                 view.direction === "horizontal"
@@ -239,9 +240,11 @@ export function Workspace({
         label={t(($) => (toolsVisible ? $.shell.collapseTools : $.shell.expandTools))}
         aria-expanded={toolsVisible}
         aria-controls="workspace-tools"
-        onClick={() =>
-          mobile ? onMobileTools(true) : setView((old) => ({ ...old, rightOpen: !old.rightOpen }))
-        }
+        onClick={() => {
+          if (focusMode.active) focusMode.exit();
+          if (mobile) onMobileTools(true);
+          else setView((old) => ({ ...old, rightOpen: !toolsVisible }));
+        }}
       >
         {toolsVisible ? <PanelRightClose /> : <PanelRightOpen />}
       </IconButton>

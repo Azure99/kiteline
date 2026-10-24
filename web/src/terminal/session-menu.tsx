@@ -1,34 +1,24 @@
 import { useTranslation } from "react-i18next";
+import type { ReactElement } from "react";
+import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import {
   ArrowDown,
   ArrowUp,
-  Columns2,
   Copy,
   Maximize2,
   MoreHorizontal,
   Pencil,
-  RefreshCw,
-  Rows2,
-  Search,
-  Settings,
   Split,
   Trash2,
   X,
-  ZoomIn,
-  ZoomOut,
 } from "lucide-react";
 import type { Session } from "@kiteline/shared/protocol";
-import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
+import { MenuItem, MenuPopup } from "../components/ui/menu";
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "../components/ui/context-menu";
 import { Button } from "../components/ui/button";
-import {
-  groupFor,
-  members,
-  type MemberPosition,
-  type SplitDirection,
-  type TerminalLayout,
-} from "./groups";
+import { groupFor, members, type MemberPosition, type TerminalLayout } from "./groups";
 
-export type SessionCommand =
+export type TerminalCommand =
   | "rename"
   | "end"
   | "attach"
@@ -36,144 +26,145 @@ export type SessionCommand =
   | "larger"
   | "smaller"
   | "close";
-export function SessionMenu({
-  id,
-  session,
-  layout,
-  busy,
-  mobile,
-  label,
-  onCommand,
-  onMove,
-  onDirection,
-  onSettings,
-  onSearch,
-  searchDisabled,
-}: {
-  id?: string;
-  session?: Session;
-  layout: TerminalLayout;
-  busy: boolean;
-  mobile: boolean;
-  label?: string;
-  onCommand(command: SessionCommand, id: string): void;
-  onMove(id: string, target?: string, position?: MemberPosition): void;
-  onDirection(direction: SplitDirection): void;
-  onSettings?(): void;
-  onSearch?(): void;
-  searchDisabled?: boolean;
-}) {
-  const { t } = useTranslation();
 
-  const group = id ? groupFor(layout, id) : undefined;
-  const ids = group ? members(group) : [];
-  const index = id ? ids.indexOf(id) : -1;
+export interface SessionMenuProps {
+  id: string;
+  session?: Session;
+  targetName: string;
+  targetTitle?: string;
+  layout: TerminalLayout;
+  mutationDisabled: boolean;
+  mobile: boolean;
+  canClose: boolean;
+  label: string;
+  onCommand(command: TerminalCommand, id: string): void;
+  onMove(id: string, target?: string, position?: MemberPosition): void;
+}
+
+export function SessionObjectMenu({
+  children,
+  ...props
+}: SessionMenuProps & { children: ReactElement }) {
   return (
-    <Menu>
-      <MenuTrigger
-        render={
-          <Button variant="ghost" size="icon" aria-label={label ?? t(($) => $.terminal.actions)} />
-        }
+    <ContextMenu>
+      <ContextMenuTrigger render={children} />
+      <ContextMenuContent>
+        <SessionMenuItems {...props} />
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+export function SessionSubmenu(props: SessionMenuProps) {
+  return (
+    <MenuPrimitive.SubmenuRoot>
+      <MenuPrimitive.SubmenuTrigger
+        nativeButton
+        openOnHover={false}
+        render={<Button variant="ghost" size="icon" aria-label={props.label} />}
       >
         <MoreHorizontal />
-      </MenuTrigger>
-      <MenuContent>
-        {onSettings && (
-          <MenuItem onClick={onSettings}>
-            <Settings />
-            {t(($) => $.terminal.settings)}
+      </MenuPrimitive.SubmenuTrigger>
+      <MenuPrimitive.Portal>
+        <MenuPrimitive.Positioner side="right" align="start" sideOffset={4} className="z-50">
+          <MenuPopup>
+            <SessionMenuItems {...props} />
+          </MenuPopup>
+        </MenuPrimitive.Positioner>
+      </MenuPrimitive.Portal>
+    </MenuPrimitive.SubmenuRoot>
+  );
+}
+
+function SessionMenuItems({
+  id,
+  session,
+  targetName,
+  targetTitle,
+  layout,
+  mutationDisabled,
+  mobile,
+  canClose,
+  onCommand,
+  onMove,
+}: SessionMenuProps) {
+  const { t } = useTranslation();
+  const group = groupFor(layout, id);
+  const ids = group ? members(group) : [];
+  const index = ids.indexOf(id);
+  return (
+    <>
+      <div className="max-w-64 truncate px-2 py-1 text-xs text-muted-foreground" title={targetName}>
+        {targetName}
+      </div>
+      {targetTitle && (
+        <div className="max-w-64 whitespace-normal break-words px-2 pb-1 text-xs text-muted-foreground">
+          {targetTitle}
+        </div>
+      )}
+      {session && (
+        <>
+          <MenuItem disabled={mutationDisabled} onClick={() => onCommand("rename", id)}>
+            <Pencil />
+            {t(($) => $.common.rename)}
           </MenuItem>
-        )}
-        {onSearch && (
-          <MenuItem disabled={searchDisabled} onClick={onSearch}>
-            <Search />
-            {t(($) => $.terminal.search)}
+          <MenuItem onClick={() => onCommand("attach", id)}>
+            <Copy />
+            {t(($) => $.terminal.cliAttach)}
           </MenuItem>
-        )}
-        {id && (
-          <>
-            {!mobile && (
-              <>
-                <MenuItem disabled={ids.length < 2} onClick={() => onMove(id)}>
-                  <Split />
-                  {t(($) => $.terminal.separateGroup)}
-                </MenuItem>
-                {layout.groups
-                  .filter((item) => item !== group)
-                  .map((item) => (
-                    <MenuItem key={item.id} onClick={() => onMove(id, item.id)}>
-                      <Maximize2 />
-                      {t(($) => $.terminal.moveToGroup, {
-                        number: layout.groups.indexOf(item) + 1,
-                      })}
-                    </MenuItem>
-                  ))}
-                <MenuItem
-                  disabled={index <= 0}
-                  onClick={() => onMove(id, group!.id, { anchor: ids[index - 1]!, side: "before" })}
-                >
-                  <ArrowUp />
-                  {t(($) => $.terminal.moveEarlier)}
-                </MenuItem>
-                <MenuItem
-                  disabled={!group || index === ids.length - 1}
-                  onClick={() => onMove(id, group!.id, { anchor: ids[index + 1]!, side: "after" })}
-                >
-                  <ArrowDown />
-                  {t(($) => $.terminal.moveLater)}
-                </MenuItem>
-                <MenuItem disabled={ids.length < 2} onClick={() => onDirection("horizontal")}>
-                  <Columns2 />
-                  {t(($) => $.terminal.horizontal)}
-                </MenuItem>
-                <MenuItem disabled={ids.length < 2} onClick={() => onDirection("vertical")}>
-                  <Rows2 />
-                  {t(($) => $.terminal.vertical)}
-                </MenuItem>
-                <div className="my-1 border-t border-border" />
-              </>
-            )}
-            {session && (
-              <>
-                <MenuItem onClick={() => onCommand("redraw", id)}>
-                  <RefreshCw />
-                  {t(($) => $.terminal.redrawProgram)}
-                </MenuItem>
-              </>
-            )}
-            <MenuItem onClick={() => onCommand("larger", id)}>
-              <ZoomIn />
-              {t(($) => $.terminal.fontLarger)}
+        </>
+      )}
+      {!mobile && (
+        <>
+          {group && (
+            <MenuItem disabled={ids.length < 2} onClick={() => onMove(id)}>
+              <Split />
+              {t(($) => $.terminal.separateGroup)}
             </MenuItem>
-            <MenuItem onClick={() => onCommand("smaller", id)}>
-              <ZoomOut />
-              {t(($) => $.terminal.fontSmaller)}
-            </MenuItem>
-            {session && (
-              <>
-                <MenuItem disabled={busy} onClick={() => onCommand("rename", id)}>
-                  <Pencil />
-                  {t(($) => $.common.rename)}
-                </MenuItem>
-                <MenuItem onClick={() => onCommand("attach", id)}>
-                  <Copy />
-                  {t(($) => $.terminal.cliAttach)}
-                </MenuItem>
-              </>
-            )}
-            <MenuItem onClick={() => onCommand("close", id)}>
-              <X />
-              {t(($) => $.terminal.closeDisplay)}
-            </MenuItem>
-            {session && (
-              <MenuItem disabled={busy} onClick={() => onCommand("end", id)}>
-                <Trash2 />
-                {t(($) => $.terminal.endSession)}
+          )}
+          {layout.groups
+            .filter((item) => item !== group)
+            .map((item) => (
+              <MenuItem key={item.id} onClick={() => onMove(id, item.id)}>
+                <Maximize2 />
+                {t(($) => $.terminal.moveToGroup, {
+                  number: layout.groups.indexOf(item) + 1,
+                })}
               </MenuItem>
-            )}
-          </>
-        )}
-      </MenuContent>
-    </Menu>
+            ))}
+          {group && (
+            <>
+              <MenuItem
+                disabled={index <= 0}
+                onClick={() => onMove(id, group.id, { anchor: ids[index - 1]!, side: "before" })}
+              >
+                <ArrowUp />
+                {t(($) => $.terminal.moveEarlier)}
+              </MenuItem>
+              <MenuItem
+                disabled={index === ids.length - 1}
+                onClick={() => onMove(id, group.id, { anchor: ids[index + 1]!, side: "after" })}
+              >
+                <ArrowDown />
+                {t(($) => $.terminal.moveLater)}
+              </MenuItem>
+              <div className="my-1 border-t border-border" />
+            </>
+          )}
+        </>
+      )}
+      {canClose && (
+        <MenuItem onClick={() => onCommand("close", id)}>
+          <X />
+          {t(($) => $.terminal.closeDisplay)}
+        </MenuItem>
+      )}
+      {session && (
+        <MenuItem disabled={mutationDisabled} onClick={() => onCommand("end", id)}>
+          <Trash2 />
+          {t(($) => $.terminal.endSession)}
+        </MenuItem>
+      )}
+    </>
   );
 }

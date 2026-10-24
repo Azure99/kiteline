@@ -24,7 +24,7 @@ Choose system, light or dark appearance from Settings at the bottom of the left 
 
 At 960 CSS pixels or wider, choose Work pages, Terminal or Together in the title row. Together supports vertical or horizontal arrangement and a draggable divider; either sidebar can be collapsed independently. Narrow layouts show only work pages or a terminal, with a target icon in the title row to switch between them. Drafts, the active page and the session are retained. File and Git tools open as a separate page on mobile.
 
-Device names, workspaces and work page tabs support context menus for the pointed object. On a phone, long-press an object or use its More button; device management is also available from More at the top right of device details. Editor content, diff content and terminal screens keep their existing text selection and copy interactions.
+Device names, workspaces and work page tabs support context menus for the pointed object. On a phone, long-press an object or use its More button; device management is also available from More at the top right of device details. Editor and diff content keep their existing text selection and copy interactions; terminal content is described below.
 
 ### Where settings are stored
 
@@ -66,7 +66,7 @@ If the terminal remains unresponsive, close displays of the same session that yo
 
 ### Online reports
 
-When a program sends an OSC 9 or OSC 777 notification, or an unsolicited OSC 7501 blocked report, a marker appears beside its workspace in the desktop sidebar. On mobile, the navigation button at the left edge of the main area shows a count; opening navigation lists sources by workspace. Sessions can report without an open display. Each entry shows its source and server receipt time in your local timezone: `HH:mm` for the same day, or `MM-DD HH:mm` for another day. Only the latest report from each terminal is kept. It does not mean the program is still waiting.
+When a program sends an OSC 9 or OSC 777 notification, or an unsolicited OSC 7501 blocked report, a marker appears beside its workspace in the desktop sidebar. On mobile, the navigation button at the left edge of the main area shows a count; opening navigation lists sources by workspace. Navigation remains available during terminal search in the normal layout; leave focus mode first to open it. Sessions can report without an open display. Each entry shows its source and server receipt time in your local timezone: `HH:mm` for the same day, or `MM-DD HH:mm` for another day. Only the latest report from each terminal is kept. It does not mean the program is still waiting.
 
 Opening the list does not clear reports. Selecting a source returns to its original session. Returning from Files, switching or reselecting a terminal, reopening the page, and returning to a page showing that terminal activate it. When the server processes the activation request, it clears that terminal's existing report across clients; reports arriving afterward remain. Staying in the terminal does not automatically clear new reports. A terminal shown alongside work pages follows the same session selection and activation rules.
 
@@ -79,6 +79,8 @@ New sessions start in the workspace directory and inherit the agent's environmen
 Shortcuts run one command in the login shell; the session ends when that command exits. Install the AI CLI programs used by the default shortcuts yourself.
 
 "Close display" closes only the display; the session continues and can be reopened through "Select terminal session".
+
+Desktop terminal tabs identify the current session; panes no longer repeat a title bar. Right-click a tab or use its row's More button in the session picker to rename, move, close the display or end that session. The terminal area menu provides splits, arrangement, maximization, search, font size and settings. The remaining space on the right shows the current program's title when it sends one.
 
 ### Copy and paste
 
@@ -99,9 +101,11 @@ Supported forms are `/`-separated relative paths, POSIX absolute paths inside th
 
 ### Search and display
 
-The Focus terminal button cycles through focus within the window, browser fullscreen, and exit. The first step hides the rest of the workbench while keeping the browser window's position and size, so several windows can monitor output at once. The Focus file button works the same way when editing files in narrow layouts.
+On desktop and mobile, one button in the terminal control row cycles through normal, focus, fullscreen, and back to normal. Focus hides both sidebars and the device/workspace header; navigation returns in the normal layout. Changing the device, workspace, or tool exits terminal focus and fullscreen. Focus file on mobile follows the same rules.
 
-Terminal search covers currently loaded display content, including history, without case sensitivity. On desktop, use the toolbar search button. On a phone, open the terminal menu and choose Search terminal below Terminal settings.
+Leaving fullscreen restores the normal layout. The terminal area menu and Settings on a terminal page no longer repeat focus or fullscreen actions. Settings on other pages and the phone file menu still provide fullscreen. Independent desktop fullscreen entered from Settings on other pages ends when changing devices, changing workspaces, or leaving a workspace; it stays active when switching tools within the same workspace.
+
+Terminal search covers currently loaded display content, including history, without case sensitivity. On desktop and phone, choose Search terminal from the terminal area menu.
 
 "Scrollback lines for new sessions" in "Terminal settings" controls the history retained per session (range in [Limits](reference.en.md#limits)). It affects only sessions created afterward.
 
@@ -114,7 +118,7 @@ Input is available after the session's display and history are restored. If a pr
 - "Connection closed": click "Reconnect". A display that falls behind output for too long also disconnects on its own; the session and other displays are unaffected.
 - Recording unavailable: click "Recover terminal". It rebuilds recording for the same program without restarting it; previous web history is no longer retained.
 - History restoration exceeds capacity or times out: click "Retry with less history" to restore only the current screen; history on the device is unchanged.
-- Connected but the display is garbled: use "Redraw program" in the session menu. It briefly resizes the program to trigger a redraw, which can change other clients' displays and selections, so it requires confirmation. If that does not help, use "Close display" and reopen it.
+- Connected but the display is garbled: use "Redraw program" in the terminal area menu. It briefly resizes the program to trigger a redraw, which can change other clients' displays and selections, so it requires confirmation. If that does not help, use "Close display" and reopen it.
 
 A history gap means some output during a recorder failure was not captured in web history. Ended sessions are read-only and show their exit code.
 

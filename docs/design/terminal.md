@@ -186,7 +186,7 @@ CLI 在目标检查和连接成功后才进入 raw 模式，以本机终端实�
 | “重新连接”       | 显示出错，错误码不是 `recording_unavailable` 或 `not_found` |
 | “恢复终端”       | 错误码为 `recording_unavailable`                            |
 | “减少历史后重试” | 错误码为 `limit_exceeded`、`timeout` 或 `busy`              |
-| “重绘程序”       | 会话菜单，确认后执行                                        |
+| “重绘程序”       | 终端区域菜单，确认后执行                                    |
 
 - 重新连接：确认登录仍有效后关闭当前显示，新建显示并以 `retained` 重新附着。不触及 recorder、共享历史和程序。
 - 恢复终端：调用 `sessions.recover`，`recovering` 期间读取会话列表，变为可用后重新附着（见[记录故障后的恢复](#记录故障后的恢复)）。

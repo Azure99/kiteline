@@ -1,12 +1,18 @@
 import { ApplicationTitle } from "./application-title";
 import { useTranslation } from "react-i18next";
 import { ErrorNotice } from "../components/error-notice";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Minimize2, Columns2, Rows2, Fullscreen, X, Minimize, Scan, Search } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactElement,
+} from "react";
+import { X, Fullscreen, Minimize, Scan } from "lucide-react";
 import type { Device, Workspace } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
 import { Button } from "../components/ui/button";
-import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
 import { useWatchStatus } from "../lib/use-workspace-refresh";
 import { WatchStatus } from "../components/watch-status";
 import type { TerminalActions, TerminalCapabilities } from "./terminal-view";
@@ -37,7 +43,13 @@ import {
   type TerminalLayout,
 } from "./groups";
 import { SplitPanes } from "./split-panes";
-import { SessionMenu, type SessionCommand } from "./session-menu";
+import {
+  SessionObjectMenu,
+  SessionSubmenu,
+  type TerminalCommand,
+  type SessionMenuProps,
+} from "./session-menu";
+import { TerminalMenu } from "./terminal-menu";
 import { SessionPicker, NewSessionButtons } from "./session-controls";
 import { SessionDialog, type SessionAction } from "./session-dialog";
 import { GroupTabs, useTerminalDrag } from "./group-tabs";
@@ -132,8 +144,6 @@ export function WorkspaceView({
     if (activatedSession) onActivateTerminal(device.id, workspace.id, activatedSession);
   }, [activatedSession, visible, activationRequest, device.id, workspace.id, onActivateTerminal]);
   const enabled = device.status === "online" && !remote.busy;
-  const split = !mobile && members.length > 1 && !group?.maximized;
-  const multipleGroups = !mobile && layout.groups.length > 1;
   function name(id: string, fallback = t(($) => $.terminal.ended)) {
     return find(id)?.name ?? names.current.get(id) ?? fallback;
   }
@@ -242,14 +252,6 @@ export function WorkspaceView({
     applyMain(moveSession(layout, id, target, position));
   }
   const drag = useTerminalDrag(move);
-  function patchGroup(change: Partial<NonNullable<typeof group>>) {
-    if (!group) return;
-    selectionEpoch.current++;
-    setLayout((old) => ({
-      ...old,
-      groups: old.groups.map((item) => (item.id === group.id ? { ...item, ...change } : item)),
-    }));
-  }
   async function create({
     shortcutId,
     split,
@@ -297,7 +299,7 @@ export function WorkspaceView({
     const owner = id ? groupFor(layout, id) : undefined;
     void create({ split: owner && id ? { groupId: owner.id, anchor: id, direction } : undefined });
   }
-  function command(kind: SessionCommand, id: string) {
+  function command(kind: TerminalCommand, id: string) {
     const display = displays.current.get(id);
     if (kind === "redraw") display?.redraw();
     else if (kind === "larger" || kind === "smaller") display?.fontSize(kind === "larger" ? 1 : -1);
@@ -309,60 +311,38 @@ export function WorkspaceView({
       setAction({ kind, session });
     }
   }
-  function menu({
-    id,
-    label,
-    includeSettings = true,
-  }: {
-    id?: string;
-    label?: string;
-    includeSettings?: boolean;
-  } = {}) {
-    return (
-      <SessionMenu
-        id={id}
-        session={find(id)}
-        layout={layout}
-        busy={remote.busy}
-        mobile={mobile}
-        label={label}
-        onCommand={(kind, value) => command(kind, value)}
-        onMove={move}
-        onDirection={(direction) => {
-          const owner = id ? groupFor(layout, id) : undefined;
-          if (owner) setLayout((old) => arrangeGroup(old, owner.id, direction));
-        }}
-        onSettings={includeSettings ? () => setSettings(true) : undefined}
-        onSearch={
-          mobile && includeSettings
-            ? () => {
-                if (id) displays.current.get(id)?.search();
-              }
-            : undefined
-        }
-        searchDisabled={!id || !capabilities[id]?.hasTerminal}
-      />
-    );
+  function menuProps(id: string): SessionMenuProps {
+    return {
+      id,
+      session: find(id),
+      targetName: name(id),
+      targetTitle: capabilities[id]?.title,
+      layout,
+      mutationDisabled: !enabled,
+      mobile,
+      canClose: !!groupFor(layout, id),
+      label: t(($) => $.common.actionsNamed, { name: name(id) }),
+      onCommand: command,
+      onMove: move,
+    };
   }
-  function picker() {
+  function objectMenu(id: string, trigger: ReactElement) {
+    return <SessionObjectMenu {...menuProps(id)}>{trigger}</SessionObjectMenu>;
+  }
+  function picker(showLabel = false) {
     return (
       <SessionPicker
+        showLabel={showLabel}
+        showName={mobile}
         sessions={sessions}
         selected={targetPending ? undefined : selected}
         groups={layout.groups}
         retained={[...opened]}
         name={name}
-        iconOnly={!mobile && (multipleGroups || split)}
-        uncertain={remote.uncertainCreate}
         refreshDisabled={device.status !== "online"}
         onRefresh={() => void remote.refresh()}
-        onDragStart={
-          !targetPending && !mobile && selected && !multipleGroups && !split
-            ? (event) => drag.start(event, selected)
-            : undefined
-        }
-        onDragEnd={drag.end}
         onSelect={(id) => choose(id)}
+        objectMenu={(id) => <SessionSubmenu {...menuProps(id)} />}
       />
     );
   }
@@ -397,102 +377,75 @@ export function WorkspaceView({
           </div>
         )}
       <div className={visible ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
-        {focusMode.error && (
-          <div role="status" className="flex shrink-0 items-center gap-2 px-3 text-sm">
-            <span className="flex-1">{t(($) => $.terminal[focusMode.error!])}</span>
-            <IconButton label={t(($) => $.common.dismiss)} onClick={focusMode.dismiss}>
-              <X />
-            </IconButton>
-          </div>
-        )}
         <div ref={setMainSearchHost} className="relative shrink-0">
           <div
             data-search-controls
-            className="flex min-h-10 shrink-0 items-center gap-1 border-b border-border bg-muted px-2 max-desk:gap-0 max-desk:px-1"
+            className="terminal-toolbar flex min-h-10 shrink-0 items-center gap-1 border-b border-border bg-muted px-2 max-desk:gap-0 max-desk:px-1"
           >
             {picker()}
             {watchDismissed && <WatchStatus reason={watchReason} compact />}
-            {!mobile && (multipleGroups || drag.dragging) ? (
+            {!mobile && !targetPending && (
               <GroupTabs
                 layout={layout}
                 name={name}
-                canDrag={(id) => !!find(id) || opened.has(id)}
+                canDrag={(id) => !mobile && (!!find(id) || opened.has(id))}
                 drag={drag}
                 onSelect={choose}
+                objectMenu={objectMenu}
               />
-            ) : null}
-            {(!split || !multipleGroups) && (
-              <span className="flex min-w-0 flex-1 overflow-hidden px-1">
-                {!split && (
-                  <ApplicationTitle
-                    title={!targetPending && selected ? capabilities[selected]?.title : undefined}
-                  />
-                )}
-              </span>
             )}
+            <span className="flex min-w-0 flex-1 overflow-hidden px-1">
+              <ApplicationTitle
+                title={!targetPending && selected ? capabilities[selected]?.title : undefined}
+              />
+            </span>
             {newButtons()}
-            {!mobile && (
-              <Menu>
-                <MenuTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      disabled={!enabled}
-                      aria-label={t(($) => $.terminal.createSplit)}
-                    />
-                  }
-                >
-                  <Columns2 />
-                </MenuTrigger>
-                <MenuContent>
-                  <MenuItem onClick={() => createSplit(selected, "horizontal")}>
-                    <Columns2 />
-                    {t(($) => $.terminal.splitRight)}
-                  </MenuItem>
-                  <MenuItem onClick={() => createSplit(selected, "vertical")}>
-                    <Rows2 />
-                    {t(($) => $.terminal.splitDown)}
-                  </MenuItem>
-                </MenuContent>
-              </Menu>
-            )}
-            {!mobile && group?.maximized && members.length > 1 && (
-              <IconButton
-                label={t(($) => $.terminal.restoreSplit)}
-                onClick={() => patchGroup({ maximized: false })}
-              >
-                <Minimize2 />
-              </IconButton>
-            )}
-            {!mobile && (
-              <IconButton
-                label={t(($) => $.terminal.search)}
-                disabled={targetPending || !selected || !capabilities[selected]?.hasTerminal}
-                onClick={() => {
-                  if (selected && !targetPending) displays.current.get(selected)?.search();
-                }}
-              >
-                <Search />
-              </IconButton>
-            )}
             <IconButton
-              label={t(($) => $.terminal[focusMode.next])}
-              aria-pressed={focusMode.active || focusMode.fullscreen}
-              onPointerDown={(event) => {
-                if (mobile) event.preventDefault();
-              }}
+              label={t(($) =>
+                focusMode.fullscreen
+                  ? $.terminal.exitFullscreen
+                  : focusMode.active
+                    ? $.terminal.enterFullscreen
+                    : $.terminal.enterFocus,
+              )}
+              aria-pressed={focusMode.active}
+              onPointerDown={(event) => event.preventDefault()}
               onClick={focusMode.toggle}
             >
-              {focusMode.next === "exitFocus" ? (
-                <Minimize />
-              ) : focusMode.next === "enterFullscreen" ? (
-                <Fullscreen />
-              ) : (
-                <Scan />
-              )}
+              {focusMode.fullscreen ? <Minimize /> : focusMode.active ? <Fullscreen /> : <Scan />}
             </IconButton>
-            {menu({ id: split || targetPending ? undefined : selected })}
+            <TerminalMenu
+              id={targetPending ? undefined : selected}
+              targetName={!targetPending && selected ? name(selected) : undefined}
+              targetTitle={!targetPending && selected ? capabilities[selected]?.title : undefined}
+              group={targetPending ? undefined : group}
+              hasDisplay={
+                !targetPending &&
+                !!selected &&
+                opened.has(selected) &&
+                !!capabilities[selected]?.hasTerminal
+              }
+              canRedraw={!!find(selected)}
+              mutationDisabled={!enabled}
+              mobile={mobile}
+              onCommand={command}
+              onSplit={(direction) => createSplit(selected, direction)}
+              onMaximize={() => {
+                if (!group || !selected) return;
+                const next = selectSession(layout, selected);
+                currentGroup(next)!.maximized = !group.maximized;
+                applyMain(next);
+              }}
+              onDirection={(direction) => {
+                if (group) setLayout((old) => arrangeGroup(old, group.id, direction));
+              }}
+              onSearch={() => {
+                if (selected && !targetPending) {
+                  displays.current.get(selected)?.search();
+                }
+              }}
+              onSettings={() => setSettings(true)}
+            />
           </div>
         </div>
         {targetPending && (
@@ -531,33 +484,24 @@ export function WorkspaceView({
               setLayout((old) => resizeSplit(old, groupId, splitId, sizes))
             }
             events={{
-              name,
               actions: register,
               capabilities: reportCapabilities,
-              title: (id) => capabilities[id]?.title,
               focus,
-              close,
-              maximize: () => patchGroup({ maximized: !group?.maximized }),
-              menu: (id) =>
-                menu({
-                  id,
-                  label: t(($) => $.common.actionsNamed, {
-                    name: name(id),
-                  }),
-                  includeSettings: false,
-                }),
-              drag,
             }}
           />
         )}
         {!members.length && !targetPending && (
-          <div className="flex min-h-0 flex-1 items-center justify-center">{newButtons(true)}</div>
+          <div className="flex min-h-0 flex-1 items-center justify-center">
+            {sessions.length > 0 || opened.size > 0 ? picker(true) : newButtons(true)}
+          </div>
         )}
       </div>
       {action && (
         <SessionDialog
           key={`${action.kind}:${action.session.id}`}
           action={action}
+          identity={name(action.session.id)}
+          mutationDisabled={!enabled}
           busy={remote.busy}
           error={remote.mutationError}
           device={device}

@@ -9,7 +9,6 @@ export function useSessions(device: Device, workspaceId: string) {
   const [listError, setListError] = useState<unknown>();
   const [listErrorDismissed, setListErrorDismissed] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [uncertainCreate, setUncertainCreate] = useState(false);
   const [busy, setBusy] = useState(false);
   const alive = useRef(true);
   const revision = useRef(0);
@@ -65,7 +64,6 @@ export function useSessions(device: Device, workspaceId: string) {
   async function create(shortcutId?: string) {
     setBusy(true);
     setError(undefined);
-    setUncertainCreate(false);
     try {
       const session = await rpc(device.id, "sessions.create", { workspaceId, shortcutId });
       if (alive.current) {
@@ -77,7 +75,6 @@ export function useSessions(device: Device, workspaceId: string) {
     } catch (error) {
       if (alive.current) {
         setError(error);
-        setUncertainCreate(error instanceof ApiError && error.outcome === "unknown");
         const knownId =
           error instanceof ApiError &&
           error.result &&
@@ -117,7 +114,6 @@ export function useSessions(device: Device, workspaceId: string) {
     listError,
     refreshing,
     busy,
-    uncertainCreate,
     mutationError: error,
     clearMutationError: () => setError(undefined),
     refresh: () => {

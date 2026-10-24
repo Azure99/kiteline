@@ -10,6 +10,7 @@ import {
   FileOutput,
   Fullscreen,
   Minimize,
+  Minimize2,
   MoreHorizontal,
   Quote,
   RefreshCw,
@@ -267,14 +268,20 @@ export function DraftView({
               <FileOutput />
               {t(($) => $.files.saveAs)}
             </MenuItem>
+            {focusMode && (
+              <>
+                <div className="my-1 border-t border-border" />
+                <MenuItem onClick={() => void focusMode.toggleFullscreen()}>
+                  {focusMode.fullscreen ? <Minimize2 /> : <Fullscreen />}
+                  {t(($) =>
+                    focusMode.fullscreen ? $.terminal.exitFullscreen : $.terminal.enterFullscreen,
+                  )}
+                </MenuItem>
+              </>
+            )}
           </MenuContent>
         </Menu>
       </div>
-      {focusMode?.error && (
-        <div role="alert" className="shrink-0 text-destructive">
-          {t(($) => $.terminal[focusMode.error!])}
-        </div>
-      )}
       {(unavailable ||
         store.overLimit(draft) ||
         draft.notice ||

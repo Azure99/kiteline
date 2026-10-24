@@ -205,7 +205,9 @@ export function Workbench({
       workspace
       ? `${device.id}:${workspace.id}:${route.tool}`
       : undefined,
+    session && route.valid && device && workspace ? `${device.id}:${workspace.id}` : undefined,
   );
+  const navigationVisible = !terminalFocus.active && (mobile ? mobileNavigation : sidebarOpen);
   const orphan =
     route.tool === "files" && route.deviceId && route.workspaceId && (!device || !workspace)
       ? drafts.find(
@@ -456,7 +458,7 @@ export function Workbench({
       >
         <aside
           id="device-sidebar"
-          hidden={terminalFocus.active || (mobile ? !mobileNavigation : !sidebarOpen)}
+          hidden={!navigationVisible}
           className="workbench-sidebar flex min-h-0 shrink-0 flex-col border-r border-border bg-muted"
         >
           <div className="flex min-h-12 shrink-0 items-center gap-2 px-4">
@@ -523,6 +525,20 @@ export function Workbench({
                 )}
               </MenuTrigger>
               <MenuContent>
+                {!(workspace && route.tool === "terminal") && (
+                  <MenuItem
+                    onClick={() => {
+                      if (mobile) setMobileNavigation(false);
+                      void terminalFocus.toggleFullscreen();
+                    }}
+                  >
+                    {t(($) =>
+                      terminalFocus.fullscreen
+                        ? $.terminal.exitFullscreen
+                        : $.terminal.enterFullscreen,
+                    )}
+                  </MenuItem>
+                )}
                 <MenuItem onClick={() => setCliSetup(true)}>
                   <Terminal />
                   {t(($) => $.cliSetup.title)}
@@ -564,24 +580,28 @@ export function Workbench({
           <ReleaseNotice />
           <header
             hidden={terminalFocus.active}
-            className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border px-1 max-desk:min-h-11"
+            className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border bg-background px-1 max-desk:min-h-11"
           >
             <IconButton
               ref={navigationToggle}
               label={
-                (mobile || !sidebarOpen
-                  ? t(($) => $.shell.expandSidebar)
-                  : t(($) => $.shell.collapseSidebar)) +
+                (navigationVisible
+                  ? t(($) => $.shell.collapseSidebar)
+                  : t(($) => $.shell.expandSidebar)) +
                 (mobile && navigationReports.length
                   ? " · " + t(($) => $.reports.count, { count: navigationReports.length })
                   : "")
               }
-              aria-expanded={mobile ? mobileNavigation : sidebarOpen}
+              aria-expanded={navigationVisible}
               aria-controls="device-sidebar"
               className="relative"
-              onClick={() => (mobile ? setMobileNavigation(true) : setSidebarOpen((open) => !open))}
+              onClick={() => {
+                if (terminalFocus.active) terminalFocus.exit();
+                if (mobile) setMobileNavigation(true);
+                else setSidebarOpen(!navigationVisible);
+              }}
             >
-              {mobile || !sidebarOpen ? <PanelLeftOpen /> : <PanelLeftClose />}
+              {navigationVisible ? <PanelLeftClose /> : <PanelLeftOpen />}
               {mobile && navigationReports.length > 0 && (
                 <span className="absolute top-0 right-0 rounded-full bg-primary px-1 text-[10px] text-primary-foreground">
                   {navigationReports.length}
@@ -626,6 +646,17 @@ export function Workbench({
                   <X />
                 </IconButton>
               )}
+            </div>
+          )}
+          {terminalFocus.error && (
+            <div
+              role="alert"
+              className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2 text-sm text-destructive"
+            >
+              <span className="flex-1">{t(($) => $.terminal[terminalFocus.error!])}</span>
+              <IconButton label={t(($) => $.common.dismiss)} onClick={terminalFocus.dismiss}>
+                <X />
+              </IconButton>
             </div>
           )}
           {renderMain()}

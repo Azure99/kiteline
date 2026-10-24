@@ -1,108 +1,86 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
+import { useMobile } from "../lib/use-mobile";
 
-type FocusIntent = { target: string; attempted: boolean };
-
-export function useTerminalFocus(context: string | undefined) {
-  const [target, setTarget] = useState<FocusIntent>();
+export function useTerminalFocus(context: string | undefined, workspaceScope: string | undefined) {
+  const mobile = useMobile();
+  const [target, setTarget] = useState<string>();
   const [fullscreen, setFullscreen] = useState(false);
   const [error, setError] = useState<"fullscreenFailed" | "fullscreenExitFailed">();
-  const intent = useRef<FocusIntent>(undefined);
-  const pending = useRef<FocusIntent>(undefined);
-  const exiting = useRef(false);
-
-  const leaveFullscreen = useCallback(() => {
-    if (document.fullscreenElement !== document.documentElement || exiting.current) return;
-    exiting.current = true;
-    void document.exitFullscreen().then(
-      () => {
-        exiting.current = false;
-        const remains = document.fullscreenElement === document.documentElement;
-        setFullscreen(remains);
-        if (remains) setError("fullscreenExitFailed");
-      },
-      () => {
-        exiting.current = false;
-        setFullscreen(document.fullscreenElement === document.documentElement);
-        setError("fullscreenExitFailed");
-      },
-    );
-  }, []);
-  const exit = useCallback(() => {
-    intent.current = undefined;
-    setTarget(undefined);
-    setError(undefined);
-    leaveFullscreen();
-  }, [leaveFullscreen]);
-
+  const pending = useRef(false);
+  const previousWorkspaceScope = useRef(workspaceScope);
+  const exitPreviousContext = useEffectEvent(() => {
+    if (target !== undefined || previousWorkspaceScope.current !== workspaceScope) exit();
+    previousWorkspaceScope.current = workspaceScope;
+  });
   useLayoutEffect(() => {
-    if (intent.current?.target !== context) exit();
-  }, [context, exit]);
+    exitPreviousContext();
+  }, [context, workspaceScope]);
   useEffect(() => {
     const viewport = document.querySelector<HTMLMetaElement>('meta[name="viewport"]')!;
-    const originalViewport = viewport.content;
+    const original = viewport.content;
     const changed = () => {
-      const current = intent.current;
       const entered = document.fullscreenElement === document.documentElement;
+      setFullscreen(entered);
+      if (!entered) setTarget(undefined);
       viewport.content =
         entered && document.documentElement.hasAttribute("data-terminal-active")
-          ? `${originalViewport}, viewport-fit=cover`
-          : originalViewport;
-      setFullscreen(entered);
-      if (entered && (!current || (pending.current && pending.current !== current)))
-        leaveFullscreen();
+          ? `${original}, viewport-fit=auto`
+          : original;
     };
     document.addEventListener("fullscreenchange", changed);
     return () => {
       document.removeEventListener("fullscreenchange", changed);
-      viewport.content = originalViewport;
+      viewport.content = original;
     };
-  }, [leaveFullscreen]);
-  useEffect(
-    () => () => {
-      intent.current = undefined;
-      leaveFullscreen();
-    },
-    [leaveFullscreen],
-  );
-
-  function request(current: FocusIntent) {
-    const root = document.documentElement;
-    if (exiting.current || pending.current || !root.requestFullscreen) {
-      setError("fullscreenFailed");
-      return;
-    }
-    pending.current = current;
-    try {
-      void root.requestFullscreen().then(
-        () => {
-          if (pending.current === current) pending.current = undefined;
-          if (intent.current !== current) leaveFullscreen();
-        },
-        () => {
-          if (pending.current === current) pending.current = undefined;
-          if (intent.current === current) setError("fullscreenFailed");
-        },
-      );
-    } catch {
-      pending.current = undefined;
-      if (intent.current === current) setError("fullscreenFailed");
-    }
-  }
-  const active = context !== undefined && target?.target === context;
-  const next: "exitFocus" | "enterFullscreen" | "enterFocus" =
-    fullscreen || (active && target.attempted)
-      ? "exitFocus"
-      : active
-        ? "enterFullscreen"
-        : "enterFocus";
-  function toggle() {
-    if (next === "exitFocus") return exit();
-    if (!context) return;
+  }, []);
+  const active = context !== undefined && target === context;
+  async function toggleFullscreen() {
+    if (pending.current) return;
+    pending.current = true;
     setError(undefined);
-    const current = { target: context, attempted: active };
-    intent.current = current;
-    setTarget(current);
-    if (current.attempted) request(current);
+    const exiting = document.fullscreenElement === document.documentElement;
+    try {
+      if (exiting) await document.exitFullscreen();
+      else {
+        if (mobile) setTarget(context);
+        await document.documentElement.requestFullscreen();
+      }
+    } catch {
+      if (!exiting && mobile) setTarget(undefined);
+      setError(exiting ? "fullscreenExitFailed" : "fullscreenFailed");
+    } finally {
+      pending.current = false;
+    }
   }
-  return { active, fullscreen, next, toggle, error, dismiss: () => setError(undefined) };
+  function exit() {
+    if (document.fullscreenElement === document.documentElement) {
+      void toggleFullscreen();
+    } else {
+      setTarget(undefined);
+      setError(undefined);
+    }
+  }
+  function toggle() {
+    if (active || fullscreen) {
+      void toggleFullscreen();
+    } else {
+      setTarget(context);
+      setError(undefined);
+    }
+  }
+  const next: "enterFocus" | "enterFullscreen" | "exitFocus" = fullscreen
+    ? "exitFocus"
+    : active
+      ? "enterFullscreen"
+      : "enterFocus";
+  return {
+    active,
+    fullscreen,
+    next,
+    toggle,
+    exit,
+    toggleFullscreen,
+    error,
+    dismiss: () => setError(undefined),
+  };
 }
