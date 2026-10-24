@@ -563,6 +563,7 @@ export function WorkspaceView({
               }}
               onSearch={() => {
                 if (selected && !targetPending) {
+                  choose(selected);
                   displays.current.get(selected)?.search();
                 }
               }}
@@ -596,6 +597,7 @@ export function WorkspaceView({
             deviceId={device.id}
             workspaceId={workspace.id}
             workspacePath={workspace.path}
+            name={name}
             groups={groups}
             current={targetPending ? undefined : group?.id}
             opened={opened}

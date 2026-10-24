@@ -14,6 +14,7 @@ export function SplitPanes({
   deviceId,
   workspaceId,
   workspacePath,
+  name,
   groups,
   current,
   opened,
@@ -28,6 +29,7 @@ export function SplitPanes({
   deviceId: string;
   workspaceId: string;
   workspacePath: string;
+  name(id: string): string;
   groups: TerminalGroup[];
   current?: string;
   opened: ReadonlySet<string>;
@@ -180,6 +182,7 @@ export function SplitPanes({
             >
               <TerminalPane
                 id={id}
+                sessionName={name(id)}
                 deviceId={deviceId}
                 workspaceId={workspaceId}
                 workspacePath={workspacePath}
@@ -220,6 +223,7 @@ function minimumSize(node: TerminalNode): { width: number; height: number } {
 
 function TerminalPane({
   id,
+  sessionName,
   deviceId,
   workspaceId,
   workspacePath,
@@ -229,6 +233,7 @@ function TerminalPane({
   events,
 }: {
   id: string;
+  sessionName: string;
   deviceId: string;
   workspaceId: string;
   workspacePath: string;
@@ -258,6 +263,7 @@ function TerminalPane({
         workspaceId={workspaceId}
         workspacePath={workspacePath}
         sessionId={id}
+        sessionName={sessionName}
         searchHost={searchHost}
         searchActive={active && !hidden}
       />

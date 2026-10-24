@@ -242,6 +242,8 @@ export class TerminalDisplay {
           this.interaction?.modifiers(value),
         );
         this.keyboardViewport = new KeyboardViewport(terminal, this.reportReading);
+        const selectionResize = terminal.onResize(() => terminal.clearSelection());
+        this.cleanups.push(() => selectionResize.dispose());
         const readingEvents = [
           terminal.onScroll(this.reportReading),
           terminal.onWriteParsed(this.reportReading),

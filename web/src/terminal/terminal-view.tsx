@@ -65,6 +65,7 @@ export function TerminalView({
   workspaceId,
   workspacePath,
   sessionId,
+  sessionName,
   ref,
   onCapabilities,
   searchHost,
@@ -74,6 +75,7 @@ export function TerminalView({
   workspaceId: string;
   workspacePath: string;
   sessionId: string;
+  sessionName: string;
   ref?: Ref<TerminalActions>;
   onCapabilities?(id: string, value: TerminalCapabilities | undefined): void;
   searchHost: HTMLDivElement | null;
@@ -124,9 +126,9 @@ export function TerminalView({
   useLayoutEffect(() => {
     if (!searchOpen || !searchActive || !searchHost) return;
     const controls = searchHost.querySelector<HTMLElement>("[data-search-controls]")!;
-    controls.style.visibility = "hidden";
+    controls.style.display = "none";
     return () => {
-      controls.style.visibility = "";
+      controls.style.display = "";
     };
   }, [searchOpen, searchActive, searchHost]);
   const mobile = useMobile();
@@ -470,11 +472,13 @@ export function TerminalView({
           createPortal(
             <TerminalSearch
               terminal={terminal}
+              targetName={sessionName}
               active={searchActive}
               inputRef={searchInput}
               onClose={() => {
                 setSearchOpen(false);
-                terminal?.focus();
+                if (terminal?.options.disableStdin) terminal.focus();
+                else input.current();
               }}
             />,
             searchHost,
@@ -515,6 +519,7 @@ export function TerminalView({
       </div>
       <div
         ref={arrowRoot}
+        hidden={searchOpen && searchActive}
         className="terminal-aux shrink-0 border-t"
         onPointerDown={(event) => event.preventDefault()}
         onClick={(event) => {

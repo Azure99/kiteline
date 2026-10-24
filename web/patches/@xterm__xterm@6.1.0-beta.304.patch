@@ -1,8 +1,16 @@
 diff --git a/src/browser/Viewport.ts b/src/browser/Viewport.ts
-index 18c275ccbe583f48ccb5c5f66cd26d0bd8621e39..d695f43c0ecde21df4d87577d35ecba77a60472e 100644
 --- a/src/browser/Viewport.ts
 +++ b/src/browser/Viewport.ts
-@@ -185,7 +185,7 @@ export class Viewport extends Disposable {
+@@ -165,7 +165,7 @@
+     }
+     this._queuedAnimationFrame = this._renderService.addRefreshCallback(() => {
+       this._queuedAnimationFrame = undefined;
+-      this._sync(this._latestYDisp);
++      this._sync();
+     });
+   }
+ 
+@@ -185,7 +185,7 @@
      // never cause a scrollLines call, only setScrollPosition can do that.
      this._suppressOnScrollHandler = true;
      this._scrollableElement.setScrollDimensions({
@@ -11,6 +19,14 @@ index 18c275ccbe583f48ccb5c5f66cd26d0bd8621e39..d695f43c0ecde21df4d87577d35ecba7
        scrollHeight: this._renderService.dimensions.css.cell.height * this._bufferService.buffer.lines.length
      });
      this._suppressOnScrollHandler = false;
+@@ -193,6 +193,7 @@
+     // If ydisp has been changed by some other component (input/buffer), then stop animating smooth
+     // scroll and scroll there immediately.
+     if (ydisp !== this._latestYDisp) {
++      this._latestYDisp = ydisp;
+       this._scrollableElement.setScrollPosition({
+         scrollTop: ydisp * this._renderService.dimensions.css.cell.height
+       });
 diff --git a/src/browser/input/CompositionHelper.ts b/src/browser/input/CompositionHelper.ts
 index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..f0121cd4e81f337edf429ac87f3b15cb6103874a 100644
 --- a/src/browser/input/CompositionHelper.ts
@@ -183,3 +199,168 @@ index 9f7df4f9ccfa172145be94917eb11c9b77100c3a..09bb42f100dae462c4dbf979c1f689eb
 +      listeners[i]!.fn.call(listeners[i]!.thisArgs, event);
      }
    }
+diff --git a/src/common/buffer/Buffer.ts b/src/common/buffer/Buffer.ts
+--- a/src/common/buffer/Buffer.ts
++++ b/src/common/buffer/Buffer.ts
+@@ -10,7 +10,7 @@
+ import { IAttributeData, IBuffer, IBufferLine, ICellData } from './Types';
+ import { ExtendedAttrs } from './AttributeData';
+ import { BufferLine, DEFAULT_ATTR_DATA } from './BufferLine';
+-import { getWrappedLineTrimmedLength, reflowLargerApplyNewLayout, reflowLargerCreateNewLayout, reflowLargerGetLinesToRemove, reflowSmallerGetNewLineLengths } from './BufferReflow';
++import { IResizeAnchor, getWrappedLineTrimmedLength, reflowLargerApplyNewLayout, reflowLargerCreateNewLayout, reflowLargerGetLinesToRemove, reflowSmallerGetNewLineLengths } from './BufferReflow';
+ import { CellData } from './CellData';
+ import { NULL_CELL_CHAR, NULL_CELL_CODE, NULL_CELL_WIDTH, WHITESPACE_CELL_CHAR, WHITESPACE_CELL_CODE, WHITESPACE_CELL_WIDTH } from './Constants';
+ import { Marker } from './Marker';
+@@ -158,6 +158,11 @@
+    * @param newRows The new number of rows.
+    */
+   public resize(newCols: number, newRows: number): void {
++    // Reading intent may remain true when an earlier resize clamped ydisp to ybase.
++    const firstLine = this._hasScrollback && this._bufferService.buffer === this && this._bufferService.isUserScrolling
++      ? this.lines.get(this.ydisp) as BufferLine | undefined
++      : undefined;
++    const anchor: IResizeAnchor | undefined = firstLine ? { line: firstLine } : undefined;
+     // store reference to null cell with default attrs
+     const nullCell = this.getNullCell(DEFAULT_ATTR_DATA);
+ 
+@@ -256,7 +261,7 @@
+     this.scrollBottom = newRows - 1;
+ 
+     if (this._isReflowEnabled) {
+-      this._reflow(newCols, newRows);
++      this._reflow(newCols, newRows, anchor);
+ 
+       // Trim the end of the line off if cols shrunk
+       if (this._cols > newCols) {
+@@ -265,6 +270,12 @@
+           dirtyMemoryLines += +this.lines.get(i)!.resize(newCols, nullCell);
+         }
+       }
++    }
++
++    if (anchor) {
++      let index = 0;
++      while (index < this.lines.length && this.lines.get(index) !== anchor.line) index++;
++      this.ydisp = index === this.lines.length ? 0 : Math.min(index, this.ybase);
+     }
+ 
+     this._cols = newCols;
+@@ -315,22 +326,22 @@
+     return this._hasScrollback;
+   }
+ 
+-  private _reflow(newCols: number, newRows: number): void {
++  private _reflow(newCols: number, newRows: number, anchor?: IResizeAnchor): void {
+     if (this._cols === newCols) {
+       return;
+     }
+ 
+     // Iterate through rows, ignore the last one as it cannot be wrapped
+     if (newCols > this._cols) {
+-      this._reflowLarger(newCols, newRows);
++      this._reflowLarger(newCols, newRows, anchor);
+     } else {
+-      this._reflowSmaller(newCols, newRows);
+-    }
+-  }
+-
+-  private _reflowLarger(newCols: number, newRows: number): void {
++      this._reflowSmaller(newCols, newRows, anchor);
++    }
++  }
++
++  private _reflowLarger(newCols: number, newRows: number, anchor?: IResizeAnchor): void {
+     const reflowCursorLine = this._optionsService.rawOptions.reflowCursorLine;
+-    const toRemove: number[] = reflowLargerGetLinesToRemove(this.lines, this._cols, newCols, this.ybase + this.y, this.getNullCell(DEFAULT_ATTR_DATA), reflowCursorLine);
++    const toRemove: number[] = reflowLargerGetLinesToRemove(this.lines, this._cols, newCols, this.ybase + this.y, this.getNullCell(DEFAULT_ATTR_DATA), reflowCursorLine, anchor);
+     if (toRemove.length > 0) {
+       const newLayoutResult = reflowLargerCreateNewLayout(this.lines, toRemove);
+       reflowLargerApplyNewLayout(this.lines, newLayoutResult.layout);
+@@ -361,7 +372,7 @@
+     this.savedY = Math.max(this.savedY - countRemoved, 0);
+   }
+ 
+-  private _reflowSmaller(newCols: number, newRows: number): void {
++  private _reflowSmaller(newCols: number, newRows: number, anchor?: IResizeAnchor): void {
+     const reflowCursorLine = this._optionsService.rawOptions.reflowCursorLine;
+     const nullCell = this.getNullCell(DEFAULT_ATTR_DATA);
+     // Gather all BufferLines that need to be inserted into the Buffer here so that they can be
+@@ -392,6 +403,9 @@
+         }
+       }
+ 
++      const anchorIndex = anchor ? wrappedLines.indexOf(anchor.line) : -1;
++      let anchorOffset = 0;
++      for (let i = 0; i < anchorIndex; i++) anchorOffset += getWrappedLineTrimmedLength(wrappedLines, i, this._cols);
+       const lastLineLength = wrappedLines[wrappedLines.length - 1].getTrimmedLength();
+       const destLineLengths = reflowSmallerGetNewLineLengths(wrappedLines, this._cols, newCols);
+       const linesToAdd = destLineLengths.length - wrappedLines.length;
+@@ -455,6 +469,14 @@
+         if (destLineLengths[i] < newCols) {
+           wrappedLines[i].setCell(destLineLengths[i], nullCell);
+         }
++      }
++
++      if (anchor && anchorIndex !== -1) {
++        let destination = 0;
++        while (destination < destLineLengths.length - 1 && anchorOffset >= destLineLengths[destination]) {
++          anchorOffset -= destLineLengths[destination++];
++        }
++        anchor.line = wrappedLines[destination];
+       }
+ 
+       // Adjust viewport as needed
+diff --git a/src/common/buffer/BufferReflow.ts b/src/common/buffer/BufferReflow.ts
+--- a/src/common/buffer/BufferReflow.ts
++++ b/src/common/buffer/BufferReflow.ts
+@@ -6,6 +6,11 @@
+ import { BufferLine } from './BufferLine';
+ import { CircularList } from '../CircularList';
+ import { IBufferLine, ICellData } from './Types';
++
++/** A single resize's logical-cell anchor; never retained between resize operations. */
++export interface IResizeAnchor {
++  line: BufferLine;
++}
+ 
+ export interface INewLayoutResult {
+   layout: number[];
+@@ -22,7 +27,7 @@
+  * @param nullCell The cell data to use when filling in empty cells.
+  * @param reflowCursorLine Whether to reflow the line containing the cursor.
+  */
+-export function reflowLargerGetLinesToRemove(lines: CircularList<IBufferLine>, oldCols: number, newCols: number, bufferAbsoluteY: number, nullCell: ICellData, reflowCursorLine: boolean): number[] {
++export function reflowLargerGetLinesToRemove(lines: CircularList<IBufferLine>, oldCols: number, newCols: number, bufferAbsoluteY: number, nullCell: ICellData, reflowCursorLine: boolean, anchor?: IResizeAnchor): number[] {
+   // Gather all BufferLines that need to be removed from the Buffer here so that they can be
+   // batched up and only committed once
+   const toRemove: number[] = [];
+@@ -50,6 +55,10 @@
+         continue;
+       }
+     }
++
++    const anchorIndex = anchor ? wrappedLines.indexOf(anchor.line) : -1;
++    let anchorOffset = 0;
++    for (let j = 0; j < anchorIndex; j++) anchorOffset += getWrappedLineTrimmedLength(wrappedLines, j, oldCols);
+ 
+     // Copy buffer data to new locations
+     let destLineIndex = 0;
+@@ -96,6 +105,18 @@
+       } else {
+         break;
+       }
++    }
++
++    if (anchor && anchorIndex !== -1) {
++      const retained = wrappedLines.slice(0, wrappedLines.length - countToRemove);
++      let destination = 0;
++      while (destination < retained.length - 1) {
++        const length = getWrappedLineTrimmedLength(retained, destination, newCols);
++        if (anchorOffset < length) break;
++        anchorOffset -= length;
++        destination++;
++      }
++      anchor.line = retained[destination];
+     }
+ 
+     if (countToRemove > 0) {

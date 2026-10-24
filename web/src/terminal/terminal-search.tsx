@@ -9,11 +9,13 @@ import { revealTerminalSelection } from "./clipped-screen";
 
 export function TerminalSearch({
   terminal,
+  targetName,
   active,
   inputRef,
   onClose,
 }: {
   terminal?: Terminal;
+  targetName: string;
   active: boolean;
   inputRef: RefObject<HTMLInputElement | null>;
   onClose(): void;
@@ -55,6 +57,7 @@ export function TerminalSearch({
         selecting = false;
       }
     };
+    const resize = terminal.onResize(() => setFound(undefined));
     // The addon caches lines without distinguishing the active buffer.
     const buffer = terminal.buffer.onBufferChange(() => {
       clearSelection();
@@ -66,6 +69,7 @@ export function TerminalSearch({
     return () => {
       search.current = () => {};
       selection.dispose();
+      resize.dispose();
       buffer.dispose();
       clearSelection();
       addon.dispose();
@@ -74,18 +78,23 @@ export function TerminalSearch({
   return (
     <div
       role="search"
-      aria-label={t(($) => $.terminal.search)}
+      aria-label={`${t(($) => $.terminal.search)} · ${targetName}`}
       hidden={!active}
-      className="absolute inset-0 z-20 flex items-center border-b border-border bg-background px-2 text-foreground"
+      className="flex min-h-10 flex-wrap items-center gap-x-1 border-b border-border bg-background px-2 py-0.5 text-foreground"
     >
+      <span className="w-full truncate text-xs leading-5 text-muted-foreground" title={targetName}>
+        {targetName}
+      </span>
       <Input
-        className="h-8 min-h-8 py-1 max-desk:h-9 max-desk:min-h-9"
+        className="h-8 min-h-8 w-0 flex-1 basis-32 py-1 max-desk:h-9 max-desk:min-h-9"
         ref={inputRef}
         value={query}
         disabled={!terminal}
-        aria-label={t(($) => $.terminal.search)}
+        aria-label={`${t(($) => $.terminal.search)} · ${targetName}`}
         placeholder={t(($) => $.common.search)}
         autoComplete="off"
+        autoCapitalize="off"
+        autoCorrect="off"
         spellCheck={false}
         onChange={(event) => {
           setQuery(event.target.value);
@@ -102,32 +111,34 @@ export function TerminalSearch({
           }
         }}
       />
-      <span role="status" className="w-16 shrink-0 px-1 text-xs text-muted-foreground">
-        {found === false ? t(($) => $.terminal.searchEmpty) : ""}
-      </span>
-      <IconButton
-        label={t(($) => $.terminal.searchPrevious)}
-        disabled={!terminal || !query}
-        onPointerDown={(event) => event.preventDefault()}
-        onClick={() => search.current(query, true)}
-      >
-        <ArrowUp />
-      </IconButton>
-      <IconButton
-        label={t(($) => $.terminal.searchNext)}
-        disabled={!terminal || !query}
-        onPointerDown={(event) => event.preventDefault()}
-        onClick={() => search.current(query)}
-      >
-        <ArrowDown />
-      </IconButton>
-      <IconButton
-        label={t(($) => $.terminal.closeSearch)}
-        onPointerDown={(event) => event.preventDefault()}
-        onClick={onClose}
-      >
-        <X />
-      </IconButton>
+      <div className="ml-auto flex shrink-0 items-center">
+        <span role="status" className="w-16 shrink-0 px-1 text-xs text-muted-foreground">
+          {found === false ? t(($) => $.terminal.searchEmpty) : ""}
+        </span>
+        <IconButton
+          label={t(($) => $.terminal.searchPrevious)}
+          disabled={!terminal || !query}
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={() => search.current(query, true)}
+        >
+          <ArrowUp />
+        </IconButton>
+        <IconButton
+          label={t(($) => $.terminal.searchNext)}
+          disabled={!terminal || !query}
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={() => search.current(query)}
+        >
+          <ArrowDown />
+        </IconButton>
+        <IconButton
+          label={t(($) => $.terminal.closeSearch)}
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={onClose}
+        >
+          <X />
+        </IconButton>
+      </div>
     </div>
   );
 }

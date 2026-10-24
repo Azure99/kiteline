@@ -117,11 +117,11 @@ On desktop and mobile, one button in the terminal control row cycles through nor
 
 Leaving fullscreen restores the normal layout. The terminal area menu and Settings on a terminal page no longer repeat focus or fullscreen actions. Settings on other pages and the phone file menu still provide fullscreen. Independent desktop fullscreen entered from Settings on other pages ends when changing devices, changing workspaces, or leaving a workspace; it stays active when switching tools within the same workspace.
 
-Terminal search covers currently loaded display content, including history, without case sensitivity. On desktop and phone, choose Search terminal from the terminal area menu.
+Terminal search covers currently loaded display content, including history, without case sensitivity. On desktop and phone, choose Search terminal from the terminal area menu to reveal the current pane and search it. The search bar shows the target session name, and its controls wrap in narrow areas. The current terminal's auxiliary keys are hidden during search and return when it closes, letting you continue typing; ended sessions still support history navigation. An actual grid size change keeps the query and clears the search result status; press Enter to search again.
 
 "Scrollback lines for new sessions" in "Terminal settings" controls the history retained per session (range in [Limits](reference.en.md#limits)). It affects only sessions created afterward.
 
-A session has one row/column size, determined by the client that most recently typed or resized its window. Other clients reflow to it. Opening the phone keyboard does not resize the session.
+A session has one row/column size, determined by the client that most recently typed or resized its window. Other clients reflow to it. Opening the phone keyboard does not resize the session. An actual grid size change clears each display's selection and keeps the content you were reading in view. Near the bottom, the viewport adjusts to the available scroll range; if that content has been trimmed from history, it shows the earliest retained content.
 
 ### Connection and recovery
 
