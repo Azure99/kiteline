@@ -60,10 +60,12 @@ export function DraftView({
   focusMode,
   editorVisible = true,
   htmlPreviewVisible = true,
+  showTabs = true,
 }: {
   focusMode?: ReturnType<typeof useTerminalFocus>;
   editorVisible?: boolean;
   htmlPreviewVisible?: boolean;
+  showTabs?: boolean;
   store: DraftStore;
   draft: Draft;
   targetOS?: AgentEnvironment["os"];
@@ -148,12 +150,12 @@ export function DraftView({
     return <div className="p-4 text-sm text-muted-foreground">{t(($) => $.files.closed)}</div>;
   return (
     <>
-      <DraftTabs store={store} tabs={tabs} draft={draft} hidden={focusMode?.active} />
+      {showTabs && <DraftTabs store={store} tabs={tabs} draft={draft} hidden={focusMode?.active} />}
       <div
         className={`flex min-h-10 shrink-0 items-center gap-1 border-b border-border px-3 max-sm:flex-wrap ${focusMode?.active ? "" : "max-sm:justify-end"}`}
       >
         <span
-          className={`min-w-0 flex-1 truncate text-xs ${focusMode?.active ? "max-sm:basis-full max-sm:pt-1" : "max-sm:hidden"}`}
+          className="min-w-0 flex-1 basis-32 truncate px-2 text-xs max-sm:basis-full max-sm:whitespace-pre-wrap max-sm:break-all max-sm:pt-1"
           title={`${draft.deviceName} / ${draft.workspaceName}\n${draft.resolvedPath ?? draftLabel(draft)}`}
         >
           {draftLabel(draft)}

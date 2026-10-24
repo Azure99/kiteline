@@ -101,10 +101,9 @@ test("selecting a published starting session before create completes does not du
   expect(members(currentGroup(result)!)).toEqual(["anchor", "starting"]);
 });
 
-test("a retained companion end screen does not keep a released main group", () => {
-  const layout = { ...selectSession(emptyLayout(), "ended"), dock: "ended", dockOpen: true };
-  const kept = retainSessions(layout, new Set(), new Set(["ended"]));
-  expect(kept.groups).toEqual([]);
-  expect(kept.dock).toBe("ended");
-  expect(retainSessions(kept, new Set()).dock).toBeUndefined();
+test("retains an opened end screen until its display is closed", () => {
+  const layout = selectSession(emptyLayout(), "ended");
+  const kept = retainSessions(layout, new Set(["ended"]));
+  expect(members(currentGroup(kept)!)).toEqual(["ended"]);
+  expect(retainSessions(kept, new Set()).groups).toEqual([]);
 });

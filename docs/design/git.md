@@ -75,7 +75,7 @@
 - 结构化 diff 与文件编辑器共用语言匹配和语法配色，分别按旧、新文件名懒加载语言。每个 hunk 的两侧独立解析；patch 缺少的前文可能导致局部误着色，不额外读取全文。未知语言显示原文，加载失败保留 diff 并提示原因。
 - patch 已截断、物理行数超过 `diffRenderLines`、解析失败或含无法解释的正文时，浏览器（`web/src/git/diff-view.tsx`）不渲染结构化 diff，只显示原因、summary 和不超过 `diffRawBytes` 的原始 patch 前缀。
 - 没有文本 hunk 的纯 rename、mode 变化和二进制文件只显示 summary，不当作没有变化。
-- 自己发起的 stage 或 unstage 成功且涉及当前预览的文件时，预览切到该文件的另一侧；期间用户另选了文件时不跳转。
+- stage 或 unstage 成功后刷新比较内容，保留已打开页及其比较来源，不自动切到另一侧。
 
 ### 历史与分支
 

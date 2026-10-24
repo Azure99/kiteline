@@ -42,7 +42,6 @@ export function SessionMenu({
   layout,
   busy,
   mobile,
-  dock,
   label,
   onCommand,
   onMove,
@@ -56,7 +55,6 @@ export function SessionMenu({
   layout: TerminalLayout;
   busy: boolean;
   mobile: boolean;
-  dock?: boolean;
   label?: string;
   onCommand(command: SessionCommand, id: string): void;
   onMove(id: string, target?: string, position?: MemberPosition): void;
@@ -74,13 +72,7 @@ export function SessionMenu({
     <Menu>
       <MenuTrigger
         render={
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={
-              label ?? (dock ? t(($) => $.terminal.dockActions) : t(($) => $.terminal.actions))
-            }
-          />
+          <Button variant="ghost" size="icon" aria-label={label ?? t(($) => $.terminal.actions)} />
         }
       >
         <MoreHorizontal />
@@ -100,7 +92,7 @@ export function SessionMenu({
         )}
         {id && (
           <>
-            {!dock && !mobile && (
+            {!mobile && (
               <>
                 <MenuItem disabled={ids.length < 2} onClick={() => onMove(id)}>
                   <Split />

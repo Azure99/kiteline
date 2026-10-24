@@ -56,13 +56,7 @@ export function closeDraft(store: DraftStore, draft: Draft) {
     isWorkspaceRoute(route, draft) &&
     store.find({ ...draft, path: route.query.file ?? "" }, route.query.draft) === draft
   ) {
-    const tabs = store
-      .snapshot()
-      .filter((item) => item.deviceId === draft.deviceId && item.workspaceId === draft.workspaceId);
-    const index = tabs.indexOf(draft);
-    const next = tabs[index + 1] ?? tabs[index - 1];
-    if (next && route.tool === "files" && !route.query.search) showDraft(next, true);
-    else updateWorkspaceQuery(draft, { file: next?.path || undefined, draft: next?.id }, true);
+    updateWorkspaceQuery(draft, { file: undefined, draft: undefined }, true);
   }
   store.close(draft);
 }

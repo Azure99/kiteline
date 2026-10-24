@@ -28,6 +28,7 @@ import {
   currentPath,
   devicePath,
   navigate,
+  parseRoute,
   useRoute,
   workspacePath,
   tasksPath,
@@ -45,7 +46,9 @@ import { DeviceActionDialog, type DeviceAction } from "./devices/device-actions"
 import { DeviceNavigation } from "./devices/device-navigation";
 import { Home, DeviceDetail } from "./devices/device-views";
 import { useRecentWorkspaces } from "./devices/recent-workspaces";
-import { WorkspaceView } from "./terminal/workspace-view";
+import { Workspace, type WorkspaceMemory } from "./workspace/workspace";
+import type { WorkPagesState } from "./workspace/pages";
+import type { GitBrowseState } from "./git/git";
 import type { TerminalLayout } from "./terminal/groups";
 import { reportKey, type ReceivedReport } from "./terminal/reports";
 import {
@@ -66,12 +69,6 @@ import { CliSetupDialog } from "./cli/cli-setup-dialog";
 import { useTerminalFocus } from "./terminal/use-terminal-focus";
 import { deferredView, ViewBoundary } from "./components/deferred-view";
 
-const Files = deferredView(async () => ({ default: (await import("./files/files")).Files }), {
-  active: (props) => props.visible,
-});
-const GitTool = deferredView(async () => ({ default: (await import("./git/git")).GitTool }), {
-  active: (props) => props.visible,
-});
 const TasksPage = deferredView(async () => ({
   default: (await import("./tasks/tasks")).TasksPage,
 }));
@@ -94,6 +91,9 @@ export function Workbench({
     }
   });
   const [drafts] = useState(() => new DraftStore());
+  const [workspaceViews] = useState(() => new Map<string, WorkspaceMemory>());
+  const [workPages] = useState(() => new Map<string, WorkPagesState>());
+  const [gitBrowsing] = useState(() => new Map<string, GitBrowseState>());
   const [gitActions] = useState(() => new GitActions());
   const [reports, setReports] = useState(new Map<string, ReceivedReport>());
   const [activationRequest, setActivationRequest] = useState(0);
@@ -135,6 +135,12 @@ export function Workbench({
   const [openFiles, setOpenFiles] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileNavigation, setMobileNavigation] = useState(false);
+  const [mobileTools, setMobileTools] = useState(false);
+  const [workspaceControls, setWorkspaceControls] = useState<HTMLDivElement | null>(null);
+  const [workspaceTools, setWorkspaceTools] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    setMobileTools(!!(route.query.search || route.query.reveal));
+  }, [route.deviceId, route.workspaceId, route.query.search, route.query.reveal]);
   const navigationToggle = useRef<HTMLButtonElement>(null);
   const routePath = currentPath();
   useEffect(() => setMobileNavigation(false), [routePath]);
@@ -190,17 +196,11 @@ export function Workbench({
   useEffect(() => {
     document.title = title;
   }, [title]);
-  const terminalPage =
-    !!session && route.valid && !!device && !!workspace && route.tool === "terminal";
-  useLayoutEffect(() => {
-    document.documentElement.toggleAttribute("data-terminal-active", terminalPage);
-    return () => document.documentElement.removeAttribute("data-terminal-active");
-  }, [terminalPage]);
   const mobile = useMobile();
   const terminalFocus = useTerminalFocus(
     session &&
       route.valid &&
-      (route.tool === "terminal" || (mobile && route.tool === "files" && route.query.draft)) &&
+      (!mobile || route.tool === "terminal" || (route.tool === "files" && route.query.draft)) &&
       device &&
       workspace
       ? `${device.id}:${workspace.id}:${route.tool}`
@@ -251,6 +251,7 @@ export function Workbench({
     setBinding(false);
     setCliSetup(false);
     setMobileNavigation(false);
+    setMobileTools(false);
     setOpenFiles(false);
     setDirectoryDevice(undefined);
     setAction(undefined);
@@ -273,6 +274,9 @@ export function Workbench({
     try {
       await post("/api/logout");
       terminalLayouts.clear();
+      workspaceViews.clear();
+      workPages.clear();
+      gitBrowsing.clear();
       try {
         sessionStorage.removeItem(terminalLayoutsKey);
       } catch {
@@ -287,7 +291,14 @@ export function Workbench({
     }
   }
   function choose(path: string) {
-    navigate(path);
+    const destination = parseRoute(new URL(path, window.location.origin));
+    const saved =
+      destination.deviceId &&
+      destination.workspaceId &&
+      Object.values(destination.query).every((value) => value === undefined)
+        ? workspaceViews.get(`${destination.deviceId}:${destination.workspaceId}`)?.path
+        : undefined;
+    navigate(saved ?? path);
     setMobileNavigation(false);
     setError(undefined);
   }
@@ -377,57 +388,51 @@ export function Workbench({
             </Button>
           }
         >
-          <WorkspaceView
+          <Workspace
             device={device}
             workspace={workspace}
-            visible={route.tool === "terminal"}
             layouts={terminalLayouts}
             onLayout={saveLayout}
             onActivateTerminal={activateTerminal}
             activationRequest={activationRequest}
             focusMode={terminalFocus}
             onCliSetup={() => setCliSetup(true)}
-          >
-            <Files
-              focusMode={terminalFocus}
-              device={device}
-              workspace={workspace}
-              visible={route.tool === "files"}
-              store={drafts}
-              onOperation={(action, folder) =>
-                setFileOperation({
+            store={drafts}
+            actions={gitActions}
+            views={workspaceViews}
+            savedPages={workPages}
+            gitBrowsing={gitBrowsing}
+            controlsHost={workspaceControls}
+            toolsHost={workspaceTools}
+            mobileTools={mobileTools}
+            onMobileTools={setMobileTools}
+            navigationOpen={mobile && mobileNavigation}
+            onOperation={(action, folder) =>
+              setFileOperation({
+                deviceId: device.id,
+                workspaceId: workspace.id,
+                deviceName: device.name,
+                workspaceName: workspace.name,
+                folder,
+                action,
+              })
+            }
+            onUpload={(files, folder) => {
+              const id = newId();
+              setUploads((old) => [
+                ...old,
+                {
+                  id,
                   deviceId: device.id,
                   workspaceId: workspace.id,
-                  deviceName: device.name,
-                  workspaceName: workspace.name,
                   folder,
-                  action,
-                })
-              }
-              onUpload={(files, folder) => {
-                const id = newId();
-                setUploads((old) => [
-                  ...old,
-                  {
-                    id,
-                    deviceId: device.id,
-                    workspaceId: workspace.id,
-                    folder,
-                    files,
-                    label: `${device.name} / ${workspace.name} / ${folder}`,
-                  },
-                ]);
-                setActiveUpload(id);
-              }}
-            />
-            <GitTool
-              device={device}
-              workspace={workspace}
-              visible={route.tool === "git"}
-              store={drafts}
-              actions={gitActions}
-            />
-          </WorkspaceView>
+                  files,
+                  label: `${device.name} / ${workspace.name} / ${folder}`,
+                },
+              ]);
+              setActiveUpload(id);
+            }}
+          />
         </ViewBoundary>
       );
     }
@@ -552,7 +557,10 @@ export function Workbench({
             </Menu>
           </div>
         </aside>
-        <main hidden={mobile && mobileNavigation} className="flex min-w-0 flex-1 flex-col">
+        <main
+          hidden={mobile && (mobileNavigation || mobileTools)}
+          className="flex min-w-0 flex-1 flex-col"
+        >
           <ReleaseNotice />
           <header
             hidden={terminalFocus.active}
@@ -594,6 +602,7 @@ export function Workbench({
                 ? t(($) => $.schedules.title)
                 : (workspace?.name ?? device?.name ?? "Kiteline")}
             </strong>
+            <div ref={setWorkspaceControls} className="flex shrink-0 items-center gap-1" />
           </header>
           {route.valid && !route.tasks && device && (!route.workspaceId || workspace) && (
             <AgentReleaseNotice key={`agent-release:${device.id}`} device={device} />
@@ -621,6 +630,7 @@ export function Workbench({
           )}
           {renderMain()}
         </main>
+        <div ref={setWorkspaceTools} hidden={mobile && mobileNavigation} className="contents" />
       </div>
       <OpenFiles store={drafts} devices={devices} open={openFiles} onOpenChange={setOpenFiles} />
       <Dialog open={cliSetup} onOpenChange={setCliSetup}>

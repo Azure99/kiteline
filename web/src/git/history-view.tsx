@@ -2,17 +2,19 @@ import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, ChevronDown, GitCommitHorizontal, GitBranch } from "lucide-react";
-import type { ViewType } from "react-diff-view";
 import type { Commit, CommitFiles, GitHistory } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
 import { IconButton } from "../components/icon-button";
-import { ToolHeader, ToolSidebar } from "../components/tool-layout";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
 import { rpc } from "../lib/api";
-import { useMobile } from "../lib/use-mobile";
-import { DiffView, type DiffTarget } from "./diff-view";
+import { type DiffTarget } from "./diff-view";
 import { GitFilePath } from "./view-header";
 import { PageFooter } from "./page-footer";
+
+export interface HistorySelection {
+  commit?: Commit;
+  parent?: string;
+}
 
 interface Props {
   deviceId: string;
@@ -21,8 +23,10 @@ interface Props {
   active: boolean;
   visible: boolean;
   refreshKey: number;
-  diffView: ViewType;
-  renderHeader(target?: DiffTarget, onBack?: () => void): ReactNode;
+  target?: DiffTarget;
+  onTarget(target: DiffTarget): void;
+  selection: HistorySelection;
+  renderHeader(): ReactNode;
   onBranch?: (oid: string) => void;
 }
 export function HistoryView(props: Props) {
@@ -31,7 +35,12 @@ export function HistoryView(props: Props) {
   const { deviceId, workspaceId, repoId, active, refreshKey, renderHeader } = props;
   const [value, setValue] = useState<GitHistory>();
   const [offset, setOffset] = useState(0);
-  const [selected, setSelected] = useState<Commit>();
+  const [selected, setSelected] = useState<Commit | undefined>(props.selection.commit);
+  function selectCommit(commit?: Commit) {
+    props.selection.commit = commit;
+    props.selection.parent = commit?.parents[0];
+    setSelected(commit);
+  }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
   const request = useRef<AbortController>(undefined);
@@ -80,26 +89,22 @@ export function HistoryView(props: Props) {
   return (
     <>
       {!active && props.visible && (
-        <ToolHeader visible order={3}>
+        <div className="shrink-0">
           <p role="status" className="px-4 py-2 text-xs text-muted-foreground">
             {value ? t(($) => $.git.historyUnavailable) : t(($) => $.common.deviceOffline)}
           </p>
-        </ToolHeader>
+        </div>
       )}
       {active && busy && value && (
-        <ToolHeader visible={props.visible} order={3}>
+        <div className="shrink-0">
           <p role="status" className="px-4 py-2 text-xs text-muted-foreground">
             {t(($) => $.git.historyRefreshing)}
           </p>
-        </ToolHeader>
+        </div>
       )}
-      {!selected && (
-        <ToolHeader visible={props.visible} order={2}>
-          {renderHeader()}
-        </ToolHeader>
-      )}
+      {!selected && <div className="shrink-0">{renderHeader()}</div>}
       {!!error && (
-        <ToolHeader visible={props.visible} order={3}>
+        <div className="shrink-0">
           <div
             role="alert"
             className="max-h-24 overflow-auto px-4 py-2 text-xs break-words text-destructive"
@@ -107,14 +112,14 @@ export function HistoryView(props: Props) {
             {value && <p>{t(($) => $.git.historyStale)}</p>}
             <ErrorNotice error={error} />
           </div>
-        </ToolHeader>
+        </div>
       )}
       <div className={`${selected ? "hidden" : "flex"} min-h-0 flex-1 flex-col`}>
         <div className="scroll-area min-h-0 flex-1 overflow-auto">
           {value?.commits.map((commit) => (
             <button
               key={commit.oid}
-              onClick={() => setSelected(commit)}
+              onClick={() => selectCommit(commit)}
               className="flex min-h-16 w-full items-start gap-3 border-b border-border px-4 py-3 text-left hover:bg-primary-soft"
             >
               <GitCommitHorizontal className="mt-1 size-4 shrink-0 text-muted-foreground" />
@@ -171,7 +176,7 @@ export function HistoryView(props: Props) {
           key={selected.oid}
           {...props}
           commit={selected}
-          onBack={() => setSelected(undefined)}
+          onBack={() => selectCommit(undefined)}
         />
       )}
     </>
@@ -188,19 +193,18 @@ function CommitView({
   renderHeader,
   onBack,
   onBranch,
-  diffView,
+  target,
+  onTarget,
+  selection,
 }: Props & { commit: Commit; onBack: () => void }) {
   const { t } = useTranslation();
 
-  const [parent, setParent] = useState(commit.parents[0]);
+  const [parent, setParent] = useState(selection.parent ?? commit.parents[0]);
   const [value, setValue] = useState<CommitFiles>();
-  const [target, setTarget] = useState<DiffTarget>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
   const request = useRef<AbortController>(undefined);
   const offsets = useRef<number[]>([0]);
-  const mobile = useMobile();
-  const hasTarget = !!target;
   const list = useRef<HTMLElement>(null);
   const listScroll = useRef<{ top: number; left: number; path?: string; offset?: number }>({
     top: 0,
@@ -220,7 +224,7 @@ function CommitView({
         (kept.offset ?? 0)
       : kept.top;
     element.scrollLeft = kept.left;
-  }, [mobile, value, visible, hasTarget]);
+  }, [value, visible]);
   const load = useCallback(
     async (offset = 0) => {
       if (!active) return;
@@ -260,7 +264,6 @@ function CommitView({
   );
   useEffect(() => {
     setValue(undefined);
-    setTarget(undefined);
     offsets.current = [0];
     listScroll.current = { top: 0, left: 0 };
   }, [deviceId, workspaceId, repoId, commit.oid, parent]);
@@ -270,9 +273,9 @@ function CommitView({
   }, [active, load, refreshKey]);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <ToolHeader visible={visible} order={2}>
-        {renderHeader(target, () => setTarget(undefined))}
-        {(!mobile || !target) && (
+      <div className="shrink-0">
+        {renderHeader()}
+        {
           <div className="flex shrink-0 items-center gap-2 border-b border-border p-2">
             <IconButton label={t(($) => $.git.backHistory)} onClick={onBack}>
               <ArrowLeft />
@@ -293,7 +296,7 @@ function CommitView({
               </IconButton>
             )}
           </div>
-        )}
+        }
         {commit.parents.length > 1 && (
           <div className="shrink-0 border-b border-border px-3">
             <Menu>
@@ -306,7 +309,13 @@ function CommitView({
               </MenuTrigger>
               <MenuContent>
                 {commit.parents.map((oid, index) => (
-                  <MenuItem key={oid} onClick={() => setParent(oid)}>
+                  <MenuItem
+                    key={oid}
+                    onClick={() => {
+                      selection.parent = oid;
+                      setParent(oid);
+                    }}
+                  >
                     {t(($) => $.git.parentNumber, { number: index + 1 })} · {oid.slice(0, 8)}
                   </MenuItem>
                 ))}
@@ -328,94 +337,90 @@ function CommitView({
             <ErrorNotice error={error} />
           </div>
         )}
-      </ToolHeader>
+      </div>
       <div className="flex min-h-0 flex-1">
-        <ToolSidebar visible={visible}>
-          <aside
-            ref={list}
-            onScroll={(event) => {
-              const element = event.currentTarget;
-              if (!element.clientHeight) return;
-              const top = element.getBoundingClientRect().top;
-              const row = Array.from(
-                element.querySelectorAll<HTMLElement>("[data-history-file]"),
-              ).find((row) => row.getBoundingClientRect().bottom > top);
-              listScroll.current = {
-                top: element.scrollTop,
-                left: element.scrollLeft,
-                path: row?.dataset.historyFile,
-                offset: row ? row.getBoundingClientRect().top - top : undefined,
-              };
-            }}
-            className={`${mobile && target ? "hidden" : ""} scroll-area w-full overflow-auto border-border desk:w-72 desk:shrink-0 desk:border-r`}
-            aria-label={t(($) => $.git.commitFiles)}
-          >
-            {value?.files.map((file) =>
-              file.path === undefined ? (
-                <div
-                  key={`invalid:${file.pathError}`}
-                  className="border-b border-border px-3 py-2 text-xs break-all text-muted-foreground"
-                >
-                  <span className="mr-2 font-mono">{file.status}</span>
-                  {t(($) => $.git.invalidPath, { path: file.pathError })}
-                  {file.binary && <span className="ml-2">{t(($) => $.git.binary)}</span>}
-                </div>
-              ) : (
-                <button
-                  key={`path:${file.path}`}
-                  data-history-file={file.path}
-                  onClick={() =>
-                    setTarget({
-                      path: file.path,
-                      side: "commit",
-                      commitOid: commit.oid,
-                      parentOid: parent,
-                    })
-                  }
-                  aria-current={target?.path === file.path ? "true" : undefined}
-                  className={`flex min-h-8 w-full items-center gap-2 border-b border-border px-3 text-left text-xs max-desk:min-h-11 ${target?.path === file.path ? "bg-primary-soft shadow-[inset_3px_0_var(--primary)]" : "hover:bg-primary-soft"}`}
-                >
-                  <span className="font-mono text-muted-foreground">{file.status}</span>
-                  <GitFilePath path={file.path} stacked />
-                  {!file.binary && file.additions !== undefined && file.deletions !== undefined && (
-                    <span className="shrink-0 whitespace-nowrap font-mono text-[11px]">
-                      <span className="text-success">+{file.additions}</span>{" "}
-                      <span className="text-destructive">−{file.deletions}</span>
-                    </span>
-                  )}
-                  {file.binary && (
-                    <span className="text-muted-foreground">{t(($) => $.git.binary)}</span>
-                  )}
-                </button>
-              ),
-            )}
-            {busy && (
-              <p className="p-4 text-xs text-muted-foreground">{t(($) => $.common.reading)}</p>
-            )}
-            {!!(value && !busy && !error && !value.files.length) && (
-              <p className="p-4 text-xs text-muted-foreground">{t(($) => $.git.noFileChanges)}</p>
-            )}
-            {value?.nextOffset !== undefined && (
-              <Button
-                variant="ghost"
-                className="w-full"
-                disabled={busy || !active}
-                onClick={() => void load(value.nextOffset)}
+        <aside
+          ref={list}
+          onScroll={(event) => {
+            const element = event.currentTarget;
+            if (!element.clientHeight) return;
+            const top = element.getBoundingClientRect().top;
+            const row = Array.from(
+              element.querySelectorAll<HTMLElement>("[data-history-file]"),
+            ).find((row) => row.getBoundingClientRect().bottom > top);
+            listScroll.current = {
+              top: element.scrollTop,
+              left: element.scrollLeft,
+              path: row?.dataset.historyFile,
+              offset: row ? row.getBoundingClientRect().top - top : undefined,
+            };
+          }}
+          className="scroll-area min-h-0 w-full flex-1 overflow-auto"
+          aria-label={t(($) => $.git.commitFiles)}
+        >
+          {value?.files.map((file) =>
+            file.path === undefined ? (
+              <div
+                key={`invalid:${file.pathError}`}
+                className="border-b border-border px-3 py-2 text-xs break-all text-muted-foreground"
               >
-                {t(($) => $.common.more)}
-              </Button>
-            )}
-          </aside>
-        </ToolSidebar>
-        {target && (
-          <DiffView
-            key={JSON.stringify(target)}
-            {...{ deviceId, workspaceId, repoId, target }}
-            refreshKey={refreshKey}
-            active={active}
-            viewType={diffView}
-          />
-        )}
+                <span className="mr-2 font-mono">{file.status}</span>
+                {t(($) => $.git.invalidPath, { path: file.pathError })}
+                {file.binary && <span className="ml-2">{t(($) => $.git.binary)}</span>}
+              </div>
+            ) : (
+              <button
+                key={`path:${file.path}`}
+                data-history-file={file.path}
+                onClick={() =>
+                  onTarget({
+                    path: file.path,
+                    side: "commit",
+                    commitOid: commit.oid,
+                    parentOid: parent,
+                  })
+                }
+                aria-current={
+                  target?.side === "commit" &&
+                  target.commitOid === commit.oid &&
+                  target.parentOid === parent &&
+                  target.path === file.path
+                    ? "true"
+                    : undefined
+                }
+                className={`flex min-h-8 w-full items-center gap-2 border-b border-border px-3 text-left text-xs max-desk:min-h-11 ${target?.side === "commit" && target.commitOid === commit.oid && target.parentOid === parent && target.path === file.path ? "bg-primary-soft shadow-[inset_3px_0_var(--primary)]" : "hover:bg-primary-soft"}`}
+              >
+                <span className="font-mono text-muted-foreground">{file.status}</span>
+                <GitFilePath path={file.path} stacked />
+                {!file.binary && file.additions !== undefined && file.deletions !== undefined && (
+                  <span className="shrink-0 whitespace-nowrap font-mono text-[11px]">
+                    <span className="text-success">+{file.additions}</span>{" "}
+                    <span className="text-destructive">−{file.deletions}</span>
+                  </span>
+                )}
+                {file.binary && (
+                  <span className="text-muted-foreground">{t(($) => $.git.binary)}</span>
+                )}
+              </button>
+            ),
+          )}
+          {busy && (
+            <p className="p-4 text-xs text-muted-foreground">{t(($) => $.common.reading)}</p>
+          )}
+          {!!(value && !busy && !error && !value.files.length) && (
+            <p className="p-4 text-xs text-muted-foreground">{t(($) => $.git.noFileChanges)}</p>
+          )}
+          {value?.nextOffset !== undefined && (
+            <Button
+              variant="ghost"
+              className="w-full"
+              disabled={busy || !active}
+              onClick={() => void load(value.nextOffset)}
+            >
+              {t(($) => $.common.more)}
+            </Button>
+          )}
+        </aside>
       </div>
     </div>
   );

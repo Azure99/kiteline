@@ -1,20 +1,18 @@
 import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ChevronDown, FolderGit2, GitBranch, RefreshCw } from "lucide-react";
-import type { ViewType } from "react-diff-view";
 import type { Device, DiscardScope, GitEntry, Repo, Workspace } from "@kiteline/shared/protocol";
-import { ToolHeader, ToolSidebar } from "../components/tool-layout";
 import { Button } from "../components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
-import { apiError } from "../lib/api";
 import { useMobile } from "../lib/use-mobile";
+import { apiError } from "../lib/api";
 import type { DraftStore } from "../files/drafts";
 import { showFile } from "../files/navigation";
-import { DiffView, type DiffTarget } from "./diff-view";
+import { type DiffTarget } from "./diff-view";
 import { selectionOf, type ChangeSide } from "./selection";
 import { useGitStatus } from "./use-status";
-import { HistoryView } from "./history-view";
+import { HistoryView, type HistorySelection } from "./history-view";
 import { BranchesView } from "./branches-view";
 import {
   currentRoute,
@@ -32,9 +30,14 @@ import { BranchDialog } from "./branch-dialog";
 import { RemoteActions } from "./remote-actions";
 import { OperationBar } from "./operation-bar";
 import { GitViewHeader, type GitView } from "./view-header";
-import { useRepos } from "./use-repos";
+import type { useRepos } from "./use-repos";
 import { ChangeSection } from "./change-section";
 import { PageFooter } from "./page-footer";
+
+export interface GitBrowseState {
+  view: GitView;
+  history: HistorySelection;
+}
 
 export function GitTool({
   device,
@@ -42,23 +45,27 @@ export function GitTool({
   visible,
   store,
   actions,
+  onDiff,
+  activeDiff,
+  saved,
+  repositories,
 }: {
   device: Device;
   workspace: Workspace;
   visible: boolean;
   store: DraftStore;
   actions: GitActions;
+  onDiff(repo: Repo, target: DiffTarget): void;
+  activeDiff?: { repoId: string; target: DiffTarget };
+  saved: Map<string, GitBrowseState>;
+  repositories: ReturnType<typeof useRepos>;
 }) {
   const { t } = useTranslation();
 
   const route = useRoute();
   const requestedRepo = route.query.repo;
   const enabled = device.status === "online";
-  const { repos, scan, busy, error, discover } = useRepos(
-    device.id,
-    workspace.id,
-    visible && enabled,
-  );
+  const { repos, scan, busy, error, discover } = repositories;
   const selectedRepoId = requestedRepo ?? repos.find((item) => item.available)?.id ?? repos[0]?.id;
   const repo = repos.find((item) => item.id === selectedRepoId);
   const activeRepoId = repo?.id;
@@ -124,7 +131,7 @@ export function GitTool({
   );
   return (
     <div className={visible ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
-      <ToolHeader visible={visible}>
+      <div className="shrink-0">
         {!repo?.available && (
           <div className="flex min-h-11 shrink-0 items-center gap-2 border-b border-border px-3">
             {picker}
@@ -159,11 +166,12 @@ export function GitTool({
             </Button>
           </div>
         )}
-      </ToolHeader>
+      </div>
       {repo?.available ? (
         <RepoView
           key={repo.id}
-          {...{ device, workspace, repo, visible, enabled, actions, store, picker }}
+          {...{ device, workspace, repo, visible, enabled, actions, store, picker, onDiff, saved }}
+          target={activeDiff?.repoId === repo.id ? activeDiff.target : undefined}
           onFile={openFile}
           onLocate={locateFile}
         />
@@ -195,6 +203,9 @@ function RepoView({
   actions,
   store,
   picker,
+  target,
+  onDiff,
+  saved,
 }: {
   device: Device;
   workspace: Workspace;
@@ -206,37 +217,32 @@ function RepoView({
   actions: GitActions;
   store: DraftStore;
   picker: ReactNode;
+  target?: DiffTarget;
+  onDiff(repo: Repo, target: DiffTarget): void;
+  saved: Map<string, GitBrowseState>;
 }) {
   const { t, i18n } = useTranslation();
 
   const mobile = useMobile();
   const state = useGitStatus(device.id, workspace.id, repo.id, visible && enabled);
-  const [target, setTarget] = useState<DiffTarget>();
-  const [view, setView] = useState<GitView>("changes");
-  const [diffView, setDiffView] = useState<ViewType>("unified");
-  const effectiveDiffView = mobile ? "unified" : diffView;
-  const [historyVisited, setHistoryVisited] = useState(false);
+  const [browsing] = useState(() => {
+    const key = `${device.id}:${workspace.id}:${repo.id}`;
+    const value = saved.get(key) ?? { view: "changes" as const, history: {} };
+    saved.set(key, value);
+    return value;
+  });
+  const [view, setView] = useState<GitView>(browsing.view);
+  const [historyVisited, setHistoryVisited] = useState(view === "history");
   const [refresh, setRefresh] = useState(0);
-  const selectionVersion = useRef(0);
-  const selectTarget = (next?: DiffTarget) => {
-    selectionVersion.current++;
-    setTarget(next);
-  };
+  const selectTarget = (next: DiffTarget) => onDiff(repo, next);
   const selectView = (next: GitView) => {
-    selectionVersion.current++;
     if (next === "history") setHistoryVisited(true);
+    browsing.view = next;
     setView(next);
   };
-  useEffect(() => {
-    if (!visible) selectionVersion.current++;
-  }, [visible]);
   const { value, selected, setSelected } = state;
   const actionTarget = { deviceId: device.id, workspaceId: workspace.id, repoId: repo.id };
   const activity = useGitActivity(actions, actionTarget);
-  const diffRefresh = useMemo(
-    () => [value, activity.revision, refresh],
-    [value, activity.revision, refresh],
-  );
   const [discarding, setDiscarding] = useState<{ paths: string[]; scope: DiscardScope }>();
   const [branchStart, setBranchStart] = useState<string>();
   const disabled = !enabled || !!activity.request;
@@ -247,36 +253,18 @@ function RepoView({
   async function indexAction(paths: string[], kind: "stage" | "unstage") {
     if (kind === "stage" && !confirmDiskVersion(store, actionTarget, repo.path, paths)) return;
     const params = { paths: [...new Set(paths)] };
-    const selection = selectionVersion.current;
-    const result =
-      kind === "stage"
-        ? await actions.run(actionTarget, "git.stage", params)
-        : await actions.run(actionTarget, "git.unstage", params);
-    if (
-      result &&
-      selection === selectionVersion.current &&
-      target &&
-      view === "changes" &&
-      paths.includes(target.path)
-    ) {
-      setTarget({ path: target.path, side: kind === "stage" ? "staged" : "worktree" });
-    }
+    await actions.run(actionTarget, kind === "stage" ? "git.stage" : "git.unstage", params);
   }
-  const renderHeader = (preview?: DiffTarget, onBack?: () => void) => (
+  const renderHeader = () => (
     <GitViewHeader
       view={view}
-      diffView={diffView}
-      onDiffView={setDiffView}
       count={value?.totalCount}
-      target={preview}
       disabled={!enabled}
       onView={selectView}
-      onBack={onBack}
       onRefresh={() => {
         void state.load();
         setRefresh((value) => value + 1);
       }}
-      onFile={onFile}
       onCreateBranch={
         view === "branches" && value?.head.oid && !disabled
           ? () => setBranchStart(value.head.oid!)
@@ -298,12 +286,12 @@ function RepoView({
   const counts = (
     <>
       {!!value?.ahead && (
-        <span className={mobile ? "shrink-0 text-xs" : "text-xs"}>
+        <span className="shrink-0 text-xs">
           ↑{value.ahead.toLocaleString(i18n.resolvedLanguage)}
         </span>
       )}
       {!!value?.behind && (
-        <span className={mobile ? "shrink-0 text-xs" : "text-xs"}>
+        <span className="shrink-0 text-xs">
           ↓{value.behind.toLocaleString(i18n.resolvedLanguage)}
         </span>
       )}
@@ -311,42 +299,27 @@ function RepoView({
   );
   return (
     <>
-      <ToolHeader visible={visible} order={1}>
+      <div className="shrink-0">
         <div className="flex min-h-11 shrink-0 items-center gap-2 border-b border-border px-3">
           {picker}
           <button
-            className={`flex min-h-10 min-w-0 flex-1 text-xs max-desk:min-h-11 ${mobile ? "flex-col items-start justify-center" : "items-center gap-2"}`}
-            title={
-              mobile
-                ? [value?.branch, value?.upstream, value?.head.oid].filter(Boolean).join(" · ")
-                : (value?.head.oid ?? undefined)
-            }
+            className="flex min-h-10 min-w-0 flex-1 flex-col items-start justify-center text-xs max-desk:min-h-11"
+            title={[value?.branch, value?.upstream, value?.head.oid].filter(Boolean).join(" · ")}
             onClick={() => selectView("branches")}
           >
-            {mobile ? (
-              <>
-                <span className="flex w-full min-w-0 items-center gap-2 leading-4">
-                  <GitBranch size={15} className="shrink-0" />
-                  <span className="min-w-0 truncate">{branchLabel}</span>
-                </span>
-                {(value?.upstream || value?.ahead || value?.behind) && (
-                  <span className="flex w-full min-w-0 items-center gap-2 leading-4">
-                    {value?.upstream && <span className="min-w-0 truncate">{value.upstream}</span>}
-                    {counts}
-                  </span>
-                )}
-              </>
-            ) : (
-              <>
+            <>
+              <span className="flex w-full min-w-0 items-center gap-2 leading-4">
                 <GitBranch size={15} className="shrink-0" />
-                <span className="truncate">
-                  {branchLabel}
-                  {value?.upstream ? ` · ${value.upstream}` : ""}
+                <span className="min-w-0 truncate">{branchLabel}</span>
+              </span>
+              {(value?.upstream || value?.ahead || value?.behind) && (
+                <span className="flex w-full min-w-0 items-center gap-2 leading-4">
+                  {value?.upstream && <span className="min-w-0 truncate">{value.upstream}</span>}
+                  {counts}
                 </span>
-              </>
-            )}
+              )}
+            </>
           </button>
-          {!mobile && counts}
           <RemoteActions
             target={actionTarget}
             actions={actions}
@@ -354,8 +327,7 @@ function RepoView({
             head={value?.head}
           />
         </div>
-        {view !== "history" &&
-          renderHeader(view === "changes" ? target : undefined, () => selectTarget())}
+        {view !== "history" && renderHeader()}
         {!!(state.error || state.notice) && (
           <div
             role={state.error ? "alert" : "status"}
@@ -387,7 +359,7 @@ function RepoView({
             }
           />
         )}
-      </ToolHeader>
+      </div>
       {historyVisited && (
         <div className={view === "history" ? "flex min-h-0 min-w-0 flex-1 flex-col" : "hidden"}>
           <HistoryView
@@ -398,7 +370,9 @@ function RepoView({
             visible={visible && view === "history"}
             refreshKey={refresh}
             renderHeader={renderHeader}
-            diffView={effectiveDiffView}
+            target={target}
+            onTarget={selectTarget}
+            selection={browsing.history}
             onBranch={(oid) => {
               if (!disabled) setBranchStart(oid);
             }}
@@ -416,78 +390,59 @@ function RepoView({
         />
       )}
       <div className={view === "changes" ? "flex min-h-0 flex-1" : "hidden"}>
-        <ToolSidebar visible={visible && view === "changes" && (!mobile || !target)}>
-          <aside
-            className="flex min-h-0 w-full flex-col border-border desk:w-80 desk:shrink-0 desk:border-r"
-            aria-label={t(($) => $.git.changeList)}
-          >
-            <div className="scroll-area min-h-0 flex-1 overflow-auto">
-              {!value && state.busy && (
-                <p role="status" className="px-4 py-3 text-xs text-muted-foreground">
-                  {t(($) => $.common.reading)}
-                </p>
-              )}
-              {value &&
-                (["conflict", "staged", "worktree"] as const).map((side) => (
-                  <ChangeSection
-                    key={side}
-                    status={value}
-                    side={side}
-                    selected={selected}
-                    target={target}
-                    disabled={disabled}
-                    onSelect={select}
-                    onIndex={indexAction}
-                    onDiscard={(paths, scope) => setDiscarding({ paths, scope })}
-                    onFile={onFile}
-                    onTarget={selectTarget}
-                  />
-                ))}
-            </div>
-            <PageFooter
-              summary={
-                value && (
-                  <>
-                    {value.entries.length
-                      ? `${(value.offset + 1).toLocaleString(i18n.resolvedLanguage)}–${(value.offset + value.entries.length).toLocaleString(i18n.resolvedLanguage)}`
-                      : "0"}{" "}
-                    / {value.totalCount.toLocaleString(i18n.resolvedLanguage)}
-                  </>
-                )
-              }
-              previousLabel={t(($) => $.git.previousPage)}
-              previousDisabled={!value?.offset || state.busy}
-              onPrevious={state.previous}
-              nextLabel={t(($) => $.git.nextPage)}
-              nextDisabled={value?.nextOffset === undefined || state.busy}
-              onNext={state.next}
-            />
-            <CommitBox
-              target={actionTarget}
-              actions={actions}
-              status={value}
-              disabled={disabled || state.busy}
-              mobile={mobile}
-            />
-          </aside>
-        </ToolSidebar>
-        {target ? (
-          <DiffView
-            key={JSON.stringify(target)}
-            deviceId={device.id}
-            workspaceId={workspace.id}
-            repoId={repo.id}
-            target={target}
-            refreshKey={diffRefresh}
-            viewType={effectiveDiffView}
+        <aside
+          className="flex min-h-0 w-full flex-1 flex-col"
+          aria-label={t(($) => $.git.changeList)}
+        >
+          <div className="scroll-area min-h-0 flex-1 overflow-auto">
+            {!value && state.busy && (
+              <p role="status" className="px-4 py-3 text-xs text-muted-foreground">
+                {t(($) => $.common.reading)}
+              </p>
+            )}
+            {value &&
+              (["conflict", "staged", "worktree"] as const).map((side) => (
+                <ChangeSection
+                  key={side}
+                  status={value}
+                  side={side}
+                  selected={selected}
+                  target={target}
+                  disabled={disabled}
+                  onSelect={select}
+                  onIndex={indexAction}
+                  onDiscard={(paths, scope) => setDiscarding({ paths, scope })}
+                  onFile={onFile}
+                  onTarget={selectTarget}
+                />
+              ))}
+          </div>
+          <PageFooter
+            summary={
+              value && (
+                <>
+                  {value.entries.length
+                    ? `${(value.offset + 1).toLocaleString(i18n.resolvedLanguage)}–${(value.offset + value.entries.length).toLocaleString(i18n.resolvedLanguage)}`
+                    : "0"}{" "}
+                  / {value.totalCount.toLocaleString(i18n.resolvedLanguage)}
+                </>
+              )
+            }
+            previousLabel={t(($) => $.git.previousPage)}
+            previousDisabled={!value?.offset || state.busy}
+            onPrevious={state.previous}
+            nextLabel={t(($) => $.git.nextPage)}
+            nextDisabled={value?.nextOffset === undefined || state.busy}
+            onNext={state.next}
           />
-        ) : (
-          !mobile && (
-            <div className="flex min-w-0 flex-1 items-center justify-center text-sm text-muted-foreground">
-              {t(($) => $.git.selectChange)}
-            </div>
-          )
-        )}
+          <CommitBox
+            target={actionTarget}
+            actions={actions}
+            status={value}
+            disabled={disabled || state.busy}
+            mobile={mobile}
+          />
+        </aside>
       </div>
       {discarding && (
         <DiscardDialog

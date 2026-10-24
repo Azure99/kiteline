@@ -20,16 +20,13 @@ export interface TerminalGroup {
 export interface TerminalLayout {
   groups: TerminalGroup[];
   current?: string;
-  dock?: string;
-  dockOpen: boolean;
-  dockSize: number;
 }
 export interface MemberPosition {
   anchor: string;
   side: "before" | "after";
 }
 export function emptyLayout(): TerminalLayout {
-  return { groups: [], dockOpen: false, dockSize: 32 };
+  return { groups: [] };
 }
 export function leaves(node: TerminalNode): TerminalLeaf[] {
   return "sessionId" in node ? [node] : node.children.flatMap(leaves);
@@ -224,18 +221,13 @@ export function resizeSplit(
   if (group) resize(group.root);
   return next;
 }
-export function retainSessions(
-  layout: TerminalLayout,
-  ids: ReadonlySet<string>,
-  dockIds = ids,
-): TerminalLayout {
+export function retainSessions(layout: TerminalLayout, ids: ReadonlySet<string>): TerminalLayout {
   const stale = layout.groups.flatMap(members).filter((id) => !ids.has(id));
-  if (!stale.length && (!layout.dock || dockIds.has(layout.dock))) return layout;
+  if (!stale.length) return layout;
   const next = structuredClone(layout);
   for (const id of stale) {
     const group = groupFor(next, id);
     if (group) remove(next, group, id);
   }
-  if (next.dock && !dockIds.has(next.dock)) next.dock = undefined;
   return next;
 }

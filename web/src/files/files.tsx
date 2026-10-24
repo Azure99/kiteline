@@ -1,13 +1,11 @@
 import { useTranslation } from "react-i18next";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import {
-  ArrowLeft,
   ArrowUp,
   FilePlus2,
   FolderPlus,
   ListChecks,
   MoreHorizontal,
-  PanelLeft,
   RefreshCw,
   Copy,
   FolderInput,
@@ -36,7 +34,6 @@ import { FileDetails } from "./file-details";
 import { FileNameDialog, type NameAction } from "./name-dialog";
 import { isWithin, movedPath, parentPath } from "./paths";
 import { useFileBrowser } from "./use-browser";
-import { DraftTabs } from "./draft-tabs";
 import { DraftView } from "./draft-view";
 import { useDrafts, type Draft, type DraftStore } from "./drafts";
 import { showDraft, showFile } from "./navigation";
@@ -45,12 +42,17 @@ import { FileContent } from "./file-content";
 import { downloadFile } from "./content";
 import { FileSearch } from "./file-search";
 import { useWorkspaceRefresh } from "../lib/use-workspace-refresh";
+import type { FilePage } from "../workspace/pages";
 import type { useTerminalFocus } from "../terminal/use-terminal-focus";
 
 export function Files({
   device,
   workspace,
-  visible,
+  browsing,
+  contentVisible,
+  page,
+  onOpenContent,
+  onResolvePath,
   store,
   onUpload,
   onOperation,
@@ -59,22 +61,28 @@ export function Files({
   focusMode?: ReturnType<typeof useTerminalFocus>;
   device: Device;
   workspace: Workspace;
-  visible: boolean;
+  browsing: boolean;
+  contentVisible: boolean;
+  page?: FilePage;
+  onOpenContent(): void;
+  onResolvePath(from: string, to: string): void;
   store: DraftStore;
   onUpload: (files: File[], folder: string) => void;
   onOperation: (action: FileAction, folder: string) => void;
 }) {
   const { t, i18n } = useTranslation();
 
+  const visible = browsing || contentVisible;
   const route = useRoute();
   const mobile = useMobile();
   const folder = route.query.folder ?? ".";
   const reveal = route.query.reveal;
+  const rootTree = !mobile && !reveal;
+  const folderLabel = folder === "." ? workspace.name : folder;
   const [revealError, setRevealError] = useState<unknown>();
   const [expanded, setExpanded] = useState(new Set(["."]));
   const [selected, setSelected] = useState(new Set<string>());
   const [selecting, setSelecting] = useState(false);
-  const [listOpen, setListOpen] = useState(true);
   const [action, setAction] = useState<NameAction>();
   const [details, setDetails] = useState<Entry>();
   const [directoryDrop, setDirectoryDrop] = useState(false);
@@ -98,14 +106,13 @@ export function Files({
     ).find((element) => element.dataset.entryPath === previous);
     row?.scrollIntoView({ block: "center" });
   }, [folder, mobile, pages]);
-  const initialRoot =
-    visible && enabled && !mobile && listOpen && !reveal && pages["."] === undefined;
+  const initialRoot = browsing && enabled && !mobile && !reveal && pages["."] === undefined;
   useEffect(() => {
     if (initialRoot) void load(".");
   }, [initialRoot, load]);
-  const queryFile = route.query.file;
-  const queryDraft = route.query.draft;
-  const queryLine = route.query.line;
+  const queryFile = page?.path;
+  const queryDraft = page?.draftId;
+  const queryLine = route.query.file === queryFile ? route.query.line : undefined;
   const [location, setLocation] = useState<{ path: string; position: Draft["location"] }>();
   const searching = route.query.search === true;
   const drafts = useDrafts(store).filter(
@@ -113,13 +120,12 @@ export function Files({
   );
   const draft =
     drafts.find((item) => item.id === queryDraft) ?? drafts.find((item) => item.path === queryFile);
-  const hasFile = !!queryFile || !!draft;
   useWorkspaceRefresh(device.id, workspace.id, visible && enabled, async (signal) => {
     await refresh(signal, true);
     if (draft && !signal.aborted) await store.observe(draft, signal);
   });
   useEffect(() => {
-    if (visible && !searching && queryLine !== undefined) {
+    if (contentVisible && queryLine !== undefined) {
       setLocation(queryFile ? { path: queryFile, position: { line: queryLine } } : undefined);
       updateWorkspaceQuery(
         { deviceId: device.id, workspaceId: workspace.id },
@@ -128,29 +134,17 @@ export function Files({
       );
       return;
     }
-    if (location && (!visible || searching || queryFile !== location.path)) {
+    if (location && queryFile !== location.path) {
       setLocation(undefined);
       return;
     }
-    if (!visible || searching || !draft) return;
+    if (!contentVisible || !draft) return;
     if (location?.path === draft.path) {
       draft.location = location.position;
       store.changed();
       setLocation(undefined);
     }
-    if (queryDraft !== draft.id) showDraft(draft, true);
-  }, [
-    visible,
-    searching,
-    draft,
-    queryFile,
-    queryDraft,
-    queryLine,
-    location,
-    store,
-    device.id,
-    workspace.id,
-  ]);
+  }, [contentVisible, draft, queryFile, queryLine, location, store, device.id, workspace.id]);
   useEffect(() => {
     if (!visible || !enabled || folder === ".") return;
     const deviceTarget = { deviceId: device.id, workspaceId: workspace.id };
@@ -200,9 +194,6 @@ export function Files({
     return () => controller.abort();
   }, [visible, enabled, reveal, device.id, device.environment?.os, workspace.id]);
   useEffect(() => {
-    if (visible && reveal) setListOpen(true);
-  }, [visible, reveal]);
-  useEffect(() => {
     const written = (event: WindowEventMap["kiteline:file-written"]) => {
       const target = event.detail;
       if (target.deviceId === device.id && target.workspaceId === workspace.id)
@@ -217,14 +208,10 @@ export function Files({
   function updateQuery(query: WorkspaceQuery, replace = false) {
     updateWorkspaceQuery(target, query, replace);
   }
-  function setFilePath(path?: string) {
-    updateQuery({ file: path, draft: undefined });
-  }
   function enter(path: string) {
     setSelected(new Set());
     updateQuery({
       folder: path,
-      ...(mobile ? { file: undefined, draft: undefined } : {}),
     });
     setExpanded((old) => {
       const next = new Set(old);
@@ -237,6 +224,7 @@ export function Files({
   function open(entry: Entry) {
     setNotice(undefined);
     setLocation(undefined);
+    onOpenContent();
     showFile({ ...target, path: entry.path! });
   }
   function download(path: string) {
@@ -321,7 +309,7 @@ export function Files({
   const savingWithin = (path: string) => store.savingWithin(device.id, workspace.id, path);
   return (
     <div
-      className={visible ? "flex min-h-0 flex-1 flex-col" : "hidden"}
+      className={contentVisible ? "flex min-h-0 flex-1 flex-col" : "hidden"}
       onDragOverCapture={(event) => {
         if (!event.dataTransfer.types.includes("Files")) return;
         event.preventDefault();
@@ -344,26 +332,29 @@ export function Files({
         if (files.length) onUpload(files, folder);
       }}
     >
-      <FileSearch
-        deviceId={device.id}
-        workspaceId={workspace.id}
-        workspaceName={workspace.name}
-        visible={visible && searching}
-        disabled={!enabled}
-        onBack={() => updateQuery({ search: undefined })}
-        onOpen={(match, query) => {
-          setLocation(
-            match.line
-              ? {
-                  path: match.path,
-                  position: { line: match.line, range: match.ranges?.[0], query },
-                }
-              : undefined,
-          );
-          showFile({ ...target, path: match.path });
-        }}
-      />
-      <ToolHeader visible={visible}>
+      <ToolSidebar visible={browsing && searching}>
+        <FileSearch
+          deviceId={device.id}
+          workspaceId={workspace.id}
+          workspaceName={workspace.name}
+          visible={browsing && searching}
+          disabled={!enabled}
+          onBack={() => updateQuery({ search: undefined })}
+          onOpen={(match, query) => {
+            setLocation(
+              match.line
+                ? {
+                    path: match.path,
+                    position: { line: match.line, range: match.ranges?.[0], query },
+                  }
+                : undefined,
+            );
+            onOpenContent();
+            showFile({ ...target, path: match.path });
+          }}
+        />
+      </ToolSidebar>
+      <ToolHeader visible={browsing}>
         <div
           className={
             searching || focusMode?.active
@@ -371,32 +362,18 @@ export function Files({
               : "flex min-h-10 shrink-0 items-center gap-1 border-b border-border px-2"
           }
         >
-          {mobile && hasFile ? (
-            <IconButton label={t(($) => $.files.backDirectory)} onClick={() => setFilePath()}>
-              <ArrowLeft />
-            </IconButton>
-          ) : (
-            <IconButton
-              label={t(($) => $.files.parentDirectory)}
-              disabled={folder === "."}
-              onClick={() => enter(parentPath(folder))}
-            >
-              <ArrowUp />
-            </IconButton>
-          )}
-          {!mobile && (
-            <IconButton
-              label={t(($) => $.files.toggleList)}
-              onClick={() => setListOpen((open) => !open)}
-            >
-              <PanelLeft />
-            </IconButton>
-          )}
+          <IconButton
+            label={t(($) => $.files.parentDirectory)}
+            disabled={folder === "."}
+            onClick={() => enter(parentPath(folder))}
+          >
+            <ArrowUp />
+          </IconButton>
           <span
             className="min-w-0 flex-1 truncate text-xs"
             title={pages[folder]?.listing?.resolvedPath}
           >
-            {folder === "." ? workspace.name : folder}
+            {folderLabel}
           </span>
           <IconButton
             label={t(($) => $.files.searchFiles)}
@@ -408,7 +385,8 @@ export function Files({
           <IconButton
             label={t(($) => $.files.newFile)}
             disabled={!enabled}
-            onClick={() =>
+            onClick={() => {
+              onOpenContent();
               showDraft(
                 store.open({
                   ...target,
@@ -417,8 +395,8 @@ export function Files({
                   deviceName: device.name,
                   workspaceName: workspace.name,
                 }),
-              )
-            }
+              );
+            }}
           >
             <FilePlus2 />
           </IconButton>
@@ -531,85 +509,80 @@ export function Files({
           </div>
         )}
       </ToolHeader>
-      {!searching && !hasFile && drafts.length > 0 && <DraftTabs store={store} tabs={drafts} />}
-      <div className={searching ? "hidden" : "flex min-h-0 flex-1"}>
-        {(mobile || listOpen) && (
-          <ToolSidebar visible={visible && (!mobile || (!searching && !hasFile))}>
-            <aside
-              ref={list}
-              key={mobile ? folder : undefined}
-              className="scroll-area w-full overflow-auto border-border bg-muted desk:w-72 desk:shrink-0 desk:border-r"
-              aria-label={t(($) => $.files.list)}
-            >
-              {(!mobile || !hasFile) && (
-                <FileExplorer
-                  path={mobile || reveal ? folder : "."}
-                  {...{ pages, expanded, selected, mobile, selecting }}
-                  currentFile={queryFile ?? reveal ?? undefined}
-                  disabled={!enabled}
-                  savingWithin={savingWithin}
-                  onFolder={enter}
-                  onOpen={open}
-                  onSelect={(path) =>
-                    setSelected((old) => {
-                      const next = new Set(old);
-                      if (next.has(path)) next.delete(path);
-                      else next.add(path);
-                      return next;
-                    })
-                  }
-                  onRename={(entry) => setAction({ kind: "rename", entry })}
-                  onAction={(kind, entry) => onOperation({ kind, entries: [entry] }, folder)}
-                  onDownload={(entry) => download(entry.path!)}
-                  onMore={(path) => void load(path, true)}
-                  onDetails={setDetails}
-                />
-              )}
-            </aside>
-          </ToolSidebar>
-        )}
-        {(!mobile || hasFile) && (
-          <section
-            className="flex min-w-0 flex-1 flex-col max-desk:min-h-0 max-desk:overflow-y-auto"
-            aria-label={t(($) => $.files.fileContent)}
+      <div className="flex min-h-0 flex-1">
+        <ToolSidebar visible={browsing && !searching}>
+          <aside
+            ref={list}
+            key={mobile ? folder : undefined}
+            className="scroll-area min-h-0 w-full flex-1 overflow-auto bg-muted"
+            aria-label={t(($) => $.files.list)}
           >
-            {draft ? (
-              <DraftView
-                focusMode={mobile ? focusMode : undefined}
-                key={draft.id}
-                store={store}
-                draft={draft}
-                targetOS={device.environment?.os}
-                editorVisible={!searching}
-                htmlPreviewVisible={
-                  visible && !searching && queryLine === undefined && !location && !draft.location
-                }
-                unavailable={!enabled ? t(($) => $.common.deviceOffline) : undefined}
-              />
-            ) : queryFile ? (
-              <FileContent
-                key={queryFile}
-                onResolvePath={(path) =>
-                  setLocation((current) =>
-                    current?.path === queryFile ? { ...current, path } : current,
-                  )
-                }
-                target={{
-                  ...target,
-                  path: queryFile,
-                  deviceName: device.name,
-                  workspaceName: workspace.name,
-                }}
-                store={store}
-                active={visible && !searching && enabled}
-              />
-            ) : (
-              <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-                {drafts.length === 0 && t(($) => $.files.selectFiles)}
-              </div>
-            )}
-          </section>
-        )}
+            <FileExplorer
+              path={rootTree ? "." : folder}
+              {...{ pages, expanded, selected, mobile, selecting }}
+              currentFile={queryFile ?? reveal ?? undefined}
+              disabled={!enabled}
+              savingWithin={savingWithin}
+              onFolder={enter}
+              onOpen={open}
+              onSelect={(path) =>
+                setSelected((old) => {
+                  const next = new Set(old);
+                  if (next.has(path)) next.delete(path);
+                  else next.add(path);
+                  return next;
+                })
+              }
+              onRename={(entry) => setAction({ kind: "rename", entry })}
+              onAction={(kind, entry) => onOperation({ kind, entries: [entry] }, folder)}
+              onDownload={(entry) => download(entry.path!)}
+              onMore={(path) => void load(path, true)}
+              onDetails={setDetails}
+            />
+          </aside>
+        </ToolSidebar>
+        <section
+          className="flex min-w-0 flex-1 flex-col max-desk:min-h-0 max-desk:overflow-y-auto"
+          aria-label={t(($) => $.files.fileContent)}
+        >
+          {draft ? (
+            <DraftView
+              focusMode={mobile ? focusMode : undefined}
+              showTabs={false}
+              key={draft.id}
+              store={store}
+              draft={draft}
+              targetOS={device.environment?.os}
+              editorVisible={contentVisible}
+              htmlPreviewVisible={
+                contentVisible && queryLine === undefined && !location && !draft.location
+              }
+              unavailable={!enabled ? t(($) => $.common.deviceOffline) : undefined}
+            />
+          ) : queryFile ? (
+            <FileContent
+              key={queryFile}
+              onResolvePath={(path) => {
+                onResolvePath(queryFile, path);
+                setLocation((current) =>
+                  current?.path === queryFile ? { ...current, path } : current,
+                );
+              }}
+              target={{
+                ...target,
+                path: queryFile,
+                deviceName: device.name,
+                workspaceName: workspace.name,
+              }}
+              store={store}
+              active={contentVisible && enabled}
+            />
+          ) : (
+            <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+              {drafts.length === 0 && t(($) => $.files.selectFiles)}
+            </div>
+          )}
+        </section>
       </div>
       {details && (
         <FileDetails entry={details} root={workspace.path} onClose={() => setDetails(undefined)} />

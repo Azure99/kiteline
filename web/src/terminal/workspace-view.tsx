@@ -1,32 +1,15 @@
 import { ApplicationTitle } from "./application-title";
 import { useTranslation } from "react-i18next";
 import { ErrorNotice } from "../components/error-notice";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { Group, Panel, Separator, type GroupImperativeHandle } from "react-resizable-panels";
-import {
-  Folder,
-  GitBranch,
-  Terminal,
-  Maximize2,
-  PanelBottom,
-  Minimize2,
-  Columns2,
-  Rows2,
-  Fullscreen,
-  X,
-  Minimize,
-  Scan,
-  Search,
-} from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Minimize2, Columns2, Rows2, Fullscreen, X, Minimize, Scan, Search } from "lucide-react";
 import type { Device, Workspace } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
 import { Button } from "../components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
 import { useWatchStatus } from "../lib/use-workspace-refresh";
 import { WatchStatus } from "../components/watch-status";
-import { ToolLayout } from "../components/tool-layout";
 import type { TerminalActions, TerminalCapabilities } from "./terminal-view";
-import { TerminalView } from "./lazy-terminal-view";
 import { TerminalSettings } from "./settings";
 import {
   currentRoute,
@@ -60,7 +43,6 @@ import { SessionDialog, type SessionAction } from "./session-dialog";
 import { GroupTabs, useTerminalDrag } from "./group-tabs";
 import type { useTerminalFocus } from "./use-terminal-focus";
 
-// Owns the shared main/dock layout while Files and Git occupy the tool region.
 export function WorkspaceView({
   device,
   workspace,
@@ -71,7 +53,6 @@ export function WorkspaceView({
   activationRequest,
   focusMode,
   onCliSetup,
-  children,
 }: {
   device: Device;
   workspace: Workspace;
@@ -82,7 +63,6 @@ export function WorkspaceView({
   activationRequest: number;
   focusMode: ReturnType<typeof useTerminalFocus>;
   onCliSetup(): void;
-  children: ReactNode;
 }) {
   const { t } = useTranslation();
   const watchReason = useWatchStatus(device.id, workspace.id);
@@ -97,20 +77,12 @@ export function WorkspaceView({
   const lastRouteSession = useRef<string | null | undefined>(undefined);
   const lastTool = useRef<string | undefined>(undefined);
   // A later selection prevents a pending create from taking over that region.
-  const selectionEpoch = useRef({ main: 0, dock: 0 });
+  const selectionEpoch = useRef(0);
   const displays = useRef(new Map<string, TerminalActions>());
   const [mainSearchHost, setMainSearchHost] = useState<HTMLDivElement | null>(null);
-  const [dockSearchHost, setDockSearchHost] = useState<HTMLDivElement | null>(null);
-  const [capabilities, setCapabilities] = useState<
-    Record<"main" | "dock", Record<string, TerminalCapabilities>>
-  >({ main: {}, dock: {} });
+  const [capabilities, setCapabilities] = useState<Record<string, TerminalCapabilities>>({});
   const names = useRef(new Map<string, string>());
-  const dockActions = useRef(new Map<string, TerminalActions>());
-  const [opened, setOpened] = useState(() => ({
-    main: new Set<string>(),
-    dock: new Set<string>(),
-  }));
-  const dockPanels = useRef<GroupImperativeHandle>(null);
+  const [opened, setOpened] = useState(() => new Set<string>());
   const [settings, setSettings] = useState(false);
   const [action, setAction] = useState<SessionAction>();
   const group = currentGroup(layout);
@@ -119,11 +91,11 @@ export function WorkspaceView({
   const find = (id?: string) => sessions.find((session) => session.id === id);
   const groups = retainSessions(
     layout,
-    new Set([...sessions.map((session) => session.id), ...opened.main]),
+    new Set([...sessions.map((session) => session.id), ...opened]),
   ).groups;
   const shownGroup = groups.find((item) => item.id === group?.id);
   const members = shownGroup ? groupMembers(shownGroup) : [];
-  const targetKnown = !!routeSession && (!!find(routeSession) || opened.main.has(routeSession));
+  const targetKnown = !!routeSession && (!!find(routeSession) || opened.has(routeSession));
   const targetPending = !!routeSession && (!targetKnown || selected !== routeSession);
   const targetMissing =
     !targetKnown &&
@@ -131,64 +103,29 @@ export function WorkspaceView({
     !remote.listError &&
     !remote.refreshing &&
     device.status === "online";
-  const dockId =
-    layout.dock && (find(layout.dock) || opened.dock.has(layout.dock)) ? layout.dock : undefined;
-  const dockExpanded = layout.dockOpen && !mobile;
   const visibleMembers =
     visible && !targetPending
       ? members.filter((id) => (!mobile && !group?.maximized) || id === selected).join(",")
       : "";
   useLayoutEffect(() => {
     const main = visibleMembers ? visibleMembers.split(",") : [];
-    const dock = !visible && dockExpanded && dockId ? [dockId] : [];
-    setOpened((old) =>
-      main.every((id) => old.main.has(id)) && dock.every((id) => old.dock.has(id))
-        ? old
-        : {
-            main: new Set([...old.main, ...main]),
-            dock: new Set([...old.dock, ...dock]),
-          },
-    );
-  }, [visibleMembers, visible, dockExpanded, dockId]);
-  useLayoutEffect(() => {
-    if (visible) return;
-    const size = dockExpanded ? layout.dockSize : 0;
-    const frame = requestAnimationFrame(() =>
-      dockPanels.current?.setLayout({ tool: 100 - size, dock: size }),
-    );
-    return () => cancelAnimationFrame(frame);
-  }, [visible, dockExpanded, layout.dockSize]);
+    setOpened((old) => (main.every((id) => old.has(id)) ? old : new Set([...old, ...main])));
+  }, [visibleMembers]);
   const [pageVisible, setPageVisible] = useState(() => !document.hidden);
   useEffect(() => {
     const change = () => setPageVisible(!document.hidden);
-    const visibility = () => {
-      change();
-      const focusedDock = document.activeElement?.closest<HTMLElement>("[data-dock-session-id]");
-      if (
-        !document.hidden &&
-        !visible &&
-        dockExpanded &&
-        dockId &&
-        focusedDock?.dataset.dockSessionId === dockId
-      )
-        onActivateTerminal(device.id, workspace.id, dockId);
-    };
     const hide = () => setPageVisible(false);
-    document.addEventListener("visibilitychange", visibility);
+    document.addEventListener("visibilitychange", change);
     window.addEventListener("pageshow", change);
     window.addEventListener("pagehide", hide);
     return () => {
-      document.removeEventListener("visibilitychange", visibility);
+      document.removeEventListener("visibilitychange", change);
       window.removeEventListener("pageshow", change);
       window.removeEventListener("pagehide", hide);
     };
-  }, [visible, dockExpanded, dockId, device.id, workspace.id, onActivateTerminal]);
+  }, []);
   const activatedSession =
-    pageVisible &&
-    visible &&
-    !targetPending &&
-    selected &&
-    (find(selected) || opened.main.has(selected))
+    pageVisible && visible && !targetPending && selected && (find(selected) || opened.has(selected))
       ? selected
       : undefined;
   useLayoutEffect(() => {
@@ -203,11 +140,7 @@ export function WorkspaceView({
   useEffect(() => {
     for (const session of sessions) names.current.set(session.id, session.name);
     for (const id of names.current.keys())
-      if (
-        !sessions.some((session) => session.id === id) &&
-        !opened.main.has(id) &&
-        !opened.dock.has(id)
-      )
+      if (!sessions.some((session) => session.id === id) && !opened.has(id))
         names.current.delete(id);
   }, [sessions, opened]);
   useEffect(() => {
@@ -215,9 +148,8 @@ export function WorkspaceView({
   }, [key, layout, onLayout]);
   useEffect(() => {
     if (!remote.loaded) return;
-    const kept = new Set([...sessions.map((session) => session.id), ...opened.main]);
-    const dockKept = new Set([...sessions.map((session) => session.id), ...opened.dock]);
-    setLayout((old) => retainSessions(old, kept, dockKept));
+    const kept = new Set([...sessions.map((session) => session.id), ...opened]);
+    setLayout((old) => retainSessions(old, kept));
   }, [sessions, remote.loaded, opened]);
   useEffect(() => {
     if (!remote.loaded && !targetKnown) return;
@@ -237,13 +169,13 @@ export function WorkspaceView({
     const previous = lastRouteSession.current;
     if (routeSession) {
       if (!targetKnown) return;
-      selectionEpoch.current.main++;
+      selectionEpoch.current++;
       lastRouteSession.current = routeSession;
       setLayout((old) => selectSession(old, routeSession));
     } else {
       lastRouteSession.current = routeSession;
       if (route.tool === "terminal" && previous !== undefined) {
-        selectionEpoch.current.main++;
+        selectionEpoch.current++;
         setLayout((old) => ({ ...old, current: undefined }));
       }
     }
@@ -256,41 +188,30 @@ export function WorkspaceView({
     targetKnown,
     device.id,
     workspace.id,
-    opened.main,
+    opened,
   ]);
   const register = useCallback((id: string, value: TerminalActions | null) => {
     if (value) displays.current.set(id, value);
     else displays.current.delete(id);
   }, []);
-  const reportCapabilities = useCallback(
-    (region: "main" | "dock", id: string, value: TerminalCapabilities | undefined) => {
-      setCapabilities((old) => {
-        const previous = old[region][id];
-        if (
-          previous?.ready === value?.ready &&
-          previous?.hasTerminal === value?.hasTerminal &&
-          previous?.title === value?.title
-        )
-          return old;
-        const next = { ...old[region] };
-        if (value === undefined) delete next[id];
-        else next[id] = value;
-        return { ...old, [region]: next };
-      });
-    },
-    [],
-  );
-  const reportMain = useCallback(
-    (id: string, value: TerminalCapabilities | undefined) => reportCapabilities("main", id, value),
-    [reportCapabilities],
-  );
-  const reportDock = useCallback(
-    (id: string, value: TerminalCapabilities | undefined) => reportCapabilities("dock", id, value),
-    [reportCapabilities],
-  );
+  const reportCapabilities = useCallback((id: string, value: TerminalCapabilities | undefined) => {
+    setCapabilities((old) => {
+      const previous = old[id];
+      if (
+        previous?.ready === value?.ready &&
+        previous?.hasTerminal === value?.hasTerminal &&
+        previous?.title === value?.title
+      )
+        return old;
+      const next = { ...old };
+      if (value === undefined) delete next[id];
+      else next[id] = value;
+      return next;
+    });
+  }, []);
   // Explicit main-layout actions also publish their selected session to the URL.
   function applyMain(next: TerminalLayout, tool = route.tool, replace = false) {
-    selectionEpoch.current.main++;
+    selectionEpoch.current++;
     setLayout(next);
     const id = currentGroup(next)?.active;
     lastRouteSession.current = id ?? null;
@@ -301,31 +222,21 @@ export function WorkspaceView({
       replace,
     );
   }
-  function choose(id: string, dock = false) {
-    if (!find(id) && !(dock ? opened.dock.has(id) : opened.main.has(id))) return;
-    if (dock) {
-      selectionEpoch.current.dock++;
-      if (!visible && pageVisible) onActivateTerminal(device.id, workspace.id, id);
-      setLayout((old) => ({ ...old, dock: id, dockOpen: true }));
-    } else {
-      if (activatedSession === id && visible) onActivateTerminal(device.id, workspace.id, id);
-      applyMain(selectSession(layout, id));
-    }
+  function choose(id: string) {
+    if (!find(id) && !opened.has(id)) return;
+    if (activatedSession === id && visible) onActivateTerminal(device.id, workspace.id, id);
+    applyMain(selectSession(layout, id));
   }
   function focus(id: string) {
     if (selected !== id) applyMain(selectSession(layout, id), route.tool, true);
   }
-  function close(id: string, dock = false) {
+  function close(id: string) {
     setOpened((old) => {
-      const region = dock ? "dock" : "main";
-      const next = new Set(old[region]);
+      const next = new Set(old);
       next.delete(id);
-      return { ...old, [region]: next };
+      return next;
     });
-    if (dock) {
-      selectionEpoch.current.dock++;
-      setLayout((old) => ({ ...old, dock: undefined }));
-    } else applyMain(closeSession(layout, id));
+    applyMain(closeSession(layout, id));
   }
   function move(id: string, target?: string, position?: MemberPosition) {
     applyMain(moveSession(layout, id, target, position));
@@ -333,32 +244,28 @@ export function WorkspaceView({
   const drag = useTerminalDrag(move);
   function patchGroup(change: Partial<NonNullable<typeof group>>) {
     if (!group) return;
-    selectionEpoch.current.main++;
+    selectionEpoch.current++;
     setLayout((old) => ({
       ...old,
       groups: old.groups.map((item) => (item.id === group.id ? { ...item, ...change } : item)),
     }));
   }
   async function create({
-    dock = false,
     shortcutId,
     split,
   }: {
-    dock?: boolean;
     shortcutId?: string;
     split?: { groupId: string; anchor: string; direction: SplitDirection };
   } = {}) {
-    const intent = { ...selectionEpoch.current };
+    const intent = selectionEpoch.current;
     const session = await remote.create(shortcutId);
     if (!session) return;
     const current = currentRoute();
     const activate =
-      selectionEpoch.current[dock ? "dock" : "main"] === intent[dock ? "dock" : "main"] &&
-      (dock ||
-        !isWorkspaceRoute(current, { deviceId: device.id, workspaceId: workspace.id }) ||
+      selectionEpoch.current === intent &&
+      (!isWorkspaceRoute(current, { deviceId: device.id, workspaceId: workspace.id }) ||
         (current.query.session ?? null) === routeSession);
     setLayout((old) => {
-      if (dock) return activate ? { ...old, dock: session.id, dockOpen: true } : old;
       const next = split
         ? splitSession(old, session.id, split.groupId, split.anchor, split.direction)
         : selectSession(old, session.id);
@@ -376,12 +283,9 @@ export function WorkspaceView({
         next.current = current?.id;
         if (current && active) current.active = active;
       }
-      return {
-        ...next,
-        dock: old.dock ?? (selectionEpoch.current.dock === intent.dock ? session.id : undefined),
-      };
+      return next;
     });
-    if (!dock && activate) {
+    if (activate) {
       lastRouteSession.current = session.id;
       updateWorkspaceQuery(
         { deviceId: device.id, workspaceId: workspace.id },
@@ -393,11 +297,11 @@ export function WorkspaceView({
     const owner = id ? groupFor(layout, id) : undefined;
     void create({ split: owner && id ? { groupId: owner.id, anchor: id, direction } : undefined });
   }
-  function command(kind: SessionCommand, id: string, dock = false) {
-    const display = (dock ? dockActions : displays).current.get(id);
+  function command(kind: SessionCommand, id: string) {
+    const display = displays.current.get(id);
     if (kind === "redraw") display?.redraw();
     else if (kind === "larger" || kind === "smaller") display?.fontSize(kind === "larger" ? 1 : -1);
-    else if (kind === "close") close(id, dock);
+    else if (kind === "close") close(id);
     else {
       const session = find(id);
       if (!session) return;
@@ -407,12 +311,10 @@ export function WorkspaceView({
   }
   function menu({
     id,
-    dock = false,
     label,
     includeSettings = true,
   }: {
     id?: string;
-    dock?: boolean;
     label?: string;
     includeSettings?: boolean;
   } = {}) {
@@ -423,9 +325,8 @@ export function WorkspaceView({
         layout={layout}
         busy={remote.busy}
         mobile={mobile}
-        dock={dock}
         label={label}
-        onCommand={(kind, value) => command(kind, value, dock)}
+        onCommand={(kind, value) => command(kind, value)}
         onMove={move}
         onDirection={(direction) => {
           const owner = id ? groupFor(layout, id) : undefined;
@@ -433,107 +334,56 @@ export function WorkspaceView({
         }}
         onSettings={includeSettings ? () => setSettings(true) : undefined}
         onSearch={
-          mobile && includeSettings && !dock
+          mobile && includeSettings
             ? () => {
                 if (id) displays.current.get(id)?.search();
               }
             : undefined
         }
-        searchDisabled={!id || !capabilities.main[id]?.hasTerminal}
+        searchDisabled={!id || !capabilities[id]?.hasTerminal}
       />
     );
   }
-  function picker(dock = false) {
+  function picker() {
     return (
       <SessionPicker
         sessions={sessions}
-        selected={dock ? dockId : targetPending ? undefined : selected}
-        dock={dock}
-        groups={dock ? [] : layout.groups}
-        retained={[...(dock ? opened.dock : opened.main)]}
+        selected={targetPending ? undefined : selected}
+        groups={layout.groups}
+        retained={[...opened]}
         name={name}
-        iconOnly={!dock && (mobile || multipleGroups || split)}
+        iconOnly={!mobile && (multipleGroups || split)}
         uncertain={remote.uncertainCreate}
         refreshDisabled={device.status !== "online"}
         onRefresh={() => void remote.refresh()}
         onDragStart={
-          !dock && !targetPending && !mobile && selected && !multipleGroups && !split
+          !targetPending && !mobile && selected && !multipleGroups && !split
             ? (event) => drag.start(event, selected)
             : undefined
         }
         onDragEnd={drag.end}
-        onSelect={(id) => choose(id, dock)}
+        onSelect={(id) => choose(id)}
       />
     );
   }
-  function newButtons(dock = false, showLabel = false) {
+  function newButtons(showLabel = false) {
     return (
       <NewSessionButtons
-        dock={dock}
         showLabel={showLabel}
         disabled={!enabled}
         shortcuts={device.snapshot?.shortcuts ?? []}
-        onCreate={(shortcutId) => void create({ dock, shortcutId })}
+        onCreate={(shortcutId) => void create({ shortcutId })}
       />
     );
   }
   return (
     <>
-      <div
-        hidden={focusMode.active}
-        className="flex shrink-0 items-center border-b border-border bg-muted px-4 max-desk:px-0"
-      >
-        <div
-          role="tablist"
-          aria-label={t(($) => $.shell.tools)}
-          className="flex min-w-0 flex-1 gap-5 max-desk:gap-0"
-        >
-          {[
-            { id: "terminal" as const, name: t(($) => $.common.terminal), icon: Terminal },
-            { id: "files" as const, name: t(($) => $.common.files), icon: Folder },
-            { id: "git" as const, name: t(($) => $.common.git), icon: GitBranch },
-          ].map((tool) => (
-            <button
-              key={tool.id}
-              role="tab"
-              aria-selected={route.tool === tool.id}
-              className="tool-tab flex min-h-10 items-center justify-center gap-2 text-sm"
-              onClick={() =>
-                navigateWorkspace({ deviceId: device.id, workspaceId: workspace.id }, tool.id)
-              }
-            >
-              <tool.icon size={15} />
-              {tool.name}
-            </button>
-          ))}
-        </div>
-        {watchDismissed && <WatchStatus reason={watchReason} compact />}
-        {!visible && (
-          <IconButton
-            className="max-desk:hidden"
-            label={
-              layout.dockOpen ? t(($) => $.terminal.collapseDock) : t(($) => $.terminal.expandDock)
-            }
-            aria-expanded={layout.dockOpen}
-            aria-controls="companion-terminal"
-            onClick={() => {
-              selectionEpoch.current.dock++;
-              const opening = layout.dock ?? selected;
-              if (!layout.dockOpen && opening && (find(opening) || opened.dock.has(opening)))
-                onActivateTerminal(device.id, workspace.id, opening);
-              setLayout((old) => ({ ...old, dockOpen: !old.dockOpen, dock: old.dock ?? selected }));
-            }}
-          >
-            <PanelBottom />
-          </IconButton>
-        )}
-      </div>
       {!watchDismissed && (
         <WatchStatus reason={watchReason} onDismiss={() => setWatchDismissed(true)} />
       )}
       {!!remote.error &&
         (!action || action.kind === "attach" || remote.error !== remote.mutationError) &&
-        (visible || dockExpanded || remote.error !== remote.listError) && (
+        (visible || remote.error !== remote.listError) && (
           <div
             role="alert"
             className="workbench-notice flex shrink-0 items-start gap-2 bg-danger-soft px-3 py-2 text-sm text-destructive"
@@ -561,11 +411,12 @@ export function WorkspaceView({
             className="flex min-h-10 shrink-0 items-center gap-1 border-b border-border bg-muted px-2 max-desk:gap-0 max-desk:px-1"
           >
             {picker()}
+            {watchDismissed && <WatchStatus reason={watchReason} compact />}
             {!mobile && (multipleGroups || drag.dragging) ? (
               <GroupTabs
                 layout={layout}
                 name={name}
-                canDrag={(id) => !!find(id) || opened.main.has(id)}
+                canDrag={(id) => !!find(id) || opened.has(id)}
                 drag={drag}
                 onSelect={choose}
               />
@@ -574,9 +425,7 @@ export function WorkspaceView({
               <span className="flex min-w-0 flex-1 overflow-hidden px-1">
                 {!split && (
                   <ApplicationTitle
-                    title={
-                      !targetPending && selected ? capabilities.main[selected]?.title : undefined
-                    }
+                    title={!targetPending && selected ? capabilities[selected]?.title : undefined}
                   />
                 )}
               </span>
@@ -619,7 +468,7 @@ export function WorkspaceView({
             {!mobile && (
               <IconButton
                 label={t(($) => $.terminal.search)}
-                disabled={targetPending || !selected || !capabilities.main[selected]?.hasTerminal}
+                disabled={targetPending || !selected || !capabilities[selected]?.hasTerminal}
                 onClick={() => {
                   if (selected && !targetPending) displays.current.get(selected)?.search();
                 }}
@@ -674,7 +523,7 @@ export function WorkspaceView({
             workspacePath={workspace.path}
             groups={groups}
             current={targetPending ? undefined : group?.id}
-            opened={opened.main}
+            opened={opened}
             searchHost={mainSearchHost}
             mobile={mobile}
             visible={visible && !targetPending}
@@ -684,8 +533,8 @@ export function WorkspaceView({
             events={{
               name,
               actions: register,
-              capabilities: reportMain,
-              title: (id) => capabilities.main[id]?.title,
+              capabilities: reportCapabilities,
+              title: (id) => capabilities[id]?.title,
               focus,
               close,
               maximize: () => patchGroup({ maximized: !group?.maximized }),
@@ -702,124 +551,8 @@ export function WorkspaceView({
           />
         )}
         {!members.length && !targetPending && (
-          <div className="flex min-h-0 flex-1 items-center justify-center">
-            {newButtons(false, true)}
-          </div>
+          <div className="flex min-h-0 flex-1 items-center justify-center">{newButtons(true)}</div>
         )}
-      </div>
-      <div className={visible ? "hidden" : "flex min-h-0 flex-1 flex-col"}>
-        <ToolLayout>
-          <Group
-            id={`companion-${workspace.id}`}
-            groupRef={dockPanels}
-            orientation="vertical"
-            className="min-h-0 min-w-0 flex-1"
-            onLayoutChanged={(sizes, meta) => {
-              if (meta.isUserInteraction) setLayout((old) => ({ ...old, dockSize: sizes.dock! }));
-            }}
-          >
-            <Panel
-              id="tool"
-              minSize={mobile || !layout.dockOpen ? 0 : 160}
-              className="flex h-full min-h-0 flex-col"
-            >
-              {children}
-            </Panel>
-            <Separator
-              disabled={!dockExpanded}
-              className={dockExpanded ? "split-divider" : "hidden"}
-              aria-label={t(($) => $.terminal.resizeDock)}
-            />
-            <Panel
-              id="dock"
-              minSize={dockExpanded ? 170 : 0}
-              maxSize={dockExpanded ? "100%" : "0%"}
-              defaultSize={`${dockExpanded ? layout.dockSize : 0}%`}
-              className="flex h-full min-h-0 flex-col"
-            >
-              <div ref={setDockSearchHost} className="relative shrink-0">
-                <div
-                  data-search-controls
-                  id="companion-terminal"
-                  className={
-                    dockExpanded
-                      ? "flex min-h-9 shrink-0 items-center gap-1 border-b border-border bg-muted px-2"
-                      : "hidden"
-                  }
-                >
-                  {picker(true)}
-                  <span className="flex min-w-0 flex-1 overflow-hidden px-1">
-                    <ApplicationTitle
-                      title={dockId ? capabilities.dock[dockId]?.title : undefined}
-                    />
-                  </span>
-                  {newButtons(true)}
-                  <IconButton
-                    label={t(($) => $.terminal.search)}
-                    disabled={!dockExpanded || !dockId || !capabilities.dock[dockId]?.hasTerminal}
-                    onClick={() => {
-                      if (dockExpanded && dockId) dockActions.current.get(dockId)?.search();
-                    }}
-                  >
-                    <Search />
-                  </IconButton>
-                  {dockId && (
-                    <>
-                      <IconButton
-                        label={t(($) => $.terminal.expandTerminal)}
-                        disabled={!find(dockId) && !opened.main.has(dockId)}
-                        onClick={() => applyMain(selectSession(layout, dockId), "terminal")}
-                      >
-                        <Maximize2 />
-                      </IconButton>
-                    </>
-                  )}
-                  {menu({ id: dockId, dock: true })}
-                </div>
-              </div>
-              {[...opened.dock].map((id) => (
-                <div
-                  key={id}
-                  data-dock-session-id={id}
-                  onFocusCapture={(event) => {
-                    const dockRegion = event.currentTarget.parentElement!;
-                    if (
-                      event.currentTarget.contains(event.target) &&
-                      !dockRegion.contains(event.relatedTarget) &&
-                      !visible &&
-                      pageVisible &&
-                      dockExpanded &&
-                      dockId === id
-                    )
-                      onActivateTerminal(device.id, workspace.id, id);
-                  }}
-                  className={
-                    dockExpanded && dockId === id ? "flex min-h-0 flex-1 flex-col" : "hidden"
-                  }
-                >
-                  <TerminalView
-                    ref={(value) => {
-                      if (value) dockActions.current.set(id, value);
-                      else dockActions.current.delete(id);
-                    }}
-                    deviceId={device.id}
-                    workspaceId={workspace.id}
-                    workspacePath={workspace.path}
-                    sessionId={id}
-                    onCapabilities={reportDock}
-                    searchHost={dockSearchHost}
-                    searchActive={!visible && dockExpanded && dockId === id}
-                  />
-                </div>
-              ))}
-              {!dockId && dockExpanded && (
-                <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-                  {t(($) => $.terminal.selectSession)}
-                </div>
-              )}
-            </Panel>
-          </Group>
-        </ToolLayout>
       </div>
       {action && (
         <SessionDialog

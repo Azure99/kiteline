@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { emptyLayout, type TerminalLayout } from "../src/terminal/groups";
+import { emptyLayout, members, type TerminalLayout } from "../src/terminal/groups";
 import { readTerminalLayouts, writeTerminalLayouts } from "../src/terminal/layout-storage";
 
 const layout: TerminalLayout = {
@@ -29,12 +29,9 @@ const layout: TerminalLayout = {
     { id: "two", active: "d", maximized: false, root: { id: "d", sessionId: "d" } },
   ],
   current: "one",
-  dock: "b",
-  dockOpen: true,
-  dockSize: 40,
 };
 
-test("restores recursive proportions, groups, active panes, maximization and a shared dock", () => {
+test("restores recursive proportions, groups, active panes, maximization", () => {
   let stored: string | null = null;
   const storage = {
     getItem: () => stored,
@@ -49,14 +46,25 @@ test("restores recursive proportions, groups, active panes, maximization and a s
   expect(readTerminalLayouts(storage)).toEqual(layouts);
 });
 
-test("preserves existing layouts without a current group or a selected dock", () => {
-  for (const item of [
-    { ...layout, current: undefined, dock: undefined },
-    { ...emptyLayout(), dock: "independent", dockOpen: true },
-    { ...emptyLayout(), dockOpen: true },
-  ]) {
+test("preserves layouts without a current group", () => {
+  for (const item of [{ ...layout, current: undefined }, emptyLayout()]) {
     const saved = JSON.stringify([["workspace", item]]);
     expect(readTerminalLayouts({ getItem: () => saved }).get("workspace")).toEqual(item);
+  }
+});
+
+test("restores a former companion as a group without replacing the current selection", () => {
+  for (const dock of ["b", "independent"]) {
+    const saved = JSON.stringify([
+      ["workspace", { ...layout, dock, dockOpen: true, dockSize: 40 }],
+    ]);
+    const restored = readTerminalLayouts({ getItem: () => saved }).get("workspace")!;
+    expect(restored.current).toBe(layout.current);
+    expect(restored.groups.slice(0, 2)).toEqual(layout.groups);
+    expect(
+      restored.groups.flatMap((group) => members(group)).filter((id) => id === dock),
+    ).toHaveLength(1);
+    expect(restored).not.toHaveProperty("dock");
   }
 });
 

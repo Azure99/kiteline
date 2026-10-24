@@ -277,14 +277,25 @@ body {
     width: 196px;
   }
 }
-.tool-tab {
-  min-width: 90px;
-  border-bottom: 2px solid transparent;
+.workbench-tools {
+  width: 320px;
 }
-.tool-tab[aria-selected="true"] {
-  color: var(--primary);
-  border-bottom-color: var(--primary);
+/* Panel IDs identify the sizing element even when older Chromium adds an inner wrapper. */
+.workspace-panes[data-mode="work"] > #terminal,
+.workspace-panes[data-mode="terminal"] > #work,
+.workspace-panes:not([data-mode="both"]) > .split-divider {
+  display: none !important;
 }
+.workspace-panes[data-mode="work"] > #work,
+.workspace-panes[data-mode="terminal"] > #terminal {
+  flex: 1 !important;
+}
+@media (min-width: 960px) and (max-width: 1199px) {
+  .workbench-tools {
+    width: 288px;
+  }
+}
+
 .scroll-area {
   overscroll-behavior: contain;
   scrollbar-width: thin;
@@ -527,12 +538,8 @@ body {
     border-radius: 8px 8px 0 0;
     padding-bottom: env(safe-area-inset-bottom);
   }
-  .tool-tab {
-    min-width: 0;
-    flex: 1;
-    min-height: 44px;
-  }
-  .workbench-sidebar {
+  .workbench-sidebar,
+  .workbench-tools {
     width: 100%;
     border-right: 0;
   }

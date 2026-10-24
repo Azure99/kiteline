@@ -12,7 +12,6 @@ export function SessionPicker({
   sessions,
   selected,
   uncertain,
-  dock,
   groups = [],
   retained = [],
   name,
@@ -26,7 +25,6 @@ export function SessionPicker({
   sessions: Session[];
   selected?: string;
   uncertain: boolean;
-  dock: boolean;
   groups?: TerminalGroup[];
   retained?: string[];
   name(id: string): string;
@@ -42,7 +40,7 @@ export function SessionPicker({
   const available = new Set([...sessions.map((session) => session.id), ...retained]);
   const grouped = new Set(groups.flatMap(members));
   const other = [...available].filter((id) => !grouped.has(id));
-  const label = dock ? t(($) => $.terminal.selectDock) : t(($) => $.terminal.selectSession);
+  const label = t(($) => $.terminal.selectSession);
   function item(id: string) {
     const session = sessions.find((value) => value.id === id);
     return (
@@ -130,13 +128,11 @@ export function SessionPicker({
 }
 export function NewSessionButtons({
   shortcuts,
-  dock,
   disabled,
   onCreate,
   showLabel = false,
 }: {
   shortcuts: Shortcut[];
-  dock: boolean;
   disabled: boolean;
   onCreate(shortcutId?: string): void;
   showLabel?: boolean;
@@ -150,7 +146,7 @@ export function NewSessionButtons({
           <Button
             variant={showLabel ? "outline" : "ghost"}
             size={showLabel ? "default" : "icon"}
-            aria-label={dock ? t(($) => $.terminal.newDock) : t(($) => $.terminal.new)}
+            aria-label={t(($) => $.terminal.new)}
             disabled={disabled}
           />
         }

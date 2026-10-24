@@ -5,7 +5,6 @@ import { ErrorNotice } from "../components/error-notice";
 import { IconButton } from "../components/icon-button";
 import { apiError, type ApiError } from "../lib/api";
 import { currentRoute, isWorkspaceRoute, updateWorkspaceQuery } from "../lib/navigation";
-import { showDraft } from "./navigation";
 import { parentPath } from "./paths";
 import { downloadFile, readContent, type DiskImage, type FileTarget } from "./content";
 import type { DraftStore } from "./drafts";
@@ -51,18 +50,19 @@ export function FileContent({
       .then((content) => {
         if (controller.signal.aborted) return;
         const route = currentRoute();
-        if (!isWorkspaceRoute(route, target) || route.tool !== "files" || route.query.file !== path)
-          return;
+        if (!isWorkspaceRoute(route, target)) return;
         if (content.kind === "text") {
           const actual = { ...target, path: content.value.target.path };
           const draft = store.open(actual, content.value);
           if (actual.path !== path) resolvePath(actual.path);
-          showDraft(draft, true);
+          updateWorkspaceQuery(target, { file: draft.path, draft: draft.id }, true);
         } else {
           setImage(content.value);
           const actual = content.value.meta.targetPath!;
-          if (actual !== path)
+          if (actual !== path) {
+            resolvePath(actual);
             updateWorkspaceQuery(target, { file: actual, folder: parentPath(actual) }, true);
+          }
         }
       })
       .catch((reason: unknown) => {

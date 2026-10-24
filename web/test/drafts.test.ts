@@ -280,29 +280,21 @@ test("closing a duplicate-path draft does not clear the file-only target of anot
   expect(browser.location.searchParams.get("repo")).toBe("r");
 });
 
-test("closing the active file continues right, then left, without leaving its workspace", () => {
+test("closing the active draft clears only its target so the workspace can choose the next page", () => {
   const store = new DraftStore();
   store.limits([{ id: "device", editorBytes: 1024 } as Device]);
   const named = { ...target, deviceName: "Device", workspaceName: "Workspace" };
-  const a = store.open({ ...named, path: "dir/a.txt" }, disk("base", "a", "dir/a.txt"));
+  const a = store.open(named, disk("a", "a"));
   const b = store.open({ ...named, path: "b.txt" }, disk("b", "b", "b.txt"));
-  const c = store.open({ ...named, path: "c.txt" }, disk("c", "c", "c.txt"));
-  const other = store.open({ ...named, workspaceId: "other" }, disk("other", "other"));
-  const edited = a.state!.update({ changes: { from: 4, insert: " edited" } }).state;
-  store.update(a, edited);
-  const browser = browserAt(`/devices/device/workspaces/workspace/files?file=b.txt&draft=${b.id}`);
+  const browser = browserAt(
+    `/devices/device/workspaces/workspace/files?file=b.txt&draft=${b.id}&session=s`,
+  );
   closeDraft(store, b);
-  expect(browser.location.searchParams.get("draft")).toBe(c.id);
-  expect(browser.location.searchParams.get("file")).toBe("c.txt");
-  closeDraft(store, c);
-  expect(browser.location.searchParams.get("draft")).toBe(a.id);
-  expect(browser.location.searchParams.get("folder")).toBe("dir");
-  expect(a.state).toBe(edited);
-  closeDraft(store, a);
   expect(browser.location.searchParams.has("file")).toBe(false);
   expect(browser.location.searchParams.has("draft")).toBe(false);
-  expect(store.snapshot()).toEqual([other]);
-  expect(history.replaceState).toHaveBeenCalledTimes(3);
+  expect(browser.location.searchParams.get("session")).toBe("s");
+  expect(store.snapshot()).toEqual([a]);
+  expect(history.replaceState).toHaveBeenCalledTimes(1);
   expect(history.pushState).not.toHaveBeenCalled();
 });
 
@@ -316,9 +308,10 @@ test.each(["files", "git"])("background close preserves the %s tool and query", 
     `/devices/device/workspaces/workspace/${tool}?file=b.txt&draft=${b.id}&search=1&folder=dir&repo=r&session=s&reveal=dir/target.txt`,
   );
   const expected = new URL(browser.location);
-  expected.searchParams.set("file", "a.txt");
-  expected.searchParams.set("draft", a.id);
+  expected.searchParams.delete("file");
+  expected.searchParams.delete("draft");
   closeDraft(store, b);
+  expect(store.has(a)).toBe(true);
   expect(browser.location.pathname).toBe(expected.pathname);
   expect(Object.fromEntries(browser.location.searchParams)).toEqual(
     Object.fromEntries(expected.searchParams),

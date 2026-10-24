@@ -22,16 +22,17 @@ After a server upgrade, an already open page shows the Web and Server versions a
 
 Choose system, light or dark appearance from Settings at the bottom of the left sidebar or the login page. The default follows the system; a manual choice is saved in the current browser. Choose system again to resume automatic changes. Switching appearance preserves open file drafts, undo history and selections; terminal content keeps its dark colors.
 
-Layout follows the available window width. Below 960 CSS pixels, it shows one terminal session at a time, without a terminal panel in Files or Git. At 960 pixels or wider, split terminals and the terminal panel are available.
+At 960 CSS pixels or wider, choose Work pages, Terminal or Together in the title row. Together supports vertical or horizontal arrangement and a draggable divider; either sidebar can be collapsed independently. Narrow layouts show only work pages or a terminal, with a target icon in the title row to switch between them. Drafts, the active page and the session are retained. File and Git tools open as a separate page on mobile.
 
-Device names and workspaces support context menus for the pointed object. On a phone, long-press an object or use its More button; device management is also available from More at the top right of device details. Editor content, diff content and terminal screens keep their existing text selection and copy interactions.
+Device names, workspaces and work page tabs support context menus for the pointed object. On a phone, long-press an object or use its More button; device management is also available from More at the top right of device details. Editor content, diff content and terminal screens keep their existing text selection and copy interactions.
 
 ### Where settings are stored
 
 | Content                                                     | Storage                               |
 | ----------------------------------------------------------- | ------------------------------------- |
 | Language, appearance, recent workspaces, terminal font size | Current browser                       |
-| Terminal groups, splits and terminal panel                  | Current browser tab                   |
+| Terminal groups and splits                                  | Current browser tab                   |
+| Work-page tabs, content mode and shared layout              | Current page, per workspace           |
 | Unsaved changes, commit messages                            | Current page; lost on reload or close |
 | New-session scrollback lines, terminal shortcuts            | Device; shared across origins         |
 | Device name                                                 | Server                                |
@@ -67,7 +68,7 @@ If the terminal remains unresponsive, close displays of the same session that yo
 
 When a program sends an OSC 9 or OSC 777 notification, or an unsolicited OSC 7501 blocked report, a marker appears beside its workspace in the desktop sidebar. On mobile, the navigation button at the left edge of the main area shows a count; opening navigation lists sources by workspace. Sessions can report without an open display. Each entry shows its source and server receipt time in your local timezone: `HH:mm` for the same day, or `MM-DD HH:mm` for another day. Only the latest report from each terminal is kept. It does not mean the program is still waiting.
 
-Opening the list does not clear reports. Selecting a source returns to its original session. Returning from Files, switching or reselecting a terminal, reopening the page, and returning to a page showing that terminal activate it. When the server processes the activation request, it clears that terminal's existing report across clients; reports arriving afterward remain. Staying in the terminal does not automatically clear new reports. A companion terminal activates when selected, expanded or focused in its content area from outside; internal search or merely showing it alongside Files or Git does not clear reports.
+Opening the list does not clear reports. Selecting a source returns to its original session. Returning from Files, switching or reselecting a terminal, reopening the page, and returning to a page showing that terminal activate it. When the server processes the activation request, it clears that terminal's existing report across clients; reports arriving afterward remain. Staying in the terminal does not automatically clear new reports. A terminal shown alongside work pages follows the same session selection and activation rules.
 
 Pending reports live in server memory and synchronize when a page returns or reconnects. A server restart loses them. Ended sessions retain historical reports; deleting a device removes its reports. Failed or unconfirmed activation requests show an error; synchronized reports reflect the current state. Programs that do not send these terminal events do not automatically appear in the list.
 
@@ -125,7 +126,9 @@ The session menu’s “Continue in CLI” provides a complete command for the c
 
 ## Files
 
-Files browses and edits the current workspace, with list paths relative to its directory. “Copy device absolute path” in Details copies the path text on the device; quote it according to your shell's rules when using it in a shell command.
+The right Files sidebar browses the current workspace, with paths relative to its directory; opened files appear in the central work pages. Clicking a file or Git entry opens a page that remains until you close it. Selecting an already open page does not duplicate it. “Copy device absolute path” in Details copies the path text on the device; quote it according to your shell's rules when using it in a shell command.
+
+Work-page tabs show only filenames. To distinguish files with the same name or diffs of the same file from different sources, open a tab and check its content header's path and comparison source, or view the full path and source in its context menu. On phones, the path above a text file can wrap onto multiple lines.
 
 ### Browse
 
@@ -159,7 +162,7 @@ Switch `.md` and `.markdown` files between source and preview. The preview inclu
 
 The preview is isolated from the workbench, but document and CDN scripts can read and send the entire preview content. Modules, fetch and fonts remain subject to browser CORS rules; localStorage/sessionStorage are unavailable. Links, scripts and meta refresh can navigate within the frame, and browser Back may traverse frame history first. Form submission, new windows and top-level navigation are not enabled.
 
-Switching to source, another tool or draft, or file search ends the current preview. Showing the preview again runs it anew, resetting form values and chart selections while preserving the source draft and undo history. Terminal line links return to source. Save writes the draft, while Download reads the file on disk; interactions inside the preview do not change the source.
+Switching to source, another draft or workspace, or hiding the content ends the current preview. Switching sidebar tools or searching while the content remains visible does not restart it. Showing the preview again runs it anew, resetting form values and chart selections while preserving the source draft and undo history. Terminal line links return to source. Save writes the draft, while Download reads the file on disk; interactions inside the preview do not change the source.
 
 ### Drafts
 
@@ -234,7 +237,9 @@ With several repositories, the first is selected automatically; switch by path i
 
 ### Status and diff
 
-Diffs start in Unified view. On wide screens, you can switch to Split view, which wraps long lines within each column; Unified view keeps horizontal scrolling. Narrow windows use Unified view and restore your previous choice when widened. Worktree, staged and history diffs share this choice.
+The Git sidebar manages changes, history, branches and repository operations; work pages show individual diffs. Keep multiple files or comparison sources open to compare them. The content header shows the repository path, and tab tooltips retain the full path and parent revision. Checking list entries does not change the active page. Opening a source file from a diff keeps Git in the sidebar. Staging or unstaging preserves the current page and its comparison source.
+
+Diffs start in Unified view. On wide screens, the layout icon shows the current state; click it to switch between Unified and Split. Its tooltip names the current and next layout. Split wraps long lines within each column; Unified keeps horizontal scrolling. Narrow windows use Unified view and restore your previous choice when widened. Worktree, staged and history diffs share this choice.
 
 Inline changes use a stronger background color, and Split view aligns corresponding lines using unchanged text. Alignment uses only the context in the patch, so repeated content can produce imperfect matches. The original diff remains readable while computing or after a failure, with a status message.
 

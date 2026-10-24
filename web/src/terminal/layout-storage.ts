@@ -1,4 +1,10 @@
-import type { TerminalGroup, TerminalLayout, TerminalNode } from "./groups";
+import {
+  groupFor,
+  selectSession,
+  type TerminalGroup,
+  type TerminalLayout,
+  type TerminalNode,
+} from "./groups";
 
 export const terminalLayoutsKey = "kiteline.terminalLayouts";
 
@@ -60,14 +66,16 @@ function layout(value: unknown): TerminalLayout {
   });
   const current = saved.current === undefined ? undefined : id(saved.current);
   if (current !== undefined && !groupIds.has(current)) return invalid();
-  if (typeof saved.dockOpen !== "boolean") return invalid();
-  return {
-    groups,
-    current,
-    dock: saved.dock === undefined ? undefined : id(saved.dock),
-    dockOpen: saved.dockOpen,
-    dockSize: percentage(saved.dockSize),
-  };
+  let restored: TerminalLayout = { groups, current };
+  // A saved companion session now belongs to the single terminal group area.
+  if (saved.dock !== undefined) {
+    const dock = id(saved.dock);
+    if (!groupFor(restored, dock)) {
+      restored = selectSession(restored, dock);
+      restored.current = current;
+    }
+  }
+  return restored;
 }
 
 export function readTerminalLayouts(storage: Pick<Storage, "getItem">) {
