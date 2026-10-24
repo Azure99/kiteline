@@ -369,6 +369,32 @@ export function Workbench({
       setBinding(true);
     },
   };
+  const navigationButton = (
+    <IconButton
+      ref={navigationToggle}
+      label={
+        (navigationVisible ? t(($) => $.shell.collapseSidebar) : t(($) => $.shell.expandSidebar)) +
+        (mobile && navigationReports.length
+          ? " · " + t(($) => $.reports.count, { count: navigationReports.length })
+          : "")
+      }
+      aria-expanded={navigationVisible}
+      aria-controls="device-sidebar"
+      className="relative"
+      onClick={() => {
+        if (terminalFocus.active) terminalFocus.exit();
+        if (mobile) setMobileNavigation(true);
+        else setSidebarOpen(!navigationVisible);
+      }}
+    >
+      {navigationVisible ? <PanelLeftClose /> : <PanelLeftOpen />}
+      {mobile && navigationReports.length > 0 && (
+        <span className="absolute top-0 right-0 rounded-full bg-primary px-1 text-[10px] text-primary-foreground">
+          {navigationReports.length}
+        </span>
+      )}
+    </IconButton>
+  );
   function renderMain() {
     if (!route.valid)
       return (
@@ -456,6 +482,7 @@ export function Workbench({
             onActivateTerminal={activateTerminal}
             activationRequest={activationRequest}
             focusMode={terminalFocus}
+            reports={navigationReports}
             onCliSetup={() => setCliSetup(true)}
             store={drafts}
             actions={gitActions}
@@ -664,32 +691,7 @@ export function Workbench({
             hidden={terminalFocus.active}
             className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border bg-background px-1 max-desk:min-h-11"
           >
-            <IconButton
-              ref={navigationToggle}
-              label={
-                (navigationVisible
-                  ? t(($) => $.shell.collapseSidebar)
-                  : t(($) => $.shell.expandSidebar)) +
-                (mobile && navigationReports.length
-                  ? " · " + t(($) => $.reports.count, { count: navigationReports.length })
-                  : "")
-              }
-              aria-expanded={navigationVisible}
-              aria-controls="device-sidebar"
-              className="relative"
-              onClick={() => {
-                if (terminalFocus.active) terminalFocus.exit();
-                if (mobile) setMobileNavigation(true);
-                else setSidebarOpen(!navigationVisible);
-              }}
-            >
-              {navigationVisible ? <PanelLeftClose /> : <PanelLeftOpen />}
-              {mobile && navigationReports.length > 0 && (
-                <span className="absolute top-0 right-0 rounded-full bg-primary px-1 text-[10px] text-primary-foreground">
-                  {navigationReports.length}
-                </span>
-              )}
-            </IconButton>
+            {!terminalFocus.active && navigationButton}
             {workspace && (
               <span className="hidden min-w-0 max-w-40 items-center gap-2 text-xs text-muted-foreground desk:flex">
                 <span className="truncate">{device?.name}</span>

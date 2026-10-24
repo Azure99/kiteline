@@ -11,6 +11,7 @@ import {
 } from "react";
 import { Maximize2, SquareTerminal } from "lucide-react";
 import { members, type MemberPosition, type TerminalGroup, type TerminalLayout } from "./groups";
+import { ReportMark } from "./reports";
 
 type Target = { groupId?: string; position?: MemberPosition; key: string };
 function memberTarget(event: DragEvent, group: TerminalGroup, id: string): Target {
@@ -64,6 +65,7 @@ export function useTerminalDrag(
 export function GroupTabs({
   layout,
   name,
+  reported,
   canDrag,
   drag,
   onSelect,
@@ -71,6 +73,7 @@ export function GroupTabs({
 }: {
   layout: TerminalLayout;
   name(id: string): string;
+  reported(id: string): boolean;
   canDrag(id: string): boolean;
   drag: ReturnType<typeof useTerminalDrag>;
   onSelect(id: string, keyboard: boolean): void;
@@ -153,6 +156,7 @@ export function GroupTabs({
                           <SquareTerminal size={13} className="shrink-0" />
                         )}
                         <span className="truncate">{name(id)}</span>
+                        {reported(id) && <ReportMark />}
                       </button>,
                     )}
                   </Fragment>

@@ -8,12 +8,14 @@ import { IconButton } from "../components/icon-button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
 import { members, type TerminalGroup } from "./groups";
 import { ShortcutIcon } from "./shortcut-icon";
+import { ReportMark, ReportSummary, type ReceivedReport } from "./reports";
 
 export function SessionPicker({
   sessions,
   selected,
   groups = [],
   retained = [],
+  reports,
   name,
   refreshDisabled,
   onRefresh,
@@ -29,6 +31,7 @@ export function SessionPicker({
   selected?: string;
   groups?: TerminalGroup[];
   retained?: string[];
+  reports: ReadonlyMap<string, ReceivedReport>;
   name(id: string): string;
   refreshDisabled: boolean;
   onRefresh(): void;
@@ -46,8 +49,11 @@ export function SessionPicker({
   const grouped = new Set(groups.flatMap(members));
   const other = [...available].filter((id) => !grouped.has(id));
   const label = t(($) => $.terminal.selectSession);
+  // Another session needs attention even when its tab is not visible.
+  const elsewhere = [...reports.keys()].some((id) => id !== selected && available.has(id));
   function item(id: string) {
     const session = sessions.find((value) => value.id === id);
+    const report = reports.get(id);
     return (
       <div key={id} className="session-picker-row" role="none">
         <MenuItem
@@ -62,7 +68,9 @@ export function SessionPicker({
             <span className="max-w-60 truncate" title={name(id)}>
               {name(id)}
             </span>
+            {report && <ReportSummary report={report} />}
           </span>
+          {report && <ReportMark />}
           {(!session || session.state === "starting") && (
             <span className="text-xs text-muted-foreground">
               {session ? t(($) => $.terminal.starting) : t(($) => $.terminal.ended)}
@@ -91,17 +99,23 @@ export function SessionPicker({
           ) : showName ? (
             <Button variant="ghost" className="min-w-0 max-w-[45%] shrink" aria-label={label} />
           ) : (
-            <IconButton label={label} />
+            <IconButton label={label} className="relative" />
           )
         }
       >
         <SquareTerminal />
+        {elsewhere && !showLabel && !showName && (
+          <span className="absolute top-1 right-1 flex">
+            <ReportMark />
+          </span>
+        )}
         {showLabel && label}
         {!showLabel && showName && (
           <>
             <span className="truncate">
               {selected ? name(selected) : t(($) => $.common.terminal)}
             </span>
+            {elsewhere && <ReportMark />}
             <ChevronDown />
           </>
         )}

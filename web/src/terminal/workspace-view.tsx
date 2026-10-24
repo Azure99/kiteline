@@ -55,6 +55,7 @@ import { SessionDialog, type SessionAction } from "./session-dialog";
 import { GroupTabs, useTerminalDrag } from "./group-tabs";
 import { ApplicationTitle } from "./application-title";
 import type { useTerminalFocus } from "./use-terminal-focus";
+import type { ReceivedReport } from "./reports";
 
 export function WorkspaceView({
   device,
@@ -65,6 +66,7 @@ export function WorkspaceView({
   onActivateTerminal,
   activationRequest,
   focusMode,
+  reports,
   onCliSetup,
   onSelectTerminal,
 }: {
@@ -76,6 +78,7 @@ export function WorkspaceView({
   onActivateTerminal(deviceId: string, workspaceId: string, sessionId: string): void;
   activationRequest: number;
   focusMode: ReturnType<typeof useTerminalFocus>;
+  reports: readonly ReceivedReport[];
   onCliSetup(): void;
   onSelectTerminal(): void;
 }) {
@@ -93,6 +96,7 @@ export function WorkspaceView({
   );
   const routeSession = route.query.session ?? null;
   const lastRouteSession = useRef<string | null | undefined>(undefined);
+  const lastActivationRequest = useRef(activationRequest);
   const lastTool = useRef<string | undefined>(undefined);
   // A later selection prevents a pending create from taking over that region.
   const selectionEpoch = useRef(0);
@@ -112,6 +116,11 @@ export function WorkspaceView({
   const group = currentGroup(layout);
   const selected = mobile ? mobileSession : group?.active;
   const sessions = remote.sessions;
+  const sessionReports = new Map(
+    reports
+      .filter((report) => report.deviceId === device.id && report.workspaceId === workspace.id)
+      .map((report) => [report.sessionId, report]),
+  );
   const find = (id?: string) => sessions.find((session) => session.id === id);
   const groups = retainSessions(
     layout,
@@ -123,12 +132,7 @@ export function WorkspaceView({
   const missing = new Set(remote.loaded ? [...opened].filter((id) => !find(id)) : []);
   const targetKnown = !!routeSession && (!!find(routeSession) || opened.has(routeSession));
   const targetPending = !!routeSession && (!targetKnown || selected !== routeSession);
-  const targetMissing =
-    !targetKnown &&
-    remote.loaded &&
-    !remote.listError &&
-    !remote.refreshing &&
-    device.status === "online";
+  const targetMissing = remote.loaded && !targetKnown;
   const visibleMembers =
     visible && !targetPending
       ? mobile
@@ -153,8 +157,12 @@ export function WorkspaceView({
     };
   }, []);
   const activatedSession =
-    pageVisible && visible && !targetPending && selected && (find(selected) || opened.has(selected))
-      ? selected
+    pageVisible && visible
+      ? routeSession && targetMissing && device.status === "online"
+        ? routeSession
+        : !targetPending && selected && (find(selected) || opened.has(selected))
+          ? selected
+          : undefined
       : undefined;
   useLayoutEffect(() => {
     if (activatedSession) onActivateTerminal(device.id, workspace.id, activatedSession);
@@ -195,6 +203,9 @@ export function WorkspaceView({
     updateWorkspaceQuery({ deviceId: device.id, workspaceId: workspace.id }, { session: id }, true);
   }, [mobile, selected, routeSession, targetKnown, device.id, workspace.id]);
   useEffect(() => {
+    // Report navigation can explicitly select the same route again.
+    const activationChanged = lastActivationRequest.current !== activationRequest;
+    lastActivationRequest.current = activationRequest;
     if (!remote.loaded && !targetKnown) return;
     // Mobile selection and desktop groups share the URL, not their layout state.
     const returning = route.tool === "terminal" && lastTool.current !== "terminal";
@@ -208,14 +219,17 @@ export function WorkspaceView({
       );
       return;
     }
-    if (lastRouteSession.current === routeSession) return;
+    if (lastRouteSession.current === routeSession && !activationChanged) return;
     const previous = lastRouteSession.current;
     if (routeSession) {
       if (!targetKnown) return;
       selectionEpoch.current++;
       lastRouteSession.current = routeSession;
       if (mobile) setMobileSession(routeSession);
-      else setLayout((old) => selectSession(old, routeSession));
+      else {
+        revealRequest.current = routeSession;
+        setLayout((old) => selectSession(old, routeSession));
+      }
     } else {
       lastRouteSession.current = routeSession;
       if (route.tool === "terminal" && previous !== undefined) {
@@ -226,6 +240,7 @@ export function WorkspaceView({
     }
   }, [
     routeSession,
+    activationRequest,
     mobile,
     route.tool,
     selected,
@@ -454,6 +469,7 @@ export function WorkspaceView({
         selected={targetPending ? undefined : selected}
         groups={mobile ? [] : layout.groups}
         retained={[...opened]}
+        reports={sessionReports}
         name={name}
         onShowGroup={mobile ? undefined : (id, shown) => applyMain(showGroup(layout, id, shown))}
         refreshDisabled={device.status !== "online"}
@@ -498,79 +514,82 @@ export function WorkspaceView({
           </div>
         )}
       <div className={visible ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
-        <div ref={setMainSearchHost} className="relative shrink-0">
-          <div
-            data-search-controls
-            className="terminal-toolbar flex min-h-10 shrink-0 items-center gap-1 border-b border-border bg-muted px-2 max-desk:gap-0 max-desk:px-1"
-          >
-            {picker()}
-            {watchDismissed && <WatchStatus reason={watchReason} compact />}
-            {!mobile && !targetPending && (
-              <GroupTabs
-                layout={layout}
-                name={name}
-                canDrag={(id) => !mobile && (!!find(id) || opened.has(id))}
-                drag={drag}
-                onSelect={choose}
-                objectMenu={objectMenu}
-              />
-            )}
-            <span className="flex min-w-0 flex-1 overflow-hidden px-1">
-              <ApplicationTitle
-                title={!targetPending && selected ? capabilities[selected]?.title : undefined}
-              />
-            </span>
-            {newButtons()}
-            <IconButton
-              label={t(($) =>
-                focusMode.fullscreen
-                  ? $.terminal.exitFullscreen
-                  : focusMode.active
-                    ? $.terminal.enterFullscreen
-                    : $.terminal.enterFocus,
-              )}
-              aria-pressed={focusMode.active}
-              onPointerDown={(event) => event.preventDefault()}
-              onClick={focusMode.toggle}
+        <div className="flex shrink-0 items-start">
+          <div ref={setMainSearchHost} className="relative min-w-0 flex-1">
+            <div
+              data-search-controls
+              className="terminal-toolbar flex min-h-10 shrink-0 items-center gap-1 border-b border-border bg-muted px-2 max-desk:gap-0 max-desk:px-1"
             >
-              {focusMode.fullscreen ? <Minimize /> : focusMode.active ? <Fullscreen /> : <Scan />}
-            </IconButton>
-            <TerminalMenu
-              id={targetPending ? undefined : selected}
-              targetName={!targetPending && selected ? name(selected) : undefined}
-              targetTitle={!targetPending && selected ? capabilities[selected]?.title : undefined}
-              group={targetPending ? undefined : group}
-              hasDisplay={
-                !targetPending &&
-                !!selected &&
-                opened.has(selected) &&
-                !!capabilities[selected]?.hasTerminal
-              }
-              canRedraw={!!find(selected)}
-              mutationDisabled={!enabled}
-              mobile={mobile}
-              onCommand={command}
-              onSplit={(direction) => createSplit(selected, direction)}
-              onMaximize={() => {
-                if (!group || !selected) return;
-                const next = selectSession(layout, selected);
-                currentGroup(next)!.maximized = !group.maximized;
-                applyMain(next);
-              }}
-              onDirection={(direction) => {
-                if (group) {
-                  revealRequest.current = group.active;
-                  setLayout((old) => arrangeGroup(old, group.id, direction));
+              {picker()}
+              {watchDismissed && <WatchStatus reason={watchReason} compact />}
+              {!mobile && !targetPending && (
+                <GroupTabs
+                  layout={layout}
+                  name={name}
+                  reported={(id) => sessionReports.has(id)}
+                  canDrag={(id) => !mobile && (!!find(id) || opened.has(id))}
+                  drag={drag}
+                  onSelect={choose}
+                  objectMenu={objectMenu}
+                />
+              )}
+              <span className="flex min-w-0 flex-1 overflow-hidden px-1">
+                <ApplicationTitle
+                  title={!targetPending && selected ? capabilities[selected]?.title : undefined}
+                />
+              </span>
+              {newButtons()}
+              <IconButton
+                label={t(($) =>
+                  focusMode.fullscreen
+                    ? $.terminal.exitFullscreen
+                    : focusMode.active
+                      ? $.terminal.enterFullscreen
+                      : $.terminal.enterFocus,
+                )}
+                aria-pressed={focusMode.active}
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={focusMode.toggle}
+              >
+                {focusMode.fullscreen ? <Minimize /> : focusMode.active ? <Fullscreen /> : <Scan />}
+              </IconButton>
+              <TerminalMenu
+                id={targetPending ? undefined : selected}
+                targetName={!targetPending && selected ? name(selected) : undefined}
+                targetTitle={!targetPending && selected ? capabilities[selected]?.title : undefined}
+                group={targetPending ? undefined : group}
+                hasDisplay={
+                  !targetPending &&
+                  !!selected &&
+                  opened.has(selected) &&
+                  !!capabilities[selected]?.hasTerminal
                 }
-              }}
-              onSearch={() => {
-                if (selected && !targetPending) {
-                  choose(selected);
-                  displays.current.get(selected)?.search();
-                }
-              }}
-              onSettings={() => setSettings(true)}
-            />
+                canRedraw={!!find(selected)}
+                mutationDisabled={!enabled}
+                mobile={mobile}
+                onCommand={command}
+                onSplit={(direction) => createSplit(selected, direction)}
+                onMaximize={() => {
+                  if (!group || !selected) return;
+                  const next = selectSession(layout, selected);
+                  currentGroup(next)!.maximized = !group.maximized;
+                  applyMain(next);
+                }}
+                onDirection={(direction) => {
+                  if (group) {
+                    revealRequest.current = group.active;
+                    setLayout((old) => arrangeGroup(old, group.id, direction));
+                  }
+                }}
+                onSearch={() => {
+                  if (selected && !targetPending) {
+                    choose(selected);
+                    displays.current.get(selected)?.search();
+                  }
+                }}
+                onSettings={() => setSettings(true)}
+              />
+            </div>
           </div>
         </div>
         {targetPending && (

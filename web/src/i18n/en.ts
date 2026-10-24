@@ -296,8 +296,9 @@ export const en = {
   reports: {
     count: "Reports received: {{count}}",
     returnTo: "Return to {{name}}",
-    blocked: "Program reported blocked",
+    blocked: "Report about waiting for input",
     notification: "Terminal notification",
+    pending: "Pending report",
   },
   devices: {
     filterWorkspaces: "Filter workspaces",

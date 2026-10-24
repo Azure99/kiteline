@@ -292,8 +292,9 @@ export const zhCN = {
   reports: {
     count: "已收报告：{{count}}",
     returnTo: "返回 {{name}}",
-    blocked: "程序报告了 blocked",
+    blocked: "等待输入的报告",
     notification: "终端通知",
+    pending: "有待处理报告",
   },
   devices: {
     filterWorkspaces: "筛选工作区",

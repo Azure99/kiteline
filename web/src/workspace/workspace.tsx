@@ -64,6 +64,7 @@ export function Workspace({
   onActivateTerminal,
   activationRequest,
   focusMode,
+  reports,
   onCliSetup,
   store,
   actions,
@@ -353,6 +354,7 @@ export function Workspace({
           onActivateTerminal,
           activationRequest,
           focusMode,
+          reports,
           onCliSetup,
         }}
         onSelectTerminal={() => setView((old) => ({ ...old, mobileMode: "terminal" }))}
