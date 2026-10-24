@@ -113,6 +113,12 @@ export function TerminalView({
   const [expanded, setExpanded] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [contextSelection, setContextSelection] = useState("");
+  const [copyNotice, setCopyNotice] = useState<object>();
+  useEffect(() => {
+    if (!copyNotice) return;
+    const timer = window.setTimeout(() => setCopyNotice(undefined), 1600);
+    return () => window.clearTimeout(timer);
+  }, [copyNotice]);
   const contextMenu = useRef<ContextMenuPrimitive.Root.Actions>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   useLayoutEffect(() => {
@@ -265,6 +271,7 @@ export function TerminalView({
   async function copySelection() {
     try {
       await copyText(contextSelection);
+      setCopyNotice({});
     } catch (error) {
       setNotice(error);
     }
@@ -483,6 +490,14 @@ export function TerminalView({
               input.current();
             }}
           />
+        )}
+        {copyNotice && (
+          <span
+            role="status"
+            className="pointer-events-none absolute bottom-3 left-3 rounded bg-[#39414c] px-2 py-1 text-xs text-[#e2e8f0] shadow"
+          >
+            {t(($) => $.common.copied)}
+          </span>
         )}
         {reading && (
           <div className="absolute bottom-3 right-4 rounded bg-[#39414c] shadow">

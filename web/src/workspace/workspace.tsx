@@ -3,12 +3,15 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import {
   ArrowLeft,
-  Columns2,
+  PanelBottom,
+  PanelTop,
+  PanelLeft,
+  PanelRight,
+  PanelsTopLeft,
   Files as FilesIcon,
   GitBranch,
   PanelRightClose,
   PanelRightOpen,
-  Rows2,
   Terminal,
 } from "lucide-react";
 import { Group, Panel, Separator } from "react-resizable-panels";
@@ -35,11 +38,14 @@ const GitTool = deferredView(async () => ({ default: (await import("../git/git")
   active: (props) => props.visible,
 });
 type Mode = "work" | "both" | "terminal";
+type Position = "bottom" | "right" | "top" | "left";
+const positions: Position[] = ["bottom", "right", "top", "left"];
+const positionIcons = { bottom: PanelBottom, right: PanelRight, top: PanelTop, left: PanelLeft };
 type View = {
   mode: Mode;
   mobileMode: "work" | "terminal";
   tool: "files" | "git";
-  direction: "horizontal" | "vertical";
+  position: Position;
   ratio: number;
   rightOpen: boolean;
 };
@@ -69,7 +75,7 @@ export function Workspace({
   mobileTools,
   onMobileTools,
   navigationOpen,
-}: Omit<ComponentProps<typeof WorkspaceView>, "visible"> & {
+}: Omit<ComponentProps<typeof WorkspaceView>, "visible" | "onSelectTerminal"> & {
   store: DraftStore;
   actions: GitActions;
   onUpload(files: File[], folder: string): void;
@@ -96,7 +102,7 @@ export function Workspace({
       mode: route.tool === "terminal" ? "terminal" : "work",
       mobileMode: route.tool === "terminal" ? "terminal" : "work",
       tool: route.tool === "git" ? "git" : "files",
-      direction: saved?.view.direction ?? "vertical",
+      position: saved?.view.position ?? "bottom",
       ratio: saved?.view.ratio ?? 60,
       rightOpen: true,
     };
@@ -152,6 +158,30 @@ export function Workspace({
   useLayoutEffect(() => {
     followRoute();
   }, [route, activationRequest]);
+  const previousMobile = useRef(mobile);
+  const handoffContent = useEffectEvent(() => {
+    if (previousMobile.current === mobile) return;
+    previousMobile.current = mobile;
+    if (!mobile && focusMode.active && view.mobileMode === "work") focusMode.exit();
+    setView((old) => {
+      if (mobile) {
+        const mobileMode =
+          focusMode.active || old.mode === "terminal"
+            ? "terminal"
+            : old.mode === "work"
+              ? "work"
+              : old.mobileMode;
+        return { ...old, mobileMode };
+      }
+      return {
+        ...old,
+        mode: old.mode !== "both" && old.mode !== old.mobileMode ? "both" : old.mode,
+      };
+    });
+  });
+  useLayoutEffect(() => {
+    handoffContent();
+  }, [mobile]);
   const mode = focusMode.active && !mobile ? "terminal" : mobile ? view.mobileMode : view.mode;
   const terminalVisible = mode !== "work" && !(mobile && mobileTools) && !navigationOpen;
   const contentVisible = mode !== "terminal" && !(mobile && mobileTools) && !navigationOpen;
@@ -179,6 +209,28 @@ export function Workspace({
       else navigateWorkspace(target, "files");
     } else if (next === "terminal") navigateWorkspace(target, "terminal");
   }
+  const vertical = view.position === "top" || view.position === "bottom";
+  const terminalFirst = view.position === "top" || view.position === "left";
+  const nextMode = mode === "work" ? "both" : mode === "both" ? "terminal" : "work";
+  const ModeIcon = mode === "work" ? FilesIcon : mode === "both" ? PanelsTopLeft : Terminal;
+  const nextPosition = positions[(positions.indexOf(view.position) + 1) % positions.length]!;
+  const PositionIcon = positionIcons[view.position];
+  function modeLabel(mode: Mode) {
+    return t(($) =>
+      mode === "work" ? $.shell.workPages : mode === "both" ? $.shell.cooperate : $.common.terminal,
+    );
+  }
+  function positionLabel(position: Position) {
+    return t(($) =>
+      position === "top"
+        ? $.shell.terminalTop
+        : position === "right"
+          ? $.shell.terminalRight
+          : position === "bottom"
+            ? $.shell.terminalBottom
+            : $.shell.terminalLeft,
+    );
+  }
   const controls = (
     <>
       {mobile ? (
@@ -194,45 +246,26 @@ export function Workspace({
         </IconButton>
       ) : (
         <>
-          <div
-            role="group"
-            aria-label={t(($) => $.shell.workspaceMode)}
-            className="flex shrink-0 gap-0.5"
-          >
-            {(["work", "both", "terminal"] as const).map((id) => (
-              <button
-                key={id}
-                aria-pressed={mode === id}
-                className={`min-h-8 rounded px-2 text-xs ${mode === id ? "bg-primary-soft text-primary" : "text-muted-foreground hover:bg-muted"}`}
-                onClick={() => chooseMode(id)}
-              >
-                {t(($) =>
-                  id === "work"
-                    ? $.shell.workPages
-                    : id === "both"
-                      ? $.shell.cooperate
-                      : $.common.terminal,
-                )}
-              </button>
-            ))}
-          </div>
           {mode === "both" && (
             <IconButton
-              label={t(($) =>
-                view.direction === "horizontal"
-                  ? $.shell.arrangeVertical
-                  : $.shell.arrangeHorizontal,
-              )}
-              onClick={() =>
-                setView((old) => ({
-                  ...old,
-                  direction: old.direction === "horizontal" ? "vertical" : "horizontal",
-                }))
-              }
+              label={t(($) => $.shell.terminalPosition, {
+                current: positionLabel(view.position),
+                next: positionLabel(nextPosition),
+              })}
+              onClick={() => setView((old) => ({ ...old, position: nextPosition }))}
             >
-              {view.direction === "horizontal" ? <Rows2 /> : <Columns2 />}
+              <PositionIcon />
             </IconButton>
           )}
+          <IconButton
+            label={t(($) => $.shell.workspaceMode, {
+              current: modeLabel(mode),
+              next: modeLabel(nextMode),
+            })}
+            onClick={() => chooseMode(nextMode)}
+          >
+            <ModeIcon />
+          </IconButton>
         </>
       )}
       <IconButton
@@ -250,6 +283,84 @@ export function Workspace({
       </IconButton>
     </>
   );
+  const workPanel = (
+    <Panel
+      key="work"
+      id="work"
+      defaultSize={`${view.ratio}%`}
+      minSize="20%"
+      className="work-page-panel flex min-h-0 min-w-0 flex-col"
+    >
+      <section
+        className="flex min-h-0 min-w-0 flex-1 flex-col"
+        aria-label={t(($) => $.shell.workPages)}
+      >
+        <WorkPages pages={pages} hidden={focusMode.active} />
+        <Files
+          device={device}
+          workspace={workspace}
+          store={store}
+          page={pages.activePage?.kind === "file" ? pages.activePage : undefined}
+          focusMode={focusMode}
+          browsing={toolsVisible && view.tool === "files"}
+          contentVisible={contentVisible && pages.activePage?.kind === "file"}
+          onOpenContent={showContent}
+          onResolvePath={pages.resolvePath}
+          onUpload={onUpload}
+          onOperation={onOperation}
+        />
+        {pages.activePage?.kind === "diff" && (
+          <DiffPageView
+            key={pages.activePage.id}
+            page={pages.activePage}
+            deviceId={device.id}
+            workspaceId={workspace.id}
+            actions={actions}
+            repositories={repositories}
+            view={diffView}
+            onView={setDiffView}
+            active={contentVisible && device.status === "online"}
+          />
+        )}
+        {!pages.activePage && (
+          <div className="flex min-h-0 flex-1 items-center justify-center p-4 text-sm text-muted-foreground">
+            {t(($) => $.shell.openWorkPage)}
+          </div>
+        )}
+      </section>
+    </Panel>
+  );
+  const terminalPanel = (
+    <Panel
+      key="terminal"
+      id="terminal"
+      defaultSize={`${100 - view.ratio}%`}
+      minSize="20%"
+      className="terminal-panel flex min-h-0 min-w-0 flex-col"
+    >
+      <WorkspaceView
+        {...{
+          device,
+          workspace,
+          layouts,
+          onLayout,
+          onActivateTerminal,
+          activationRequest,
+          focusMode,
+          onCliSetup,
+        }}
+        onSelectTerminal={() => setView((old) => ({ ...old, mobileMode: "terminal" }))}
+        visible={terminalVisible}
+      />
+    </Panel>
+  );
+  const divider = (
+    <Separator
+      key="divider"
+      className="split-divider"
+      aria-label={t(($) => $.shell.resizeWorkPages)}
+    />
+  );
   return (
     <>
       {controlsHost && createPortal(controls, controlsHost)}
@@ -257,76 +368,14 @@ export function Workspace({
         <Group
           className="workspace-panes min-h-0 min-w-0 flex-1"
           data-mode={mode}
-          orientation={view.direction}
+          orientation={vertical ? "vertical" : "horizontal"}
           onLayoutChanged={(sizes, meta) => {
             if (meta.isUserInteraction) setView((old) => ({ ...old, ratio: sizes.work! }));
           }}
         >
-          <Panel
-            id="work"
-            defaultSize={`${view.ratio}%`}
-            minSize="20%"
-            className="work-page-panel flex min-h-0 min-w-0 flex-col"
-          >
-            <section
-              className="flex min-h-0 min-w-0 flex-1 flex-col"
-              aria-label={t(($) => $.shell.workPages)}
-            >
-              <WorkPages pages={pages} hidden={focusMode.active} />
-              <Files
-                device={device}
-                workspace={workspace}
-                store={store}
-                page={pages.activePage?.kind === "file" ? pages.activePage : undefined}
-                focusMode={focusMode}
-                browsing={toolsVisible && view.tool === "files"}
-                contentVisible={contentVisible && pages.activePage?.kind === "file"}
-                onOpenContent={showContent}
-                onResolvePath={pages.resolvePath}
-                onUpload={onUpload}
-                onOperation={onOperation}
-              />
-              {pages.activePage?.kind === "diff" && (
-                <DiffPageView
-                  key={pages.activePage.id}
-                  page={pages.activePage}
-                  deviceId={device.id}
-                  workspaceId={workspace.id}
-                  actions={actions}
-                  repositories={repositories}
-                  view={diffView}
-                  onView={setDiffView}
-                  active={contentVisible && device.status === "online"}
-                />
-              )}
-              {!pages.activePage && (
-                <div className="flex min-h-0 flex-1 items-center justify-center p-4 text-sm text-muted-foreground">
-                  {t(($) => $.shell.openWorkPage)}
-                </div>
-              )}
-            </section>
-          </Panel>
-          <Separator className="split-divider" aria-label={t(($) => $.shell.resizeWorkPages)} />
-          <Panel
-            id="terminal"
-            defaultSize={`${100 - view.ratio}%`}
-            minSize="20%"
-            className="terminal-panel flex min-h-0 min-w-0 flex-col"
-          >
-            <WorkspaceView
-              {...{
-                device,
-                workspace,
-                layouts,
-                onLayout,
-                onActivateTerminal,
-                activationRequest,
-                focusMode,
-                onCliSetup,
-              }}
-              visible={terminalVisible}
-            />
-          </Panel>
+          {terminalFirst
+            ? [terminalPanel, divider, workPanel]
+            : [workPanel, divider, terminalPanel]}
         </Group>
       </ToolLayout>
       {toolsHost &&

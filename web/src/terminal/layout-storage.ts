@@ -62,7 +62,14 @@ function layout(value: unknown): TerminalLayout {
     const root = node(group.root, members);
     const active = id(group.active);
     if (!members.has(active)) return invalid();
-    return { id: key, root, active, maximized: group.maximized };
+    if (group.hidden !== undefined && typeof group.hidden !== "boolean") return invalid();
+    return {
+      id: key,
+      root,
+      active,
+      maximized: group.maximized,
+      ...(group.hidden && { hidden: true }),
+    };
   });
   const current = saved.current === undefined ? undefined : id(saved.current);
   if (current !== undefined && !groupIds.has(current)) return invalid();

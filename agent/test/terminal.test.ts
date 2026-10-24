@@ -1,6 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { mkdtemp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { AppError, limits, type AgentEvent } from "@kiteline/shared/protocol";
 import { tmux } from "@kiteline/shared/terminal/node";
 import {
@@ -48,7 +49,7 @@ function outputCredit(message: Extract<RecorderMessage, { type: "bytes" | "frame
     : terminalOutputCost(Buffer.byteLength(JSON.stringify(message.frame)));
 }
 async function fixture() {
-  const dataDir = await mkdtemp("/var/tmp/kiteline-term-");
+  const dataDir = await mkdtemp(join(tmpdir(), "kiteline-term-"));
   cleanups.push(() => rm(dataDir, { recursive: true, force: true }));
   const runDir = join(dataDir, "run");
   await mkdir(runDir);
@@ -83,6 +84,23 @@ test("short session IDs match exactly and preserve occupied directories and acti
   ]);
   await agent.close();
   expect(await readFile(join(residue, "retained.txt"), "utf8")).toBe("retain this directory");
+}, 15000);
+
+test("ordinary Shell names reserve starting records and reuse ended names", async () => {
+  const { agent, workspace, signal } = await fixture();
+  const created = await Promise.all(
+    Array.from({ length: 3 }, () =>
+      agent.sessions.create(workspace.id, undefined, undefined, signal),
+    ),
+  );
+  expect(created.map((session) => session.name).sort()).toEqual(["Shell", "Shell 2", "Shell 3"]);
+  const first = created.find((session) => session.name === "Shell")!;
+  const second = created.find((session) => session.name === "Shell 2")!;
+  await agent.sessions.end(workspace.id, first.id);
+  const reused = await agent.sessions.create(workspace.id, undefined, undefined, signal);
+  expect(reused.name).toBe("Shell");
+  agent.sessions.rename(workspace.id, second.id, "My task");
+  expect(agent.sessions.get(second.id).session.name).toBe("My task");
 }, 15000);
 
 test("real recorder captures Shell output, restores history and pastes while native copy-mode stays active", async () => {

@@ -12,6 +12,7 @@ import {
   arrangeGroup,
   resizeSplit,
   parentSplit,
+  showGroup,
 } from "../src/terminal/groups";
 
 test("moving existing sessions preserves identity and removes empty groups", () => {
@@ -106,4 +107,45 @@ test("retains an opened end screen until its display is closed", () => {
   const kept = retainSessions(layout, new Set(["ended"]));
   expect(members(currentGroup(kept)!)).toEqual(["ended"]);
   expect(retainSessions(kept, new Set()).groups).toEqual([]);
+});
+
+test("hiding groups preserves their tree and selection, including an empty visible area", () => {
+  let layout = selectSession(emptyLayout(), "build");
+  const first = layout.current!;
+  layout = splitSession(layout, "tests", first, "build", "horizontal");
+  layout = selectSession(layout, "shell");
+  const second = layout.current!;
+  const groups = layout.groups;
+
+  layout = showGroup(layout, first, false);
+  expect(layout.current).toBe(second);
+  expect(layout.groups[0]).toEqual({ ...groups[0], hidden: true });
+  layout = showGroup(layout, second, false);
+  expect(layout.current).toBeUndefined();
+  expect(layout.groups.every((group) => group.hidden)).toBe(true);
+  layout = showGroup(layout, first, true);
+  expect(layout.current).toBe(first);
+  expect(layout.groups[0]).toEqual(groups[0]);
+  layout = selectSession(layout, "shell");
+  expect(layout.current).toBe(second);
+  expect(layout.groups).toEqual(groups);
+
+  layout = showGroup(layout, second, false);
+  expect(layout.current).toBe(first);
+  expect(currentGroup(layout)?.active).toBe("tests");
+});
+
+test("explicit moves and splits reveal their hidden destination group", () => {
+  const initial = selectSession(emptyLayout(), "build");
+  const target = initial.current!;
+  const hidden = showGroup(selectSession(initial, "shell"), target, false);
+  for (const result of [
+    moveSession(hidden, "shell", target),
+    splitSession(hidden, "new", target, "build", "vertical"),
+  ]) {
+    expect(result.current).toBe(target);
+    expect(currentGroup(result)?.hidden).toBeUndefined();
+    expect(members(currentGroup(result)!)[0]).toBe("build");
+  }
+  expect(hidden.groups[0]?.hidden).toBe(true);
 });

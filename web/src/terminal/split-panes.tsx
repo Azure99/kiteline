@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { useCallback, useLayoutEffect, useRef, type ReactNode } from "react";
+import { useCallback, useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import type { TerminalActions, TerminalCapabilities } from "./terminal-view";
 import { TerminalView } from "./lazy-terminal-view";
@@ -17,8 +17,10 @@ export function SplitPanes({
   groups,
   current,
   opened,
+  revealRequest,
   searchHost,
   mobile,
+  mobileSession,
   visible,
   events,
   onSizes,
@@ -29,8 +31,10 @@ export function SplitPanes({
   groups: TerminalGroup[];
   current?: string;
   opened: ReadonlySet<string>;
+  revealRequest: RefObject<string | undefined>;
   searchHost: HTMLDivElement | null;
   mobile: boolean;
+  mobileSession?: string;
   visible: boolean;
   events: PaneEvents;
   onSizes(groupId: string, splitId: string, sizes: Record<string, number>): void;
@@ -40,6 +44,7 @@ export function SplitPanes({
   const panes = useRef(new Map<string, HTMLDivElement>());
   const frame = useRef(0);
   const group = groups.find((item) => item.id === current);
+  const active = mobile ? mobileSession : group?.active;
   const single = mobile || !!group?.maximized;
   const minimum = group && !single ? minimumSize(group.root) : { width: 0, height: 0 };
   const measure = useCallback(() => {
@@ -74,6 +79,34 @@ export function SplitPanes({
       cancelAnimationFrame(frame.current);
     };
   }, [group, single, opened, visible, measure, scheduleMeasure]);
+  useLayoutEffect(() => {
+    const id = revealRequest.current;
+    if (!id) return;
+    if (mobile || !visible || group?.active !== id) {
+      revealRequest.current = undefined;
+      return;
+    }
+    const element = surface.current;
+    const pane = panes.current.get(id);
+    if (!element || !pane || !element.clientWidth || !element.clientHeight) return;
+    const scroll = element.parentElement!;
+    const viewport = scroll.getBoundingClientRect();
+    const left = viewport.left + scroll.clientLeft;
+    const top = viewport.top + scroll.clientTop;
+    const bounds = pane.getBoundingClientRect();
+    function nearestOffset(start: number, end: number, viewStart: number, viewEnd: number) {
+      const fits = end - start <= viewEnd - viewStart;
+      if (start < viewStart) {
+        if (end > viewEnd) return 0;
+        return fits ? start - viewStart : end - viewEnd;
+      }
+      if (end > viewEnd) return fits ? end - viewEnd : start - viewStart;
+      return 0;
+    }
+    revealRequest.current = undefined;
+    scroll.scrollLeft += nearestOffset(bounds.left, bounds.right, left, left + scroll.clientWidth);
+    scroll.scrollTop += nearestOffset(bounds.top, bounds.bottom, top, top + scroll.clientHeight);
+  });
   function skeleton(node: TerminalNode): ReactNode {
     if ("sessionId" in node)
       return <div className="h-full w-full" data-layout-session={node.sessionId} />;
@@ -110,22 +143,26 @@ export function SplitPanes({
     );
   }
   return (
-    <div className={group ? "scroll-area min-h-0 flex-1 overflow-auto" : "hidden"}>
+    <div className={active ? "scroll-area min-h-0 flex-1 overflow-auto" : "hidden"}>
       <div
         ref={surface}
         className="relative h-full min-h-full"
         style={{ minWidth: minimum.width, minHeight: minimum.height }}
       >
-        {group &&
+        {active &&
           (single ? (
-            <div className="h-full w-full" data-layout-session={group.active} />
-          ) : (
+            <div className="h-full w-full" data-layout-session={active} />
+          ) : group ? (
             skeleton(group.root)
-          ))}
+          ) : null)}
         {/* Display siblings stay in opening order; only the empty layout skeleton is reparented. */}
         {[...opened].map((id) => {
           const owner = groups.find((item) => members(item).includes(id));
-          const shown = !!owner && owner === group && visible && (!single || id === group.active);
+          const shown =
+            visible &&
+            (mobile
+              ? id === mobileSession
+              : !!owner && owner === group && (!single || id === active));
           return (
             <div
               key={id}
@@ -141,18 +178,16 @@ export function SplitPanes({
                   : { width: 0, height: 0 }
               }
             >
-              {owner && (
-                <TerminalPane
-                  id={id}
-                  deviceId={deviceId}
-                  workspaceId={workspaceId}
-                  workspacePath={workspacePath}
-                  active={id === owner.active}
-                  hidden={!shown}
-                  searchHost={searchHost}
-                  events={events}
-                />
-              )}
+              <TerminalPane
+                id={id}
+                deviceId={deviceId}
+                workspaceId={workspaceId}
+                workspacePath={workspacePath}
+                active={id === active}
+                hidden={!shown}
+                searchHost={searchHost}
+                events={events}
+              />
             </div>
           );
         })}
@@ -163,13 +198,24 @@ export function SplitPanes({
 
 function minimumSize(node: TerminalNode): { width: number; height: number } {
   if ("sessionId" in node) return { width: 180, height: 120 };
-  const children = node.children.map(minimumSize);
-  const sum = (axis: "width" | "height") =>
-    children.reduce((total, child) => total + child[axis], 4 * (children.length - 1));
-  const max = (axis: "width" | "height") => Math.max(...children.map((child) => child[axis]));
+  const total = node.children.reduce((sum, child) => sum + node.sizes[child.id]!, 0);
+  const children = node.children.map((child) => ({
+    minimum: minimumSize(child),
+    ratio: node.sizes[child.id]! / total,
+  }));
+  const splitMinimum = (axis: "width" | "height") => {
+    const separators = 4 * (children.length - 1);
+    // Saved zero shares continue to use the existing panel constraints.
+    if (node.children.some((child) => node.sizes[child.id] === 0)) {
+      return children.reduce((total, child) => total + child.minimum[axis], separators);
+    }
+    return Math.max(...children.map((child) => child.minimum[axis] / child.ratio)) + separators;
+  };
+  const max = (axis: "width" | "height") =>
+    Math.max(...children.map((child) => child.minimum[axis]));
   return node.direction === "horizontal"
-    ? { width: sum("width"), height: max("height") }
-    : { width: max("width"), height: sum("height") };
+    ? { width: splitMinimum("width"), height: max("height") }
+    : { width: max("width"), height: splitMinimum("height") };
 }
 
 function TerminalPane({

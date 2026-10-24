@@ -125,6 +125,16 @@ export class Sessions {
         ? metadata.shortcuts.find((item) => item.id === shortcutId)
         : undefined;
       if (shortcutId && !shortcut) throw new AppError("not_found", "Shortcut does not exist");
+      let sessionName = name ?? shortcut?.name;
+      if (sessionName === undefined) {
+        const occupied = new Set(
+          [...this.records.values()]
+            .filter((item) => item.session.workspaceId === workspaceId)
+            .map((item) => item.session.name),
+        );
+        sessionName = "Shell";
+        for (let number = 2; occupied.has(sessionName); number++) sessionName = `Shell ${number}`;
+      }
       for (let attempt = 0; attempt < 8; attempt++) {
         const id = randomBytes(sessionIdBytes).toString("hex");
         if (this.records.has(id)) continue;
@@ -140,7 +150,7 @@ export class Sessions {
           session: {
             id,
             workspaceId,
-            name: name ?? shortcut?.name ?? "Shell",
+            name: sessionName,
             createdAt: new Date().toISOString(),
             historyLines: metadata.settings.historyLines,
             state: "starting",

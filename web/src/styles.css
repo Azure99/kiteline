@@ -613,3 +613,14 @@ body {
 .tok-invalid {
   text-decoration: underline wavy var(--color-destructive);
 }
+
+.terminal-divider:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+.terminal-notice button:hover,
+.terminal-notice button:focus-visible {
+  background: #465364;
+  color: #ffffff;
+}

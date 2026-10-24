@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { limits, type Device, type Session, type Workspace } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -44,6 +44,7 @@ export function SessionDialog({
 
   const { kind } = action;
   const [name, setName] = useState(action.session.name);
+  const initiallySelected = useRef(false);
   return (
     <Dialog
       open
@@ -93,6 +94,11 @@ export function SessionDialog({
                   value={name}
                   maxLength={limits.nameLength}
                   onChange={(event) => setName(event.target.value)}
+                  onFocus={(event) => {
+                    if (initiallySelected.current) return;
+                    initiallySelected.current = true;
+                    event.currentTarget.select();
+                  }}
                   autoFocus
                 />
               ) : (

@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { Check, ChevronDown, Plus, RefreshCw, SquareTerminal } from "lucide-react";
+import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import type { Session, Shortcut } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
 import { IconButton } from "../components/icon-button";
@@ -17,9 +18,12 @@ export function SessionPicker({
   refreshDisabled,
   onRefresh,
   onSelect,
+  focusOnKeyboard,
+  onSelectionComplete,
   objectMenu,
   showLabel = false,
   showName = false,
+  onShowGroup,
 }: {
   sessions: Session[];
   selected?: string;
@@ -28,12 +32,16 @@ export function SessionPicker({
   name(id: string): string;
   refreshDisabled: boolean;
   onRefresh(): void;
-  onSelect(id: string): void;
+  onSelect(id: string, keyboard: boolean): void;
+  focusOnKeyboard: boolean;
+  onSelectionComplete(): void;
   objectMenu(id: string): ReactNode;
   showLabel?: boolean;
   showName?: boolean;
+  onShowGroup?(id: string, shown: boolean): void;
 }) {
   const { t } = useTranslation();
+  const keyboardSelection = useRef(false);
   const available = new Set([...sessions.map((session) => session.id), ...retained]);
   const grouped = new Set(groups.flatMap(members));
   const other = [...available].filter((id) => !grouped.has(id));
@@ -42,7 +50,13 @@ export function SessionPicker({
     const session = sessions.find((value) => value.id === id);
     return (
       <div key={id} className="session-picker-row" role="none">
-        <MenuItem aria-current={id === selected ? "true" : undefined} onClick={() => onSelect(id)}>
+        <MenuItem
+          aria-current={id === selected ? "true" : undefined}
+          onClick={(event) => {
+            keyboardSelection.current = focusOnKeyboard && event.detail === 0;
+            onSelect(id, keyboardSelection.current);
+          }}
+        >
           <SquareTerminal />
           <span className="flex min-w-0 flex-1 flex-col">
             <span className="max-w-60 truncate" title={name(id)}>
@@ -62,7 +76,14 @@ export function SessionPicker({
   }
 
   return (
-    <Menu>
+    <Menu
+      onOpenChange={(open) => {
+        if (open) keyboardSelection.current = false;
+      }}
+      onOpenChangeComplete={(open) => {
+        if (!open && keyboardSelection.current) onSelectionComplete();
+      }}
+    >
       <MenuTrigger
         render={
           showLabel ? (
@@ -85,16 +106,27 @@ export function SessionPicker({
           </>
         )}
       </MenuTrigger>
-      <MenuContent>
+      <MenuContent finalFocus={() => !keyboardSelection.current}>
         {groups.map((group, index) => (
           <div
             key={group.id}
             role="group"
             aria-label={t(($) => $.terminal.group, { number: index + 1 })}
           >
-            <p className="px-2 py-1 text-xs text-muted-foreground">
-              {t(($) => $.terminal.group, { number: index + 1 })}
-            </p>
+            {onShowGroup && (
+              <MenuPrimitive.CheckboxItem
+                checked={!group.hidden}
+                onCheckedChange={(shown) => onShowGroup(group.id, shown)}
+                className="flex min-h-8 items-center gap-2 rounded px-2 py-1.5 text-xs text-muted-foreground outline-none data-highlighted:bg-muted"
+              >
+                <span className="size-4 shrink-0">
+                  <MenuPrimitive.CheckboxItemIndicator>
+                    <Check size={16} />
+                  </MenuPrimitive.CheckboxItemIndicator>
+                </span>
+                {t(($) => $.terminal.showGroup, { number: index + 1 })}
+              </MenuPrimitive.CheckboxItem>
+            )}
             {members(group)
               .filter((id) => available.has(id))
               .map(item)}

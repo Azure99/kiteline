@@ -1,4 +1,3 @@
-import { ApplicationTitle } from "./application-title";
 import { useTranslation } from "react-i18next";
 import { ErrorNotice } from "../components/error-notice";
 import {
@@ -38,6 +37,7 @@ import {
   splitSession,
   arrangeGroup,
   resizeSplit,
+  showGroup,
   type MemberPosition,
   type SplitDirection,
   type TerminalLayout,
@@ -53,6 +53,7 @@ import { TerminalMenu } from "./terminal-menu";
 import { SessionPicker, NewSessionButtons } from "./session-controls";
 import { SessionDialog, type SessionAction } from "./session-dialog";
 import { GroupTabs, useTerminalDrag } from "./group-tabs";
+import { ApplicationTitle } from "./application-title";
 import type { useTerminalFocus } from "./use-terminal-focus";
 
 export function WorkspaceView({
@@ -65,6 +66,7 @@ export function WorkspaceView({
   activationRequest,
   focusMode,
   onCliSetup,
+  onSelectTerminal,
 }: {
   device: Device;
   workspace: Workspace;
@@ -75,6 +77,7 @@ export function WorkspaceView({
   activationRequest: number;
   focusMode: ReturnType<typeof useTerminalFocus>;
   onCliSetup(): void;
+  onSelectTerminal(): void;
 }) {
   const { t } = useTranslation();
   const watchReason = useWatchStatus(device.id, workspace.id);
@@ -85,12 +88,21 @@ export function WorkspaceView({
   const remote = useSessions(device, workspace.id);
   const mobile = useMobile();
   const route = useRoute();
+  const [mobileSession, setMobileSession] = useState(
+    () => route.query.session ?? currentGroup(layout)?.active,
+  );
   const routeSession = route.query.session ?? null;
   const lastRouteSession = useRef<string | null | undefined>(undefined);
   const lastTool = useRef<string | undefined>(undefined);
   // A later selection prevents a pending create from taking over that region.
   const selectionEpoch = useRef(0);
+  const revealRequest = useRef<string>(undefined);
   const displays = useRef(new Map<string, TerminalActions>());
+  const [pendingFocus, setPendingFocus] = useState<{
+    id: string;
+    epoch: number;
+    menuClosed: boolean;
+  }>();
   const [mainSearchHost, setMainSearchHost] = useState<HTMLDivElement | null>(null);
   const [capabilities, setCapabilities] = useState<Record<string, TerminalCapabilities>>({});
   const names = useRef(new Map<string, string>());
@@ -98,7 +110,7 @@ export function WorkspaceView({
   const [settings, setSettings] = useState(false);
   const [action, setAction] = useState<SessionAction>();
   const group = currentGroup(layout);
-  const selected = group?.active;
+  const selected = mobile ? mobileSession : group?.active;
   const sessions = remote.sessions;
   const find = (id?: string) => sessions.find((session) => session.id === id);
   const groups = retainSessions(
@@ -117,7 +129,9 @@ export function WorkspaceView({
     device.status === "online";
   const visibleMembers =
     visible && !targetPending
-      ? members.filter((id) => (!mobile && !group?.maximized) || id === selected).join(",")
+      ? mobile
+        ? (selected ?? "")
+        : members.filter((id) => !group?.maximized || id === selected).join(",")
       : "";
   useLayoutEffect(() => {
     const main = visibleMembers ? visibleMembers.split(",") : [];
@@ -161,9 +175,26 @@ export function WorkspaceView({
     const kept = new Set([...sessions.map((session) => session.id), ...opened]);
     setLayout((old) => retainSessions(old, kept));
   }, [sessions, remote.loaded, opened]);
+  const previousSelection = useRef({ mobile, selected });
+  useLayoutEffect(() => {
+    const before = previousSelection.current;
+    previousSelection.current = { mobile, selected };
+    if (before.mobile === mobile) return;
+    // An explicit unresolved route remains authoritative during the handoff.
+    if (routeSession && (!targetKnown || lastRouteSession.current !== routeSession)) return;
+    const id = before.selected;
+    selectionEpoch.current++;
+    lastRouteSession.current = id ?? null;
+    if (mobile) setMobileSession(id);
+    else {
+      revealRequest.current = id;
+      setLayout((old) => (id ? selectSession(old, id) : { ...old, current: undefined }));
+    }
+    updateWorkspaceQuery({ deviceId: device.id, workspaceId: workspace.id }, { session: id }, true);
+  }, [mobile, selected, routeSession, targetKnown, device.id, workspace.id]);
   useEffect(() => {
     if (!remote.loaded && !targetKnown) return;
-    // Apply navigation to the main layout; explicit layout actions update the URL below.
+    // Mobile selection and desktop groups share the URL, not their layout state.
     const returning = route.tool === "terminal" && lastTool.current !== "terminal";
     lastTool.current = route.tool;
     if (returning && !routeSession && selected) {
@@ -181,16 +212,19 @@ export function WorkspaceView({
       if (!targetKnown) return;
       selectionEpoch.current++;
       lastRouteSession.current = routeSession;
-      setLayout((old) => selectSession(old, routeSession));
+      if (mobile) setMobileSession(routeSession);
+      else setLayout((old) => selectSession(old, routeSession));
     } else {
       lastRouteSession.current = routeSession;
       if (route.tool === "terminal" && previous !== undefined) {
         selectionEpoch.current++;
-        setLayout((old) => ({ ...old, current: undefined }));
+        if (mobile) setMobileSession(undefined);
+        else setLayout((old) => ({ ...old, current: undefined }));
       }
     }
   }, [
     routeSession,
+    mobile,
     route.tool,
     selected,
     remote.loaded,
@@ -219,6 +253,49 @@ export function WorkspaceView({
       return next;
     });
   }, []);
+  useLayoutEffect(() => {
+    if (!pendingFocus) return;
+    if (
+      mobile ||
+      !visible ||
+      !pageVisible ||
+      routeSession !== pendingFocus.id ||
+      selectionEpoch.current !== pendingFocus.epoch
+    ) {
+      setPendingFocus(undefined);
+      return;
+    }
+    if (
+      !pendingFocus.menuClosed ||
+      targetPending ||
+      selected !== pendingFocus.id ||
+      !capabilities[pendingFocus.id]?.ready
+    )
+      return;
+    const display = displays.current.get(pendingFocus.id);
+    if (!display) return;
+    setPendingFocus(undefined);
+    display.focus();
+  }, [
+    pendingFocus,
+    mobile,
+    visible,
+    pageVisible,
+    routeSession,
+    targetPending,
+    selected,
+    capabilities,
+  ]);
+  useEffect(() => {
+    if (!pendingFocus) return;
+    const cancel = () => setPendingFocus(undefined);
+    document.addEventListener("pointerdown", cancel, true);
+    document.addEventListener("keydown", cancel, true);
+    return () => {
+      document.removeEventListener("pointerdown", cancel, true);
+      document.removeEventListener("keydown", cancel, true);
+    };
+  }, [pendingFocus]);
   // Explicit main-layout actions also publish their selected session to the URL.
   function applyMain(next: TerminalLayout, tool = route.tool, replace = false) {
     selectionEpoch.current++;
@@ -232,20 +309,48 @@ export function WorkspaceView({
       replace,
     );
   }
-  function choose(id: string) {
+  function choose(id: string, keyboard = false, fromPicker = false) {
     if (!find(id) && !opened.has(id)) return;
+    onSelectTerminal();
+    if (!mobile) revealRequest.current = id;
     if (activatedSession === id && visible) onActivateTerminal(device.id, workspace.id, id);
-    applyMain(selectSession(layout, id));
+    if (mobile) selectMobile(id);
+    else applyMain(selectSession(layout, id));
+    setPendingFocus(
+      keyboard && !mobile
+        ? { id, epoch: selectionEpoch.current, menuClosed: !fromPicker }
+        : undefined,
+    );
+  }
+  function selectMobile(id?: string, replace = false) {
+    selectionEpoch.current++;
+    setMobileSession(id);
+    lastRouteSession.current = id ?? null;
+    updateWorkspaceQuery(
+      { deviceId: device.id, workspaceId: workspace.id },
+      { session: id },
+      replace,
+    );
   }
   function focus(id: string) {
-    if (selected !== id) applyMain(selectSession(layout, id), route.tool, true);
+    if (selected !== id) {
+      revealRequest.current = undefined;
+      if (mobile) selectMobile(id, true);
+      else applyMain(selectSession(layout, id), route.tool, true);
+    }
   }
   function close(id: string) {
-    setOpened((old) => {
-      const next = new Set(old);
-      next.delete(id);
-      return next;
-    });
+    if (!mobile || !groupFor(layout, id)) {
+      setOpened((old) => {
+        const next = new Set(old);
+        next.delete(id);
+        return next;
+      });
+    }
+    if (mobile) {
+      if (selected === id) selectMobile(undefined);
+      return;
+    }
     applyMain(closeSession(layout, id));
   }
   function move(id: string, target?: string, position?: MemberPosition) {
@@ -267,6 +372,13 @@ export function WorkspaceView({
       selectionEpoch.current === intent &&
       (!isWorkspaceRoute(current, { deviceId: device.id, workspaceId: workspace.id }) ||
         (current.query.session ?? null) === routeSession);
+    if (mobile) {
+      if (activate) {
+        onSelectTerminal();
+        selectMobile(session.id);
+      }
+      return;
+    }
     setLayout((old) => {
       const next = split
         ? splitSession(old, session.id, split.groupId, split.anchor, split.direction)
@@ -279,6 +391,7 @@ export function WorkspaceView({
           if (previous && groupMembers(group).includes(previous.active)) {
             group.active = previous.active;
             group.maximized = previous.maximized;
+            if (previous.hidden) group.hidden = true;
           }
         }
         const current = active ? groupFor(next, active) : undefined;
@@ -288,6 +401,7 @@ export function WorkspaceView({
       return next;
     });
     if (activate) {
+      onSelectTerminal();
       lastRouteSession.current = session.id;
       updateWorkspaceQuery(
         { deviceId: device.id, workspaceId: workspace.id },
@@ -320,7 +434,7 @@ export function WorkspaceView({
       layout,
       mutationDisabled: !enabled,
       mobile,
-      canClose: !!groupFor(layout, id),
+      canClose: mobile ? id === selected : !!groupFor(layout, id),
       label: t(($) => $.common.actionsNamed, { name: name(id) }),
       onCommand: command,
       onMove: move,
@@ -336,12 +450,17 @@ export function WorkspaceView({
         showName={mobile}
         sessions={sessions}
         selected={targetPending ? undefined : selected}
-        groups={layout.groups}
+        groups={mobile ? [] : layout.groups}
         retained={[...opened]}
         name={name}
+        onShowGroup={mobile ? undefined : (id, shown) => applyMain(showGroup(layout, id, shown))}
         refreshDisabled={device.status !== "online"}
         onRefresh={() => void remote.refresh()}
-        onSelect={(id) => choose(id)}
+        onSelect={(id, keyboard) => choose(id, keyboard, true)}
+        focusOnKeyboard={!mobile}
+        onSelectionComplete={() =>
+          setPendingFocus((pending) => (pending ? { ...pending, menuClosed: true } : undefined))
+        }
         objectMenu={(id) => <SessionSubmenu {...menuProps(id)} />}
       />
     );
@@ -437,7 +556,10 @@ export function WorkspaceView({
                 applyMain(next);
               }}
               onDirection={(direction) => {
-                if (group) setLayout((old) => arrangeGroup(old, group.id, direction));
+                if (group) {
+                  revealRequest.current = group.active;
+                  setLayout((old) => arrangeGroup(old, group.id, direction));
+                }
               }}
               onSearch={() => {
                 if (selected && !targetPending) {
@@ -469,7 +591,7 @@ export function WorkspaceView({
             </Button>
           </div>
         )}
-        {groups.length > 0 && (
+        {(groups.length > 0 || opened.size > 0) && (
           <SplitPanes
             deviceId={device.id}
             workspaceId={workspace.id}
@@ -477,8 +599,10 @@ export function WorkspaceView({
             groups={groups}
             current={targetPending ? undefined : group?.id}
             opened={opened}
+            revealRequest={revealRequest}
             searchHost={mainSearchHost}
             mobile={mobile}
+            mobileSession={mobileSession}
             visible={visible && !targetPending}
             onSizes={(groupId, splitId, sizes) =>
               setLayout((old) => resizeSplit(old, groupId, splitId, sizes))
@@ -490,7 +614,7 @@ export function WorkspaceView({
             }}
           />
         )}
-        {!members.length && !targetPending && (
+        {!(mobile ? selected : members.length) && !targetPending && (
           <div className="flex min-h-0 flex-1 items-center justify-center">
             {sessions.length > 0 || opened.size > 0 ? picker(true) : newButtons(true)}
           </div>

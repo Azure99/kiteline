@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { emptyLayout, members, type TerminalLayout } from "../src/terminal/groups";
+import { emptyLayout, members, showGroup, type TerminalLayout } from "../src/terminal/groups";
 import { readTerminalLayouts, writeTerminalLayouts } from "../src/terminal/layout-storage";
 
 const layout: TerminalLayout = {
@@ -50,6 +50,22 @@ test("preserves layouts without a current group", () => {
   for (const item of [{ ...layout, current: undefined }, emptyLayout()]) {
     const saved = JSON.stringify([["workspace", item]]);
     expect(readTerminalLayouts({ getItem: () => saved }).get("workspace")).toEqual(item);
+  }
+});
+
+test("restores hidden groups with their proportions and an empty visible area", () => {
+  const oneHidden = showGroup(layout, "one", false);
+  const allHidden = showGroup(oneHidden, "two", false);
+  for (const item of [oneHidden, allHidden]) {
+    let stored = "";
+    const storage = {
+      getItem: () => stored,
+      setItem: (_key: string, value: string) => (stored = value),
+    };
+    writeTerminalLayouts(storage, new Map([["workspace", item]]));
+    const restored = readTerminalLayouts(storage).get("workspace")!;
+    expect(restored).toEqual(item);
+    expect(showGroup(restored, "one", true).groups[0]).toEqual(layout.groups[0]);
   }
 });
 

@@ -22,7 +22,9 @@ After a server upgrade, an already open page shows the Web and Server versions a
 
 Choose system, light or dark appearance from Settings at the bottom of the left sidebar or the login page. The default follows the system; a manual choice is saved in the current browser. Choose system again to resume automatic changes. Switching appearance preserves open file drafts, undo history and selections; terminal content keeps its dark colors.
 
-At 960 CSS pixels or wider, choose Work pages, Terminal or Together in the title row. Together supports vertical or horizontal arrangement and a draggable divider; either sidebar can be collapsed independently. Narrow layouts show only work pages or a terminal, with a target icon in the title row to switch between them. Drafts, the active page and the session are retained. File and Git tools open as a separate page on mobile.
+At 960 CSS pixels or wider, the layout icon in the title row shows the current mode. Click to cycle through Work pages, Together and Terminal. In Together mode, the position icon on its left shows the terminal position and cycles through bottom, right, top and left. Drag the divider to adjust proportions; either sidebar can be collapsed independently. Narrow layouts show only work pages or a terminal, with a target icon in the title row to switch between them. File and Git tools open as a separate page on mobile.
+
+Switching between desktop and phone layouts keeps drafts, the active page and sessions, along with the existing position and proportions. When Together becomes narrow, it shows the most recently explicitly selected file or terminal. For example, selecting a file and then typing in the terminal still leaves the file visible after narrowing. Switching content on the phone and returning to desktop changes a layout that previously showed only one kind of content to Together.
 
 Device names, workspaces and work page tabs support context menus for the pointed object. On a phone, long-press an object or use its More button; device management is also available from More at the top right of device details. Editor and diff content keep their existing text selection and copy interactions; terminal content is described below.
 
@@ -76,11 +78,17 @@ Pending reports live in server memory and synchronize when a page returns or rec
 
 New sessions start in the workspace directory and inherit the agent's environment (from service configuration when running as a service; see [Run in the background](devices.en.md#run-in-the-background)). Linux and macOS use the project user's login shell; Windows uses PowerShell. See [Shell](reference.en.md#shell) for defaults and configuration.
 
+Ordinary Shell sessions without an explicit name use the first available name Shell, Shell 2, Shell 3, and so on in their workspace. Names can be reused after a session ends.
+
 Shortcuts run one command in the login shell; the session ends when that command exits. Install the AI CLI programs used by the default shortcuts yourself.
 
 "Close display" closes only the display; the session continues and can be reopened through "Select terminal session".
 
-Desktop terminal tabs identify the current session; panes no longer repeat a title bar. Right-click a tab or use its row's More button in the session picker to rename, move, close the display or end that session. The terminal area menu provides splits, arrangement, maximization, search, font size and settings. The remaining space on the right shows the current program's title when it sends one.
+Desktop groups share one row of tabs; click a tab to select a session within its group. Group checkboxes in the picker control which groups are shown. Hiding a group keeps its sessions, split structure and proportions; selecting a member reveals the group again. The phone shows one terminal at a time. The current session selection continues across layouts, including an explicit choice to close the display and leave no session selected. Existing desktop groups, split structure and proportions are retained. Returning to desktop makes the phone's selected session current and reveals its group and pane, including a hidden group.
+
+Explicitly selecting a session tab or picker item with the keyboard on desktop moves input focus to that session after the menu closes and its display is ready. A later key press, pointer action, target change, or leaving the page cancels the pending focus request.
+
+Terminal tabs identify the current session; panes no longer repeat a title bar. Right-click a tab or use its row's More button in the session picker to rename, move, close the display or end that session. The terminal area menu provides splits, arrangement, maximization, search, font size and settings. The remaining space on the right shows the latest title the program sent, including after a page reload or when the session is opened on another device. In narrow areas, splits retain a minimum canvas based on their saved proportions and can be scrolled. Selecting a session from its tab or the picker, or explicitly arranging splits, reveals the current pane; output does not pull the canvas back from a manual scroll.
 
 ### Copy and paste
 

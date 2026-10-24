@@ -92,6 +92,54 @@ test("retained recovery consumes a window title split across UTF-8 and escape bo
   }
 });
 
+test("snapshots replay the latest window title to a new display", async () => {
+  const model = new Model(
+    80,
+    24,
+    100,
+    (error) => {
+      throw error;
+    },
+    () => {},
+  );
+  const restore = async (history: "retained" | "screen") => {
+    let snapshot!: Snapshot;
+    const detach = await model.attach(
+      history,
+      1000,
+      (value) => (snapshot = value),
+      () => {},
+      new AbortController().signal,
+    );
+    detach();
+    const restored = screen();
+    const titles: string[] = [];
+    restored.terminal.onTitleChange((title) => titles.push(title));
+    await restored.write(snapshot.data);
+    for (const event of snapshot.tail) await apply(restored, event);
+    restored.terminal.dispose();
+    return titles;
+  };
+  try {
+    model.output(Buffer.from("\x1b]2;Codex · 等待确认\x07prompt> "));
+    await model.checkpointNow();
+    expect(await restore("retained")).toEqual(["Codex · 等待确认"]);
+    expect(await restore("screen")).toEqual(["Codex · 等待确认"]);
+    // Keep the parser non-ground so attach must replay the checkpoint and its tail.
+    model.output(Buffer.from("\x1b]2;Updated title\x07\x1b["));
+    await model.ordered(() => {});
+    expect((await restore("retained")).at(-1)).toBe("Updated title");
+    model.output(Buffer.from("0m"));
+    await model.checkpointNow();
+    expect(await restore("retained")).toEqual(["Updated title"]);
+    model.output(Buffer.from("\x1b]2;\x07"));
+    await model.checkpointNow();
+    expect(await restore("retained")).toEqual([]);
+  } finally {
+    await model.dispose();
+  }
+});
+
 test("batched output preserves UTF-8, non-ground recovery, resize and live order", async () => {
   const faults: Error[] = [];
   const model = new Model(

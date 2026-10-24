@@ -20,11 +20,11 @@ export function MenuRadioItem({ children, ...props }: Primitive.RadioItem.Props)
     </Primitive.RadioItem>
   );
 }
-export function MenuContent({ children }: { children: React.ReactNode }) {
+export function MenuContent({ children, ...props }: Primitive.Popup.Props) {
   return (
     <Primitive.Portal>
       <Primitive.Positioner sideOffset={4} align="end" className="z-50">
-        <MenuPopup>{children}</MenuPopup>
+        <MenuPopup {...props}>{children}</MenuPopup>
       </Primitive.Positioner>
     </Primitive.Portal>
   );

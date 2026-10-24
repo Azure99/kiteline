@@ -16,6 +16,7 @@ export interface TerminalGroup {
   root: TerminalNode;
   active: string;
   maximized: boolean;
+  hidden?: boolean;
 }
 export interface TerminalLayout {
   groups: TerminalGroup[];
@@ -127,7 +128,21 @@ export function selectSession(layout: TerminalLayout, id: string): TerminalLayou
     next.groups.push(group);
   }
   group.active = id;
+  delete group.hidden;
   next.current = group.id;
+  return next;
+}
+export function showGroup(layout: TerminalLayout, groupId: string, shown: boolean): TerminalLayout {
+  const next = structuredClone(layout);
+  const group = next.groups.find((item) => item.id === groupId);
+  if (!group) return layout;
+  if (shown) {
+    delete group.hidden;
+    next.current ??= group.id;
+  } else {
+    group.hidden = true;
+    if (next.current === group.id) next.current = next.groups.find((item) => !item.hidden)?.id;
+  }
   return next;
 }
 export function closeSession(layout: TerminalLayout, id: string): TerminalLayout {
@@ -150,6 +165,7 @@ export function splitSession(
   if (source) remove(next, source, id);
   target.root = insert(target.root, leaf(id), { anchor, side: "after" }, direction);
   target.active = id;
+  delete target.hidden;
   target.maximized = false;
   next.current = target.id;
   return next;
@@ -187,6 +203,7 @@ export function moveSession(
     }
   }
   target.active = id;
+  delete target.hidden;
   target.maximized = false;
   next.current = target.id;
   return next;

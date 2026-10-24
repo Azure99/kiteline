@@ -29,6 +29,14 @@ import { terminalNotice } from "./notice.js";
 const { Terminal } = headless;
 const { SerializeAddon } = serialize;
 
+// SerializeAddon omits the window title, so a new display would lose it until the program
+// sends another one. Control characters cannot appear inside the replayed OSC 2.
+function titleVT(title: string) {
+  // eslint-disable-next-line no-control-regex
+  const text = title.replace(/[\x00-\x1f\x7f-\x9f]/g, "");
+  return text ? `\x1b]2;${text}\x07` : "";
+}
+
 export interface Snapshot {
   data: Buffer;
   cols: number;
@@ -51,6 +59,7 @@ export class Model {
   private pendingOutput?: { parts: string[]; bytes: number };
   private pendingBytes = 0;
   private checkpoint?: Omit<Snapshot, "tail">;
+  private title = "";
   private tail: TerminalEvent[] = [];
   private tailBytes = 0;
   private snapshotError?: Error;
@@ -71,6 +80,9 @@ export class Model {
     initializeTerminalUnicode(this.terminal);
     adaptTerminalProfile(this.terminal);
     this.terminal.loadAddon(this.serializer);
+    this.terminal.onTitleChange((title) => {
+      this.title = title;
+    });
     for (const code of [9, 777, 7501])
       this.terminal.parser.registerOscHandler(code, (body) => {
         const report = terminalNotice(code, body);
@@ -189,7 +201,9 @@ export class Model {
     const original = this.terminal.buffer.normal.baseY;
     while (true) {
       const data = Buffer.from(
-        this.serializer.serialize({ scrollback }) + mouseEncodingVT(this.terminal),
+        this.serializer.serialize({ scrollback }) +
+          mouseEncodingVT(this.terminal) +
+          titleVT(this.title),
       );
       if (data.length <= limits.terminalSnapshotBytes)
         return {
