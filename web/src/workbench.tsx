@@ -135,6 +135,7 @@ export function Workbench({
   const [cliSetup, setCliSetup] = useState(false);
   const [openFiles, setOpenFiles] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState<number>();
   const [mobileNavigation, setMobileNavigation] = useState(false);
   const [mobileTools, setMobileTools] = useState(false);
   const [workspaceControls, setWorkspaceControls] = useState<HTMLDivElement | null>(null);
@@ -524,6 +525,8 @@ export function Workbench({
         className="fixed top-[var(--app-top,0px)] left-0 flex h-[var(--app-height,100vh)] w-full min-h-0 overflow-hidden bg-background"
       >
         <EdgePanel
+          desktopWidth={sidebarWidth}
+          onDesktopWidthChange={setSidebarWidth}
           id="device-sidebar"
           side="left"
           mobile={mobile}
@@ -654,7 +657,7 @@ export function Workbench({
           ref={mainContent}
           tabIndex={-1}
           aria-label={t(($) => $.shell.mainContent)}
-          className="flex min-w-0 flex-1 flex-col outline-none"
+          className="flex min-w-0 flex-1 flex-col outline-none desk:min-w-[400px]"
         >
           <ReleaseNotice />
           <header

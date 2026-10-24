@@ -313,15 +313,15 @@ body {
 }
 
 .workbench-sidebar {
-  width: 228px;
+  width: var(--edge-width, 228px);
 }
 @media (min-width: 960px) and (max-width: 1199px) {
   .workbench-sidebar {
-    width: 196px;
+    width: var(--edge-width, 196px);
   }
 }
 .workbench-tools {
-  width: 320px;
+  width: var(--edge-width, 320px);
 }
 /* Panel IDs identify the sizing element even when older Chromium adds an inner wrapper. */
 .workspace-panes[data-mode="work"] > #terminal,
@@ -335,7 +335,7 @@ body {
 }
 @media (min-width: 960px) and (max-width: 1199px) {
   .workbench-tools {
-    width: 288px;
+    width: var(--edge-width, 288px);
   }
 }
 
@@ -666,4 +666,44 @@ body {
 .terminal-notice button:focus-visible {
   background: #465364;
   color: #ffffff;
+}
+
+@media (min-width: 960px) {
+  .edge-panel {
+    position: relative;
+    flex-shrink: 1;
+  }
+  .workbench-sidebar {
+    min-width: 180px;
+    max-width: 400px;
+  }
+  .workbench-tools {
+    min-width: 240px;
+    max-width: 560px;
+  }
+}
+.edge-width-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+  touch-action: none;
+  z-index: 1;
+  outline: none;
+}
+.edge-panel[data-edge="left"] > .edge-width-handle {
+  right: -4px;
+}
+.edge-panel[data-edge="right"] > .edge-width-handle {
+  left: -4px;
+}
+.edge-width-handle::after {
+  content: "";
+  position: absolute;
+  inset: 0 3px;
+}
+.edge-width-handle:hover::after,
+.edge-width-handle:focus-visible::after {
+  background: var(--primary);
 }

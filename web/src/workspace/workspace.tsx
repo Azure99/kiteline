@@ -49,6 +49,7 @@ type View = {
   position: Position;
   ratio: number;
   rightOpen: boolean;
+  toolsWidth?: number;
 };
 export interface WorkspaceMemory {
   view: View;
@@ -106,6 +107,7 @@ export function Workspace({
       position: saved?.view.position ?? "bottom",
       ratio: saved?.view.ratio ?? 60,
       rightOpen: true,
+      toolsWidth: saved?.view.toolsWidth,
     };
   });
   useLayoutEffect(() => {
@@ -385,6 +387,8 @@ export function Workspace({
       {toolsHost &&
         createPortal(
           <EdgePanel
+            desktopWidth={view.toolsWidth}
+            onDesktopWidthChange={(toolsWidth) => setView((old) => ({ ...old, toolsWidth }))}
             id="workspace-tools"
             side="right"
             mobile={mobile}
