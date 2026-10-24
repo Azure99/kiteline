@@ -9,6 +9,7 @@ export interface PaneEvents {
   actions(id: string, value: TerminalActions | null): void;
   capabilities(id: string, value: TerminalCapabilities | undefined): void;
   focus(id: string): void;
+  close(id: string): void;
 }
 export function SplitPanes({
   deviceId,
@@ -18,6 +19,7 @@ export function SplitPanes({
   groups,
   current,
   opened,
+  missing,
   revealRequest,
   searchHost,
   mobile,
@@ -33,6 +35,8 @@ export function SplitPanes({
   groups: TerminalGroup[];
   current?: string;
   opened: ReadonlySet<string>;
+  /** Opened sessions that a successful session list no longer contains. */
+  missing: ReadonlySet<string>;
   revealRequest: RefObject<string | undefined>;
   searchHost: HTMLDivElement | null;
   mobile: boolean;
@@ -188,6 +192,7 @@ export function SplitPanes({
                 workspacePath={workspacePath}
                 active={id === active}
                 hidden={!shown}
+                missing={missing.has(id)}
                 searchHost={searchHost}
                 events={events}
               />
@@ -229,6 +234,7 @@ function TerminalPane({
   workspacePath,
   active,
   hidden,
+  missing,
   searchHost,
   events,
 }: {
@@ -239,6 +245,7 @@ function TerminalPane({
   workspacePath: string;
   active: boolean;
   hidden: boolean;
+  missing: boolean;
   searchHost: HTMLDivElement | null;
   events: PaneEvents;
 }) {
@@ -264,6 +271,8 @@ function TerminalPane({
         workspacePath={workspacePath}
         sessionId={id}
         sessionName={sessionName}
+        sessionMissing={missing}
+        onClose={() => events.close(id)}
         searchHost={searchHost}
         searchActive={active && !hidden}
       />

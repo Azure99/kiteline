@@ -119,6 +119,8 @@ export function WorkspaceView({
   ).groups;
   const shownGroup = groups.find((item) => item.id === group?.id);
   const members = shownGroup ? groupMembers(shownGroup) : [];
+  // Displays use the same list as the picker's "Ended" mark; it never reconnects them.
+  const missing = new Set(remote.loaded ? [...opened].filter((id) => !find(id)) : []);
   const targetKnown = !!routeSession && (!!find(routeSession) || opened.has(routeSession));
   const targetPending = !!routeSession && (!targetKnown || selected !== routeSession);
   const targetMissing =
@@ -601,6 +603,7 @@ export function WorkspaceView({
             groups={groups}
             current={targetPending ? undefined : group?.id}
             opened={opened}
+            missing={missing}
             revealRequest={revealRequest}
             searchHost={mainSearchHost}
             mobile={mobile}
@@ -613,6 +616,7 @@ export function WorkspaceView({
               actions: register,
               capabilities: reportCapabilities,
               focus,
+              close,
             }}
           />
         )}

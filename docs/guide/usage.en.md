@@ -127,7 +127,8 @@ A session has one row/column size, determined by the client that most recently t
 
 Input is available after the session's display and history are restored. If a problem occurs:
 
-- "Connection closed": click "Reconnect". A display that falls behind output for too long also disconnects on its own; the session and other displays are unaffected.
+- "Connection closed": click "Reconnect". While waiting or after a failed attempt, the last screen remains read-only and can still be scrolled, selected and copied. It is replaced once the new display is fully restored. A display that falls behind output for too long also disconnects on its own; the session and other displays are unaffected.
+- "The session no longer exists": the session ended while disconnected, for example because the agent or device restarted. The display keeps the last screen read-only and cannot reconnect; use "Close display" to close it.
 - Recording unavailable: click "Recover terminal". It rebuilds recording for the same program without restarting it; previous web history is no longer retained.
 - History restoration exceeds capacity or times out: click "Retry with less history" to restore only the current screen; history on the device is unchanged.
 - Connected but the display is garbled: use "Redraw program" in the terminal area menu. It briefly resizes the program to trigger a redraw, which can change other clients' displays and selections, so it requires confirmation. If that does not help, use "Close display" and reopen it.

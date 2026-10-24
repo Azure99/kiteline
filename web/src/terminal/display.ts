@@ -37,6 +37,8 @@ export interface DisplayState {
   error?: unknown;
   notice?: "connectionLost" | "inputLimit" | "pasteLimit";
   exitCode?: number | null;
+  /** Ended because a session list no longer has it, not because an end frame arrived. */
+  missing?: boolean;
   historyLimited?: boolean;
   historyGap?: boolean;
 }
@@ -279,21 +281,7 @@ export class TerminalDisplay {
         this.change({ ...this.state, status: "ready" });
         break;
       case "ended":
-        this.ready = false;
-        if (this.terminal) {
-          this.terminal.options.disableStdin = true;
-          freezeMouse(this.terminal);
-          this.keyboardViewport?.dispose();
-          this.keyboardViewport = undefined;
-          this.cleanups.push(retainReadonlyViewport(this.terminal));
-        }
-        this.change({
-          ...this.state,
-          status: "ended",
-          exitCode: frame.exitCode === null ? null : Number(frame.exitCode),
-          notice: undefined,
-          error: undefined,
-        });
+        this.end({ exitCode: frame.exitCode === null ? null : Number(frame.exitCode) });
         break;
       case "error":
         this.fail(new ApiError(String(frame.code), String(frame.message), "failed", frame.details));
@@ -313,6 +301,29 @@ export class TerminalDisplay {
       default:
         throw new Error("Invalid terminal message");
     }
+  }
+  retainScreen() {
+    if (!this.terminal) return;
+    this.terminal.options.disableStdin = true;
+    freezeMouse(this.terminal);
+    this.keyboardViewport?.dispose();
+    this.keyboardViewport = undefined;
+    // A retained recovery screen may subsequently receive sessionMissing/end.
+    if (!this.element.classList.contains("terminal-readonly"))
+      this.cleanups.push(retainReadonlyViewport(this.terminal));
+  }
+  private end(result: Pick<DisplayState, "exitCode" | "missing">) {
+    this.ready = false;
+    this.retainScreen();
+    this.change({ ...this.state, status: "ended", ...result, notice: undefined, error: undefined });
+    // The read-only viewport may now scroll; show "Back to bottom" without waiting for a resize.
+    this.reportReading();
+  }
+  /** Keeps a disconnected display's last screen read-only once its session no longer exists. */
+  sessionMissing() {
+    if (this.disposed || this.state.status !== "error") return;
+    this.receivedEnd = true;
+    this.end({ exitCode: null, missing: true });
   }
   private async output(bytes: Uint8Array) {
     const terminal = this.terminal;

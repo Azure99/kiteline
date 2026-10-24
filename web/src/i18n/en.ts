@@ -464,6 +464,8 @@ export const en = {
       "This temporarily resizes the task and may change the display and selection at other entry points.",
     redraw: "Redraw",
     ended: "Ended",
+    endedMissing:
+      "Ended: the session no longer exists (it may have exited, or the agent or device restarted)",
     newGroup: "New group",
     resize: "Resize terminal",
     restoreSplit: "Restore split",

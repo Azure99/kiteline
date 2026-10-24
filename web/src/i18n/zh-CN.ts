@@ -456,6 +456,7 @@ export const zhCN = {
     redrawHint: "这会暂时调整任务尺寸，可能改变其他入口的画面和选区。",
     redraw: "重绘",
     ended: "已结束",
+    endedMissing: "已结束：会话已不存在（可能已退出，或 agent、设备已重启）",
     newGroup: "独立成组",
     resize: "调整终端大小",
     restoreSplit: "还原分屏",

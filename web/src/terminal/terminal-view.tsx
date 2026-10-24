@@ -66,8 +66,10 @@ export function TerminalView({
   workspacePath,
   sessionId,
   sessionName,
+  sessionMissing,
   ref,
   onCapabilities,
+  onClose,
   searchHost,
   searchActive,
 }: {
@@ -76,8 +78,11 @@ export function TerminalView({
   workspacePath: string;
   sessionId: string;
   sessionName: string;
+  /** A successful session list no longer contains this session. */
+  sessionMissing: boolean;
   ref?: Ref<TerminalActions>;
   onCapabilities?(id: string, value: TerminalCapabilities | undefined): void;
+  onClose(): void;
   searchHost: HTMLDivElement | null;
   searchActive: boolean;
 }) {
@@ -105,11 +110,13 @@ export function TerminalView({
     return () => provider.dispose();
   }, [terminal, deviceId, workspaceId, workspacePath, t]);
   const [reading, setReading] = useState(false);
-  const [attempt, setAttempt] = useState(0);
+  const restoring = useRef(false);
+  const restoreDisplay = useRef<(scope: "retained" | "screen") => void>(() => {});
   const [state, setState] = useState<DisplayState>({ status: "connecting" });
   const code = state.error instanceof ApiError ? state.error.code : undefined;
   const screenRetry =
     state.status === "error" && ["limit_exceeded", "timeout", "busy"].includes(code ?? "");
+  const missing = !!state.missing || (state.status === "error" && code === "not_found");
   const [notice, setNotice] = useState<unknown>();
   const [modifiers, setModifiers] = useState<Modifiers>(releasedModifiers);
   const [expanded, setExpanded] = useState(true);
@@ -150,7 +157,6 @@ export function TerminalView({
     [onCapabilities, sessionId, state.status, terminal, title],
   );
   useEffect(() => () => onCapabilities?.(sessionId, undefined), [onCapabilities, sessionId]);
-  const [history, setHistory] = useState<"retained" | "screen">("retained");
   const [recovering, setRecovering] = useState(false);
   const [redrawDialog, setRedrawDialog] = useState(false);
   const [redrawing, setRedrawing] = useState(false);
@@ -160,17 +166,18 @@ export function TerminalView({
     return () => operations.current.abort();
   }, []);
   function redisplay(scope: "retained" | "screen" = "retained") {
-    if (!webCompatible()) return;
+    if (!webCompatible() || restoring.current) return;
+    restoring.current = true;
     const signal = operations.current.signal;
     void api("/api/session", { signal })
       .then(() => {
         if (signal.aborted || !webCompatible()) return;
         setNotice("");
-        setHistory(scope);
         setState({ status: "connecting" });
-        setAttempt((value) => value + 1);
+        restoreDisplay.current(scope);
       })
       .catch((error: unknown) => {
+        restoring.current = false;
         if (!signal.aborted) setNotice(error);
       });
   }
@@ -220,32 +227,132 @@ export function TerminalView({
     }
   }
   useEffect(() => {
-    const current = new TerminalDisplay(
-      element.current!,
-      deviceId,
-      workspaceId,
-      sessionId,
-      setState,
-      history,
-      {
-        opened: setTerminal,
-        title: setTitle,
-        reading: setReading,
-        modifiers: setModifiers,
-      },
-    );
-    display.current = current;
+    type Screen = {
+      display: TerminalDisplay;
+      host: HTMLDivElement;
+      terminal?: Terminal;
+      title: string;
+      reading: boolean;
+      modifiers: Modifiers;
+      suspended: boolean;
+    };
+    let current: Screen | undefined;
+    let candidate: Screen | undefined;
+    function remove(screen: Screen) {
+      screen.display.dispose();
+      screen.host.remove();
+    }
+    function publish(screen: Screen, next: DisplayState) {
+      display.current = screen.display;
+      setTerminal(screen.terminal);
+      setTitle(screen.title);
+      setReading(screen.reading);
+      setModifiers(screen.modifiers);
+      setState(next);
+    }
+    function createScreen(scope: "retained" | "screen", pending: boolean): Screen {
+      const host = document.createElement("div");
+      host.className = "terminal-canvas absolute inset-0";
+      if (pending) {
+        host.style.visibility = "hidden";
+        host.style.pointerEvents = "none";
+        host.setAttribute("aria-hidden", "true");
+      }
+      element.current!.append(host);
+      const screen = {
+        host,
+        title: "",
+        reading: false,
+        modifiers: releasedModifiers,
+        suspended: false,
+      } as Screen;
+      screen.display = new TerminalDisplay(
+        host,
+        deviceId,
+        workspaceId,
+        sessionId,
+        (next) => {
+          if (screen === candidate) {
+            if (next.status === "ready") {
+              const old = current;
+              candidate = undefined;
+              current = screen;
+              host.style.visibility = "";
+              host.style.pointerEvents = "";
+              host.removeAttribute("aria-hidden");
+              screen.terminal?.textarea?.setAttribute("tabindex", "0");
+              restoring.current = false;
+              publish(screen, next);
+              screen.display.resize();
+              if (old) remove(old);
+            } else if (next.status === "error" || next.status === "ended") {
+              candidate = undefined;
+              restoring.current = false;
+              remove(screen);
+              const missing = next.error instanceof ApiError && next.error.code === "not_found";
+              if (missing) current?.display.sessionMissing();
+              setState(missing ? { status: "ended", missing: true } : next);
+            }
+          } else if (screen === current && (!screen.suspended || next.missing)) {
+            if (next.status !== "connecting") restoring.current = false;
+            setState(next);
+          }
+        },
+        scope,
+        {
+          opened: (value) => {
+            screen.terminal = value;
+            if (pending) value.textarea?.setAttribute("tabindex", "-1");
+            if (screen === current) setTerminal(value);
+          },
+          title: (value) => {
+            screen.title = value;
+            if (screen === current) setTitle(value);
+          },
+          reading: (value) => {
+            screen.reading = value;
+            if (screen === current) setReading(value);
+          },
+          modifiers: (value) => {
+            screen.modifiers = value;
+            if (screen === current) setModifiers(value);
+          },
+        },
+      );
+      return screen;
+    }
+    current = createScreen("retained", false);
+    display.current = current.display;
+    restoreDisplay.current = (scope) => {
+      if (current && !current.terminal) {
+        remove(current);
+        current = createScreen(scope, false);
+        display.current = current.display;
+        return;
+      }
+      if (current && !current.suspended) {
+        current.display.retainScreen();
+        current.suspended = true;
+      }
+      candidate = createScreen(scope, true);
+    };
     return () => {
-      current.dispose();
-      setTitle("");
+      restoreDisplay.current = () => {};
+      restoring.current = false;
+      if (candidate) remove(candidate);
+      if (current) remove(current);
       display.current = undefined;
+      setTitle("");
       setTerminal(undefined);
       setReading(false);
     };
-  }, [deviceId, workspaceId, sessionId, attempt, history]);
+  }, [deviceId, workspaceId, sessionId]);
   useLayoutEffect(() => {
     if (state.status === "ready") display.current?.resize();
   }, [state.status]);
+  useEffect(() => {
+    if (sessionMissing && state.status === "error") display.current?.sessionMissing();
+  }, [sessionMissing, state.status]);
   useEffect(() => {
     Terminal.strings.promptLabel = t(($) => $.terminal.inputLabel);
     Terminal.strings.tooMuchOutput = t(($) => $.terminal.tooMuchOutput);
@@ -377,6 +484,7 @@ export function TerminalView({
           data-two-actions={screenRetry}
           data-compact={
             !notice &&
+            !missing &&
             !state.error &&
             !state.notice &&
             (state.status === "ended" || state.status === "connecting")
@@ -384,7 +492,9 @@ export function TerminalView({
           role="status"
         >
           <div className="min-w-0 flex-1 break-words">
-            {notice || state.error ? (
+            {missing && !notice ? (
+              t(($) => $.terminal.endedMissing)
+            ) : notice || state.error ? (
               <ErrorNotice error={notice || state.error} />
             ) : state.notice ? (
               t(($) => $.terminal[state.notice!])
@@ -404,7 +514,7 @@ export function TerminalView({
               t(($) => $.terminal.historyLimited)
             ) : null}
           </div>
-          {!!(state.status === "error" && code !== "not_found") && (
+          {state.status === "error" && !missing && (
             <>
               <Button
                 variant="ghost"
@@ -429,6 +539,12 @@ export function TerminalView({
               )}
             </>
           )}
+          {missing && (
+            <Button variant="ghost" onClick={onClose}>
+              <X />
+              {t(($) => $.terminal.closeDisplay)}
+            </Button>
+          )}
           {!!notice && (
             <IconButton label={t(($) => $.common.dismiss)} onClick={() => setNotice("")}>
               <X />
@@ -450,7 +566,7 @@ export function TerminalView({
           }}
         >
           <ContextMenuPrimitive.Trigger
-            render={<div ref={element} className="terminal-canvas min-h-0 min-w-0 flex-1" />}
+            render={<div ref={element} className="relative min-h-0 min-w-0 flex-1" />}
           />
           <ContextMenuContent>
             <MenuItem disabled={!contextSelection} onClick={() => void copySelection()}>
