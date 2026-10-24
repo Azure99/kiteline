@@ -141,13 +141,6 @@ body {
   background: var(--terminal);
 }
 @layer kiteline-editor-reset {
-  button,
-  input,
-  textarea,
-  select {
-    font: inherit;
-    letter-spacing: 0;
-  }
   button {
     cursor: pointer;
   }
@@ -269,6 +262,56 @@ body {
 .status-dot[data-status="online"] {
   background: #438568;
 }
+.edge-panel-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: rgb(0 0 0 / 24%);
+  transition: opacity 200ms ease-out;
+}
+.edge-panel-backdrop[data-starting-style],
+.edge-panel-backdrop[data-ending-style] {
+  opacity: 0;
+}
+.edge-panel-backdrop[data-ending-style],
+.edge-panel[data-mobile="true"][data-ending-style] {
+  pointer-events: none;
+}
+.edge-panel {
+  outline: none;
+}
+.edge-panel[data-mobile="true"] {
+  position: fixed;
+  top: var(--app-top, 0px);
+  height: var(--app-height, 100vh);
+  width: min(360px, calc(100% - 40px));
+  z-index: 31;
+  box-shadow: 0 0 24px rgb(0 0 0 / 20%);
+  transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.edge-panel[data-mobile="true"][data-edge="left"] {
+  left: 0;
+}
+.edge-panel[data-mobile="true"][data-edge="right"] {
+  right: 0;
+}
+.edge-panel[data-mobile="true"][data-starting-style],
+.edge-panel[data-mobile="true"][data-ending-style] {
+  transform: translateX(var(--edge-slide));
+}
+.edge-panel[data-edge="left"] {
+  --edge-slide: -100%;
+}
+.edge-panel[data-edge="right"] {
+  --edge-slide: 100%;
+}
+@media (prefers-reduced-motion: reduce) {
+  .edge-panel[data-mobile="true"],
+  .edge-panel-backdrop {
+    transition: none;
+  }
+}
+
 .workbench-sidebar {
   width: 228px;
 }

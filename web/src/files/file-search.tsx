@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Fragment, useEffect, useEffectEvent, useRef, useState } from "react";
+import { Fragment, useEffect, useEffectEvent, useRef, useState, type Ref } from "react";
 import { ArrowLeft, Search, X } from "lucide-react";
 import { FileIcon } from "../components/file-icon";
 import type { SearchMatch, SearchResult } from "@kiteline/shared/protocol";
@@ -11,18 +11,20 @@ import { isMobile } from "../lib/use-mobile";
 import { ErrorNotice } from "../components/error-notice";
 
 export function FileSearch({
+  ref,
   deviceId,
   workspaceId,
   workspaceName,
-  visible,
+  active,
   disabled,
   onBack,
   onOpen,
 }: {
+  ref?: Ref<HTMLElement>;
   deviceId: string;
   workspaceId: string;
   workspaceName: string;
-  visible: boolean;
+  active: boolean;
   disabled: boolean;
   onBack: () => void;
   onOpen: (match: SearchMatch, query: string) => void;
@@ -41,8 +43,8 @@ export function FileSearch({
       input.current?.focus({ preventScroll: true });
   });
   useEffect(() => {
-    if (visible) focusEmpty();
-  }, [visible]);
+    if (active) focusEmpty();
+  }, [active]);
   const request = useRef<AbortController>(undefined);
   useEffect(() => () => request.current?.abort(), []);
   function cancel() {
@@ -77,7 +79,9 @@ export function FileSearch({
   }
   return (
     <section
-      className={visible ? "flex min-h-0 flex-1 flex-col max-desk:overflow-auto" : "hidden"}
+      ref={ref}
+      tabIndex={-1}
+      className="flex min-h-0 flex-1 flex-col outline-none max-desk:overflow-auto"
       aria-label={t(($) => $.files.searchTitle)}
     >
       <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border px-2">

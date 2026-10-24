@@ -6,7 +6,7 @@ export const TooltipTrigger = Primitive.Trigger;
 export function TooltipContent({ children, ...props }: Primitive.Popup.Props) {
   return (
     <Primitive.Portal>
-      <Primitive.Positioner sideOffset={5} className="z-60">
+      <Primitive.Positioner sideOffset={5} className="pointer-events-none z-60">
         <Primitive.Popup
           className="tooltip-content max-w-xs rounded bg-foreground px-2 py-1 text-xs text-background shadow"
           {...props}

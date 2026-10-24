@@ -42,6 +42,7 @@ export interface GitBrowseState {
 export function GitTool({
   device,
   workspace,
+  selected,
   visible,
   store,
   actions,
@@ -52,6 +53,7 @@ export function GitTool({
 }: {
   device: Device;
   workspace: Workspace;
+  selected: boolean;
   visible: boolean;
   store: DraftStore;
   actions: GitActions;
@@ -130,7 +132,7 @@ export function GitTool({
     </Menu>
   );
   return (
-    <div className={visible ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+    <div className={selected ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
       <div className="shrink-0">
         {!repo?.available && (
           <div className="flex min-h-11 shrink-0 items-center gap-2 border-b border-border px-3">

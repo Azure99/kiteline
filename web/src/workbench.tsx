@@ -1,6 +1,7 @@
 import { newId } from "./lib/id";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { EdgePanel } from "./components/edge-panel";
 import { trackViewport } from "./lib/viewport";
 import { useMobile } from "./lib/use-mobile";
 import { AppearanceOptions } from "./components/appearance-menu";
@@ -142,6 +143,8 @@ export function Workbench({
     setMobileTools(!!(route.query.search || route.query.reveal));
   }, [route.deviceId, route.workspaceId, route.query.search, route.query.reveal]);
   const navigationToggle = useRef<HTMLButtonElement>(null);
+  const mainContent = useRef<HTMLElement>(null);
+  const focusContentAfterClose = useRef(false);
   const routePath = currentPath();
   useEffect(() => setMobileNavigation(false), [routePath]);
   const [directoryDevice, setDirectoryDevice] = useState<{ device: Device; origin: string }>();
@@ -189,10 +192,31 @@ export function Workbench({
   const directoryEnvironment =
     directoryTarget?.status === "online" ? directoryTarget.environment : undefined;
   const workspace = device?.snapshot?.workspaces.find((w) => w.id === route.workspaceId);
+  let contextTitle: string = t(($) => $.shell.home);
+  if (!route.valid) contextTitle = t(($) => $.shell.pageMissing);
+  else if (route.tasks)
+    contextTitle = `${t(($) => $.schedules.title)}${device ? ` · ${device.name}` : ""}`;
+  else if (route.deviceId) {
+    if (!device)
+      contextTitle = devicesLoaded
+        ? t(($) => $.shell.deviceMissing)
+        : connectionError
+          ? t(($) => $.common.disconnected)
+          : t(($) => $.shell.connectingDevice);
+    else if (route.workspaceId && !workspace)
+      contextTitle = device.snapshot
+        ? t(($) => $.shell.workspaceMissing)
+        : device.status === "online"
+          ? t(($) => $.common.loading)
+          : t(($) => $.common.deviceOffline);
+    else contextTitle = device.name;
+  }
   const title =
     session && route.valid && device && workspace && route.tool
       ? `${workspace.name} · ${t(($) => $.common[route.tool!])} · ${device.name} · Kiteline`
-      : "Kiteline";
+      : session
+        ? `${contextTitle} · Kiteline`
+        : "Kiteline";
   useEffect(() => {
     document.title = title;
   }, [title]);
@@ -292,17 +316,28 @@ export function Workbench({
       setError({ cause: error });
     }
   }
-  function choose(path: string) {
+  function choose(
+    path: string,
+    {
+      restoreWorkspace = true,
+      keyboard = false,
+    }: { restoreWorkspace?: boolean; keyboard?: boolean } = {},
+  ) {
+    if (keyboard && mobile && mobileNavigation) focusContentAfterClose.current = true;
     const destination = parseRoute(new URL(path, window.location.origin));
     const saved =
+      restoreWorkspace &&
       destination.deviceId &&
       destination.workspaceId &&
       Object.values(destination.query).every((value) => value === undefined)
         ? workspaceViews.get(`${destination.deviceId}:${destination.workspaceId}`)?.path
         : undefined;
-    navigate(saved ?? path);
+    const target = saved ?? path;
+    if (target !== currentPath()) navigate(target);
     setMobileNavigation(false);
     setError(undefined);
+    if (keyboard && !(mobile && mobileNavigation))
+      mainContent.current?.focus({ preventScroll: true });
   }
   const navigationReports = [...reports.values()]
     .filter((report) =>
@@ -372,13 +407,35 @@ export function Workbench({
       );
     if (!device)
       return (
-        <p className="p-6 text-muted-foreground">
-          {connected ? t(($) => $.shell.deviceMissing) : t(($) => $.shell.connectingDevice)}
-        </p>
+        <div className="space-y-3 p-6">
+          <p className="text-muted-foreground">
+            {devicesLoaded
+              ? t(($) => $.shell.deviceMissing)
+              : connectionError
+                ? t(($) => $.common.disconnected)
+                : t(($) => $.shell.connectingDevice)}
+          </p>
+          <Button variant="outline" onClick={() => choose("/devices")}>
+            {t(($) => $.shell.backDevices)}
+          </Button>
+        </div>
       );
     if (route.workspaceId) {
       if (!workspace)
-        return <p className="p-6 text-muted-foreground">{t(($) => $.shell.workspaceRemoved)}</p>;
+        return (
+          <div className="space-y-3 p-6">
+            <p className="text-muted-foreground">
+              {device.snapshot
+                ? t(($) => $.shell.workspaceMissing)
+                : device.status === "online"
+                  ? t(($) => $.common.loading)
+                  : t(($) => $.common.deviceOffline)}
+            </p>
+            <Button variant="outline" onClick={() => choose(devicePath(device.id))}>
+              {t(($) => $.shell.backDevice)}
+            </Button>
+          </div>
+        );
       return (
         <ViewBoundary
           key={`${device.id}:${workspace.id}`}
@@ -452,13 +509,34 @@ export function Workbench({
   if (!session) return authentication;
   return (
     <>
+      <a
+        href="#workbench-main"
+        onClick={(event) => {
+          event.preventDefault();
+          mainContent.current?.focus({ preventScroll: true });
+        }}
+        className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[60] focus:rounded focus:border focus:border-border focus:bg-background focus:px-4 focus:py-3 focus:text-sm"
+      >
+        {t(($) => $.shell.skipToContent)}
+      </a>
       <div
         data-terminal-focus={terminalFocus.active ? "" : undefined}
         className="fixed top-[var(--app-top,0px)] left-0 flex h-[var(--app-height,100vh)] w-full min-h-0 overflow-hidden bg-background"
       >
-        <aside
+        <EdgePanel
           id="device-sidebar"
-          hidden={!navigationVisible}
+          side="left"
+          mobile={mobile}
+          open={navigationVisible}
+          onClose={() => setMobileNavigation(false)}
+          returnFocus={() => {
+            if (focusContentAfterClose.current) {
+              focusContentAfterClose.current = false;
+              return mainContent.current;
+            }
+            return navigationToggle.current;
+          }}
+          label={t(($) => $.shell.deviceWorkspaces)}
           className="workbench-sidebar flex min-h-0 shrink-0 flex-col border-r border-border bg-muted"
         >
           <div className="flex min-h-12 shrink-0 items-center gap-2 px-4">
@@ -466,14 +544,10 @@ export function Workbench({
               k
             </span>
             <strong className="min-w-0 flex-1 text-sm">Kiteline</strong>
-            {mobile && mobileNavigation && (
+            {mobile && (
               <IconButton
-                autoFocus
                 label={t(($) => $.shell.returnToContent)}
-                onClick={() => {
-                  setMobileNavigation(false);
-                  requestAnimationFrame(() => navigationToggle.current?.focus());
-                }}
+                onClick={() => setMobileNavigation(false)}
               >
                 <ArrowLeft />
               </IconButton>
@@ -484,10 +558,12 @@ export function Workbench({
               variant="ghost"
               className={
                 "w-full justify-start " +
-                (!route.tasks && !route.deviceId ? "bg-background hover:bg-background" : "")
+                (route.valid && !route.tasks && !route.deviceId
+                  ? "bg-background text-primary hover:bg-background"
+                  : "")
               }
-              aria-current={!route.tasks && !route.deviceId ? "page" : undefined}
-              onClick={() => choose("/devices")}
+              aria-current={route.valid && !route.tasks && !route.deviceId ? "page" : undefined}
+              onClick={(event) => choose("/devices", { keyboard: event.detail === 0 })}
             >
               <LayoutDashboard />
               {t(($) => $.shell.home)}
@@ -499,7 +575,7 @@ export function Workbench({
                 (route.tasks ? "bg-background text-primary hover:bg-background" : "")
               }
               aria-current={route.tasks ? "page" : undefined}
-              onClick={() => choose(tasksPath())}
+              onClick={(event) => choose(tasksPath(), { keyboard: event.detail === 0 })}
             >
               <CalendarClock />
               <span className="min-w-0 flex-1 truncate text-left">
@@ -572,10 +648,13 @@ export function Workbench({
               </MenuContent>
             </Menu>
           </div>
-        </aside>
+        </EdgePanel>
         <main
-          hidden={mobile && (mobileNavigation || mobileTools)}
-          className="flex min-w-0 flex-1 flex-col"
+          id="workbench-main"
+          ref={mainContent}
+          tabIndex={-1}
+          aria-label={t(($) => $.shell.mainContent)}
+          className="flex min-w-0 flex-1 flex-col outline-none"
         >
           <ReleaseNotice />
           <header
@@ -616,11 +695,9 @@ export function Workbench({
             )}
             <strong
               className="min-w-0 flex-1 truncate text-xs font-medium"
-              title={workspace?.name ?? device?.name}
+              title={workspace ? `${device?.name} · ${workspace.name}` : contextTitle}
             >
-              {route.tasks
-                ? t(($) => $.schedules.title)
-                : (workspace?.name ?? device?.name ?? "Kiteline")}
+              {workspace?.name ?? contextTitle}
             </strong>
             <div ref={setWorkspaceControls} className="flex shrink-0 items-center gap-1" />
           </header>
@@ -661,7 +738,7 @@ export function Workbench({
           )}
           {renderMain()}
         </main>
-        <div ref={setWorkspaceTools} hidden={mobile && mobileNavigation} className="contents" />
+        <div ref={setWorkspaceTools} className="contents" />
       </div>
       <OpenFiles store={drafts} devices={devices} open={openFiles} onOpenChange={setOpenFiles} />
       <Dialog open={cliSetup} onOpenChange={setCliSetup}>
@@ -730,7 +807,13 @@ export function Workbench({
           }}
         />
       )}
-      {action && <DeviceActionDialog action={action} onClose={() => setAction(undefined)} />}
+      {action && (
+        <DeviceActionDialog
+          action={action}
+          onClose={() => setAction(undefined)}
+          onNavigate={(path) => choose(path, { restoreWorkspace: false })}
+        />
+      )}
     </>
   );
 }

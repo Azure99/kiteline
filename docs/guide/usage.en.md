@@ -16,13 +16,13 @@ Origins with different hostnames or schemes, such as `http://192.168.1.10:8080` 
 
 Language follows the browser by default: Simplified Chinese for Chinese locales, English otherwise. Switching language does not affect open files or terminals.
 
-The address bar records the device, workspace, tool and open file, repository and session, so you can use Back, Forward and bookmarks. The browser tab title shows the current workspace, tool and device to help distinguish open pages.
+The address bar records the device, workspace, tool and open file, repository and session, so you can use Back, Forward and bookmarks. The browser tab title shows the current workspace, tool and device; Workbench, task, device and error pages show their context to help distinguish open pages.
 
 After a server upgrade, an already open page shows the Web and Server versions and pauses remote operations. Copy unsaved content before clicking "Reload page".
 
 Choose system, light or dark appearance from Settings at the bottom of the left sidebar or the login page. The default follows the system; a manual choice is saved in the current browser. Choose system again to resume automatic changes. Switching appearance preserves open file drafts, undo history and selections; terminal content keeps its dark colors.
 
-At 960 CSS pixels or wider, the layout icon in the title row shows the current mode. Click to cycle through Work pages, Together and Terminal. In Together mode, the position icon on its left shows the terminal position and cycles through bottom, right, top and left. Drag the divider to adjust proportions; either sidebar can be collapsed independently. Narrow layouts show only work pages or a terminal, with a target icon in the title row to switch between them. File and Git tools open as a separate page on mobile.
+At 960 CSS pixels or wider, the layout icon in the title row shows the current mode. Click to cycle through Work pages, Together and Terminal. In Together mode, the position icon on its left shows the terminal position and cycles through bottom, right, top and left. Drag the divider to adjust proportions; either sidebar can be collapsed independently. Narrow layouts show only work pages or a terminal, with a target icon in the title row to switch between them. On mobile, navigation and file/Git tools overlay the main area from their respective edges. Close them with the return button, backdrop or Escape; opening content returns to the main area. File search is in the tool’s More menu.
 
 Switching between desktop and phone layouts keeps drafts, the active page and sessions, along with the existing position and proportions. When Together becomes narrow, it shows the most recently explicitly selected file or terminal. For example, selecting a file and then typing in the terminal still leaves the file visible after narrowing. Switching content on the phone and returning to desktop changes a layout that previously showed only one kind of content to Together.
 
@@ -52,9 +52,11 @@ Deleting a device removes its record, binding and scheduled-task summaries from 
 
 A workspace is a registered project directory on a device. Select the project directory in "Add workspace" on an online device. The registered path is the real directory after resolving symbolic links. Adding the same directory again returns the existing workspace.
 
-Use Search beside Devices and workspaces to filter registered workspaces by name or path, including those without terminal sessions. Matching is case-insensitive. X clears the query and keeps search open; Search or Escape closes it and clears the filter. Navigation entries show names; full paths are available in the object menu and device details. The button at the left edge of the main area opens or closes navigation. On mobile, choosing a destination returns to the main area.
+Use Search beside Devices and workspaces to filter registered workspaces by name or path, including those without terminal sessions. Matching is case-insensitive. Filtering temporarily expands matching devices and shows the full path when it matches; clearing the filter restores the previous collapsed state. When a nonempty filter has exactly one result, press Enter to open that workspace. X clears the query and keeps search open; Search or Escape closes it and clears the filter. Full paths are also available in the object menu and device details.
 
-Removing a workspace deletes only the registration, keeping directories and files. A workspace cannot be removed while the device is offline or it still has terminal sessions.
+The button at the left edge of the main area opens or closes navigation. On mobile, choosing a destination returns to the main area. Returning to a workspace from the sidebar resumes its last target in the current page; selecting the current target again does not add a Back step. Activating Workbench, Tasks, a device or a workspace in the sidebar with the keyboard, or pressing Enter on a unique filter result, moves focus to the main content. The "Skip to main content" entry at the top of the page also moves focus there.
+
+Removing a workspace deletes only the registration, keeping directories and files. A workspace cannot be removed while the device is offline or it still has terminal sessions. If removal is rejected because of terminal sessions, select "Open workspace terminals", end the sessions, then retry removal.
 
 A workspace is not a sandbox. Terminal, file and Git operations use the project user's permissions and can access any path that user can access.
 

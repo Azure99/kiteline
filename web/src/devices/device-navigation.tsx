@@ -35,7 +35,7 @@ export function DeviceNavigation({
   drafts: DraftStore;
   reports: ReceivedReport[];
   onReport: (report: ReceivedReport) => void;
-  onNavigate: (path: string) => void;
+  onNavigate: (path: string, options?: { keyboard?: boolean }) => void;
   onBind: () => void;
   onPort: (deviceId: string) => void;
   onAdd: (device: Device) => void;
@@ -49,6 +49,7 @@ export function DeviceNavigation({
   const searchButton = useRef<HTMLButtonElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const [collapsed, setCollapsed] = useState<string[]>([]);
+  const visibleCollapsed = query.trim() ? [] : collapsed;
   function closeSearch() {
     setSearchOpen(false);
     setQuery("");
@@ -65,12 +66,15 @@ export function DeviceNavigation({
       ),
     }))
     .filter(({ workspaces }) => !filter || workspaces.length > 0);
+  const matchingWorkspaces = matches.flatMap(({ device, workspaces }) =>
+    workspaces.map((workspace) => ({ device, workspace })),
+  );
   return (
     <nav aria-label={t(($) => $.shell.deviceWorkspaces)} className="space-y-1 p-2">
       <div className="flex items-center justify-between gap-1 px-1">
         <button
-          className="flex-1 text-left text-xs font-medium text-muted-foreground"
-          onClick={() => onNavigate("/devices")}
+          className="flex-1 text-left text-xs font-medium text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={(event) => onNavigate("/devices", { keyboard: event.detail === 0 })}
         >
           {t(($) => $.shell.deviceWorkspaces)}
         </button>
@@ -113,6 +117,22 @@ export function DeviceNavigation({
                 event.stopPropagation();
                 closeSearch();
               }
+              if (
+                event.key === "Enter" &&
+                !event.nativeEvent.isComposing &&
+                filter &&
+                matchingWorkspaces.length === 1
+              ) {
+                event.preventDefault();
+                const { device, workspace } = matchingWorkspaces[0]!;
+                onNavigate(
+                  workspaceDestination(
+                    { deviceId: device.id, workspaceId: workspace.id },
+                    tool ?? "terminal",
+                  ),
+                  { keyboard: true },
+                );
+              }
             }}
           />
           {query && (
@@ -140,11 +160,15 @@ export function DeviceNavigation({
           >
             <IconButton
               label={t(
-                ($) => (collapsed.includes(d.id) ? $.common.expandNamed : $.common.collapseNamed),
-                { name: d.name },
+                ($) =>
+                  visibleCollapsed.includes(d.id) ? $.common.expandNamed : $.common.collapseNamed,
+                {
+                  name: d.name,
+                },
               )}
               className="size-6 max-desk:w-8"
-              aria-expanded={!collapsed.includes(d.id)}
+              aria-expanded={!visibleCollapsed.includes(d.id)}
+              disabled={!!filter}
               onClick={() =>
                 setCollapsed((previous) =>
                   previous.includes(d.id)
@@ -153,7 +177,7 @@ export function DeviceNavigation({
                 )
               }
             >
-              {collapsed.includes(d.id) ? <ChevronRight /> : <ChevronDown />}
+              {visibleCollapsed.includes(d.id) ? <ChevronRight /> : <ChevronDown />}
             </IconButton>
             <DeviceMenu
               device={d}
@@ -163,8 +187,8 @@ export function DeviceNavigation({
               onPort={onPort}
             >
               <button
-                className={`flex min-h-9 min-w-0 flex-1 items-center gap-1.5 rounded text-left text-xs max-desk:min-h-11 max-desk:text-sm ${deviceId === d.id && !tool ? "" : "hover:bg-muted"}`}
-                onClick={() => onNavigate(devicePath(d.id))}
+                className={`flex min-h-9 min-w-0 flex-1 items-center gap-1.5 rounded text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring max-desk:min-h-11 max-desk:text-sm ${deviceId === d.id && !tool ? "" : "hover:bg-muted"}`}
+                onClick={(event) => onNavigate(devicePath(d.id), { keyboard: event.detail === 0 })}
               >
                 <Server size={15} className="shrink-0 text-muted-foreground" />
                 <span
@@ -187,15 +211,16 @@ export function DeviceNavigation({
               <Globe />
             </IconButton>
           </div>
-          {!collapsed.includes(d.id) &&
+          {!visibleCollapsed.includes(d.id) &&
             workspaces.map((w) => {
               const sources = reports.filter(
                 (report) => report.deviceId === d.id && report.workspaceId === w.id,
               );
-              const open = () =>
-                onNavigate(
-                  workspaceDestination({ deviceId: d.id, workspaceId: w.id }, tool ?? "terminal"),
-                );
+              const path = workspaceDestination(
+                { deviceId: d.id, workspaceId: w.id },
+                tool ?? "terminal",
+              );
+              const open = (keyboard = false) => onNavigate(path, { keyboard });
               return (
                 <div key={w.id}>
                   <div className="group flex items-center">
@@ -203,18 +228,26 @@ export function DeviceNavigation({
                       navigation
                       device={d}
                       workspace={w}
-                      onOpen={open}
+                      onOpen={() => open()}
                       onAction={onAction}
                     >
                       <button
                         aria-current={
                           deviceId === d.id && workspaceId === w.id ? "page" : undefined
                         }
-                        className={`flex min-h-9 min-w-0 flex-1 items-center gap-2 rounded border-l-2 pl-3 pr-2 text-left text-sm max-desk:min-h-11 ${deviceId === d.id && workspaceId === w.id ? "border-primary bg-primary-soft text-primary" : "border-transparent hover:bg-muted"}`}
-                        onClick={open}
+                        className={`flex min-h-9 min-w-0 flex-1 items-center gap-2 rounded border-l-2 pl-3 pr-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring max-desk:min-h-11 ${deviceId === d.id && workspaceId === w.id ? "border-primary bg-primary-soft text-primary" : "border-transparent hover:bg-muted"}`}
+                        onClick={(event) => open(event.detail === 0)}
                       >
-                        <span className="min-w-0 flex-1 truncate" title={w.name}>
-                          {w.name}
+                        <span className="min-w-0 flex-1" title={w.name}>
+                          <span className="block truncate">{w.name}</span>
+                          {filter && w.path.toLowerCase().includes(filter) && (
+                            <span
+                              className="block whitespace-normal break-all text-xs text-muted-foreground"
+                              title={w.path}
+                            >
+                              {w.path}
+                            </span>
+                          )}
                         </span>
                         {openDrafts.some(
                           (draft) =>
@@ -262,7 +295,7 @@ export function DeviceNavigation({
                     sources.map((report) => (
                       <button
                         key={report.sessionId}
-                        className="ml-8 block w-[calc(100%_-_2rem)] rounded border-l-2 border-primary px-3 py-2 text-sm hover:bg-muted"
+                        className="ml-8 block w-[calc(100%_-_2rem)] rounded border-l-2 border-primary px-3 py-2 text-sm outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
                         aria-label={t(($) => $.reports.returnTo, { name: report.name })}
                         onClick={() => onReport(report)}
                       >

@@ -67,7 +67,7 @@ export function WorkPages({
                       aria-label={title}
                       aria-current={pages.active === page.id ? "true" : undefined}
                       onClick={() => pages.select(page)}
-                      className="flex min-h-9 min-w-0 items-center gap-2 px-3 text-xs max-desk:min-h-11"
+                      className="flex min-h-9 min-w-0 items-center gap-2 px-3 text-sm max-desk:min-h-11"
                     >
                       {page.kind === "diff" ? (
                         <GitCompareArrows size={14} className="shrink-0" />

@@ -2,7 +2,8 @@ import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { limits, type Device, type Workspace } from "@kiteline/shared/protocol";
-import { api, rpc } from "../lib/api";
+import { ApiError, api, rpc } from "../lib/api";
+import { workspacePath } from "../lib/navigation";
 import { UninstallInstructions } from "./uninstall-instructions";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -21,9 +22,11 @@ export type DeviceAction =
 export function DeviceActionDialog({
   action,
   onClose,
+  onNavigate,
 }: {
   action: DeviceAction;
   onClose: () => void;
+  onNavigate: (path: string) => void;
 }) {
   const { t } = useTranslation();
 
@@ -118,7 +121,7 @@ export function DeviceActionDialog({
               </p>
               {renaming ? (
                 <label className="block space-y-2">
-                  <span>{t(($) => $.common.name)}</span>
+                  <span className="block">{t(($) => $.common.name)}</span>
                   <Input
                     value={name}
                     onChange={(event) => setName(event.target.value)}
@@ -147,6 +150,19 @@ export function DeviceActionDialog({
               <DialogClose disabled={busy} render={<Button variant="outline" />}>
                 {t(($) => $.common.cancel)}
               </DialogClose>
+              {action.type === "workspace-remove" &&
+                error instanceof ApiError &&
+                error.code === "busy" && (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      onClose();
+                      onNavigate(workspacePath(action.device.id, action.workspace.id, "terminal"));
+                    }}
+                  >
+                    {t(($) => $.devices.openWorkspaceTerminals)}
+                  </Button>
+                )}
               <Button type="submit" variant={renaming ? "default" : "destructive"} disabled={busy}>
                 {busy
                   ? t(($) => $.common.processing)

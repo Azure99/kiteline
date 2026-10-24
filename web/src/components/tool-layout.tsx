@@ -18,11 +18,9 @@ export function ToolLayout({
   return <Regions value={{ header, sidebar }}>{children}</Regions>;
 }
 
-export function ToolHeader({ visible, children }: { visible: boolean; children: ReactNode }) {
+export function ToolHeader({ children }: { children: ReactNode }) {
   const { header } = useContext(Regions);
-  return header
-    ? createPortal(<div className={visible ? "flex flex-col" : "hidden"}>{children}</div>, header)
-    : null;
+  return header ? createPortal(<div className="flex flex-col">{children}</div>, header) : null;
 }
 
 export function ToolSidebar({ visible, children }: { visible: boolean; children: ReactNode }) {

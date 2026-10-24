@@ -17,6 +17,7 @@ import {
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { IconButton } from "../components/icon-button";
 import { ToolLayout } from "../components/tool-layout";
+import { EdgePanel } from "../components/edge-panel";
 import { deferredView } from "../components/deferred-view";
 import { currentPath, navigateWorkspace, useRoute } from "../lib/navigation";
 import { useMobile } from "../lib/use-mobile";
@@ -183,8 +184,8 @@ export function Workspace({
     handoffContent();
   }, [mobile]);
   const mode = focusMode.active && !mobile ? "terminal" : mobile ? view.mobileMode : view.mode;
-  const terminalVisible = mode !== "work" && !(mobile && mobileTools) && !navigationOpen;
-  const contentVisible = mode !== "terminal" && !(mobile && mobileTools) && !navigationOpen;
+  const terminalVisible = mode !== "work";
+  const contentVisible = mode !== "terminal";
   const toolsVisible =
     !focusMode.active && !navigationOpen && (mobile ? mobileTools : view.rightOpen);
   const repositories = useRepos(
@@ -195,9 +196,12 @@ export function Workspace({
         (contentVisible && pages.activePage?.kind === "diff")),
   );
   useLayoutEffect(() => {
-    document.documentElement.toggleAttribute("data-terminal-active", terminalVisible);
+    document.documentElement.toggleAttribute(
+      "data-terminal-active",
+      terminalVisible && !(mobile && (navigationOpen || mobileTools)),
+    );
     return () => document.documentElement.removeAttribute("data-terminal-active");
-  }, [terminalVisible]);
+  }, [terminalVisible, mobile, navigationOpen, mobileTools]);
   function chooseMode(next: Mode) {
     if (focusMode.active) focusMode.exit();
     setView((old) => ({
@@ -380,25 +384,25 @@ export function Workspace({
       </ToolLayout>
       {toolsHost &&
         createPortal(
-          <aside
+          <EdgePanel
             id="workspace-tools"
-            hidden={!toolsVisible}
+            side="right"
+            mobile={mobile}
+            open={toolsVisible}
+            onClose={() => onMobileTools(false)}
+            returnFocus={rightToggle}
+            label={t(($) => $.shell.workspaceTools)}
             className="workbench-tools flex min-h-0 shrink-0 flex-col border-l border-border bg-muted"
-            aria-label={t(($) => $.shell.workspaceTools)}
           >
             <div
               className="flex min-h-10 shrink-0 items-center gap-1 border-b border-border px-2 max-desk:min-h-11"
               role="tablist"
               aria-label={t(($) => $.shell.tools)}
             >
-              {mobile && mobileTools && (
+              {mobile && (
                 <IconButton
-                  autoFocus
                   label={t(($) => $.shell.returnToContent)}
-                  onClick={() => {
-                    onMobileTools(false);
-                    requestAnimationFrame(() => rightToggle.current?.focus());
-                  }}
+                  onClick={() => onMobileTools(false)}
                 >
                   <ArrowLeft />
                 </IconButton>
@@ -408,7 +412,7 @@ export function Workspace({
                   key={tool}
                   role="tab"
                   aria-selected={view.tool === tool}
-                  className={`flex min-h-9 items-center gap-2 rounded px-3 text-xs max-desk:min-h-11 ${view.tool === tool ? "bg-primary-soft text-primary" : "hover:bg-background"}`}
+                  className={`flex min-h-9 items-center gap-2 rounded px-3 text-sm max-desk:min-h-11 ${view.tool === tool ? "bg-primary-soft text-primary" : "hover:bg-background"}`}
                   onClick={() => setView((old) => ({ ...old, tool }))}
                 >
                   {tool === "files" ? <FilesIcon size={15} /> : <GitBranch size={15} />}
@@ -431,6 +435,7 @@ export function Workspace({
               actions={actions}
               saved={gitBrowsing}
               repositories={repositories}
+              selected={view.tool === "git"}
               visible={toolsVisible && view.tool === "git"}
               activeDiff={pages.activePage?.kind === "diff" ? pages.activePage : undefined}
               onDiff={(repo, diff) => {
@@ -438,7 +443,7 @@ export function Workspace({
                 showContent();
               }}
             />
-          </aside>,
+          </EdgePanel>,
           toolsHost,
         )}
     </>

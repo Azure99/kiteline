@@ -88,6 +88,7 @@ export function Files({
   const [directoryDrop, setDirectoryDrop] = useState(false);
   const [notice, setNotice] = useState<"renamed" | "created">();
   const fileInput = useRef<HTMLInputElement>(null);
+  const searchRegion = useRef<HTMLElement>(null);
   const list = useRef<HTMLElement>(null);
   const previousFolder = useRef(folder);
   const enabled = device.status === "online";
@@ -332,12 +333,13 @@ export function Files({
         if (files.length) onUpload(files, folder);
       }}
     >
-      <ToolSidebar visible={browsing && searching}>
+      <ToolSidebar visible={searching}>
         <FileSearch
+          ref={searchRegion}
           deviceId={device.id}
           workspaceId={workspace.id}
           workspaceName={workspace.name}
-          visible={browsing && searching}
+          active={browsing && searching}
           disabled={!enabled}
           onBack={() => updateQuery({ search: undefined })}
           onOpen={(match, query) => {
@@ -354,7 +356,7 @@ export function Files({
           }}
         />
       </ToolSidebar>
-      <ToolHeader visible={browsing}>
+      <ToolHeader>
         <div
           className={
             searching
@@ -375,13 +377,15 @@ export function Files({
           >
             {folderLabel}
           </span>
-          <IconButton
-            label={t(($) => $.files.searchFiles)}
-            disabled={!enabled}
-            onClick={() => updateQuery({ search: true })}
-          >
-            <Search />
-          </IconButton>
+          {!mobile && (
+            <IconButton
+              label={t(($) => $.files.searchFiles)}
+              disabled={!enabled}
+              onClick={() => updateQuery({ search: true })}
+            >
+              <Search />
+            </IconButton>
+          )}
           <IconButton
             label={t(($) => $.files.newFile)}
             disabled={!enabled}
@@ -420,7 +424,13 @@ export function Files({
             >
               <MoreHorizontal />
             </MenuTrigger>
-            <MenuContent>
+            <MenuContent finalFocus={searching ? searchRegion : undefined}>
+              {mobile && (
+                <MenuItem disabled={!enabled} onClick={() => updateQuery({ search: true })}>
+                  <Search />
+                  {t(($) => $.files.searchFiles)}
+                </MenuItem>
+              )}
               <MenuItem disabled={!enabled} onClick={() => fileInput.current?.click()}>
                 <Upload />
                 {t(($) => $.files.uploadFiles)}
@@ -510,7 +520,7 @@ export function Files({
         )}
       </ToolHeader>
       <div className="flex min-h-0 flex-1">
-        <ToolSidebar visible={browsing && !searching}>
+        <ToolSidebar visible={!searching}>
           <aside
             ref={list}
             key={mobile ? folder : undefined}

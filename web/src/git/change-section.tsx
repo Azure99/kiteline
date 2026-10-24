@@ -133,7 +133,7 @@ export function ChangeSection({
                 ? onFile(entry.path)
                 : onTarget({ path: entry.path, side: side === "staged" ? "staged" : "worktree" })
             }
-            className="flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left text-xs max-desk:min-h-11"
+            className="flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left text-sm max-desk:min-h-11"
           >
             <GitFilePath path={entry.path} stacked title={description ? "" : entry.path} />
           </button>
