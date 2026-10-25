@@ -16,7 +16,15 @@ import {
 } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { taskRunActive, type ScheduledTask, type TaskRun } from "@kiteline/shared/protocol";
+import {
+  OperationError,
+  errorReply,
+  limits,
+  taskRunActive,
+  type ScheduledTask,
+  type TaskRun,
+} from "@kiteline/shared/protocol";
+import { ptyBridgeBinary } from "@kiteline/shared/terminal/node";
 import { privateDirectory } from "../src/config.js";
 import { testConfig } from "./support/config.js";
 import { ScheduledTasks } from "../src/tasks/index.js";
@@ -969,12 +977,180 @@ async function cli(root: string, args: string[]) {
   return { code, stdout, stderr, json: () => JSON.parse(stdout) };
 }
 
+async function deleteInTerminal(root: string, taskId: string, answer: string) {
+  const child = spawn(
+    ptyBridgeBinary,
+    [
+      "80",
+      "24",
+      String(limits.dataChunkBytes),
+      String(limits.terminalPendingBytes),
+      process.execPath,
+      resolve("packages/agent/dist/main.js"),
+      "schedule",
+      "delete",
+      taskId,
+      "--json",
+    ],
+    {
+      env: { ...process.env, KITELINE_AGENT_HOME: root, KITELINE_AGENT_RUN_DIR: join(root, "run") },
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  );
+  let output = "";
+  let diagnostic = "";
+  child.stdout.on("data", (chunk) => {
+    output += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    diagnostic += chunk;
+  });
+  const closed = once(child, "close");
+  try {
+    await expect
+      .poll(() => output)
+      .toContain(`Delete task ${taskId} and its retained results? [y/N]`);
+    const payload = Buffer.from(answer + "\r");
+    const header = Buffer.alloc(5);
+    header.write("I");
+    header.writeUInt32BE(payload.length, 1);
+    child.stdin.write(Buffer.concat([header, payload]));
+    const [code] = await closed;
+    expect(diagnostic).toBe("");
+    const jsonLine = output.split(/\r?\n/).find((line) => line.startsWith('{"outcome":'));
+    expect(jsonLine).toBeDefined();
+    return { code, json: JSON.parse(jsonLine!) };
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+    await closed;
+  }
+}
+
+test("CLI help and usage precede config while execution errors retain generated IDs", async () => {
+  const f = await fixture();
+  try {
+    await writeFile(join(f.root, "config.json"), "{");
+    const help = await cli(f.root, ["--help", "--json"]);
+    expect(help.code).toBe(0);
+    expect(help.stderr).toBe("");
+    const commands = help.stdout.split("All commands support")[0]!;
+    for (const command of [
+      "list",
+      "show",
+      "create",
+      "update",
+      "preview",
+      "run",
+      "pause",
+      "resume",
+      "acknowledge",
+      "runs",
+      "status",
+      "output",
+      "stop",
+      "delete",
+    ])
+      expect(commands).toContain(`kiteline-agent schedule ${command} `);
+    expect(help.stdout).toContain("On exit 3 query the printed taskId/runId");
+
+    const usage = await cli(f.root, ["run", "task", "--task-id", "wrong", "--json"]);
+    expect(usage.code).toBe(2);
+    expect(usage.json()).toEqual({
+      outcome: "failed",
+      error: { code: "invalid_argument", message: expect.stringContaining("--task-id") },
+    });
+    const deletion = await cli(f.root, ["delete", "task", "--json"]);
+    expect(deletion.code).toBe(2);
+    expect(deletion.json()).toEqual({
+      outcome: "failed",
+      error: {
+        code: "invalid_argument",
+        message: "Use --yes to confirm deletion without a terminal",
+      },
+    });
+    const confirmed = await cli(f.root, ["delete", "task", "--yes", "--json"]);
+    expect(confirmed.code).toBe(1);
+    expect(confirmed.json()).toEqual({
+      outcome: "failed",
+      taskId: "task",
+      error: { code: "io_error", message: expect.any(String) },
+    });
+    const creation = await cli(f.root, [
+      "create",
+      "--name",
+      "CLI",
+      "--command",
+      "true",
+      "--cron",
+      "0 9 * * *",
+      "--json",
+    ]);
+    expect(creation.code).toBe(1);
+    expect(creation.json()).toEqual({
+      outcome: "failed",
+      taskId: expect.stringMatching(/^[a-zA-Z0-9_-]+$/),
+      error: { code: "io_error", message: expect.any(String) },
+    });
+    const run = await cli(f.root, ["run", "task", "--json"]);
+    expect(run.code).toBe(1);
+    expect(run.json()).toEqual({
+      outcome: "failed",
+      taskId: "task",
+      runId: expect.stringMatching(/^[a-zA-Z0-9_-]+$/),
+      error: { code: "io_error", message: expect.any(String) },
+    });
+  } finally {
+    await f.close();
+  }
+});
+
+test("CLI deletion confirms in a real terminal before config and includes IDs only after confirmation", async () => {
+  const f = await fixture();
+  await mkdir(f.config.runDir);
+  const requests: string[] = [];
+  const local = new LocalServer(f.config, async (method, params, requestSignal) => {
+    requests.push(method);
+    return scheduleRpc(f.tasks, method as ScheduleMethod, params, requestSignal);
+  });
+  try {
+    await local.start();
+    await f.tasks.create("task", input(f.root), signal);
+    await writeFile(join(f.root, "config.json"), "{");
+    expect(await deleteInTerminal(f.root, "task", "n")).toEqual({
+      code: 1,
+      json: { outcome: "failed", error: { code: "cancelled", message: "Deletion cancelled" } },
+    });
+    expect(requests).toEqual([]);
+    expect(await deleteInTerminal(f.root, "task", "y")).toEqual({
+      code: 1,
+      json: {
+        outcome: "failed",
+        error: { code: "io_error", message: expect.any(String) },
+        taskId: "task",
+      },
+    });
+    expect(requests).toEqual([]);
+    await rm(join(f.root, "config.json"));
+    expect(await deleteInTerminal(f.root, "task", "y")).toEqual({
+      code: 0,
+      json: { outcome: "succeeded", result: { removed: true } },
+    });
+    expect(requests).toEqual(["tasks.delete"]);
+    expect(f.tasks.list().total).toBe(0);
+  } finally {
+    await local.close();
+    await f.close();
+  }
+});
+
 test("offline CLI help, usage and socket management share the same task and execution identities", async () => {
   const f = await fixture();
   await mkdir(f.config.runDir);
-  const local = new LocalServer(f.config, async (method, params, requestSignal) =>
-    scheduleRpc(f.tasks, method as ScheduleMethod, params, requestSignal),
-  );
+  const requests: { method: string; params: Record<string, unknown> }[] = [];
+  const local = new LocalServer(f.config, async (method, params, requestSignal) => {
+    requests.push({ method, params });
+    return scheduleRpc(f.tasks, method as ScheduleMethod, params, requestSignal);
+  });
   try {
     const help = await cli("/path/that/does/not/exist", ["create", "--help"]);
     expect(help.code).toBe(0);
@@ -982,6 +1158,13 @@ test("offline CLI help, usage and socket management share the same task and exec
     expect((await cli(f.root, ["create", "--json"])).code).toBe(2);
     expect((await cli(f.root, ["list", "--json"])).code).toBe(1);
     await local.start();
+    const unknownOption = await cli(f.root, ["run", "task", "--task-id", "other", "--json"]);
+    expect(unknownOption.code).toBe(2);
+    expect(unknownOption.json()).toEqual({
+      outcome: "failed",
+      error: { code: "invalid_argument", message: expect.stringContaining("--task-id") },
+    });
+    expect(requests).toEqual([]);
     const created = await cli(f.root, [
       "create",
       "--task-id",
@@ -994,11 +1177,37 @@ test("offline CLI help, usage and socket management share the same task and exec
       "0 9 * * *",
       "--cwd",
       f.root,
+      "--timezone",
+      "Etc/UTC",
       "--json",
     ]);
     expect(created.code).toBe(0);
     const task = created.json().result as ScheduledTask;
     expect(task.id).toBe("cli");
+    expect(requests.at(-1)).toEqual({
+      method: "tasks.create",
+      params: {
+        taskId: "cli",
+        input: {
+          name: "CLI",
+          command: "printf '你好'",
+          schedule: { kind: "cron", expression: "0 9 * * *" },
+          cwd: f.root,
+          timezone: "Etc/UTC",
+        },
+      },
+    });
+    const beforeMissing = requests.length;
+    const missing = await cli(f.root, ["update", "missing", "--name", "Missing", "--json"]);
+    expect(missing.code).toBe(1);
+    expect(missing.json()).toMatchObject({
+      outcome: "failed",
+      error: { code: "not_found" },
+      taskId: "missing",
+    });
+    expect(requests.slice(beforeMissing)).toEqual([
+      { method: "tasks.get", params: { taskId: "missing" } },
+    ]);
     expect(
       (
         await cli(f.root, [
@@ -1012,13 +1221,53 @@ test("offline CLI help, usage and socket management share the same task and exec
         ])
       ).code,
     ).toBe(2);
+    expect(requests.at(-1)).toEqual({
+      method: "tasks.update",
+      params: { taskId: task.id, expectedRevision: 0, changes: { name: "Invalid" } },
+    });
     expect((await cli(f.root, ["update", task.id, "--name", "Updated", "--json"])).code).toBe(0);
+    expect(requests.slice(-2)).toEqual([
+      { method: "tasks.get", params: { taskId: task.id } },
+      {
+        method: "tasks.update",
+        params: { taskId: task.id, expectedRevision: task.revision, changes: { name: "Updated" } },
+      },
+    ]);
+    const beforeExplicit = requests.length;
+    const explicit = await cli(f.root, [
+      "update",
+      task.id,
+      "--name",
+      "Explicit",
+      "--expected-revision",
+      String(task.revision + 1),
+      "--json",
+    ]);
+    expect(explicit.code).toBe(0);
+    expect(requests.slice(beforeExplicit)).toEqual([
+      {
+        method: "tasks.update",
+        params: {
+          taskId: task.id,
+          expectedRevision: task.revision + 1,
+          changes: { name: "Explicit" },
+        },
+      },
+    ]);
     expect((await cli(f.root, ["pause", task.id, "--json"])).code).toBe(0);
     const accepted = await cli(f.root, ["run", task.id, "--run-id", "cli-run", "--json"]);
     expect(accepted.code).toBe(0);
     await finished(f.tasks, "cli-run");
     expect((await cli(f.root, ["output", "cli-run", "--stream", "banana", "--json"])).code).toBe(2);
+    expect(requests.at(-1)).toEqual({
+      method: "runs.output",
+      params: { runId: "cli-run", stream: "banana", offset: 0 },
+    });
     expect((await cli(f.root, ["output", "cli-run", "--limit", "0", "--json"])).code).toBe(2);
+    expect(requests.at(-1)).toEqual({
+      method: "runs.output",
+      params: { runId: "cli-run", stream: "stdout", offset: 0, limit: 0 },
+    });
     expect((await cli(f.root, ["status", "cli-run", "--json"])).json().result.state).toBe(
       "succeeded",
     );
@@ -1031,21 +1280,121 @@ test("offline CLI help, usage and socket management share the same task and exec
   }
 });
 
-test("CLI reports a lost mutation confirmation as unknown with its pre-generated IDs", async () => {
+test("CLI can query actual create and run mutations after losing confirmation with generated IDs", async () => {
   const f = await fixture();
   await mkdir(f.config.runDir);
-  const server = createServer((request) => {
-    request.resume();
-    request.on("end", () => request.socket.destroy());
+  const requests: { method: ScheduleMethod; params: Record<string, unknown> }[] = [];
+  const server = createServer(async (request, response) => {
+    try {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      const body = JSON.parse(Buffer.concat(chunks).toString()) as (typeof requests)[number];
+      requests.push(body);
+      const result = await scheduleRpc(f.tasks, body.method, body.params, signal);
+      if (body.method === "tasks.create" || body.method === "tasks.run") request.socket.destroy();
+      else response.end(JSON.stringify({ id: "local", outcome: "succeeded", result }));
+    } catch (error) {
+      response.end(JSON.stringify(errorReply("local", error)));
+    }
   });
   server.listen(join(f.config.runDir, "agent.sock"));
   await once(server, "listening");
   try {
-    const result = await cli(f.root, ["run", "task", "--run-id", "lost", "--json"]);
-    expect(result.code).toBe(3);
-    expect(result.json()).toMatchObject({ outcome: "unknown", taskId: "task", runId: "lost" });
+    const created = await cli(f.root, [
+      "create",
+      "--name",
+      "Lost confirmation",
+      "--command",
+      "printf recovered",
+      "--cron",
+      "0 9 * * *",
+      "--cwd",
+      f.root,
+      "--json",
+    ]);
+    expect(created.code).toBe(3);
+    expect(created.json()).toMatchObject({ outcome: "unknown", taskId: expect.any(String) });
+    const taskId = created.json().taskId as string;
+    expect(requests.find((request) => request.method === "tasks.create")?.params.taskId).toBe(
+      taskId,
+    );
+    const shown = await cli(f.root, ["show", taskId, "--json"]);
+    expect(shown.code).toBe(0);
+    expect(shown.json()).toMatchObject({
+      outcome: "succeeded",
+      result: { id: taskId, name: "Lost confirmation" },
+    });
+
+    const run = await cli(f.root, ["run", taskId, "--json"]);
+    expect(run.code).toBe(3);
+    expect(run.json()).toMatchObject({ outcome: "unknown", taskId, runId: expect.any(String) });
+    const runId = run.json().runId as string;
+    expect(requests.find((request) => request.method === "tasks.run")?.params).toEqual({
+      taskId,
+      runId,
+    });
+    await finished(f.tasks, runId);
+    const status = await cli(f.root, ["status", runId, "--json"]);
+    expect(status.code).toBe(0);
+    expect(status.json()).toMatchObject({
+      outcome: "succeeded",
+      result: { id: runId, taskId, state: "succeeded" },
+    });
+    expect((await cli(f.root, ["output", runId, "--json"])).json().result.text).toBe("recovered");
+    expect(requests.map((request) => request.method)).toEqual([
+      "tasks.create",
+      "tasks.get",
+      "tasks.run",
+      "runs.get",
+      "runs.output",
+    ]);
   } finally {
-    server.close();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await f.close();
+  }
+});
+
+test("CLI preserves local error results and details with schedule-specific exit precedence", async () => {
+  const f = await fixture();
+  await mkdir(f.config.runDir);
+  const local = new LocalServer(f.config, async (_method, params) => {
+    const unknown = params.runId === "unknown";
+    throw new OperationError(
+      unknown ? "invalid_argument" : "io_error",
+      "Reported operation failure",
+      unknown ? "unknown" : "partial",
+      { runId: params.runId },
+      { reason: "retained diagnostic" },
+    );
+  });
+  try {
+    await local.start();
+    for (const { runId, outcome, code, exit } of [
+      { runId: "partial", outcome: "partial", code: "io_error", exit: 1 },
+      { runId: "unknown", outcome: "unknown", code: "invalid_argument", exit: 3 },
+    ] as const) {
+      const result = await cli(f.root, ["stop", runId, "--json"]);
+      expect(result.code).toBe(exit);
+      expect(result.json()).toEqual({
+        outcome,
+        error: {
+          code,
+          message: "Reported operation failure",
+          details: { reason: "retained diagnostic" },
+        },
+        runId,
+        result: { runId },
+      });
+      expect(result.stderr).toBe(`${code}: Reported operation failure (runId=${runId})\n`);
+    }
+    const plain = await cli(f.root, ["stop", "partial"]);
+    expect(plain).toMatchObject({
+      code: 1,
+      stdout: "",
+      stderr: "io_error: Reported operation failure (runId=partial)\n",
+    });
+  } finally {
+    await local.close();
     await f.close();
   }
 });
