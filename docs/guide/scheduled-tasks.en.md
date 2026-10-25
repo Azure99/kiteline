@@ -74,7 +74,13 @@ If the result of “Run now” is unclear, first query the run ID provided on th
 
 ## Run records and output
 
-stdout and stderr are stored separately, without a shared chronological order between them.
+The name, command and working directory in run details come from that run's parameter snapshot. History shows recorded exit codes and specific reasons. “Skipped” and “Command could not start” mean the command did not start; “Unknown” does not mean the command never started.
+
+Each newly opened run starts on stdout, and both tabs show the bytes actually retained for their stream. Arrow keys move tab focus; Enter or Space switches streams. Displayed and copied output is plain text with terminal control sequences removed; retained byte counts still refer to the original output. stdout and stderr are stored separately, without a shared chronological order between them.
+
+New output does not pull you to the end while you scroll up or select text. Switching streams preserves each reading position; scroll to the bottom or click “Back to latest” to follow new output again. Partial output retention and output-processing errors have separate notices, with diagnostics retained for errors. Assess these separately from the command's exit result.
+
+When a device is offline, content already read in an open detail view remains readable. Newly opened task details and output cannot be read until the device is online again.
 
 Output and records have retention limits; see [Limits](reference.en.md#limits) for values:
 
@@ -101,7 +107,7 @@ To review:
 
 You can also delete a task that needs review. Its deletion confirmation includes the same review confirmation.
 
-If the agent cannot read files under `tasks/` at startup, the device's task feature shows “Scheduled task storage is unavailable on this device.” The agent log identifies the failing file in a message beginning `Scheduled task storage:`. Terminals, files and Git remain available. Repair or move the failing file and restart the agent. The agent does not automatically repair or delete these files.
+If the agent cannot read files under `tasks/` at startup, the device's task feature shows “Scheduled task storage is unavailable on this device.” The agent log identifies the failing file in a message beginning `Scheduled task storage:`. You can also run `kiteline-agent doctor` on that device and read the Scheduled Tasks diagnosis. Terminals, files and Git remain available. Follow the diagnosis to repair or move the failing file, then restart the agent. The agent does not automatically repair or delete these files.
 
 ## Command line
 

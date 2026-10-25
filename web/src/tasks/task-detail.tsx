@@ -151,10 +151,8 @@ export function TaskDetail({
           </Button>
         </div>
       )}
-      {!task && !readError && (
-        <p className="text-sm text-muted-foreground">
-          {online ? t(($) => $.common.loading) : t(($) => $.common.deviceOffline)}
-        </p>
+      {!task && !readError && online && (
+        <p className="text-sm text-muted-foreground">{t(($) => $.common.loading)}</p>
       )}
       {task && (
         <>
@@ -289,7 +287,20 @@ export function TaskDetail({
                     </span>
                     <span className="text-xs text-muted-foreground">
                       {t(($) => $.schedules[run.trigger])} ·{" "}
-                      {t(($) => $.schedules[`state_${run.state}`])}
+                      <span
+                        className={
+                          run.state === "failed"
+                            ? "text-destructive"
+                            : run.state === "unknown"
+                              ? "text-warning"
+                              : undefined
+                        }
+                      >
+                        {t(($) => $.schedules[`state_${run.state}`])}
+                      </span>
+                      {run.exitCode != null &&
+                        ` · ${t(($) => $.schedules.exit, { code: run.exitCode })}`}
+                      {run.reasonCode && ` · ${t(($) => $.schedules[`reason_${run.reasonCode!}`])}`}
                     </span>
                   </span>
                   <ChevronRight size={16} />
@@ -300,9 +311,21 @@ export function TaskDetail({
               <p className="py-4 text-sm text-muted-foreground">{t(($) => $.schedules.noRuns)}</p>
             )}
             {runs && runs.items.length < runs.total && (
-              <Button variant="ghost" disabled={!online || loadingMore} onClick={() => void more()}>
-                {t(($) => $.common.more)}
-              </Button>
+              <div className="space-y-1 pt-2">
+                <p className="text-xs text-muted-foreground">
+                  {t(($) => $.schedules.historyCount, {
+                    shown: runs.items.length,
+                    total: runs.total,
+                  })}
+                </p>
+                <Button
+                  variant="ghost"
+                  disabled={!online || loadingMore}
+                  onClick={() => void more()}
+                >
+                  {t(($) => $.common.more)}
+                </Button>
+              </div>
             )}
           </section>
         </>

@@ -188,7 +188,7 @@ export function TasksPage({
                       </p>
                     ) : group.snapshot.storageError ? (
                       <p role="status" className="p-3 text-sm text-destructive">
-                        {t(($) => $.schedules.storageError)}
+                        {t(($) => $.schedules.storageError)} {t(($) => $.schedules.storageRecovery)}
                       </p>
                     ) : !group.snapshot.items.length ? (
                       <p className="p-3 text-sm text-muted-foreground">
@@ -278,7 +278,7 @@ export function TasksPage({
               )}
               {storageError ? (
                 <p role="status" className="p-4 text-sm text-destructive">
-                  {t(($) => $.schedules.storageError)}
+                  {t(($) => $.schedules.storageError)} {t(($) => $.schedules.storageRecovery)}
                 </p>
               ) : route.runId ? (
                 <RunDetail
