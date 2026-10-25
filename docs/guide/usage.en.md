@@ -268,6 +268,8 @@ Desktop starts with Changes above a shared History/Branches area. With both expa
 
 The Git sidebar manages changes, history, branches and repository operations; work pages show individual diffs. Keep multiple files or comparison sources open to compare them. The content header shows the repository path, and tab tooltips retain the full path and parent revision. Checking list entries does not change the active page. Opening a source file from a diff keeps Git in the sidebar. Staging or unstaging preserves the current page and its comparison source.
 
+When a worktree or staged comparison says "This comparison no longer has changes", you can explicitly open the other side for the same repository and path while retaining the original page. The other side may also have no changes. "Open Git panel" reveals that repository's tools, keeping the selected Changes, History or Branches area.
+
 Diffs start in Unified view. On wide screens, the layout icon shows the current state; click it to switch between Unified and Split. Its tooltip names the current and next layout. Unified wraps to the actual content pane width, and Split wraps within each column, preserving source text and original line numbers. Long generated lines require more vertical scrolling. Narrow windows use Unified view and restore your previous choice when widened. Worktree, staged and history diffs share this choice.
 
 Inline changes use a stronger background color, and Split view aligns corresponding lines using unchanged text. Alignment uses only the context in the patch, so repeated content can produce imperfect matches. The original diff remains readable while computing or after a failure, with a status message.
@@ -282,15 +284,15 @@ A dot on a change row marks a related unsaved draft. Worktree comparisons read t
 - An action that would also change unselected paths does not proceed. Those paths and the required preceding actions are listed.
 - Unstaging a rename affects both old and new paths. "Unstage the new path only" affects only the new path.
 
-When the list refreshes, changed items are unchecked and the number is shown.
+Successful staging, unstaging or discarding unchecks the corresponding items in that operation. Background list updates that change other selected items uncheck them separately and show the count. After a failed, partial or unconfirmed result, refresh to check the actual state.
 
-The commit includes everything staged, regardless of the current page or selected rows. You cannot commit while status is refreshing, with an empty message, unresolved conflicts or no staged changes.
+The commit includes everything staged, regardless of the current page or selected rows. The dialog shows the repository, branch or detached HEAD, and the repository-wide staged file count. It explains why committing is unavailable, including an offline device, a Git write or status read in progress, unavailable status, conflicts, no staged changes or an empty message. Successful feedback shows the actual commit OID.
 
-On desktop, click "Commit message" to open the editor; you can write a message before staging. On mobile, open it from "Commit". Cancelling keeps the message draft; a successful commit clears the submitted message draft.
+On desktop, click "Commit message" to open the editor; you can write a message before staging. On mobile, open it from the available "Commit" button; when disabled, its reason appears beside it. Cancelling keeps the message draft. A successful commit clears the submitted message only if it has not been edited during the request; a new message written during the commit is retained.
 
 ### Discard changes
 
-"Discard unstaged changes" restores the index version; "Discard all changes" restores the HEAD version. Before proceeding, review whether each item will be restored or deleted. Files listed for deletion, such as untracked files, are permanently deleted. If a file changes after review, the operation does not proceed and must be reviewed again.
+"Discard unstaged changes" restores the index version; "Discard all changes" restores the HEAD version. The confirmation lists deletions first, then restorations, with counts and the restore source. Review the actual lists; deleted files are not moved to the trash. If a file changes after review, the operation does not proceed and must be reviewed again.
 
 ### Branches and history
 
@@ -308,30 +310,30 @@ On mobile, use the "Remote actions" menu for Pull and Push.
 
 Pull runs `git pull`, using the default commit message for merges. Pull configured for interactive rebase fails. Push runs `git push`; force push is not available.
 
-Authentication cannot be interactive: Git does not prompt for a username or password. SSH keys, ssh-agent or credential helpers must work without input in the agent's environment. If authentication fails, click "Terminal" in the feedback and run the same Git command in that workspace's terminal to finish configuration, such as saving credentials in a helper, then return and retry. For service agents, see [Run in the background](devices.en.md#run-in-the-background).
+Authentication cannot be interactive: Git does not prompt for a username or password. SSH keys, ssh-agent or credential helpers must work without input in the agent's environment. "Terminal" in the feedback and "Continue in Terminal" in the operation bar first show the device, workspace, repository and full path. Copy the repository path, then select "Open workspace terminal" to enter the existing terminal. The Shell keeps its directory and any text already entered. Change to the target repository manually as needed and run the same Git command to finish configuration, such as saving credentials in a helper, then return and retry. For service agents, see [Run in the background](devices.en.md#run-in-the-background).
 
 ### Conflicts and continuation
 
 During merge, rebase, cherry-pick, revert or am, including operations begun in a terminal, the top shows the operation and reason, with "Continue", "Abort" and "Continue in Terminal":
 
 1. Resolve and save conflicts in Files or a terminal.
-2. Click the plus on a conflict row in Git to mark it resolved.
+2. Click the checkmark, "Stage as resolved", on the conflict row in Git to stage its disk content. This does not validate the resolution or check for remaining conflict markers.
 3. Once no conflicts remain, click "Continue" to use the default commit message.
 
 After confirmation, "Abort" asks Git to restore the pre-operation state; uncommitted content may be affected. The web app can continue only rebases consisting of ordinary pick steps. Finish rebases with edit, reword, squash, fixup, exec or other steps, and unrecognized operations, in a terminal, then refresh the web app.
 
 ### Result unconfirmed
 
-Each repository executes one Git write at a time, queuing the rest. "Cancel operation" is available during execution. The workbench cannot determine the repository state in these cases and shows "Result unconfirmed. Refresh and check before trying again.":
+Feedback names the operation and reports completion, failure, partial completion or an unconfirmed result. Successful staging and unstaging stay silent. Completed feedback can be dismissed; "Cancel operation" is available during execution. Each repository executes one Git write at a time, queuing the rest. The workbench cannot determine the repository state in these cases and shows "Result unconfirmed"; refresh and check before deciding to retry:
 
 - A Git command exits unsuccessfully, such as a rejected push, a commit rejected by a hook, or an existing `index.lock`.
 - Contact is lost during execution.
 - The operation is cancelled.
 - The write deadline is exceeded (see [Limits](reference.en.md#limits)).
 
-Expand "Git output" to read Git's original output, then "Refresh Git" to check branches, commits and changes. Retry manually only after confirming that the operation did not take effect. The workbench does not retry automatically.
+Feedback directly shows the retained multiline Git output and error diagnostics, with a notice when truncated. Expand "Details" for additional error data. A successful Fetch can still be followed by a separate status read failure. Use "Refresh Git" to check branches, commits and changes. Retry manually only after confirming that the operation did not take effect. The workbench does not retry automatically.
 
-A partially completed multi-step operation shows "The operation was only partially completed." Use a terminal for stash, line staging and other omitted functions; see [Out of scope (Chinese)](../design/git.md#范围外).
+A partially completed multi-step operation retains its known progress and diagnostics. Use a terminal for stash, line staging and other omitted functions; see [Out of scope (Chinese)](../design/git.md#范围外).
 
 ## Access development services
 

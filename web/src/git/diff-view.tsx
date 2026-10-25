@@ -7,6 +7,7 @@ import { diffTokens } from "./highlight";
 import type { InlineHunk } from "./inline-diff";
 import { type GitDiff } from "@kiteline/shared/protocol";
 import { ApiError, errorMessage, rpc } from "../lib/api";
+import { Button } from "../components/ui/button";
 import { ErrorNotice, ErrorDetails } from "../components/error-notice";
 import { useGitStatusLabel } from "./status-label";
 
@@ -29,6 +30,8 @@ export function DiffView({
   viewType,
   refreshKey,
   active = true,
+  onOtherSide,
+  onChanges,
 }: {
   deviceId: string;
   workspaceId: string;
@@ -37,6 +40,8 @@ export function DiffView({
   viewType: ViewType;
   refreshKey?: unknown;
   active?: boolean;
+  onOtherSide?: () => void;
+  onChanges?: () => void;
 }) {
   const { t } = useTranslation();
 
@@ -108,9 +113,27 @@ export function DiffView({
       )}
       <div className="scroll-area min-h-0 min-w-0 flex-1 overflow-auto">
         {unavailable && (
-          <p role="status" className="p-4 text-sm text-muted-foreground">
-            {t(($) => $.git.changeUnavailable)}
-          </p>
+          <div className="space-y-3 p-4 text-sm text-muted-foreground">
+            <p role="status">{t(($) => $.git.changeUnavailable)}</p>
+            {target.side !== "commit" && (onOtherSide || onChanges) && (
+              <div className="flex flex-wrap gap-2">
+                {onOtherSide && (
+                  <Button variant="outline" onClick={onOtherSide}>
+                    {t(($) =>
+                      target.side === "worktree"
+                        ? $.git.openStagedComparison
+                        : $.git.openWorktreeComparison,
+                    )}
+                  </Button>
+                )}
+                {onChanges && (
+                  <Button variant="outline" onClick={onChanges}>
+                    {t(($) => $.git.backToChanges)}
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
         )}
         {!!error && !unavailable && !historyFeedback && (
           <div role="alert" className="break-words p-4 text-sm text-destructive">

@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { ChevronDown, Circle, Minus, Plus, Undo2 } from "lucide-react";
+import { Check, ChevronDown, Circle, Minus, Plus, Undo2 } from "lucide-react";
 import type { DiscardScope, GitEntry, GitStatus } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
 import { discardable, RowActions, stageable } from "./change-actions";
@@ -74,7 +74,11 @@ export function ChangeSection({
           <>
             <IconButton
               label={
-                side === "staged" ? t(($) => $.git.unstageSelected) : t(($) => $.git.stageSelected)
+                side === "staged"
+                  ? t(($) => $.git.unstageSelected)
+                  : side === "conflict"
+                    ? t(($) => $.git.resolveSelected)
+                    : t(($) => $.git.stageSelected)
               }
               disabled={
                 disabled || (side !== "staged" && chosen.some((entry) => !stageable(entry)))
@@ -90,7 +94,7 @@ export function ChangeSection({
                 )
               }
             >
-              {side === "staged" ? <Minus /> : <Plus />}
+              {side === "staged" ? <Minus /> : side === "conflict" ? <Check /> : <Plus />}
             </IconButton>
             <IconButton
               label={
@@ -111,6 +115,11 @@ export function ChangeSection({
           </>
         )}
       </div>
+      {side === "conflict" && (
+        <p className="border-b border-border px-3 py-2 text-xs text-muted-foreground">
+          {t(($) => $.git.resolveDiskExplain)}
+        </p>
+      )}
       {entries.map((entry) => {
         if (entry.path === undefined)
           return (

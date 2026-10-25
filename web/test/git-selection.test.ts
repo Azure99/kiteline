@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { GitEntry, GitStatus } from "@kiteline/shared/protocol";
-import { reconcileSelection, selectionOf } from "../src/git/selection";
+import { reconcileSelection, selectionOf, withoutSelection } from "../src/git/selection";
 
 const entry: GitEntry = {
   path: "new",
@@ -73,4 +73,24 @@ test("reading or changing files inside a submodule does not clear its staged poi
     ],
   };
   expect(reconcileSelection([selected], first, changed)).toEqual([selected]);
+});
+
+test("successful consumption removes only the captured path, side and signature", () => {
+  const worktree = selectionOf(entry, "worktree");
+  const staged = selectionOf(entry, "staged");
+  const changed = selectionOf({ ...entry, worktreeStatus: "D" }, "worktree");
+  const unrelated = selectionOf({ ...entry, path: "another" }, "worktree");
+  expect(withoutSelection([worktree, staged, changed, unrelated], [worktree])).toEqual([
+    staged,
+    changed,
+    unrelated,
+  ]);
+});
+
+test("successful consumption preserves unrelated invalidation notices", () => {
+  const completed = selectionOf(entry, "worktree");
+  const external = selectionOf({ ...entry, path: "external" }, "worktree");
+  const otherSide = selectionOf(entry, "staged");
+  const notices = [completed, external, otherSide];
+  expect(withoutSelection(notices, [completed])).toEqual([external, otherSide]);
 });

@@ -325,6 +325,18 @@ export function Workspace({
             workspaceId={workspace.id}
             actions={actions}
             repositories={repositories}
+            onDiff={(repo, diff) => {
+              pages.openDiff(repo, diff);
+              showContent();
+            }}
+            onChanges={() => {
+              if (focusMode.active) focusMode.exit();
+              setView((old) => ({ ...old, tool: "git", rightOpen: true }));
+              if (mobile) onMobileTools(true);
+              navigateWorkspace(target, "git", {
+                repo: pages.activePage?.kind === "diff" ? pages.activePage.repoId : undefined,
+              });
+            }}
             view={diffView}
             onView={setDiffView}
             active={contentVisible && device.status === "online"}

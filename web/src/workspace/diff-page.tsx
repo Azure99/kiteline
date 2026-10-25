@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Columns2, FilePenLine, RefreshCw, Rows2 } from "lucide-react";
-import { DiffView } from "../git/diff-view";
+import { DiffView, type DiffTarget } from "../git/diff-view";
+import type { Repo } from "@kiteline/shared/protocol";
 import { GitFilePath } from "../git/view-header";
 import { ErrorNotice } from "../components/error-notice";
 import type { useRepos } from "../git/use-repos";
@@ -25,6 +26,8 @@ export function DiffPageView({
   active,
   repositories,
   store,
+  onDiff,
+  onChanges,
 }: {
   page: DiffPage;
   deviceId: string;
@@ -35,6 +38,8 @@ export function DiffPageView({
   active: boolean;
   repositories: ReturnType<typeof useRepos>;
   store: DraftStore;
+  onDiff(repo: Repo, target: DiffTarget): void;
+  onChanges(): void;
 }) {
   const { t } = useTranslation();
   const mobile = useMobile();
@@ -115,6 +120,16 @@ export function DiffPageView({
           repoId={page.repoId}
           target={page.target}
           viewType={mobile ? "unified" : view}
+          onOtherSide={
+            page.target.side === "commit"
+              ? undefined
+              : () =>
+                  onDiff(repo, {
+                    path: page.target.path,
+                    side: page.target.side === "worktree" ? "staged" : "worktree",
+                  })
+          }
+          onChanges={onChanges}
         />
       ) : (
         <div className="p-4 text-sm text-muted-foreground">

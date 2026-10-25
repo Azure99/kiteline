@@ -2,7 +2,7 @@ import { ErrorNotice } from "../components/error-notice";
 import { i18n } from "../i18n";
 import { useTranslation } from "react-i18next";
 import { useEffect, useState, type ReactElement } from "react";
-import { FolderOpen, Minus, MoreHorizontal, Plus, Undo2 } from "lucide-react";
+import { Check, FolderOpen, Minus, MoreHorizontal, Plus, Trash2, Undo2 } from "lucide-react";
 import type { DiscardScope, GitEntry, GitReview } from "@kiteline/shared/protocol";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "../components/ui/context-menu";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../components/ui/tooltip";
@@ -17,10 +17,11 @@ import {
   DialogTitle,
 } from "../components/ui/dialog";
 import { rpc } from "../lib/api";
+import { cn } from "../lib/utils";
 import type { DraftStore } from "../files/drafts";
 import { hasUnsavedDraft } from "./drafts";
 import type { ChangeSide } from "./selection";
-import type { GitActions, GitTarget } from "./actions";
+import type { GitTarget } from "./actions";
 import { GitPathDetails } from "./feedback";
 
 export function stageable(entry: GitEntry) {
@@ -135,7 +136,7 @@ export function RowActions({
         <ContextMenuContent>
           {details}
           <MenuItem aria-label={indexLabel} disabled={indexDisabled} onClick={index}>
-            {staged ? <Minus /> : <Plus />}
+            {staged ? <Minus /> : side === "conflict" ? <Check /> : <Plus />}
             {t(($) => (staged ? $.git.unstage : side === "conflict" ? $.git.resolve : $.git.stage))}
           </MenuItem>
           {items}
@@ -143,7 +144,7 @@ export function RowActions({
       </ContextMenu>
       <div className="flex shrink-0 items-center">
         <IconButton label={indexLabel} disabled={indexDisabled} onClick={index}>
-          {staged ? <Minus /> : <Plus />}
+          {staged ? <Minus /> : side === "conflict" ? <Check /> : <Plus />}
         </IconButton>
         <Menu>
           <MenuTrigger
@@ -181,14 +182,14 @@ export function DiscardDialog({
   target,
   paths,
   scope,
-  actions,
+  onDiscard,
   onClose,
   onLocate,
 }: {
   target: GitTarget;
   paths: string[];
   scope: DiscardScope;
-  actions: GitActions;
+  onDiscard: (review: GitReview) => void;
   onClose: () => void;
   onLocate: (path: string) => void;
 }) {
@@ -225,15 +226,12 @@ export function DiscardDialog({
               : t(($) => $.git.discardWorktree)}
           </DialogTitle>
         </DialogHeader>
-        <div className="scroll-area min-h-0 space-y-2 overflow-auto p-4 text-sm">
-          {review
-            ? review.summary.map((entry) => (
-                <p key={entry.path} className="break-all whitespace-pre-wrap">
-                  {entry.action === "delete" ? t(($) => $.common.delete) : t(($) => $.git.restore)}{" "}
-                  · {entry.path}
-                </p>
-              ))
-            : !error && <p role="status">{t(($) => $.git.reviewing)}</p>}
+        <div className="scroll-area min-h-0 space-y-4 overflow-auto p-4 text-sm">
+          {review ? (
+            <DiscardSummary summary={review.summary} scope={scope} />
+          ) : (
+            !error && <p role="status">{t(($) => $.git.reviewing)}</p>
+          )}
           {!!error && (
             <div role="alert" className="text-destructive">
               <ErrorNotice error={error} />
@@ -266,11 +264,7 @@ export function DiscardDialog({
             disabled={!review}
             onClick={() => {
               if (review) {
-                void actions.run(target, "git.discard", {
-                  paths: review.paths,
-                  scope,
-                  reviewToken: review.reviewToken,
-                });
+                onDiscard(review);
                 onClose();
               }
             }}
@@ -282,4 +276,50 @@ export function DiscardDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+export function DiscardSummary({
+  summary,
+  scope,
+}: {
+  summary: GitReview["summary"];
+  scope: DiscardScope;
+}) {
+  const { t } = useTranslation();
+  return (["delete", "restore"] as const).map((action) => {
+    const entries = summary.filter((entry) => entry.action === action);
+    const count = entries.length;
+    if (!count) return null;
+    return (
+      <section key={action} className="space-y-2">
+        <h3
+          className={cn(
+            "flex items-center gap-2 font-medium",
+            action === "delete" && "text-destructive",
+          )}
+        >
+          {action === "delete" ? (
+            <Trash2 size={16} className="shrink-0" />
+          ) : (
+            <Undo2 size={16} className="shrink-0 text-muted-foreground" />
+          )}
+          {action === "delete"
+            ? t(($) => $.git.discardDeletes, { count })
+            : scope === "all"
+              ? t(($) => $.git.discardRestoresHead, { count })
+              : t(($) => $.git.discardRestoresIndex, { count })}
+        </h3>
+        {action === "delete" && (
+          <p className="text-xs text-destructive">{t(($) => $.git.discardDeleteHint)}</p>
+        )}
+        <ul className="space-y-1 pl-6">
+          {entries.map((entry) => (
+            <li key={entry.path} className="break-all whitespace-pre-wrap">
+              {entry.path}
+            </li>
+          ))}
+        </ul>
+      </section>
+    );
+  });
 }

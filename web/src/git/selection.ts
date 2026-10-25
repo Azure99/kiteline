@@ -6,6 +6,17 @@ export interface ChangeSelection {
   path: string;
   signature: string;
 }
+export function withoutSelection(selected: ChangeSelection[], removed: ChangeSelection[]) {
+  return selected.filter(
+    (item) =>
+      !removed.some(
+        (other) =>
+          item.path === other.path &&
+          item.side === other.side &&
+          item.signature === other.signature,
+      ),
+  );
+}
 export function inSide(entry: GitEntry, side: ChangeSide) {
   if (side === "conflict") return entry.conflict;
   if (entry.conflict) return false;

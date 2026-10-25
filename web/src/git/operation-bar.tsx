@@ -20,6 +20,15 @@ export function OperationBar({
 }) {
   const { t } = useTranslation();
 
+  const operationLabels = {
+    merge: t(($) => $.git.operationMerge),
+    rebase: t(($) => $.git.operationRebase),
+    am: t(($) => $.git.operationAm),
+    "cherry-pick": t(($) => $.git.operationCherryPick),
+    revert: t(($) => $.git.operationRevert),
+    unknown: t(($) => $.git.operationUnknown),
+  };
+  const operationLabel = operationLabels[operation.kind];
   const activity = useGitActivity(actions, target);
   const busy = disabled || !!activity.request;
   const expectedOperation = operation.token
@@ -28,9 +37,13 @@ export function OperationBar({
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-warning-soft px-3 py-2 text-xs">
       <div className="min-w-0 flex-1 basis-32">
-        <p>{operation.kind === "unknown" ? t(($) => $.git.pendingOperation) : operation.kind}</p>
+        <p>{operationLabel}</p>
         {operation.reason && (
-          <p className="mt-1 break-words text-muted-foreground">{operation.reason}</p>
+          <p className="mt-1 break-words text-muted-foreground">
+            {operation.reason === "Resolve and stage conflicting files first"
+              ? t(($) => $.git.resolveAndStageFirst)
+              : operation.reason}
+          </p>
         )}
       </div>
       <Button
@@ -48,7 +61,7 @@ export function OperationBar({
         disabled={busy || !operation.token || !operation.canAbort}
         onClick={() => {
           if (!expectedOperation) return;
-          if (window.confirm(t(($) => $.git.abortConfirm, { kind: operation.kind })))
+          if (window.confirm(t(($) => $.git.abortConfirm, { kind: operationLabel })))
             void actions.run(target, "git.abort", { expectedOperation });
         }}
       >

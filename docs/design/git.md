@@ -56,13 +56,15 @@
 
 - 批量选择只在当前页内有效（`web/src/git/selection.ts`）。翻页、切换仓库、`symbolicRef` 变化，或 detached 状态下 OID 变化时清空选择；同一分支的 OID 前进不清空。
 - 刷新后只保留各方面都未变的项，其余取消并以中性提示说明取消勾选的数量；新出现的条目不会被自动选中。
+- stage、unstage 和 discard 请求前捕获本次路径与区域的选择身份；只有协议成功返回后，才消费仍匹配 path、side、signature 的选择。discard 以 review 的真实路径和 scope 为准。失败、unknown、partial 或取消确认不主动消费，后续读取仍可按实际变化撤销选择。
+- 失效通知保留被撤销的身份集合，成功消费只移除本次身份，保留无关外部变化提示。写操作结束后的刷新使用后台读取，不清空已有通知；主动刷新或翻页清除旧通知。仓库组件和工作区生命周期隔离异步完成，不将旧仓结果应用到另一仓。
 
 ## Diff 与历史
 
 ### 工作树与暂存区 diff
 
 - `git.diff` 的 `side` 为 `worktree` 时比较 index 与磁盘，为 `staged` 时比较 HEAD 与 index（没有 HEAD 时暂存项全部显示为新文件），为 `commit` 时比较提交与所选父提交。
-- 工作树和暂存区的 diff 先重读 status，确认所选条目仍在该区域；已不适用时返回 `conflict` 和 `details.reason = "change_unavailable"`，浏览器清除旧 patch 并显示中性的空状态。
+- 工作树和暂存区的 diff 先重读 status，确认所选条目仍在该区域；已不适用时返回 `conflict` 和 `details.reason = "change_unavailable"`，浏览器清除旧 patch 并显示中性的空状态。用户可显式打开同仓同路径的另一侧新页，原页身份保留；打开 Git 面板则退出正文专注、显露该仓工具，沿用原区域选择。
 - 未跟踪项只支持普通文件和符号链接，用 `git diff --no-index /dev/null ./<path>` 生成把整个文件作为新内容的 patch；目录等其他类型返回 `unsupported`。
 - diff 的共同选项以 `agent/src/git/observe.ts` 的 `diffOptions` 为准：关闭颜色、外部 diff 和 textconv，按仓库根目录处理路径，并保留子模块变化。生成 patch 时保留空上下文行的前缀，避免解析器把它们丢弃（`agent/src/git/diff.ts`）。
 - `summary`（`path`、`oldPath`、`status`、`binary`、`oldMode`、`newMode`）来自 `--raw` 和 `--numstat` 的机器输出，`binary` 按 numstat 的 `-` 标记判断。要操作的路径只来自 status，不从 patch 标题推导。
@@ -107,6 +109,9 @@
 - 写命令没能启动（没有进程）时结果为失败。进程启动后以非零退出码结束、被取消、超时或输出异常时，结果都是结果未确认（`unknown`），因为 Git 可能已部分生效；push 被拒绝、hook 拒绝提交、`index.lock` 已存在都属于这一类。
 - 以下情况结果为 `partial`：stage、unstage、discard 已完成部分步骤后失败（结果带 `changedPaths`）；continue 或 abort 失败但 HEAD 或操作 token 已变化；创建分支成功而随后的切换失败。
 - 写命令成功、但随后读取 HEAD 失败时，结果为结果未确认，并带上已知事实（如 `committed: true`）。不自动重放的通用规则见[结果语义](protocol.md#结果语义)。
+- 浏览器按仓库保留最近实际方法，以协议 outcome 显示操作归属和结果；成功 stage/unstage 静默。完成反馈可关闭，关闭不修改消息、选择或刷新 revision；pending 不可关闭，仍可取消。写成功与后续状态读取失败分别显示。
+- 多行诊断直接显示，只有相同 stdout/stderr 及复制自 stderr.trim() 的 error.message 合并；其他消息、details、路径、截断事实及实际 commitOid 保留。
+- 反馈和操作栏的终端入口共用 RepoView 局部目标对话，显示并复制真实 repo.rootPath；打开时由 Workspace 明确选择终端模式，继续使用原有会话、目录和输入内容。
 
 ### 进程结束
 
@@ -127,7 +132,7 @@ stage、unstage、review 和 discard 的路径最多 `listPageEntries × 2` 个�
 ### discard
 
 - 范围有两种：`worktree` 从 index 恢复工作树，`all` 从 HEAD 同时恢复 index 和工作树。没有单独丢弃未跟踪文件的范围：未跟踪的普通文件和符号链接在两种范围下都被删除。目录和嵌套仓库不会被删除。
-- 浏览器先调用 `git.review`（读方法，不进队列），得到完整的确认路径（`all` 时包括 rename 的源路径）、每项动作（恢复或删除）和 `reviewToken`。`git.discard` 原样提交路径、范围和 reviewToken；agent 在队列内重新计算，路径或 token 不同时返回 `conflict`，需要重新审查。
+- 浏览器先调用 `git.review`（读方法，不进队列），得到完整的确认路径（`all` 时包括 rename 的源路径）、每项动作（恢复或删除）和 `reviewToken`。确认按 summary.action 先列删除、再列恢复及数量，恢复来源由 scope 决定；删除提示仅说明不使用回收站。`git.discard` 原样提交路径、范围和 reviewToken；agent 在队列内重新计算，路径或 token 不同时返回 `conflict`，需要重新审查。
 - reviewToken 摘要 repoId、范围、路径集合、indexToken，以及每项的来源 index 或 HEAD 项、磁盘类型、文件内容的 SHA-256 或链接内容。只读取所选路径的内容。审查期间 HEAD 或 index 变化时返回 `conflict`。
 - 路径占用检查：agent 从仓库根目录逐级 `lstat` 每个路径，不跟随链接。必经的祖先是文件、链接或特殊项，或者目标位置是目录或特殊项时，整次请求返回 `conflict` 和 `blockedPaths`（目录时附其子项名称），由用户先在文件工具中处理。`all` 还做与 stage 相同的 index 祖先和后代检查。
 - 执行顺序：先移除需要移出 index 的项，再逐个删除确认要删除的普通文件和链接，最后从确认的来源恢复目标。删除直接在 Git 队列内调用 `fs.unlink`，不经过文件工具的删除流程和发布锁。具体 Git 调用见 `agent/src/git/changes.ts`。

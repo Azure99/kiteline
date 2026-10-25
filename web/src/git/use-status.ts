@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { GitStatus } from "@kiteline/shared/protocol";
 import { ApiError, rpc } from "../lib/api";
-import { reconcileSelection, type ChangeSelection } from "./selection";
+import { reconcileSelection, withoutSelection, type ChangeSelection } from "./selection";
 import { useWorkspaceRefresh } from "../lib/use-workspace-refresh";
 
 export function useGitStatus(
@@ -13,7 +13,7 @@ export function useGitStatus(
   const [value, setValue] = useState<GitStatus>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
-  const [notice, setNotice] = useState(0);
+  const [notice, setNotice] = useState<ChangeSelection[]>([]);
   const [selected, setSelected] = useState<ChangeSelection[]>([]);
   const current = useRef<GitStatus>(undefined);
   const selection = useRef(selected);
@@ -40,7 +40,7 @@ export function useGitStatus(
       request.current = controller;
       setBusy(true);
       setError(undefined);
-      if (!background) setNotice(0);
+      if (!background) setNotice([]);
       if (paging) {
         selection.current = [];
         setSelected([]);
@@ -77,8 +77,8 @@ export function useGitStatus(
         }
         if (controller.signal.aborted) return;
         const retained = reconcileSelection(selection.current, current.current, next);
-        if (selection.current.length > retained.length)
-          setNotice(selection.current.length - retained.length);
+        const removed = withoutSelection(selection.current, retained);
+        if (removed.length) setNotice((old) => [...withoutSelection(old, removed), ...removed]);
         selection.current = retained;
         setSelected(retained);
         history.current = visited.filter((item) => item < next.offset);
@@ -115,6 +115,11 @@ export function useGitStatus(
     notice,
     selected,
     setSelected,
+    consume: (completed: ChangeSelection[]) => {
+      selection.current = withoutSelection(selection.current, completed);
+      setSelected(selection.current);
+      setNotice((old) => withoutSelection(old, completed));
+    },
     load,
     previous: () => {
       const stack = history.current.slice();

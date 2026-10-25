@@ -6,6 +6,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Copy,
   FolderGit2,
   GitBranch,
   RefreshCw,
@@ -14,9 +15,18 @@ import {
 import type { Device, DiscardScope, GitEntry, Repo, Workspace } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
 import { IconButton } from "../components/icon-button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
 import { useMobile } from "../lib/use-mobile";
 import { apiError } from "../lib/api";
+import { useCopyFeedback } from "../lib/use-copy-feedback";
 import { useDrafts, type DraftStore } from "../files/drafts";
 import { hasUnsavedDraft } from "./drafts";
 import { showFile } from "../files/navigation";
@@ -206,7 +216,19 @@ export function GitTool({
       {repo?.available ? (
         <RepoView
           key={repo.id}
-          {...{ device, workspace, repo, visible, enabled, actions, store, picker, onDiff, saved }}
+          {...{
+            device,
+            workspace,
+            repo,
+            visible,
+            enabled,
+            actions,
+            store,
+            picker,
+            onDiff,
+            onTerminal,
+            saved,
+          }}
           target={activeDiff?.repoId === repo.id ? activeDiff.target : undefined}
           onFile={openFile}
           onLocate={locateFile}
@@ -255,6 +277,7 @@ function RepoView({
   picker,
   target,
   onDiff,
+  onTerminal,
   saved,
 }: {
   device: Device;
@@ -269,6 +292,7 @@ function RepoView({
   picker: ReactNode;
   target?: DiffTarget;
   onDiff(repo: Repo, target: DiffTarget): void;
+  onTerminal(): void;
   saved: Map<string, GitBrowseState>;
 }) {
   const { t, i18n } = useTranslation();
@@ -324,16 +348,28 @@ function RepoView({
   const activity = useGitActivity(actions, actionTarget);
   const [discarding, setDiscarding] = useState<{ paths: string[]; scope: DiscardScope }>();
   const [branchStart, setBranchStart] = useState<string>();
+  const [terminalOpen, setTerminalOpen] = useState(false);
   const drafts = useDrafts(store);
   const disabled = !enabled || !!activity.request;
   const { load } = state;
   useEffect(() => {
-    if (visible && enabled && activity.revision) void load();
+    if (visible && enabled && activity.revision)
+      void load(undefined, undefined, undefined, false, true);
   }, [activity.revision, visible, enabled, load]);
   async function indexAction(paths: string[], kind: "stage" | "unstage") {
     if (kind === "stage" && !confirmDiskVersion(store, actionTarget, repo.path, paths)) return;
     const params = { paths: [...new Set(paths)] };
-    await actions.run(actionTarget, kind === "stage" ? "git.stage" : "git.unstage", params);
+    const consumed = selected.filter(
+      (item) =>
+        paths.includes(item.path) &&
+        (kind === "unstage" ? item.side === "staged" : item.side !== "staged"),
+    );
+    const result = await actions.run(
+      actionTarget,
+      kind === "stage" ? "git.stage" : "git.unstage",
+      params,
+    );
+    if (result) state.consume(consumed);
   }
   function refreshView(view: GitView) {
     void state.load();
@@ -409,7 +445,7 @@ function RepoView({
             onCreateBranch={layout.view === "branches" ? createBranch : undefined}
           />
         )}
-        {!!(state.error || state.notice) && (
+        {!!(state.error || state.notice.length) && (
           <div
             role={state.error ? "alert" : "status"}
             className={`border-b border-border px-4 py-2 text-xs ${state.error ? "text-destructive" : "text-muted-foreground"}`}
@@ -417,7 +453,7 @@ function RepoView({
             {state.error ? (
               <ErrorNotice error={state.error} />
             ) : (
-              t(($) => $.git.selectionCleared, { count: state.notice })
+              t(($) => $.git.selectionCleared, { count: state.notice.length })
             )}
           </div>
         )}
@@ -425,9 +461,7 @@ function RepoView({
           actions={actions}
           target={actionTarget}
           onLocate={onLocate}
-          onTerminal={() =>
-            navigateWorkspace({ deviceId: device.id, workspaceId: workspace.id }, "terminal")
-          }
+          onTerminal={() => setTerminalOpen(true)}
         />
         {value?.operation && (
           <OperationBar
@@ -435,9 +469,7 @@ function RepoView({
             target={actionTarget}
             actions={actions}
             disabled={!enabled}
-            onTerminal={() =>
-              navigateWorkspace({ deviceId: device.id, workspaceId: workspace.id }, "terminal")
-            }
+            onTerminal={() => setTerminalOpen(true)}
           />
         )}
       </div>
@@ -561,8 +593,11 @@ function RepoView({
                   target={actionTarget}
                   actions={actions}
                   status={value}
-                  disabled={disabled || state.busy}
                   mobile={mobile}
+                  repoPath={repo.path}
+                  offline={!enabled}
+                  writing={!!activity.request}
+                  reading={state.busy}
                 />
               </aside>
             </div>
@@ -632,7 +667,22 @@ function RepoView({
         <DiscardDialog
           target={actionTarget}
           {...discarding}
-          actions={actions}
+          onDiscard={(review) => {
+            const scope = discarding.scope;
+            const consumed = selected.filter(
+              (item) =>
+                review.paths.includes(item.path) && (scope === "all" || item.side === "worktree"),
+            );
+            void actions
+              .run(actionTarget, "git.discard", {
+                paths: review.paths,
+                scope,
+                reviewToken: review.reviewToken,
+              })
+              .then((result) => {
+                if (result) state.consume(consumed);
+              });
+          }}
           onLocate={onLocate}
           onClose={() => setDiscarding(undefined)}
         />
@@ -645,6 +695,71 @@ function RepoView({
           onClose={() => setBranchStart(undefined)}
         />
       )}
+      <Dialog open={terminalOpen} onOpenChange={setTerminalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t(($) => $.common.terminal)}</DialogTitle>
+          </DialogHeader>
+          <div className="min-h-0 overflow-auto p-5">
+            <RepoTerminalTarget {...{ device, workspace, repo }} />
+          </div>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>
+              {t(($) => $.common.cancel)}
+            </DialogClose>
+            <Button
+              onClick={() => {
+                setTerminalOpen(false);
+                onTerminal();
+              }}
+            >
+              {t(($) => $.git.openWorkspaceTerminal)}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
+  );
+}
+
+function RepoTerminalTarget({
+  device,
+  workspace,
+  repo,
+}: {
+  device: Device;
+  workspace: Workspace;
+  repo: Repo;
+}) {
+  const { t } = useTranslation();
+  const { copy, copied, error, pending } = useCopyFeedback();
+  return (
+    <div className="space-y-2 text-xs">
+      <p className="break-all text-muted-foreground">
+        {device.name} · {workspace.name}
+      </p>
+      <p className="break-all">
+        {t(($) => $.git.terminalTarget, {
+          path: repo.path === "." ? t(($) => $.git.workspaceRoot) : repo.path,
+        })}
+      </p>
+      <p className="select-text break-all font-mono whitespace-pre-wrap">{repo.rootPath}</p>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="outline" disabled={pending} onClick={() => void copy(repo.rootPath)}>
+          <Copy />
+          {t(($) => $.git.copyRepositoryPath)}
+        </Button>
+        {copied === repo.rootPath && (
+          <span role="status" className="text-muted-foreground">
+            {t(($) => $.common.copied)}
+          </span>
+        )}
+      </div>
+      {error?.id === repo.rootPath && (
+        <div role="alert">
+          <ErrorNotice error={error.error} />
+        </div>
+      )}
+    </div>
   );
 }

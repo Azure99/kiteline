@@ -18,21 +18,49 @@ export function CommitBox({
   target,
   actions,
   status,
-  disabled,
   mobile,
+  repoPath,
+  offline,
+  writing,
+  reading,
 }: {
   target: GitTarget;
   actions: GitActions;
   status?: GitStatus;
-  disabled: boolean;
   mobile: boolean;
+  repoPath: string;
+  offline: boolean;
+  writing: boolean;
+  reading: boolean;
 }) {
   const { t } = useTranslation();
 
   const message = useGitMessage(actions, target);
   const [open, setOpen] = useState(false);
   const available =
-    !disabled && !!status?.stagedCount && !status.hasConflicts && !!status.indexToken;
+    !offline &&
+    !writing &&
+    !reading &&
+    !!status?.stagedCount &&
+    !status.hasConflicts &&
+    !!status.indexToken;
+  const reason = offline
+    ? t(($) => $.common.deviceOffline)
+    : writing
+      ? t(($) => $.git.commitWriting)
+      : reading
+        ? t(($) => $.git.commitReading)
+        : !status
+          ? t(($) => $.git.commitNoStatus)
+          : status.hasConflicts
+            ? t(($) => $.git.commitConflicts)
+            : !status.indexToken
+              ? t(($) => $.git.commitNoIndex)
+              : !status.stagedCount
+                ? t(($) => $.git.commitNoStaged)
+                : !message.trim()
+                  ? t(($) => $.git.commitNoMessage)
+                  : undefined;
   const submit = () => {
     if (!available || !message.trim() || !status?.indexToken) return;
     void actions.run(target, "git.commit", {
@@ -65,6 +93,11 @@ export function CommitBox({
             <Check />
             {t(($) => $.git.commit)}
           </Button>
+          {!available && reason && (
+            <p role="status" className="mt-2 text-xs text-muted-foreground">
+              {reason}
+            </p>
+          )}
         </div>
       ) : (
         <div className="flex min-h-11 shrink-0 items-center gap-1 border-t border-border p-1.5">
@@ -89,7 +122,27 @@ export function CommitBox({
         <DialogHeader>
           <DialogTitle>{t(($) => $.git.commit)}</DialogTitle>
         </DialogHeader>
-        <div className="p-4">{input}</div>
+        <div className="space-y-3 overflow-auto p-4">
+          <div className="space-y-1 text-xs text-muted-foreground">
+            <p className="break-all">
+              {t(($) => $.git.repository)}:{" "}
+              {repoPath === "." ? t(($) => $.git.workspaceRoot) : repoPath}
+            </p>
+            <p className="break-all" title={status?.head.oid ?? undefined}>
+              {status?.branch ??
+                (status?.head.oid
+                  ? t(($) => $.git.detachedAt, { oid: status.head.oid.slice(0, 8) })
+                  : t(($) => $.git.commitNoStatus))}
+            </p>
+            {status && <p>{t(($) => $.git.commitStagedCount, { count: status.stagedCount })}</p>}
+          </div>
+          {input}
+          {reason && (
+            <p role="status" className="text-xs text-muted-foreground">
+              {reason}
+            </p>
+          )}
+        </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>
             {t(($) => $.common.cancel)}

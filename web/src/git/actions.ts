@@ -25,6 +25,7 @@ export interface GitActivity {
   };
   error?: ApiError | Error;
   completed?: GitWriteMethod;
+  lastMethod?: GitWriteMethod;
   result?: unknown;
   revision: number;
 }
@@ -91,6 +92,7 @@ export class GitActions {
     };
     const messageVersion = value.messageVersion;
     value.request = request;
+    value.lastMethod = method;
     value.error = undefined;
     value.completed = undefined;
     value.result = undefined;
@@ -130,6 +132,14 @@ export class GitActions {
       value.revision++;
       this.notify();
     }
+  }
+  dismiss(target: GitTarget) {
+    const value = this.get(target);
+    if (value.request) return;
+    value.error = undefined;
+    value.completed = undefined;
+    value.result = undefined;
+    this.notify();
   }
   async cancel(target: GitTarget) {
     const value = this.get(target),
