@@ -1,8 +1,19 @@
 import { afterEach, expect, test } from "vitest";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { appendFile, cp, mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  appendFile,
+  cp,
+  mkdir,
+  mkdtemp,
+  realpath,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import type { Repo, Workspace } from "@kiteline/shared/protocol";
 import { WorkspaceWatches } from "../src/watches.js";
 import { Repositories } from "../src/git/repos.js";
@@ -17,7 +28,7 @@ afterEach(async () => {
 });
 const pollOptions = { timeout: 5000, interval: 30 };
 async function setup() {
-  const root = await mkdtemp("/var/tmp/kiteline-watch-");
+  const root = await realpath(await mkdtemp(join(tmpdir(), "kiteline-watch-")));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const events: { type: string; workspaceId: string; status?: string }[] = [];
   const watches = new WorkspaceWatches((event) => events.push(event));
@@ -25,8 +36,8 @@ async function setup() {
   const workspace = (id: string, path: string): Workspace => ({ id, path, name: id });
   return { root, watches, events, workspace };
 }
-test.runIf(process.platform === "linux")(
-  "directory watches follow moved subtrees and file changes without following symlinks",
+test.runIf(process.platform === "linux" || process.platform === "darwin")(
+  "workspace watches follow moved subtrees and file changes without following symlinks",
   async () => {
     const { root, watches, events, workspace } = await setup();
     const project = join(root, "project"),
@@ -163,6 +174,77 @@ test("shared Git metadata invalidates both active worktrees", async () => {
     { type: "workspace.changed", workspaceId: "b" },
   ]);
 });
+test("replacing registered shared Git metadata notifies its owners and honors repo removal", async () => {
+  const { root, watches, events, workspace } = await setup();
+  const a = join(root, "a"),
+    b = join(root, "b"),
+    metadata = join(root, "metadata"),
+    replacement = join(root, "replacement");
+  await mkdir(a);
+  await mkdir(b);
+  await mkdir(metadata);
+  await writeFile(join(metadata, "HEAD"), "ref: refs/heads/main\n");
+  await cp(metadata, replacement, { recursive: true });
+  watches.set([workspace("a", a), workspace("b", b)]);
+  for (const [id, path] of [
+    ["a", a],
+    ["b", b],
+  ] as const)
+    watches.repo(id, {
+      id,
+      path: ".",
+      rootPath: path,
+      gitDir: metadata,
+      commonDir: metadata,
+      available: true,
+      linked: id === "b",
+    });
+  await expect
+    .poll(
+      () =>
+        new Set(
+          events.filter((event) => event.status === "normal").map((event) => event.workspaceId),
+        ).size,
+      pollOptions,
+    )
+    .toBe(2);
+  events.length = 0;
+  await rename(metadata, join(root, "old-metadata"));
+  await rename(replacement, metadata);
+  await expect
+    .poll(
+      () =>
+        [
+          ...new Set(
+            events
+              .filter((event) => event.type === "workspace.changed")
+              .map((event) => event.workspaceId),
+          ),
+        ].sort(),
+      pollOptions,
+    )
+    .toEqual(["a", "b"]);
+  events.length = 0;
+  watches.reposComplete("a", new Set());
+  await expect
+    .poll(
+      () => events.some((event) => event.workspaceId === "a" && event.status === "normal"),
+      pollOptions,
+    )
+    .toBe(true);
+  events.length = 0;
+  await appendFile(join(metadata, "HEAD"), "updated\n");
+  await expect
+    .poll(
+      () => events.some((event) => event.type === "workspace.changed" && event.workspaceId === "b"),
+      pollOptions,
+    )
+    .toBe(true);
+  expect(
+    events.some((event) => event.type === "workspace.changed" && event.workspaceId === "a"),
+  ).toBe(false);
+});
+
 test("dependencies stay ignored while repositories join metadata watching before scan completion", async () => {
   const { root, watches, events, workspace } = await setup();
   const ignored = join(root, "node_modules");
@@ -387,7 +469,7 @@ test("closing during startup permits a new subscription and immediate write noti
     .toBe(true);
 });
 
-test.runIf(process.platform === "linux")(
+test.runIf(process.platform === "linux" || process.platform === "darwin")(
   "atomic directory replacement keeps overlapping workspaces watching",
   async () => {
     const { root, watches, events, workspace } = await setup();
@@ -457,5 +539,84 @@ test.runIf(process.platform === "linux")(
       )
       .toBe(true);
     expect(events.some((event) => event.workspaceId === "a")).toBe(false);
+  },
+);
+
+test.runIf(process.platform === "linux" || process.platform === "darwin")(
+  "replacing an active parent notifies nested workspaces and Git metadata owners",
+  async () => {
+    const { root, watches, events, workspace } = await setup();
+    const project = join(root, "project"),
+      child = join(project, "child"),
+      metadata = join(project, "metadata"),
+      worktree = join(root, "worktree"),
+      replacement = join(root, "replacement");
+    await mkdir(child, { recursive: true });
+    await writeFile(join(child, "file"), "original");
+    await mkdir(metadata);
+    await writeFile(join(metadata, "HEAD"), "ref: refs/heads/main\n");
+    await mkdir(worktree);
+    await cp(project, replacement, { recursive: true });
+    watches.set([
+      workspace("parent", project),
+      workspace("child", child),
+      workspace("metadata-owner", worktree),
+    ]);
+    watches.repo("metadata-owner", {
+      id: "repo",
+      path: ".",
+      rootPath: worktree,
+      gitDir: metadata,
+      commonDir: metadata,
+      available: true,
+      linked: true,
+    });
+    await expect
+      .poll(
+        () =>
+          new Set(
+            events.filter((event) => event.status === "normal").map((event) => event.workspaceId),
+          ).size,
+        pollOptions,
+      )
+      .toBe(3);
+    events.length = 0;
+    await rename(project, join(root, "old-project"));
+    await rename(replacement, project);
+    await expect
+      .poll(
+        () =>
+          [
+            ...new Set(
+              events
+                .filter((event) => event.type === "workspace.changed")
+                .map((event) => event.workspaceId),
+            ),
+          ].sort(),
+        pollOptions,
+      )
+      .toEqual(["child", "metadata-owner", "parent"]);
+  },
+);
+
+test.runIf(process.platform === "darwin")(
+  "a missing workspace starts watching when its root is created",
+  async () => {
+    const { root, watches, events, workspace } = await setup();
+    const project = join(root, "project");
+    watches.set([workspace("a", project)]);
+    await expect
+      .poll(() => events.some((event) => event.status === "normal"), pollOptions)
+      .toBe(true);
+    events.length = 0;
+    await mkdir(project);
+    await expect
+      .poll(() => events.some((event) => event.type === "workspace.changed"), pollOptions)
+      .toBe(true);
+    events.length = 0;
+    await writeFile(join(project, "file"), "new root content");
+    await expect
+      .poll(() => events.some((event) => event.type === "workspace.changed"), pollOptions)
+      .toBe(true);
   },
 );

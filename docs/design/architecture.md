@@ -143,7 +143,7 @@ agent 的 JSON 状态文件以原子替换写入，不调用 fsync；文件损�
 | 终端          | tmux、`@xterm/headless`、xterm.js               | 程序不依赖浏览器连接，可远程接续，重连能恢复画面。需随包携带打过补丁的 tmux。                |
 | 文件改名      | `rename-noreplace`、Windows addon               | Node 没有原子的不覆盖改名。Linux 和 macOS 上每次不覆盖改名要启动一个进程。                   |
 | 搜索          | 随包 ripgrep，`stream-json` 解析 `rg --json`    | 遵守忽略规则；结果逐条解析，不整份读入内存。                                                 |
-| 文件监听      | chokidar                                        | 跨平台。只监听正在查看的工作区，事件只用于提示刷新。                                         |
+| 文件监听      | Node fs.watch、chokidar                         | 只监听正在查看的工作区，事件用于提示刷新，见[变化监听](files.md#变化监听)。                  |
 | 图片          | `image-size`                                    | 只读文件头取尺寸，不解码图片。                                                               |
 | 定时任务      | Croner，Node 子进程                             | 计划在 agent 内计算，与连接无关；agent 未运行时不触发。                                      |
 | 工作台        | React、Vite、Tailwind CSS、Base UI              | 见[前端约定](#前端约定)。                                                                    |

@@ -1,6 +1,11 @@
-import type { Stats } from "node:fs";
+import {
+  lstatSync,
+  watch as nativeWatch,
+  type FSWatcher as NativeWatcher,
+  type Stats,
+} from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
-import { watch, type FSWatcher } from "chokidar";
+import { watch } from "chokidar";
 import {
   asError,
   limits,
@@ -12,7 +17,7 @@ import {
 const excluded = new Set(["node_modules", ".pnpm", ".venv", "dist", "build", "target"]);
 const gitTrees = new Set(["refs", "rebase-merge", "rebase-apply", "sequencer"]);
 interface Watched {
-  watcher: FSWatcher;
+  watcher: { close(): Promise<void> };
   owners: Set<string>;
   ready: boolean;
   error?: string;
@@ -78,6 +83,13 @@ export class WatchRoots {
     }, limits.watchDebounce);
   }
 
+  private observed(path: string, owners: Set<string>) {
+    for (const id of owners) this.changed(id);
+    for (const [id, active] of this.active) if (within(path, active.root)) this.changed(id);
+    for (const [root, entry] of this.git)
+      if (within(path, root)) for (const id of entry.owners) this.changed(id);
+  }
+
   private emit(workspaceId: string) {
     this.send({ type: "workspace.changed", workspaceId });
   }
@@ -121,12 +133,11 @@ export class WatchRoots {
       ) {
         if (active.tree) this.stop(active.tree);
         active.metadataRoots = metadataRoots;
-        active.tree = this.start(
-          active.root,
-          (path) => ignoreTree(active.root, metadataRoots, path),
-          new Set([id]),
-          process.platform === "linux",
-        );
+        const ignored = (path: string) => ignoreTree(active.root, metadataRoots, path);
+        active.tree =
+          process.platform === "darwin"
+            ? this.startNative(active.root, ignored, new Set([id]))
+            : this.start(active.root, ignored, new Set([id]), process.platform === "linux");
       }
       this.report(id);
     }
@@ -151,17 +162,18 @@ export class WatchRoots {
       usePolling: false,
     });
     const entry: Watched = { watcher, owners, ready: false };
-    if (directoriesOnly)
-      // Linux directory watches report file changes without a watch for each file.
-      watcher.on("raw", (_event, path, details) => {
-        const { watchedPath } = details as { watchedPath: string };
-        const absolute = path ? resolve(watchedPath, path) : watchedPath;
-        if (within(root, absolute) && !ignored(absolute))
-          for (const id of entry.owners) this.changed(id);
-      });
-    watcher.on("all", () => {
-      for (const id of entry.owners) this.changed(id);
+    watcher.on("raw", (_event, path, details) => {
+      const { watchedPath } = details as { watchedPath?: string };
+      // Root replacement can preserve every child name and emit no Chokidar all event.
+      if (watchedPath === parent && (!path || resolve(parent, path) === root)) {
+        this.observed(root, entry.owners);
+        return;
+      }
+      if (!directoriesOnly || !watchedPath) return;
+      const absolute = path ? resolve(watchedPath, path) : watchedPath;
+      if (within(root, absolute) && !ignored(absolute)) this.observed(absolute, entry.owners);
     });
+    watcher.on("all", (_event, path) => this.observed(path, entry.owners));
     watcher.on("ready", () => {
       entry.ready = true;
       for (const id of entry.owners) this.report(id);
@@ -169,6 +181,68 @@ export class WatchRoots {
     watcher.on("error", (error) => {
       if (process.platform === "linux" && entry.error) return;
       entry.error = asError(error).message;
+      for (const id of entry.owners) this.report(id);
+    });
+    return entry;
+  }
+
+  private startNative(
+    root: string,
+    ignored: (path: string) => boolean,
+    owners: Set<string>,
+  ): Watched {
+    const parent = dirname(root);
+    let tree: NativeWatcher | undefined;
+    let boundary: NativeWatcher | undefined;
+    let closed = false;
+    const entry: Watched = {
+      owners,
+      ready: false,
+      watcher: {
+        async close() {
+          closed = true;
+          tree?.close();
+          boundary?.close();
+        },
+      },
+    };
+    const changed = (path = root) => {
+      if (!closed) this.observed(path, entry.owners);
+    };
+    const failed = (error: unknown) => {
+      if (closed) return;
+      entry.error = asError(error).message;
+      for (const id of entry.owners) this.report(id);
+    };
+    const attach = () => {
+      try {
+        // An existing FSEvents watch follows the registered path across root replacements.
+        if (!lstatSync(root).isDirectory()) return;
+        tree = nativeWatch(root, { recursive: true }, (_event, filename) => {
+          const path = filename ? resolve(root, String(filename)) : root;
+          if (within(root, path) && !ignored(path)) changed(path);
+        });
+        tree.on("error", failed);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT" && code !== "ENOTDIR") failed(error);
+      }
+    };
+    try {
+      boundary = nativeWatch(parent, (event, filename) => {
+        if (closed || (filename && resolve(parent, String(filename)) !== root)) return;
+        if (!tree && (event === "rename" || !filename)) attach();
+        changed();
+      });
+      boundary.on("error", failed);
+      attach();
+    } catch (error) {
+      failed(error);
+    }
+    // Native fs.watch is registered synchronously and has no Chokidar initial scan.
+    queueMicrotask(() => {
+      if (closed) return;
+      entry.ready = true;
       for (const id of entry.owners) this.report(id);
     });
     return entry;

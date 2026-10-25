@@ -192,12 +192,14 @@ HTML 预览直接以当前稿件构造 `srcdoc`，只授予 iframe `sandbox="all
 
 ## 变化监听
 
-- 浏览器通过事件 WebSocket 的 `watch.set` 声明正在使用的设备和工作区。server 汇总所有浏览器的目标，按设备下发，agent 只监听其中仍登记的工作区。监听实现位于 `agent/src/watch-roots.ts`，使用 chokidar，不跟随符号链接，不轮询。Linux 在独立 worker 内处理监听建立、文件系统事件和关闭，避免这些工作阻塞 agent 的交互请求；其他平台在主线程运行。
-- 工作树监听排除 `agent/src/watch-roots.ts` 的 `excluded` 目录、`.git` 内部，以及工作区内已发现仓库的 gitDir 和 commonDir。agent 同时监听根目录的上一级，根目录被替换后能重新挂上。Linux 的 Chokidar 补丁按目录身份变化重建监听，并更新共享底层 handle，避免同名新目录继续引用旧 inode。被排除的目录仍可浏览，只靠定时刷新更新。
+- 浏览器通过事件 WebSocket 的 `watch.set` 声明正在使用的设备和工作区。server 汇总所有浏览器的目标，按设备下发，agent 只监听其中仍登记的工作区。监听实现位于 `agent/src/watch-roots.ts`，不跟随符号链接，默认不轮询。macOS 工作树使用 Node 原生递归监听，其他平台工作树及所有 Git 元数据使用 Chokidar。Linux 在独立 worker 内处理监听建立、文件系统事件和关闭，避免这些工作阻塞 agent 的交互请求；其他平台在主线程运行。
+- 工作树监听排除 `agent/src/watch-roots.ts` 的 `excluded` 目录、`.git` 内部，以及工作区内已发现仓库的 gitDir 和 commonDir。agent 同时监听根目录的上一级，覆盖初始根缺失及直接根替换后的监听恢复。macOS 已建立的原生监听按注册路径跨根替换继续工作，不在每次 rename 时关闭重挂；初次建立前以 lstat 排除根本身为符号链接的情况。Linux 的 Chokidar 补丁按目录身份变化重建监听，并更新共享底层 handle，避免同名新目录继续引用旧 inode。被排除的目录仍可浏览，只靠定时刷新更新。
+- macOS 工作树递归接收事件，再按工作树边界和排除规则过滤，不为每个普通文件保留监听 FD；根内被排除目录的底层事件仍可能到达。该工作树分支不读取 Chokidar 的 polling 环境变量，Git 元数据仍保留 Chokidar 的原有效果。
 - Linux 工作树只为目录建立 watch，通过 Chokidar raw 事件接收目录内的文件变化，再按同一工作树边界和排除规则合并通知。初次遍历仍检查每个文件；目录数量本身很大时仍可能耗尽系统监听配额。Git 元数据不使用此目录模式。
 - Git 元数据监听覆盖每个已发现仓库的 gitDir 和 commonDir，只看顶层文件和 `gitTrees` 指定的状态目录，不看 `objects/`。多个工作区共享同一元数据目录时共用一个监听。
+- 已收到的路径事件先通知原监听 owner，再通知根目录位于该事件路径之内的活动工作区及 Git 元数据 owner，沿现有 pending 集合和去抖合并。既有直接 parent→root raw 回调也进入这段传播，因此活动父根替换可通知嵌套工作区；没有已监听祖先时，不保证任意祖先替换能被观察。
 - 文件系统事件按 `watchDebounce` 合并为 `workspace.changed`，通知文件、Git 和仓库发现刷新，不带文件内容。agent 自己完成写操作时立即发送事件。
-- 全部监听就绪后 agent 发送 `watch.status` 为 `normal`；任一监听报错时为 `degraded` 并附原因，界面显示监听退化。已建立的部分监听继续工作。Linux 的 worker 异常退出也报告 `degraded`，不自动重启，下一次订阅变化时重新建立。
+- 全部监听就绪后 agent 发送 `watch.status` 为 `normal`，表示监听已就绪，不保证文件系统事件完整；macOS 原生 watch 在同步注册完成后就绪，Chokidar 在初始扫描完成后就绪。任一监听报错时为 `degraded` 并附原因，界面显示监听退化。已建立的部分监听继续工作。Linux 的 worker 异常退出也报告 `degraded`，不自动重启，下一次订阅变化时重新建立。
 - 没有订阅或控制连接断开时释放监听，Linux 同时结束 worker；旧 worker 的退出不会覆盖重连后的新订阅。agent 停止时等待所有 worker 退出。
 - 浏览器的刷新节奏在 `web/src/lib/use-workspace-refresh.ts`：事件合并使用 `watchDebounce`，可见页面还按 `visibleRefreshInterval` 定时刷新；进入工具立即刷新，重新连接和页面恢复可见时也触发刷新。同一视图同时只有一个刷新请求，期间到达的事件在它完成后再触发一次。
 - 文件工具刷新当前目录，并重新读取当前显示的打开文件：revision 与草稿的基准 revision 不同时只标记磁盘已变化，不替换编辑器中的内容。草稿、磁盘和 Git index 的关系见 [Git 写操作](git.md#写操作)。
