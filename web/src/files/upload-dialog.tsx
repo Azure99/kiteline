@@ -37,6 +37,7 @@ interface ActiveUpload {
 export function UploadDialog({
   deviceId,
   workspaceId,
+  label,
   folder,
   files,
   open,
@@ -46,6 +47,7 @@ export function UploadDialog({
 }: {
   deviceId: string;
   workspaceId: string;
+  label: string;
   folder: string;
   files: File[];
   open: boolean;
@@ -171,6 +173,7 @@ export function UploadDialog({
             <DialogTitle>{t(($) => $.files.uploadCount, { count: rows.length })}</DialogTitle>
           </DialogHeader>
           <div className="scroll-area min-h-0 space-y-3 overflow-auto p-4">
+            <p className="break-all text-sm">{label}</p>
             {rows.map((row) => (
               <div key={row.id} className="space-y-2 border-b border-border py-2 last:border-0">
                 <p className="break-all text-sm">

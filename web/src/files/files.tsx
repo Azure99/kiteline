@@ -88,6 +88,7 @@ export function Files({
   const [directoryDrop, setDirectoryDrop] = useState(false);
   const [notice, setNotice] = useState<"renamed" | "created">();
   const fileInput = useRef<HTMLInputElement>(null);
+  const uploadFolder = useRef(folder);
   const searchRegion = useRef<HTMLElement>(null);
   const list = useRef<HTMLElement>(null);
   const previousFolder = useRef(folder);
@@ -231,6 +232,10 @@ export function Files({
       return next;
     });
     if (folder === path || path === ".") void load(path);
+  }
+  function chooseUpload(path: string) {
+    uploadFolder.current = path;
+    fileInput.current?.click();
   }
   function open(entry: Entry) {
     setNotice(undefined);
@@ -422,7 +427,7 @@ export function Files({
             aria-label={t(($) => $.files.uploadPicker)}
             onChange={(event) => {
               const files = Array.from(event.target.files ?? []);
-              if (files.length) onUpload(files, folder);
+              if (files.length) onUpload(files, uploadFolder.current);
               event.target.value = "";
             }}
           />
@@ -441,7 +446,7 @@ export function Files({
                   {t(($) => $.files.searchFiles)}
                 </MenuItem>
               )}
-              <MenuItem disabled={!enabled} onClick={() => fileInput.current?.click()}>
+              <MenuItem disabled={!enabled} onClick={() => chooseUpload(folder)}>
                 <Upload />
                 {t(($) => $.files.uploadFiles)}
               </MenuItem>
@@ -559,6 +564,8 @@ export function Files({
                 })
               }
               onRename={(entry) => setAction({ kind: "rename", entry })}
+              onUpload={chooseUpload}
+              onNewDirectory={(parent) => setAction({ kind: "directory", parent })}
               onAction={(kind, entry) => onOperation({ kind, entries: [entry] }, folder)}
               onDownload={(entry) => download(entry.path!)}
               onMore={(path) => void load(path, true)}

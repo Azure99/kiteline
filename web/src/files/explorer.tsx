@@ -16,6 +16,8 @@ import {
   Trash2,
   Download,
   Info,
+  Upload,
+  FolderPlus,
 } from "lucide-react";
 import type { Entry } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
@@ -39,6 +41,8 @@ export function FileExplorer({
   onOpen,
   onSelect,
   onRename,
+  onUpload,
+  onNewDirectory,
   onAction,
   onDownload,
   onMore,
@@ -58,6 +62,8 @@ export function FileExplorer({
   onOpen: (entry: Entry) => void;
   onSelect: (path: string) => void;
   onRename: (entry: Entry) => void;
+  onUpload: (path: string) => void;
+  onNewDirectory: (path: string) => void;
   onAction: (kind: "copy" | "move" | "delete", entry: Entry) => void;
   onDownload: (entry: Entry) => void;
   onMore: (path: string) => void;
@@ -72,6 +78,18 @@ export function FileExplorer({
     return (
       <>
         <p className="max-w-72 break-all px-2 py-1 text-xs text-muted-foreground">{entry.path}</p>
+        {entry.kind === "directory" && (
+          <>
+            <MenuItem onClick={() => onUpload(entry.path!)}>
+              <Upload />
+              {t(($) => $.files.uploadFiles)}
+            </MenuItem>
+            <MenuItem onClick={() => onNewDirectory(entry.path!)}>
+              <FolderPlus />
+              {t(($) => $.files.newDirectory)}
+            </MenuItem>
+          </>
+        )}
         <MenuItem onClick={() => onDetails(entry)}>
           <Info />
           {t(($) => $.files.details)}
@@ -206,6 +224,8 @@ export function FileExplorer({
                   onOpen,
                   onSelect,
                   onRename,
+                  onUpload,
+                  onNewDirectory,
                   onAction,
                   onDownload,
                   onMore,

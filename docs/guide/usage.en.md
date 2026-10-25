@@ -219,13 +219,13 @@ After opening a result in the same workspace, return to the current search to op
 
 ### Create and rename
 
-"New file" opens an unnamed draft. Enter its path on first save, starting in the directory where you created the draft. The device and Git cannot see the file until it is saved. First saves, directory creation, and renaming fail if the name exists; nothing is overwritten. Open tabs follow renamed or moved paths. The workspace root and files currently being saved cannot be renamed, moved or deleted.
+"New file" opens an unnamed draft. Enter its path on first save, starting in the directory shown in the file toolbar when you created the draft. "New directory" in a folder's context menu creates inside that folder. The device and Git cannot see the file until it is saved. First saves, directory creation, and renaming fail if the name exists; nothing is overwritten. Open tabs follow renamed or moved paths. The workspace root and files currently being saved cannot be renamed, moved or deleted.
 
 Path inputs preserve line breaks in pasted text. Press Enter or the mobile keyboard's Done key to submit directory creation, renaming, first saves, or Save as. Upload, organize, and conflict paths still use their respective action buttons.
 
 ### Upload and download
 
-Choose files or drop them onto Files to upload. The confirmation dialog defaults to the current directory and lets you change destination paths. A drop containing any directory is rejected in full. Uploads send files sequentially. After data is sent, the device still needs to finish. Collapsing the dialog does not cancel the upload. Downloads use the browser's download manager; directories cannot be downloaded. See [Limits](reference.en.md#limits) for size limits.
+Choose files from the toolbar or a folder's context menu, or drop them onto Files to upload. The toolbar and file drops use the current browsing directory; a folder's menu uses that folder. The confirmation dialog shows the device, workspace and starting directory captured when the upload was created, and lets you change destination paths. A drop containing any directory is rejected in full. Uploads send files sequentially. After data is sent, the device still needs to finish. Collapsing the dialog does not cancel the upload. If you switch workspaces while it is collapsed, reopening still shows the original upload destination. To upload to another workspace, start a new upload from that workspace. Downloads use the browser's download manager; directories cannot be downloaded. See [Limits](reference.en.md#limits) for size limits.
 
 ### Organize files
 
