@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import { useState } from "react";
 import type { FileInspection } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
-import { Textarea } from "../components/ui/textarea";
+import { PathField } from "./path-field";
 import {
   Dialog,
   DialogContent,
@@ -54,7 +54,7 @@ export function FileConflictDialog({
           )}
           <label className="block space-y-1 text-sm">
             <span>{t(($) => $.files.keepBothPath)}</span>
-            <Textarea
+            <PathField
               aria-label={t(($) => $.files.keepBothPath)}
               rows={2}
               value={path}

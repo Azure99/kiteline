@@ -47,6 +47,13 @@ export function FileSearch({
   }, [active]);
   const request = useRef<AbortController>(undefined);
   useEffect(() => () => request.current?.abort(), []);
+  function resetSearch() {
+    request.current?.abort();
+    request.current = undefined;
+    setResult(undefined);
+    setStatus(undefined);
+    setBusy(false);
+  }
   function cancel() {
     request.current?.abort();
     request.current = undefined;
@@ -116,7 +123,11 @@ export function FileSearch({
                 type="button"
                 aria-pressed={mode === value}
                 className={`min-h-8 px-3 text-xs max-desk:min-h-11 ${mode === value ? "rounded bg-background shadow-xs" : "text-muted-foreground"}`}
-                onClick={() => setMode(value)}
+                onClick={() => {
+                  if (mode === value) return;
+                  resetSearch();
+                  setMode(value);
+                }}
               >
                 {label}
               </button>
@@ -126,7 +137,10 @@ export function FileSearch({
             <input
               type="checkbox"
               checked={includeIgnored}
-              onChange={(event) => setIncludeIgnored(event.target.checked)}
+              onChange={(event) => {
+                resetSearch();
+                setIncludeIgnored(event.target.checked);
+              }}
             />
             {t(($) => $.files.includeIgnored)}
           </label>
@@ -137,7 +151,10 @@ export function FileSearch({
             aria-label={t(($) => $.files.searchQuery)}
             autoCapitalize="none"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              resetSearch();
+              setQuery(event.target.value);
+            }}
             className="min-w-0 flex-1"
           />
           <Button type="submit" disabled={disabled || !query}>

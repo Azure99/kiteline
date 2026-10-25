@@ -20,6 +20,7 @@ import {
 import type { Entry } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger, createMenuHandle } from "../components/ui/menu";
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "../components/ui/context-menu";
 import type { DirectoryPage } from "./use-browser";
 import { formatBytes, unavailableEntryLabel } from "./format";
 
@@ -67,6 +68,47 @@ export function FileExplorer({
   const [menuHandle] = useState(() => createMenuHandle<string>());
   const page = pages[path];
   const rowStyle = useMemo(() => ({ paddingLeft: 8 + depth * 14 }), [depth]);
+  function menuItems(entry: Entry) {
+    return (
+      <>
+        <p className="max-w-72 break-all px-2 py-1 text-xs text-muted-foreground">{entry.path}</p>
+        <MenuItem onClick={() => onDetails(entry)}>
+          <Info />
+          {t(($) => $.files.details)}
+        </MenuItem>
+        {(entry.kind === "file" || entry.kind === "symlink") && (
+          <>
+            <MenuItem onClick={() => onDownload(entry)}>
+              <Download />
+              {t(($) => $.common.download)}
+            </MenuItem>
+          </>
+        )}
+        <MenuItem disabled={savingWithin(entry.path!)} onClick={() => onRename(entry)}>
+          <Pencil />
+          {t(($) => $.common.rename)}
+        </MenuItem>
+        <MenuItem onClick={() => onAction("copy", entry)}>
+          <Copy />
+          {t(($) => $.common.copy)}
+        </MenuItem>
+        <MenuItem disabled={savingWithin(entry.path!)} onClick={() => onAction("move", entry)}>
+          <FolderInput />
+          {t(($) => $.common.move)}
+        </MenuItem>
+        <MenuItem disabled={savingWithin(entry.path!)} onClick={() => onAction("delete", entry)}>
+          <Trash2 />
+          {t(($) => $.common.delete)}
+        </MenuItem>
+        {entry.kind === "symlink" && (
+          <MenuItem onClick={() => onFolder(entry.path!)}>
+            <Folder />
+            {t(($) => $.files.openLinkDirectory)}
+          </MenuItem>
+        )}
+      </>
+    );
+  }
   return (
     <div aria-busy={page?.busy}>
       {page?.listing?.entries.items.map((entry, index) => {
@@ -77,7 +119,7 @@ export function FileExplorer({
           <div key={entry.path ?? `invalid-${index}`}>
             <div
               data-entry-path={entry.path}
-              className={`flex min-h-8 items-center pr-1 max-desk:min-h-11 ${currentFile === entry.path ? "bg-primary-soft" : "hover:bg-muted"}`}
+              className={`group flex min-h-8 items-center pr-1 max-desk:min-h-11 ${currentFile === entry.path ? "bg-primary-soft" : "hover:bg-muted"}`}
               style={rowStyle}
             >
               {selecting && (
@@ -92,41 +134,53 @@ export function FileExplorer({
                   />
                 </label>
               )}
-              <button
-                className="flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left disabled:opacity-50 max-desk:min-h-11"
-                disabled={!entry.path || disabled}
-                title={entry.linkTarget ? `${entry.name} -> ${entry.linkTarget}` : entry.name}
-                onClick={() => (folder ? onFolder(entry.path!) : onOpen(entry))}
-              >
-                {!mobile &&
-                  folder &&
-                  (open ? (
-                    <ChevronDown size={13} className="shrink-0" />
-                  ) : (
-                    <ChevronRight size={13} className="shrink-0" />
-                  ))}
-                {entry.kind === "file" ? (
-                  <FileIcon path={entry.name} />
-                ) : (
-                  <Icon
-                    size={16}
-                    className={`shrink-0 ${folder ? "text-primary" : "text-muted-foreground"}`}
-                  />
-                )}
-                <span className="min-w-0 flex-1 truncate whitespace-pre text-sm">{entry.name}</span>
-                {(entry.unavailableReason || entry.kind === "file" || entry.kind === "other") && (
-                  <span className="shrink-0 text-[11px] text-muted-foreground">
-                    {entry.unavailableReason
-                      ? unavailableEntryLabel(entry.unavailableReason)
-                      : entry.kind === "other"
-                        ? t(($) => $.files.specialFile)
-                        : formatBytes(entry.size)}
-                  </span>
-                )}
-                {mobile && folder && (
-                  <ChevronRight size={16} className="shrink-0 text-muted-foreground" />
-                )}
-              </button>
+              <ContextMenu disabled={!entry.path || disabled}>
+                <ContextMenuTrigger
+                  render={
+                    <button
+                      className="flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left disabled:opacity-50 max-desk:min-h-11"
+                      disabled={!entry.path || disabled}
+                      title={entry.linkTarget ? `${entry.name} -> ${entry.linkTarget}` : entry.name}
+                      onClick={() => (folder ? onFolder(entry.path!) : onOpen(entry))}
+                    >
+                      {!mobile &&
+                        folder &&
+                        (open ? (
+                          <ChevronDown size={13} className="shrink-0" />
+                        ) : (
+                          <ChevronRight size={13} className="shrink-0" />
+                        ))}
+                      {entry.kind === "file" ? (
+                        <FileIcon path={entry.name} />
+                      ) : (
+                        <Icon
+                          size={16}
+                          className={`shrink-0 ${folder ? "text-primary" : "text-muted-foreground"}`}
+                        />
+                      )}
+                      <span className="min-w-0 flex-1 truncate whitespace-pre text-sm">
+                        {entry.name}
+                      </span>
+                      {(entry.unavailableReason ||
+                        entry.kind === "file" ||
+                        entry.kind === "other") && (
+                        <span className="shrink-0 text-[11px] text-muted-foreground">
+                          {entry.unavailableReason
+                            ? unavailableEntryLabel(entry.unavailableReason)
+                            : entry.kind === "other"
+                              ? t(($) => $.files.specialFile)
+                              : formatBytes(entry.size)}
+                        </span>
+                      )}
+                      {mobile && folder && (
+                        <ChevronRight size={16} className="shrink-0 text-muted-foreground" />
+                      )}
+                    </button>
+                  }
+                />
+                <ContextMenuContent>{entry.path && menuItems(entry)}</ContextMenuContent>
+              </ContextMenu>
+
               {!!entry.path && (
                 <EntryMenuTrigger
                   handle={menuHandle}
@@ -195,48 +249,7 @@ export function FileExplorer({
           return (
             <MenuContent>
               {entry?.path ? (
-                <>
-                  <MenuItem onClick={() => onDetails(entry)}>
-                    <Info />
-                    {t(($) => $.files.details)}
-                  </MenuItem>
-                  {(entry.kind === "file" || entry.kind === "symlink") && (
-                    <>
-                      <MenuItem onClick={() => onDownload(entry)}>
-                        <Download />
-                        {t(($) => $.common.download)}
-                      </MenuItem>
-                    </>
-                  )}
-                  <MenuItem disabled={savingWithin(entry.path)} onClick={() => onRename(entry)}>
-                    <Pencil />
-                    {t(($) => $.common.rename)}
-                  </MenuItem>
-                  <MenuItem onClick={() => onAction("copy", entry)}>
-                    <Copy />
-                    {t(($) => $.common.copy)}
-                  </MenuItem>
-                  <MenuItem
-                    disabled={savingWithin(entry.path)}
-                    onClick={() => onAction("move", entry)}
-                  >
-                    <FolderInput />
-                    {t(($) => $.common.move)}
-                  </MenuItem>
-                  <MenuItem
-                    disabled={savingWithin(entry.path)}
-                    onClick={() => onAction("delete", entry)}
-                  >
-                    <Trash2 />
-                    {t(($) => $.common.delete)}
-                  </MenuItem>
-                  {entry.kind === "symlink" && (
-                    <MenuItem onClick={() => onFolder(entry.path!)}>
-                      <Folder />
-                      {t(($) => $.files.openLinkDirectory)}
-                    </MenuItem>
-                  )}
-                </>
+                menuItems(entry)
               ) : payload ? (
                 <CloseMissingMenu handle={menuHandle} />
               ) : null}
@@ -269,6 +282,7 @@ const EntryMenuTrigger = memo(function EntryMenuTrigger({
         <Button
           variant="ghost"
           size="icon"
+          className="row-more"
           aria-label={t(($) => $.files.actionsNamed, { name })}
           disabled={disabled}
         />

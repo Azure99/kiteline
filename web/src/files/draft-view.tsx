@@ -1,3 +1,5 @@
+import { flushSync } from "react-dom";
+import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { ErrorNotice } from "../components/error-notice";
 import type { AgentEnvironment } from "@kiteline/shared/protocol";
 import { useTranslation } from "react-i18next";
@@ -8,6 +10,7 @@ import {
   Download,
   Eye,
   FileOutput,
+  FolderOpen,
   Fullscreen,
   Minimize,
   Minimize2,
@@ -16,6 +19,7 @@ import {
   RefreshCw,
   Save,
   Scan,
+  Search,
   X,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
@@ -31,6 +35,8 @@ import {
 import { IconButton } from "../components/icon-button";
 import { deferredView } from "../components/deferred-view";
 import { ApiError } from "../lib/api";
+import { navigateWorkspace } from "../lib/navigation";
+import { parentPath } from "./paths";
 import { useCopyFeedback } from "../lib/use-copy-feedback";
 import {
   draftError,
@@ -44,7 +50,7 @@ import { DraftTabs } from "./draft-tabs";
 import { draftLabel } from "./draft-label";
 import { codeLineReference } from "./code-line-reference";
 import { SaveDraftDialog } from "./save-draft-dialog";
-import { TextEditor } from "./text-editor";
+import { TextEditor, type TextEditorHandle } from "./text-editor";
 import { formatBytes } from "./format";
 import { downloadFile, type DiskText } from "./content";
 import type { useTerminalFocus } from "../terminal/use-terminal-focus";
@@ -74,6 +80,9 @@ export function DraftView({
 }) {
   const { t } = useTranslation();
 
+  const editor = useRef<TextEditorHandle>(null);
+  const [searchFromMenu, setSearchFromMenu] = useState(false);
+  const menuActions = useRef<MenuPrimitive.Root.Actions>(null);
   const all = useDrafts(store);
   // Editing updates this draft without notifying the entire open-files list.
   useDraftVersion(store, draft);
@@ -84,14 +93,29 @@ export function DraftView({
     : /\.(md|markdown)$/i.test(draft.path)
       ? "markdown"
       : undefined;
-  const [preview, setPreview] = useState<typeof previewType>();
-  if (preview && preview !== previewType) setPreview(undefined);
+  const [htmlPreview, setHtmlPreview] = useState(false);
+  if (htmlPreview && previewType !== "html") setHtmlPreview(false);
+  const preview =
+    previewType === "markdown" && draft.markdownPreview
+      ? "markdown"
+      : previewType === "html" && htmlPreview
+        ? "html"
+        : undefined;
+  const setPreview = useCallback(
+    (value?: "markdown" | "html") => {
+      if (previewType === "markdown") {
+        draft.markdownPreview = value === "markdown";
+        store.changed(draft, false);
+      } else setHtmlPreview(value === "html");
+    },
+    [draft, previewType, store],
+  );
   const previewElement = useRef<HTMLElement>(null);
-  const previewPosition = useRef<{ line: number; offset: number }>(undefined);
   const rememberPreviewPosition = useCallback(() => {
     const article = previewElement.current;
     if (preview === "markdown" && article) {
       const viewport = article.getBoundingClientRect();
+      if (!viewport.width || !viewport.height) return;
       let nearest: HTMLElement | undefined;
       let distance = Infinity;
       for (const block of article.querySelectorAll<HTMLElement>("[data-source-line]")) {
@@ -104,14 +128,14 @@ export function DraftView({
       }
       if (nearest) {
         const line = Number(nearest.dataset.sourceLine);
-        previewPosition.current = {
+        draft.markdownPosition = {
           line,
           offset: nearest.getBoundingClientRect().top - viewport.top,
         };
         return line;
       }
     }
-  }, [preview]);
+  }, [draft, preview]);
   function togglePreview() {
     const line = rememberPreviewPosition();
     if (line) draft.location = { line };
@@ -122,7 +146,8 @@ export function DraftView({
       rememberPreviewPosition();
       setPreview(undefined);
     }
-  }, [preview, draft.location, rememberPreviewPosition]);
+  }, [preview, draft.location, rememberPreviewPosition, setPreview]);
+  useLayoutEffect(() => () => void rememberPreviewPosition(), [rememberPreviewPosition]);
   const [disk, setDisk] = useState<DiskText>();
   const [saveAs, setSaveAs] = useState(false);
   const [error, setError] = useState<unknown>();
@@ -152,135 +177,142 @@ export function DraftView({
   return (
     <>
       {showTabs && <DraftTabs store={store} tabs={tabs} draft={draft} hidden={focusMode?.active} />}
-      <div
-        className={`flex min-h-10 shrink-0 items-center gap-1 border-b border-border px-3 max-sm:flex-wrap ${focusMode?.active ? "" : "max-sm:justify-end"}`}
-      >
+      <div className="flex min-h-10 shrink-0 flex-wrap items-center justify-end border-b border-border px-1">
         <span
           className="min-w-0 flex-1 basis-32 truncate px-2 text-xs max-sm:basis-full max-sm:whitespace-pre-wrap max-sm:break-all max-sm:pt-1"
           title={`${draft.deviceName} / ${draft.workspaceName}\n${draft.resolvedPath ?? draftLabel(draft)}`}
         >
           {draftLabel(draft)}
         </span>
-        {previewType && (
+        <div className="ml-auto flex max-w-full flex-wrap justify-end">
+          {previewType && (
+            <IconButton
+              label={
+                preview
+                  ? t(($) => $.files.editSource)
+                  : previewType === "html"
+                    ? t(($) => $.files.previewHtml)
+                    : t(($) => $.files.previewMarkdown)
+              }
+              onClick={togglePreview}
+            >
+              {preview ? <Code /> : <Eye />}
+            </IconButton>
+          )}
+          {editorVisible && !preview && (
+            <IconButton
+              label={t(($) => $.files.copyCodeLineReference)}
+              disabled={!draft.state}
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={() => void copy(codeLineReference(draft), draft.id)}
+            >
+              <Quote />
+            </IconButton>
+          )}
+          {focusMode && (
+            <IconButton
+              label={
+                focusMode.next === "enterFocus"
+                  ? t(($) => $.files.enterFocus)
+                  : t(($) => $.terminal[focusMode.next])
+              }
+              onClick={focusMode.toggle}
+            >
+              {focusMode.next === "exitFocus" ? (
+                <Minimize />
+              ) : focusMode.next === "enterFullscreen" ? (
+                <Fullscreen />
+              ) : (
+                <Scan />
+              )}
+            </IconButton>
+          )}
           <IconButton
-            label={
-              preview
-                ? t(($) => $.files.editSource)
-                : previewType === "html"
-                  ? t(($) => $.files.previewHtml)
-                  : t(($) => $.files.previewMarkdown)
-            }
-            onClick={togglePreview}
+            label={t(($) => $.files.saveFile)}
+            disabled={!store.canSave(draft) || !!unavailable}
+            onClick={() => void save()}
           >
-            {preview ? <Code /> : <Eye />}
+            <Save />
           </IconButton>
-        )}
-        <IconButton
-          label={t(($) => $.files.downloadFile)}
-          className="hidden sm:inline-flex"
-          disabled={downloadDisabled}
-          onClick={download}
-        >
-          <Download />
-        </IconButton>
-        <IconButton
-          label={t(($) => $.files.copyText)}
-          disabled={!draft.state}
-          onPointerDown={(event) => event.preventDefault()}
-          onClick={() => void copy(draft.state!.doc.toString(), draft.id)}
-        >
-          <Copy />
-        </IconButton>
-        {editorVisible && !preview && (
-          <IconButton
-            label={t(($) => $.files.copyCodeLineReference)}
-            disabled={!draft.state}
-            onPointerDown={(event) => event.preventDefault()}
-            onClick={() => void copy(codeLineReference(draft), draft.id)}
+          <Menu
+            actionsRef={menuActions}
+            onOpenChange={(open) => {
+              if (open) setSearchFromMenu(false);
+            }}
           >
-            <Quote />
-          </IconButton>
-        )}
-        <IconButton
-          label={t(($) => $.files.checkDisk)}
-          className="hidden sm:inline-flex"
-          disabled={checkDisabled}
-          onClick={() => void check()}
-        >
-          <RefreshCw />
-        </IconButton>
-        <IconButton
-          label={t(($) => $.files.saveAs)}
-          className="hidden sm:inline-flex"
-          disabled={saveAsDisabled}
-          onClick={openSaveAs}
-        >
-          <FileOutput />
-        </IconButton>
-        <IconButton
-          label={t(($) => $.files.saveFile)}
-          disabled={!store.canSave(draft) || !!unavailable}
-          onClick={() => void save()}
-        >
-          <Save />
-        </IconButton>
-        {focusMode && (
-          <IconButton
-            label={
-              focusMode.next === "enterFocus"
-                ? t(($) => $.files.enterFocus)
-                : t(($) => $.terminal[focusMode.next])
-            }
-            onClick={focusMode.toggle}
-          >
-            {focusMode.next === "exitFocus" ? (
-              <Minimize />
-            ) : focusMode.next === "enterFullscreen" ? (
-              <Fullscreen />
-            ) : (
-              <Scan />
-            )}
-          </IconButton>
-        )}
-        <Menu>
-          <MenuTrigger
-            render={
-              <Button
-                className="sm:hidden"
-                variant="ghost"
-                size="icon"
-                aria-label={t(($) => $.files.moreActions)}
-              />
-            }
-          >
-            <MoreHorizontal />
-          </MenuTrigger>
-          <MenuContent>
-            <MenuItem disabled={downloadDisabled} onClick={download}>
-              <Download />
-              {t(($) => $.files.downloadFile)}
-            </MenuItem>
-            <MenuItem disabled={checkDisabled} onClick={() => void check()}>
-              <RefreshCw />
-              {t(($) => $.files.checkDisk)}
-            </MenuItem>
-            <MenuItem disabled={saveAsDisabled} onClick={openSaveAs}>
-              <FileOutput />
-              {t(($) => $.files.saveAs)}
-            </MenuItem>
-            {focusMode && (
-              <>
-                <div className="my-1 border-t border-border" />
-                <MenuItem onClick={() => void focusMode.toggleFullscreen()}>
-                  {focusMode.fullscreen ? <Minimize2 /> : <Fullscreen />}
-                  {t(($) =>
-                    focusMode.fullscreen ? $.terminal.exitFullscreen : $.terminal.enterFullscreen,
-                  )}
+            <MenuTrigger
+              render={
+                <Button variant="ghost" size="icon" aria-label={t(($) => $.files.moreActions)} />
+              }
+            >
+              <MoreHorizontal />
+            </MenuTrigger>
+            <MenuContent finalFocus={searchFromMenu ? false : undefined}>
+              {editorVisible && draft.state && !preview && (
+                <MenuItem
+                  closeOnClick={false}
+                  onClick={() => {
+                    // Release the menu focus lock within the touch gesture so Android opens the IME.
+                    flushSync(() => setSearchFromMenu(true));
+                    flushSync(() => {
+                      menuActions.current?.close();
+                      menuActions.current?.unmount();
+                    });
+                    editor.current?.openSearch();
+                  }}
+                >
+                  <Search />
+                  {t(($) => $.files.findReplace)}
                 </MenuItem>
-              </>
-            )}
-          </MenuContent>
-        </Menu>
+              )}
+              <MenuItem
+                disabled={!draft.state}
+                onClick={() => void copy(draft.state!.doc.toString(), draft.id)}
+              >
+                <Copy />
+                {t(($) => $.files.copyText)}
+              </MenuItem>
+              <MenuItem
+                disabled={!draft.path}
+                onClick={() =>
+                  navigateWorkspace(draft, "files", {
+                    folder: parentPath(draft.path),
+                    reveal: draft.path,
+                    search: undefined,
+                    line: undefined,
+                  })
+                }
+              >
+                <FolderOpen />
+                {t(($) => $.files.openContainingDirectory)}
+              </MenuItem>
+              <MenuItem disabled={downloadDisabled} onClick={download}>
+                <Download />
+                {t(($) => $.files.downloadFile)}
+              </MenuItem>
+              <div className="my-1 border-t border-border" />
+              <MenuItem disabled={checkDisabled} onClick={() => void check()}>
+                <RefreshCw />
+                {t(($) => $.files.checkDisk)}
+              </MenuItem>
+              <MenuItem disabled={saveAsDisabled} onClick={openSaveAs}>
+                <FileOutput />
+                {t(($) => $.files.saveAs)}
+              </MenuItem>
+              {focusMode && (
+                <>
+                  <div className="my-1 border-t border-border" />
+                  <MenuItem onClick={() => void focusMode.toggleFullscreen()}>
+                    {focusMode.fullscreen ? <Minimize2 /> : <Fullscreen />}
+                    {t(($) =>
+                      focusMode.fullscreen ? $.terminal.exitFullscreen : $.terminal.enterFullscreen,
+                    )}
+                  </MenuItem>
+                </>
+              )}
+            </MenuContent>
+          </Menu>
+        </div>
       </div>
       {(unavailable ||
         store.overLimit(draft) ||
@@ -347,13 +379,17 @@ export function DraftView({
           target={draft}
           text={draft.state.doc.toString()}
           containerRef={previewElement}
-          position={previewPosition.current}
+          position={draft.markdownPosition}
+          visible={editorVisible && !draft.location}
+          onScroll={rememberPreviewPosition}
         />
       ) : draft.state ? (
         editorVisible && (
           <TextEditor
+            ref={editor}
             key={draft.id}
             {...{ draft, store }}
+            wrap={previewType === "markdown"}
             onSave={() => {
               if (!unavailable) void save();
             }}

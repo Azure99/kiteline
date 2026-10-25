@@ -47,6 +47,8 @@ export interface Draft extends FileTarget {
   revision?: string;
   resolvedPath?: string;
   scrollSnapshot?: ReturnType<EditorView["scrollSnapshot"]>;
+  markdownPreview?: boolean;
+  markdownPosition?: { line: number; offset: number };
   location?: { line: number; range?: [number, number]; query?: string };
   operation?: { request: AbortController } & (
     | { kind: "loading" | "checking" }

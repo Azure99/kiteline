@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Upload } from "lucide-react";
 import type { FileInspection } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
-import { Textarea } from "../components/ui/textarea";
+import { PathField } from "./path-field";
 import {
   Dialog,
   DialogContent,
@@ -179,7 +179,7 @@ export function UploadDialog({
                     {formatBytes(row.file.size)}
                   </span>
                 </p>
-                <Textarea
+                <PathField
                   aria-label={t(($) => $.files.uploadTarget, { name: row.file.name })}
                   rows={1}
                   value={row.path}

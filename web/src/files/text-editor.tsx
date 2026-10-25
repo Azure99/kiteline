@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
 import { EditorView } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { openSearchPanel, SearchQuery, setSearchQuery } from "@codemirror/search";
@@ -11,14 +11,22 @@ import { useTheme } from "../lib/appearance";
 import { editorAppearance } from "./editor-state";
 import { editorPhrases } from "./editor-locale";
 
+export interface TextEditorHandle {
+  openSearch(): void;
+}
+
 export function TextEditor({
   draft,
   store,
+  wrap,
   onSave,
+  ref,
 }: {
   draft: Draft;
   store: DraftStore;
+  wrap: boolean;
   onSave: () => void;
+  ref?: Ref<TextEditorHandle>;
 }) {
   const { t, i18n } = useTranslation();
 
@@ -66,11 +74,28 @@ export function TextEditor({
       view.current = undefined;
     };
   }, [draft, store]);
+  useImperativeHandle(
+    ref,
+    () => ({
+      openSearch() {
+        if (view.current) openSearchPanel(view.current);
+      },
+    }),
+    [],
+  );
   useLayoutEffect(() => {
     const editor = view.current;
     if (editor && draft.state && editor.state !== draft.state) editor.setState(draft.state);
-    if (editor && editor.state.facet(EditorView.darkTheme) !== dark)
-      editor.dispatch({ effects: editorAppearance.reconfigure(EditorView.darkTheme.of(dark)) });
+    if (
+      editor &&
+      (editor.state.facet(EditorView.darkTheme) !== dark || editor.lineWrapping !== wrap)
+    )
+      editor.dispatch({
+        effects: editorAppearance.reconfigure([
+          EditorView.darkTheme.of(dark),
+          wrap ? EditorView.lineWrapping : [],
+        ]),
+      });
   });
   useLayoutEffect(() => {
     const editor = view.current;

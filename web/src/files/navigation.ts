@@ -8,13 +8,13 @@ import { isDirty, type Draft, type DraftStore } from "./drafts";
 import { parentPath } from "./paths";
 import type { FileTarget } from "./content";
 
-export function showFile(target: FileTarget, line?: number) {
+export function showFile(target: FileTarget, line?: number, keepSearch = false) {
   navigateWorkspace(target, "files", {
     file: target.path,
     line,
     folder: parentPath(target.path),
     draft: undefined,
-    search: undefined,
+    search: keepSearch || undefined,
     reveal: undefined,
   });
 }

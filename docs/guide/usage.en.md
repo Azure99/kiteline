@@ -28,7 +28,7 @@ On desktop, drag the inner edge of either sidebar to resize it, or Tab to its di
 
 Switching between desktop and phone layouts keeps drafts, the active page and sessions, along with the existing position and proportions. When Together becomes narrow, it shows the most recently explicitly selected file or terminal. For example, selecting a file and then typing in the terminal still leaves the file visible after narrowing. Switching content on the phone and returning to desktop changes a layout that previously showed only one kind of content to Together.
 
-Device names, workspaces and work page tabs support context menus for the pointed object. On a phone, long-press an object or use its More button; device management is also available from More at the top right of device details. Editor and diff content keep their existing text selection and copy interactions; terminal content is described below.
+Device names, workspaces, files and folders, and work page tabs support context menus for the pointed object. On a phone, long-press an object or use its More button; device management is also available from More at the top right of device details. Editor and diff content keep their existing text selection and copy interactions; terminal content is described below.
 
 ### Where settings are stored
 
@@ -159,7 +159,9 @@ PNG, JPEG, GIF and WebP images are detected by content and previewed; images exc
 
 The file editor and Git diffs highlight syntax by filename. Diffs contain partial context, so multiline comments or strings can be colored incorrectly; use the source text to interpret them.
 
-On narrow screens, “More file actions” in the file toolbar contains Download file, Check disk content, and Save as.
+The file toolbar keeps code line references, Save, and content preview. “More file actions” contains Find / replace, Copy text, Open containing directory, Download file, Check disk content, and Save as. “Open containing directory” navigates to the current file's directory and identifies the file; save an unnamed draft first. Phones also keep direct access to Focus file.
+
+While editing source, choose “Find / replace” from the menu to search the current draft, including unsaved edits. Replacements change the draft; Save writes them to disk.
 
 In the file source toolbar, “Copy code line reference” copies the whole lines touched by the selection, or the cursor line when nothing is selected, with the device, workspace, relative path and line numbers. It uses the current editor text, including unsaved edits, without changing the selection or saving the file. Paste it manually into the target terminal.
 
@@ -171,7 +173,11 @@ Saving replaces the original with a new file, so its parent directory must allow
 
 ### Markdown preview
 
+Markdown source wraps to the editor width without changing line breaks in the file.
+
 Switch `.md` and `.markdown` files between source and preview. The preview includes unsaved edits and renders `mermaid` code blocks as diagrams. Relative file links open their targets in Files. Raw HTML appears as text; external images in ordinary Markdown appear as links, while external images within diagrams load automatically.
+
+Switching files or workspaces, or hiding the content, preserves preview mode when you return to the draft and restores the visible paragraph's position when the content becomes visible again. Terminal line links and search locations open source instead.
 
 ### HTML preview
 
@@ -185,7 +191,7 @@ Switching to source, another draft or workspace, or hiding the content ends the 
 
 Drafts are kept only in the current page's memory:
 
-- They survive switching files, tools, workspaces and devices. "Open files" lets you find open drafts across all devices.
+- They survive switching files, tools, workspaces and devices. "Open files" lets you find open drafts across all devices. A dot marks unsaved drafts in file tabs and "Open files".
 - Closing a file tab with unsaved content offers Cancel, Discard changes, or Save and close. Empty unnamed drafts close directly.
 - With unsaved changes, the browser prompts before reloading, navigating away, or closing the page. Confirming that you want to leave loses the drafts. On mobile, the prompt may be skipped when you close the app or the system discards the page.
 - If a device goes offline or a device/workspace is deleted, content remains viewable and copyable, but cannot be saved to its original location.
@@ -207,11 +213,13 @@ File search searches the workspace's files on disk by content or file name, with
 - `.gitignore` applies only inside Git repositories; `.ignore` and `.rgignore` always apply. Check "Include ignored files" to include files excluded by these rules.
 - Results and search duration are limited (see [Limits](reference.en.md#limits)). Reaching a limit shows "incomplete results". Results with non-UTF-8 paths are omitted and also mark the results incomplete.
 
-When you open a content result, if the text at its original position no longer matches the query, the editor opens Find. Click “next” to search the current content.
+After opening a result in the same workspace, return to the current search to open more results. Changing the query or search options clears the previous results; run the search again. Returning from another workspace may require entering the conditions and searching again. When you open a content result, if the text at its original position no longer matches the query, the editor opens Find. Click “next” to search the current content.
 
 ### Create and rename
 
 "New file" opens an unnamed draft. Enter its path on first save, starting in the directory where you created the draft. The device and Git cannot see the file until it is saved. First saves, directory creation, and renaming fail if the name exists; nothing is overwritten. Open tabs follow renamed or moved paths. The workspace root and files currently being saved cannot be renamed, moved or deleted.
+
+Path inputs preserve line breaks in pasted text. Press Enter or the mobile keyboard's Done key to submit directory creation, renaming, first saves, or Save as. Upload, organize, and conflict paths still use their respective action buttons.
 
 ### Upload and download
 

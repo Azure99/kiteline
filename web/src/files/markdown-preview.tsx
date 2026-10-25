@@ -3,6 +3,7 @@ import {
   createElement,
   isValidElement,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useState,
@@ -138,14 +139,18 @@ export function MarkdownPreview({
   text,
   containerRef,
   position,
+  visible,
+  onScroll,
 }: {
   target: FileTarget;
   text: string;
   containerRef: RefObject<HTMLElement | null>;
   position?: { line: number; offset: number };
+  visible: boolean;
+  onScroll(): void;
 }) {
   const { t } = useTranslation();
-  useLayoutEffect(() => {
+  const restorePosition = useEffectEvent(() => {
     if (!position) return;
     const article = containerRef.current!;
     let nearest: HTMLElement | undefined;
@@ -161,7 +166,10 @@ export function MarkdownPreview({
       article.scrollTop +=
         nearest.getBoundingClientRect().top - article.getBoundingClientRect().top - position.offset;
     }
-  }, [containerRef, position]);
+  });
+  useLayoutEffect(() => {
+    if (visible) restorePosition();
+  }, [visible]);
   const components = useMemo<Components>(() => {
     const target = { deviceId, workspaceId, path };
     let pending = Promise.resolve();
@@ -229,6 +237,7 @@ export function MarkdownPreview({
       ref={containerRef}
       className="markdown-preview scroll-area min-h-0 flex-1 overflow-auto p-5"
       aria-label={t(($) => $.files.markdownPreview)}
+      onScroll={onScroll}
     >
       <Markdown
         remarkPlugins={[remarkGfm]}

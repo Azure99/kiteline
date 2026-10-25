@@ -91,7 +91,14 @@ export function OpenFiles({
                       {draft.deviceName} / {draft.workspaceName}
                     </span>
                   </span>
-                  {isDirty(draft) && <Circle size={7} fill="currentColor" />}
+                  {isDirty(draft) && (
+                    <Circle
+                      size={7}
+                      fill="currentColor"
+                      className="shrink-0"
+                      aria-label={t(($) => $.files.unsaved)}
+                    />
+                  )}
                 </Button>
                 <span role="status" className="shrink-0 text-xs text-muted-foreground">
                   {copied === draft.id ? t(($) => $.common.copied) : ""}

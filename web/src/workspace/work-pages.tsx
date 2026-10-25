@@ -64,7 +64,9 @@ export function WorkPages({
                   render={
                     <button
                       title={title}
-                      aria-label={title}
+                      aria-label={
+                        draft && isDirty(draft) ? `${title} · ${t(($) => $.files.unsaved)}` : title
+                      }
                       aria-current={pages.active === page.id ? "true" : undefined}
                       onClick={() => pages.select(page)}
                       className="flex min-h-9 min-w-0 items-center gap-2 px-3 text-sm max-desk:min-h-11"
@@ -79,6 +81,7 @@ export function WorkPages({
                         <Circle
                           size={7}
                           fill="currentColor"
+                          className="shrink-0"
                           aria-label={t(($) => $.files.unsaved)}
                         />
                       )}

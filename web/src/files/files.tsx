@@ -135,7 +135,7 @@ export function Files({
       );
       return;
     }
-    if (location && queryFile !== location.path) {
+    if (location && route.query.file !== location.path) {
       setLocation(undefined);
       return;
     }
@@ -145,7 +145,17 @@ export function Files({
       store.changed();
       setLocation(undefined);
     }
-  }, [contentVisible, draft, queryFile, queryLine, location, store, device.id, workspace.id]);
+  }, [
+    contentVisible,
+    draft,
+    queryFile,
+    queryLine,
+    route.query.file,
+    location,
+    store,
+    device.id,
+    workspace.id,
+  ]);
   useEffect(() => {
     if (!visible || !enabled || folder === ".") return;
     const deviceTarget = { deviceId: device.id, workspaceId: workspace.id };
@@ -352,7 +362,7 @@ export function Files({
                 : undefined,
             );
             onOpenContent();
-            showFile({ ...target, path: match.path });
+            showFile({ ...target, path: match.path }, undefined, true);
           }}
         />
       </ToolSidebar>
@@ -458,6 +468,11 @@ export function Files({
             </MenuContent>
           </Menu>
         </div>
+        {!searching && reveal && (
+          <p className="border-b border-border px-3 py-2 text-xs whitespace-pre-wrap break-all">
+            {t(($) => $.files.directoryFile, { path: reveal })}
+          </p>
+        )}
         {!searching && !!selected.size && (
           <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border px-3">
             <span className="mr-auto text-xs">

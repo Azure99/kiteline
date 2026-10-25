@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Entry } from "@kiteline/shared/protocol";
 import { rpc } from "../lib/api";
 import { Button } from "../components/ui/button";
-import { Textarea } from "../components/ui/textarea";
+import { PathField } from "./path-field";
 import {
   Dialog,
   DialogContent,
@@ -94,7 +94,7 @@ export function FileNameDialog({
             <p className="break-all text-xs text-muted-foreground">
               {action.kind === "rename" ? action.entry.path : action.parent}
             </p>
-            <Textarea
+            <PathField
               ref={input}
               aria-label={t(($) => $.common.name)}
               rows={2}

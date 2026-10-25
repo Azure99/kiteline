@@ -68,7 +68,7 @@ test("workspace navigation retains known tool targets only within the same works
   expect(history.pushState).not.toHaveBeenCalled();
 });
 
-test("file line requests reject invalid numbers and normal file opens clear the old request", () => {
+test("file opens preserve search only when requested and reject invalid line numbers", () => {
   for (const line of ["0", "-1", "1.5", "Infinity", "NaN", "9007199254740992"])
     expect(parseRoute(new URL(`https://kiteline.test/?line=${line}`)).query.line).toBeUndefined();
   const target = { deviceId: "d", workspaceId: "w", path: "src/main.ts" };
@@ -84,15 +84,37 @@ test("file line requests reject invalid numbers and normal file opens clear the 
       browser.location = new URL(path, browser.location);
     },
   });
-  showFile(target, 61);
+  showFile(target, 61, true);
   expect(parseRoute(browser.location).query).toMatchObject({
     file: target.path,
     folder: "src",
     line: 61,
     draft: undefined,
+    search: true,
+    reveal: undefined,
+  });
+  const next = { ...target, path: "test/other.ts" };
+  showFile(next, 17, true);
+  expect(parseRoute(browser.location)).toMatchObject({
+    deviceId: target.deviceId,
+    workspaceId: target.workspaceId,
+    tool: "files",
+    query: {
+      file: next.path,
+      folder: "test",
+      line: 17,
+      draft: undefined,
+      search: true,
+      reveal: undefined,
+    },
+  });
+  showFile(target);
+  expect(parseRoute(browser.location).query).toMatchObject({
+    file: target.path,
+    folder: "src",
+    line: undefined,
+    draft: undefined,
     search: undefined,
     reveal: undefined,
   });
-  showFile(target);
-  expect(parseRoute(browser.location).query.line).toBeUndefined();
 });

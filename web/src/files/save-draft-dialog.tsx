@@ -3,7 +3,7 @@ import type { AgentEnvironment } from "@kiteline/shared/protocol";
 import { useTranslation } from "react-i18next";
 import { ErrorNotice } from "../components/error-notice";
 import { Button } from "../components/ui/button";
-import { Textarea } from "../components/ui/textarea";
+import { PathField } from "./path-field";
 import {
   Dialog,
   DialogContent,
@@ -34,6 +34,7 @@ export function SaveDraftDialog({
   });
   const [error, setError] = useState<unknown>();
   const generation = useRef(0);
+  const field = useRef<HTMLTextAreaElement>(null);
   useEffect(
     () => () => {
       generation.current++;
@@ -51,15 +52,19 @@ export function SaveDraftDialog({
         if (!open) close();
       }}
     >
-      <DialogContent>
+      <DialogContent initialFocus={field}>
         <DialogHeader>
           <DialogTitle>
             {draft.path ? t(($) => $.files.saveAs) : t(($) => $.common.save)}
           </DialogTitle>
+          <p className="mt-1 break-words text-xs text-muted-foreground">
+            {draft.deviceName} / {draft.workspaceName}
+          </p>
         </DialogHeader>
         <form
           onSubmit={(event) => {
             event.preventDefault();
+            if (!store.canSave(draft)) return;
             setError(undefined);
             const submitted = ++generation.current;
             void store.save(draft, path, null, targetOS).then((saved) => {
@@ -74,13 +79,17 @@ export function SaveDraftDialog({
           className="flex min-h-0 flex-col"
         >
           <div className="space-y-3 overflow-auto p-4">
-            <Textarea
-              aria-label={t(($) => $.files.savePath)}
-              autoCapitalize="none"
-              rows={2}
-              value={path}
-              onChange={(event) => setPath(event.target.value)}
-            />
+            <label className="block space-y-1 text-sm">
+              <span>{t(($) => $.files.savePath)}</span>
+              <PathField
+                ref={field}
+                aria-label={t(($) => $.files.savePath)}
+                autoCapitalize="none"
+                rows={2}
+                value={path}
+                onChange={(event) => setPath(event.target.value)}
+              />
+            </label>
             {!!error && (
               <div role="alert" className="text-sm text-destructive">
                 <ErrorNotice error={error} />

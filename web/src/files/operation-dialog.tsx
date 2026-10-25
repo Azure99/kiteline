@@ -13,7 +13,7 @@ import type {
 } from "@kiteline/shared/protocol";
 import { apiError, ApiError, cancelRequest, rpc, rpcReply } from "../lib/api";
 import { Button } from "../components/ui/button";
-import { Textarea } from "../components/ui/textarea";
+import { PathField } from "./path-field";
 import {
   Dialog,
   DialogContent,
@@ -305,7 +305,7 @@ export function FileOperationDialog({
             ) : (
               <label className="block space-y-1 text-sm">
                 <span>{t(($) => $.files.targetDirectory)}</span>
-                <Textarea
+                <PathField
                   aria-label={t(($) => $.files.targetDirectory)}
                   rows={1}
                   value={directory}
@@ -337,7 +337,7 @@ export function FileOperationDialog({
               >
                 <p className="break-all whitespace-pre-wrap text-sm">{row.entry.path}</p>
                 {action.kind !== "delete" && (
-                  <Textarea
+                  <PathField
                     aria-label={t(($) => $.files.targetNamed, {
                       path: row.entry.path ?? row.entry.name,
                     })}
