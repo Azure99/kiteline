@@ -3,6 +3,18 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 import hooks from "eslint-plugin-react-hooks";
 
+const nodeOnlyShared = [
+  "node/*",
+  "windows/*",
+  "protocol/stdio",
+  "protocol/ws",
+  "protocol/file-stream",
+  "protocol/http-stream",
+  "terminal/node",
+  "terminal/windows",
+  "terminal/pane",
+];
+
 export default tseslint.config(
   { ignores: ["**/dist/**", "**/node_modules/**"] },
   js.configs.recommended,
@@ -20,11 +32,8 @@ export default tseslint.config(
     },
   },
   {
-    files: [
-      "packages/web/src/**/*.{ts,tsx}",
-      "packages/shared/src/protocol/{index,rpc,tasks,text,client,ipc,navigation,terminal-observation}.ts",
-      "packages/shared/src/terminal/index.ts",
-    ],
+    files: ["packages/web/src/**/*.{ts,tsx}", "packages/shared/src/**/*.ts"],
+    ignores: nodeOnlyShared.map((path) => `packages/shared/src/${path}.ts`),
     rules: {
       "no-restricted-properties": [
         "error",
@@ -53,16 +62,7 @@ export default tseslint.config(
         {
           patterns: [
             {
-              group: [
-                "@kiteline/shared/protocol/stdio",
-                "@kiteline/shared/protocol/ws",
-                "@kiteline/shared/protocol/file-stream",
-                "@kiteline/shared/protocol/http-stream",
-                "@kiteline/shared/terminal/node",
-                "@kiteline/shared/terminal/windows",
-                "@kiteline/shared/windows/*",
-                "@kiteline/shared/node/*",
-              ],
+              group: nodeOnlyShared.map((path) => `@kiteline/shared/${path}`),
               message: "The browser cannot use Node-only shared entry points.",
             },
           ],

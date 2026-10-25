@@ -166,7 +166,7 @@ agent 的出站代理规则见[出站代理与证书](../guide/devices.md#出站
 
 - **构建目标**：`packages/web/vite.config.ts` 把 `build.target` 和 `build.cssTarget` 设为 `chrome97`，JavaScript 语法和 CSS 都转换到 Chromium 97 可用的形式。
 - **CSS layer**：Chromium 97 不支持 `@layer`，构建时 `@csstools/postcss-cascade-layers` 把 layer 展开为选择器权重。展开后，Tailwind 的 `base` 重置和应用的 `kiteline-editor-reset` 重置权重变高，会覆盖 CodeMirror 运行时注入的无 layer 样式；`packages/web/postcss/editor-reset-compat.ts` 因此让编辑器内只使用低权重的重置副本，编辑器外保留原规则。
-- **运行时补充**：`packages/web/src/lib/browser-compat.ts` 在 `main.tsx` 中最先导入，补上 Chromium 97 缺少的 `structuredClone`。`eslint.config.mjs` 对 Web 及其消费的 shared 入口禁用 Chromium 97 不可用的 API，并限制 Web 导入仅能在 Node 运行的 shared 入口。
+- **运行时补充**：`packages/web/src/lib/browser-compat.ts` 在 `main.tsx` 中最先导入，补上 Chromium 97 缺少的 `structuredClone`。`eslint.config.mjs` 对 Web 和可供浏览器使用的 shared 源码检查既定的不兼容 API，排除仅能在 Node 运行的 shared 模块，并限制 Web 导入这些模块。
 - **视口高度**：Chromium 97 没有 `dvh`，`packages/web/src/lib/viewport.ts` 此时用 `visualViewport` 测得的像素高度设置 `--app-height`，规则见[输入与焦点](interaction.md#输入与焦点)。
 
 以下改动后要在 Chromium 97 和当前 Chrome 中重新检查：
