@@ -13,6 +13,7 @@ export interface PaneEvents {
 }
 export function SplitPanes({
   deviceId,
+  deviceName,
   workspaceId,
   workspacePath,
   name,
@@ -29,6 +30,7 @@ export function SplitPanes({
   onSizes,
 }: {
   deviceId: string;
+  deviceName: string;
   workspaceId: string;
   workspacePath: string;
   name(id: string): string;
@@ -188,6 +190,7 @@ export function SplitPanes({
                 id={id}
                 sessionName={name(id)}
                 deviceId={deviceId}
+                deviceName={deviceName}
                 workspaceId={workspaceId}
                 workspacePath={workspacePath}
                 active={id === active}
@@ -230,6 +233,7 @@ function TerminalPane({
   id,
   sessionName,
   deviceId,
+  deviceName,
   workspaceId,
   workspacePath,
   active,
@@ -241,6 +245,7 @@ function TerminalPane({
   id: string;
   sessionName: string;
   deviceId: string;
+  deviceName: string;
   workspaceId: string;
   workspacePath: string;
   active: boolean;
@@ -267,6 +272,7 @@ function TerminalPane({
         ref={setActions}
         onCapabilities={events.capabilities}
         deviceId={deviceId}
+        deviceName={deviceName}
         workspaceId={workspaceId}
         workspacePath={workspacePath}
         sessionId={id}

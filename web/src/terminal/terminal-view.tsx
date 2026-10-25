@@ -62,6 +62,7 @@ export interface TerminalCapabilities {
 }
 export function TerminalView({
   deviceId,
+  deviceName,
   workspaceId,
   workspacePath,
   sessionId,
@@ -74,6 +75,7 @@ export function TerminalView({
   searchActive,
 }: {
   deviceId: string;
+  deviceName: string;
   workspaceId: string;
   workspacePath: string;
   sessionId: string;
@@ -603,6 +605,7 @@ export function TerminalView({
           <TouchControls
             terminal={terminal}
             deviceId={deviceId}
+            deviceName={deviceName}
             workspaceId={workspaceId}
             workspacePath={workspacePath}
             onPaste={canPaste ? paste : undefined}

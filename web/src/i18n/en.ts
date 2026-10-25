@@ -421,6 +421,15 @@ export const en = {
     link: "Link",
     selectDirectory: "Select this directory",
     port: "Port",
+    stripPrefixHelp:
+      "The service receives the path after the proxy prefix is removed; use this for pages served from the root path.",
+    keepPrefixHelp:
+      "The service receives the full prefix; configure the project to serve pages and resources under the base below.",
+    proxyResourceHint:
+      "If the page loads resources from /, check both the project base and WebSocket path.",
+    openURL: "URL to open",
+    projectBase: "Project base",
+    openDevicePort: "Open device port {{port}}",
     proxyPath: "Proxy path",
     stripPrefix: "Strip prefix",
     keepPrefix: "Keep prefix",

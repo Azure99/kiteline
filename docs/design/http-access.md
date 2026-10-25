@@ -114,7 +114,7 @@ server 在向浏览器发出响应头之前遇到的错误按下表返回（映�
 - 502 包括本地端口拒绝连接、本地服务在请求前关闭连接、返回非 HTTP 数据或无效状态码。
 - 页面导航指带 `Sec-Fetch-Mode: navigate` 或 `Sec-Fetch-Dest: document` 的 GET 请求。登录成功后，工作台只在 `returnTo` 是同源的 `/proxy/…` 或 `/absproxy/…` 路径时跳回原地址（`web/src/lib/login-return.ts`），其他情况见[导航与上下文](interaction.md#导航与上下文)。
 - 426 依据的版本记录只在 server 内存中（`Connections.releases`）。server 重启后，在 agent 再次尝试连接之前，未连接的设备返回 503。版本一致规则见[契约来源](protocol.md#契约来源)。
-- 页面导航得到英文 HTML 错误页，显示设备、端口和错误，并提供返回设备详情及重新加载的操作；其他请求得到 `text/plain` 消息。连接类错误会提示检查端口、监听地址和容器网络。所有错误响应带 `Cache-Control: no-store` 和 `Connection: close`；升级请求的错误响应直接写在原始 socket 上。
+- 页面导航得到英文 HTML 错误页，显示端口和实际错误；只有登录、设备权限及适用的 Origin 检查通过且找到设备后，才显示该设备的名称，名称与错误文本均作 HTML 转义。页面提供按原 deviceId 返回设备详情及重新加载的操作；其他请求得到 `text/plain` 消息。连接类错误会提示检查端口、监听地址和容器网络。所有错误响应带 `Cache-Control: no-store` 和 `Connection: close`；升级请求的错误响应直接写在原始 socket 上。
 - 响应头已经发出或 WebSocket 已经升级后，任何失败都只能断开连接。
 - 上游自己返回的状态码和正文（包括应用自己的 401 和 5xx）原样转发，不属于上表。
 - 管理接口使用另一张映射表（`unsupported` 为 400，未列出的错误码为 500），见[结果语义](protocol.md#结果语义)的错误码表。

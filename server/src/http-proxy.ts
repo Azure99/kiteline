@@ -69,6 +69,7 @@ function failure(
   destination: ServerResponse | Duplex,
   error: unknown,
   target?: Target,
+  deviceName?: string,
 ) {
   if (destination.destroyed) return;
   if (destination instanceof ServerResponse && destination.headersSent)
@@ -108,12 +109,14 @@ function failure(
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escape(title)}</title>
 <style>
-body{font:15px/1.6 system-ui,sans-serif;color:#263247;margin:48px auto;padding:0 24px;max-width:640px;overflow-wrap:anywhere}
+:root{color-scheme:light dark;background:#fff;color:#263247}
+body{font:15px/1.6 system-ui,sans-serif;margin:48px auto;padding:0 24px;max-width:640px;overflow-wrap:anywhere}
 h1{font-size:22px}
 a,button{display:inline-flex;align-items:center;min-height:44px;padding:0 12px;border:0;background:transparent;color:#4269ad;font:inherit;cursor:pointer}
+@media(prefers-color-scheme:dark){:root{background:#161b22;color:#dce3ed}a,button{color:#9fc5ff}}
 </style>
 <h1>${escape(title)}</h1>
-<p>${escape(target?.deviceId ?? "")}</p>
+<p>${escape(deviceName ?? "")}</p>
 <p>${escape(message)}</p>
 <a href="/devices${target ? `/${encodeURIComponent(target.deviceId)}` : ""}">Back to device</a>
 <button type="button" onclick="location.reload()">Reopen</button>
@@ -141,6 +144,7 @@ export class HttpProxy {
   ) {}
   async handle(request: IncomingMessage, destination: ServerResponse | Duplex, head?: Buffer) {
     let target: Target | undefined;
+    let deviceName: string | undefined;
     try {
       if (request.method === "CONNECT")
         throw new AppError("unsupported", "CONNECT is not supported");
@@ -152,6 +156,7 @@ export class HttpProxy {
         requireOrigin(request, entryOrigin);
       const device = this.connections.devices().find((value) => value.id === target!.deviceId);
       if (!device) throw new AppError("not_found", "Device not found");
+      deviceName = device.name;
       if (target.redirect) {
         if (destination instanceof ServerResponse) {
           closeIfBodyUnread(destination);
@@ -169,15 +174,16 @@ export class HttpProxy {
       }
       if (head !== undefined && request.headers.upgrade?.toLowerCase() !== "websocket")
         throw new AppError("unsupported", "Only WebSocket upgrades are supported");
-      await this.forward(request, destination, target, login, entryOrigin, head);
+      await this.forward(request, destination, target, device.name, login, entryOrigin, head);
     } catch (error) {
-      failure(request, destination, error, target);
+      failure(request, destination, error, target, deviceName);
     }
   }
   private async forward(
     request: IncomingMessage,
     destination: ServerResponse | Duplex,
     target: Target,
+    deviceName: string,
     login: Login,
     entryOrigin: string,
     head?: Buffer,
@@ -206,7 +212,7 @@ export class HttpProxy {
       if (finished || (!upgraded && incoming?.complete && (response?.headersSent || sentHead)))
         return;
       if (sentHead && !response) destination.destroy();
-      else failure(request, destination, error, target);
+      else failure(request, destination, error, target, deviceName);
       finish(error);
     };
     destination.on("error", fail);

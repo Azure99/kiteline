@@ -197,7 +197,7 @@ export class TerminalDisplay {
         const hoverLink = (_event: MouseEvent, uri: string) => {
           const target = deviceServiceLink(uri, this.deviceId);
           this.element.title = target
-            ? i18n.t(($) => $.devices.openService, { device: this.deviceId, port: target.port })
+            ? i18n.t(($) => $.devices.openDevicePort, { port: target.port })
             : uri;
         };
         const leaveLink = () => this.element.removeAttribute("title");

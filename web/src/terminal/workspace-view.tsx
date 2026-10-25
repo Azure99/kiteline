@@ -620,6 +620,7 @@ export function WorkspaceView({
         {(groups.length > 0 || opened.size > 0) && (
           <SplitPanes
             deviceId={device.id}
+            deviceName={device.name}
             workspaceId={workspace.id}
             workspacePath={workspace.path}
             name={name}

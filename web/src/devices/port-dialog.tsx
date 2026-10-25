@@ -48,7 +48,8 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
     return () => request.current?.abort();
   }, [load]);
   const value = /^\d{1,5}$/.test(port) ? Number(port) : 0;
-  const url = value >= 1 && value <= 65535 ? serviceURL(device.id, value, retain).href : undefined;
+  const service = value >= 1 && value <= 65535 ? serviceURL(device.id, value, retain) : undefined;
+  const url = service?.href;
   const copyFailure = copyError?.id === url ? copyError : undefined;
   function open() {
     if (url) window.open(url, "_blank", "noopener,noreferrer");
@@ -74,7 +75,7 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
           <div className="space-y-4 overflow-auto p-5">
             <p className="break-all text-sm font-medium">{device.name}</p>
             <label className="block space-y-2 text-sm">
-              <span>{t(($) => $.devices.port)}</span>
+              <span className="block">{t(($) => $.devices.port)}</span>
               <Input
                 ref={input}
                 aria-label={t(($) => $.devices.port)}
@@ -100,7 +101,12 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
                     reset();
                   }}
                 />
-                {t(($) => $.devices.stripPrefix)}
+                <span>
+                  <span className="block">{t(($) => $.devices.stripPrefix)}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {t(($) => $.devices.stripPrefixHelp)}
+                  </span>
+                </span>
               </label>
               <label className="flex min-h-8 items-center gap-2 max-desk:min-h-11">
                 <input
@@ -112,9 +118,27 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
                     reset();
                   }}
                 />
-                {t(($) => $.devices.keepPrefix)}
+                <span>
+                  <span className="block">{t(($) => $.devices.keepPrefix)}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {t(($) => $.devices.keepPrefixHelp)}
+                  </span>
+                </span>
               </label>
             </fieldset>
+            <p className="text-xs text-muted-foreground">{t(($) => $.devices.proxyResourceHint)}</p>
+            {service && (
+              <div className="space-y-1 text-xs">
+                <p className="text-muted-foreground">{t(($) => $.devices.openURL)}</p>
+                <p className="select-text break-all font-mono">{service.href}</p>
+                {retain && (
+                  <>
+                    <p className="text-muted-foreground">{t(($) => $.devices.projectBase)}</p>
+                    <p className="select-text break-all font-mono">{service.pathname}</p>
+                  </>
+                )}
+              </div>
+            )}
             <div>
               <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
                 <span>{t(($) => $.devices.listeningPorts)}</span>
@@ -140,6 +164,8 @@ export function PortDialog({ device, onClose }: { device: Device; onClose: () =>
                     <Button
                       key={entry}
                       variant="outline"
+                      aria-pressed={entry === value}
+                      className={entry === value ? "bg-primary-soft text-primary" : undefined}
                       onClick={() => {
                         setPort(String(entry));
                         reset();

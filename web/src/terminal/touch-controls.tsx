@@ -13,6 +13,7 @@ import { showFile } from "../files/navigation";
 export function TouchControls({
   terminal,
   deviceId,
+  deviceName,
   workspaceId,
   workspacePath,
   onTap,
@@ -20,6 +21,7 @@ export function TouchControls({
 }: {
   terminal: Terminal;
   deviceId: string;
+  deviceName: string;
   workspaceId: string;
   workspacePath: string;
   onTap: () => void;
@@ -148,7 +150,7 @@ export function TouchControls({
             </IconButton>
             {service && (
               <IconButton
-                label={t(($) => $.devices.openService, { device: deviceId, port: service.port })}
+                label={t(($) => $.devices.openService, { device: deviceName, port: service.port })}
                 onClick={() => window.open(service.url, "_blank", "noopener,noreferrer")}
               >
                 <ExternalLink />

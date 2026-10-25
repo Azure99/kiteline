@@ -96,7 +96,7 @@ async function fixture(handler: RequestListener, channels = 128) {
     tls.closeAllConnections();
     upstream.closeAllConnections();
     await new Promise<void>((resolve) => tls.close(() => resolve()));
-    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+    if (upstream.listening) await new Promise<void>((resolve) => upstream.close(() => resolve()));
     setDefaultCACertificates(originalCA);
     await close();
   });
@@ -178,6 +178,60 @@ test("development HTML preserves the upstream CSP or its absence", async () => {
         expect(response.text).toBe(method === "HEAD" ? "" : html);
       }
 });
+
+test("service failures name only an authorized device and preserve the original error response", async () => {
+  const f = await fixture((_req, res) => res.end("service ready"));
+  const name = "Proxy <Device> & \"local\" 'lab'";
+  const escapedName = "Proxy &lt;Device&gt; &amp; &quot;local&quot; &#39;lab&#39;";
+  f.store.renameDevice(f.identity.deviceId, name);
+  const navigation = { "sec-fetch-mode": "navigate" };
+  const restricted = f.store.createCredential("Other devices", [], null);
+  const forbidden = await f.call(undefined, "GET", {
+    ...navigation,
+    cookie: "",
+    authorization: `Bearer ${restricted.token}`,
+  });
+  expect(forbidden.status).toBe(403);
+  expect(forbidden.text).toContain("Credential does not permit this device");
+  expect(forbidden.text).not.toContain(name);
+  expect(forbidden.text).not.toContain(escapedName);
+  expect(await f.call(undefined, "GET", { cookie: "" })).toMatchObject({
+    status: 401,
+    text: "Please sign in\n",
+  });
+
+  await new Promise<void>((resolve, reject) =>
+    f.upstream.close((error) => (error ? reject(error) : resolve())),
+  );
+  const failed = await f.call(undefined, "GET", navigation);
+  expect(failed.status).toBe(502);
+  expect(failed.headers["content-type"]).toBe("text/html; charset=utf-8");
+  expect(failed.headers["cache-control"]).toBe("no-store");
+  expect(failed.headers.connection).toBe("close");
+  expect(failed.text).toContain(`Device port ${f.upstreamPort}`);
+  expect(failed.text).toContain(`<p>${escapedName}</p>`);
+  expect(failed.text).not.toContain(name);
+  expect(failed.text).toContain("ECONNREFUSED");
+  expect(failed.text).toContain("check the port, listening address, and container network");
+  expect(failed.text).toContain(`href="/devices/${f.identity.deviceId}"`);
+  expect(failed.text).toContain(">Reopen</button>");
+  const plain = await f.call();
+  expect(plain.status).toBe(502);
+  expect(plain.headers["content-type"]).toBe("text/plain; charset=utf-8");
+  expect(plain.text).toContain("ECONNREFUSED");
+  expect(plain.text).not.toContain(name);
+  expect(plain.text).not.toContain(escapedName);
+
+  await f.agent.close();
+  await expect.poll(() => f.kiteline.connections.devices()[0]?.status).toBe("offline");
+  const offline = await f.call(undefined, "GET", navigation);
+  expect(offline.status).toBe(503);
+  expect(offline.text).toContain(`Device port ${f.upstreamPort}`);
+  expect(offline.text).toContain(`<p>${escapedName}</p>`);
+  expect(offline.text).toContain("<p>Device offline</p>");
+  expect(offline.text).toContain(`href="/devices/${f.identity.deviceId}"`);
+  expect(await f.call()).toMatchObject({ status: 503, text: "Device offline\n" });
+}, 15_000);
 
 test("real HTTP tunnel preserves raw paths, bodies, finite header rules and application errors", async () => {
   const f = await fixture(async (req, res) => {

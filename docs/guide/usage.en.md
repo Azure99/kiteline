@@ -343,9 +343,11 @@ The workbench opens HTTP services listening on local device ports, including Web
 
 Choose "Open port" beside the device name in the left navigation, then enter a port in that device's dialog. Open navigation first if it is collapsed. Candidates are a snapshot and may include non-HTTP services; unlisted ports can be entered manually.
 
+The dialog shows the actual URL used for opening and copying. "Keep prefix" also shows the base to configure in the project.
+
 The service must listen on `127.0.0.1`, `::1`, `0.0.0.0` or `::` on the agent's machine or container. See [Run in a container](devices.en.md#run-in-a-container).
 
-In terminal output, `http:` links whose hosts are `localhost`, `127.0.0.1`, `[::1]`, `0.0.0.0` or `[::]` are converted to that device's port address. Click on desktop; on phones, long-press to select the full link and tap "Open device port". Other links open their original addresses.
+In terminal output, `http:` links whose hosts are `localhost`, `127.0.0.1`, `[::1]`, `0.0.0.0` or `[::]` are converted to that device's port address. Click on desktop; on phones, long-press to select the full link and tap "Open device port", which identifies the current device name and port. Other links open their original addresses.
 
 ### Two path modes
 
@@ -354,7 +356,7 @@ In terminal output, `http:` links whose hosts are `localhost`, `127.0.0.1`, `[::
 | "Strip prefix" | `/proxy/DEVICE_ID/PORT/…`    | Prefix removed               |
 | "Keep prefix"  | `/absproxy/DEVICE_ID/PORT/…` | Full prefix retained         |
 
-"Strip prefix" suits pages using only relative URLs. If a page references resources with paths starting with `/`, requests go to the workbench root, causing blank pages or MIME-type errors. Use "Keep prefix" for these projects and set the project's base to `/absproxy/DEVICE_ID/PORT/`.
+"Strip prefix" suits pages using only relative URLs. If a page references resources with paths starting with `/`, requests go to the workbench root, causing blank pages or MIME-type errors. Use "Keep prefix" for these projects and set the project's base to the `/absproxy/DEVICE_ID/PORT/` shown in the dialog. Also check that application-generated resource and WebSocket URLs use this prefix.
 
 The service receives the workbench address as `Host`, such as `kiteline.example.com:8443`; the workbench login cookie is not forwarded. Find the device ID in its page URL `/devices/DEVICE_ID`, or choose "Keep prefix" and "Copy link".
 
@@ -397,12 +399,12 @@ const socket = new WebSocket(socketUrl);
 ### Common errors
 
 - Redirected to sign-in: the browser is not signed in or its login expired. Signing in returns to the original URL automatically.
-- 502: no service on the port, the service listens only on another address, or it is not HTTP.
-- 503: device offline. 426: agent/server version mismatch; see [Upgrade the agent](devices.en.md#upgrade-the-agent). 404: device ID does not exist.
+- 502: check the target port and actual error shown, whether an HTTP service listens on that port at a reachable address, and the agent container's network.
+- 503: device offline; check that device's agent connection. 426: agent/server version mismatch; see [Upgrade the agent](devices.en.md#upgrade-the-agent). 404: device ID does not exist.
 - 504 or 429: connection timeout or device connection capacity reached. Retry later.
 - Blank page or MIME-type error: use "Keep prefix" and configure the base.
 
-Workbench-generated error pages are in English; errors returned by the development service appear unchanged.
+Workbench-generated error pages are in English and show the target device name, port and actual error. After addressing the problem, click "Reopen" to open the URL again manually. "Back to device" returns to that device's details. Errors returned by the development service appear unchanged.
 
 ### Security
 
