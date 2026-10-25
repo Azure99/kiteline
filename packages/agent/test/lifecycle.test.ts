@@ -7,6 +7,8 @@ import { Agent } from "../src/agent.js";
 import { privateDirectory } from "../src/config.js";
 import { testConfig } from "./support/config.js";
 import { ScheduledTasks } from "../src/tasks/index.js";
+import { TemporaryFiles } from "../src/files/temporary.js";
+import { AppError, type OperationError } from "@kiteline/shared/protocol";
 import { localRequest } from "../src/local.js";
 
 test("agent shutdown waits for an accepted workspace publication", async () => {
@@ -33,6 +35,79 @@ test("agent shutdown waits for an accepted workspace publication", async () => {
     ).rejects.toMatchObject({ code: "cancelled" });
   } finally {
     await agent.close();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("agent shutdown waits for cancelled bulk cleanup and its completion notification", async () => {
+  const dataDir = await mkdtemp("/var/tmp/kiteline-bulk-shutdown-");
+  const root = join(dataDir, "workspace");
+  await mkdir(root);
+  await writeFile(join(root, "source"), "published");
+  const agent = new Agent(testConfig(dataDir), {
+    deviceId: "test",
+    deviceToken: "test",
+    server: "https://localhost",
+  });
+  const changed = vi.spyOn(agent.watches, "changed").mockImplementation(() => {});
+  const controller = new AbortController();
+  let resume!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    resume = resolve;
+  });
+  const create = TemporaryFiles.prototype.create;
+  const held = vi.spyOn(TemporaryFiles.prototype, "create").mockImplementationOnce(async function (
+    this: TemporaryFiles,
+    ...args
+  ) {
+    const file = await create.apply(this, args);
+    const dispose = file.dispose.bind(file);
+    file.dispose = async () => {
+      controller.abort(new AppError("cancelled", "Cancelled after publication"));
+      await gate;
+      await dispose();
+    };
+    return file;
+  });
+  try {
+    const workspace = await agent.metadata.add(root);
+    const response = agent.dispatch(
+      "files.copy",
+      {
+        workspaceId: workspace.id,
+        items: [
+          { path: "source", targetPath: "published", collision: "error" },
+          { path: "source", targetPath: "pending", collision: "error" },
+        ],
+      },
+      controller.signal,
+    );
+    const error = await response.catch((error: OperationError) => error);
+    expect(error).toMatchObject({
+      outcome: "partial",
+      result: {
+        items: [{ outcome: "succeeded" }, { outcome: "failed", error: { code: "cancelled" } }],
+      },
+    });
+    const snapshot = structuredClone((error as OperationError).result);
+    expect(await readFile(join(root, "published"), "utf8")).toBe("published");
+    expect(changed).not.toHaveBeenCalled();
+    let closed = false;
+    const closing = agent.close().then(() => {
+      closed = true;
+    });
+    await Promise.resolve();
+    expect(closed).toBe(false);
+    resume();
+    await closing;
+    expect(changed).toHaveBeenCalledExactlyOnceWith(workspace.id, true);
+    expect((error as OperationError).result).toEqual(snapshot);
+    await expect(access(join(root, "pending"))).rejects.toMatchObject({ code: "ENOENT" });
+  } finally {
+    resume();
+    await agent.close();
+    held.mockRestore();
+    changed.mockRestore();
     await rm(dataDir, { recursive: true, force: true });
   }
 });

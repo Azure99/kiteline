@@ -35,11 +35,11 @@ async function setup() {
   const { id } = await metadata.add(root);
   const temporary = new TemporaryFiles(home);
   const files = new BinaryFiles(config, metadata, temporary);
-  return { home, root, config, id, temporary, files, signal: new AbortController().signal };
+  return { home, root, config, id, files, signal: new AbortController().signal };
 }
 
 test("binary upload is independent of text limits and replaces only the confirmed link entry", async () => {
-  const { root, id, files, temporary, signal } = await setup();
+  const { root, id, files, signal } = await setup();
   await writeFile(join(root, "shared"), "original");
   await symlink("shared", join(root, "config"));
   const where = await locate(root, "config");
@@ -55,15 +55,10 @@ test("binary upload is independent of text limits and replaces only the confirme
   const upload = await files.prepare(id, "config", bytes.length, false, version, signal);
   try {
     for (let i = 0; i < bytes.length; i += 65536)
-      upload.received += await temporary.write(
-        upload.temporary,
-        bytes.subarray(i, i + 65536),
-        upload.received,
-        signal,
-      );
+      await upload.temporary.write(bytes.subarray(i, i + 65536), signal);
     expect(await files.save(upload, signal)).toMatchObject({ path: "config", size: bytes.length });
   } finally {
-    await temporary.release(upload.temporary, upload);
+    await upload.temporary.dispose();
   }
   expect(await readFile(join(root, "config"))).toEqual(bytes);
   expect(await readFile(join(root, "shared"), "utf8")).toBe("original");
@@ -72,17 +67,17 @@ test("binary upload is independent of text limits and replaces only the confirme
   expect(info.mode & 0o777).toBe(0o666 & ~process.umask());
   expect((await readdir(root)).filter((name) => name.startsWith(".kiteline-"))).toEqual([]);
   const competing = await files.prepare(id, "new", 3, true, undefined, signal);
-  competing.received = await temporary.write(competing.temporary, Buffer.from("new"), 0, signal);
+  await competing.temporary.write(Buffer.from("new"), signal);
   await writeFile(join(root, "new"), "competitor");
   await expect(files.save(competing, signal)).rejects.toMatchObject({ code: "conflict" });
-  await temporary.release(competing.temporary, competing);
+  await competing.temporary.dispose();
   expect(await readFile(join(root, "new"), "utf8")).toBe("competitor");
 });
 
 test.each([0o600, 0o755, undefined])(
   "upload preserves regular target permissions: %s",
   async (mode) => {
-    const { root, id, files, temporary, signal } = await setup();
+    const { root, id, files, signal } = await setup();
     const path = join(root, "target");
     let version: string | undefined;
     if (mode !== undefined) {
@@ -93,10 +88,10 @@ test.each([0o600, 0o755, undefined])(
     }
     const upload = await files.prepare(id, "target", 5, mode === undefined, version, signal);
     try {
-      upload.received = await temporary.write(upload.temporary, Buffer.from("after"), 0, signal);
+      await upload.temporary.write(Buffer.from("after"), signal);
       await files.save(upload, signal);
     } finally {
-      await temporary.release(upload.temporary, upload);
+      await upload.temporary.dispose();
     }
     expect(await readFile(path, "utf8")).toBe("after");
     expect((await lstat(path)).mode & 0o777).toBe(mode ?? 0o666 & ~process.umask());
@@ -105,13 +100,13 @@ test.each([0o600, 0o755, undefined])(
 );
 
 test("upload cancellation and changed targets leave no published or temporary file", async () => {
-  const { root, id, files, temporary, signal } = await setup();
+  const { root, id, files, signal } = await setup();
   const controller = new AbortController();
   const upload = await files.prepare(id, "cancelled", 1, true, undefined, signal);
-  upload.received = await temporary.write(upload.temporary, Buffer.from("x"), 0, signal);
+  await upload.temporary.write(Buffer.from("x"), signal);
   controller.abort();
   await expect(files.save(upload, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
-  await temporary.release(upload.temporary, upload);
+  await upload.temporary.dispose();
   await expect(lstat(join(root, "cancelled"))).rejects.toMatchObject({ code: "ENOENT" });
 
   const path = join(root, "changed");
@@ -119,10 +114,10 @@ test("upload cancellation and changed targets leave no published or temporary fi
   const where = await locate(root, "changed");
   const version = versionOf(where.parent, where.name, await lstat(path, { bigint: true }));
   const changed = await files.prepare(id, "changed", 1, false, version, signal);
-  changed.received = await temporary.write(changed.temporary, Buffer.from("x"), 0, signal);
+  await changed.temporary.write(Buffer.from("x"), signal);
   await writeFile(path, "external");
   await expect(files.save(changed, signal)).rejects.toMatchObject({ code: "conflict" });
-  await temporary.release(changed.temporary, changed);
+  await changed.temporary.dispose();
   expect(await readFile(path, "utf8")).toBe("external");
   expect((await lstat(path)).mode & 0o777).toBe(0o600);
   expect((await readdir(root)).filter((name) => name.startsWith(".kiteline-"))).toEqual([]);

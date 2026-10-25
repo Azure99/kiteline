@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { AppError } from "@kiteline/shared/protocol";
-import { publish } from "../src/files/publish.js";
+import { withPublicationLock } from "../src/files/publish.js";
 
 test("cancelled waiters return promptly without letting writes pass the actual owner", async () => {
   let release!: () => void;
@@ -13,17 +13,17 @@ test("cancelled waiters return promptly without letting writes pass the actual o
   });
   const order: string[] = [];
   const active = new AbortController();
-  const owner = publish(async () => {
+  const owner = withPublicationLock(async () => {
     entered();
     await gate;
     order.push("owner");
   }, active.signal);
   await ready;
   const cancelled = new AbortController();
-  const waiter = publish(async () => {
+  const waiter = withPublicationLock(async () => {
     order.push("cancelled");
   }, cancelled.signal);
-  const next = publish(async () => {
+  const next = withPublicationLock(async () => {
     order.push("next");
   });
   try {

@@ -1,22 +1,19 @@
 import { AppError, type UploadedFile } from "@kiteline/shared/protocol";
 import type { AgentConfig } from "../config.js";
 import type { MetadataStore } from "../metadata.js";
-import { publish } from "./publish.js";
+import { withPublicationLock } from "./publish.js";
 import { checkTarget, targetAgain } from "./destination.js";
 import { locate, logicalPath } from "./paths.js";
-import { publishTemporary, type Temporary, type TemporaryFiles } from "./temporary.js";
+import type { StagedFile, TemporaryFiles } from "./temporary.js";
 
 export interface UploadWrite {
   workspaceId: string;
   path: string;
   size: number;
-  received: number;
   target: Awaited<ReturnType<typeof locate>>;
   collision: "error" | "replace";
   expectedTargetVersion?: string;
-  temporary: Temporary;
-  published: boolean;
-  uncertain: boolean;
+  temporary: StagedFile;
 }
 
 export class BinaryFiles {
@@ -41,7 +38,7 @@ export class BinaryFiles {
     const root = this.metadata.workspace(workspaceId).path;
     path = await logicalPath(root, path, createOnly, signal);
     const collision = createOnly ? "error" : "replace";
-    const target = await publish(async () => {
+    const target = await withPublicationLock(async () => {
       const location = await locate(root, path);
       await checkTarget(location, { targetPath: path, collision, expectedTargetVersion }, false);
       return location;
@@ -52,19 +49,16 @@ export class BinaryFiles {
       path,
       target,
       size,
-      received: 0,
       collision,
       expectedTargetVersion,
       temporary,
-      published: false,
-      uncertain: false,
     };
   }
 
   async save(item: UploadWrite, signal: AbortSignal): Promise<UploadedFile> {
-    if (item.received !== item.size)
+    if (item.temporary.bytesWritten !== item.size)
       throw new AppError("invalid_argument", "Received body length is incomplete");
-    return publish(async () => {
+    return withPublicationLock(async () => {
       const current = await targetAgain(
         this.metadata.workspace(item.workspaceId).path,
         item.path,
@@ -79,12 +73,11 @@ export class BinaryFiles {
         },
         false,
       );
-      await item.temporary.handle.chmod(
+      await item.temporary.seal(
         target?.isFile() ? Number(target.mode & 0o777n) : 0o666 & ~process.umask(),
       );
-      await this.temporary.closeFile(item.temporary);
       signal.throwIfAborted();
-      await publishTemporary(item, current.absolute, item.collision === "replace");
+      await item.temporary.publish(current.absolute, { replace: item.collision === "replace" });
       return { path: item.path, size: item.size };
     }, signal);
   }

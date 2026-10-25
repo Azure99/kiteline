@@ -4,31 +4,82 @@ import { join } from "node:path";
 import { AppError, OperationError } from "@kiteline/shared/protocol";
 import { atomicJson, readJson } from "@kiteline/shared/node/files";
 import { stateFiles } from "../config.js";
-import { publish } from "./publish.js";
+import { withPublicationLock } from "./publish.js";
 import { renameEntry } from "./rename.js";
 
 interface TemporaryRecord {
   name: string;
   parent: string;
 }
-export interface TrackedTemporary extends TemporaryRecord {
-  path: string;
-}
-export interface Temporary extends TrackedTemporary {
-  handle: FileHandle;
+export class StagedEntry {
+  private publication: "unpublished" | "published" | "uncertain" = "unpublished";
+  constructor(
+    private readonly path: string,
+    private readonly remove: (published: boolean) => Promise<void>,
+  ) {}
+
+  get mayHaveChangedTarget() {
+    return this.publication !== "unpublished";
+  }
+
+  async publish(target: string, options: { replace: boolean }) {
+    try {
+      await renameEntry(this.path, target, options);
+      this.publication = "published";
+    } catch (error) {
+      if (error instanceof OperationError && error.outcome === "unknown")
+        this.publication = "uncertain";
+      throw error;
+    }
+  }
+
+  dispose() {
+    return this.remove(this.publication === "published");
+  }
 }
 
-export async function publishTemporary(
-  item: { temporary: TrackedTemporary; published: boolean; uncertain: boolean },
-  target: string,
-  replace: boolean,
-) {
-  try {
-    await renameEntry(item.temporary.path, target, { replace });
-    item.published = true;
-  } catch (error) {
-    if (error instanceof OperationError && error.outcome === "unknown") item.uncertain = true;
-    throw error;
+export class StagedFile extends StagedEntry {
+  private written = 0;
+  constructor(
+    path: string,
+    readonly handle: FileHandle,
+    remove: (published: boolean) => Promise<void>,
+  ) {
+    super(path, remove);
+  }
+
+  get bytesWritten() {
+    return this.written;
+  }
+
+  async write(bytes: Buffer, signal: AbortSignal) {
+    signal.throwIfAborted();
+    let offset = 0;
+    while (offset < bytes.length) {
+      signal.throwIfAborted();
+      const { bytesWritten } = await this.handle.write(
+        bytes,
+        offset,
+        bytes.length - offset,
+        this.written,
+      );
+      if (!bytesWritten) throw new AppError("io_error", "File writing could not continue");
+      offset += bytesWritten;
+      this.written += bytesWritten;
+    }
+  }
+
+  async seal(mode: number) {
+    await this.handle.chmod(mode);
+    await this.handle.close();
+  }
+
+  override async dispose() {
+    try {
+      await this.handle.close();
+    } finally {
+      await super.dispose();
+    }
   }
 }
 
@@ -50,7 +101,7 @@ export class TemporaryFiles {
         console.error("Temporary file records:", this.path, error);
     }
     this.startup = Promise.all(
-      this.records.map((record) => publish(() => this.removeLocked(record))),
+      this.records.map((record) => withPublicationLock(() => this.removeLocked(record))),
     ).then(() => {});
   }
 
@@ -58,8 +109,8 @@ export class TemporaryFiles {
     await this.startup;
   }
 
-  create(parent: string, signal: AbortSignal): Promise<Temporary> {
-    return publish(async () => {
+  create(parent: string, signal: AbortSignal): Promise<StagedFile> {
+    return withPublicationLock(async () => {
       const name = `.kiteline-${randomUUID()}.tmp`;
       const path = join(parent, name);
       const handle = await open(path, "wx+", 0o600);
@@ -67,7 +118,9 @@ export class TemporaryFiles {
       this.records.push(record);
       try {
         await atomicJson(this.path, this.records);
-        return { ...record, path, handle };
+        return new StagedFile(path, handle, (published) =>
+          withPublicationLock(() => this.removeLocked(record, published)),
+        );
       } catch (error) {
         await handle
           .close()
@@ -83,8 +136,8 @@ export class TemporaryFiles {
     target: string | Buffer,
     signal: AbortSignal,
     type?: "file" | "dir" | "junction",
-  ): Promise<TrackedTemporary> {
-    return publish(async () => {
+  ): Promise<StagedEntry> {
+    return withPublicationLock(async () => {
       const name = `.kiteline-${randomUUID()}.tmp`;
       const path = join(parent, name);
       await symlink(target, path, type);
@@ -92,41 +145,14 @@ export class TemporaryFiles {
       this.records.push(record);
       try {
         await atomicJson(this.path, this.records);
-        return { ...record, path };
+        return new StagedEntry(path, (published) =>
+          withPublicationLock(() => this.removeLocked(record, published)),
+        );
       } catch (error) {
         await this.removeLocked(record);
         throw error;
       }
     }, signal);
-  }
-
-  closeFile(temporary: Temporary) {
-    return temporary.handle.close();
-  }
-
-  async write(temporary: Temporary, bytes: Buffer, position: number, signal: AbortSignal) {
-    signal.throwIfAborted();
-    let offset = 0;
-    while (offset < bytes.length) {
-      signal.throwIfAborted();
-      const { bytesWritten } = await temporary.handle.write(
-        bytes,
-        offset,
-        bytes.length - offset,
-        position + offset,
-      );
-      if (!bytesWritten) throw new AppError("io_error", "File writing could not continue");
-      offset += bytesWritten;
-    }
-    return offset;
-  }
-
-  async release(temporary: TrackedTemporary, { published }: { published: boolean }) {
-    try {
-      if ("handle" in temporary) await this.closeFile(temporary as Temporary);
-    } finally {
-      await publish(() => this.removeLocked(temporary, published));
-    }
   }
 
   private async removeLocked(record: TemporaryRecord, published = false) {

@@ -3,7 +3,7 @@ import { opendir, mkdir, stat } from "node:fs/promises";
 import type { BigIntStats, Dir, Dirent } from "node:fs";
 import { basename, dirname, join, posix } from "node:path";
 import { AppError, type DirectoryListing, type Entry } from "@kiteline/shared/protocol";
-import { publish } from "./publish.js";
+import { withPublicationLock } from "./publish.js";
 import { devicePath, entryName, readDirectoryEntry, realPath, sameObject } from "./paths.js";
 import { CursorBudget, CursorTable } from "../cursor-budget.js";
 
@@ -122,7 +122,7 @@ export class Directories {
   async mkdir(path: string, signal?: AbortSignal) {
     devicePath(path);
     const name = entryName(basename(path));
-    return publish(async () => {
+    return withPublicationLock(async () => {
       const target = join(await realPath(dirname(path)), name);
       signal?.throwIfAborted();
       await mkdir(target);

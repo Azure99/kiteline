@@ -19,7 +19,7 @@ import {
   type TaskRun,
 } from "@kiteline/shared/protocol";
 import type { DoctorReport } from "../src/doctor.js";
-import { publish } from "../src/files/publish.js";
+import { withPublicationLock } from "../src/files/publish.js";
 
 test("shortcut icons round-trip through RPC and metadata, and omitting one clears the old value", async () => {
   const dataDir = await mkdtemp("/var/tmp/kiteline-shortcut-rpc-");
@@ -356,7 +356,7 @@ test("bulk file requests outlive the RPC timeout and still cancel while publicat
   let held: Promise<void> | undefined;
   const hold = async () => {
     let started = false;
-    held = publish(
+    held = withPublicationLock(
       () =>
         new Promise<void>((resolve) => {
           release = resolve;

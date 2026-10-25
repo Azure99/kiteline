@@ -140,7 +140,6 @@ export class Agent {
     this.fileChannels = new FileChannels(
       this.textFiles,
       new BinaryFiles(config, this.metadata, this.temporaryFiles),
-      this.temporaryFiles,
       this.metadata,
       config,
       identity,

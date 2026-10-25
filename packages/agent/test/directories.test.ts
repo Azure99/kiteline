@@ -100,8 +100,6 @@ test("closing a first directory read waits for it and prevents a late live curso
 });
 
 test("directory and repository pages share slots until their resources are released", async () => {
-  const saved = { ...agentLimits };
-  Object.assign(agentLimits, { listPageEntries: 1, discoveryDirectories: 1, cursorsPerDevice: 2 });
   const data = await directory();
   const root = join(data, "project");
   await mkdir(join(root, "one"), { recursive: true });
@@ -112,7 +110,13 @@ test("directory and repository pages share slots until their resources are relea
   const directories = new Directories(budget);
   const repos = new Repositories(metadata, budget);
   const signal = new AbortController().signal;
+  const saved = { ...agentLimits };
   try {
+    Object.assign(agentLimits, {
+      listPageEntries: 1,
+      discoveryDirectories: 1,
+      cursorsPerDevice: 2,
+    });
     const listing = await directories.list(root);
     expect(listing.entries.nextCursor).toBeTruthy();
     const scan = await repos.discover(workspace.id, undefined, signal);
@@ -129,8 +133,11 @@ test("directory and repository pages share slots until their resources are relea
     const available = await directories.list(root);
     expect(available.entries.items).toHaveLength(1);
   } finally {
-    await Promise.all([directories.close(), repos.close()]);
-    Object.assign(agentLimits, saved);
+    try {
+      await Promise.all([directories.close(), repos.close()]);
+    } finally {
+      Object.assign(agentLimits, saved);
+    }
   }
 });
 
@@ -144,8 +151,6 @@ test("repository continuation renews on acquisition and a busy reader cannot ren
   const workspace = await metadata.add(root);
   const repos = new Repositories(metadata, new CursorBudget());
   const saved = { ...agentLimits };
-  Object.assign(agentLimits, { discoveryDirectories: 1, cursorsPerDevice: 1 });
-  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
   let resume!: () => void;
   let entered!: () => void;
   const held = new Promise<void>((resolve) => {
@@ -157,6 +162,8 @@ test("repository continuation renews on acquisition and a busy reader cannot ren
   let readingSignal: AbortSignal | undefined;
   let pending: Promise<unknown> | undefined;
   try {
+    Object.assign(agentLimits, { discoveryDirectories: 1, cursorsPerDevice: 1 });
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     const first = await repos.discover(workspace.id, undefined, new AbortController().signal);
     expect(first.scanCursor).toBeTruthy();
     await vi.advanceTimersByTimeAsync(59_000);
@@ -185,10 +192,13 @@ test("repository continuation renews on acquisition and a busy reader cannot ren
     expect(available.scanCursor).toBeTruthy();
   } finally {
     resume();
-    await pending?.catch(() => {});
-    await repos.close();
-    vi.restoreAllMocks();
-    vi.useRealTimers();
-    Object.assign(agentLimits, saved);
+    try {
+      await pending?.catch(() => {});
+      await repos.close();
+    } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+      Object.assign(agentLimits, saved);
+    }
   }
 });

@@ -16,7 +16,7 @@ import {
   type PathError,
 } from "@kiteline/shared/protocol";
 import type { MetadataStore } from "../metadata.js";
-import { publish } from "./publish.js";
+import { withPublicationLock } from "./publish.js";
 import {
   containsDirectory,
   entryInfo,
@@ -29,7 +29,7 @@ import {
 } from "./paths.js";
 import { checkTarget, targetAgain } from "./destination.js";
 import { renameEntry } from "./rename.js";
-import { TemporaryFiles, type TrackedTemporary } from "./temporary.js";
+import { TemporaryFiles, type StagedEntry } from "./temporary.js";
 
 interface ObjectRef {
   path: string;
@@ -86,12 +86,17 @@ export class FileOperations {
     const root = this.metadata.workspace(workspaceId).path;
     const controller = new AbortController();
     signal = AbortSignal.any([signal, controller.signal]);
+    // Reserve a conservative share for diagnostics alongside paths and other result fields.
+    const detailBudgetDivisor = 4;
+    const detailBudgetPerItem = Math.floor(
+      agentLimits.resultBytes / (items.length * detailBudgetDivisor),
+    );
     const states: ResultState[] = items.map(() => ({
       completed: 0,
       failed: 0,
       failures: [],
       detailBytes: 0,
-      budget: Math.floor(agentLimits.resultBytes / (items.length * 4)),
+      budget: detailBudgetPerItem,
       truncated: false,
       unknown: false,
       finished: false,
@@ -104,13 +109,12 @@ export class FileOperations {
       resolve = yes;
       reject = no;
     });
-    let totalCompleted = 0,
-      bytes = 0,
-      lastProgress = 0;
-    const report = (path: string, count = 0, written = 0, force = false) => {
-      totalCompleted += count;
-      bytes += written;
-      if (!settled && (force || Date.now() - lastProgress >= 200)) {
+    let totalCompleted = 0;
+    let bytes = 0;
+    let lastProgress = 0;
+    const progressIntervalMs = 200;
+    const reportProgress = (path: string, { force = false }: { force?: boolean } = {}) => {
+      if (!settled && (force || Date.now() - lastProgress >= progressIntervalMs)) {
         lastProgress = Date.now();
         progress?.({ phase: "running", currentPath: path, completedItems: totalCompleted, bytes });
       }
@@ -151,11 +155,12 @@ export class FileOperations {
         };
         const countCompleted = (path: string) => {
           state.completed++;
-          report(path, 1);
+          totalCompleted++;
+          reportProgress(path);
         };
         try {
           signal.throwIfAborted();
-          const source = await publish(async () => {
+          const source = await withPublicationLock(async () => {
             const path = await logicalPath(root, item.path, false, signal);
             if (kind !== "delete")
               item.targetPath = await logicalPath(
@@ -173,21 +178,19 @@ export class FileOperations {
             signal,
             result: state,
             countCompleted,
-            reportBytes: (count) => report(source.path, 0, count),
+            reportBytes: (count) => {
+              bytes += count;
+              reportProgress(source.path);
+            },
           };
           if (kind === "delete") await this.remove(context, source, markFinished);
-          else
-            await this.copyMove(context, {
-              source,
-              item,
-              move: kind === "move",
-              markFinished,
-            });
+          else if (kind === "copy") await this.copyEntry(context, { source, item, markFinished });
+          else await this.moveEntry(context, { source, item, markFinished });
         } catch (error) {
           fail(state, item.path, error);
         }
         state.finished = true;
-        report(item.path, 0, 0, true);
+        reportProgress(item.path, { force: true });
       }
     })();
     this.executions.set(execution, controller);
@@ -216,7 +219,7 @@ export class FileOperations {
     } else if (!source.info.isFile() && !source.info.isSymbolicLink()) {
       throw new AppError("unsupported", "Device nodes, sockets, and FIFOs cannot be deleted");
     }
-    await publish(async () => {
+    await withPublicationLock(async () => {
       const current = await verify(root, source);
       await change(
         result,
@@ -233,180 +236,183 @@ export class FileOperations {
     }, signal);
   }
 
-  private async copyMove(
+  private async copyEntry(
     context: OperationContext,
     {
       source,
       item,
-      move,
       expectedParent,
       markFinished = () => {},
     }: {
       source: ObjectRef;
       item: CopyItem;
-      move: boolean;
       expectedParent?: ObjectRef;
       markFinished?: () => void;
     },
   ) {
-    const { root, signal, result, countCompleted, reportBytes } = context;
-    if (!source.info.isDirectory() && !source.info.isFile() && !source.info.isSymbolicLink())
-      throw new AppError("unsupported", "Device nodes, sockets, and FIFOs cannot be copied");
-    const target = await publish(async () => {
-      await verify(root, source);
-      const target = await locate(root, item.targetPath);
-      if (expectedParent && !sameObject(target.parentInfo, expectedParent.info))
-        throw new AppError("conflict", "Target directory has changed");
-      if (source.location.absolute === target.absolute)
-        throw new AppError("invalid_argument", "Source and target are the same");
-      if (source.info.isDirectory() && (await containsDirectory(source.info, target.parent)))
-        throw new AppError(
-          "invalid_argument",
-          "Cannot copy or move an item into itself or a subdirectory",
-        );
-      await checkTarget(target, item, source.info.isDirectory());
-      return target;
-    }, signal);
-    if (move) {
-      try {
-        await publish(async () => {
-          await verify(root, source);
-          const current = await targetAgain(root, item.targetPath, target);
-          const destination = await checkTarget(current, item, source.info.isDirectory());
-          if (destination && sameObject(source.info, destination))
-            throw new AppError(
-              "invalid_argument",
-              "Source and target refer to the same directory entry object",
-            );
-          await change(
-            result,
-            signal,
-            () =>
-              renameEntry(source.location.absolute, current.absolute, {
-                replace: item.collision === "replace",
-              }),
-            () => {
-              markFinished();
-              countCompleted(source.path);
-            },
-          );
-        }, signal);
-        return;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EXDEV") throw error;
-      }
-    }
+    const { root, signal, result } = context;
+    const target = await prepareTarget(context, source, item, expectedParent);
     if (source.info.isDirectory()) {
-      const created = await publish(async () => {
-        const current = await targetAgain(root, item.targetPath, target);
-        await change(
-          result,
-          signal,
-          () => mkdir(current.absolute, { mode: Number(source.info.mode & 0o777n) | 0o700 }),
-          () => countCompleted(item.targetPath),
-        );
-        return capture(root, item.targetPath);
-      }, signal);
+      const created = await createTargetDirectory(context, source, item, target);
       await this.children(root, source, signal, result, async (child) => {
         const childTarget = posix.join(item.targetPath, child.location.name);
-        await this.copyMove(context, {
+        await this.copyEntry(context, {
           source: child,
           item: { path: child.path, targetPath: childTarget, collision: "error" },
-          move,
           expectedParent: created,
         });
       });
-      await publish(async () => {
-        await verify(root, created);
-        await change(
-          result,
-          signal,
-          () => chmod(created.location.absolute, Number(source.info.mode & 0o777n)),
-          () => {
-            if (!move) markFinished();
-          },
-        );
-      }, signal);
-      if (move)
-        await publish(async () => {
-          await verify(root, source);
-          await change(result, signal, () => rmdir(source.location.absolute), markFinished);
-        }, signal);
+      await restoreDirectoryMode(context, source, created, markFinished);
       return;
     }
 
-    let temporary: TrackedTemporary | undefined;
-    let published = false;
-    let copied = source;
+    const { temporary } = await this.copyFileOrLinkToTemporary(context, source, target.parent);
     try {
-      if (source.info.isSymbolicLink()) {
-        const text = await readlink(source.location.absolute, { encoding: "buffer" });
-        temporary = await this.temporary.createLink(
-          target.parent,
-          text,
-          signal,
-          await linkType(source.location.absolute),
-        );
-      } else {
-        const file = await open(
-          source.location.absolute,
-          constants.O_RDONLY | constants.O_NONBLOCK,
-        );
-        try {
-          const info = await file.stat({ bigint: true });
-          if (!info.isFile() || !sameObject(info, source.info))
-            throw new AppError("conflict", "Source file has changed");
-          copied = { ...source, info };
-          const output = await this.temporary.create(target.parent, signal);
-          temporary = output;
-          const block = Buffer.alloc(limits.dataChunkBytes);
-          let position = 0;
-          while (position < Number(info.size)) {
-            signal.throwIfAborted();
-            const { bytesRead } = await file.read(
-              block,
-              0,
-              Math.min(block.length, Number(info.size) - position),
-              position,
-            );
-            if (!bytesRead) throw new AppError("conflict", "Source file shrank during copying");
-            await this.temporary.write(output, block.subarray(0, bytesRead), position, signal);
-            position += bytesRead;
-            reportBytes(bytesRead);
-          }
-          const after = await file.stat({ bigint: true });
-          if (!sameContentStat(info, after))
-            throw new AppError("conflict", "Source file changed during copying");
-          await output.handle.chmod(Number(info.mode & 0o777n));
-          await this.temporary.closeFile(output);
-        } finally {
-          await file.close();
-        }
-      }
-      await publish(async () => {
+      await publishCopiedEntry(context, temporary, item, target, markFinished);
+    } finally {
+      await temporary.dispose();
+    }
+  }
+
+  private async moveEntry(
+    context: OperationContext,
+    {
+      source,
+      item,
+      expectedParent,
+      markFinished = () => {},
+    }: {
+      source: ObjectRef;
+      item: CopyItem;
+      expectedParent?: ObjectRef;
+      markFinished?: () => void;
+    },
+  ) {
+    const { root, signal, result, countCompleted } = context;
+    const target = await prepareTarget(context, source, item, expectedParent);
+    try {
+      await withPublicationLock(async () => {
+        await verify(root, source);
         const current = await targetAgain(root, item.targetPath, target);
-        await checkTarget(current, item, false);
+        const destination = await checkTarget(current, item, source.info.isDirectory());
+        if (destination && sameObject(source.info, destination))
+          throw new AppError(
+            "invalid_argument",
+            "Source and target refer to the same directory entry object",
+          );
         await change(
           result,
           signal,
           () =>
-            renameEntry(temporary!.path, current.absolute, {
+            renameEntry(source.location.absolute, current.absolute, {
               replace: item.collision === "replace",
             }),
           () => {
-            published = true;
-            if (!move) markFinished();
-            countCompleted(item.targetPath);
+            markFinished();
+            countCompleted(source.path);
           },
         );
       }, signal);
-      if (move)
-        await publish(async () => {
-          await verify(root, copied, true);
-          await change(result, signal, () => unlink(copied.location.absolute), markFinished);
-        }, signal);
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EXDEV") throw error;
+    }
+    await this.moveAcrossFilesystems(context, source, item, target, markFinished);
+  }
+
+  private async moveAcrossFilesystems(
+    context: OperationContext,
+    source: ObjectRef,
+    item: CopyItem,
+    target: Awaited<ReturnType<typeof locate>>,
+    markFinished: () => void,
+  ) {
+    const { root, signal, result } = context;
+    if (source.info.isDirectory()) {
+      const created = await createTargetDirectory(context, source, item, target);
+      await this.children(root, source, signal, result, async (child) => {
+        const childTarget = posix.join(item.targetPath, child.location.name);
+        await this.moveEntry(context, {
+          source: child,
+          item: { path: child.path, targetPath: childTarget, collision: "error" },
+          expectedParent: created,
+        });
+      });
+      await restoreDirectoryMode(context, source, created);
+      await withPublicationLock(async () => {
+        await verify(root, source);
+        await change(result, signal, () => rmdir(source.location.absolute), markFinished);
+      }, signal);
+      return;
+    }
+
+    const { temporary, copiedSource } = await this.copyFileOrLinkToTemporary(
+      context,
+      source,
+      target.parent,
+    );
+    try {
+      await publishCopiedEntry(context, temporary, item, target);
+      await withPublicationLock(async () => {
+        await verify(root, copiedSource, true);
+        await change(result, signal, () => unlink(copiedSource.location.absolute), markFinished);
+      }, signal);
     } finally {
-      if (temporary) await this.temporary.release(temporary, { published });
+      await temporary.dispose();
+    }
+  }
+
+  private async copyFileOrLinkToTemporary(
+    context: OperationContext,
+    source: ObjectRef,
+    parent: string,
+  ) {
+    const { signal, reportBytes } = context;
+    let temporary: StagedEntry | undefined;
+    try {
+      if (source.info.isSymbolicLink()) {
+        const text = await readlink(source.location.absolute, { encoding: "buffer" });
+        temporary = await this.temporary.createLink(
+          parent,
+          text,
+          signal,
+          await linkType(source.location.absolute),
+        );
+        return { temporary, copiedSource: source };
+      }
+
+      const file = await open(source.location.absolute, constants.O_RDONLY | constants.O_NONBLOCK);
+      try {
+        const info = await file.stat({ bigint: true });
+        if (!info.isFile() || !sameObject(info, source.info))
+          throw new AppError("conflict", "Source file has changed");
+        const copiedSource = { ...source, info };
+        const output = await this.temporary.create(parent, signal);
+        temporary = output;
+        const block = Buffer.alloc(limits.dataChunkBytes);
+        while (output.bytesWritten < Number(info.size)) {
+          signal.throwIfAborted();
+          const { bytesRead } = await file.read(
+            block,
+            0,
+            Math.min(block.length, Number(info.size) - output.bytesWritten),
+            output.bytesWritten,
+          );
+          if (!bytesRead) throw new AppError("conflict", "Source file shrank during copying");
+          await output.write(block.subarray(0, bytesRead), signal);
+          reportBytes(bytesRead);
+        }
+        const after = await file.stat({ bigint: true });
+        if (!sameContentStat(info, after))
+          throw new AppError("conflict", "Source file changed during copying");
+        await output.seal(Number(info.mode & 0o777n));
+        return { temporary, copiedSource };
+      } finally {
+        await file.close();
+      }
+    } catch (error) {
+      if (temporary) await temporary.dispose();
+      throw error;
     }
   }
 
@@ -430,7 +436,7 @@ export class FileOperations {
         try {
           if (!isUtf8(raw))
             throw new AppError("unsupported", "Name is not valid UTF-8; the item is retained");
-          const child = await publish(async () => {
+          const child = await withPublicationLock(async () => {
             await verify(root, source);
             return capture(root, path);
           }, signal);
@@ -522,6 +528,92 @@ async function change<T>(
   return value;
 }
 
+async function createTargetDirectory(
+  context: OperationContext,
+  source: ObjectRef,
+  item: CopyItem,
+  target: Awaited<ReturnType<typeof locate>>,
+) {
+  const { root, signal, result, countCompleted } = context;
+  return withPublicationLock(async () => {
+    const current = await targetAgain(root, item.targetPath, target);
+    await change(
+      result,
+      signal,
+      () => mkdir(current.absolute, { mode: Number(source.info.mode & 0o777n) | 0o700 }),
+      () => countCompleted(item.targetPath),
+    );
+    return capture(root, item.targetPath);
+  }, signal);
+}
+
+async function restoreDirectoryMode(
+  context: OperationContext,
+  source: ObjectRef,
+  created: ObjectRef,
+  confirmed: () => void = () => {},
+) {
+  const { root, signal, result } = context;
+  await withPublicationLock(async () => {
+    await verify(root, created);
+    await change(
+      result,
+      signal,
+      () => chmod(created.location.absolute, Number(source.info.mode & 0o777n)),
+      confirmed,
+    );
+  }, signal);
+}
+
+async function publishCopiedEntry(
+  context: OperationContext,
+  temporary: StagedEntry,
+  item: CopyItem,
+  target: Awaited<ReturnType<typeof locate>>,
+  confirmed: () => void = () => {},
+) {
+  const { root, signal, result, countCompleted } = context;
+  await withPublicationLock(async () => {
+    const current = await targetAgain(root, item.targetPath, target);
+    await checkTarget(current, item, false);
+    await change(
+      result,
+      signal,
+      () => temporary.publish(current.absolute, { replace: item.collision === "replace" }),
+      () => {
+        confirmed();
+        countCompleted(item.targetPath);
+      },
+    );
+  }, signal);
+}
+
+async function prepareTarget(
+  context: OperationContext,
+  source: ObjectRef,
+  item: CopyItem,
+  expectedParent?: ObjectRef,
+) {
+  const { root, signal } = context;
+  if (!source.info.isDirectory() && !source.info.isFile() && !source.info.isSymbolicLink())
+    throw new AppError("unsupported", "Device nodes, sockets, and FIFOs cannot be copied");
+  return withPublicationLock(async () => {
+    await verify(root, source);
+    const target = await locate(root, item.targetPath);
+    if (expectedParent && !sameObject(target.parentInfo, expectedParent.info))
+      throw new AppError("conflict", "Target directory has changed");
+    if (source.location.absolute === target.absolute)
+      throw new AppError("invalid_argument", "Source and target are the same");
+    if (source.info.isDirectory() && (await containsDirectory(source.info, target.parent)))
+      throw new AppError(
+        "invalid_argument",
+        "Cannot copy or move an item into itself or a subdirectory",
+      );
+    await checkTarget(target, item, source.info.isDirectory());
+    return target;
+  }, signal);
+}
+
 async function capture(root: string, path: string): Promise<ObjectRef> {
   const location = await locate(root, path);
   return { path, location, info: await entryInfo(location.absolute) };
@@ -549,8 +641,18 @@ function fail(state: ResultState, path: string, error: unknown) {
   if (error instanceof OperationError && error.outcome === "unknown") state.unknown = true;
   const failure = { path, error: asError(error) };
   if (!state.error) {
-    const length = Math.max(16, Math.floor((state.budget - 100) / 3));
-    state.error = { code: failure.error.code, message: failure.error.message.slice(0, length) };
+    // Leave conservative room for error fields and message encoding.
+    const errorFieldsReserveBytes = 100;
+    const messageEncodingDivisor = 3;
+    const minimumMessageLength = 16;
+    const maxErrorMessageLength = Math.max(
+      minimumMessageLength,
+      Math.floor((state.budget - errorFieldsReserveBytes) / messageEncodingDivisor),
+    );
+    state.error = {
+      code: failure.error.code,
+      message: failure.error.message.slice(0, maxErrorMessageLength),
+    };
     state.detailBytes += Buffer.byteLength(JSON.stringify(state.error));
     if (state.error.message.length !== failure.error.message.length) state.truncated = true;
   }

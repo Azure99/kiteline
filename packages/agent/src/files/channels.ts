@@ -14,7 +14,6 @@ import type { AgentConfig, Identity } from "../config.js";
 import type { TextFiles, TextWrite } from "./save.js";
 import { readWorkspaceFile, type FileRead } from "./read.js";
 import type { BinaryFiles, UploadWrite } from "./upload.js";
-import type { TemporaryFiles } from "./temporary.js";
 import { connectChannel } from "../network.js";
 import type { MetadataStore } from "../metadata.js";
 
@@ -36,7 +35,6 @@ export class FileChannels {
   constructor(
     private files: TextFiles,
     private binaryFiles: BinaryFiles,
-    private temporary: TemporaryFiles,
     private metadata: MetadataStore,
     private config: AgentConfig,
     private identity: Identity,
@@ -95,14 +93,9 @@ export class FileChannels {
           if (binary) {
             const item = channel.write.value;
             signal.throwIfAborted();
-            if (item.received + data.length > item.size)
+            if (item.temporary.bytesWritten + data.length > item.size)
               throw new AppError("invalid_argument", "Received body exceeds the declared length");
-            item.received += await this.temporary.write(
-              item.temporary,
-              data,
-              item.received,
-              signal,
-            );
+            await item.temporary.write(data, signal);
           } else if (frame?.type === "end") {
             let reply;
             try {
@@ -117,7 +110,7 @@ export class FileChannels {
             } catch (error) {
               reply = errorReply(id, error);
             }
-            if (channel.write.value.published || channel.write.value.uncertain)
+            if (channel.write.value.temporary.mayHaveChangedTarget)
               this.changed(channel.write.value.workspaceId);
             await send(JSON.stringify({ type: "result", reply }));
             this.finish(id, undefined, true);
@@ -238,7 +231,7 @@ export class FileChannels {
       await finish(() => channel.read?.close());
       if (channel.write) {
         const item = channel.write.value;
-        await finish(() => this.temporary.release(item.temporary, item));
+        await finish(() => item.temporary.dispose());
       }
     })();
     this.cleanup.add(cleanup);

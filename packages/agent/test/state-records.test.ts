@@ -12,11 +12,13 @@ test("unreadable temporary records are logged and ignored; readable residual pat
     const signal = new AbortController().signal;
     await owner.load();
     const pending = await owner.create(root, signal);
-    await owner.write(pending, Buffer.from("pending"), 0, signal);
-    await owner.closeFile(pending);
+    await pending.write(Buffer.from("pending"), signal);
+    await pending.handle.close();
     await owner.close();
     const path = join(root, "temporary-files.json");
     const valid = await fs.readFile(path, "utf8");
+    const [record] = JSON.parse(valid) as { name: string; parent: string }[];
+    const pendingPath = join(record!.parent, record!.name);
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     for (const content of ["", "null"]) {
       await fs.writeFile(path, content);
@@ -27,7 +29,7 @@ test("unreadable temporary records are logged and ignored; readable residual pat
         await restored.close();
       }
       expect(await fs.readFile(path, "utf8")).toBe(content);
-      expect(await fs.readFile(pending.path, "utf8")).toBe("pending");
+      expect(await fs.readFile(pendingPath, "utf8")).toBe("pending");
     }
     expect(logged).toHaveBeenCalledTimes(2);
     logged.mockRestore();
@@ -36,7 +38,7 @@ test("unreadable temporary records are logged and ignored; readable residual pat
     try {
       await restored.load();
       await restored.close();
-      await expect(fs.readFile(pending.path)).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(fs.readFile(pendingPath)).rejects.toMatchObject({ code: "ENOENT" });
       expect(JSON.parse(await fs.readFile(path, "utf8"))).toEqual([]);
     } finally {
       await restored.close();

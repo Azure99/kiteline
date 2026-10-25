@@ -35,11 +35,11 @@ async function setup() {
   cleanups.push(() => temporary.close());
   const files = new TextFiles(config, metadata, temporary);
   const signal = new AbortController().signal;
-  return { root, data, id: workspace.id, files, temporary, signal, config };
+  return { root, data, id: workspace.id, files, signal, config };
 }
 
 test("text revisions survive same-byte inode replacement and save follows links atomically", async () => {
-  const { files, temporary, id, root, signal, config } = await setup();
+  const { files, id, root, signal, config } = await setup();
   const original = Buffer.from("\uFEFFa\r\n中\r\n");
   await writeFile(join(root, "target"), original, { mode: 0o640 });
   await symlink("target", join(root, "link"));
@@ -60,9 +60,9 @@ test("text revisions survive same-byte inode replacement and save follows links 
   await current.finish();
   const bytes = Buffer.from(encodeText("edited\n", format));
   const write = await files.prepare(id, "link", bytes.length, false, first.meta.revision, signal);
-  write.received = await temporary.write(write.temporary, bytes, 0, signal);
+  await write.temporary.write(bytes, signal);
   const saved = await files.save(write, signal);
-  await temporary.release(write.temporary, write);
+  await write.temporary.dispose();
   expect(await readlink(join(root, "link"))).toBe("target");
   expect(await readFile(join(root, "target"))).toEqual(bytes);
   expect((await stat(join(root, "target"))).mode & 0o777).toBe(0o640);
@@ -72,21 +72,21 @@ test("text revisions survive same-byte inode replacement and save follows links 
 });
 
 test("late saves conflict after content changes or rename and never recreate the old target", async () => {
-  const { files, temporary, id, root, signal, config } = await setup();
+  const { files, id, root, signal, config } = await setup();
   await writeFile(join(root, "a"), "old");
   const before = await readWorkspaceFile(root, "a", "text", config.limits, signal);
   await before.finish();
   const write = await files.prepare(id, "a", 3, false, before.meta.revision, signal);
-  write.received = await temporary.write(write.temporary, Buffer.from("new"), 0, signal);
+  await write.temporary.write(Buffer.from("new"), signal);
   await writeFile(join(root, "a"), "external");
   await expect(files.save(write, signal)).rejects.toMatchObject({ code: "conflict" });
-  await temporary.release(write.temporary, write);
+  await write.temporary.dispose();
   expect(await readFile(join(root, "a"), "utf8")).toBe("external");
   const next = await files.prepare(id, "a", 3, false, before.meta.revision, signal);
-  next.received = await temporary.write(next.temporary, Buffer.from("new"), 0, signal);
+  await next.temporary.write(Buffer.from("new"), signal);
   await rename(join(root, "a"), join(root, "renamed"));
   await expect(files.save(next, signal)).rejects.toMatchObject({ code: "conflict" });
-  await temporary.release(next.temporary, next);
+  await next.temporary.dispose();
   await expect(stat(join(root, "a"))).rejects.toMatchObject({ code: "ENOENT" });
   expect((await readdir(root)).filter((name) => name.startsWith(".kiteline-"))).toEqual([]);
 });
@@ -184,46 +184,46 @@ test("automatic open uses content and independent limits while preserving text s
 });
 
 test("startup cleans registered temporary paths and exclusive saves reject occupied targets", async () => {
-  const { files, temporary, id, root, data, signal } = await setup();
+  const { files, id, root, data, signal } = await setup();
   const pending = await files.prepare(id, "new", 3, true, undefined, signal);
-  pending.received = await temporary.write(pending.temporary, Buffer.from("new"), 0, signal);
-  await temporary.closeFile(pending.temporary);
+  await pending.temporary.write(Buffer.from("new"), signal);
+  await pending.temporary.handle.close();
   await writeFile(join(root, ".kiteline-unregistered.tmp"), "keep");
   const restored = new TemporaryFiles(data);
   await restored.load();
   await restored.close();
-  await expect(stat(pending.temporary.path)).rejects.toMatchObject({ code: "ENOENT" });
+  expect(await readdir(root)).toEqual([".kiteline-unregistered.tmp"]);
   expect(await readFile(join(root, ".kiteline-unregistered.tmp"), "utf8")).toBe("keep");
   const race = await files.prepare(id, "new", 3, true, undefined, signal);
-  race.received = await temporary.write(race.temporary, Buffer.from("new"), 0, signal);
+  await race.temporary.write(Buffer.from("new"), signal);
   await symlink("missing", join(root, "new"));
   await expect(files.save(race, signal)).rejects.toMatchObject({ code: "EEXIST" });
-  await temporary.release(race.temporary, race);
+  await race.temporary.dispose();
   expect(await readlink(join(root, "new"))).toBe("missing");
 });
 
 test("lowering the editor limit still allows saving a reduced draft against its original version", async () => {
-  const { files, temporary, id, root, config, signal } = await setup();
+  const { files, id, root, config, signal } = await setup();
   await writeFile(join(root, "a"), "long baseline");
   const before = await readWorkspaceFile(root, "a", "text", config.limits, signal);
   await before.finish();
   config.limits.editorBytes = 4;
   const write = await files.prepare(id, "a", 3, false, before.meta.revision, signal);
-  write.received = await temporary.write(write.temporary, Buffer.from("new"), 0, signal);
+  await write.temporary.write(Buffer.from("new"), signal);
   await files.save(write, signal);
-  await temporary.release(write.temporary, write);
+  await write.temporary.dispose();
   expect(await readFile(join(root, "a"), "utf8")).toBe("new");
 });
 
 test("cancelled temporary writers are cleaned after their real writes finish", async () => {
-  const { files, temporary, id, signal } = await setup();
+  const { files, id, root, signal } = await setup();
   const cancelled = await files.prepare(id, "cancelled", 6, true, undefined, signal);
-  cancelled.received = await temporary.write(cancelled.temporary, Buffer.from("one"), 0, signal);
+  await cancelled.temporary.write(Buffer.from("one"), signal);
   const controller = new AbortController();
   controller.abort(new Error("cancelled"));
-  await expect(
-    temporary.write(cancelled.temporary, Buffer.from("two"), cancelled.received, controller.signal),
-  ).rejects.toThrow("cancelled");
-  await temporary.release(cancelled.temporary, cancelled);
-  await expect(stat(cancelled.temporary.path)).rejects.toMatchObject({ code: "ENOENT" });
+  await expect(cancelled.temporary.write(Buffer.from("two"), controller.signal)).rejects.toThrow(
+    "cancelled",
+  );
+  await cancelled.temporary.dispose();
+  expect(await readdir(root)).toEqual([]);
 });

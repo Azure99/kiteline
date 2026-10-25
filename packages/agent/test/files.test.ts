@@ -14,7 +14,7 @@ import { Files } from "../src/files/index.js";
 import { Directories } from "../src/files/directories.js";
 import { MetadataStore } from "../src/metadata.js";
 import { testConfig } from "./support/config.js";
-import { publish } from "../src/files/publish.js";
+import { withPublicationLock } from "../src/files/publish.js";
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -103,7 +103,7 @@ test("directory changes expire continuation and cancelled queued mutations do no
   });
   const controller = new AbortController();
   let release!: () => void;
-  const barrier = publish(
+  const barrier = withPublicationLock(
     () =>
       new Promise<void>((resolve) => {
         release = resolve;

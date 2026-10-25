@@ -9,7 +9,7 @@ import {
 } from "@kiteline/shared/protocol";
 import type { Directories } from "./directories.js";
 import type { MetadataStore } from "../metadata.js";
-import { publish } from "./publish.js";
+import { withPublicationLock } from "./publish.js";
 import {
   entryInfo,
   entryName,
@@ -81,7 +81,7 @@ export class Files {
     const root = this.metadata.workspace(workspaceId).path;
     let path = relativePath(input);
     if (path === ".") throw new AppError("conflict", "Workspace root directory already exists");
-    return publish(async () => {
+    return withPublicationLock(async () => {
       path = await logicalPath(root, path, true, signal);
       const target = await locate(root, path);
       signal?.throwIfAborted();
@@ -113,7 +113,7 @@ export class Files {
     const root = this.metadata.workspace(workspaceId).path;
     const path = relativePath(input);
     const name = entryName(newName);
-    return publish(async () => {
+    return withPublicationLock(async () => {
       const actual = await logicalPath(root, path, false, signal);
       const source = await locate(root, actual);
       const info = await entryInfo(source.absolute);

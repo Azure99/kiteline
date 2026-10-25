@@ -7,7 +7,7 @@ import { decodeText } from "@kiteline/shared/protocol/text";
 import { readExact, revisionOf, revisionDigest } from "./read.js";
 import type { AgentConfig } from "../config.js";
 import type { MetadataStore } from "../metadata.js";
-import { publish } from "./publish.js";
+import { withPublicationLock } from "./publish.js";
 import {
   entryInfo,
   locate,
@@ -17,19 +17,16 @@ import {
   relativePath,
   versionOf,
 } from "./paths.js";
-import { publishTemporary, type TemporaryFiles, type Temporary } from "./temporary.js";
+import type { TemporaryFiles, StagedFile } from "./temporary.js";
 
 export interface TextWrite {
   path: string;
   workspaceId: string;
   size: number;
-  received: number;
   expectedRevision?: string;
   createOnly: boolean;
   target: string;
-  temporary: Temporary;
-  published: boolean;
-  uncertain: boolean;
+  temporary: StagedFile;
 }
 
 export class TextFiles {
@@ -86,24 +83,20 @@ export class TextFiles {
       workspaceId,
       path,
       size,
-      received: 0,
       expectedRevision,
       createOnly,
       target,
       temporary,
-      published: false,
-      uncertain: false,
     };
   }
 
   async save(item: TextWrite, signal: AbortSignal): Promise<SavedFile> {
-    if (item.received !== item.size)
+    if (item.temporary.bytesWritten !== item.size)
       throw new AppError("invalid_argument", "Received body length is incomplete");
     const content = await readExact(item.temporary.handle, item.size, signal);
     decodeText(content);
     const { dev } = await item.temporary.handle.stat({ bigint: true });
-    await this.temporary.closeFile(item.temporary);
-    return publish(async () => {
+    return withPublicationLock(async () => {
       signal.throwIfAborted();
       let target: string;
       let mode = 0o666 & ~process.umask();
@@ -137,14 +130,9 @@ export class TextFiles {
         mode = current.mode;
       }
       if (target !== item.target) throw new AppError("conflict", "Save target path has changed");
-      const prepared = await open(item.temporary.path, "r+");
-      try {
-        await prepared.chmod(mode);
-      } finally {
-        await prepared.close();
-      }
+      await item.temporary.seal(mode);
       signal.throwIfAborted();
-      await publishTemporary(item, target, !item.createOnly);
+      await item.temporary.publish(target, { replace: !item.createOnly });
       const result = {
         path: item.path,
         size: item.size,

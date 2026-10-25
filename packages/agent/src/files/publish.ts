@@ -1,7 +1,7 @@
 let publishing = false;
 const waiting = new Set<() => void>();
 
-export function publish<T>(action: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+export function withPublicationLock<T>(action: () => Promise<T>, signal?: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
     const cancel = () => {
       waiting.delete(start);
