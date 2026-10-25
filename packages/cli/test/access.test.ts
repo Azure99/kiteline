@@ -500,6 +500,143 @@ test("terminal argument errors are local, finite, and do not consume stdin", asy
   }
 });
 
+test("terminal condition epochs use 128 UTF-16 units before any HTTP request", async () => {
+  const root = await directory();
+  await writeFile(
+    join(root, ".kiteline.json"),
+    JSON.stringify({ device: "d", workspace: "w", session: "s" }),
+  );
+  const screen = {
+    position: { epoch: "current", seq: 1, tail: null, attrs: false },
+    input: { epoch: "current", inputSeq: 0 },
+    cols: 80,
+    rows: 24,
+    active: "normal",
+    cursor: { x: 0, y: 0, visible: true },
+    historyGap: false,
+    synchronizedOutput: false,
+    screen: [],
+  };
+  let rejectRemote = false;
+  const server = await fixture((request, response) => {
+    const { method } = JSON.parse(request.body);
+    if (rejectRemote)
+      return json(response, {
+        outcome: "failed",
+        error: { code: "invalid_argument", message: "Rejected by device" },
+      });
+    let result: unknown;
+    if (method === "sessions.snapshot")
+      result = { reason: "unchanged", position: screen.position, input: screen.input };
+    else if (method === "sessions.send")
+      result = { before: { epoch: "current", seq: 1 }, input: screen.input };
+    else if (method === "sessions.resize") result = { cols: 80, rows: 24 };
+    else result = { reason: "timeout", snapshot: screen };
+    json(response, { outcome: "succeeded", result });
+  });
+  await save(root, server.url);
+  const epoch = "界".repeat(126) + "😀";
+  const cases = [
+    {
+      args: (epoch: string) => [
+        "snapshot",
+        "--if-changed",
+        JSON.stringify({ epoch, seq: 0, tail: null, attrs: false }),
+      ],
+      method: "sessions.snapshot",
+      condition: "ifChanged",
+    },
+    {
+      args: (epoch: string) => ["send", "--text", "Enter", "--if-input", `${epoch}:0002`],
+      method: "sessions.send",
+      condition: "ifInput",
+    },
+    {
+      args: (epoch: string) => ["wait", "--mode", "change", "--after", `${epoch}:0002`],
+      method: "sessions.wait",
+      condition: "after",
+    },
+  ];
+  for (const entry of cases) {
+    const count = server.requests.length;
+    const accepted = await cli(root, ["terminal", ...entry.args(epoch), "--json"]);
+    expect(accepted.code, accepted.stdout + accepted.stderr).toBe(0);
+    expect(server.requests).toHaveLength(count + 1);
+    const request = JSON.parse(server.requests.at(-1)!.body);
+    expect(request.method).toBe(entry.method);
+    expect(request.params[entry.condition].epoch).toBe(epoch);
+    expect(request.params).not.toHaveProperty("timeoutMs");
+    if (entry.method === "sessions.send")
+      expect(request.params).toMatchObject({
+        input: { type: "text", text: "Enter" },
+        ifInput: { inputSeq: 2 },
+      });
+    if (entry.method === "sessions.wait") {
+      expect(request.params.after.seq).toBe(2);
+      expect(request.params).not.toHaveProperty("quietMs");
+    }
+    const rejected = await cli(root, ["terminal", ...entry.args(epoch + "x"), "--json"]);
+    expect(rejected.code, rejected.stdout + rejected.stderr).toBe(2);
+    expect(JSON.parse(rejected.stdout)).toMatchObject({ error: { code: "invalid_argument" } });
+    expect(server.requests).toHaveLength(count + 1);
+  }
+  const resized = await cli(root, [
+    "terminal",
+    "resize",
+    "--cols",
+    "00080",
+    "--rows",
+    "00024",
+    "--timeout-ms",
+    "0001",
+    "--json",
+  ]);
+  expect(resized.code, resized.stdout + resized.stderr).toBe(0);
+  expect(JSON.parse(server.requests.at(-1)!.body)).toMatchObject({
+    method: "sessions.resize",
+    params: { cols: 80, rows: 24, timeoutMs: 1 },
+  });
+  const count = server.requests.length;
+  for (const args of [
+    ["wait", "--after", "epoch:1"],
+    ["snapshot", "--tail", "1e2"],
+    ["send", "--text", "x", "--if-input", "epoch:+1"],
+    ["wait", "--mode", "change", "--after", "with:colon:1"],
+    ["snapshot", "--if-changed", "not-json"],
+  ]) {
+    const reply = await cli(root, ["terminal", ...args, "--json"]);
+    expect(reply.code, reply.stdout + reply.stderr).toBe(2);
+    expect(JSON.parse(reply.stdout)).toMatchObject({ error: { code: "invalid_argument" } });
+  }
+  const dimensions = await cli(root, [
+    "terminal",
+    "resize",
+    "--cols",
+    "501",
+    "--rows",
+    "24",
+    "--json",
+  ]);
+  expect(dimensions.code).toBe(2);
+  expect(JSON.parse(dimensions.stdout).error.message).toMatch(/--cols:.*1 to 500/);
+  expect(server.requests).toHaveLength(count);
+
+  rejectRemote = true;
+  const remote = await cli(root, [
+    "terminal",
+    "snapshot",
+    "--if-changed",
+    JSON.stringify({ epoch, seq: 0, tail: null, attrs: false }),
+    "--json",
+  ]);
+  expect(remote.code).toBe(1);
+  expect(JSON.parse(remote.stdout)).toMatchObject({
+    outcome: "failed",
+    error: { code: "invalid_argument", message: "Rejected by device" },
+  });
+  expect(server.requests).toHaveLength(count + 1);
+});
+
 test("terminal text preserves physical lines and keeps attrs outside the body", async () => {
   const root = await directory();
   await writeFile(

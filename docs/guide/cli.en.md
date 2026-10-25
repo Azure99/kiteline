@@ -147,6 +147,8 @@ Each call is a separate short command; terminal and shell state remain on the de
 
 For conditional input (`--if-input`), incremental observation (`--if-changed`), style intervals (`--attrs`) and deadlines, see `kiteline terminal <command> --help`. The mechanisms are described in [Remote observation (Chinese)](../design/terminal.md#远程观察).
 
+The epoch in `--if-changed`, `--if-input` and `--after` is limited to 128 UTF-16 code units. Longer values exit locally with code 2 without sending a request; `invalid_argument` returned by the device still exits with code 1.
+
 ### When recording is unavailable
 
 When a command returns `recording_unavailable`, the terminal program is usually still running and attach remains available. To use short-command or workbench observation, check `terminal list`, then run `terminal recover`. Recovery does not restart the program, but discards the old web history and may briefly resize the terminal for a redraw. A `recovering` reply means only that the request was accepted.

@@ -226,7 +226,7 @@ test("control reconnects after handshake rejection, retains valid watches and sc
       await expect(agent.dispatch(method, {}, signal)).rejects.toMatchObject({
         code: "unsupported",
       });
-    const session = await agent.sessions.create(active.id, undefined, undefined, signal);
+    const session = await agent.sessions.create({ workspaceId: active.id }, signal);
     await expect(
       agent.dispatch("sessions.end", { sessionId: session.id }, signal),
     ).rejects.toMatchObject({ code: "invalid_argument" });
@@ -237,7 +237,7 @@ test("control reconnects after handshake rejection, retains valid watches and sc
     await expect(
       agent.dispatch("sessions.end", { workspaceId: active.id, sessionId: session.id }, signal),
     ).resolves.toEqual({ ended: true });
-    const local = await agent.sessions.create(active.id, undefined, undefined, signal);
+    const local = await agent.sessions.create({ workspaceId: active.id }, signal);
     rejectVersion = true;
     socket.close();
     await expect

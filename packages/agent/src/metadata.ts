@@ -84,8 +84,9 @@ export class MetadataStore {
     this.queue = operation.catch(() => {});
     return operation;
   }
-  withCurrent<T>(read: (metadata: Metadata) => T): Promise<T> {
-    const operation = this.queue.then(() => read(this.value));
+  // Synchronous directory allocation and session registration serialize with workspace changes.
+  withSessionRegistration<T>(register: (metadata: Metadata) => T): Promise<T> {
+    const operation = this.queue.then(() => register(this.value));
     this.queue = operation.catch(() => {});
     return operation;
   }

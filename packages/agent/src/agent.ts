@@ -26,7 +26,7 @@ import type { AgentConfig, Identity } from "./config.js";
 import { MetadataStore } from "./metadata.js";
 import { Directories } from "./files/directories.js";
 import { Sessions } from "./terminal/sessions.js";
-import { terminalRpc } from "./terminal/rpc.js";
+import { isSessionMethod, terminalRpc } from "./terminal/rpc.js";
 import { LocalServer } from "./local.js";
 import { TerminalChannels } from "./terminal/channels.js";
 import { Files } from "./files/index.js";
@@ -118,7 +118,20 @@ export class Agent {
     this.temporaryFiles = new TemporaryFiles(config.dataDir);
     this.files = new Files(this.metadata, this.directories);
     this.metadata.onChange = (snapshot) => this.send({ type: "metadata.snapshot", snapshot });
-    this.sessions = new Sessions(config, this.metadata);
+    this.sessions = new Sessions(config, this.metadata, {
+      frame: (message) => this.terminalChannels.frame(message),
+      notice: (message) => {
+        try {
+          if (!this.send(message))
+            console.error(`Terminal report dropped for ${message.sessionId}: server unavailable`);
+        } catch (error) {
+          if (!(error instanceof AppError) || error.code !== "limit_exceeded") throw error;
+          console.error(`Terminal report dropped for ${message.sessionId}: ${error.message}`);
+        }
+      },
+      changed: (workspaceId) =>
+        this.send({ type: "sessions.changed", workspaceId } satisfies AgentEvent),
+    });
     this.textFiles = new TextFiles(config, this.metadata, this.temporaryFiles);
     this.fileOperations = new FileOperations(this.metadata, this.temporaryFiles, (workspaceId) =>
       this.watches.changed(workspaceId, true),
@@ -134,18 +147,6 @@ export class Agent {
       (workspaceId) => this.watches.changed(workspaceId, true),
     );
     this.httpChannels = new HttpChannels(identity);
-    this.sessions.onFrame = (message) => this.terminalChannels.frame(message);
-    this.sessions.onNotice = (message) => {
-      try {
-        if (!this.send(message))
-          console.error(`Terminal report dropped for ${message.sessionId}: server unavailable`);
-      } catch (error) {
-        if (!(error instanceof AppError) || error.code !== "limit_exceeded") throw error;
-        console.error(`Terminal report dropped for ${message.sessionId}: ${error.message}`);
-      }
-    };
-    this.sessions.onChanged = (workspaceId) =>
-      this.send({ type: "sessions.changed", workspaceId } satisfies AgentEvent);
     this.local = new LocalServer(config, (method, params, signal) =>
       this.handleLocal(method, params, signal),
     );
@@ -170,7 +171,8 @@ export class Agent {
       });
     if (method === "workspaces.list")
       return Promise.resolve({ workspaces: this.metadata.value.workspaces });
-    if (method === "sessions.end") return this.sessions.end(undefined, string(params.sessionId));
+    if (method === "sessions.end")
+      return this.sessions.end({ sessionId: string(params.sessionId) });
     if (!localSessionMethods.has(method) && !isScheduleMethod(method))
       throw new AppError("unsupported", "Unsupported local operation");
     return this.dispatch(method, params, signal);
@@ -429,6 +431,11 @@ export class Agent {
     if (isScheduleMethod(method)) return scheduleRpc(this.schedules, method, params, signal);
     if (isGitMethod(method))
       return gitRpc(this.repos, this.gitWrites, method, params, signal, progress);
+    if (isSessionMethod(method))
+      return terminalRpc(method, params, signal, {
+        sessions: this.sessions,
+        metadata: this.metadata,
+      });
     switch (method) {
       case "ports.list":
         return listeningPorts(signal) satisfies Promise<RpcResult<typeof method>>;
@@ -524,44 +531,6 @@ export class Agent {
           signal,
         ) satisfies Promise<RpcResult<typeof method>>;
       }
-      case "sessions.list": {
-        const workspaceId = optionalString(params.workspaceId);
-        if (workspaceId) this.metadata.workspace(workspaceId);
-        return this.sessions.list(workspaceId) satisfies RpcResult<typeof method>;
-      }
-      case "sessions.create":
-        return this.sessions.create(
-          string(params.workspaceId),
-          optionalString(params.name, "name", limits.nameLength),
-          optionalString(params.shortcutId),
-          signal,
-        ) satisfies Promise<RpcResult<typeof method>>;
-      case "sessions.rename":
-        return this.sessions.rename(
-          string(params.workspaceId),
-          string(params.sessionId),
-          string(params.name, "name", limits.nameLength),
-        ) satisfies RpcResult<typeof method>;
-      case "sessions.end":
-        return this.sessions.end(
-          string(params.workspaceId),
-          string(params.sessionId),
-        ) satisfies Promise<RpcResult<typeof method>>;
-      case "sessions.recover":
-        return this.sessions.recover(
-          string(params.workspaceId),
-          string(params.sessionId),
-        ) satisfies RpcResult<typeof method>;
-      case "sessions.snapshot":
-      case "sessions.send":
-      case "sessions.wait":
-      case "sessions.resize":
-        return terminalRpc(method, params, this.sessions);
-      case "sessions.redraw":
-        return this.sessions.redraw(
-          string(params.workspaceId),
-          string(params.sessionId),
-        ) satisfies Promise<RpcResult<typeof method>>;
       case "settings.update":
         return this.metadata.updateSettings(
           integer(params.historyLines, "historyLines", 0, limits.terminalHistoryLines),

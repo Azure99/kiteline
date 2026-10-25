@@ -1,5 +1,14 @@
 import { WebSocket } from "ws";
-import { AppError, asError, integer, limits, record, string } from "@kiteline/shared/protocol";
+import {
+  AppError,
+  asError,
+  integer,
+  limits,
+  parseTerminalCols,
+  parseTerminalRows,
+  record,
+  string,
+} from "@kiteline/shared/protocol";
 import type {
   BrowserTerminalInput,
   RecorderMessage,
@@ -50,17 +59,18 @@ export class TerminalChannels {
     socket.on("open", () => {
       heartbeat(socket);
       try {
-        const item = this.sessions.get(string(params.sessionId), string(params.workspaceId));
-        if (item.session.state !== "running")
-          throw new AppError("busy", "Terminal is still being created");
+        const status = this.sessions.channelOpenStatus({
+          sessionId: string(params.sessionId),
+          workspaceId: string(params.workspaceId),
+        });
         if (params.mode === "tty") {
           if (params.history !== undefined)
             throw new AppError("invalid_argument", "TTY attach does not accept history");
           channel.backend = {
             mode: "tty",
             options: {
-              cols: integer(params.cols, "cols", 1, limits.terminalMaxCols),
-              rows: integer(params.rows, "rows", 1, limits.terminalMaxRows),
+              cols: parseTerminalCols(params.cols),
+              rows: parseTerminalRows(params.rows),
               term: string(params.term, "term"),
             },
           };
@@ -73,7 +83,7 @@ export class TerminalChannels {
             params.history !== "screen"
           )
             throw new AppError("invalid_argument", "Invalid history range");
-          if (item.session.webStatus !== "available")
+          if (status.webStatus !== "available")
             throw new AppError("recording_unavailable", "Terminal recording is unavailable");
           channel.backend = { mode: "web" };
         }
@@ -97,12 +107,12 @@ export class TerminalChannels {
         if (!channel.started) {
           if (message?.type !== "start")
             throw new AppError("invalid_argument", "Channel has not started");
-          const item = this.sessions.get(channel.sessionId);
+          const target = this.sessions.channelStartTarget(channel.sessionId);
           if (channel.backend?.mode === "tty") {
             channel.started = true;
             socket.pause();
             channel.backend.bridge = TtyBridge.start(
-              item.identity.socket,
+              target.socket,
               channel.backend.options,
               (data) => sendFrame(socket, data),
               () => {
@@ -128,7 +138,7 @@ export class TerminalChannels {
             );
             return;
           }
-          if (item.session.webStatus !== "available")
+          if (target.webStatus !== "available")
             throw new AppError("recording_unavailable", "Terminal recording is unavailable");
           channel.started = true;
           void this.sessions.recorder
@@ -137,7 +147,7 @@ export class TerminalChannels {
               sessionId: channel.sessionId,
               attachmentId: id,
               history: params.history === "screen" ? "screen" : "retained",
-              historyGap: item.session.historyGap,
+              historyGap: target.historyGap,
             })
             .catch((error: unknown) => this.fail(id, error));
           return;
@@ -154,8 +164,8 @@ export class TerminalChannels {
         } else if (message?.type === "resize")
           input = {
             type: "resize",
-            cols: integer(message.cols, "cols", 1, limits.terminalMaxCols),
-            rows: integer(message.rows, "rows", 1, limits.terminalMaxRows),
+            cols: parseTerminalCols(message.cols),
+            rows: parseTerminalRows(message.rows),
           };
         else if (message?.type === "consumed")
           input = {

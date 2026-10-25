@@ -22,7 +22,7 @@ tmux 使用会话目录下的私有配置，不加载用户的 tmux 配置或插
 
 创建由 `packages/agent/src/terminal/sessions.ts` 协调，必须保持：
 
-- 以 `0700` 独占新建会话目录，已存在的目录从不复用。
+- 以 `0700` 独占新建会话目录，已存在的目录从不复用。目录分配与会话登记在 metadata 的同一个同步队列回调内完成，与工作区变更串行。
 - 启动 tmux 之前以 `starting` 状态登记会话及创建时的 `historyLines`；确认创建成功后才变为 `running`、记录可用。
 - 程序的工作目录是工作区目录，通过进程 cwd 传给 tmux，不用会展开格式字符串的 `-c`。
 
@@ -33,7 +33,7 @@ Shell 的选择和执行参数见 [agent 配置文件](../guide/reference.md#age
 - recorder 在应答前失败或退出：agent 在私有 socket 上执行 `list-panes -a` 查证。pane 存活则设为 `running`、记录不可用（可以恢复）；确认不存在且不会再出现时删除登记并返回失败；无法确认时保留 `starting`，返回带 `sessionId` 的结果未确认（见[结果语义](protocol.md#结果语义)）。
 - 调用方停止等待（RPC 取消、超时或控制连接断开）：agent 只停止等待，返回带 `sessionId` 的 `cancelled`、结果未确认，创建在后台继续。
 - Windows 上创建失败或 agent 停止时，agent 发送 `cancelCreate`。recorder 等该次创建的准备步骤结束、关闭已建立的部分后才应答；不应答时 agent 结束 recorder 的整个进程集合。此后不会有迟到的创建。
-- Linux 和 macOS 没有撤销步骤，失败后 tmux 会话仍可能出现。agent 定期查证记录不可用的会话：存活的 `starting` 会话变为 `running`，确认已结束的删除登记。
+- Linux 和 macOS 没有撤销步骤，失败后 tmux 会话仍可能出现。agent 定期查证记录不可用的会话：查证找到 pane（包括 dead pane）时确认创建已经到达，暂时缺失的结果本身不清除迟到创建的可能性；存活的 `starting` 会话变为 `running`，确认已结束且不会迟到的删除登记。
 - 网页收到结果未确认时重新读取会话列表，按 `sessionId` 找回会话，从不自动重发创建。
 
 ### 存续与结束
@@ -54,7 +54,7 @@ Shell 的选择和执行参数见 [agent 配置文件](../guide/reference.md#age
 
 agent 正常停止（包括停止或重启服务）时，`Agent.close()` 在每个会话的私有 socket 上执行 `kill-server`，会话中的程序随之结束。新启动的 agent 会话表为空，不导入旧会话。停止顺序见[启动与停止](agent-lifecycle.md#启动与停止)，异常退出见[资源与清理](#资源与清理)。
 
-程序退出后，`remain-on-exit on` 让 pane 保留到 agent 读取退出码。受管 pane 必须同时得到子进程退出状态、PTY 读取 EOF 并排空原始输出后才变为 dead，避免慢消费期间提前关闭 PTY 丢失尾部。recorder 订阅 `#{pane_dead}`，在控制流中排在之前的输出之后处理结束：先把结束帧（含退出码）送给所有显示，再通知 agent。agent 在私有 socket 上执行 `kill-server`（Windows 还要结束 tmux server 的进程集合并等它清空），删除登记，推送 `sessions.changed`，再删除会话目录。退出码在 Linux 和 macOS 上取同次订阅的 `#{pane_dead_status}`；Windows 的 pane 包装进程在 shell 退出后、自己结束前，将完整 DWORD 以四字节 UInt32LE 同步写入会话目录的 `pane.exit`，recorder 在 pane 变为 dead 时读取，读不到时为空。明确结束会话时，agent 先等进行中的创建或恢复，再让 recorder 关闭控制客户端并执行 `kill-server`，退出码为空。
+程序退出后，`remain-on-exit on` 让 pane 保留到 agent 读取退出码。受管 pane 必须同时得到子进程退出状态、PTY 读取 EOF 并排空原始输出后才变为 dead，避免慢消费期间提前关闭 PTY 丢失尾部。recorder 订阅 `#{pane_dead}`，在控制流中排在之前的输出之后处理结束：先把结束帧（含退出码）排入每个显示的有序输出，再通知 agent；显示仍受消费信用限制，agent 删除登记可以早于尾部输出和结束帧的实际交付。agent 在私有 socket 上执行 `kill-server`（Windows 还要结束 tmux server 的进程集合并等它清空），删除登记，推送 `sessions.changed`，再删除会话目录。退出码在 Linux 和 macOS 上取同次订阅的 `#{pane_dead_status}`；Windows 的 pane 包装进程在 shell 退出后、自己结束前，将完整 DWORD 以四字节 UInt32LE 同步写入会话目录的 `pane.exit`，recorder 在 pane 变为 dead 时读取，读不到时为空。明确结束会话时，agent 先等进行中的创建或恢复，再让 recorder 关闭控制客户端并执行 `kill-server`，退出码为空。
 
 不变量：
 
@@ -87,13 +87,13 @@ recorder 为每个会话保存一个检查点和其后的完整尾段：
 - “历史存在缺口”（`historyGap`）：本次 agent 运行期间该会话发生过记录故障，部分输出没有进入网页历史。agent 运行期间不清除。
 - “已减少较早历史”（`historyLimited`）：本次附着的恢复副本被缩短。
 
-模型积压、检查点间隔和恢复尾段的阈值见 `packages/terminal-recorder/src/model.ts` 的 `modelLimits`；每个显示已发送但未确认的窗口见 `packages/terminal-recorder/src/attachment.ts` 的 `terminalOutstandingBytes`；跨进程共用的恢复副本、待发队列、分块和交互期限见 `packages/shared/src/protocol/index.ts` 的 `limits`。各机制的越界后果见本页相应段落。
+模型积压、检查点间隔和恢复尾段的阈值见 `packages/terminal-recorder/src/model.ts` 的 `modelLimits`；每个显示已发送但未确认的窗口见 `packages/terminal-recorder/src/attachment.ts` 的 `terminalOutstandingBytes`；跨进程共用的恢复副本、待发队列、分块和交互期限见 `packages/shared/src/protocol/limits.ts` 的 `limits`。各机制的越界后果见本页相应段落。
 
 ## 附着与恢复
 
 ### 网页附着
 
-网页打开显示时建立 `terminal.attach` 数据通道（见[数据通道](protocol.md#数据通道)）。agent 确认会话为 `running` 且记录可用后发送通道就绪帧 `ready{meta}`（带 `terminalInputBytes`；server 读取它，并在创建通道的响应中交给浏览器），收到 `start` 后请求 recorder 附着，`history` 为 `retained`（默认）或 `screen`：
+网页打开显示时建立 `terminal.attach` 数据通道（见[数据通道](protocol.md#数据通道)）。agent 确认会话为 `running` 且记录可用后发送通道就绪帧 `ready{meta}`（带 `terminalInputBytes`；server 读取它，并在创建通道的响应中交给浏览器），收到 `start` 后重新读取会话登记及记录可用状态，再请求 recorder 附着，`history` 为 `retained`（默认）或 `screen`：
 
 - `retained`：解析器空闲且尚无检查点或尾段非空时，先生成新检查点；然后发送检查点和尾段副本。解析器不空闲但有检查点时，直接发送已有检查点和完整尾段，不等程序补完序列。两者都没有时等待下一次输出，`interactionTimeout` 内取不到返回 `busy`。
 - `screen`：只在解析器空闲时序列化当前屏幕（滚屏为 0），否则等待，超时返回 `busy`。它不替换检查点，也不改会话的 `historyLines`。
@@ -112,7 +112,7 @@ agent 发往该显示的帧依次为：`restore.begin`（尺寸、`historyLines`
 
 ### 远程交互附着
 
-`kiteline terminal attach` 使用已有 CLI 凭据和目标，经 `terminal.attach` 的 `mode:"tty"` 变体接续运行中的会话。agent 收到配对后的 `start` 才启动 PTY helper 和普通 tmux client；helper 使用 `tmux attach-session -E` 保持原会话环境，仅该 client 使用本机传来的 `TERM`。记录不可用不阻止 TTY 附着，recorder 故障也不关闭 TTY 通道。
+`kiteline terminal attach` 使用已有 CLI 凭据和目标，经 `terminal.attach` 的 `mode:"tty"` 变体接续运行中的会话。agent 收到配对后的 `start` 时重新读取会话登记，才启动 PTY helper 和普通 tmux client；helper 使用 `tmux attach-session -E` 保持原会话环境，仅该 client 使用本机传来的 `TERM`。记录不可用不阻止 TTY 附着，recorder 故障也不关闭 TTY 通道。
 
 helper 持续读取 PTY。agent 在发送前核对累计未消费输出，超过显示预算就结束这个 client，不把显示背压传给原 pane。helper 退出时先排空最后的输出，再发送 `ended{exitCode:0}`；启动、传输或清理失败时发送 `error`。通道结束只关闭自己的 PTY client，清理有期限。Windows 上整个桥进程集合放在一个 Job 中，确认 Job 清空和输出排空后才结束。
 
@@ -181,6 +181,10 @@ CLI 在目标检查和连接成功后才进入 raw 模式，以本机终端实�
 `sessions.snapshot` 在 model 的有序解析队列中读取活动屏幕，返回物理行、尺寸、0-based 光标与可见性、normal/alternate、historyGap 和 synchronizedOutput。可选 `tail` 只读 normal buffer 的当前保留历史；`omitted` 是本次未带出的保留行数，不含已淘汰或故障丢失的原文。可选 `attrs` 返回以 cell 列计的具名非默认样式区间，`end` 不含；颜色为 palette 索引或 RGB，文本与样式分离。宽字符和折行不通过删除控制码推断。
 
 每个 model 新建 `epoch`，每次已解析输出或尺寸变化递增 `seq`；相同文字重绘也可能推进 seq。快照的 `position` 还包含 `tail: null | number` 和 `attrs: boolean`。调用方仅能在同一目标携带该完整位置作 `ifChanged`；选项相同且位置未变才返回 `unchanged`，仍返回当前 `{epoch,inputSeq}`。更换观察选项返回完整数据，epoch 不同返回 `reset` 全屏。没有观察缓存；`send.before` 不是条件快照位置。
+
+终端值规则集中在 `packages/shared/src/protocol/terminal-observation.ts` 的纯 parser。条件位置的 epoch 为 1..128 个 UTF-16 码元且不含 NUL；Agent 和远程 CLI 共用此规则，CLI 先解析 JSON 或 `EPOCH:SEQ` 文本。Agent 的 Sessions 先检查完整会话目标、归属、recording 可用且未 ending，再解析 snapshot/send/wait/resize 的载荷；parser 不读取会话或时钟。
+
+send、resize、wait 在全部值解析成功后按 timeoutMs 建立一次绝对动作 deadline。编码、IPC 传递、排队和执行继续消费同一个期限；snapshot 没有动作 deadline。Agent 的 RPC 总期限和 Recorder 应答期限分别保持原有寿命。
 
 `sessions.wait` 使用相同输出事件和有序队列。quiet 从 recorder 完成已有解析后计时，输出与 resize 重置窗口；change 比较 `after` 的 epoch/seq，能看到请求到达前已发生的变化。quiet 默认 300ms、总等待默认 1000ms，总等待始终有限，默认仅在 RPC 入口补齐。quiet、changed、timeout、reset 都返回当时完整画面；quiet 只表示近期没有输出活动，不表示业务完成。
 

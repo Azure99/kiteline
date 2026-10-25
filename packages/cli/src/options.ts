@@ -2,14 +2,19 @@ import { parseArgs } from "node:util";
 import { posix } from "node:path";
 import {
   AppError,
-  integer,
   limits,
-  record,
+  parseInputPosition,
+  parseScreenPosition,
+  parseTerminalCols,
+  parseTerminalKey,
+  parseTerminalPosition,
+  parseTerminalQuietMs,
+  parseTerminalRows,
+  parseTerminalTail,
+  parseTerminalTimeoutMs,
+  parseTerminalWaitMode,
   string,
   terminalKeys,
-  type InputPosition,
-  type ScreenPosition,
-  type TerminalPosition,
 } from "@kiteline/shared/protocol";
 
 const options = {
@@ -76,53 +81,52 @@ function filePath(value: string | undefined) {
   return posix.normalize(path).replace(/\/$/, "") || ".";
 }
 
-function keyOption(value: string | undefined) {
-  if (value === undefined) return undefined;
-  const key = terminalKeys.find((key) => key === value);
-  if (!key)
-    throw new AppError("invalid_argument", `--key must be one of: ${terminalKeys.join(", ")}`);
-  return key;
+function optionValue<T>(name: string, parseValue: () => T): T {
+  try {
+    return parseValue();
+  } catch (error) {
+    if (error instanceof AppError)
+      throw new AppError(error.code, `--${name}: ${error.message}`, error.details);
+    throw error;
+  }
 }
 
-function numberOption(value: string | undefined, name: string, min: number, max: number) {
+function keyOption(value: string | undefined) {
+  return value === undefined ? undefined : optionValue("key", () => parseTerminalKey(value));
+}
+
+function numberOption(
+  value: string | undefined,
+  name: string,
+  parseValue: (value: unknown) => number,
+) {
   if (value === undefined) return undefined;
   if (!/^\d+$/.test(value))
-    throw new AppError("invalid_argument", `--${name} must be an integer from ${min} to ${max}`);
-  return integer(Number(value), `--${name}: expected ${min}..${max}`, min, max);
+    throw new AppError("invalid_argument", `--${name} must contain only decimal digits`);
+  return optionValue(name, () => parseValue(Number(value)));
 }
 
-function terminalPosition(value: string): TerminalPosition {
+function positionParts(value: string) {
   const match = /^([^:]+):(\d+)$/.exec(value);
   if (!match) throw new AppError("invalid_argument", "Expected a position in EPOCH:SEQ format");
-  return {
-    epoch: match[1]!,
-    seq: integer(Number(match[2]), "position sequence", 0, Number.MAX_SAFE_INTEGER),
-  };
+  return { epoch: match[1]!, seq: Number(match[2]) };
 }
 
-function inputPosition(value: string): InputPosition {
-  const { epoch, seq } = terminalPosition(value);
-  return { epoch, inputSeq: seq };
+function inputPosition(value: string) {
+  return optionValue("if-input", () => {
+    const { epoch, seq } = positionParts(value);
+    return parseInputPosition({ epoch, inputSeq: seq });
+  });
 }
 
-function screenPosition(value: string): ScreenPosition {
-  let position: Record<string, unknown>;
+function screenPosition(value: string) {
+  let position: unknown;
   try {
-    position = record(JSON.parse(value));
+    position = JSON.parse(value);
   } catch {
     throw new AppError("invalid_argument", "--if-changed requires a position JSON object");
   }
-  if (typeof position.attrs !== "boolean")
-    throw new AppError("invalid_argument", "--if-changed position.attrs must be a boolean");
-  return {
-    epoch: string(position.epoch, "--if-changed position.epoch"),
-    seq: integer(position.seq, "--if-changed position.seq", 0, Number.MAX_SAFE_INTEGER),
-    tail:
-      position.tail === null
-        ? null
-        : integer(position.tail, "--if-changed position.tail", 0, limits.terminalHistoryLines),
-    attrs: position.attrs,
-  };
+  return optionValue("if-changed", () => parseScreenPosition(position));
 }
 
 export function parse(argv: string[]) {
@@ -174,9 +178,11 @@ export function parse(argv: string[]) {
         throw new AppError("invalid_argument", "--enter cannot be combined with --key");
     }
     if (command === "terminal wait") {
-      if (raw.mode !== undefined && raw.mode !== "quiet" && raw.mode !== "change")
-        throw new AppError("invalid_argument", "--mode must be quiet or change");
-      if (raw.mode === "change") {
+      const mode =
+        raw.mode === undefined
+          ? undefined
+          : optionValue("mode", () => parseTerminalWaitMode(raw.mode));
+      if (mode === "change") {
         if (raw.after === undefined)
           throw new AppError("invalid_argument", "--mode change requires --after EPOCH:SEQ");
         if (raw["quiet-ms"] !== undefined)
@@ -190,6 +196,7 @@ export function parse(argv: string[]) {
     if (command === "terminal resize" && (raw.cols === undefined || raw.rows === undefined))
       throw new AppError("invalid_argument", "resize requires --cols and --rows");
   }
+  const after = raw.after;
   const values = {
     ...raw,
     path: filePath(fileCommand ? positionals[2] : raw.path),
@@ -200,14 +207,17 @@ export function parse(argv: string[]) {
         ? undefined
         : string(raw["replace-version"], "--replace-version"),
     key: keyOption(raw.key),
-    tail: numberOption(raw.tail, "tail", 0, limits.terminalHistoryLines),
-    cols: numberOption(raw.cols, "cols", 1, limits.terminalMaxCols),
-    rows: numberOption(raw.rows, "rows", 1, limits.terminalMaxRows),
-    "quiet-ms": numberOption(raw["quiet-ms"], "quiet-ms", 1, 10000),
-    "timeout-ms": numberOption(raw["timeout-ms"], "timeout-ms", 1, 10000),
+    tail: numberOption(raw.tail, "tail", parseTerminalTail),
+    cols: numberOption(raw.cols, "cols", parseTerminalCols),
+    rows: numberOption(raw.rows, "rows", parseTerminalRows),
+    "quiet-ms": numberOption(raw["quiet-ms"], "quiet-ms", parseTerminalQuietMs),
+    "timeout-ms": numberOption(raw["timeout-ms"], "timeout-ms", parseTerminalTimeoutMs),
     "if-changed": raw["if-changed"] === undefined ? undefined : screenPosition(raw["if-changed"]),
     "if-input": raw["if-input"] === undefined ? undefined : inputPosition(raw["if-input"]),
-    after: raw.after === undefined ? undefined : terminalPosition(raw.after),
+    after:
+      after === undefined
+        ? undefined
+        : optionValue("after", () => parseTerminalPosition(positionParts(after))),
   };
   return { command, values, help: showHelp };
 }

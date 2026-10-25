@@ -38,13 +38,18 @@ export interface Creation {
   result: Promise<TerminalIdentity>;
   cancel: () => Promise<void>;
 }
+interface RecorderEvents {
+  message(message: RecorderMessage): void;
+  exit(reason: string): void;
+}
 
 export class Recorder {
   private instance?: Instance;
   private closing?: Promise<void>;
-  onMessage?: (message: RecorderMessage) => void;
-  onExit?: (reason: string) => void;
-  constructor(private config: RecorderConfig) {}
+  constructor(
+    private config: RecorderConfig,
+    private readonly events: RecorderEvents,
+  ) {}
   get available() {
     return !!this.instance?.writer && !this.instance.stopping;
   }
@@ -148,7 +153,7 @@ export class Recorder {
                 ),
               );
           }
-        } else this.onMessage?.(message);
+        } else this.events.message(message);
       },
       (error) => {
         instance.stderr = error.message;
@@ -169,7 +174,7 @@ export class Recorder {
     instance.pending.clear();
     if (this.instance === instance) {
       this.instance = undefined;
-      this.onExit?.(reason);
+      this.events.exit(reason);
     }
     instance.finish();
   }

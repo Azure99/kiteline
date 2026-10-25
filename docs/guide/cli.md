@@ -147,6 +147,8 @@ kiteline web url
 
 条件输入（`--if-input`）、增量观察（`--if-changed`）、样式区间（`--attrs`）和各项期限见 `kiteline terminal <命令> --help`，机制见[远程观察](../design/terminal.md#远程观察)。
 
+`--if-changed`、`--if-input` 和 `--after` 的 epoch 最多为 128 个 UTF-16 码元。超限在本地退出 2，不发送请求；设备返回的 `invalid_argument` 仍退出 1。
+
 ### 记录不可用时
 
 命令返回 `recording_unavailable` 时，终端程序通常仍在运行，attach 照常可用。需要短命令或工作台观察时，先用 `terminal list` 确认状态，再执行 `terminal recover`。恢复不重启程序，但会丢弃之前的网页历史，并可能短暂改变尺寸让程序重绘；返回 `recovering` 只表示已受理。

@@ -7,9 +7,20 @@ import {
   AppError,
   OperationError,
   asError,
+  defaultTerminalOperationTimeoutMs,
+  defaultTerminalWaitTimeoutMs,
   limits,
+  parseInputPosition,
+  parseScreenWait,
+  parseSessionInput,
+  parseSnapshotOptions,
+  parseTerminalCols,
+  parseTerminalRows,
+  parseTerminalTimeoutMs,
+  string,
   type Session,
   type AgentEvent,
+  type RpcResult,
 } from "@kiteline/shared/protocol";
 import type {
   CreateTerminal,
@@ -35,7 +46,7 @@ export function checkRunDir(runDir: string) {
 
 interface Managed {
   session: Session;
-  identity: Partial<TerminalIdentity> & Pick<TerminalIdentity, "socket">;
+  socket: string;
   creation?: Promise<Session>;
   // A recorder timeout can leave creation in flight; a missing tmux server is not yet proof of failure.
   creationMayArrive?: boolean;
@@ -45,6 +56,30 @@ interface Managed {
   recovery?: Promise<void>;
   ending?: boolean;
 }
+interface SessionTarget {
+  workspaceId: string;
+  sessionId: string;
+}
+interface CreateSession {
+  workspaceId: string;
+  name?: string;
+  shortcutId?: string;
+}
+interface SessionEvents {
+  changed(workspaceId: string): void;
+  frame(message: RecorderMessage): void;
+  notice(message: Extract<AgentEvent, { type: "terminal.notice" }>): void;
+}
+type TerminalFacts =
+  | { kind: "missing" }
+  | {
+      kind: "pane";
+      identity: TerminalIdentity;
+      alive: boolean;
+      cols: number;
+      rows: number;
+    };
+
 function waitFor<T>(operation: Promise<T>, signal: AbortSignal) {
   return new Promise<T>((resolve, reject) => {
     const abort = () => reject(signal.reason);
@@ -64,26 +99,27 @@ export class Sessions {
   private closing = false;
   private checking = false;
   private lifeTimer: NodeJS.Timeout;
-  onChanged?: (workspaceId: string) => void;
-  onFrame?: (message: RecorderMessage) => void;
-  onNotice?: (message: Extract<AgentEvent, { type: "terminal.notice" }>) => void;
   constructor(
     private config: AgentConfig,
     private metadata: MetadataStore,
+    private readonly events: SessionEvents,
   ) {
-    this.recorder = new Recorder(config.limits);
-    this.recorder.onMessage = (message) => this.message(message);
-    this.recorder.onExit = (reason) => {
-      for (const item of this.records.values()) {
-        if (process.platform !== "win32") item.creationMayArrive = false;
-        this.unavailable(item, reason);
-        this.onFrame?.({
-          type: "fault",
-          sessionId: item.session.id,
-          error: { code: "recording_unavailable", message: reason },
-        });
-      }
-    };
+    this.recorder = new Recorder(
+      { terminalInputBytes: config.limits.terminalInputBytes },
+      {
+        message: (message) => this.message(message),
+        exit: (reason) => {
+          for (const item of this.records.values()) {
+            if (process.platform !== "win32") item.creationMayArrive = false;
+            this.message({
+              type: "fault",
+              sessionId: item.session.id,
+              error: { code: "recording_unavailable", message: reason },
+            });
+          }
+        },
+      },
+    );
     this.lifeTimer = setInterval(() => {
       void this.track(this.checkUnavailable()).catch(console.error);
     }, 2000);
@@ -96,26 +132,98 @@ export class Sessions {
         .filter((session) => !workspaceId || session.workspaceId === workspaceId),
     };
   }
-  get(id: string, workspaceId?: string) {
-    const item = this.records.get(id);
+  private get({ sessionId, workspaceId }: { sessionId: string; workspaceId?: string }) {
+    const item = this.records.get(sessionId);
     if (!item || (workspaceId && item.session.workspaceId !== workspaceId))
       throw new AppError("not_found", "Terminal session does not exist");
     return item;
+  }
+  private recording(target: SessionTarget) {
+    const item = this.get(target);
+    if (item.session.webStatus !== "available" || item.ending)
+      throw new AppError("recording_unavailable", "Recover terminal recording first");
+    return item.session;
+  }
+  private recordingForRpc(params: Record<string, unknown>) {
+    return this.recording({
+      sessionId: string(params.sessionId),
+      workspaceId: string(params.workspaceId),
+    });
+  }
+  snapshot(params: Record<string, unknown>): Promise<RpcResult<"sessions.snapshot">> {
+    const { id: sessionId, historyGap } = this.recordingForRpc(params);
+    const options = parseSnapshotOptions(params);
+    return this.recorder.request({ type: "snapshot", sessionId, options, historyGap });
+  }
+  send(params: Record<string, unknown>): Promise<RpcResult<"sessions.send">> {
+    const { id: sessionId } = this.recordingForRpc(params);
+    const timeoutMs = parseTerminalTimeoutMs(params.timeoutMs ?? defaultTerminalOperationTimeoutMs);
+    const input = parseSessionInput(params.input);
+    const ifInput = params.ifInput === undefined ? undefined : parseInputPosition(params.ifInput);
+    const deadline = Date.now() + timeoutMs;
+    return this.recorder.request({ type: "session.send", sessionId, input, ifInput, deadline });
+  }
+  wait(params: Record<string, unknown>): Promise<RpcResult<"sessions.wait">> {
+    const { id: sessionId, historyGap } = this.recordingForRpc(params);
+    const timeoutMs = parseTerminalTimeoutMs(params.timeoutMs ?? defaultTerminalWaitTimeoutMs);
+    const options = parseScreenWait(params);
+    const deadline = Date.now() + timeoutMs;
+    return this.recorder.request({ type: "wait", sessionId, options, historyGap, deadline });
+  }
+  resize(params: Record<string, unknown>): Promise<RpcResult<"sessions.resize">> {
+    const { id: sessionId } = this.recordingForRpc(params);
+    const timeoutMs = parseTerminalTimeoutMs(params.timeoutMs ?? defaultTerminalOperationTimeoutMs);
+    const cols = parseTerminalCols(params.cols);
+    const rows = parseTerminalRows(params.rows);
+    const deadline = Date.now() + timeoutMs;
+    return this.recorder.request({ type: "session.resize", sessionId, cols, rows, deadline });
+  }
+  channelOpenStatus(target: SessionTarget) {
+    const item = this.get(target);
+    if (item.session.state !== "running")
+      throw new AppError("busy", "Terminal is still being created");
+    return { webStatus: item.session.webStatus };
+  }
+  channelStartTarget(id: string) {
+    const item = this.get({ sessionId: id });
+    return {
+      socket: item.socket,
+      webStatus: item.session.webStatus,
+      historyGap: item.session.historyGap,
+    };
   }
   private track<T>(promise: Promise<T>) {
     this.jobs.add(promise);
     void promise.finally(() => this.jobs.delete(promise)).catch(() => {});
     return promise;
   }
-  async create(
-    workspaceId: string,
-    name: string | undefined,
-    shortcutId: string | undefined,
-    signal: AbortSignal,
-  ) {
+  async create(options: CreateSession, signal: AbortSignal) {
     if (this.closing) throw new AppError("cancelled", "Agent is stopping");
     await access(this.config.shell, constants.X_OK);
-    const { item, workspace, shortcut } = await this.metadata.withCurrent((metadata) => {
+    const { item, terminal } = await this.registerCreation(options, signal);
+    this.events.changed(item.session.workspaceId);
+    const operation = this.track(this.startCreation(item, terminal));
+    item.creation = operation;
+    void operation
+      .finally(() => {
+        item.creation = undefined;
+      })
+      .catch(() => {});
+    try {
+      return await waitFor(operation, signal);
+    } catch (error) {
+      if (signal.aborted)
+        throw new OperationError(
+          "cancelled",
+          "Terminal creation confirmation was interrupted",
+          "unknown",
+          { sessionId: item.session.id },
+        );
+      throw error;
+    }
+  }
+  private registerCreation({ workspaceId, name, shortcutId }: CreateSession, signal: AbortSignal) {
+    return this.metadata.withSessionRegistration((metadata) => {
       signal.throwIfAborted();
       if (this.closing) throw new AppError("cancelled", "Agent is stopping");
       if (this.records.size >= this.config.limits.terminalSessionsPerDevice)
@@ -157,120 +265,103 @@ export class Sessions {
             webStatus: "unavailable",
             historyGap: false,
           },
-          identity: { socket },
+          socket,
         };
         this.records.set(id, item);
-        return { item, workspace, shortcut };
-      }
-      throw new AppError("busy", "Could not allocate an unused terminal session ID");
-    });
-    const { id } = item.session;
-    this.onChanged?.(workspaceId);
-    const operation = this.track(
-      (async () => {
-        try {
-          const options: CreateTerminal = {
+        return {
+          item,
+          terminal: {
             sessionId: id,
-            socket: item.identity.socket,
+            socket,
             workspacePath: workspace.path,
             shell: this.config.shell,
             command: shortcut?.command,
             cols: agentLimits.terminalInitialCols,
             rows: agentLimits.terminalInitialRows,
             historyLines: item.session.historyLines,
-          };
-          if (process.platform === "win32")
-            item.server = await startTerminalServer(options, limits.interactionTimeout);
-          if (this.closing) throw new AppError("cancelled", "Agent is stopping");
-          item.creationMayArrive = true;
-          let identity: TerminalIdentity;
-          if (process.platform === "win32") {
-            item.createRequest = this.recorder.create(options);
-            identity = await item.createRequest.result;
-          } else
-            identity = await this.recorder.request<TerminalIdentity>({
-              type: "create",
-              ...options,
-            });
-          item.creationMayArrive = false;
-          if (!this.records.has(id) || item.cleanup)
-            throw new OperationError("io_error", "Terminal has ended", "unknown", {
-              sessionId: id,
-            });
-          item.identity = identity;
-          item.session.state = "running";
-          item.session.webStatus = "available";
-          this.onChanged?.(workspaceId);
-          return { ...item.session };
-        } catch (error) {
-          if (process.platform === "win32") {
-            await item.createRequest?.cancel();
-            item.creationMayArrive = false;
-          } else if (!(error instanceof OperationError)) item.creationMayArrive = false;
-          if (!this.records.has(id))
-            throw new OperationError(
-              "io_error",
-              "Terminal was created and then ended; check the session list",
-              "unknown",
-              {
-                sessionId: id,
-              },
-            );
-          const state = await this.inspect(item).catch(() => undefined);
-          if (state?.alive) {
-            item.session.state = "running";
-            this.unavailable(item, asError(error).message);
-            return { ...item.session };
-          }
-          if (state && !state.alive && !item.creationMayArrive) {
-            await this.remove(item);
-            throw error;
-          }
-          throw new OperationError(
-            "io_error",
-            "Could not confirm terminal creation; check the session list",
-            "unknown",
-            {
-              sessionId: id,
-            },
-          );
-        }
-      })(),
-    );
-    item.creation = operation;
-    void operation
-      .finally(() => {
-        item.creation = undefined;
-      })
-      .catch(() => {});
+          } satisfies CreateTerminal,
+        };
+      }
+      throw new AppError("busy", "Could not allocate an unused terminal session ID");
+    });
+  }
+  private async startCreation(item: Managed, options: CreateTerminal): Promise<Session> {
+    const { id, workspaceId } = item.session;
     try {
-      return await waitFor(operation, signal);
+      if (process.platform === "win32")
+        item.server = await startTerminalServer(options, limits.interactionTimeout);
+      if (this.closing) throw new AppError("cancelled", "Agent is stopping");
+      item.creationMayArrive = true;
+      if (process.platform === "win32") {
+        item.createRequest = this.recorder.create(options);
+        await item.createRequest.result;
+      } else
+        await this.recorder.request<TerminalIdentity>({
+          type: "create",
+          ...options,
+        });
+      item.creationMayArrive = false;
+      if (!this.records.has(id) || item.cleanup)
+        throw new OperationError("io_error", "Terminal has ended", "unknown", {
+          sessionId: id,
+        });
+      item.session.state = "running";
+      item.session.webStatus = "available";
+      this.events.changed(workspaceId);
+      return { ...item.session };
     } catch (error) {
-      if (signal.aborted)
-        throw new OperationError(
-          "cancelled",
-          "Terminal creation confirmation was interrupted",
-          "unknown",
-          { sessionId: id },
-        );
-      throw error;
+      return this.settleCreationFailure(item, error);
     }
   }
-  rename(workspaceId: string, id: string, name: string) {
-    const item = this.get(id, workspaceId);
+  private async settleCreationFailure(item: Managed, error: unknown): Promise<Session> {
+    const { id } = item.session;
+    if (process.platform === "win32") {
+      await item.createRequest?.cancel();
+      item.creationMayArrive = false;
+    } else if (!(error instanceof OperationError)) item.creationMayArrive = false;
+    if (!this.records.has(id))
+      throw new OperationError(
+        "io_error",
+        "Terminal was created and then ended; check the session list",
+        "unknown",
+        {
+          sessionId: id,
+        },
+      );
+    const facts = await this.observePane(item).catch(() => undefined);
+    if (facts?.kind === "pane" && facts.alive) {
+      item.session.state = "running";
+      this.unavailable(item, asError(error).message);
+      return { ...item.session };
+    }
+    if (facts && !item.creationMayArrive) {
+      await this.remove(item);
+      throw error;
+    }
+    throw new OperationError(
+      "io_error",
+      "Could not confirm terminal creation; check the session list",
+      "unknown",
+      {
+        sessionId: id,
+      },
+    );
+  }
+  rename(target: SessionTarget, name: string) {
+    const item = this.get(target);
     item.session.name = name;
-    this.onChanged?.(workspaceId);
+    this.events.changed(item.session.workspaceId);
     return item.session;
   }
-  async end(workspaceId: string | undefined, id: string) {
-    const item = this.get(id, workspaceId);
+  async end(target: { sessionId: string; workspaceId?: string }) {
+    const item = this.get(target);
     item.ending = true;
     try {
       await item.creation?.catch(() => {});
       await item.recovery;
       if (this.recorder.available) {
         try {
-          await this.recorder.request({ type: "end", sessionId: id });
+          await this.recorder.request({ type: "end", sessionId: item.session.id });
         } catch (error) {
           if (
             process.platform !== "win32" &&
@@ -285,35 +376,36 @@ export class Sessions {
       item.ending = false;
     }
   }
-  recover(workspaceId: string, id: string) {
-    const item = this.get(id, workspaceId);
+  recover(target: SessionTarget) {
+    const item = this.get(target);
+    const { id, workspaceId } = item.session;
     if (this.closing || item.ending) throw new AppError("cancelled", "Terminal is ending");
     if (item.creation || item.session.state !== "running")
       throw new AppError("busy", "Terminal is still being created");
     if (item.session.webStatus === "available" || item.recovery) return { ...item.session };
     item.session.webStatus = "recovering";
     delete item.session.webReason;
-    this.onChanged?.(workspaceId);
+    this.events.changed(workspaceId);
     item.recovery = this.track(
       (async () => {
         try {
-          const state = await this.inspect(item);
-          if (!state.alive) {
+          const facts = await this.observePane(item);
+          if (facts.kind === "missing" || !facts.alive) {
             await this.remove(item);
             return;
           }
           await this.recorder.request({
             type: "recover",
             sessionId: id,
-            ...(item.identity as TerminalIdentity),
-            cols: state.cols!,
-            rows: state.rows!,
+            ...facts.identity,
+            cols: facts.cols,
+            rows: facts.rows,
             historyLines: item.session.historyLines,
           });
           if (this.records.get(id) === item && !item.cleanup && !item.ending) {
             item.session.webStatus = "available";
             delete item.session.webReason;
-            this.onChanged?.(workspaceId);
+            this.events.changed(workspaceId);
           }
         } catch (error) {
           if (this.records.get(id) === item && !item.cleanup)
@@ -325,24 +417,22 @@ export class Sessions {
     );
     return { ...item.session };
   }
-  async redraw(workspaceId: string, id: string) {
-    const item = this.get(id, workspaceId);
-    if (item.session.webStatus !== "available" || item.ending)
-      throw new AppError("recording_unavailable", "Recover terminal recording first");
-    await this.recorder.request({ type: "redraw", sessionId: id });
-    return { ...item.session };
+  async redraw(target: SessionTarget) {
+    const session = this.recording(target);
+    await this.recorder.request({ type: "redraw", sessionId: session.id });
+    return { ...session };
   }
   private unavailable(item: Managed, reason: string) {
     item.session.webStatus = "unavailable";
     item.session.historyGap = true;
     item.session.webReason = reason;
-    this.onChanged?.(item.session.workspaceId);
+    this.events.changed(item.session.workspaceId);
   }
   private message(message: RecorderMessage) {
     if (message.type === "notice") {
       const item = this.records.get(message.sessionId);
       if (item)
-        this.onNotice?.({
+        this.events.notice({
           type: "terminal.notice",
           workspaceId: item.session.workspaceId,
           sessionId: item.session.id,
@@ -358,12 +448,17 @@ export class Sessions {
       const item = this.records.get(message.sessionId);
       if (item) void this.track(this.remove(item)).catch((error: unknown) => console.error(error));
     }
-    this.onFrame?.(message);
+    this.events.frame(message);
   }
-  private async inspect(item: Managed) {
+  private async observePane(item: Managed) {
+    const facts = await this.inspect(item.socket);
+    if (facts.kind === "pane") item.creationMayArrive = false;
+    return facts;
+  }
+  private async inspect(socket: string): Promise<TerminalFacts> {
     try {
       const output = await tmux(
-        item.identity.socket,
+        socket,
         [
           "list-panes",
           "-a",
@@ -373,20 +468,18 @@ export class Sessions {
         undefined,
         AbortSignal.timeout(this.config.limits.rpcTimeout),
       );
-      if (process.platform === "win32" && !output.trim())
-        return { alive: false, cols: undefined, rows: undefined };
+      if (process.platform === "win32" && !output.trim()) return { kind: "missing" };
       const result = /^(%\d+) (@\d+) ([01]) (\d+) (\d+)\s*$/.exec(output);
       if (!result) throw new Error("Cannot verify the managed terminal identity");
-      item.creationMayArrive = false;
-      item.identity.paneId = result[1];
-      item.identity.windowId = result[2];
       return {
+        kind: "pane",
+        identity: { socket, paneId: result[1]!, windowId: result[2]! },
         alive: result[3] === "0",
         cols: Number(result[4]),
         rows: Number(result[5]),
       };
     } catch (error) {
-      if (tmuxServerMissing(error)) return { alive: false, cols: undefined, rows: undefined };
+      if (tmuxServerMissing(error)) return { kind: "missing" };
       throw error;
     }
   }
@@ -403,11 +496,12 @@ export class Sessions {
           item.ending
         )
           continue;
-        const state = await this.inspect(item).catch(() => undefined);
-        if (state?.alive && item.session.state === "starting") {
+        const facts = await this.observePane(item).catch(() => undefined);
+        if (facts?.kind === "pane" && facts.alive && item.session.state === "starting") {
           item.session.state = "running";
-          this.onChanged?.(item.session.workspaceId);
-        } else if (state && !state.alive && !item.creationMayArrive) await this.remove(item);
+          this.events.changed(item.session.workspaceId);
+        } else if (facts && (facts.kind === "missing" || !facts.alive) && !item.creationMayArrive)
+          await this.remove(item);
       }
     } finally {
       this.checking = false;
@@ -419,13 +513,16 @@ export class Sessions {
     item.cleanup = (async () => {
       try {
         await tmux(
-          item.identity.socket,
+          item.socket,
           ["kill-server"],
           undefined,
           AbortSignal.timeout(this.config.limits.rpcTimeout),
         );
       } catch (error) {
-        if (!item.server && (await this.inspect(item)).alive) throw error;
+        if (!item.server) {
+          const facts = await this.observePane(item);
+          if (facts.kind === "pane" && facts.alive) throw error;
+        }
       } finally {
         if (item.server) {
           await item.server.job.stop();
@@ -433,8 +530,8 @@ export class Sessions {
         }
       }
       this.records.delete(item.session.id);
-      this.onChanged?.(item.session.workspaceId);
-      await rm(dirname(item.identity.socket), { recursive: true, force: true });
+      this.events.changed(item.session.workspaceId);
+      await rm(dirname(item.socket), { recursive: true, force: true });
     })().finally(() => {
       item.cleanup = undefined;
     });

@@ -1,5 +1,9 @@
 import release from "../version.json" with { type: "json" };
 import type { TaskSnapshot } from "./tasks.js";
+import { AppError, record, string, optionalString, integer } from "./validation.js";
+import { limits } from "./limits.js";
+
+export { AppError, record, string, optionalString, integer, limits };
 
 export const appVersion = release.version;
 export const terminalProfile = "xterm-c2-unicode11";
@@ -17,28 +21,6 @@ export type {
   GitWriteMethod,
   GitWriteArguments,
 } from "./rpc.js";
-
-export const limits = {
-  nameLength: 256,
-  shortcutCommandLength: 65536,
-  interactionTimeout: 30_000,
-  fileIdleTimeout: 120_000,
-  controlMessageBytes: 1024 * 1024,
-  dataChunkBytes: 64 * 1024,
-  filePendingFrames: 256,
-  filePendingBytes: 2 * 1024 * 1024,
-  pendingRequestsPerDevice: 32,
-  watchDebounce: 300,
-  heartbeatInterval: 20_000,
-  heartbeatTimeout: 60_000,
-  tcpKeepAliveDelayMs: 20_000,
-  terminalPendingBytes: 1024 * 1024,
-  terminalDisplayBytes: 4 * 1024 * 1024,
-  terminalSnapshotBytes: 16 * 1024 * 1024,
-  terminalMaxCols: 500,
-  terminalMaxRows: 200,
-  terminalHistoryLines: 50_000,
-} as const;
 
 export const controlCloseCodes = {
   connectionReplaced: 4001,
@@ -436,15 +418,6 @@ export interface ChannelReady<T = TerminalMeta | FileMeta> {
   meta: T;
 }
 
-export class AppError extends Error {
-  constructor(
-    public code: string,
-    message: string,
-    public details?: unknown,
-  ) {
-    super(message);
-  }
-}
 export class OperationError extends AppError {
   static from(reason: KitelineError, outcome: OperationError["outcome"], result?: unknown) {
     return new OperationError(reason.code, reason.message, outcome, result, reason.details);
@@ -485,24 +458,6 @@ export function asError(error: unknown): KitelineError {
     code: (code && mapped[code]) || "io_error",
     message: error instanceof Error ? error.message : String(error),
   };
-}
-export function record(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value))
-    throw new AppError("invalid_argument", "Expected an object");
-  return value as Record<string, unknown>;
-}
-export function string(value: unknown, name = "value", max = 4096): string {
-  if (typeof value !== "string" || !value.length || value.length > max || value.includes("\0"))
-    throw new AppError("invalid_argument", `Invalid ${name}`);
-  return value;
-}
-export function optionalString(value: unknown, name = "value", max = 4096): string | undefined {
-  return value === undefined ? undefined : string(value, name, max);
-}
-export function integer(value: unknown, name: string, min: number, max: number): number {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < min || value > max)
-    throw new AppError("invalid_argument", `Invalid ${name}`);
-  return value;
 }
 export function windowsName(value: string) {
   if (

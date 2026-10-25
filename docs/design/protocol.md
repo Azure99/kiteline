@@ -4,7 +4,8 @@
 
 ## 契约来源
 
-- `packages/shared/src/protocol/index.ts`：`appVersion`、固定限额 `limits`、`Reply`、各对象类型、控制消息、浏览器事件、`ChannelKind` 和校验函数。
+- `packages/shared/src/protocol/index.ts`：公共协议入口，再导出 `limits`、基础校验和终端值 parser，并定义 `appVersion`、`Reply`、各对象类型、控制消息、浏览器事件和 `ChannelKind`。
+- `packages/shared/src/protocol/validation.ts`、`limits.ts`：基础校验与 `AppError`、固定限额。`terminal-observation.ts`：终端类型和纯值 parser，由 Agent 和远程 CLI 的同义值消费共用；CLI 另行处理文本词法与命令组合。
 - `packages/shared/src/protocol/rpc.ts`：RPC 方法及参数、结果类型，`rpcMutates`，`gitWriteMethods`。
 - `packages/shared/src/protocol/tasks.ts`：定时任务对象。`packages/shared/src/protocol/ipc.ts`：recorder IPC 消息和终端帧。
 - `packages/shared/src/protocol/ws.ts`、`file-stream.ts`、`http-stream.ts`、`stdio.ts`：心跳、帧发送、文件帧队列、HTTP 字节流、逐行 JSON。
@@ -256,7 +257,7 @@ server 在内存中保留每个设备/工作区/session 的最新待处理报告
 
 期限的数值见[限额](../guide/reference.md#限额)。方法、参数和结果类型以 `packages/shared/src/protocol/rpc.ts` 的 `RpcMethods` 为准；`rpcMutates` 定义哪些方法按写请求处理，结果不明时遵守[结果语义](#结果语义)。
 
-运行时分派入口是 `packages/agent/src/agent.ts` 的 `perform()`；定时任务、Git 和终端观察/输入分别交给 `packages/agent/src/tasks/rpc.ts`、`packages/agent/src/git/rpc.ts` 与 `packages/agent/src/terminal/rpc.ts`。终端短 RPC 的位置、屏幕和输入类型在 `packages/shared/src/protocol/terminal-observation.ts`；snapshot、wait 为读取，send、resize、recover 为写入。各方法的业务规则见相应的终端、文件、Git、定时任务和开发服务访问文档。
+运行时分派入口是 `packages/agent/src/agent.ts` 的 `perform()`；定时任务、Git 和全部会话方法分别交给 `packages/agent/src/tasks/rpc.ts`、`packages/agent/src/git/rpc.ts` 与 `packages/agent/src/terminal/rpc.ts`。终端短 RPC 的位置、屏幕和输入类型在 `packages/shared/src/protocol/terminal-observation.ts`；snapshot、wait 为读取，send、resize、recover 为写入。各方法的业务规则见相应的终端、文件、Git、定时任务和开发服务访问文档。
 
 ## 数据通道
 
