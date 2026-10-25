@@ -14,7 +14,7 @@ import {
 import type { Device } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
 import { devicePath, workspacePath, tasksPath } from "../lib/navigation";
-import type { DeviceAction } from "./device-actions";
+import type { DeviceActions } from "./device-actions";
 import { useEffect, useRef, useState } from "react";
 import { rpc } from "../lib/api";
 import type { RecentWorkspace } from "./recent-workspaces";
@@ -22,6 +22,7 @@ import { SessionFinder, type SessionObservation } from "./session-finder";
 import { DeviceMenu } from "./device-menu";
 import { WorkspaceMenu } from "./workspace-menu";
 
+const sessionsRefreshIntervalMs = 15_000;
 const toolIcons = { terminal: Terminal, files: FileText, git: GitBranch };
 
 export function Home({
@@ -130,19 +131,7 @@ export function Home({
     </section>
   );
 }
-export function DeviceDetail({
-  device,
-  onNavigate,
-  onAdd,
-  onAction,
-  onPort,
-}: {
-  device: Device;
-  onNavigate: (path: string) => void;
-  onAdd: (device: Device) => void;
-  onAction: (action: DeviceAction) => void;
-  onPort: (deviceId: string) => void;
-}) {
+export function DeviceDetail({ device, actions }: { device: Device; actions: DeviceActions }) {
   const { t, i18n } = useTranslation();
 
   const [observation, setObservation] = useState<SessionObservation>();
@@ -176,7 +165,7 @@ export function DeviceDetail({
     }
     refreshSessions.current = () => void refresh();
     void refresh();
-    const timer = setInterval(() => void refresh(), 15000);
+    const timer = setInterval(() => void refresh(), sessionsRefreshIntervalMs);
     return () => {
       stopped = true;
       abort.abort();
@@ -190,13 +179,7 @@ export function DeviceDetail({
       <div className="mb-2 flex items-center gap-3">
         <Server size={23} className="text-muted-foreground" />
         <h1 className="min-w-0 flex-1 break-words text-lg font-semibold">{device.name}</h1>
-        <DeviceMenu
-          device={device}
-          onNavigate={onNavigate}
-          onAdd={onAdd}
-          onAction={onAction}
-          onPort={onPort}
-        />
+        <DeviceMenu device={device} actions={actions} />
       </div>
       <div className="mb-7 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
         <span className="flex items-center gap-2">
@@ -238,7 +221,7 @@ export function DeviceDetail({
       <Button
         variant="outline"
         className="mb-4"
-        onClick={() => onNavigate(tasksPath({ filter: device.id }))}
+        onClick={() => actions.navigate(tasksPath({ filter: device.id }))}
       >
         <CalendarClock />
         {t(($) => $.schedules.title)}
@@ -249,7 +232,7 @@ export function DeviceDetail({
         error={sessionsError}
         busy={sessionsBusy}
         onRefresh={() => refreshSessions.current()}
-        onNavigate={onNavigate}
+        onNavigate={actions.navigate}
       />
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-sm font-semibold">
@@ -258,7 +241,7 @@ export function DeviceDetail({
         <Button
           variant="outline"
           disabled={device.status !== "online"}
-          onClick={() => onAdd(device)}
+          onClick={() => actions.addWorkspace(device)}
         >
           <FolderPlus />
           {t(($) => $.devices.addWorkspace)}
@@ -273,12 +256,12 @@ export function DeviceDetail({
             <WorkspaceMenu
               device={device}
               workspace={w}
-              onOpen={() => onNavigate(workspacePath(device.id, w.id))}
-              onAction={onAction}
+              onOpen={() => actions.navigate(workspacePath(device.id, w.id))}
+              onAction={actions.openAction}
             >
               <button
                 className="flex min-w-0 flex-1 items-center gap-3 py-4 text-left hover:bg-muted"
-                onClick={() => onNavigate(workspacePath(device.id, w.id))}
+                onClick={() => actions.navigate(workspacePath(device.id, w.id))}
               >
                 <Folder className="shrink-0 text-primary" size={18} />
                 <span className="min-w-0">

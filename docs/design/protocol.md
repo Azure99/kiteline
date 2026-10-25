@@ -205,7 +205,7 @@ Web owner 在 `POST /api/credentials` 提交 `{name, deviceIds, expiresAt}`，�
 | `request.progress`                                      | 发起请求的登录           |
 | `channel.failed`                                        | 发起文件读取的登录       |
 
-连接关闭后，工作台等待 1.5 秒，读取 `/api/session` 和设备列表后重新连接；这两次读取失败时，3 秒后再试（`packages/web/src/devices/use-devices.ts`）。重连和页面恢复时同步尚待处理的终端报告，其他断线期间的事件不补发。
+连接关闭后，工作台等待 1.5 秒，读取 `/api/session` 和设备列表后重新连接；这两次读取失败时，3 秒后再试（`packages/web/src/devices/use-browser-control-connection.ts`）。重连和页面恢复时同步尚待处理的终端报告，其他断线期间的事件不补发。
 
 ### 在线终端报告
 

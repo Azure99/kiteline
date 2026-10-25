@@ -1,10 +1,10 @@
 import { newId } from "../lib/id";
 export type SplitDirection = "horizontal" | "vertical";
-export interface TerminalLeaf {
+interface TerminalLeaf {
   id: string;
   sessionId: string;
 }
-export interface TerminalSplit {
+interface TerminalSplit {
   id: string;
   direction: SplitDirection;
   children: TerminalNode[];
@@ -168,6 +168,37 @@ export function splitSession(
   delete target.hidden;
   target.maximized = false;
   next.current = target.id;
+  return next;
+}
+export function placeCreatedSession(
+  layout: TerminalLayout,
+  sessionId: string,
+  {
+    activate,
+    split,
+  }: {
+    activate: boolean;
+    split?: { groupId: string; anchor: string; direction: SplitDirection };
+  },
+): TerminalLayout {
+  const next = split
+    ? splitSession(layout, sessionId, split.groupId, split.anchor, split.direction)
+    : selectSession(layout, sessionId);
+  if (activate) return next;
+
+  // Keep later selections and group visibility while placing at the original anchor.
+  const active = currentGroup(layout)?.active;
+  for (const group of next.groups) {
+    const previous = layout.groups.find((item) => item.id === group.id);
+    if (previous && members(group).includes(previous.active)) {
+      group.active = previous.active;
+      group.maximized = previous.maximized;
+      if (previous.hidden) group.hidden = true;
+    }
+  }
+  const current = active ? groupFor(next, active) : undefined;
+  next.current = current?.id;
+  if (current && active) current.active = active;
   return next;
 }
 export function moveSession(

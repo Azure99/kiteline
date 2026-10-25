@@ -28,6 +28,7 @@ import {
   updateWorkspaceQuery,
   useRoute,
   type WorkspaceQuery,
+  type NavigationOptions,
 } from "../lib/navigation";
 import { FileExplorer } from "./explorer";
 import { FileDetails } from "./file-details";
@@ -132,7 +133,7 @@ export function Files({
       updateWorkspaceQuery(
         { deviceId: device.id, workspaceId: workspace.id },
         { line: undefined },
-        true,
+        { replace: true },
       );
       return;
     }
@@ -170,7 +171,7 @@ export function Files({
         isWorkspaceRoute(current, deviceTarget) &&
         current.query.folder === folder
       )
-        updateWorkspaceQuery(deviceTarget, { folder: listing.path }, true);
+        updateWorkspaceQuery(deviceTarget, { folder: listing.path }, { replace: true });
     });
     return () => {
       active = false;
@@ -198,7 +199,11 @@ export function Files({
           current.query.reveal !== reveal
         )
           return;
-        updateWorkspaceQuery(target, { reveal: entry.path, folder: parentPath(entry.path) }, true);
+        updateWorkspaceQuery(
+          target,
+          { reveal: entry.path, folder: parentPath(entry.path) },
+          { replace: true },
+        );
       })
       .catch((error: unknown) => {
         if (!controller.signal.aborted) setRevealError(error);
@@ -217,8 +222,8 @@ export function Files({
     };
   }, [device.id, workspace.id, load]);
   const target = { deviceId: device.id, workspaceId: workspace.id };
-  function updateQuery(query: WorkspaceQuery, replace = false) {
-    updateWorkspaceQuery(target, query, replace);
+  function updateQuery(query: WorkspaceQuery, options: NavigationOptions = {}) {
+    updateWorkspaceQuery(target, query, options);
   }
   function enter(path: string) {
     setSelected(new Set());
@@ -265,7 +270,7 @@ export function Files({
         file: query.file ? nextPath(query.file) : undefined,
         reveal: query.reveal ? nextPath(query.reveal) : undefined,
       },
-      true,
+      { replace: true },
     );
     const next = new Set([...expanded].map(nextPath));
     setExpanded(next);
@@ -285,7 +290,7 @@ export function Files({
         forget(item.path);
         if (isWithin(folder, item.path)) folder = parentPath(item.path);
       }
-      updateQuery({ folder }, true);
+      updateQuery({ folder }, { replace: true });
     }
     const affected = new Set<string>();
     for (const item of items) {

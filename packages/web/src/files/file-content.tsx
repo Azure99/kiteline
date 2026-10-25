@@ -55,13 +55,17 @@ export function FileContent({
           const actual = { ...target, path: content.value.target.path };
           const draft = store.open(actual, content.value);
           if (actual.path !== path) resolvePath(actual.path);
-          updateWorkspaceQuery(target, { file: draft.path, draft: draft.id }, true);
+          updateWorkspaceQuery(target, { file: draft.path, draft: draft.id }, { replace: true });
         } else {
           setImage(content.value);
           const actual = content.value.meta.targetPath!;
           if (actual !== path) {
             resolvePath(actual);
-            updateWorkspaceQuery(target, { file: actual, folder: parentPath(actual) }, true);
+            updateWorkspaceQuery(
+              target,
+              { file: actual, folder: parentPath(actual) },
+              { replace: true },
+            );
           }
         }
       })

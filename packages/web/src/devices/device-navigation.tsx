@@ -10,7 +10,7 @@ import { ReportContent, type ReceivedReport } from "../terminal/reports";
 import { devicePath, workspaceDestination, type WorkspaceTool } from "../lib/navigation";
 import { isDirty, useDrafts, type DraftStore } from "../files/drafts";
 import { useMobile } from "../lib/use-mobile";
-import type { DeviceAction } from "./device-actions";
+import type { DeviceActions } from "./device-actions";
 import { DeviceMenu } from "./device-menu";
 import { WorkspaceMenu } from "./workspace-menu";
 
@@ -22,11 +22,8 @@ export function DeviceNavigation({
   drafts,
   reports,
   onReport,
-  onNavigate,
+  actions,
   onBind,
-  onPort,
-  onAdd,
-  onAction,
 }: {
   devices: Device[];
   deviceId?: string;
@@ -35,11 +32,8 @@ export function DeviceNavigation({
   drafts: DraftStore;
   reports: ReceivedReport[];
   onReport: (report: ReceivedReport) => void;
-  onNavigate: (path: string, options?: { keyboard?: boolean }) => void;
+  actions: DeviceActions;
   onBind: () => void;
-  onPort: (deviceId: string) => void;
-  onAdd: (device: Device) => void;
-  onAction: (action: DeviceAction) => void;
 }) {
   const { t } = useTranslation();
   const mobile = useMobile();
@@ -74,7 +68,7 @@ export function DeviceNavigation({
       <div className="flex items-center justify-between gap-1 px-1">
         <button
           className="flex-1 text-left text-xs font-medium text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          onClick={(event) => onNavigate("/devices", { keyboard: event.detail === 0 })}
+          onClick={(event) => actions.navigate("/devices", { keyboard: event.detail === 0 })}
         >
           {t(($) => $.shell.deviceWorkspaces)}
         </button>
@@ -125,7 +119,7 @@ export function DeviceNavigation({
               ) {
                 event.preventDefault();
                 const { device, workspace } = matchingWorkspaces[0]!;
-                onNavigate(
+                actions.navigate(
                   workspaceDestination(
                     { deviceId: device.id, workspaceId: workspace.id },
                     tool ?? "terminal",
@@ -179,16 +173,12 @@ export function DeviceNavigation({
             >
               {visibleCollapsed.includes(d.id) ? <ChevronRight /> : <ChevronDown />}
             </IconButton>
-            <DeviceMenu
-              device={d}
-              onNavigate={onNavigate}
-              onAdd={onAdd}
-              onAction={onAction}
-              onPort={onPort}
-            >
+            <DeviceMenu device={d} actions={actions}>
               <button
                 className={`flex min-h-9 min-w-0 flex-1 items-center gap-1.5 rounded text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring max-desk:min-h-11 max-desk:text-sm ${deviceId === d.id && !tool ? "" : "hover:bg-muted"}`}
-                onClick={(event) => onNavigate(devicePath(d.id), { keyboard: event.detail === 0 })}
+                onClick={(event) =>
+                  actions.navigate(devicePath(d.id), { keyboard: event.detail === 0 })
+                }
               >
                 <Server size={15} className="shrink-0 text-muted-foreground" />
                 <span
@@ -206,7 +196,7 @@ export function DeviceNavigation({
             </DeviceMenu>
             <IconButton
               label={t(($) => $.shell.openDevicePort, { name: d.name })}
-              onClick={() => onPort(d.id)}
+              onClick={() => actions.openPort(d.id)}
             >
               <Globe />
             </IconButton>
@@ -220,7 +210,7 @@ export function DeviceNavigation({
                 { deviceId: d.id, workspaceId: w.id },
                 tool ?? "terminal",
               );
-              const open = (keyboard = false) => onNavigate(path, { keyboard });
+              const open = (keyboard = false) => actions.navigate(path, { keyboard });
               return (
                 <div key={w.id}>
                   <div className="group flex items-center">
@@ -229,7 +219,7 @@ export function DeviceNavigation({
                       device={d}
                       workspace={w}
                       onOpen={() => open()}
-                      onAction={onAction}
+                      onAction={actions.openAction}
                     >
                       <button
                         aria-current={

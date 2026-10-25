@@ -27,6 +27,10 @@ interface Result {
   deviceId?: string;
 }
 
+const bindingPendingPollMs = 2_000;
+const bindingRetryPollMs = 3_000;
+const bindingRetryLimit = 3;
+
 export function BindingDialog({
   devices,
   connected,
@@ -47,8 +51,8 @@ export function BindingDialog({
   const [error, setError] = useState<unknown>();
   const { copied, error: copyError, copy, reset } = useCopyFeedback();
   const [platform, setPlatform] = useState<AgentPlatform>("linux");
-  const [busy, setBusy] = useState(true);
-  const [queryStopped, setQueryStopped] = useState(false);
+  const [creating, setCreating] = useState(true);
+  const [pollingStopped, setPollingStopped] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const boundDevicePresent = result?.deviceId
     ? devices.some((device) => device.id === result.deviceId)
@@ -58,14 +62,14 @@ export function BindingDialog({
     setResult(undefined);
     setError(undefined);
     reset();
-    setBusy(true);
+    setCreating(true);
     try {
       setBinding(await post<Binding>("/api/bindings"));
       setResult({ status: "pending" });
     } catch (error) {
       setError(error);
     } finally {
-      setBusy(false);
+      setCreating(false);
     }
   }, [reset]);
   const started = useRef(false);
@@ -79,7 +83,7 @@ export function BindingDialog({
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     let failures = 0;
-    setQueryStopped(false);
+    setPollingStopped(false);
     setError(undefined);
     async function poll() {
       try {
@@ -90,13 +94,15 @@ export function BindingDialog({
         setResult(status);
         setError(undefined);
         failures = 0;
-        if (status.status === "pending") timer = setTimeout(() => void poll(), 2000);
+        if (status.status === "pending")
+          timer = setTimeout(() => void poll(), bindingPendingPollMs);
       } catch (error) {
         if (!controller.signal.aborted) {
           setError(error);
           const temporary = error instanceof ApiError && error.retryable;
-          if (temporary && failures++ < 3) timer = setTimeout(() => void poll(), 3000);
-          else setQueryStopped(true);
+          if (temporary && failures++ < bindingRetryLimit)
+            timer = setTimeout(() => void poll(), bindingRetryPollMs);
+          else setPollingStopped(true);
         }
       }
     }
@@ -116,6 +122,14 @@ export function BindingDialog({
       : undefined;
   const device = devices.find((entry) => entry.id === result?.deviceId);
   const online = connected && device?.status === "online";
+  let statusMessage: string;
+  if (unavailable) statusMessage = t(($) => $.devices.bindingUnavailable);
+  else if (result?.status === "consumed") {
+    if (online) statusMessage = t(($) => $.devices.deviceOnline, { name: device.name });
+    else if (!connected) statusMessage = t(($) => $.devices.registeredUnknown);
+    else statusMessage = t(($) => $.devices.registeredOffline);
+  } else if (result?.status === "expired") statusMessage = t(($) => $.devices.bindingExpired);
+  else statusMessage = t(($) => $.devices.waitingDevice);
   const hostname = window.location.hostname;
   const loopback =
     hostname === "localhost" ||
@@ -129,7 +143,7 @@ export function BindingDialog({
       </DialogHeader>
       <div className="space-y-4 overflow-auto p-5">
         {!binding ? (
-          busy ? (
+          creating ? (
             <p role="status" className="text-sm text-muted-foreground">
               {t(($) => $.devices.generating)}
             </p>
@@ -157,17 +171,7 @@ export function BindingDialog({
                 {online && result?.status === "consumed" && (
                   <CircleCheck size={18} className="text-primary" />
                 )}
-                {unavailable
-                  ? t(($) => $.devices.bindingUnavailable)
-                  : result?.status === "consumed"
-                    ? online
-                      ? t(($) => $.devices.deviceOnline, { name: device.name })
-                      : !connected
-                        ? t(($) => $.devices.registeredUnknown)
-                        : t(($) => $.devices.registeredOffline)
-                    : result?.status === "expired"
-                      ? t(($) => $.devices.bindingExpired)
-                      : t(($) => $.devices.waitingDevice)}
+                {statusMessage}
               </span>
               {pending && (
                 <span className="text-xs">
@@ -259,11 +263,11 @@ export function BindingDialog({
           </Button>
         )}
         {(result?.status === "expired" || unavailable) && (
-          <Button onClick={() => void create()} disabled={busy}>
+          <Button onClick={() => void create()} disabled={creating}>
             {t(($) => $.devices.regenerate)}
           </Button>
         )}
-        {binding && queryStopped && !unavailable && result?.status !== "expired" && (
+        {binding && pollingStopped && !unavailable && result?.status !== "expired" && (
           <Button onClick={() => setAttempt((value) => value + 1)}>
             {t(($) => $.common.retry)}
           </Button>

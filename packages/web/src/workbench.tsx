@@ -20,7 +20,7 @@ import {
   LayoutDashboard,
   Settings,
 } from "lucide-react";
-import type { Device } from "@kiteline/shared/protocol";
+import type { Device, Workspace as WorkspaceInfo } from "@kiteline/shared/protocol";
 import type { LoginSession } from "./auth";
 import { apiError, errorMessage, post } from "./lib/api";
 import { emit } from "./lib/events";
@@ -35,28 +35,25 @@ import {
   tasksPath,
   workspaceDestination,
 } from "./lib/navigation";
-import { useDevices } from "./devices/use-devices";
+import { useBrowserControlConnection } from "./devices/use-browser-control-connection";
 import { Button } from "./components/ui/button";
 import { Dialog } from "./components/ui/dialog";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "./components/ui/menu";
 import { IconButton } from "./components/icon-button";
 import { BindingDialog } from "./devices/binding-dialog";
 import { DirectoryDialog } from "./devices/directory-dialog";
-import { DeviceActionDialog, type DeviceAction } from "./devices/device-actions";
+import {
+  DeviceActionDialog,
+  type DeviceAction,
+  type DeviceActions,
+} from "./devices/device-actions";
 
 import { DeviceNavigation } from "./devices/device-navigation";
 import { Home, DeviceDetail } from "./devices/device-views";
-import { useRecentWorkspaces } from "./devices/recent-workspaces";
-import { Workspace, type WorkspaceMemory } from "./workspace/workspace";
-import type { WorkPagesState } from "./workspace/pages";
-import type { GitBrowseState } from "./git/git";
-import type { TerminalLayout } from "./terminal/groups";
+import { useRecentWorkspaces, type RecentWorkspace } from "./devices/recent-workspaces";
+import { Workspace } from "./workspace/workspace";
+import { WorkspaceMemories, workspaceKey } from "./workspace/memory";
 import { reportKey, type ReceivedReport } from "./terminal/reports";
-import {
-  readTerminalLayouts,
-  terminalLayoutsKey,
-  writeTerminalLayouts,
-} from "./terminal/layout-storage";
 import { GitActions } from "./git/actions";
 import { DraftStore, isDirty } from "./files/drafts";
 import { DraftView } from "./files/draft-view";
@@ -83,76 +80,215 @@ export function Workbench({
   setSession(session?: LoginSession): void;
   authentication: ReactNode;
 }) {
-  const { t, i18n } = useTranslation();
-  const [terminalLayouts] = useState(() => {
-    try {
-      return readTerminalLayouts(sessionStorage);
-    } catch {
-      return new Map<string, TerminalLayout>();
-    }
-  });
-  const [drafts] = useState(() => new DraftStore());
-  const [workspaceViews] = useState(() => new Map<string, WorkspaceMemory>());
-  const [workPages] = useState(() => new Map<string, WorkPagesState>());
-  const [gitBrowsing] = useState(() => new Map<string, GitBrowseState>());
-  const [gitActions] = useState(() => new GitActions());
-  const [reports, setReports] = useState(new Map<string, ReceivedReport>());
-  const [activationRequest, setActivationRequest] = useState(0);
-  const authenticated = !!session;
-  useEffect(() => {
-    if (!authenticated) return;
-    const receive = (event: WindowEventMap["kiteline:event"]) => {
-      const message = event.detail;
-      if (message.type === "notices.reset") setReports(new Map());
-      if (message.type === "terminal.notice")
-        setReports((previous) => new Map(previous).set(reportKey(message), message));
-      if (message.type === "notice.cleared")
-        setReports((previous) => {
-          const key = reportKey(message);
-          if (previous.get(key)?.noticeId !== message.noticeId) return previous;
-          const next = new Map(previous);
-          next.delete(key);
-          return next;
-        });
-    };
-    window.addEventListener("kiteline:event", receive);
-    return () => window.removeEventListener("kiteline:event", receive);
-  }, [authenticated]);
+  const { t } = useTranslation();
   const route = useRoute();
-  const [error, setError] = useState<{ cause: unknown; downloadPath?: string }>();
-  const saveLayout = useCallback(
-    (key: string, layout: TerminalLayout) => {
-      terminalLayouts.set(key, layout);
-      try {
-        writeTerminalLayouts(sessionStorage, terminalLayouts);
-      } catch {
-        // The in-memory layout remains available.
-      }
+  const mobile = useMobile();
+  const authenticated = !!session;
+
+  // These owners survive reauthentication; successful sign-out clears their contents.
+  const [memories] = useState(() => new WorkspaceMemories());
+  const [drafts] = useState(() => new DraftStore());
+  const [gitActions] = useState(() => new GitActions());
+  const [error, setError] = useState<WorkbenchError>();
+  useEffect(
+    function watchDraftFailuresAndPageExit() {
+      const unload = (event: BeforeUnloadEvent) => {
+        if (drafts.snapshot().some(isDirty)) {
+          event.preventDefault();
+          event.returnValue = "";
+        }
+      };
+      const failed = (event: WindowEventMap["kiteline:event"]) => {
+        const message = event.detail;
+        if (message.type === "channel.failed") {
+          drafts.fileFailed(message.channelId, message.error);
+          if (message.purpose === "download" && message.error.code !== "cancelled")
+            setError({
+              cause: apiError(message.error),
+              downloadPath: message.path,
+            });
+        }
+      };
+      window.addEventListener("beforeunload", unload);
+      window.addEventListener("kiteline:event", failed);
+      return () => {
+        window.removeEventListener("beforeunload", unload);
+        window.removeEventListener("kiteline:event", failed);
+      };
     },
-    [terminalLayouts],
+    [drafts],
   );
+  useEffect(trackViewport, []);
+
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState<number>();
+  const expireSession = useCallback(() => {
+    setSession(undefined);
+    drafts.setClosing();
+  }, [setSession, drafts]);
+  async function signOut() {
+    if (drafts.snapshot().some(isDirty) && !window.confirm(t(($) => $.shell.discardLogout))) return;
+    try {
+      await post("/api/logout");
+      memories.clear();
+      drafts.clear();
+      gitActions.clear();
+      setSession(undefined);
+    } catch (error) {
+      setError({ cause: error });
+    }
+  }
+  useEffect(
+    function watchSessionExpiration() {
+      window.addEventListener("kiteline:unauthenticated", expireSession);
+      return () => window.removeEventListener("kiteline:unauthenticated", expireSession);
+    },
+    [expireSession],
+  );
+
+  const control = useBrowserControlConnection(
+    authenticated,
+    route.deviceId,
+    route.workspaceId,
+    setSession,
+  );
+  const { devices, loaded: devicesLoaded, error: connectionError } = control;
+  const recents = useRecentWorkspaces(route, devices, devicesLoaded, authenticated);
+  const device = devices.find((d) => d.id === route.deviceId);
+  const workspace = device?.snapshot?.workspaces.find((w) => w.id === route.workspaceId);
+  let unavailable: string | undefined;
+  if (route.deviceId && !device) {
+    if (devicesLoaded) unavailable = t(($) => $.shell.deviceMissing);
+    else if (connectionError) unavailable = t(($) => $.common.disconnected);
+    else unavailable = t(($) => $.shell.connectingDevice);
+  } else if (route.workspaceId && device && !workspace) {
+    if (device.snapshot) unavailable = t(($) => $.shell.workspaceMissing);
+    else if (device.status === "online") unavailable = t(($) => $.common.loading);
+    else unavailable = t(($) => $.common.deviceOffline);
+  }
+  let contextTitle: string = t(($) => $.shell.home);
+  if (!route.valid) contextTitle = t(($) => $.shell.pageMissing);
+  else if (route.tasks)
+    contextTitle = `${t(($) => $.schedules.title)}${device ? ` · ${device.name}` : ""}`;
+  else if (route.deviceId) {
+    if (unavailable) contextTitle = unavailable;
+    else if (device) contextTitle = device.name;
+  }
+  const title =
+    session && route.valid && device && workspace && route.tool
+      ? `${workspace.name} · ${t(($) => $.common[route.tool!])} · ${device.name} · Kiteline`
+      : session
+        ? `${contextTitle} · Kiteline`
+        : "Kiteline";
+  useEffect(() => {
+    document.title = title;
+  }, [title]);
+  const terminalFocus = useTerminalFocus(
+    session &&
+      route.valid &&
+      (!mobile || route.tool === "terminal" || (route.tool === "files" && route.query.draft)) &&
+      device &&
+      workspace
+      ? `${workspaceKey({ deviceId: device.id, workspaceId: workspace.id })}:${route.tool}`
+      : undefined,
+    session && route.valid && device && workspace
+      ? workspaceKey({ deviceId: device.id, workspaceId: workspace.id })
+      : undefined,
+  );
+  useLayoutEffect(() => {
+    if (authenticated) drafts.limits(devices);
+  }, [drafts, devices, authenticated]);
+  return session ? (
+    <SignedInWorkbench
+      route={route}
+      mobile={mobile}
+      control={control}
+      device={device}
+      workspace={workspace}
+      unavailable={unavailable}
+      contextTitle={contextTitle}
+      recents={recents}
+      drafts={drafts}
+      gitActions={gitActions}
+      memories={memories}
+      sidebarOpen={sidebarOpen}
+      setSidebarOpen={setSidebarOpen}
+      sidebarWidth={sidebarWidth}
+      setSidebarWidth={setSidebarWidth}
+      error={error}
+      setError={setError}
+      terminalFocus={terminalFocus}
+      onSignOut={signOut}
+    />
+  ) : (
+    authentication
+  );
+}
+
+interface WorkbenchError {
+  cause: unknown;
+  downloadPath?: string;
+}
+
+interface SignedInWorkbenchProps {
+  route: ReturnType<typeof useRoute>;
+  mobile: boolean;
+  control: ReturnType<typeof useBrowserControlConnection>;
+  device?: Device;
+  workspace?: WorkspaceInfo;
+  unavailable?: string;
+  contextTitle: string;
+  recents: RecentWorkspace[];
+  drafts: DraftStore;
+  gitActions: GitActions;
+  memories: WorkspaceMemories;
+  sidebarOpen: boolean;
+  setSidebarOpen(open: boolean): void;
+  sidebarWidth?: number;
+  setSidebarWidth(width: number): void;
+  error?: WorkbenchError;
+  setError(error?: WorkbenchError): void;
+  terminalFocus: ReturnType<typeof useTerminalFocus>;
+  onSignOut(): Promise<void>;
+}
+
+function SignedInWorkbench({
+  route,
+  mobile,
+  control,
+  device,
+  workspace,
+  unavailable,
+  contextTitle,
+  recents,
+  drafts,
+  gitActions,
+  memories,
+  sidebarOpen,
+  setSidebarOpen,
+  sidebarWidth,
+  setSidebarWidth,
+  error,
+  setError,
+  terminalFocus,
+  onSignOut,
+}: SignedInWorkbenchProps) {
+  const { t, i18n } = useTranslation();
+  const { devices, loaded: devicesLoaded, connected, error: connectionError } = control;
+  const [workspaceControls, setWorkspaceControls] = useState<HTMLDivElement | null>(null);
+  const [workspaceTools, setWorkspaceTools] = useState<HTMLDivElement | null>(null);
+  const navigationToggle = useRef<HTMLButtonElement>(null);
+  const mainContent = useRef<HTMLElement>(null);
+  const focusContentAfterClose = useRef(false);
+
   const [binding, setBinding] = useState(false);
   const bindingReturnFocus = useRef<boolean | HTMLElement | null>(true);
   const [cliDialog, setCliDialog] = useState<{ target?: CliAttachTarget }>();
   const [openFiles, setOpenFiles] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [sidebarWidth, setSidebarWidth] = useState<number>();
   const [mobileNavigation, setMobileNavigation] = useState(false);
-  const [mobileTools, setMobileTools] = useState(false);
-  const [workspaceControls, setWorkspaceControls] = useState<HTMLDivElement | null>(null);
-  const [workspaceTools, setWorkspaceTools] = useState<HTMLDivElement | null>(null);
-  useEffect(() => {
-    setMobileTools(!!(route.query.search || route.query.reveal));
-  }, [route.deviceId, route.workspaceId, route.query.search, route.query.reveal]);
-  const navigationToggle = useRef<HTMLButtonElement>(null);
-  const mainContent = useRef<HTMLElement>(null);
-  const focusContentAfterClose = useRef(false);
-  const routePath = currentPath();
-  useEffect(() => setMobileNavigation(false), [routePath]);
   const [directoryDevice, setDirectoryDevice] = useState<{ device: Device; origin: string }>();
   const [action, setAction] = useState<DeviceAction>();
   const [portDevice, setPortDevice] = useState<string>();
-  useEffect(() => setPortDevice(undefined), [route.deviceId]);
   const [uploads, setUploads] = useState<
     {
       id: string;
@@ -172,12 +308,35 @@ export function Workbench({
     folder: string;
     action: FileAction;
   }>();
-  const {
-    devices,
-    loaded: devicesLoaded,
-    connected,
-    error: connectionError,
-  } = useDevices(!!session, route.deviceId, route.workspaceId, setSession);
+  const [reports, setReports] = useState(new Map<string, ReceivedReport>());
+  const [activationRequest, setActivationRequest] = useState(0);
+  useEffect(function watchTerminalReports() {
+    const receiveTerminalReports = (event: WindowEventMap["kiteline:event"]) => {
+      const message = event.detail;
+      if (message.type === "notices.reset") setReports(new Map());
+      if (message.type === "terminal.notice")
+        setReports((previous) => new Map(previous).set(reportKey(message), message));
+      if (message.type === "notice.cleared")
+        setReports((previous) => {
+          const key = reportKey(message);
+          if (previous.get(key)?.noticeId !== message.noticeId) return previous;
+          const next = new Map(previous);
+          next.delete(key);
+          return next;
+        });
+    };
+    window.addEventListener("kiteline:event", receiveTerminalReports);
+    return () => window.removeEventListener("kiteline:event", receiveTerminalReports);
+  }, []);
+  const navigationReports = [...reports.values()]
+    .filter((report) =>
+      devices.some(
+        (device) =>
+          device.id === report.deviceId &&
+          device.snapshot?.workspaces.some((workspace) => workspace.id === report.workspaceId),
+      ),
+    )
+    .sort((a, b) => b.receivedAt - a.receivedAt);
   const activateTerminal = useCallback(
     (deviceId: string, workspaceId: string, sessionId: string) => {
       void post(`/api/devices/${encodeURIComponent(deviceId)}/notices/activate`, {
@@ -185,54 +344,31 @@ export function Workbench({
         sessionId,
       }).catch((cause: unknown) => setError({ cause }));
     },
-    [],
+    [setError],
   );
-  const recents = useRecentWorkspaces(route, devices, devicesLoaded, !!session);
-  const device = devices.find((d) => d.id === route.deviceId);
+  function openReport(report: ReceivedReport) {
+    choose(workspaceDestination(report, "terminal", { session: report.sessionId }));
+    // Repeated activation must still reveal a terminal when the URL is unchanged.
+    setActivationRequest((value) => value + 1);
+  }
+
+  const routePath = currentPath();
+  useEffect(
+    function closeMobileNavigationAfterRouteChange() {
+      setMobileNavigation(false);
+    },
+    [routePath],
+  );
+  useEffect(
+    function closePortWhenDeviceChanges() {
+      setPortDevice(undefined);
+    },
+    [route.deviceId],
+  );
   const portTarget = devices.find((d) => d.id === portDevice);
   const directoryTarget = devices.find((item) => item.id === directoryDevice?.device.id);
   const directoryEnvironment =
     directoryTarget?.status === "online" ? directoryTarget.environment : undefined;
-  const workspace = device?.snapshot?.workspaces.find((w) => w.id === route.workspaceId);
-  let contextTitle: string = t(($) => $.shell.home);
-  if (!route.valid) contextTitle = t(($) => $.shell.pageMissing);
-  else if (route.tasks)
-    contextTitle = `${t(($) => $.schedules.title)}${device ? ` · ${device.name}` : ""}`;
-  else if (route.deviceId) {
-    if (!device)
-      contextTitle = devicesLoaded
-        ? t(($) => $.shell.deviceMissing)
-        : connectionError
-          ? t(($) => $.common.disconnected)
-          : t(($) => $.shell.connectingDevice);
-    else if (route.workspaceId && !workspace)
-      contextTitle = device.snapshot
-        ? t(($) => $.shell.workspaceMissing)
-        : device.status === "online"
-          ? t(($) => $.common.loading)
-          : t(($) => $.common.deviceOffline);
-    else contextTitle = device.name;
-  }
-  const title =
-    session && route.valid && device && workspace && route.tool
-      ? `${workspace.name} · ${t(($) => $.common[route.tool!])} · ${device.name} · Kiteline`
-      : session
-        ? `${contextTitle} · Kiteline`
-        : "Kiteline";
-  useEffect(() => {
-    document.title = title;
-  }, [title]);
-  const mobile = useMobile();
-  const terminalFocus = useTerminalFocus(
-    session &&
-      route.valid &&
-      (!mobile || route.tool === "terminal" || (route.tool === "files" && route.query.draft)) &&
-      device &&
-      workspace
-      ? `${device.id}:${workspace.id}:${route.tool}`
-      : undefined,
-    session && route.valid && device && workspace ? `${device.id}:${workspace.id}` : undefined,
-  );
   const navigationVisible = !terminalFocus.active && (mobile ? mobileNavigation : sidebarOpen);
   const orphan =
     route.tool === "files" && route.deviceId && route.workspaceId && (!device || !workspace)
@@ -245,79 +381,6 @@ export function Workbench({
           route.query.draft,
         )
       : undefined;
-  useLayoutEffect(() => {
-    if (session) drafts.limits(devices);
-  }, [drafts, devices, session]);
-  useEffect(() => {
-    const unload = (event: BeforeUnloadEvent) => {
-      if (drafts.snapshot().some(isDirty)) {
-        event.preventDefault();
-        event.returnValue = "";
-      }
-    };
-    const failed = (event: WindowEventMap["kiteline:event"]) => {
-      const message = event.detail;
-      if (message.type === "channel.failed") {
-        drafts.fileFailed(message.channelId, message.error);
-        if (message.purpose === "download" && message.error.code !== "cancelled")
-          setError({
-            cause: apiError(message.error),
-            downloadPath: message.path,
-          });
-      }
-    };
-    window.addEventListener("beforeunload", unload);
-    window.addEventListener("kiteline:event", failed);
-    return () => {
-      window.removeEventListener("beforeunload", unload);
-      window.removeEventListener("kiteline:event", failed);
-    };
-  }, [drafts]);
-  useEffect(trackViewport, []);
-  const clearTransient = useCallback(() => {
-    setReports(new Map());
-    setBinding(false);
-    setCliDialog(undefined);
-    setMobileNavigation(false);
-    setMobileTools(false);
-    setOpenFiles(false);
-    setDirectoryDevice(undefined);
-    setAction(undefined);
-    setPortDevice(undefined);
-    setUploads([]);
-    setActiveUpload(undefined);
-    setFileOperation(undefined);
-    drafts.setClosing();
-  }, [drafts]);
-  useEffect(() => {
-    const expire = () => {
-      setSession(undefined);
-      clearTransient();
-    };
-    window.addEventListener("kiteline:unauthenticated", expire);
-    return () => window.removeEventListener("kiteline:unauthenticated", expire);
-  }, [setSession, clearTransient]);
-  async function logout() {
-    if (drafts.snapshot().some(isDirty) && !window.confirm(t(($) => $.shell.discardLogout))) return;
-    try {
-      await post("/api/logout");
-      terminalLayouts.clear();
-      workspaceViews.clear();
-      workPages.clear();
-      gitBrowsing.clear();
-      try {
-        sessionStorage.removeItem(terminalLayoutsKey);
-      } catch {
-        // Storage failure does not prevent signing out.
-      }
-      drafts.clear();
-      gitActions.clear();
-      clearTransient();
-      setSession(undefined);
-    } catch (error) {
-      setError({ cause: error });
-    }
-  }
   function choose(
     path: string,
     {
@@ -332,7 +395,8 @@ export function Workbench({
       destination.deviceId &&
       destination.workspaceId &&
       Object.values(destination.query).every((value) => value === undefined)
-        ? workspaceViews.get(`${destination.deviceId}:${destination.workspaceId}`)?.path
+        ? memories.get({ deviceId: destination.deviceId, workspaceId: destination.workspaceId })
+            ?.presentation?.path
         : undefined;
     const target = saved ?? path;
     if (target !== currentPath()) navigate(target);
@@ -341,35 +405,26 @@ export function Workbench({
     if (keyboard && !(mobile && mobileNavigation))
       mainContent.current?.focus({ preventScroll: true });
   }
-  const navigationReports = [...reports.values()]
-    .filter((report) =>
-      devices.some(
-        (device) =>
-          device.id === report.deviceId &&
-          device.snapshot?.workspaces.some((workspace) => workspace.id === report.workspaceId),
-      ),
-    )
-    .sort((a, b) => b.receivedAt - a.receivedAt);
   function openBinding() {
     bindingReturnFocus.current = mobile && mobileNavigation ? navigationToggle.current : true;
     setMobileNavigation(false);
     setBinding(true);
   }
+  const deviceActions: DeviceActions = {
+    navigate: choose,
+    addWorkspace: (device) => setDirectoryDevice({ device, origin: currentPath() }),
+    openAction: setAction,
+    openPort: setPortDevice,
+  };
   const navigationProps = {
     reports: navigationReports,
-    onReport: (report: ReceivedReport) => {
-      choose(workspaceDestination(report, "terminal", { session: report.sessionId }));
-      setActivationRequest((value) => value + 1);
-    },
+    onReport: openReport,
     devices,
     drafts,
-    onPort: setPortDevice,
-    onAction: setAction,
-    onAdd: (device: Device) => setDirectoryDevice({ device, origin: currentPath() }),
+    actions: deviceActions,
     deviceId: device?.id,
     workspaceId: workspace?.id,
     tool: route.tool,
-    onNavigate: choose,
     onBind: openBinding,
   };
   const navigationButton = (
@@ -439,13 +494,7 @@ export function Workbench({
     if (!device)
       return (
         <div className="space-y-3 p-6">
-          <p className="text-muted-foreground">
-            {devicesLoaded
-              ? t(($) => $.shell.deviceMissing)
-              : connectionError
-                ? t(($) => $.common.disconnected)
-                : t(($) => $.shell.connectingDevice)}
-          </p>
+          <p className="text-muted-foreground">{unavailable}</p>
           <Button variant="outline" onClick={() => choose("/devices")}>
             {t(($) => $.shell.backDevices)}
           </Button>
@@ -455,13 +504,7 @@ export function Workbench({
       if (!workspace)
         return (
           <div className="space-y-3 p-6">
-            <p className="text-muted-foreground">
-              {device.snapshot
-                ? t(($) => $.shell.workspaceMissing)
-                : device.status === "online"
-                  ? t(($) => $.common.loading)
-                  : t(($) => $.common.deviceOffline)}
-            </p>
+            <p className="text-muted-foreground">{unavailable}</p>
             <Button variant="outline" onClick={() => choose(devicePath(device.id))}>
               {t(($) => $.shell.backDevice)}
             </Button>
@@ -469,7 +512,7 @@ export function Workbench({
         );
       return (
         <ViewBoundary
-          key={`${device.id}:${workspace.id}`}
+          key={workspaceKey({ deviceId: device.id, workspaceId: workspace.id })}
           active
           actions={
             <Button variant="outline" onClick={() => choose("/devices")}>
@@ -481,8 +524,8 @@ export function Workbench({
           <Workspace
             device={device}
             workspace={workspace}
-            layouts={terminalLayouts}
-            onLayout={saveLayout}
+            memory={memories.forTarget({ deviceId: device.id, workspaceId: workspace.id })}
+            onLayout={memories.saveTerminalLayout}
             onActivateTerminal={activateTerminal}
             activationRequest={activationRequest}
             focusMode={terminalFocus}
@@ -490,13 +533,8 @@ export function Workbench({
             onCliAttach={(target) => setCliDialog({ target })}
             store={drafts}
             actions={gitActions}
-            views={workspaceViews}
-            savedPages={workPages}
-            gitBrowsing={gitBrowsing}
             controlsHost={workspaceControls}
             toolsHost={workspaceTools}
-            mobileTools={mobileTools}
-            onMobileTools={setMobileTools}
             navigationOpen={mobile && mobileNavigation}
             onOperation={(action, folder) =>
               setFileOperation({
@@ -527,18 +565,8 @@ export function Workbench({
         </ViewBoundary>
       );
     }
-    return (
-      <DeviceDetail
-        key={device.id}
-        device={device}
-        onNavigate={choose}
-        onAdd={(device) => setDirectoryDevice({ device, origin: currentPath() })}
-        onAction={setAction}
-        onPort={setPortDevice}
-      />
-    );
+    return <DeviceDetail key={device.id} device={device} actions={deviceActions} />;
   }
-  if (!session) return authentication;
   return (
     <>
       <a
@@ -675,7 +703,7 @@ export function Workbench({
                     </span>
                   </MenuItem>
                 ))}
-                <MenuItem onClick={() => void logout()}>
+                <MenuItem onClick={() => void onSignOut()}>
                   <LogOut />
                   {t(($) => $.shell.logout)}
                 </MenuItem>
@@ -777,7 +805,7 @@ export function Workbench({
             onAddWorkspace={(device) => {
               bindingReturnFocus.current = false;
               setBinding(false);
-              setDirectoryDevice({ device, origin: currentPath() });
+              deviceActions.addWorkspace(device);
             }}
           />
         )}

@@ -22,23 +22,17 @@ import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "../componen
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
 import { devicePath } from "../lib/navigation";
 import { TerminalSettings } from "../terminal/settings";
-import type { DeviceAction } from "./device-actions";
+import type { DeviceActions } from "./device-actions";
 import { UpgradeDialog } from "./upgrade-dialog";
 
 export function DeviceMenu({
   device,
   children,
-  onNavigate,
-  onAdd,
-  onAction,
-  onPort,
+  actions,
 }: {
   device: Device;
   children?: ReactElement<ComponentPropsWithRef<"button">>;
-  onNavigate: (path: string) => void;
-  onAdd: (device: Device) => void;
-  onAction: (action: DeviceAction) => void;
-  onPort: (deviceId: string) => void;
+  actions: DeviceActions;
 }) {
   const { t } = useTranslation();
   const [settings, setSettings] = useState(false);
@@ -47,10 +41,7 @@ export function DeviceMenu({
   const items = (
     <DeviceMenuItems
       device={device}
-      onNavigate={onNavigate}
-      onAdd={onAdd}
-      onAction={onAction}
-      onPort={onPort}
+      actions={actions}
       onSettings={() => setSettings(true)}
       onUpgrade={() => setUpgrade(true)}
     />
@@ -94,33 +85,27 @@ export function DeviceMenu({
 
 function DeviceMenuItems({
   device,
-  onNavigate,
-  onAdd,
-  onAction,
-  onPort,
+  actions,
   onSettings,
   onUpgrade,
 }: {
   device: Device;
-  onNavigate: (path: string) => void;
-  onAdd: (device: Device) => void;
-  onAction: (action: DeviceAction) => void;
-  onPort: (deviceId: string) => void;
+  actions: DeviceActions;
   onSettings: () => void;
   onUpgrade: () => void;
 }) {
   const { t } = useTranslation();
   return (
     <>
-      <MenuItem onClick={() => onNavigate(devicePath(device.id))}>
+      <MenuItem onClick={() => actions.navigate(devicePath(device.id))}>
         <Server />
         {t(($) => $.devices.viewDevice)}
       </MenuItem>
-      <MenuItem disabled={device.status !== "online"} onClick={() => onAdd(device)}>
+      <MenuItem disabled={device.status !== "online"} onClick={() => actions.addWorkspace(device)}>
         <FolderPlus />
         {t(($) => $.devices.addWorkspace)}
       </MenuItem>
-      <MenuItem onClick={() => onPort(device.id)}>
+      <MenuItem onClick={() => actions.openPort(device.id)}>
         <Globe />
         {t(($) => $.shell.openPort)}
       </MenuItem>
@@ -132,11 +117,11 @@ function DeviceMenuItems({
         <Download />
         {t(($) => $.devices.upgradeAgent)}
       </MenuItem>
-      <MenuItem onClick={() => onAction({ type: "rename", device })}>
+      <MenuItem onClick={() => actions.openAction({ type: "rename", device })}>
         <Pencil />
         {t(($) => $.common.rename)}
       </MenuItem>
-      <MenuItem onClick={() => onAction({ type: "delete", device })}>
+      <MenuItem onClick={() => actions.openAction({ type: "delete", device })}>
         <Trash2 />
         {t(($) => $.devices.deleteDevice)}
       </MenuItem>

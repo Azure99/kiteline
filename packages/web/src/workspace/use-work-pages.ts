@@ -2,21 +2,28 @@ import { useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import type { Repo } from "@kiteline/shared/protocol";
 import { useDrafts, type DraftStore } from "../files/drafts";
 import { requestCloseDraft, showDraft } from "../files/navigation";
-import { currentPath, navigateWorkspace, updateWorkspaceQuery, useRoute } from "../lib/navigation";
+import {
+  currentPath,
+  navigateWorkspace,
+  updateWorkspaceQuery,
+  useRoute,
+  type NavigationOptions,
+} from "../lib/navigation";
 import type { DiffTarget } from "../git/diff-view";
 import { closePage, diffPageId, openPage, type WorkPage, type WorkPagesState } from "./pages";
+import { workspaceKey, type WorkspaceRecord } from "./memory";
 
 export function useWorkPages(
   store: DraftStore,
-  saved: Map<string, WorkPagesState>,
+  memory: WorkspaceRecord,
   deviceId: string,
   workspaceId: string,
 ) {
-  const key = `${deviceId}:${workspaceId}`;
   const target = { deviceId, workspaceId };
+  const key = workspaceKey(target);
   const route = useRoute();
   const drafts = useDrafts(store);
-  const [state, setState] = useState<WorkPagesState>(() => saved.get(key) ?? { items: [] });
+  const [state, setState] = useState<WorkPagesState>(() => memory.pages ?? { items: [] });
   const path = currentPath();
   const previousPath = useRef<string>(undefined);
   const draftFor = (page: WorkPage) =>
@@ -28,20 +35,20 @@ export function useWorkPages(
             (page.draftId ? draft.id === page.draftId : !!page.path && draft.path === page.path),
         )
       : undefined;
-  function navigateTo(page?: WorkPage, replace = false) {
+  function navigateTo(page?: WorkPage, options: NavigationOptions = {}) {
     if (page?.kind === "file") {
       const draft = draftFor(page);
-      if (draft) showDraft(draft, replace);
+      if (draft) showDraft(draft, options);
       else
         navigateWorkspace(
           target,
           "files",
           { file: page.path, draft: undefined, search: undefined },
-          replace,
+          options,
         );
     } else if (page) {
-      navigateWorkspace(target, "git", { repo: page.repoId, search: undefined }, replace);
-    } else updateWorkspaceQuery(target, { file: undefined, draft: undefined }, true);
+      navigateWorkspace(target, "git", { repo: page.repoId, search: undefined }, options);
+    } else updateWorkspaceQuery(target, { file: undefined, draft: undefined }, { replace: true });
   }
   const reconcile = useEffectEvent(() => {
     let next = state;
@@ -78,17 +85,17 @@ export function useWorkPages(
       } else if (next.active !== state.active) {
         navigateTo(
           next.items.find((page) => page.id === next.active),
-          true,
+          { replace: true },
         );
       }
     } else if (next.active !== state.active) {
       navigateTo(
         next.items.find((page) => page.id === next.active),
-        true,
+        { replace: true },
       );
     }
     if (next !== state) setState(next);
-    saved.set(key, next);
+    memory.pages = next;
     // History identifies only tabs still open in this page, not a persisted diff URL.
     history.replaceState({ ...history.state, workPage: { workspace: key, id: next.active } }, "");
   });
@@ -110,7 +117,7 @@ export function useWorkPages(
     if (state.active === page.id)
       navigateTo(
         next.items.find((item) => item.id === next.active),
-        true,
+        { replace: true },
       );
   }
   function openDiff(repo: Repo, diff: DiffTarget) {

@@ -5,7 +5,7 @@ import type { TerminalActions, TerminalCapabilities } from "./terminal-view";
 import { TerminalView } from "./lazy-terminal-view";
 import { members, type TerminalGroup, type TerminalNode } from "./groups";
 
-export interface PaneEvents {
+interface PaneEvents {
   actions(id: string, value: TerminalActions | null): void;
   capabilities(id: string, value: TerminalCapabilities | undefined): void;
   focus(id: string): void;

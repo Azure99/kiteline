@@ -101,7 +101,7 @@ export function readTerminalLayouts(storage: Pick<Storage, "getItem">) {
 
 export function writeTerminalLayouts(
   storage: Pick<Storage, "setItem">,
-  layouts: Map<string, TerminalLayout>,
+  layouts: Iterable<readonly [string, TerminalLayout]>,
 ) {
   storage.setItem(terminalLayoutsKey, JSON.stringify([...layouts]));
 }

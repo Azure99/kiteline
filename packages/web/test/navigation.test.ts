@@ -3,6 +3,7 @@ import {
   parseRoute,
   workspacePath,
   workspaceDestination,
+  navigateWorkspace,
   updateWorkspaceQuery,
   tasksPath,
 } from "../src/lib/navigation";
@@ -63,7 +64,11 @@ test("workspace navigation retains known tool targets only within the same works
   expect(Object.values(other.query).every((value) => value === undefined)).toBe(true);
   const history = { pushState: vi.fn(), replaceState: vi.fn() };
   vi.stubGlobal("history", history);
-  updateWorkspaceQuery({ ...target, workspaceId: "other" }, { file: "late.txt" }, true);
+  updateWorkspaceQuery(
+    { ...target, workspaceId: "other" },
+    { file: "late.txt" },
+    { replace: true },
+  );
   expect(history.replaceState).not.toHaveBeenCalled();
   expect(history.pushState).not.toHaveBeenCalled();
 });
@@ -117,4 +122,45 @@ test("file opens preserve search only when requested and reject invalid line num
     search: undefined,
     reveal: undefined,
   });
+});
+
+test("workspace replacements preserve page history while new destinations clear it", () => {
+  const target = { deviceId: "d", workspaceId: "w" };
+  const browser = Object.assign(new EventTarget(), {
+    location: new URL("https://kiteline.test/devices/d/workspaces/w/files?file=alias.txt"),
+  });
+  const pageState = { workPage: { workspace: "d:w", id: "file:draft" } };
+  const navigation = {
+    state: pageState as unknown,
+    replaceState: vi.fn((state: unknown, _title: string, path: string) => {
+      navigation.state = state;
+      browser.location = new URL(path, browser.location);
+    }),
+    pushState: vi.fn((state: unknown, _title: string, path: string) => {
+      navigation.state = state;
+      browser.location = new URL(path, browser.location);
+    }),
+  };
+  vi.stubGlobal("window", browser);
+  vi.stubGlobal("history", navigation);
+  vi.stubGlobal("PopStateEvent", Event);
+  const routeChanged = vi.fn();
+  browser.addEventListener("popstate", routeChanged);
+
+  updateWorkspaceQuery(target, { file: "actual.txt" }, { replace: true });
+  expect(parseRoute(browser.location).query.file).toBe("actual.txt");
+  expect(navigation.state).toBe(pageState);
+  expect(navigation.replaceState).toHaveBeenCalledOnce();
+  expect(navigation.pushState).not.toHaveBeenCalled();
+  expect(routeChanged).toHaveBeenCalledOnce();
+
+  navigateWorkspace(target, "files", { file: "actual.txt" }, { replace: true });
+  expect(navigation.replaceState).toHaveBeenCalledOnce();
+  expect(routeChanged).toHaveBeenCalledOnce();
+
+  navigateWorkspace(target, "git", { repo: "repo" });
+  expect(parseRoute(browser.location).tool).toBe("git");
+  expect(navigation.state).toBeNull();
+  expect(navigation.pushState).toHaveBeenCalledOnce();
+  expect(routeChanged).toHaveBeenCalledTimes(2);
 });

@@ -19,6 +19,14 @@ import {
 export type DeviceAction =
   | { type: "rename" | "delete"; device: Device }
   | { type: "workspace-rename" | "workspace-remove"; device: Device; workspace: Workspace };
+
+export interface DeviceActions {
+  navigate(path: string, options?: { keyboard?: boolean }): void;
+  addWorkspace(device: Device): void;
+  openAction(action: DeviceAction): void;
+  openPort(deviceId: string): void;
+}
+
 export function DeviceActionDialog({
   action,
   onClose,

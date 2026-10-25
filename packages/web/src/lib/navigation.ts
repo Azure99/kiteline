@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 
 import {
   workspacePath,
@@ -10,6 +10,9 @@ export * from "@kiteline/shared/protocol/navigation";
 export interface WorkspaceTarget {
   deviceId: string;
   workspaceId: string;
+}
+export interface NavigationOptions {
+  replace?: boolean;
 }
 export interface TasksRoute {
   filter?: string;
@@ -28,15 +31,14 @@ function subscribe(listener: () => void) {
   window.addEventListener("popstate", listener);
   return () => window.removeEventListener("popstate", listener);
 }
-export function navigate(path: string, replace = false) {
+export function navigate(path: string, { replace = false }: NavigationOptions = {}) {
   if (replace) history.replaceState(history.state, "", path);
   else history.pushState(null, "", path);
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 export function useRoute() {
-  const location = useSyncExternalStore(subscribe, currentPath);
-  const url = new URL(location, window.location.origin);
-  return parseRoute(url);
+  const path = useSyncExternalStore(subscribe, currentPath);
+  return useMemo(() => parseRoute(new URL(window.location.origin + path)), [path]);
 }
 export function parseRoute(url: URL) {
   const params = url.searchParams;
@@ -107,17 +109,17 @@ export function navigateWorkspace(
   target: WorkspaceTarget,
   tool: WorkspaceTool,
   changes: WorkspaceQuery = {},
-  replace = false,
+  options: NavigationOptions = {},
 ) {
   const path = workspaceDestination(target, tool, changes);
-  if (path !== currentPath()) navigate(path, replace);
+  if (path !== currentPath()) navigate(path, options);
 }
 export function updateWorkspaceQuery(
   target: WorkspaceTarget,
   changes: WorkspaceQuery,
-  replace = false,
+  options: NavigationOptions = {},
 ) {
   const current = currentRoute();
   if (current.tool && isWorkspaceRoute(current, target))
-    navigateWorkspace(target, current.tool, changes, replace);
+    navigateWorkspace(target, current.tool, changes, options);
 }

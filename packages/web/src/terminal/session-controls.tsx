@@ -10,11 +10,14 @@ import { members, type TerminalGroup } from "./groups";
 import { ShortcutIcon } from "./shortcut-icon";
 import { ReportMark, ReportSummary, type ReceivedReport } from "./reports";
 
+export type SessionPickerVariant = "icon" | "current" | "label";
+
 export function SessionPicker({
+  variant,
   sessions,
   selected,
-  groups = [],
-  retained = [],
+  groups,
+  retained,
   reports,
   name,
   refreshDisabled,
@@ -23,14 +26,13 @@ export function SessionPicker({
   focusOnKeyboard,
   onSelectionComplete,
   objectMenu,
-  showLabel = false,
-  showName = false,
   onShowGroup,
 }: {
+  variant: SessionPickerVariant;
   sessions: Session[];
   selected?: string;
-  groups?: TerminalGroup[];
-  retained?: string[];
+  groups: TerminalGroup[];
+  retained: string[];
   reports: ReadonlyMap<string, ReceivedReport>;
   name(id: string): string;
   refreshDisabled: boolean;
@@ -39,8 +41,6 @@ export function SessionPicker({
   focusOnKeyboard: boolean;
   onSelectionComplete(): void;
   objectMenu(id: string): ReactNode;
-  showLabel?: boolean;
-  showName?: boolean;
   onShowGroup?(id: string, shown: boolean): void;
 }) {
   const { t } = useTranslation();
@@ -94,9 +94,9 @@ export function SessionPicker({
     >
       <MenuTrigger
         render={
-          showLabel ? (
+          variant === "label" ? (
             <Button variant="outline" aria-label={label} />
-          ) : showName ? (
+          ) : variant === "current" ? (
             <Button variant="ghost" className="min-w-0 max-w-[45%] shrink" aria-label={label} />
           ) : (
             <IconButton label={label} className="relative" />
@@ -104,13 +104,13 @@ export function SessionPicker({
         }
       >
         <SquareTerminal />
-        {elsewhere && !showLabel && !showName && (
+        {elsewhere && variant === "icon" && (
           <span className="absolute top-1 right-1 flex">
             <ReportMark />
           </span>
         )}
-        {showLabel && label}
-        {!showLabel && showName && (
+        {variant === "label" && label}
+        {variant === "current" && (
           <>
             <span className="truncate">
               {selected ? name(selected) : t(($) => $.common.terminal)}

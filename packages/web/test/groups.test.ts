@@ -13,6 +13,8 @@ import {
   resizeSplit,
   parentSplit,
   showGroup,
+  groupFor,
+  placeCreatedSession,
 } from "../src/terminal/groups";
 
 test("moving existing sessions preserves identity and removes empty groups", () => {
@@ -82,24 +84,133 @@ test("sorting keeps slots, cross-group insertion uses the target parent, and arr
   expect(Object.values(root.sizes)).toEqual([25, 25, 25, 25]);
 });
 
-test("a completed create falls back to its own group if the original anchor moved", () => {
-  let layout = selectSession(emptyLayout(), "A");
-  const target = layout.current!;
-  layout = splitSession(layout, "B", target, "A", "horizontal");
-  layout = moveSession(layout, "A");
-  const result = splitSession(layout, "new", target, "A", "vertical");
-  expect(members(currentGroup(result)!)).toEqual(["new"]);
-  expect(result.groups.find((group) => group.id === target)?.root).toEqual(
-    layout.groups.find((group) => group.id === target)?.root,
-  );
+test("a completed create can select a new group", () => {
+  const original = selectSession(emptyLayout(), "shell");
+  const result = placeCreatedSession(original, "created", { activate: true });
+  expect(result.groups).toHaveLength(2);
+  expect(members(currentGroup(result)!)).toEqual(["created"]);
+  expect(currentGroup(original)?.active).toBe("shell");
 });
 
-test("selecting a published starting session before create completes does not duplicate it", () => {
+test("an activated split reveals its original group and selects the created session", () => {
+  let layout = selectSession(emptyLayout(), "build");
+  const target = layout.current!;
+  layout = splitSession(layout, "tests", target, "build", "horizontal");
+  currentGroup(layout)!.maximized = true;
+  layout = showGroup(layout, target, false);
+  const original = structuredClone(layout);
+
+  const result = placeCreatedSession(layout, "created", {
+    activate: true,
+    split: { groupId: target, anchor: "build", direction: "vertical" },
+  });
+  expect(result.current).toBe(target);
+  expect(currentGroup(result)).toMatchObject({ active: "created", maximized: false });
+  expect(currentGroup(result)?.hidden).toBeUndefined();
+  expect(members(currentGroup(result)!)).toEqual(["build", "created", "tests"]);
+  expect(parentSplit(currentGroup(result)!.root, "created")?.direction).toBe("vertical");
+  expect(layout).toEqual(original);
+});
+
+test("a completed create is placed without replacing a later selection", () => {
+  const requested = selectSession(emptyLayout(), "build");
+  const selected = selectSession(requested, "shell");
+  const result = placeCreatedSession(selected, "created", { activate: false });
+  expect(currentGroup(result)?.active).toBe("shell");
+  expect(members(groupFor(result, "created")!)).toEqual(["created"]);
+  expect(result.groups.flatMap(members)).toEqual(["build", "shell", "created"]);
+});
+
+test("an inactive split preserves hidden and maximized groups and their active session", () => {
+  let layout = selectSession(emptyLayout(), "build");
+  const target = layout.current!;
+  layout = splitSession(layout, "tests", target, "build", "horizontal");
+  currentGroup(layout)!.maximized = true;
+  layout = selectSession(showGroup(layout, target, false), "shell");
+  const original = structuredClone(layout);
+
+  const result = placeCreatedSession(layout, "created", {
+    activate: false,
+    split: { groupId: target, anchor: "build", direction: "vertical" },
+  });
+  expect(groupFor(result, "created")).toMatchObject({
+    id: target,
+    active: "tests",
+    maximized: true,
+    hidden: true,
+  });
+  expect(members(groupFor(result, "created")!)).toEqual(["build", "created", "tests"]);
+  expect(currentGroup(result)?.active).toBe("shell");
+  expect(layout).toEqual(original);
+});
+
+test.each([false, true])(
+  "an inactive create preserves an explicitly empty selection (split=%s)",
+  (split) => {
+    const anchor = selectSession(emptyLayout(), "build");
+    const layout = closeSession(selectSession(anchor, "shell"), "shell");
+    const result = placeCreatedSession(layout, "created", {
+      activate: false,
+      split: split
+        ? { groupId: anchor.current!, anchor: "build", direction: "vertical" }
+        : undefined,
+    });
+    expect(result.current).toBeUndefined();
+    expect(groupFor(result, "created")).toBeDefined();
+    expect(groupFor(result, "build")?.active).toBe("build");
+  },
+);
+
+test.each(["moved", "closed"] as const)(
+  "an ungrouped create gets its own group if the original anchor was %s",
+  (change) => {
+    let layout = selectSession(emptyLayout(), "anchor");
+    const target = layout.current!;
+    layout = splitSession(layout, "companion", target, "anchor", "horizontal");
+    layout =
+      change === "moved"
+        ? moveSession(layout, "anchor")
+        : closeSession(closeSession(layout, "anchor"), "companion");
+    const result = placeCreatedSession(layout, "created", {
+      activate: true,
+      split: { groupId: target, anchor: "anchor", direction: "vertical" },
+    });
+    expect(members(currentGroup(result)!)).toEqual(["created"]);
+    expect(result.groups.find((group) => group.id === target)?.root).toEqual(
+      layout.groups.find((group) => group.id === target)?.root,
+    );
+  },
+);
+
+test("an inactive create keeps an existing group when its original split anchor is gone", () => {
+  let layout = selectSession(emptyLayout(), "anchor");
+  const target = layout.current!;
+  layout = selectSession(closeSession(layout, "anchor"), "published");
+  const publishedGroup = layout.current!;
+  layout = selectSession(layout, "shell");
+  const result = placeCreatedSession(layout, "published", {
+    activate: false,
+    split: { groupId: target, anchor: "anchor", direction: "vertical" },
+  });
+  expect(groupFor(result, "published")?.id).toBe(publishedGroup);
+  expect(members(groupFor(result, "published")!)).toEqual(["published"]);
+  expect(currentGroup(result)?.active).toBe("shell");
+  expect(result.groups.flatMap(members)).toEqual(["published", "shell"]);
+});
+
+test("a published and selected session stays selected when the create result moves it", () => {
   const original = selectSession(emptyLayout(), "anchor");
-  const selected = selectSession(original, "starting");
-  const result = splitSession(selected, "starting", original.current!, "anchor", "vertical");
+  const selected = selectSession(original, "published");
+  const before = structuredClone(selected);
+  const result = placeCreatedSession(selected, "published", {
+    activate: false,
+    split: { groupId: original.current!, anchor: "anchor", direction: "vertical" },
+  });
   expect(result.groups).toHaveLength(1);
-  expect(members(currentGroup(result)!)).toEqual(["anchor", "starting"]);
+  expect(result.current).toBe(original.current);
+  expect(currentGroup(result)?.active).toBe("published");
+  expect(members(currentGroup(result)!)).toEqual(["anchor", "published"]);
+  expect(selected).toEqual(before);
 });
 
 test("retains an opened end screen until its display is closed", () => {

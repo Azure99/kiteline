@@ -3,6 +3,7 @@ import {
   isWorkspaceRoute,
   navigateWorkspace,
   updateWorkspaceQuery,
+  type NavigationOptions,
 } from "../lib/navigation";
 import { isDirty, type Draft, type DraftStore } from "./drafts";
 import { parentPath } from "./paths";
@@ -19,7 +20,7 @@ export function showFile(target: FileTarget, line?: number, keepSearch = false) 
   });
 }
 
-export function showDraft(draft: Draft, replace = false) {
+export function showDraft(draft: Draft, options: NavigationOptions = {}) {
   navigateWorkspace(
     draft,
     "files",
@@ -31,7 +32,7 @@ export function showDraft(draft: Draft, replace = false) {
       search: undefined,
       reveal: undefined,
     },
-    replace,
+    options,
   );
 }
 export function syncDraftPath(draft: Draft) {
@@ -47,7 +48,7 @@ export function syncDraftPath(draft: Draft) {
         file: draft.path || undefined,
         folder: draft.path ? parentPath(draft.path) : draft.untitled?.folder,
       },
-      true,
+      { replace: true },
     );
 }
 export function closeDraft(store: DraftStore, draft: Draft) {
@@ -56,7 +57,7 @@ export function closeDraft(store: DraftStore, draft: Draft) {
     isWorkspaceRoute(route, draft) &&
     store.find({ ...draft, path: route.query.file ?? "" }, route.query.draft) === draft
   ) {
-    updateWorkspaceQuery(draft, { file: undefined, draft: undefined }, true);
+    updateWorkspaceQuery(draft, { file: undefined, draft: undefined }, { replace: true });
   }
   store.close(draft);
 }

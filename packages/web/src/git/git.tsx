@@ -107,7 +107,7 @@ export function GitTool({
     const current = currentRoute();
     const target = { deviceId: device.id, workspaceId: workspace.id };
     if (current.tool === "git" && isWorkspaceRoute(current, target) && !current.query.repo)
-      updateWorkspaceQuery(target, { repo: activeRepoId }, true);
+      updateWorkspaceQuery(target, { repo: activeRepoId }, { replace: true });
   }, [route.tool, requestedRepo, activeRepoId, device.id, workspace.id]);
   function chooseRepo(id: string) {
     updateWorkspaceQuery({ deviceId: device.id, workspaceId: workspace.id }, { repo: id });
@@ -300,8 +300,7 @@ function RepoView({
   const mobile = useMobile();
   const state = useGitStatus(device.id, workspace.id, repo.id, visible && enabled);
   const [browsing] = useState(() => {
-    const key = `${device.id}:${workspace.id}:${repo.id}`;
-    const value = saved.get(key) ?? {
+    const value = saved.get(repo.id) ?? {
       layout: {
         view: "changes" as const,
         changesOpen: true,
@@ -310,7 +309,7 @@ function RepoView({
       },
       history: {},
     };
-    saved.set(key, value);
+    saved.set(repo.id, value);
     return value;
   });
   const [layout, setLayout] = useState(browsing.layout);

@@ -1,6 +1,7 @@
-import { useEffectEvent, useLayoutEffect, useRef, useState, type ComponentProps } from "react";
+import { useCallback, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import type { Device, Workspace as WorkspaceInfo } from "@kiteline/shared/protocol";
 import {
   ArrowLeft,
   PanelBottom,
@@ -21,13 +22,21 @@ import { EdgePanel } from "../components/edge-panel";
 import { deferredView } from "../components/deferred-view";
 import { currentPath, navigateWorkspace, useRoute } from "../lib/navigation";
 import { useMobile } from "../lib/use-mobile";
-import { WorkspaceView } from "../terminal/workspace-view";
+import { TerminalArea } from "../terminal/terminal-area";
+import type { useTerminalFocus } from "../terminal/use-terminal-focus";
+import type { ReceivedReport } from "../terminal/reports";
+import type { CliAttachTarget } from "../cli/cli-dialog";
 import type { DraftStore } from "../files/drafts";
 import type { FileAction } from "../files/operation-dialog";
 import type { GitActions } from "../git/actions";
 import { useRepos } from "../git/use-repos";
-import type { GitBrowseState } from "../git/git";
-import type { WorkPagesState } from "./pages";
+import type { TerminalLayout } from "../terminal/groups";
+import type {
+  ContentMode,
+  TerminalPosition,
+  WorkspacePresentation,
+  WorkspaceRecord,
+} from "./memory";
 import { useWorkPages } from "./use-work-pages";
 import { WorkPages } from "./work-pages";
 import { DiffPageView } from "./diff-page";
@@ -38,28 +47,17 @@ const Files = deferredView(async () => ({ default: (await import("../files/files
 const GitTool = deferredView(async () => ({ default: (await import("../git/git")).GitTool }), {
   active: (props) => props.visible,
 });
-type Mode = "work" | "both" | "terminal";
-type Position = "bottom" | "right" | "top" | "left";
-const positions: Position[] = ["bottom", "right", "top", "left"];
-const positionIcons = { bottom: PanelBottom, right: PanelRight, top: PanelTop, left: PanelLeft };
-type View = {
-  mode: Mode;
-  mobileMode: "work" | "terminal";
-  tool: "files" | "git";
-  position: Position;
-  ratio: number;
-  rightOpen: boolean;
-  toolsWidth?: number;
+const terminalPositions: TerminalPosition[] = ["bottom", "right", "top", "left"];
+const terminalPositionIcons = {
+  bottom: PanelBottom,
+  right: PanelRight,
+  top: PanelTop,
+  left: PanelLeft,
 };
-export interface WorkspaceMemory {
-  view: View;
-  path: string;
-}
-
 export function Workspace({
   device,
   workspace,
-  layouts,
+  memory,
   onLayout,
   onActivateTerminal,
   activationRequest,
@@ -70,133 +68,163 @@ export function Workspace({
   actions,
   onUpload,
   onOperation,
-  views,
-  savedPages,
-  gitBrowsing,
   controlsHost,
   toolsHost,
-  mobileTools,
-  onMobileTools,
   navigationOpen,
-}: Omit<ComponentProps<typeof WorkspaceView>, "visible" | "onSelectTerminal"> & {
+}: {
+  device: Device;
+  workspace: WorkspaceInfo;
+  onActivateTerminal(deviceId: string, workspaceId: string, sessionId: string): void;
+  activationRequest: number;
+  focusMode: ReturnType<typeof useTerminalFocus>;
+  reports: readonly ReceivedReport[];
+  onCliAttach(target: CliAttachTarget): void;
   store: DraftStore;
   actions: GitActions;
   onUpload(files: File[], folder: string): void;
   onOperation(action: FileAction, folder: string): void;
-  views: Map<string, WorkspaceMemory>;
-  savedPages: Map<string, WorkPagesState>;
-  gitBrowsing: Map<string, GitBrowseState>;
+  memory: WorkspaceRecord;
+  onLayout(memory: WorkspaceRecord, layout: TerminalLayout): void;
   controlsHost: HTMLDivElement | null;
   toolsHost: HTMLDivElement | null;
-  mobileTools: boolean;
   navigationOpen: boolean;
-  onMobileTools(open: boolean): void;
 }) {
   const { t } = useTranslation();
   const route = useRoute();
   const mobile = useMobile();
   const target = { deviceId: device.id, workspaceId: workspace.id };
-  const key = `${device.id}:${workspace.id}`;
   const path = currentPath();
-  const [view, setView] = useState<View>(() => {
-    const saved = views.get(key);
-    if (saved?.path === path) return saved.view;
+  const [mobileTools, setMobileTools] = useState(
+    () => !!(route.query.search || route.query.reveal),
+  );
+  const [presentation, setPresentation] = useState<WorkspacePresentation>(() => {
+    const saved = memory.presentation;
+    if (saved?.path === path) return saved.state;
+
+    let initialContent: "work" | "terminal" = "work";
+    if (route.tool === "terminal") initialContent = "terminal";
+    const rightTool = route.tool === "git" ? "git" : "files";
     return {
-      mode: route.tool === "terminal" ? "terminal" : "work",
-      mobileMode: route.tool === "terminal" ? "terminal" : "work",
-      tool: route.tool === "git" ? "git" : "files",
-      position: saved?.view.position ?? "bottom",
-      ratio: saved?.view.ratio ?? 60,
-      rightOpen: true,
-      toolsWidth: saved?.view.toolsWidth,
+      mode: initialContent,
+      mobileMode: initialContent,
+      rightTool,
+      position: saved?.state.position ?? "bottom",
+      ratio: saved?.state.ratio ?? 60,
+      rightToolsOpen: true,
+      rightToolsWidth: saved?.state.rightToolsWidth,
     };
   });
   useLayoutEffect(() => {
-    views.set(key, { view, path });
-  }, [views, key, view, path]);
+    memory.presentation = { state: presentation, path };
+  }, [memory, presentation, path]);
+  const saveLayout = useCallback(
+    (layout: TerminalLayout) => onLayout(memory, layout),
+    [memory, onLayout],
+  );
   const [fileHeader, setFileHeader] = useState<HTMLDivElement | null>(null);
   const [fileSidebar, setFileSidebar] = useState<HTMLDivElement | null>(null);
   const rightToggle = useRef<HTMLButtonElement>(null);
   const [diffView, setDiffView] = useState<"unified" | "split">("unified");
-  const pages = useWorkPages(store, savedPages, device.id, workspace.id);
-  const previous = useRef<typeof route>(undefined);
-  const previousActivation = useRef(activationRequest);
-  function showContent() {
-    onMobileTools(false);
-    setView((old) => ({
-      ...old,
-      mobileMode: "work",
-      mode: !mobile && old.mode === "terminal" ? "both" : old.mode,
-    }));
+  const pages = useWorkPages(store, memory, device.id, workspace.id);
+
+  function revealWorkPages() {
+    setMobileTools(false);
+    setPresentation((previous) => {
+      let mode = previous.mode;
+      if (!mobile && mode === "terminal") mode = "both";
+      return { ...previous, mobileMode: "work", mode };
+    });
   }
-  const followRoute = useEffectEvent(() => {
-    const before = previous.current;
-    previous.current = route;
-    if (
-      (route.query.search !== before?.query.search && route.query.search) ||
-      (route.query.reveal !== before?.query.reveal && route.query.reveal)
-    ) {
-      setView((old) => ({ ...old, tool: "files", rightOpen: true }));
-      if (mobile) onMobileTools(true);
-    } else if (
+
+  const previousRoute = useRef<typeof route>(undefined);
+  const previousActivationRequest = useRef(activationRequest);
+  const previousMobile = useRef(mobile);
+  const followRouteIntent = useEffectEvent(() => {
+    const before = previousRoute.current;
+    const searchRequested = route.query.search && route.query.search !== before?.query.search;
+    const revealRequested = route.query.reveal && route.query.reveal !== before?.query.reveal;
+    const fileSelectionChanged =
       route.tool === "files" &&
       (route.tool !== before?.tool ||
         route.query.file !== before?.query.file ||
-        route.query.draft !== before?.query.draft)
-    ) {
-      if (route.query.file || route.query.draft) showContent();
-    } else if (
-      activationRequest !== previousActivation.current ||
-      (route.tool === "terminal" &&
-        (route.tool !== before?.tool || route.query.session !== before?.query.session))
-    ) {
-      onMobileTools(false);
-      setView((old) => ({
-        ...old,
-        mobileMode: "terminal",
-        mode: !mobile && old.mode === "work" ? "both" : old.mode,
+        route.query.draft !== before?.query.draft);
+    const terminalSelectionChanged =
+      route.tool === "terminal" &&
+      (route.tool !== before?.tool || route.query.session !== before?.query.session);
+    const terminalActivationRequested = activationRequest !== previousActivationRequest.current;
+    previousRoute.current = route;
+    previousActivationRequest.current = activationRequest;
+
+    if (route.query.search !== before?.query.search || route.query.reveal !== before?.query.reveal)
+      setMobileTools(!!(route.query.search || route.query.reveal));
+
+    if (searchRequested || revealRequested) {
+      setPresentation((previous) => ({
+        ...previous,
+        rightTool: "files",
+        rightToolsOpen: true,
       }));
+      return false;
     }
-    previousActivation.current = activationRequest;
-  });
-  useLayoutEffect(() => {
-    followRoute();
-  }, [route, activationRequest]);
-  const previousMobile = useRef(mobile);
-  const handoffContent = useEffectEvent(() => {
-    if (previousMobile.current === mobile) return;
-    previousMobile.current = mobile;
-    if (!mobile && focusMode.active && view.mobileMode === "work") focusMode.exit();
-    setView((old) => {
-      if (mobile) {
-        const mobileMode =
-          focusMode.active || old.mode === "terminal"
-            ? "terminal"
-            : old.mode === "work"
-              ? "work"
-              : old.mobileMode;
-        return { ...old, mobileMode };
+    if (fileSelectionChanged) {
+      // Opening a source file leaves the selected right tool unchanged.
+      if (route.query.file || route.query.draft) {
+        revealWorkPages();
+        return true;
       }
-      return {
-        ...old,
-        mode: old.mode !== "both" && old.mode !== old.mobileMode ? "both" : old.mode,
-      };
-    });
+      return false;
+    }
+    if (terminalSelectionChanged || terminalActivationRequested) {
+      setMobileTools(false);
+      setPresentation((previous) => {
+        let mode = previous.mode;
+        if (!mobile && mode === "work") mode = "both";
+        return { ...previous, mobileMode: "terminal", mode };
+      });
+      return true;
+    }
+    return false;
   });
+  const handoffAtBreakpoint = useEffectEvent(
+    ({ contentSelected }: { contentSelected: boolean }) => {
+      previousMobile.current = mobile;
+      if (!mobile && focusMode.active && presentation.mobileMode === "work") focusMode.exit();
+
+      setPresentation((previous) => {
+        if (mobile) {
+          if (contentSelected) return previous;
+          let mobileMode = previous.mobileMode;
+          if (focusMode.active || previous.mode === "terminal") mobileMode = "terminal";
+          else if (previous.mode === "work") mobileMode = "work";
+          return { ...previous, mobileMode };
+        }
+        let mode = previous.mode;
+        if (mode !== "both" && mode !== previous.mobileMode) mode = "both";
+        return { ...previous, mode };
+      });
+    },
+  );
   useLayoutEffect(() => {
-    handoffContent();
-  }, [mobile]);
-  const mode = focusMode.active && !mobile ? "terminal" : mobile ? view.mobileMode : view.mode;
-  const terminalVisible = mode !== "work";
-  const contentVisible = mode !== "terminal";
-  const toolsVisible =
-    !focusMode.active && !navigationOpen && (mobile ? mobileTools : view.rightOpen);
+    let contentSelected = false;
+    if (previousRoute.current !== route || previousActivationRequest.current !== activationRequest)
+      contentSelected = followRouteIntent();
+    // The functional handoff consumes any route update queued above.
+    if (previousMobile.current !== mobile) handoffAtBreakpoint({ contentSelected });
+  }, [route, activationRequest, mobile]);
+
+  let visibleMode = presentation.mode;
+  if (mobile) visibleMode = presentation.mobileMode;
+  else if (focusMode.active) visibleMode = "terminal";
+  const terminalVisible = visibleMode !== "work";
+  const workPagesVisible = visibleMode !== "terminal";
+  const rightToolsVisible =
+    !focusMode.active && !navigationOpen && (mobile ? mobileTools : presentation.rightToolsOpen);
   const repositories = useRepos(
     device.id,
     workspace.id,
     device.status === "online" &&
-      ((toolsVisible && view.tool === "git") ||
-        (contentVisible && pages.activePage?.kind === "diff")),
+      ((rightToolsVisible && presentation.rightTool === "git") ||
+        (workPagesVisible && pages.activePage?.kind === "diff")),
   );
   useLayoutEffect(() => {
     document.documentElement.toggleAttribute(
@@ -205,29 +233,44 @@ export function Workspace({
     );
     return () => document.documentElement.removeAttribute("data-terminal-active");
   }, [terminalVisible, mobile, navigationOpen, mobileTools]);
-  function chooseMode(next: Mode) {
+
+  function selectContent(next: "work" | "terminal") {
     if (focusMode.active) focusMode.exit();
-    setView((old) => ({
-      ...old,
-      ...(mobile ? { mobileMode: next as "work" | "terminal" } : { mode: next }),
-    }));
+    setPresentation((previous) => {
+      if (mobile) return { ...previous, mobileMode: next };
+      return { ...previous, mode: next };
+    });
     if (next === "work") {
       if (pages.activePage) pages.select(pages.activePage);
       else navigateWorkspace(target, "files");
-    } else if (next === "terminal") navigateWorkspace(target, "terminal");
+    } else {
+      navigateWorkspace(target, "terminal");
+    }
   }
-  const vertical = view.position === "top" || view.position === "bottom";
-  const terminalFirst = view.position === "top" || view.position === "left";
-  const nextMode = mode === "work" ? "both" : mode === "both" ? "terminal" : "work";
-  const ModeIcon = mode === "work" ? FilesIcon : mode === "both" ? PanelsTopLeft : Terminal;
-  const nextPosition = positions[(positions.indexOf(view.position) + 1) % positions.length]!;
-  const PositionIcon = positionIcons[view.position];
-  function modeLabel(mode: Mode) {
+  function selectDesktopMode(next: ContentMode) {
+    if (next !== "both") {
+      selectContent(next);
+      return;
+    }
+    if (focusMode.active) focusMode.exit();
+    setPresentation((previous) => ({ ...previous, mode: "both" }));
+  }
+  const vertical = presentation.position === "top" || presentation.position === "bottom";
+  const terminalFirst = presentation.position === "top" || presentation.position === "left";
+  const nextMode = visibleMode === "work" ? "both" : visibleMode === "both" ? "terminal" : "work";
+  const ModeIcon =
+    visibleMode === "work" ? FilesIcon : visibleMode === "both" ? PanelsTopLeft : Terminal;
+  const nextPosition =
+    terminalPositions[
+      (terminalPositions.indexOf(presentation.position) + 1) % terminalPositions.length
+    ]!;
+  const PositionIcon = terminalPositionIcons[presentation.position];
+  function modeLabel(mode: ContentMode) {
     return t(($) =>
       mode === "work" ? $.shell.workPages : mode === "both" ? $.shell.cooperate : $.common.terminal,
     );
   }
-  function positionLabel(position: Position) {
+  function positionLabel(position: TerminalPosition) {
     return t(($) =>
       position === "top"
         ? $.shell.terminalTop
@@ -243,33 +286,35 @@ export function Workspace({
       {mobile ? (
         <IconButton
           label={
-            view.mobileMode === "work"
+            presentation.mobileMode === "work"
               ? t(($) => $.shell.switchToTerminal)
               : t(($) => $.shell.switchToWorkPages)
           }
-          onClick={() => chooseMode(view.mobileMode === "work" ? "terminal" : "work")}
+          onClick={() => selectContent(presentation.mobileMode === "work" ? "terminal" : "work")}
         >
-          {view.mobileMode === "work" ? <Terminal /> : <FilesIcon />}
+          {presentation.mobileMode === "work" ? <Terminal /> : <FilesIcon />}
         </IconButton>
       ) : (
         <>
-          {mode === "both" && (
+          {visibleMode === "both" && (
             <IconButton
               label={t(($) => $.shell.terminalPosition, {
-                current: positionLabel(view.position),
+                current: positionLabel(presentation.position),
                 next: positionLabel(nextPosition),
               })}
-              onClick={() => setView((old) => ({ ...old, position: nextPosition }))}
+              onClick={() =>
+                setPresentation((previous) => ({ ...previous, position: nextPosition }))
+              }
             >
               <PositionIcon />
             </IconButton>
           )}
           <IconButton
             label={t(($) => $.shell.workspaceMode, {
-              current: modeLabel(mode),
+              current: modeLabel(visibleMode),
               next: modeLabel(nextMode),
             })}
-            onClick={() => chooseMode(nextMode)}
+            onClick={() => selectDesktopMode(nextMode)}
           >
             <ModeIcon />
           </IconButton>
@@ -277,16 +322,16 @@ export function Workspace({
       )}
       <IconButton
         ref={rightToggle}
-        label={t(($) => (toolsVisible ? $.shell.collapseTools : $.shell.expandTools))}
-        aria-expanded={toolsVisible}
+        label={t(($) => (rightToolsVisible ? $.shell.collapseTools : $.shell.expandTools))}
+        aria-expanded={rightToolsVisible}
         aria-controls="workspace-tools"
         onClick={() => {
           if (focusMode.active) focusMode.exit();
-          if (mobile) onMobileTools(true);
-          else setView((old) => ({ ...old, rightOpen: !toolsVisible }));
+          if (mobile) setMobileTools(true);
+          else setPresentation((previous) => ({ ...previous, rightToolsOpen: !rightToolsVisible }));
         }}
       >
-        {toolsVisible ? <PanelRightClose /> : <PanelRightOpen />}
+        {rightToolsVisible ? <PanelRightClose /> : <PanelRightOpen />}
       </IconButton>
     </>
   );
@@ -294,7 +339,7 @@ export function Workspace({
     <Panel
       key="work"
       id="work"
-      defaultSize={`${view.ratio}%`}
+      defaultSize={`${presentation.ratio}%`}
       minSize="20%"
       className="work-page-panel flex min-h-0 min-w-0 flex-col"
     >
@@ -309,9 +354,9 @@ export function Workspace({
           store={store}
           page={pages.activePage?.kind === "file" ? pages.activePage : undefined}
           focusMode={focusMode}
-          browsing={toolsVisible && view.tool === "files"}
-          contentVisible={contentVisible && pages.activePage?.kind === "file"}
-          onOpenContent={showContent}
+          browsing={rightToolsVisible && presentation.rightTool === "files"}
+          contentVisible={workPagesVisible && pages.activePage?.kind === "file"}
+          onOpenContent={revealWorkPages}
           onResolvePath={pages.resolvePath}
           onUpload={onUpload}
           onOperation={onOperation}
@@ -327,19 +372,23 @@ export function Workspace({
             repositories={repositories}
             onDiff={(repo, diff) => {
               pages.openDiff(repo, diff);
-              showContent();
+              revealWorkPages();
             }}
             onChanges={() => {
               if (focusMode.active) focusMode.exit();
-              setView((old) => ({ ...old, tool: "git", rightOpen: true }));
-              if (mobile) onMobileTools(true);
+              setPresentation((previous) => ({
+                ...previous,
+                rightTool: "git",
+                rightToolsOpen: true,
+              }));
+              if (mobile) setMobileTools(true);
               navigateWorkspace(target, "git", {
                 repo: pages.activePage?.kind === "diff" ? pages.activePage.repoId : undefined,
               });
             }}
             view={diffView}
             onView={setDiffView}
-            active={contentVisible && device.status === "online"}
+            active={workPagesVisible && device.status === "online"}
           />
         )}
         {!pages.activePage && (
@@ -354,23 +403,26 @@ export function Workspace({
     <Panel
       key="terminal"
       id="terminal"
-      defaultSize={`${100 - view.ratio}%`}
+      defaultSize={`${100 - presentation.ratio}%`}
       minSize="20%"
       className="terminal-panel flex min-h-0 min-w-0 flex-col"
     >
-      <WorkspaceView
+      <TerminalArea
         {...{
           device,
           workspace,
-          layouts,
-          onLayout,
           onActivateTerminal,
           activationRequest,
           focusMode,
           reports,
           onCliAttach,
         }}
-        onSelectTerminal={() => setView((old) => ({ ...old, mobileMode: "terminal" }))}
+        initialLayout={memory.terminalLayout}
+        onLayout={saveLayout}
+        onSelectTerminal={() => {
+          setMobileTools(false);
+          setPresentation((previous) => ({ ...previous, mobileMode: "terminal" }));
+        }}
         visible={terminalVisible}
       />
     </Panel>
@@ -388,10 +440,11 @@ export function Workspace({
       <ToolLayout header={fileHeader} sidebar={fileSidebar}>
         <Group
           className="workspace-panes min-h-0 min-w-0 flex-1"
-          data-mode={mode}
+          data-mode={visibleMode}
           orientation={vertical ? "vertical" : "horizontal"}
           onLayoutChanged={(sizes, meta) => {
-            if (meta.isUserInteraction) setView((old) => ({ ...old, ratio: sizes.work! }));
+            if (meta.isUserInteraction)
+              setPresentation((previous) => ({ ...previous, ratio: sizes.work! }));
           }}
         >
           {terminalFirst
@@ -402,13 +455,15 @@ export function Workspace({
       {toolsHost &&
         createPortal(
           <EdgePanel
-            desktopWidth={view.toolsWidth}
-            onDesktopWidthChange={(toolsWidth) => setView((old) => ({ ...old, toolsWidth }))}
+            desktopWidth={presentation.rightToolsWidth}
+            onDesktopWidthChange={(rightToolsWidth) =>
+              setPresentation((previous) => ({ ...previous, rightToolsWidth }))
+            }
             id="workspace-tools"
             side="right"
             mobile={mobile}
-            open={toolsVisible}
-            onClose={() => onMobileTools(false)}
+            open={rightToolsVisible}
+            onClose={() => setMobileTools(false)}
             returnFocus={rightToggle}
             label={t(($) => $.shell.workspaceTools)}
             className="workbench-tools flex min-h-0 shrink-0 flex-col border-l border-border bg-muted"
@@ -421,49 +476,51 @@ export function Workspace({
               {mobile && (
                 <IconButton
                   label={t(($) => $.shell.returnToContent)}
-                  onClick={() => onMobileTools(false)}
+                  onClick={() => setMobileTools(false)}
                 >
                   <ArrowLeft />
                 </IconButton>
               )}
-              {(["files", "git"] as const).map((tool) => (
+              {(["files", "git"] as const).map((rightTool) => (
                 <button
-                  key={tool}
+                  key={rightTool}
                   role="tab"
-                  aria-selected={view.tool === tool}
-                  className={`flex min-h-9 items-center gap-2 rounded px-3 text-sm max-desk:min-h-11 ${view.tool === tool ? "bg-primary-soft text-primary" : "hover:bg-background"}`}
-                  onClick={() => setView((old) => ({ ...old, tool }))}
+                  aria-selected={presentation.rightTool === rightTool}
+                  className={`flex min-h-9 items-center gap-2 rounded px-3 text-sm max-desk:min-h-11 ${presentation.rightTool === rightTool ? "bg-primary-soft text-primary" : "hover:bg-background"}`}
+                  onClick={() => setPresentation((previous) => ({ ...previous, rightTool }))}
                 >
-                  {tool === "files" ? <FilesIcon size={15} /> : <GitBranch size={15} />}
-                  {t(($) => $.common[tool])}
+                  {rightTool === "files" ? <FilesIcon size={15} /> : <GitBranch size={15} />}
+                  {t(($) => $.common[rightTool])}
                 </button>
               ))}
             </div>
             <div
               ref={setFileHeader}
-              className={view.tool === "files" ? "flex shrink-0 flex-col" : "hidden"}
+              className={presentation.rightTool === "files" ? "flex shrink-0 flex-col" : "hidden"}
             />
             <div
               ref={setFileSidebar}
-              className={view.tool === "files" ? "flex min-h-0 flex-1 flex-col" : "hidden"}
+              className={
+                presentation.rightTool === "files" ? "flex min-h-0 flex-1 flex-col" : "hidden"
+              }
             />
             <GitTool
               device={device}
               workspace={workspace}
               store={store}
               actions={actions}
-              saved={gitBrowsing}
+              saved={memory.browsing}
               repositories={repositories}
-              selected={view.tool === "git"}
-              visible={toolsVisible && view.tool === "git"}
+              selected={presentation.rightTool === "git"}
+              visible={rightToolsVisible && presentation.rightTool === "git"}
               activeDiff={pages.activePage?.kind === "diff" ? pages.activePage : undefined}
               onTerminal={() => {
-                onMobileTools(false);
-                chooseMode("terminal");
+                setMobileTools(false);
+                selectContent("terminal");
               }}
               onDiff={(repo, diff) => {
                 pages.openDiff(repo, diff);
-                showContent();
+                revealWorkPages();
               }}
             />
           </EdgePanel>,
