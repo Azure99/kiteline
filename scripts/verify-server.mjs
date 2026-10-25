@@ -139,6 +139,9 @@ async function terminal(agentDirectory, server, origin, children) {
   const { WebSocket } = await import(
     pathToFileURL(join(agentDirectory, "agent/node_modules/ws/wrapper.mjs"))
   );
+  const { terminalOutputCost } = await import(
+    pathToFileURL(join(agentDirectory, "shared/dist/protocol/ipc.js"))
+  );
   const url = new URL(
     `/api/channels/${channel.channelId}/terminal?appVersion=${release.version}`,
     origin,
@@ -150,14 +153,18 @@ async function terminal(agentDirectory, server, origin, children) {
     socketError = error;
   });
   const frames = [];
-  let output = "",
-    consumed = 0;
+  let output = "";
+  let consumedCredit = 0;
   socket.on("message", (bytes, binary) => {
     if (binary) {
       output += bytes.toString();
-      consumed += bytes.length;
-      socket.send(JSON.stringify({ type: "consumed", bytes: consumed }));
-    } else frames.push(JSON.parse(bytes.toString()));
+    } else {
+      const frame = JSON.parse(bytes.toString());
+      frames.push(frame);
+      if (frame.type === "error" || frame.type === "input.error") return;
+    }
+    consumedCredit += terminalOutputCost(bytes.length);
+    socket.send(JSON.stringify({ type: "consumed", bytes: consumedCredit }));
   });
   const wait = (test, message) =>
     until(() => {
