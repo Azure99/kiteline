@@ -1,6 +1,6 @@
 import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowLeft, ChevronDown, GitCommitHorizontal, GitBranch } from "lucide-react";
 import type { Commit, CommitFiles, GitHistory } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
@@ -23,16 +23,16 @@ interface Props {
   active: boolean;
   visible: boolean;
   refreshKey: number;
+  headOid?: string | null;
   target?: DiffTarget;
   onTarget(target: DiffTarget): void;
   selection: HistorySelection;
-  renderHeader(): ReactNode;
   onBranch?: (oid: string) => void;
 }
 export function HistoryView(props: Props) {
   const { t, i18n } = useTranslation();
 
-  const { deviceId, workspaceId, repoId, active, refreshKey, renderHeader } = props;
+  const { deviceId, workspaceId, repoId, active, refreshKey, headOid } = props;
   const [value, setValue] = useState<GitHistory>();
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<Commit | undefined>(props.selection.commit);
@@ -43,7 +43,11 @@ export function HistoryView(props: Props) {
   }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
-  const request = useRef<AbortController>(undefined);
+  const request = useRef<{
+    controller: AbortController;
+    position: { anchor?: string; offset: number };
+    headOid?: string | null;
+  }>(undefined);
   const pages = useRef<number[]>([]);
   const position = useRef<{ anchor?: string; offset: number }>({ offset: 0 });
   const lastRefresh = useRef(refreshKey);
@@ -51,9 +55,10 @@ export function HistoryView(props: Props) {
     async (nextPosition = position.current, visited = pages.current) => {
       if (!active) return;
       const { anchor, offset } = nextPosition;
-      request.current?.abort();
+      request.current?.controller.abort();
       const controller = new AbortController();
-      request.current = controller;
+      const pending: NonNullable<typeof request.current> = { controller, position: nextPosition };
+      request.current = pending;
       setBusy(true);
       setError(undefined);
       try {
@@ -68,10 +73,12 @@ export function HistoryView(props: Props) {
         pages.current = visited;
         setValue(result);
         setOffset(offset);
+        if (pending.headOid !== undefined && result.anchorOid !== (pending.headOid ?? undefined))
+          void load({ offset: 0 }, []);
       } catch (error) {
         if (!controller.signal.aborted) setError(error);
       } finally {
-        if (request.current === controller) {
+        if (request.current === pending) {
           request.current = undefined;
           setBusy(false);
         }
@@ -84,8 +91,15 @@ export function HistoryView(props: Props) {
     // A refresh in another view must not reset this reader when it becomes active again.
     lastRefresh.current = refreshKey;
     if (active) void load(changed ? { offset: 0 } : undefined, changed ? [] : undefined);
-    return () => request.current?.abort();
+    return () => request.current?.controller.abort();
   }, [active, load, refreshKey]);
+  useEffect(() => {
+    if (!active || headOid === undefined) return;
+    const pending = request.current;
+    if ((pending?.position ?? position.current).offset !== 0) return;
+    if (pending) pending.headOid = headOid;
+    else if (position.current.anchor !== (headOid ?? undefined)) void load({ offset: 0 }, []);
+  }, [active, headOid, load]);
   return (
     <>
       {!active && props.visible && (
@@ -102,7 +116,6 @@ export function HistoryView(props: Props) {
           </p>
         </div>
       )}
-      {!selected && <div className="shrink-0">{renderHeader()}</div>}
       {!!error && (
         <div className="shrink-0">
           <div
@@ -154,12 +167,13 @@ export function HistoryView(props: Props) {
           }
           previousLabel={t(($) => $.git.previousHistory)}
           previousDisabled={!active || busy || offset === 0}
-          onPrevious={() =>
+          onPrevious={() => {
+            const offset = pages.current.at(-1) ?? 0;
             void load(
-              { anchor: position.current.anchor, offset: pages.current.at(-1) ?? 0 },
+              { anchor: offset === 0 ? undefined : position.current.anchor, offset },
               pages.current.slice(0, -1),
-            )
-          }
+            );
+          }}
           nextLabel={t(($) => $.git.nextHistory)}
           nextDisabled={!active || busy || value?.nextOffset === undefined}
           onNext={() => {
@@ -190,7 +204,6 @@ function CommitView({
   active,
   visible,
   refreshKey,
-  renderHeader,
   onBack,
   onBranch,
   target,
@@ -274,7 +287,6 @@ function CommitView({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0">
-        {renderHeader()}
         {
           <div className="flex shrink-0 items-center gap-2 border-b border-border p-2">
             <IconButton label={t(($) => $.git.backHistory)} onClick={onBack}>

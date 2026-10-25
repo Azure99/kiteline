@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Decoration, Diff, Hunk, parseDiff, type FileData, type ViewType } from "react-diff-view";
 import type { LanguageSupport } from "@codemirror/language";
 import { codeLanguage } from "../lib/code-language";
@@ -8,6 +8,7 @@ import type { InlineHunk } from "./inline-diff";
 import { type GitDiff } from "@kiteline/shared/protocol";
 import { ApiError, errorMessage, rpc } from "../lib/api";
 import { ErrorNotice, ErrorDetails } from "../components/error-notice";
+import { useGitStatusLabel } from "./status-label";
 
 export type DiffTarget = {
   path: string;
@@ -135,6 +136,7 @@ export function DiffView({
 }
 export function Patch({ value, viewType }: { value: GitDiff; viewType: ViewType }) {
   const { t } = useTranslation();
+  const statusLabel = useGitStatusLabel();
 
   const parsed = useMemo(() => {
     if (value.truncated) return { reason: "diffTruncated" as const };
@@ -209,7 +211,10 @@ export function Patch({ value, viewType }: { value: GitDiff; viewType: ViewType 
   const summary = value.summary;
   return (
     <>
-      {(summary.oldPath || summary.binary || summary.oldMode !== summary.newMode) && (
+      {(summary.status ||
+        summary.oldPath ||
+        summary.binary ||
+        summary.oldMode !== summary.newMode) && (
         <div className="space-y-1 border-b border-border px-4 py-2 text-xs text-muted-foreground">
           {summary.oldPath && (
             <p className="break-all">
@@ -217,11 +222,10 @@ export function Patch({ value, viewType }: { value: GitDiff; viewType: ViewType 
             </p>
           )}
           <p>
-            {summary.binary
-              ? t(($) => $.git.binaryNamed, { path: summary.status })
-              : summary.status}
+            {statusLabel(summary.status)}
+            {summary.binary ? ` · ${t(($) => $.git.binaryNamed, { path: summary.path })}` : ""}
             {summary.oldMode !== summary.newMode
-              ? ` · ${summary.oldMode ?? t(($) => $.git.none)} → ${summary.newMode ?? t(($) => $.git.none)}`
+              ? ` · ${t(($) => $.git.fileMode)}: ${summary.oldMode ?? t(($) => $.git.none)} → ${summary.newMode ?? t(($) => $.git.none)}`
               : ""}
           </p>
         </div>
@@ -300,8 +304,14 @@ function DiffBlock({
     () => diffTokens(file, matching?.old, matching?.new, inline),
     [file, matching, inline],
   );
+  const largestLineNumber = file.hunks.reduce(
+    (largest, hunk) =>
+      Math.max(largest, hunk.oldStart + hunk.oldLines - 1, hunk.newStart + hunk.newLines - 1),
+    1,
+  );
+  const gutterWidth = `${String(largestLineNumber).length + 4}ch`;
   return (
-    <>
+    <div style={{ "--kiteline-diff-gutter-width": gutterWidth } as CSSProperties}>
       {!!matching?.error && (
         <div role="status" className="px-4 py-2 text-xs text-muted-foreground">
           {t(($) => $.common.syntaxUnavailable)}: <ErrorNotice error={matching.error} />
@@ -319,13 +329,15 @@ function DiffBlock({
         renderGutter={({ change, side, renderDefault }) => (
           <span aria-hidden="true" className="select-none">
             {renderDefault()}
-            {side === "new" || (viewType === "split" && side === "old")
-              ? change.type === "insert"
-                ? " +"
-                : change.type === "delete"
-                  ? " −"
-                  : ""
-              : ""}
+            <span className="diff-gutter-marker">
+              {side === "new" || (viewType === "split" && side === "old")
+                ? change.type === "insert"
+                  ? "+"
+                  : change.type === "delete"
+                    ? "−"
+                    : ""
+                : ""}
+            </span>
           </span>
         )}
         renderToken={(token, renderDefault, index) =>
@@ -368,7 +380,7 @@ function DiffBlock({
           )}
         </p>
       )}
-    </>
+    </div>
   );
 }
 

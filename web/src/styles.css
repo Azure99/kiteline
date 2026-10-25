@@ -347,6 +347,7 @@ body {
   width: max-content;
   min-width: 100%;
   table-layout: auto;
+  font-family: var(--font-mono);
   font-size: 12px;
   --diff-font-family: var(--font-mono);
 }
@@ -364,9 +365,32 @@ body {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.kiteline-diff.diff-unified {
+  width: 100%;
+  table-layout: fixed;
+}
+.kiteline-diff.diff-unified .diff-code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.kiteline-diff .diff-gutter-col {
+  width: var(--kiteline-diff-gutter-width);
+}
 .kiteline-diff .diff-gutter {
-  min-width: 5ch;
+  white-space: nowrap;
   color: var(--muted-foreground);
+}
+.kiteline-diff .diff-gutter-marker {
+  display: inline-block;
+  width: 1ch;
+  margin-left: 0.5ch;
+}
+.kiteline-diff .diff-code-omit,
+.kiteline-diff .diff-gutter-omit {
+  background: var(--muted);
+}
+.kiteline-diff .diff-gutter-omit::before {
+  background: var(--border);
 }
 .kiteline-diff .diff-code-insert .inline-edit {
   background: var(--diff-code-insert-edit-background-color);
@@ -706,4 +730,9 @@ body {
 .edge-width-handle:hover::after,
 .edge-width-handle:focus-visible::after {
   background: var(--primary);
+}
+
+.git-panes[data-mobile="true"] > [data-panel],
+.git-panes[data-mobile="true"] > [data-panel] > div {
+  display: contents !important;
 }

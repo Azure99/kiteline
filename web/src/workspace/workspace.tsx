@@ -319,6 +319,7 @@ export function Workspace({
         {pages.activePage?.kind === "diff" && (
           <DiffPageView
             key={pages.activePage.id}
+            store={store}
             page={pages.activePage}
             deviceId={device.id}
             workspaceId={workspace.id}
@@ -444,6 +445,10 @@ export function Workspace({
               selected={view.tool === "git"}
               visible={toolsVisible && view.tool === "git"}
               activeDiff={pages.activePage?.kind === "diff" ? pages.activePage : undefined}
+              onTerminal={() => {
+                onMobileTools(false);
+                chooseMode("terminal");
+              }}
               onDiff={(repo, diff) => {
                 pages.openDiff(repo, diff);
                 showContent();

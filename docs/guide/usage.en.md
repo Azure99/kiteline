@@ -28,7 +28,7 @@ On desktop, drag the inner edge of either sidebar to resize it, or Tab to its di
 
 Switching between desktop and phone layouts keeps drafts, the active page and sessions, along with the existing position and proportions. When Together becomes narrow, it shows the most recently explicitly selected file or terminal. For example, selecting a file and then typing in the terminal still leaves the file visible after narrowing. Switching content on the phone and returning to desktop changes a layout that previously showed only one kind of content to Together.
 
-Device names, workspaces, files and folders, and work page tabs support context menus for the pointed object. On a phone, long-press an object or use its More button; device management is also available from More at the top right of device details. Editor and diff content keep their existing text selection and copy interactions; terminal content is described below.
+Device names, workspaces, files and folders, Git changes and work page tabs support context menus for the pointed object. On a phone, long-press an object or use its More button; device management is also available from More at the top right of device details. Editor and diff content keep their existing text selection and copy interactions; terminal content is described below.
 
 ### Where settings are stored
 
@@ -260,25 +260,33 @@ Git uses the device's Git installation and the project user's Git configuration,
 
 Git scans the workspace directory and all subdirectories, listing repositories including initialized submodules and linked worktrees within the workspace (marked `worktree`). Repositories outside the workspace are not used. If the workspace is only a subdirectory of a repository, it shows "No Git repositories found"; add the repository root as a workspace.
 
-With several repositories, the first is selected automatically; switch by path in the repository menu. If "Repository scan incomplete" appears, click "Continue scan". "Discover repositories again" rescans from the beginning. Bare repositories are not supported.
+With several repositories, the first available one is selected automatically. Switch by path in the repository menu; it marks the current repository and shows `.` as "Workspace root". If "Repository scan incomplete" appears, click "Continue scan". "Discover repositories again" rescans from the beginning. Resolve read errors or continue an incomplete scan before deciding that a repository is missing. Bare repositories are not supported.
 
 ### Status and diff
 
+Desktop starts with Changes above a shared History/Branches area. With both expanded, space starts at 60:40. Drag the divider to adjust their heights, or Tab to it and use the up and down arrow keys; Home and End move to the currently allowed limits. Collapse either area to give the other more space. Reopening an area or returning to the workspace keeps the adjusted ratio; reloading resets it to the default. Mobile uses one navigation row and shows one area at a time. The current branch in the top bar opens Branches. Switching or collapsing areas keeps drafts, the selected commit and open diffs. Each refresh button explicitly refreshes its own area; refreshing Changes does not reset a later history page to the first page.
+
 The Git sidebar manages changes, history, branches and repository operations; work pages show individual diffs. Keep multiple files or comparison sources open to compare them. The content header shows the repository path, and tab tooltips retain the full path and parent revision. Checking list entries does not change the active page. Opening a source file from a diff keeps Git in the sidebar. Staging or unstaging preserves the current page and its comparison source.
 
-Diffs start in Unified view. On wide screens, the layout icon shows the current state; click it to switch between Unified and Split. Its tooltip names the current and next layout. Split wraps long lines within each column; Unified keeps horizontal scrolling. Narrow windows use Unified view and restore your previous choice when widened. Worktree, staged and history diffs share this choice.
+Diffs start in Unified view. On wide screens, the layout icon shows the current state; click it to switch between Unified and Split. Its tooltip names the current and next layout. Unified wraps to the actual content pane width, and Split wraps within each column, preserving source text and original line numbers. Long generated lines require more vertical scrolling. Narrow windows use Unified view and restore your previous choice when widened. Worktree, staged and history diffs share this choice.
 
 Inline changes use a stronger background color, and Split view aligns corresponding lines using unchanged text. Alignment uses only the context in the patch, so repeated content can produce imperfect matches. The original diff remains readable while computing or after a failure, with a status message.
 
-Diffs exceeding the limit show only part of the raw patch. Changes are paginated. The Staged changes count covers the whole repository; other group counts cover the current page. Entries with non-UTF-8 paths cannot be operated on.
+Diffs exceeding the limit show only part of the raw patch. Entries explain known statuses, previous rename paths, file modes and binary content. A change row known to be absent from disk cannot open the file; a historical deletion only describes the selected commit. Pagination controls appear only when there is a previous or next page. The Staged changes count covers the whole repository; other group counts cover the current page. An empty group on one page does not mean the whole repository is clean. Entries with non-UTF-8 paths cannot be operated on.
+
+A dot on a change row marks a related unsaved draft. Worktree comparisons read the device disk and index; staged comparisons read the index and HEAD. When a related unsaved draft exists, the diff explains this source and does not read the browser draft. A draft with an unconfirmed save may already be on disk; check it in Files.
 
 ### Stage and commit
 
-- Staging uses files on disk, not unsaved drafts.
+- Staging reads disk files without saving browser drafts. If selected files have unsaved drafts, it first asks whether to stage the disk versions. Save first to include browser input; check any unconfirmed save result first.
 - An action that would also change unselected paths does not proceed. Those paths and the required preceding actions are listed.
 - Unstaging a rename affects both old and new paths. "Unstage the new path only" affects only the new path.
 
+When the list refreshes, changed items are unchecked and the number is shown.
+
 The commit includes everything staged, regardless of the current page or selected rows. You cannot commit while status is refreshing, with an empty message, unresolved conflicts or no staged changes.
+
+On desktop, click "Commit message" to open the editor; you can write a message before staging. On mobile, open it from "Commit". Cancelling keeps the message draft; a successful commit clears the submitted message draft.
 
 ### Discard changes
 
@@ -286,7 +294,9 @@ The commit includes everything staged, regardless of the current page or selecte
 
 ### Branches and history
 
-"Branches" lists local branches. Branches checked out in other worktrees show their paths and cannot be switched to or deleted. Switching does not force-overwrite local changes. Deletion runs `git branch -d`, which rejects unmerged branches; Git rejection shows [Result unconfirmed](#result-unconfirmed).
+"Branches" lists local branches. Click a branch row to read its full name, commit OID and worktree path. "Create branch" in the branch navigation starts from the current HEAD; the action in history details starts from that commit. Branches checked out in other worktrees cannot be switched to or deleted. Switching does not force-overwrite local changes. Deletion runs `git branch -d`, which rejects unmerged branches; Git rejection shows [Result unconfirmed](#result-unconfirmed).
+
+The first history page updates when a new HEAD is read. Later pages keep the original snapshot, so new commits do not shift the current page. Returning to the first page with Previous, or refreshing history, reads the latest history; refreshing resets the history list to its first page. Open commit details, the selected parent and diffs retain their original comparison source.
 
 History file line counts and diffs compare against the same parent commit. For merge commits, you can choose the parent. Binary files do not show line counts.
 

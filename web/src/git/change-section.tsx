@@ -1,12 +1,12 @@
 import { useTranslation } from "react-i18next";
-import { ChevronDown, Minus, Plus, Undo2 } from "lucide-react";
+import { ChevronDown, Circle, Minus, Plus, Undo2 } from "lucide-react";
 import type { DiscardScope, GitEntry, GitStatus } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
-import { Tooltip, TooltipTrigger, TooltipContent } from "../components/ui/tooltip";
 import { discardable, RowActions, stageable } from "./change-actions";
 import { inSide, type ChangeSelection, type ChangeSide } from "./selection";
 import type { DiffTarget } from "./diff-view";
 import { GitFilePath } from "./view-header";
+import { useGitStatusLabel } from "./status-label";
 
 function submoduleLabel(submodule: NonNullable<GitEntry["submodule"]>) {
   const dirty = submodule.trackedDirty || submodule.untrackedDirty;
@@ -26,6 +26,7 @@ export function ChangeSection({
   target,
   disabled,
   onSelect,
+  hasUnsavedDraft,
   onIndex,
   onDiscard,
   onFile,
@@ -37,12 +38,14 @@ export function ChangeSection({
   target?: DiffTarget;
   disabled: boolean;
   onSelect: (entry: GitEntry, side: ChangeSide) => void;
+  hasUnsavedDraft: (path: string) => boolean;
   onIndex: (paths: string[], method: "stage" | "unstage") => void;
   onDiscard: (paths: string[], scope: DiscardScope) => void;
   onFile: (path: string) => void;
   onTarget: (target: DiffTarget) => void;
 }) {
   const { t, i18n } = useTranslation();
+  const statusLabel = useGitStatusLabel();
   const label = t(($) =>
     side === "conflict"
       ? $.git.conflicts
@@ -124,10 +127,24 @@ export function ChangeSection({
         const description = entry.submodule
           ? t(($) => $.git[submoduleLabel(entry.submodule!)])
           : undefined;
+        const code = side === "staged" ? entry.indexStatus : entry.worktreeStatus;
+        const stateLabel = entry.conflict ? t(($) => $.git.conflicts) : statusLabel(code);
+        const missing = entry.types.worktree === "absent";
+        const unsaved = hasUnsavedDraft(entry.path);
         const button = (
           <button
             title={description ? undefined : entry.path}
-            aria-label={description ? `${entry.path} · ${description}` : undefined}
+            aria-label={[
+              entry.path,
+              label,
+              stateLabel,
+              description,
+              missing && t(($) => $.git.missingDiskFile),
+              unsaved && t(($) => $.git.unsavedDraft),
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+            disabled={side === "conflict" && missing}
             onClick={() =>
               side === "conflict"
                 ? onFile(entry.path)
@@ -136,12 +153,21 @@ export function ChangeSection({
             className="flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left text-sm max-desk:min-h-11"
           >
             <GitFilePath path={entry.path} stacked title={description ? "" : entry.path} />
+            {unsaved && (
+              <span
+                className="shrink-0"
+                aria-label={t(($) => $.git.unsavedDraft)}
+                title={t(($) => $.git.unsavedDraft)}
+              >
+                <Circle size={7} fill="currentColor" />
+              </span>
+            )}
           </button>
         );
         return (
           <div
             key={`path:${entry.path}`}
-            className={`flex min-h-8 items-center gap-1 border-b border-border px-2 max-desk:min-h-11 ${target?.path === entry.path && (target.side === side || side === "conflict") ? "bg-primary-soft" : ""}`}
+            className={`group flex min-h-8 items-center gap-1 border-b border-border px-2 max-desk:min-h-11 ${target?.path === entry.path && (target.side === side || side === "conflict") ? "bg-primary-soft" : ""}`}
           >
             <label className="flex min-h-8 items-center justify-center max-desk:min-h-11 max-desk:min-w-11">
               <input
@@ -153,21 +179,13 @@ export function ChangeSection({
             </label>
             <span
               className={`w-3 shrink-0 font-mono text-xs ${side === "staged" ? "text-success" : "text-warning"}`}
+              title={stateLabel}
+              aria-label={stateLabel}
             >
               {side === "staged" ? entry.indexStatus : entry.worktreeStatus}
             </span>
-            {description ? (
-              <Tooltip>
-                <TooltipTrigger render={button} />
-                <TooltipContent>
-                  <p className="break-all">{entry.path}</p>
-                  <p>{description}</p>
-                </TooltipContent>
-              </Tooltip>
-            ) : (
-              button
-            )}
             <RowActions
+              button={button}
               entry={entry}
               description={description}
               side={side}
@@ -179,7 +197,7 @@ export function ChangeSection({
           </div>
         );
       })}
-      {!entries.length && (
+      {!status.totalCount && side === "worktree" && (
         <p className="px-8 py-3 text-xs text-muted-foreground">{t(($) => $.git.noChanges)}</p>
       )}
     </div>

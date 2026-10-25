@@ -1,4 +1,4 @@
-import { Plus, RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { IconButton } from "../components/icon-button";
 import { FileIcon } from "../components/file-icon";
@@ -40,6 +40,9 @@ export function GitFilePath({
 
 export function GitViewHeader({
   view,
+  views = ["changes", "history", "branches"],
+  open = true,
+  onToggle,
   count,
   disabled,
   onView,
@@ -47,6 +50,9 @@ export function GitViewHeader({
   onCreateBranch,
 }: {
   view: GitView;
+  views?: readonly GitView[];
+  open?: boolean;
+  onToggle?: () => void;
   count?: number;
   disabled: boolean;
   onView(view: GitView): void;
@@ -55,9 +61,22 @@ export function GitViewHeader({
 }) {
   const { t, i18n } = useTranslation();
   return (
-    <div className="flex min-h-9 shrink-0 items-center gap-1 border-b border-border px-2 text-xs max-desk:min-h-11">
+    <div
+      className={`flex min-h-9 shrink-0 items-center gap-1 border-b border-border px-2 text-xs max-desk:min-h-11 ${onToggle ? "bg-muted" : ""}`}
+    >
+      {onToggle && (
+        <IconButton
+          label={t(($) => (open ? $.common.collapseNamed : $.common.expandNamed), {
+            name: t(($) => $.git.views),
+          })}
+          aria-expanded={open}
+          onClick={onToggle}
+        >
+          {open ? <ChevronDown /> : <ChevronRight />}
+        </IconButton>
+      )}
       <div role="group" aria-label={t(($) => $.git.views)} className="flex min-w-0 flex-1 gap-1">
-        {(["changes", "history", "branches"] as const).map((id) => (
+        {views.map((id) => (
           <button
             key={id}
             aria-current={view === id ? "true" : undefined}
@@ -82,9 +101,11 @@ export function GitViewHeader({
           <Plus />
         </IconButton>
       )}
-      <IconButton label={t(($) => $.git.refresh)} disabled={disabled} onClick={onRefresh}>
-        <RefreshCw />
-      </IconButton>
+      {open && (
+        <IconButton label={t(($) => $.git.refresh)} disabled={disabled} onClick={onRefresh}>
+          <RefreshCw />
+        </IconButton>
+      )}
     </div>
   );
 }

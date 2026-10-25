@@ -61,7 +61,7 @@ export function RemoteActions({
   const push = () => {
     if (head) void actions.run(target, "git.push", { expectedHead: head });
   };
-  const menuLabel = mobile ? t(($) => $.git.remoteActions) : "Fetch";
+  const menuLabel = t(($) => $.git.remoteActions);
   return (
     <div className="flex shrink-0 items-center">
       <Menu>
@@ -76,7 +76,7 @@ export function RemoteActions({
             />
           }
         >
-          {mobile ? <MoreHorizontal /> : <RefreshCw />}
+          <MoreHorizontal />
         </MenuTrigger>
         <MenuContent>
           {!!error && (

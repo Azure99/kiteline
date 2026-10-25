@@ -9,6 +9,8 @@ import { IconButton } from "../components/icon-button";
 import { useMobile } from "../lib/use-mobile";
 import { showFile } from "../files/navigation";
 import { childPath } from "../files/paths";
+import { useDrafts, type DraftStore } from "../files/drafts";
+import { hasUnsavedDraft } from "../git/drafts";
 import { useGitActivity, type GitActions } from "../git/actions";
 import { useWorkspaceRefresh } from "../lib/use-workspace-refresh";
 import type { DiffPage } from "./pages";
@@ -22,6 +24,7 @@ export function DiffPageView({
   onView,
   active,
   repositories,
+  store,
 }: {
   page: DiffPage;
   deviceId: string;
@@ -31,9 +34,13 @@ export function DiffPageView({
   onView(view: "unified" | "split"): void;
   active: boolean;
   repositories: ReturnType<typeof useRepos>;
+  store: DraftStore;
 }) {
   const { t } = useTranslation();
   const mobile = useMobile();
+  const unsaved = hasUnsavedDraft(useDrafts(store), { deviceId, workspaceId }, page.repoPath, [
+    page.target.path,
+  ]);
   const [revision, setRevision] = useState(0);
   const repo = repositories.repos.find((repo) => repo.id === page.repoId);
   const activity = useGitActivity(actions, { deviceId, workspaceId, repoId: page.repoId });
@@ -93,6 +100,15 @@ export function DiffPageView({
           </IconButton>
         </div>
       </div>
+      {page.target.side !== "commit" && unsaved && (
+        <p className="shrink-0 border-b border-border px-3 py-2 text-xs">
+          {t(($) =>
+            page.target.side === "staged"
+              ? $.git.draftComparisonStaged
+              : $.git.draftComparisonWorktree,
+          )}
+        </p>
+      )}
       {repo?.available ? (
         <DiffView
           {...{ deviceId, workspaceId, active, refreshKey }}
@@ -108,7 +124,11 @@ export function DiffPageView({
             <ErrorNotice error={repositories.error} />
           ) : (
             t(($) =>
-              repositories.busy || !repositories.scan ? $.git.discovering : $.git.repoMissing,
+              repositories.busy || !repositories.scan
+                ? $.git.discovering
+                : !repositories.scan.complete || repositories.scan.issues.length
+                  ? $.git.repoNotFoundYet
+                  : $.git.repoMissing,
             )
           )}
         </div>

@@ -1,9 +1,11 @@
 import { ErrorNotice } from "../components/error-notice";
 import { i18n } from "../i18n";
 import { useTranslation } from "react-i18next";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 import { FolderOpen, Minus, MoreHorizontal, Plus, Undo2 } from "lucide-react";
 import type { DiscardScope, GitEntry, GitReview } from "@kiteline/shared/protocol";
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "../components/ui/context-menu";
+import { Tooltip, TooltipTrigger, TooltipContent } from "../components/ui/tooltip";
 import { Button } from "../components/ui/button";
 import { IconButton } from "../components/icon-button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
@@ -15,8 +17,8 @@ import {
   DialogTitle,
 } from "../components/ui/dialog";
 import { rpc } from "../lib/api";
-import { type DraftStore, isDirty } from "../files/drafts";
-import { childPath } from "../files/paths";
+import type { DraftStore } from "../files/drafts";
+import { hasUnsavedDraft } from "./drafts";
 import type { ChangeSide } from "./selection";
 import type { GitActions, GitTarget } from "./actions";
 import { GitPathDetails } from "./feedback";
@@ -30,6 +32,7 @@ export function discardable(entry: GitEntry) {
   return !Object.values(entry.types).includes("gitlink");
 }
 export function RowActions({
+  button,
   entry,
   description,
   side,
@@ -38,6 +41,7 @@ export function RowActions({
   onDiscard,
   onFile,
 }: {
+  button: ReactElement;
   entry: GitEntry & { path: string };
   description?: string;
   side: ChangeSide;
@@ -49,94 +53,128 @@ export function RowActions({
   const { t } = useTranslation();
 
   const staged = side === "staged";
-  return (
-    <div className="flex shrink-0 items-center">
-      <IconButton
-        label={t(
-          ($) =>
-            staged
-              ? $.git.unstageNamed
-              : side === "conflict"
-                ? $.git.resolveNamed
-                : $.git.stageNamed,
-          { path: entry.path },
-        )}
-        disabled={disabled || (!staged && !stageable(entry))}
-        onClick={() =>
-          onIndex(
-            staged && entry.indexStatus === "R" && entry.oldPath
-              ? [entry.path, entry.oldPath]
-              : [entry.path],
-            staged ? "unstage" : "stage",
-          )
-        }
-      >
-        {staged ? <Minus /> : <Plus />}
-      </IconButton>
-      <Menu>
-        <MenuTrigger
-          render={
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={t(($) => $.git.actionsNamed, { path: entry.path })}
-            />
-          }
+  const indexDisabled = disabled || (!staged && !stageable(entry));
+  const indexLabel = t(
+    ($) =>
+      staged ? $.git.unstageNamed : side === "conflict" ? $.git.resolveNamed : $.git.stageNamed,
+    { path: entry.path },
+  );
+  const index = () =>
+    onIndex(
+      staged && entry.indexStatus === "R" && entry.oldPath
+        ? [entry.path, entry.oldPath]
+        : [entry.path],
+      staged ? "unstage" : "stage",
+    );
+  const details = (
+    <>
+      <p className="max-w-72 px-2 py-1 text-xs break-all text-muted-foreground">{entry.path}</p>
+      {entry.oldPath && (
+        <p className="max-w-72 px-2 py-1 text-xs break-all text-muted-foreground">
+          {t(($) => $.git.previousPath, { path: entry.oldPath })}
+        </p>
+      )}
+      {entry.types.worktree === "absent" && (
+        <p className="max-w-72 px-2 py-1 text-xs text-muted-foreground">
+          {t(($) => $.git.missingDiskFile)}
+        </p>
+      )}
+      {description && (
+        <p className="max-w-72 px-2 py-1 text-xs text-muted-foreground">{description}</p>
+      )}
+    </>
+  );
+  const items = (
+    <>
+      <MenuItem disabled={entry.types.worktree === "absent"} onClick={onFile}>
+        <FolderOpen />
+        {t(($) => $.git.openFiles)}
+      </MenuItem>
+      {staged && entry.indexStatus === "R" && entry.oldPath && (
+        <MenuItem disabled={disabled} onClick={() => onIndex([entry.path], "unstage")}>
+          <Minus />
+          {t(($) => $.git.unstageNewPath)}
+        </MenuItem>
+      )}
+      {side === "worktree" && (
+        <MenuItem
+          aria-label={t(($) => $.git.discardNamed, { path: entry.path })}
+          disabled={disabled || !discardable(entry)}
+          onClick={() => onDiscard([entry.path], "worktree")}
         >
-          <MoreHorizontal />
-        </MenuTrigger>
-        <MenuContent>
-          <p className="max-w-72 px-2 py-1 text-xs break-all text-muted-foreground">{entry.path}</p>
-          {description && (
-            <p className="max-w-72 px-2 py-1 text-xs text-muted-foreground">{description}</p>
-          )}
-          <MenuItem onClick={onFile}>
-            <FolderOpen />
-            {t(($) => $.git.openFiles)}
+          <Undo2 />
+          {t(($) => $.git.discardWorktree)}
+        </MenuItem>
+      )}
+      {entry.indexStatus !== "?" && (
+        <MenuItem
+          disabled={disabled || !discardable(entry)}
+          onClick={() => onDiscard([entry.path], "all")}
+        >
+          <Undo2 />
+          {t(($) => $.git.discardAll)}
+        </MenuItem>
+      )}
+    </>
+  );
+  const trigger = <ContextMenuTrigger render={button} />;
+  return (
+    <>
+      <ContextMenu>
+        {description ? (
+          <Tooltip>
+            <TooltipTrigger render={trigger} />
+            <TooltipContent>
+              <p className="break-all">{entry.path}</p>
+              <p>{description}</p>
+            </TooltipContent>
+          </Tooltip>
+        ) : (
+          trigger
+        )}
+        <ContextMenuContent>
+          {details}
+          <MenuItem aria-label={indexLabel} disabled={indexDisabled} onClick={index}>
+            {staged ? <Minus /> : <Plus />}
+            {t(($) => (staged ? $.git.unstage : side === "conflict" ? $.git.resolve : $.git.stage))}
           </MenuItem>
-          {staged && entry.indexStatus === "R" && entry.oldPath && (
-            <MenuItem disabled={disabled} onClick={() => onIndex([entry.path], "unstage")}>
-              <Minus />
-              {t(($) => $.git.unstageNewPath)}
-            </MenuItem>
-          )}
-          {side === "worktree" && (
-            <MenuItem
-              aria-label={t(($) => $.git.discardNamed, { path: entry.path })}
-              disabled={disabled || !discardable(entry)}
-              onClick={() => onDiscard([entry.path], "worktree")}
-            >
-              <Undo2 />
-              {t(($) => $.git.discardWorktree)}
-            </MenuItem>
-          )}
-          <MenuItem
-            disabled={disabled || !discardable(entry)}
-            onClick={() => onDiscard([entry.path], "all")}
+          {items}
+        </ContextMenuContent>
+      </ContextMenu>
+      <div className="flex shrink-0 items-center">
+        <IconButton label={indexLabel} disabled={indexDisabled} onClick={index}>
+          {staged ? <Minus /> : <Plus />}
+        </IconButton>
+        <Menu>
+          <MenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                className="row-more"
+                aria-label={t(($) => $.git.actionsNamed, { path: entry.path })}
+              />
+            }
           >
-            <Undo2 />
-            {t(($) => $.git.discardAll)}
-          </MenuItem>
-        </MenuContent>
-      </Menu>
-    </div>
+            <MoreHorizontal />
+          </MenuTrigger>
+          <MenuContent>
+            {details}
+            {items}
+          </MenuContent>
+        </Menu>
+      </div>
+    </>
   );
 }
+
 export function confirmDiskVersion(
   store: DraftStore,
   target: GitTarget,
   repoPath: string,
   paths: string[],
 ) {
-  const dirty = store
-    .snapshot()
-    .some(
-      (draft) =>
-        draft.deviceId === target.deviceId &&
-        draft.workspaceId === target.workspaceId &&
-        isDirty(draft) &&
-        paths.some((path) => draft.path === childPath(repoPath, path)),
-    );
+  const dirty = hasUnsavedDraft(store.snapshot(), target, repoPath, paths);
   return !dirty || window.confirm(i18n.t(($) => $.git.stageDiskConfirm));
 }
 export function DiscardDialog({

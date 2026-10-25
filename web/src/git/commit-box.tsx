@@ -10,6 +10,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "../components/ui/dialog";
 import { type GitActions, type GitTarget, useGitMessage } from "./actions";
 
@@ -45,6 +46,7 @@ export function CommitBox({
       aria-label={t(($) => $.git.commitMessage)}
       placeholder={t(($) => $.git.commitMessage)}
       rows={3}
+      autoFocus={!mobile}
       value={message}
       onChange={(event) => actions.message(target, event.target.value)}
     />
@@ -55,35 +57,46 @@ export function CommitBox({
       {t(($) => $.git.commit)}
     </Button>
   );
-  if (!mobile)
-    return (
-      <div className="shrink-0 space-y-2 border-t border-border p-3">
-        {input}
-        <div className="flex justify-end">{button}</div>
-      </div>
-    );
   return (
-    <>
-      <div className="shrink-0 border-t border-border p-2">
-        <Button className="w-full" disabled={!available} onClick={() => setOpen(true)}>
-          <Check />
-          {t(($) => $.git.commit)}
-        </Button>
-      </div>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t(($) => $.git.commit)}</DialogTitle>
-          </DialogHeader>
-          <div className="p-4">{input}</div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)}>
-              {t(($) => $.common.cancel)}
-            </Button>
-            {button}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
+    <Dialog open={open} onOpenChange={setOpen}>
+      {mobile ? (
+        <div className="shrink-0 border-t border-border p-2">
+          <Button className="w-full" disabled={!available} onClick={() => setOpen(true)}>
+            <Check />
+            {t(($) => $.git.commit)}
+          </Button>
+        </div>
+      ) : (
+        <div className="flex min-h-11 shrink-0 items-center gap-1 border-t border-border p-1.5">
+          <DialogTrigger
+            render={
+              <Button
+                variant="outline"
+                className="min-w-0 flex-1 justify-start"
+                aria-label={t(($) => $.git.commitMessage)}
+                title={message || t(($) => $.git.commitMessage)}
+              />
+            }
+          >
+            <span className={`truncate ${message ? "" : "text-muted-foreground"}`}>
+              {message || t(($) => $.git.commitMessage)}
+            </span>
+          </DialogTrigger>
+          {button}
+        </div>
+      )}
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t(($) => $.git.commit)}</DialogTitle>
+        </DialogHeader>
+        <div className="p-4">{input}</div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)}>
+            {t(($) => $.common.cancel)}
+          </Button>
+          {button}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
