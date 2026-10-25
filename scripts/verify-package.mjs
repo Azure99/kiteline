@@ -12,7 +12,7 @@ import {
 } from "./release-artifacts.mjs";
 import { digest, json } from "./release-inputs.mjs";
 import { windowsCliLauncher } from "./agent-launcher.ts";
-import { terminalReset } from "../cli/src/terminal-reset.ts";
+import { terminalReset } from "../packages/cli/src/terminal-reset.ts";
 
 const [kind, target, archivePath, directoryPath, extra] = process.argv.slice(2);
 if (!archivePath || !directoryPath || extra || !["agent", "server", "cli"].includes(kind))
@@ -23,7 +23,7 @@ const source = process.cwd();
 const archive = resolve(archivePath);
 const directory = realpathSync(directoryPath);
 const inputs = json(join(source, "release/inputs.json"));
-const { version } = json(join(source, "shared/src/version.json"));
+const { version } = json(join(source, "packages/shared/src/version.json"));
 const [platform, arch] = target.split("-");
 assert.ok(["linux", "macos", "windows"].includes(platform) && inputs.nodeArchives[arch]);
 assert.ok(kind === "server" ? platform === "linux" : agentTargets.includes(target));
@@ -76,7 +76,7 @@ const same = (packaged, original) => assert.equal(actual.get(packaged), digest(o
 same("LICENSE", join(source, "LICENSE"));
 same(
   "shared/licenses/proxy-agent-negotiate.txt",
-  join(source, "shared/licenses/proxy-agent-negotiate.txt"),
+  join(source, "packages/shared/licenses/proxy-agent-negotiate.txt"),
 );
 assert.ok(readFileSync(join(directory, "runtime/LICENSE"), "utf8").trim());
 

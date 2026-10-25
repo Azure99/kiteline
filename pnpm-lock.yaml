@@ -53,7 +53,7 @@ importers:
         specifier: 5.0.1
         version: 5.0.1(@types/node@22.20.4)(vite@8.3.0(@types/node@22.20.4)(jiti@2.7.0))
 
-  agent:
+  packages/agent:
     dependencies:
       '@kiteline/shared':
         specifier: workspace:*
@@ -77,13 +77,13 @@ importers:
         specifier: 8.21.0
         version: 8.21.0
 
-  cli:
+  packages/cli:
     dependencies:
       '@kiteline/shared':
         specifier: workspace:*
         version: link:../shared
 
-  server:
+  packages/server:
     dependencies:
       '@kiteline/shared':
         specifier: workspace:*
@@ -98,7 +98,7 @@ importers:
         specifier: 8.21.0
         version: 8.21.0
 
-  shared:
+  packages/shared:
     dependencies:
       '@xterm/addon-unicode11':
         specifier: 0.9.0
@@ -116,7 +116,7 @@ importers:
         specifier: 8.21.0
         version: 8.21.0
 
-  terminal-recorder:
+  packages/terminal-recorder:
     dependencies:
       '@kiteline/shared':
         specifier: workspace:*
@@ -128,7 +128,7 @@ importers:
         specifier: 6.1.0-beta.303
         version: 6.1.0-beta.303
 
-  web:
+  packages/web:
     dependencies:
       '@base-ui/react':
         specifier: 1.8.0

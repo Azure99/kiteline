@@ -1,6 +1,6 @@
 # 文件
 
-本文说明文件工具的机制和必须保持的不变量。界面操作见[使用工作台](../guide/usage.md#文件)，可配置限额见[限额](../guide/reference.md#限额)，内部阈值见 `agent/src/limits.ts` 和 `shared/src/protocol/index.ts`。
+本文说明文件工具的机制和必须保持的不变量。界面操作见[使用工作台](../guide/usage.md#文件)，可配置限额见[限额](../guide/reference.md#限额)，内部阈值见 `packages/agent/src/limits.ts` 和 `packages/shared/src/protocol/index.ts`。
 
 文件操作由 agent 以项目用户的权限在设备上执行；server 只转发 RPC 和数据通道，不保存文件内容。写操作的成功、失败和结果未确认按[结果语义](protocol.md#结果语义)处理。
 
@@ -8,7 +8,7 @@
 
 ### 路径模型
 
-- 请求中的路径相对工作区根目录，使用 UTF-8 和 `/` 分隔，根目录写作 `.`。agent 拒绝绝对路径和含 `..` 段的路径（`relativePath`），名称中的空格、换行和 Unicode 原样保留。路径等字符串参数的长度限制由 `shared/src/protocol/index.ts` 的 `string()` 检查。
+- 请求中的路径相对工作区根目录，使用 UTF-8 和 `/` 分隔，根目录写作 `.`。agent 拒绝绝对路径和含 `..` 段的路径（`relativePath`），名称中的空格、换行和 Unicode 原样保留。路径等字符串参数的长度限制由 `packages/shared/src/protocol/index.ts` 的 `string()` 检查。
 - 只有 Windows 上的 agent 检查 Windows 的保留名称和字符。Windows 路径规则和 macOS 的名称拼写解析见[平台实现](platforms.md)。
 - agent 按原始字节读取目录项名称。名称不是合法 UTF-8 或 Windows 重解析点类型不受支持时，条目返回 `path: null`，`unavailableReason` 分别为 `invalid_utf8` 或 `unsupported_reparse_point`；显示名只用于展示，浏览器不能用它构造请求路径。
 - agent 解析路径时跟随符号链接，工作区内的链接可以指向工作区外。文件工具不是沙箱，访问范围就是项目用户的权限。
@@ -20,15 +20,15 @@
 
 ### 分页与游标
 
-- `files.list` 和 `directories.list` 都由 `Directories`（`agent/src/files/directories.ts`）分页读取。每页最多 `listPageEntries` 项，且不超过 `resultBytes`（`agent/src/limits.ts`）；单个条目超过上限时返回 `limit_exceeded`。
+- `files.list` 和 `directories.list` 都由 `Directories`（`packages/agent/src/files/directories.ts`）分页读取。每页最多 `listPageEntries` 项，且不超过 `resultBytes`（`packages/agent/src/limits.ts`）；单个条目超过上限时返回 `limit_exceeded`。
 - 每页内目录排在前面，文件、链接和其他类型按名称（`localeCompare`）混排。浏览器把已加载的各页合并后按同一规则重排，所以大目录只对已加载部分排序。还有下一页时 `truncated` 为 true，界面标明列表未读完。
-- 首页创建游标，后续页通过 `nextCursor` 续读。游标的存活期（`cursorLifetime`）从每次取得读取权时重新计时，到期后回收，读完最后一页立即释放。同一游标同时只允许一个读取，否则返回 `busy`。每台设备最多同时存在 `cursorsPerDevice` 个游标（`agent/src/limits.ts`），与 Git 仓库发现的扫描游标共用。
+- 首页创建游标，后续页通过 `nextCursor` 续读。游标的存活期（`cursorLifetime`）从每次取得读取权时重新计时，到期后回收，读完最后一页立即释放。同一游标同时只允许一个读取，否则返回 `busy`。每台设备最多同时存在 `cursorsPerDevice` 个游标（`packages/agent/src/limits.ts`），与 Git 仓库发现的扫描游标共用。
 - 续页时目录的 `dev`、`ino` 或 `mtime` 已变化，或游标已过期、已释放，agent 返回 `conflict`；浏览器从首页重读，不拼接两次读取的结果。刷新时浏览器至少重读到此前已显示的条目数。
 - 浏览器放弃一次浏览时用 `cursors.release` 归还游标。agent 释放游标时先停止后续读取，等进行中的读取结束并关闭目录句柄，再归还名额。
 
 ## 打开与编辑
 
-文件编辑器和 Git diff 通过 `web/src/lib/code-language.ts` 按文件名选择同一语言库，并使用共享语法配色。语言按需加载，未知语言保留纯文本；语言下载失败只提示高亮不可用，不阻止编辑。
+文件编辑器和 Git diff 通过 `packages/web/src/lib/code-language.ts` 按文件名选择同一语言库，并使用共享语法配色。语言按需加载，未知语言保留纯文本；语言下载失败只提示高亮不可用，不阻止编辑。
 
 ### 内容识别
 
@@ -42,24 +42,24 @@
 
 ### 文本格式
 
-- 判定规则在 `shared/src/protocol/text.ts`：只编辑不含 NUL 的合法 UTF-8 文本；不支持的文件仍可下载原字节。BOM 单独记录。
+- 判定规则在 `packages/shared/src/protocol/text.ts`：只编辑不含 NUL 的合法 UTF-8 文本；不支持的文件仍可下载原字节。BOM 单独记录。
 - CRLF 的数量多于 LF 与单独 CR 之和时采用 CRLF，否则采用 LF。存在多种换行（包括任何单独的 CR）时标记 `mixedLineEndings`，保存时统一为采用的风格。编辑器内部统一使用 LF，文件末尾是否有换行随正文原样保留。
 - 读完全部字节后，agent 在同一句柄上再次读取 `size` 和 `mtime`，有变化返回 `conflict`。返回的内容、元数据（含 `resolvedPath` 和普通权限位 `mode`）和 revision 对应同一份缓冲。
 
 ### revision
 
-`revision` 由 `agent/src/files/read.ts` 的 `revisionOf()` 计算，表示解析后的路径、文件系统与内容。同一路径、同一文件系统、内容相同的原子重建得到相同的 revision，inode 变化本身不造成保存冲突。整理操作使用的 targetVersion 另有定义，见[整理操作](#整理操作)。
+`revision` 由 `packages/agent/src/files/read.ts` 的 `revisionOf()` 计算，表示解析后的路径、文件系统与内容。同一路径、同一文件系统、内容相同的原子重建得到相同的 revision，inode 变化本身不造成保存冲突。整理操作使用的 targetVersion 另有定义，见[整理操作](#整理操作)。
 
 ### 编辑容量
 
 - Windows 目标的新 `.ps1` 首次保存使用 UTF-8 BOM；已有文件及其另存副本保持原格式。目标 OS 来自草稿所属设备。正常保存和未知结果经磁盘确认后采用已保存格式，当前草稿字节数按该格式重算，保留保存期间的编辑。
 - 文本大小一律按 UTF-8 字节计算，包含 BOM 和保存时采用的换行。打开时，文件字节数和按保存风格重新编码后的字节数都不超过 `editorBytes` 才能编辑。
-- 编辑器（`web/src/files/text-editor.tsx`）在应用每个修改前测量结果大小。结果超过上限且比当前内容更大时，整次修改被拒绝，文档和撤销历史都不变，粘贴不会被截断；撤销和重做同样适用。
+- 编辑器（`packages/web/src/files/text-editor.tsx`）在应用每个修改前测量结果大小。结果超过上限且比当前内容更大时，整次修改被拒绝，文档和撤销历史都不变，粘贴不会被截断；撤销和重做同样适用。
 - 浏览器使用草稿所属设备上报的 `editorBytes`，取得之前不允许修改，设备离线时沿用最后已知的值。上限下调到当前内容以下时草稿保留，只允许不增加大小的修改，内容降到上限以内才能保存。
 
 ### 草稿
 
-草稿保存在当前页面的内存中（`web/src/files/drafts.ts`），以 ID 标识并归属设备和工作区；重新打开具名路径时复用已有稿。未命名稿的 path 为空，首次保存前不读写磁盘，创建时的目录只用于预填保存路径。草稿记录基准文本（打开或上次保存时的磁盘文本）、revision、编辑器状态和保存状态；显式退出登录时清空全部草稿。关闭草稿会释放正文、编辑器和撤销历史，迟到的请求结果只属于发出请求的那个打开实例，不会重新创建已关闭的草稿。草稿的用户可见寿命见[使用工作台](../guide/usage.md#文件)。
+草稿保存在当前页面的内存中（`packages/web/src/files/drafts.ts`），以 ID 标识并归属设备和工作区；重新打开具名路径时复用已有稿。未命名稿的 path 为空，首次保存前不读写磁盘，创建时的目录只用于预填保存路径。草稿记录基准文本（打开或上次保存时的磁盘文本）、revision、编辑器状态和保存状态；显式退出登录时清空全部草稿。关闭草稿会释放正文、编辑器和撤销历史，迟到的请求结果只属于发出请求的那个打开实例，不会重新创建已关闭的草稿。草稿的用户可见寿命见[使用工作台](../guide/usage.md#文件)。
 
 `DraftStore.observe` 只观察当前显示的稿件，读取前后沿 activity、路径、取消信号和打开实例判断结果归属。读结果到达时重新判断 dirty：没有未保存内容且容量允许时，采用同一 `DiskText` 的正文、格式和 revision；读期间发生输入时保留本地正文及旧基准，只标记磁盘已变化。后台观察不确认 unknown save，也不清除前台操作的失败；读取失败记录在单独的 observationError。
 
@@ -85,7 +85,7 @@ HTML 预览直接以当前稿件构造 `srcdoc`，只授予 iframe `sandbox="all
 
 ### 发布锁
 
-- 每个 agent 进程只有一把发布锁（`agent/src/files/publish.ts`）。改变目录项的步骤都在锁内执行：新建、重命名、目录选择器中的新建目录、临时文件的创建与登记、保存和上传的最终检查与发布、复制移动删除中每一步的检查与变更、临时文件清理。传输正文、复制正文和遍历目录在锁外进行。
+- 每个 agent 进程只有一把发布锁（`packages/agent/src/files/publish.ts`）。改变目录项的步骤都在锁内执行：新建、重命名、目录选择器中的新建目录、临时文件的创建与登记、保存和上传的最终检查与发布、复制移动删除中每一步的检查与变更、临时文件清理。传输正文、复制正文和遍历目录在锁外进行。
 - 因此同一 agent 上的保存与重命名、移动、删除不会交错：保存先完成时，重命名带走新内容；重命名或删除先完成时，之后的保存返回 `conflict`，不会在旧位置重新生成文件。
 - 等待锁的请求被取消时立即返回；已经开始的发布动作执行到结束才释放锁。
 - 外部写入者不加锁。终端、Git 和其他程序可以在检查与发布之间修改文件；revision、targetVersion 检查和不覆盖重命名只防止工作台自身的过期写入覆盖新内容。
@@ -119,12 +119,12 @@ HTML 预览直接以当前稿件构造 `srcdoc`，只授予 iframe `sandbox="all
 ### 批量请求
 
 - `files.copy` 和 `files.move` 的每一项给出源路径、同一工作区内的目标路径和 `collision`（`error` 或 `replace`），`replace` 必须带确认时的 `expectedTargetVersion`；`files.delete` 给出路径列表。
-- 每批最多 `listPageEntries` 项，请求大小由 `agent/src/files/operations.ts` 的 `parseItems()` 限制。一批内逐项按顺序执行；每个 agent 同时最多执行 `pendingRequestsPerDevice` 批，超出返回 `busy`。这三个方法没有总超时，可以取消。执行中合并进度通知，每项结束时另发一次。
+- 每批最多 `listPageEntries` 项，请求大小由 `packages/agent/src/files/operations.ts` 的 `parseItems()` 限制。一批内逐项按顺序执行；每个 agent 同时最多执行 `pendingRequestsPerDevice` 批，超出返回 `busy`。这三个方法没有总超时，可以取消。执行中合并进度通知，每项结束时另发一次。
 - 提交后的批次固定，列表刷新不会扩大选择。
 
 ### targetVersion 与替换
 
-- `targetVersion` 由 `agent/src/files/paths.ts` 的 `versionOf()` 计算，经 `files.inspect` 返回，表示确认时目标的路径和文件系统状态。替换前 agent 在发布锁内重新计算，与确认值不符时返回 `conflict`，并附当前条目和新的 targetVersion。它与保存 revision 不同，对象身份或元数据变化也会造成冲突。
+- `targetVersion` 由 `packages/agent/src/files/paths.ts` 的 `versionOf()` 计算，经 `files.inspect` 返回，表示确认时目标的路径和文件系统状态。替换前 agent 在发布锁内重新计算，与确认值不符时返回 `conflict`，并附当前条目和新的 targetVersion。它与保存 revision 不同，对象身份或元数据变化也会造成冲突。
 - 只能替换非目录项，目录不会被替换或合并，源或目标是目录时同名即冲突。替换最终符号链接只替换链接本身。
 - 源与目标相同、把目录复制或移动到自身或其子目录，都被拒绝。
 
@@ -143,11 +143,11 @@ HTML 预览直接以当前稿件构造 `srcdoc`，只授予 iframe `sandbox="all
 
 ### 保留两份
 
-`files.inspect` 带 `suggestCopyName` 时，agent 在真实目标目录中找一个尚不存在的名称，序号放在扩展名之前（`config (2).json`），目录和无扩展名文件（如 `.env`）加在末尾；找不到时不返回建议，规则见 `agent/src/files/index.ts`。建议不预留名称：执行时仍用不覆盖方式发布，名称已被占用时返回 `conflict`，不自动换名。
+`files.inspect` 带 `suggestCopyName` 时，agent 在真实目标目录中找一个尚不存在的名称，序号放在扩展名之前（`config (2).json`），目录和无扩展名文件（如 `.env`）加在末尾；找不到时不返回建议，规则见 `packages/agent/src/files/index.ts`。建议不预留名称：执行时仍用不覆盖方式发布，名称已被占用时返回 `conflict`，不自动换名。
 
 ### 结果与取消
 
-- 每项结果为 `succeeded`、`failed`、`partial`（部分子项已完成）或 `unknown`，附完成数和失败详情。详情受条数和整批结果预算限制，超出时标记 `truncated`；预算分配见 `agent/src/files/operations.ts`。整体结果：全部成功为成功；任一项为 `unknown` 时为 `unknown`；否则有已完成内容为 `partial`，没有为 `failed`。
+- 每项结果为 `succeeded`、`failed`、`partial`（部分子项已完成）或 `unknown`，附完成数和失败详情。详情受条数和整批结果预算限制，超出时标记 `truncated`；预算分配见 `packages/agent/src/files/operations.ts`。整体结果：全部成功为成功；任一项为 `unknown` 时为 `unknown`；否则有已完成内容为 `partial`，没有为 `failed`。
 - 取消（用户取消、连接断开、agent 停止）立即给出结果：没有开始或确认没有副作用的项为 `failed`，已完成一部分的为 `partial`，正在执行文件系统变更的项为 `unknown`，取消前已全部完成的项仍为 `succeeded`。
 - 给出结果后，执行体停止安排后续步骤，但已发出的 I/O、文件句柄、helper 和锁保持到真正结束，期间仍占用 `pendingRequestsPerDevice` 的批次名额。结束后 agent 发送工作区变化事件，不回送第二份结果。已完成的部分不回滚。
 
@@ -159,7 +159,7 @@ HTML 预览直接以当前稿件构造 `srcdoc`，只授予 iframe `sandbox="all
 
 ## 搜索
 
-`files.search`（`agent/src/files/search.ts`）在工作区根目录运行随包的 ripgrep（程序目录下的 `dist/native/bin/rg`），不使用 `PATH` 中的 `rg`。
+`files.search`（`packages/agent/src/files/search.ts`）在工作区根目录运行随包的 ripgrep（程序目录下的 `dist/native/bin/rg`），不使用 `PATH` 中的 `rg`。
 
 - 名称模式用 `rg --files` 列出文件（不含目录），返回相对路径中包含查询字符串的文件，比较区分大小写。正文模式用 `--fixed-strings`，不带 `-i`。
 - 两种模式都使用 `--no-config --hidden -g !.git`，`includeIgnored` 为 true 时另加 `--no-ignore`；macOS 上与 `.git` 是同一对象的大小写变体也被排除。命令不带 `--follow`，符号链接不进入结果。忽略文件的语义（包括 Git 全局的 `core.excludesFile`）和二进制文件的处理都由 rg 决定。用户可见的规则见[使用工作台](../guide/usage.md#文件)。
@@ -180,7 +180,7 @@ HTML 预览直接以当前稿件构造 `srcdoc`，只授予 iframe `sandbox="all
 
 - 浏览器一次上传一个文件，每个文件使用一个 `file.write` 的 `upload` 用途通道，建立时声明 `size`，以及 `createOnly` 或确认时的 `expectedTargetVersion`。agent 检查大小不超过 `transferBytes`，在发布锁内按[替换规则](#targetversion-与替换)检查目标，再创建临时文件。
 - 正文结束后，agent 在发布锁内确认目标父目录仍是同一对象，重新检查目标和 targetVersion，然后发布。替换普通文件时保留它的普通权限位；新建文件或替换符号链接时使用默认创建权限（`0666 & ~umask`）。属主、属组、ACL、xattr 和特殊权限位按新建规则确定。
-- 只有 agent 返回的结果表示成功，界面把正文发送完毕和设备完成写入分开显示。server 在转发正文结束帧之前失败时结果为失败，之后失败时为结果未确认（`server/src/file-transfer.ts`）。
+- 只有 agent 返回的结果表示成功，界面把正文发送完毕和设备完成写入分开显示。server 在转发正文结束帧之前失败时结果为失败，之后失败时为结果未确认（`packages/server/src/file-transfer.ts`）。
 - 取消时浏览器先停止安排后续文件，再删除当前通道，agent 删除未发布的临时文件。取消请求失败时可以再次取消；当前文件的结果仍以原上传请求的响应为准。
 
 ### 下载
@@ -199,8 +199,8 @@ HTML 预览直接以当前稿件构造 `srcdoc`，只授予 iframe `sandbox="all
 
 ## 变化监听
 
-- 浏览器通过事件 WebSocket 的 `watch.set` 声明正在使用的设备和工作区。server 汇总所有浏览器的目标，按设备下发，agent 只监听其中仍登记的工作区。监听实现位于 `agent/src/watch-roots.ts`，不跟随符号链接，默认不轮询。macOS 工作树使用 Node 原生递归监听，其他平台工作树及所有 Git 元数据使用 Chokidar。Linux 在独立 worker 内处理监听建立、文件系统事件和关闭，避免这些工作阻塞 agent 的交互请求；其他平台在主线程运行。
-- 工作树监听排除 `agent/src/watch-roots.ts` 的 `excluded` 目录、`.git` 内部，以及工作区内已发现仓库的 gitDir 和 commonDir。agent 同时监听根目录的上一级，覆盖初始根缺失及直接根替换后的监听恢复。macOS 已建立的原生监听按注册路径跨根替换继续工作，不在每次 rename 时关闭重挂；初次建立前以 lstat 排除根本身为符号链接的情况。Linux 的 Chokidar 补丁按目录身份变化重建监听，并更新共享底层 handle，避免同名新目录继续引用旧 inode。被排除的目录仍可浏览，只靠定时刷新更新。
+- 浏览器通过事件 WebSocket 的 `watch.set` 声明正在使用的设备和工作区。server 汇总所有浏览器的目标，按设备下发，agent 只监听其中仍登记的工作区。监听实现位于 `packages/agent/src/watch-roots.ts`，不跟随符号链接，默认不轮询。macOS 工作树使用 Node 原生递归监听，其他平台工作树及所有 Git 元数据使用 Chokidar。Linux 在独立 worker 内处理监听建立、文件系统事件和关闭，避免这些工作阻塞 agent 的交互请求；其他平台在主线程运行。
+- 工作树监听排除 `packages/agent/src/watch-roots.ts` 的 `excluded` 目录、`.git` 内部，以及工作区内已发现仓库的 gitDir 和 commonDir。agent 同时监听根目录的上一级，覆盖初始根缺失及直接根替换后的监听恢复。macOS 已建立的原生监听按注册路径跨根替换继续工作，不在每次 rename 时关闭重挂；初次建立前以 lstat 排除根本身为符号链接的情况。Linux 的 Chokidar 补丁按目录身份变化重建监听，并更新共享底层 handle，避免同名新目录继续引用旧 inode。被排除的目录仍可浏览，只靠定时刷新更新。
 - macOS 工作树递归接收事件，再按工作树边界和排除规则过滤，不为每个普通文件保留监听 FD；根内被排除目录的底层事件仍可能到达。该工作树分支不读取 Chokidar 的 polling 环境变量，Git 元数据仍保留 Chokidar 的原有效果。
 - Linux 工作树只为目录建立 watch，通过 Chokidar raw 事件接收目录内的文件变化，再按同一工作树边界和排除规则合并通知。初次遍历仍检查每个文件；目录数量本身很大时仍可能耗尽系统监听配额。Git 元数据不使用此目录模式。
 - Git 元数据监听覆盖每个已发现仓库的 gitDir 和 commonDir，只看顶层文件和 `gitTrees` 指定的状态目录，不看 `objects/`。多个工作区共享同一元数据目录时共用一个监听。
@@ -208,7 +208,7 @@ HTML 预览直接以当前稿件构造 `srcdoc`，只授予 iframe `sandbox="all
 - 文件系统事件按 `watchDebounce` 合并为 `workspace.changed`，通知文件、Git 和仓库发现刷新，不带文件内容。agent 自己完成写操作时立即发送事件。
 - 全部监听就绪后 agent 发送 `watch.status` 为 `normal`，表示监听已就绪，不保证文件系统事件完整；macOS 原生 watch 在同步注册完成后就绪，Chokidar 在初始扫描完成后就绪。任一监听报错时为 `degraded` 并附原因，界面显示监听退化。已建立的部分监听继续工作。Linux 的 worker 异常退出也报告 `degraded`，不自动重启，下一次订阅变化时重新建立。
 - 没有订阅或控制连接断开时释放监听，Linux 同时结束 worker；旧 worker 的退出不会覆盖重连后的新订阅。agent 停止时等待所有 worker 退出。
-- 浏览器的刷新节奏在 `web/src/lib/use-workspace-refresh.ts`：事件合并使用 `watchDebounce`，可见页面还按 `visibleRefreshInterval` 定时刷新；进入工具立即刷新，重新连接和页面恢复可见时也触发刷新。同一视图同时只有一个刷新请求，期间到达的事件在它完成后再触发一次。
+- 浏览器的刷新节奏在 `packages/web/src/lib/use-workspace-refresh.ts`：事件合并使用 `watchDebounce`，可见页面还按 `visibleRefreshInterval` 定时刷新；进入工具立即刷新，重新连接和页面恢复可见时也触发刷新。同一视图同时只有一个刷新请求，期间到达的事件在它完成后再触发一次。
 - 文件工具先刷新当前目录，再观察当前显示的打开文件；采用磁盘正文或保留本地修改的规则见[草稿](#草稿)，不遍历全部打开稿件。草稿、磁盘和 Git index 的关系见 [Git 写操作](git.md#写操作)。
 
 ## 范围外

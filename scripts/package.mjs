@@ -32,7 +32,7 @@ import {
 import { digest, fetchPinned, run as execute } from "./release-inputs.mjs";
 import { windowsRuntimeFiles, windowsComponentPath } from "./windows-components.ts";
 import { agentLauncher, windowsAgentLaunchers, windowsCliLauncher } from "./agent-launcher.ts";
-import { terminalReset } from "../cli/src/terminal-reset.ts";
+import { terminalReset } from "../packages/cli/src/terminal-reset.ts";
 
 const root = resolve(import.meta.dirname, "..");
 const release = JSON.parse(readFileSync(join(root, "release/inputs.json"), "utf8"));
@@ -76,7 +76,9 @@ if (
   );
 const node = release.nodeArchives[arch];
 const projects = ["shared", kind, ...(kind === "agent" ? ["cli", "terminal-recorder"] : [])];
-const { version } = JSON.parse(readFileSync(join(root, "shared/src/version.json"), "utf8"));
+const { version } = JSON.parse(
+  readFileSync(join(root, "packages/shared/src/version.json"), "utf8"),
+);
 const output = join(root, "dist/releases");
 const cache = "/var/tmp/kiteline-release-cache";
 const temporary = realpathSync(mkdtempSync("/var/tmp/kiteline-package-"));
@@ -111,8 +113,8 @@ async function agentArchives(sourceCommit) {
 function deploy(name, target) {
   if (name === "cli") {
     // CLI only depends on the shared package deployed beside it.
-    cpSync(join(root, "cli/dist"), join(target, "dist"), { recursive: true });
-    cpSync(join(root, "cli/package.json"), join(target, "package.json"));
+    cpSync(join(root, "packages/cli/dist"), join(target, "dist"), { recursive: true });
+    cpSync(join(root, "packages/cli/package.json"), join(target, "package.json"));
   } else {
     run("pnpm", [
       "--filter",
@@ -124,15 +126,22 @@ function deploy(name, target) {
       target,
     ]);
   }
-  // Shared's real location determines the existing native-component paths.
-  if (name !== "shared") {
+  if (name === "shared") {
+    const manifest = join(target, "package.json");
+    const metadata = JSON.parse(readFileSync(manifest, "utf8"));
+    // Source resources sit above packages; release resources share the component parent.
+    metadata.kitelineResourceRoot = "..";
+    writeFileSync(manifest, JSON.stringify(metadata, null, 2) + "\n");
+  } else {
     const link = join(target, "node_modules/@kiteline/shared");
     const injected =
       windows || name === "cli" ? undefined : resolve(realpathSync(link), "../../..");
     rmSync(link, { recursive: true, force: true });
     if (windows) {
       mkdirSync(link, { recursive: true });
-      const { exports } = JSON.parse(readFileSync(join(root, "shared/package.json"), "utf8"));
+      const { exports } = JSON.parse(
+        readFileSync(join(root, "packages/shared/package.json"), "utf8"),
+      );
       const forwarding = {};
       for (const [index, [key, source]] of Object.entries(exports).entries()) {
         const name = `export-${index}.js`;
@@ -270,8 +279,9 @@ function cliRuntime() {
 }
 try {
   const sourceCommit = readSourceCommit(root);
-  for (const name of projects) rmSync(join(root, name, "dist"), { recursive: true, force: true });
-  run("pnpm", ["exec", "tsc", "-b", ...projects]);
+  for (const name of projects)
+    rmSync(join(root, "packages", name, "dist"), { recursive: true, force: true });
+  run("pnpm", ["exec", "tsc", "-b", ...projects.map((name) => `packages/${name}`)]);
   if (kind === "server") run("pnpm", ["--filter", "@kiteline/web", "build"]);
   const agents = kind === "server" ? await agentArchives(sourceCommit) : [];
   mkdirSync(cache, { recursive: true });
@@ -314,11 +324,15 @@ try {
   }
   if (kind === "agent") {
     const recorder = JSON.parse(
-      readFileSync(join(root, "terminal-recorder/package.json"), "utf8"),
+      readFileSync(join(root, "packages/terminal-recorder/package.json"), "utf8"),
     ).dependencies;
-    const web = JSON.parse(readFileSync(join(root, "web/package.json"), "utf8")).dependencies;
-    const shared = JSON.parse(readFileSync(join(root, "shared/package.json"), "utf8")).dependencies;
-    const { terminalProfile } = await import("../shared/dist/protocol/index.js");
+    const web = JSON.parse(
+      readFileSync(join(root, "packages/web/package.json"), "utf8"),
+    ).dependencies;
+    const shared = JSON.parse(
+      readFileSync(join(root, "packages/shared/package.json"), "utf8"),
+    ).dependencies;
+    const { terminalProfile } = await import("../packages/shared/dist/protocol/index.js");
     const identityPath = join(native, "identity.json");
     writeFileSync(
       identityPath,
@@ -351,7 +365,7 @@ try {
       join(destination, `deploy/kiteline-agent.${manager}`),
     );
   } else if (kind === "server") {
-    cpSync(join(root, "web/dist"), join(destination, "web/dist"), { recursive: true });
+    cpSync(join(root, "packages/web/dist"), join(destination, "web/dist"), { recursive: true });
     mkdirSync(join(destination, "installer"));
     for (const name of ["connect.in.sh", "upgrade.in.sh", "windows-entry.in.ps1"])
       cpSync(join(root, "installer", name), join(destination, "installer", name));
@@ -373,7 +387,7 @@ try {
   mkdirSync(join(destination, "bin"));
   const launcher = join(destination, "bin", `kiteline-${kind}${windows ? ".ps1" : ""}`);
   if (windowsAgent) {
-    const { nodeEnvironmentKeys } = await import("../shared/dist/terminal/node.js");
+    const { nodeEnvironmentKeys } = await import("../packages/shared/dist/terminal/node.js");
     cpSync(join(resolve(windowsComponents), "command"), join(destination, "command"), {
       recursive: true,
     });
@@ -385,7 +399,7 @@ try {
     writeFileSync(join(destination, "bin/kiteline-agent-installed.ps1"), launchers.installed);
   } else if (kind === "agent") {
     const { installDirectory, installationManagementFile, installationUseFile, managementLockFd } =
-      await import("../agent/dist/install/paths.js");
+      await import("../packages/agent/dist/install/paths.js");
     const paths = {
       directory: installDirectory,
       management: installationManagementFile,

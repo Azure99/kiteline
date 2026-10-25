@@ -1,0 +1,38 @@
+{
+  "name": "@kiteline/shared",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist",
+    "licenses"
+  ],
+  "exports": {
+    "./protocol": "./dist/protocol/index.js",
+    "./protocol/navigation": "./dist/protocol/navigation.js",
+    "./protocol/ipc": "./dist/protocol/ipc.js",
+    "./protocol/stdio": "./dist/protocol/stdio.js",
+    "./protocol/ws": "./dist/protocol/ws.js",
+    "./protocol/file-stream": "./dist/protocol/file-stream.js",
+    "./protocol/http-stream": "./dist/protocol/http-stream.js",
+    "./protocol/text": "./dist/protocol/text.js",
+    "./terminal": "./dist/terminal/index.js",
+    "./terminal/node": "./dist/terminal/node.js",
+    "./terminal/windows": "./dist/terminal/windows.js",
+    "./windows/native": "./dist/windows/native.js",
+    "./windows/job": "./dist/windows/job.js",
+    "./windows/pipe": "./dist/windows/pipe.js",
+    "./protocol/client": "./dist/protocol/client.js",
+    "./node/network": "./dist/node/network.js",
+    "./node/files": "./dist/node/files.js",
+    "./node/paths": "./dist/node/paths.js"
+  },
+  "dependencies": {
+    "@xterm/addon-unicode11": "0.9.0",
+    "ws": "8.21.0",
+    "https-proxy-agent": "9.1.0",
+    "proxy-from-env": "2.0.0",
+    "undici": "7.29.1"
+  },
+  "kitelineResourceRoot": "../.."
+}

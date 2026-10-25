@@ -9,7 +9,7 @@
 | 类别     | 文件                                                              | 渲染者、时机与去向                                                                                                                                                                                                                                  |
 | -------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 组包模板 | `kiteline-agent.in.sh`、`kiteline-agent.in.ps1`、`launcher.in.cs` | [`scripts/agent-launcher.ts`](../../scripts/agent-launcher.ts) 在组包时生成 portable/installed 两个 agent 入口；C# 内嵌在 PowerShell 中，在入口运行时由 `Add-Type` 编译。Windows 入口使用的 Node 环境变量键取自构建后的 shared/terminal/node 模块。 |
-| 请求模板 | `connect.in.sh`、`upgrade.in.sh`、`windows-entry.in.ps1`          | [`server/src/agent-installation.ts`](../../server/src/agent-installation.ts) 在请求时填入版本、入口地址与模式，返回 `/connect.sh`、`/upgrade.sh`、`/connect.ps1` 或 `/upgrade.ps1`。                                                                |
+| 请求模板 | `connect.in.sh`、`upgrade.in.sh`、`windows-entry.in.ps1`          | [`packages/server/src/agent-installation.ts`](../../packages/server/src/agent-installation.ts) 在请求时填入版本、入口地址与模式，返回 `/connect.sh`、`/upgrade.sh`、`/connect.ps1` 或 `/upgrade.ps1`。                                              |
 | 原样分发 | `install.sh`、`install.ps1`、`kiteline-server`                    | [`scripts/package.mjs`](../../scripts/package.mjs) 将安装器复制到 server 的 downloads，供 `/install.sh`、`/install.ps1` 分发；`kiteline-server` 复制到 server 包的 `bin/kiteline-server`。                                                          |
 
 ## Linux
@@ -82,7 +82,7 @@ agent、recorder 和 pane 的启动脚本运行在随包的原生 Windows Node �
 
 ### 进程集合
 
-agent 和 recorder 在 Windows 上启动的每个进程（tmux server 和每次 tmux 调用、recorder、控制客户端、远程附着客户端、Git、ripgrep、定时任务和检查命令）都放在自己的 Job 对象中（`shared/src/windows/job.ts`）：
+agent 和 recorder 在 Windows 上启动的每个进程（tmux server 和每次 tmux 调用、recorder、控制客户端、远程附着客户端、Git、ripgrep、定时任务和检查命令）都放在自己的 Job 对象中（`packages/shared/src/windows/job.ts`）：
 
 - Job 设置 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`，不允许子进程脱离。进程以挂起状态直接创建在 Job 中，再恢复运行，不存在先运行、后加入的间隙。
 - 一个进程集合结束的判断是：主进程已退出，且 Job 中的活动进程数为 0。只看主进程退出不够。
@@ -102,8 +102,8 @@ agent 和 recorder 在 Windows 上启动的每个进程（tmux server 和每次 
 ### 环境
 
 - `pane.json` 保存 agent 启动时的完整环境变量，PowerShell 在这个环境上加上 `TERM`、`TMUX` 和 `TMUX_PANE` 运行。环境中可能有令牌等敏感值，它们由运行目录的 DACL 保护，会话结束时随会话目录删除。agent 异常退出时会话目录和 `pane.json` 留在运行目录中，需要手工删除（见[资源与清理](terminal.md#资源与清理)）。
-- tmux 相关进程使用单独的环境（`shared/src/terminal/node.ts` 的 `tmuxEnvironment()`）：`PATH` 只包含 MSYS 的 `usr/bin` 和系统目录，并关闭 MSYS 的路径自动转换。
-- 内部 Node 进程（agent、recorder、`pane.js`）启动前移除 `shared/src/terminal/node.ts` 的 `nodeEnvironmentKeys` 中的变量。命令入口启动 agent 时先保存这些值，agent 启动后再放回自己的环境，所以用户的设置仍会传给 Shell、Git 和定时任务。
+- tmux 相关进程使用单独的环境（`packages/shared/src/terminal/node.ts` 的 `tmuxEnvironment()`）：`PATH` 只包含 MSYS 的 `usr/bin` 和系统目录，并关闭 MSYS 的路径自动转换。
+- 内部 Node 进程（agent、recorder、`pane.js`）启动前移除 `packages/shared/src/terminal/node.ts` 的 `nodeEnvironmentKeys` 中的变量。命令入口启动 agent 时先保存这些值，agent 启动后再放回自己的环境，所以用户的设置仍会传给 Shell、Git 和定时任务。
 - Git、ripgrep、定时任务和诊断都直接以原生路径和用户环境运行，不经过 MSYS。
 
 ### 本机 IPC 与单实例

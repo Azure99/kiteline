@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc -b && pnpm --filter @kiteline/web build",
     "typecheck": "tsc -b && tsc -p tsconfig.tests.json && pnpm --filter @kiteline/web typecheck",
-    "lint": "eslint server agent cli terminal-recorder shared web scripts",
+    "lint": "eslint packages scripts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run --maxWorkers=2",
@@ -18,9 +18,9 @@
     "package": "node scripts/package.mjs",
     "images": "node scripts/images.mjs",
     "dev": "node scripts/dev/run.mjs",
-    "server": "node server/dist/main.js",
-    "agent": "node agent/dist/main.js",
-    "cli": "node cli/dist/main.js"
+    "server": "node packages/server/dist/main.js",
+    "agent": "node packages/agent/dist/main.js",
+    "cli": "node packages/cli/dist/main.js"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

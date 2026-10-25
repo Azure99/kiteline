@@ -4,11 +4,11 @@
 
 Kiteline is a pnpm workspace using strict TypeScript and ESM:
 
-- `server/src/`: HTTP/WebSocket service and SQLite storage.
-- `agent/src/`: device operations; `terminal-recorder/src/`: tmux recording.
-- `cli/src/`: remote `kiteline` CLI.
-- `shared/src/`: protocols and platform helpers.
-- `web/src/`: React/Vite/Tailwind workbench; `web/public/`: static assets.
+- `packages/server/src/`: HTTP/WebSocket service and SQLite storage.
+- `packages/agent/src/`: device operations; `packages/terminal-recorder/src/`: tmux recording.
+- `packages/cli/src/`: remote `kiteline` CLI.
+- `packages/shared/src/`: protocols and platform helpers.
+- `packages/web/src/`: React/Vite/Tailwind workbench; `packages/web/public/`: static assets.
 - `native/`, `installer/`, `scripts/`, `release/`, `deploy/`: native components, installation, builds, release inputs, deployment examples.
 
 The browser communicates through the server; agents initiate outbound connections. Start with [the documentation map](docs/README.md). Follow [architecture](docs/design/architecture.md) and [protocol](docs/design/protocol.md) when changing RPC, events, channels, or routes.
@@ -27,11 +27,11 @@ Run the agent separately per the setup guide, using `KITELINE_AGENT_HOME=/var/tm
 
 ## Coding Style & Naming Conventions
 
-Use two-space indentation, double quotes, semicolons, and Prettier's 100-column width with trailing commas. Follow existing kebab-case filenames, PascalCase components, and `useX` hooks. Reuse `web/src/components/ui/`; do not regenerate with shadcn CLI. Keep `en.ts` and `zh-CN.ts` synchronized in `web/src/i18n/`. Preserve Chromium 97 compatibility.
+Use two-space indentation, double quotes, semicolons, and Prettier's 100-column width with trailing commas. Follow existing kebab-case filenames, PascalCase components, and `useX` hooks. Reuse `packages/web/src/components/ui/`; do not regenerate with shadcn CLI. Keep `en.ts` and `zh-CN.ts` synchronized in `packages/web/src/i18n/`. Preserve Chromium 97 compatibility.
 
 ## Testing Guidelines
 
-Vitest tests live in `{server,agent,terminal-recorder,web,cli}/test/**/*.test.ts`; `web/test/*.typecheck.ts` are checked by `pnpm typecheck`. Add focused behavior tests for changed contracts. Run `pnpm test` after native and package builds, with Git >=2.23; target files with `pnpm test agent/test/git-read.test.ts`. No coverage threshold is configured. See [GitHub Actions](docs/development/release.md#github-actions) for CI coverage. Check UI changes in current Chrome and Chromium 97 at desktop/mobile sizes; verify terminal input on Android Chrome. For installer/native changes, test final [release packages](docs/development/release.md) on affected platforms.
+Vitest tests live in `packages/{server,agent,terminal-recorder,web,cli}/test/**/*.test.ts`; `packages/web/test/*.typecheck.ts` are checked by `pnpm typecheck`. Add focused behavior tests for changed contracts. Run `pnpm test` after native and package builds, with Git >=2.23; target files with `pnpm test packages/agent/test/git-read.test.ts`. No coverage threshold is configured. See [GitHub Actions](docs/development/release.md#github-actions) for CI coverage. Check UI changes in current Chrome and Chromium 97 at desktop/mobile sizes; verify terminal input on Android Chrome. For installer/native changes, test final [release packages](docs/development/release.md) on affected platforms.
 
 ## Commit & Pull Request Guidelines
 

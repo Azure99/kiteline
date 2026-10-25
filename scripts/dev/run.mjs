@@ -5,7 +5,7 @@ if (build.status !== 0) process.exit(build.status ?? 1);
 const launch = (command, args) => spawn(command, args, { stdio: "inherit", detached: true });
 const children = [
   launch("pnpm", ["exec", "tsc", "-b", "--watch"]),
-  launch(process.execPath, ["--watch", "server/dist/main.js"]),
+  launch(process.execPath, ["--watch", "packages/server/dist/main.js"]),
   launch("pnpm", ["--filter", "@kiteline/web", "dev"]),
 ];
 let stopping = false;

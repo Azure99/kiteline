@@ -18,14 +18,14 @@
 | server 镜像   | 本地 `kiteline-server:<版本>-<架构>`，发布为 `ghcr.io/azure99/kiteline:<版本>`           |
 | Compose       | Release 附件 `compose.yaml`，默认镜像固定到该发布版本                                    |
 
-- 版本号来自 [`shared/src/version.json`](../../shared/src/version.json)。发布包写入 `dist/releases/`，每个包旁有同名 `.sha256`。
+- 版本号来自 [`packages/shared/src/version.json`](../../packages/shared/src/version.json)。发布包写入 `dist/releases/`，每个包旁有同名 `.sha256`。
 - agent 包提供 `kiteline-agent` 与远程 `kiteline` 两个入口，共用一份 Node；独立 CLI 包只带远程 CLI 及其 runtime。server 的 `downloads/` 仅携带五个共同 agent 包，接入和升级命令从这里下载；独立 CLI 从 Release 下载。因此先构建 agent，再组装 server，最后构建镜像。
 - `pnpm package` 和 `pnpm images` 要求工作树和暂存区干净，包括没有未跟踪文件；包与镜像必须匹配当前提交、版本、平台、架构和 Node 版本。新提交后不能复用旧提交的发布包。
 - Windows 和 macOS 的组件目录按构建输入摘要检查，输入不变时可跨提交复用。Windows 摘要包含整个 `release/inputs.json`，macOS 只包含实际消费的字段；输入变化后重建相应组件。Linux 原生组件每次组包时在 Docker 中构建，可复用 Docker 层缓存。
 
 ## 发布流程
 
-1. 在 PR 中更新 `shared/src/version.json` 的版本，合并到 main。
+1. 在 PR 中更新 `packages/shared/src/version.json` 的版本，合并到 main。
 2. 在该提交建立并推送 tag。tag 必须为 `vX.Y.Z`，与该提交的版本一致，且提交属于 main 历史。在同一个 Shell 中执行：
 
    ```sh
@@ -74,7 +74,7 @@
 
 不产生 `latest` 镜像标签。候选草稿包含 12 个包、各自的 `.sha256`、固定版本的 `compose.yaml` 和覆盖这些包与 Compose 的 `SHA256SUMS`；最后上传的 `delivery.json` 标记候选完成，记录源码、运行 ID、汇总校验文件摘要和镜像 digest。
 
-`publish` 使用 main 当前提交中的脚本，检查候选与 tag 指向同一源码、附件与校验文件一致，再把候选 digest 复制为版本标签，并公开 Release。
+`publish` 使用 main 当前提交中的脚本，检查候选与 tag 指向同一源码、附件与校验文件一致，再把候选 digest 复制为版本标签，并公开 Release。当前脚本仅接受版本文件位于 `packages/shared/src/version.json` 的 tag。
 
 ### 权限与仓库设置
 
@@ -167,7 +167,7 @@ Linux arm64 主机可将上述 `amd64` 改为 `arm64`。完整多平台产物请
 
 ```sh
 pnpm package cli linux-amd64
-KITELINE_VERSION=$(node -p "require('./shared/src/version.json').version")
+KITELINE_VERSION=$(node -p "require('./packages/shared/src/version.json').version")
 CHECK=$(mktemp -d /var/tmp/kiteline-check-XXXXXX)
 tar -xzf "dist/releases/kiteline-agent-$KITELINE_VERSION-linux-amd64.tar.gz" -C "$CHECK"
 tar -xzf "dist/releases/kiteline-server-$KITELINE_VERSION-linux-amd64.tar.gz" -C "$CHECK"
@@ -276,17 +276,17 @@ runtime DLL 从固定源码包的 Cygwin tag 及有序 MSYS2 补丁重建，再�
 
 ### xterm.js
 
-固定版本见 [`web/package.json`](../../web/package.json)、[`terminal-recorder/package.json`](../../terminal-recorder/package.json) 和 [`shared/package.json`](../../shared/package.json)。当前浏览器与 headless 版本来自同一上游源码提交，升级须联合核对两端和 addons。私有成员访问以 [`TerminalCore` 和 `core()`](../../shared/src/terminal/index.ts) 为检查入口，另须核对 [`auxiliary-input.ts`](../../web/src/terminal/auxiliary-input.ts) 使用的私有键盘编码。
+固定版本见 [`packages/web/package.json`](../../packages/web/package.json)、[`packages/terminal-recorder/package.json`](../../packages/terminal-recorder/package.json) 和 [`packages/shared/package.json`](../../packages/shared/package.json)。当前浏览器与 headless 版本来自同一上游源码提交，升级须联合核对两端和 addons。私有成员访问以 [`TerminalCore` 和 `core()`](../../packages/shared/src/terminal/index.ts) 为检查入口，另须核对 [`auxiliary-input.ts`](../../packages/web/src/terminal/auxiliary-input.ts) 使用的私有键盘编码。
 
-工作台直接编译 xterm 的 TypeScript 入口。现有补丁由 [`pnpm-workspace.yaml`](../../pnpm-workspace.yaml) 的 `patchedDependencies` 指向 `web/patches/`：`DomRenderer.ts` 和 `WidthCache.ts` 按设备像素比测量字形，修复 Windows 页面缩放后的中文选区错位；`DomRenderer.ts` 还在清空选区时更新模型并重绘旧行，移除文字残留的选区背景；`Viewport.ts` 修复调整尺寸时的滚动位置跳动；`CompositionHelper.ts` 在新的组合输入开始前发送待处理的尾部独立文本，修复 Android 候选词之间漏发空格；`Event.ts` 的非空断言适配项目的 `noUncheckedIndexedAccess`，不改变 DPR 行为。
+工作台直接编译 xterm 的 TypeScript 入口。现有补丁由 [`pnpm-workspace.yaml`](../../pnpm-workspace.yaml) 的 `patchedDependencies` 指向 `packages/web/patches/`：`DomRenderer.ts` 和 `WidthCache.ts` 按设备像素比测量字形，修复 Windows 页面缩放后的中文选区错位；`DomRenderer.ts` 还在清空选区时更新模型并重绘旧行，移除文字残留的选区背景；`Viewport.ts` 修复调整尺寸时的滚动位置跳动；`CompositionHelper.ts` 在新的组合输入开始前发送待处理的尾部独立文本，修复 Android 候选词之间漏发空格；`Event.ts` 的非空断言适配项目的 `noUncheckedIndexedAccess`，不改变 DPR 行为。
 
 维护当前版本的补丁时，在仓库根目录执行：
 
 ```sh
-XTERM_VERSION=$(node -p "require('./web/package.json').dependencies['@xterm/xterm']")
+XTERM_VERSION=$(node -p "require('./packages/web/package.json').dependencies['@xterm/xterm']")
 pnpm patch "@xterm/xterm@$XTERM_VERSION"
 # 在输出的 EDIT_DIR 中修改 src/ 下的 TypeScript，然后执行：
-pnpm patch-commit --patches-dir web/patches EDIT_DIR
+pnpm patch-commit --patches-dir packages/web/patches EDIT_DIR
 ```
 
 `pnpm patch` 默认在已有补丁之上编辑；`--ignore-existing` 从原始包开始。`patch-commit` 会重新安装依赖，一起提交补丁、`pnpm-workspace.yaml` 和锁文件。
@@ -295,9 +295,9 @@ pnpm patch-commit --patches-dir web/patches EDIT_DIR
 
 ### Undici 与代理
 
-升级 Node、`undici`、`proxy-from-env` 或 `https-proxy-agent` 后，在直连、HTTP 代理和需要认证的代理下验证绑定和连接；`undici` 的 dispatcher 须兼容 Node 内置 `fetch`。实现见 [`shared/src/node/network.ts`](../../shared/src/node/network.ts)，配置见[出站代理与证书](../guide/devices.md#出站代理与证书)。
+升级 Node、`undici`、`proxy-from-env` 或 `https-proxy-agent` 后，在直连、HTTP 代理和需要认证的代理下验证绑定和连接；`undici` 的 dispatcher 须兼容 Node 内置 `fetch`。实现见 [`packages/shared/src/node/network.ts`](../../packages/shared/src/node/network.ts)，配置见[出站代理与证书](../guide/devices.md#出站代理与证书)。
 
-`https-proxy-agent` 的现有补丁在 [`agent/patches/`](../../agent/patches/) 中，修复 CONNECT 后 TLS 丢失目标 host、导致可信 IP-only 证书被误按 localhost 校验的问题。升级时核对上游是否修复，据此迁移或删除补丁及 `pnpm-workspace.yaml` 的旧登记，保留可信 IP-only 目标的连接验证。
+`https-proxy-agent` 的现有补丁在 [`packages/agent/patches/`](../../packages/agent/patches/) 中，修复 CONNECT 后 TLS 丢失目标 host、导致可信 IP-only 证书被误按 localhost 校验的问题。升级时核对上游是否修复，据此迁移或删除补丁及 `pnpm-workspace.yaml` 的旧登记，保留可信 IP-only 目标的连接验证。
 
 ### Tailwind 与 CodeMirror
 

@@ -78,7 +78,7 @@ KITELINE_DATA_DIR=/var/tmp/kiteline-dev/server pnpm server setup-token
 
    `bind` 显示 `Binding code:` 时输入绑定码。`run` 在前台运行 agent，按 Ctrl-C 停止。
 
-`pnpm agent` 运行 `agent/dist/main.js`，并从仓库根目录的 `dist/native/` 读取 tmux、rg 等组件。修改 agent 代码后，等 `tsc -b --watch` 完成编译，再重新执行 `pnpm agent run`。
+`pnpm agent` 运行 `packages/agent/dist/main.js`，并从仓库根目录的 `dist/native/` 读取 tmux、rg 等组件。修改 agent 代码后，等 `tsc -b --watch` 完成编译，再重新执行 `pnpm agent run`。
 
 不设置 `KITELINE_AGENT_HOME` 时，agent 使用 `~/.local/share/kiteline-agent`，与同一用户安装的 agent 的默认数据目录相同。开发时设置单独的目录，避免两者共用设备身份和工作区登记。
 
@@ -133,7 +133,7 @@ KITELINE_DATA_DIR=/var/tmp/kiteline-dev/server pnpm server setup-token
 
 完整的 `pnpm test` 需要先执行[安装依赖](#安装依赖)中的命令和 `pnpm build`，并使用 Git 2.23.0 及以上版本。
 
-只运行部分测试时，把文件或目录传给 `pnpm test`，例如 `pnpm test agent/test/git-read.test.ts`。
+只运行部分测试时，把文件或目录传给 `pnpm test`，例如 `pnpm test packages/agent/test/git-read.test.ts`。
 
 CI 的检查范围见[GitHub Actions](release.md#github-actions)。
 

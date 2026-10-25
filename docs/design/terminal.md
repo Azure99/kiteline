@@ -5,22 +5,22 @@
 ## 组件
 
 - **私有 tmux server**：每个会话一个，socket 为 `<运行目录>/<会话 ID>/tmux.sock`，其中只有一个名为 `kiteline` 的 tmux 会话、一个窗口和一个 pane。它持有真实 PTY 和程序，是会话是否存在的唯一依据。
-- **agent 会话表**（`agent/src/terminal/sessions.ts`）：分配 ID、登记会话、创建和结束 tmux server、查证存活、发起恢复。
-- **recorder**（`terminal-recorder/src/`）：每个 agent 一个 Node 进程；每个会话一个 tmux 控制模式客户端（`tmux -C`）、一个 `@xterm/headless` 模型和一个输入队列。
-- **网页显示**（`web/src/terminal/display.ts`）：每次附着新建一个 xterm.js 实例，恢复画面后接收实时输出，发送输入和尺寸。
-- **远程 CLI**（`cli/src/`）：短 RPC 在 recorder 中观察和操作同一终端；`terminal attach` 经 agent 的 PTY 桥运行普通 tmux client，接续已有画面和原始输入。两者结束后终端继续运行。
+- **agent 会话表**（`packages/agent/src/terminal/sessions.ts`）：分配 ID、登记会话、创建和结束 tmux server、查证存活、发起恢复。
+- **recorder**（`packages/terminal-recorder/src/`）：每个 agent 一个 Node 进程；每个会话一个 tmux 控制模式客户端（`tmux -C`）、一个 `@xterm/headless` 模型和一个输入队列。
+- **网页显示**（`packages/web/src/terminal/display.ts`）：每次附着新建一个 xterm.js 实例，恢复画面后接收实时输出，发送输入和尺寸。
+- **远程 CLI**（`packages/cli/src/`）：短 RPC 在 recorder 中观察和操作同一终端；`terminal attach` 经 agent 的 PTY 桥运行普通 tmux client，接续已有画面和原始输入。两者结束后终端继续运行。
 
-tmux 使用会话目录下的私有配置，不加载用户的 tmux 配置或插件，并收窄 prefix 键表。具体设置由 `shared/src/terminal/node.ts` 的 `terminalPreset()` 定义。
+tmux 使用会话目录下的私有配置，不加载用户的 tmux 配置或插件，并收窄 prefix 键表。具体设置由 `packages/shared/src/terminal/node.ts` 的 `terminalPreset()` 定义。
 
-固定版本：tmux 版本见 [`release/inputs.json`](../../release/inputs.json)，各平台都禁用 Sixel，并应用 [`paste.patch`](../../native/tmux/paste.patch) 和 [`flow-control.patch`](../../native/tmux/flow-control.patch)。后者为 recorder 的 `flow-control` 客户端标志提供无损在线背压；普通客户端不设置该标志。xterm.js 及插件版本见 [`web/package.json`](../../web/package.json)、[`terminal-recorder/package.json`](../../terminal-recorder/package.json) 和 [`shared/package.json`](../../shared/package.json)。网页的 xterm.js 带有 [`web/patches/`](../../web/patches/) 中的补丁，让 DOM 渲染器按设备像素比测量字形宽度；维护方法见[构建与发布](../development/release.md#xtermjs)。
+固定版本：tmux 版本见 [`release/inputs.json`](../../release/inputs.json)，各平台都禁用 Sixel，并应用 [`paste.patch`](../../native/tmux/paste.patch) 和 [`flow-control.patch`](../../native/tmux/flow-control.patch)。后者为 recorder 的 `flow-control` 客户端标志提供无损在线背压；普通客户端不设置该标志。xterm.js 及插件版本见 [`packages/web/package.json`](../../packages/web/package.json)、[`packages/terminal-recorder/package.json`](../../packages/terminal-recorder/package.json) 和 [`packages/shared/package.json`](../../packages/shared/package.json)。网页的 xterm.js 带有 [`packages/web/patches/`](../../packages/web/patches/) 中的补丁，让 DOM 渲染器按设备像素比测量字形宽度；维护方法见[构建与发布](../development/release.md#xtermjs)。
 
-网页和 recorder 的共同适配在 `shared/src/terminal/index.ts`，两端必须同步升级。该模块的私有状态访问经过 `core()`，升级时以 `TerminalCore` 核对使用的成员。网页还依赖 `web/src/terminal/` 的触控选择和画面保留适配，其中 `auxiliary-input.ts` 直接导入 xterm.js 的私有键盘编码；这些入口也要随升级复核。
+网页和 recorder 的共同适配在 `packages/shared/src/terminal/index.ts`，两端必须同步升级。该模块的私有状态访问经过 `core()`，升级时以 `TerminalCore` 核对使用的成员。网页还依赖 `packages/web/src/terminal/` 的触控选择和画面保留适配，其中 `auxiliary-input.ts` 直接导入 xterm.js 的私有键盘编码；这些入口也要随升级复核。
 
 ## 会话生命周期
 
 ### 创建
 
-创建由 `agent/src/terminal/sessions.ts` 协调，必须保持：
+创建由 `packages/agent/src/terminal/sessions.ts` 协调，必须保持：
 
 - 以 `0700` 独占新建会话目录，已存在的目录从不复用。
 - 启动 tmux 之前以 `starting` 状态登记会话及创建时的 `historyLines`；确认创建成功后才变为 `running`、记录可用。
@@ -87,7 +87,7 @@ recorder 为每个会话保存一个检查点和其后的完整尾段：
 - “历史存在缺口”（`historyGap`）：本次 agent 运行期间该会话发生过记录故障，部分输出没有进入网页历史。agent 运行期间不清除。
 - “已减少较早历史”（`historyLimited`）：本次附着的恢复副本被缩短。
 
-模型积压、检查点间隔和恢复尾段的阈值见 `terminal-recorder/src/model.ts` 的 `modelLimits`；每个显示已发送但未确认的窗口见 `terminal-recorder/src/attachment.ts` 的 `terminalOutstandingBytes`；跨进程共用的恢复副本、待发队列、分块和交互期限见 `shared/src/protocol/index.ts` 的 `limits`。各机制的越界后果见本页相应段落。
+模型积压、检查点间隔和恢复尾段的阈值见 `packages/terminal-recorder/src/model.ts` 的 `modelLimits`；每个显示已发送但未确认的窗口见 `packages/terminal-recorder/src/attachment.ts` 的 `terminalOutstandingBytes`；跨进程共用的恢复副本、待发队列、分块和交互期限见 `packages/shared/src/protocol/index.ts` 的 `limits`。各机制的越界后果见本页相应段落。
 
 ## 附着与恢复
 
@@ -100,7 +100,7 @@ recorder 为每个会话保存一个检查点和其后的完整尾段：
 
 agent 发往该显示的帧依次为：`restore.begin`（尺寸、`historyLines`、副本字节数、`historyLimited`、`historyGap`）、副本的二进制分块、尾段（二进制输出和 `resize`）、恢复完成帧 `ready`，然后是实时的二进制输出和 `resize`，最后是 `ended` 或 `error`（帧名列表见[数据通道](protocol.md#数据通道)）。恢复期间的新输出进入该显示自己的有界队列，超出显示预算则只结束该显示。网页在 `restore.begin` 时新建 xterm.js 实例，副本字节数对不上就放弃该实例；收到恢复完成帧 `ready` 并发出第一次尺寸后才允许输入。
 
-流量控制：二进制输出和有序 JSON 帧共用一份累计信用（计量见 `shared/src/protocol/ipc.ts` 的 `terminalOutputCost()`）。网页恢复完成后将连续输出按顺序提交给 xterm 自带写队列，JSON 控制帧和连接关闭状态等待此前输出解析完成；恢复阶段仍逐块等待。每个二进制输出在其 xterm 写入回调完成后、有序 JSON 帧在处理完成后，才回报 `consumed.bytes`，不能先确认尚未处理的输出来腾出窗口；未确认量达到 `terminalOutstandingBytes` 后暂停发送。带外的 `error`、`input.error` 不占信用。
+流量控制：二进制输出和有序 JSON 帧共用一份累计信用（计量见 `packages/shared/src/protocol/ipc.ts` 的 `terminalOutputCost()`）。网页恢复完成后将连续输出按顺序提交给 xterm 自带写队列，JSON 控制帧和连接关闭状态等待此前输出解析完成；恢复阶段仍逐块等待。每个二进制输出在其 xterm 写入回调完成后、有序 JSON 帧在处理完成后，才回报 `consumed.bytes`，不能先确认尚未处理的输出来腾出窗口；未确认量达到 `terminalOutstandingBytes` 后暂停发送。带外的 `error`、`input.error` 不占信用。
 
 每个显示的实时待发量受 `terminalDisplayBytes` 限制，恢复期间也计入。显示停止消费不会暂停会话：待发超限时只结束该显示，由用户重连；不会跳过部分输出后继续显示。
 
@@ -136,7 +136,7 @@ CLI 在目标检查和连接成功后才进入 raw 模式，以本机终端实�
 
 可选 `ifInput: {epoch,inputSeq}` 在队列接纳处同步比较；条件不符返回 `failed/conflict`，不接纳输入。短 CLI 和网页每次接纳输入都会递增 `inputSeq`，包括后来因期限或 detach 丢弃的输入；计数不回退。远程 `terminal attach` 的原生输入不经过这个计数。计数不意味着回显、独占或干净提示符：已经接纳但尚未回显的输入仍可与下一次输入混合。
 
-成功回执只表示 tmux 输入操作已处理，包含操作前的输出位置 `before` 和回复时当前输入位置 `input`，不表示前台命令返回。排队到期是明确失败；开始注入后不能确定结果时为 `unknown`。调用方先观察，再决定后续输入；没有请求去重或自动重发。Unix 上要等这次 tmux 调用的进程关闭后队列才继续，避免中止的调用仍占用共享缓冲区。期限与可用按键见 [RPC 类型](../../shared/src/protocol/terminal-observation.ts)。
+成功回执只表示 tmux 输入操作已处理，包含操作前的输出位置 `before` 和回复时当前输入位置 `input`，不表示前台命令返回。排队到期是明确失败；开始注入后不能确定结果时为 `unknown`。调用方先观察，再决定后续输入；没有请求去重或自动重发。Unix 上要等这次 tmux 调用的进程关闭后队列才继续，避免中止的调用仍占用共享缓冲区。期限与可用按键见 [RPC 类型](../../packages/shared/src/protocol/terminal-observation.ts)。
 
 ### 网页输入
 
@@ -231,4 +231,4 @@ agent 被强制结束或崩溃时不执行清理，新启动的 agent 也不导�
 - 滚动区不从第 0 行开始时的 CSI S：tmux 可能把滚出的行留在历史中，网页不保留。
 - 超过 2147483647 的参数：tmux 忽略整条序列，xterm.js 截到该值后执行。
 
-其他行为：网页不显示图片（构建时禁用 Sixel，网页不加载图片插件）；`allow-passthrough off` 阻止程序绕过 tmux 控制外层终端；程序用 OSC 52 写剪贴板的请求被 tmux 拒绝，tmux 自己的复制可以写到支持 OSC 52 的外层终端；记录故障恢复后的画面来自 `capture-pane`，不含故障前的网页历史和全部隐藏模式。适配的回归测试在 `terminal-recorder/test/model.test.ts`。
+其他行为：网页不显示图片（构建时禁用 Sixel，网页不加载图片插件）；`allow-passthrough off` 阻止程序绕过 tmux 控制外层终端；程序用 OSC 52 写剪贴板的请求被 tmux 拒绝，tmux 自己的复制可以写到支持 OSC 52 的外层终端；记录故障恢复后的画面来自 `capture-pane`，不含故障前的网页历史和全部隐藏模式。适配的回归测试在 `packages/terminal-recorder/test/model.test.ts`。

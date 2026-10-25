@@ -1,10 +1,10 @@
 {
   "files": [],
   "references": [
-    { "path": "shared" },
-    { "path": "server" },
-    { "path": "agent" },
-    { "path": "terminal-recorder" },
-    { "path": "cli" }
+    { "path": "packages/shared" },
+    { "path": "packages/server" },
+    { "path": "packages/agent" },
+    { "path": "packages/terminal-recorder" },
+    { "path": "packages/cli" }
   ]
 }

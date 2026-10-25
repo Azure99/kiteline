@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 import { defineConfig } from "vitest/config";
 
-const webRequire = createRequire(new URL("./web/package.json", import.meta.url));
+const webRequire = createRequire(new URL("./packages/web/package.json", import.meta.url));
 
 export default defineConfig({
   resolve: {
@@ -14,6 +14,6 @@ export default defineConfig({
   },
   oxc: { decorator: { legacy: true } },
   test: {
-    include: ["{server,agent,terminal-recorder,web,cli}/test/**/*.test.ts"],
+    include: ["packages/{server,agent,terminal-recorder,web,cli}/test/**/*.test.ts"],
   },
 });

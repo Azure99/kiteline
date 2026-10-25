@@ -17,14 +17,15 @@ const capture = (file, args) =>
   }).trim();
 const tag = process.env.CI_TAG ?? "";
 const product = mode === "publish" ? process.env.CI_SOURCE : sourceCommit(root);
-const version = mode === "publish" ? tag.slice(1) : json("shared/src/version.json").version;
+const version =
+  mode === "publish" ? tag.slice(1) : json("packages/shared/src/version.json").version;
 const repository = process.env.GITHUB_REPOSITORY;
 const registry = `ghcr.io/${repository?.toLowerCase()}`;
 
 function tagSource() {
   assert.match(tag, /^v[0-9]+\.[0-9]+\.[0-9]+$/, "Tag must use vX.Y.Z");
   const sha = capture("git", ["rev-parse", "--verify", `refs/tags/${tag}^{commit}`]);
-  const tagged = JSON.parse(capture("git", ["show", `${sha}:shared/src/version.json`]));
+  const tagged = JSON.parse(capture("git", ["show", `${sha}:packages/shared/src/version.json`]));
   assert.equal(tag, `v${tagged.version}`, "Tag must match the product version");
   const ancestor = spawnSync("git", ["merge-base", "--is-ancestor", sha, "origin/main"], {
     stdio: "inherit",

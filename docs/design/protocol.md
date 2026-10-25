@@ -1,15 +1,15 @@
 # 通信契约
 
-本文是 server、agent、recorder、工作台和本机命令行之间接口的参考，供修改其中任何一方的人阅读。字段定义见 `shared/src/protocol/` 中的类型，这里不重复字段表；各工具请求的业务含义见对应的 design 文档。
+本文是 server、agent、recorder、工作台和本机命令行之间接口的参考，供修改其中任何一方的人阅读。字段定义见 `packages/shared/src/protocol/` 中的类型，这里不重复字段表；各工具请求的业务含义见对应的 design 文档。
 
 ## 契约来源
 
-- `shared/src/protocol/index.ts`：`appVersion`、固定限额 `limits`、`Reply`、各对象类型、控制消息、浏览器事件、`ChannelKind` 和校验函数。
-- `shared/src/protocol/rpc.ts`：RPC 方法及参数、结果类型，`rpcMutates`，`gitWriteMethods`。
-- `shared/src/protocol/tasks.ts`：定时任务对象。`shared/src/protocol/ipc.ts`：recorder IPC 消息和终端帧。
-- `shared/src/protocol/ws.ts`、`file-stream.ts`、`http-stream.ts`、`stdio.ts`：心跳、帧发送、文件帧队列、HTTP 字节流、逐行 JSON。
-- `server/src/limits.ts`、`agent/src/limits.ts`、`agent/src/config.ts`：其他固定限额和可调限额。
-- `shared/src/version.json`：产品版本号。
+- `packages/shared/src/protocol/index.ts`：`appVersion`、固定限额 `limits`、`Reply`、各对象类型、控制消息、浏览器事件、`ChannelKind` 和校验函数。
+- `packages/shared/src/protocol/rpc.ts`：RPC 方法及参数、结果类型，`rpcMutates`，`gitWriteMethods`。
+- `packages/shared/src/protocol/tasks.ts`：定时任务对象。`packages/shared/src/protocol/ipc.ts`：recorder IPC 消息和终端帧。
+- `packages/shared/src/protocol/ws.ts`、`file-stream.ts`、`http-stream.ts`、`stdio.ts`：心跳、帧发送、文件帧队列、HTTP 字节流、逐行 JSON。
+- `packages/server/src/limits.ts`、`packages/agent/src/limits.ts`、`packages/agent/src/config.ts`：其他固定限额和可调限额。
+- `packages/shared/src/version.json`：产品版本号。
 
 server 和 agent 中的实现位置见[仓库结构](architecture.md#仓库结构)。JSON 字段使用 camelCase。ID 是不透明字符串。时间是 UTC 的 ISO 8601 字符串。文件路径的约定见[路径与列表](files.md#路径与列表)。
 
@@ -24,7 +24,7 @@ server、agent、工作台和远程 CLI 使用同一个产品版本 `appVersion`
 
 ## 结果语义
 
-RPC、文件写入和本机 IPC 返回 `Reply`，字段定义见 `shared/src/protocol/index.ts`。调用方必须先按 `outcome` 区分以下结果，不能只根据是否收到错误判断有无副作用。
+RPC、文件写入和本机 IPC 返回 `Reply`，字段定义见 `packages/shared/src/protocol/index.ts`。调用方必须先按 `outcome` 区分以下结果，不能只根据是否收到错误判断有无副作用。
 
 | `outcome`   | 含义                                      |
 | ----------- | ----------------------------------------- |
@@ -49,7 +49,7 @@ RPC 的 `id` 只用于关联回复和取消。server 拒绝与进行中的请求
 
 ### 错误码
 
-`error.code` 只使用下列值。`error.message` 是英文诊断，可以为空字符串；工作台按 `code` 显示本地化说明。“状态码”列是管理接口（`/api/`）返回错误时的 HTTP 状态码（`errorStatus`，`server/src/http.ts`）。开发服务代理使用另一张表（例如 `unsupported` 为 501，表外的错误为 502），见[错误响应](http-access.md#错误响应)。
+`error.code` 只使用下列值。`error.message` 是英文诊断，可以为空字符串；工作台按 `code` 显示本地化说明。“状态码”列是管理接口（`/api/`）返回错误时的 HTTP 状态码（`errorStatus`，`packages/server/src/http.ts`）。开发服务代理使用另一张表（例如 `unsupported` 为 501，表外的错误为 502），见[错误响应](http-access.md#错误响应)。
 
 | `code`                  | 含义                                                 | 状态码 |
 | ----------------------- | ---------------------------------------------------- | ------ |
@@ -183,7 +183,7 @@ Web owner 在 `POST /api/credentials` 提交 `{name, deviceIds, expiresAt}`，�
 3. server 在 30 秒内没有收到 hello 时，以 1008 `hello_timeout` 关闭连接；hello 不合法时以 1008 `invalid_control_message` 关闭，同一设备已有的连接不受影响。hello 合法时，server 以 4001 `connection_replaced` 关闭同一设备的旧连接，保存快照和 `lastSeenAt`，发送 `welcome`，再发送 `watch.set`。从这时起设备在线，RPC 和数据通道都关联这个 `connectionId`。
 4. agent 收到 welcome 后发送 `tasks.snapshot`。
 
-控制消息的类型和字段见 `shared/src/protocol/index.ts` 的 `AgentControlMessage` 与 `ServerControlMessage`。
+控制消息的类型和字段见 `packages/shared/src/protocol/index.ts` 的 `AgentControlMessage` 与 `ServerControlMessage`。
 
 - `metadata.snapshot` 是完整快照，server 只接受同一连接中 `revision` 更大的快照。`tasks.snapshot` 同样按连接内递增的 `revision` 接受，每条连接的第一份直接替换；server 只保留白名单字段，见 [server 摘要](scheduled-tasks.md#server-摘要)。
 - `watch.set` 是所有浏览器正在查看的、该设备上的工作区的并集。
@@ -204,7 +204,7 @@ Web owner 在 `POST /api/credentials` 提交 `{name, deviceIds, expiresAt}`，�
 | `request.progress`                                      | 发起请求的登录           |
 | `channel.failed`                                        | 发起文件读取的登录       |
 
-连接关闭后，工作台等待 1.5 秒，读取 `/api/session` 和设备列表后重新连接；这两次读取失败时，3 秒后再试（`web/src/devices/use-devices.ts`）。重连和页面恢复时同步尚待处理的终端报告，其他断线期间的事件不补发。
+连接关闭后，工作台等待 1.5 秒，读取 `/api/session` 和设备列表后重新连接；这两次读取失败时，3 秒后再试（`packages/web/src/devices/use-devices.ts`）。重连和页面恢复时同步尚待处理的终端报告，其他断线期间的事件不补发。
 
 ### 在线终端报告
 
@@ -222,7 +222,7 @@ server 在内存中保留每个设备/工作区/session 的最新待处理报告
 
 - 控制连接（两端）、事件连接和终端数据连接（server 的两侧和 agent 一侧）按 `heartbeatInterval` 发送 ping，超过 `heartbeatTimeout` 没有收到 pong 时强制断开。文件和开发服务的数据连接不发送 ping。
 - 升级后的 socket 和 agent 的数据连接启用 TCP keepalive，间隔由 `tcpKeepAliveDelayMs` 决定。
-- 控制连接和事件连接的发送缓冲超过 `shared/src/protocol/ws.ts` 的控制消息预算时，发送方以 1013 `control_backpressure` 关闭连接。
+- 控制连接和事件连接的发送缓冲超过 `packages/shared/src/protocol/ws.ts` 的控制消息预算时，发送方以 1013 `control_backpressure` 关闭连接。
 
 ### 关闭码
 
@@ -254,20 +254,20 @@ server 在内存中保留每个设备/工作区/session 的最新待处理报告
 | 无总期限          | `files.copy`、`files.move`、`files.delete` |
 | `rpcTimeout`      | 其他方法                                   |
 
-期限的数值见[限额](../guide/reference.md#限额)。方法、参数和结果类型以 `shared/src/protocol/rpc.ts` 的 `RpcMethods` 为准；`rpcMutates` 定义哪些方法按写请求处理，结果不明时遵守[结果语义](#结果语义)。
+期限的数值见[限额](../guide/reference.md#限额)。方法、参数和结果类型以 `packages/shared/src/protocol/rpc.ts` 的 `RpcMethods` 为准；`rpcMutates` 定义哪些方法按写请求处理，结果不明时遵守[结果语义](#结果语义)。
 
-运行时分派入口是 `agent/src/agent.ts` 的 `perform()`；定时任务、Git 和终端观察/输入分别交给 `agent/src/tasks/rpc.ts`、`agent/src/git/rpc.ts` 与 `agent/src/terminal/rpc.ts`。终端短 RPC 的位置、屏幕和输入类型在 `shared/src/protocol/terminal-observation.ts`；snapshot、wait 为读取，send、resize、recover 为写入。各方法的业务规则见相应的终端、文件、Git、定时任务和开发服务访问文档。
+运行时分派入口是 `packages/agent/src/agent.ts` 的 `perform()`；定时任务、Git 和终端观察/输入分别交给 `packages/agent/src/tasks/rpc.ts`、`packages/agent/src/git/rpc.ts` 与 `packages/agent/src/terminal/rpc.ts`。终端短 RPC 的位置、屏幕和输入类型在 `packages/shared/src/protocol/terminal-observation.ts`；snapshot、wait 为读取，send、resize、recover 为写入。各方法的业务规则见相应的终端、文件、Git、定时任务和开发服务访问文档。
 
 ## 数据通道
 
 数据通道是一条独立的 WebSocket，用于传输文件内容、终端数据和开发服务字节流，不占用控制连接。
 
-- `terminal.attach`：由 `POST …/channels` 创建，浏览器或 CLI 用 WebSocket `/api/channels/:channelId/terminal` 加入；agent 处理代码为 `agent/src/terminal/channels.ts`。
-- `file.read`：`purpose` 为 `open`、`text`、`image` 时由 `POST …/channels` 创建，浏览器用 `GET /api/channels/:channelId/content` 接收；`purpose` 为 `download` 时由 `GET /api/devices/:deviceId/download` 在内部创建。agent 处理代码为 `agent/src/files/channels.ts`。
+- `terminal.attach`：由 `POST …/channels` 创建，浏览器或 CLI 用 WebSocket `/api/channels/:channelId/terminal` 加入；agent 处理代码为 `packages/agent/src/terminal/channels.ts`。
+- `file.read`：`purpose` 为 `open`、`text`、`image` 时由 `POST …/channels` 创建，浏览器用 `GET /api/channels/:channelId/content` 接收；`purpose` 为 `download` 时由 `GET /api/devices/:deviceId/download` 在内部创建。agent 处理代码为 `packages/agent/src/files/channels.ts`。
 - `file.write`：`purpose` 为 `save`、`upload`，由 `POST …/channels` 创建，浏览器用 `PUT /api/channels/:channelId/content` 发送。
-- `http.proxy`：由 `/proxy/`、`/absproxy/` 请求在内部创建；agent 处理代码为 `agent/src/http/channels.ts`。
+- `http.proxy`：由 `/proxy/`、`/absproxy/` 请求在内部创建；agent 处理代码为 `packages/agent/src/http/channels.ts`。
 
-公开的 `POST …/channels` 只接受前三种。参数见 `shared/src/protocol/index.ts` 的 `ChannelParams`，`meta` 见同文件的 `TerminalMeta` 和 `FileMeta`；接收端仍按各自职责校验输入。
+公开的 `POST …/channels` 只接受前三种。参数见 `packages/shared/src/protocol/index.ts` 的 `ChannelParams`，`meta` 见同文件的 `TerminalMeta` 和 `FileMeta`；接收端仍按各自职责校验输入。
 
 ### 建立
 
@@ -283,7 +283,7 @@ server 在内存中保留每个设备/工作区/session 的最新待处理报告
 
 - **`file.read`**：agent 发送二进制数据块，总长度等于 `meta.size`，没有表示成功的帧。agent 留住最后一块，直到读取完成且检查全部通过才发出；失败时改发 `error` 并关闭。server 收到恰好 `meta.size` 字节时结束 HTTP 响应，字节不足的断流按读取失败处理。细节见[上传与下载](files.md#上传与下载)。
 - **`file.write`**：server 把 PUT 请求体分块转发，请求体长度等于声明大小后发送 `end`。agent 校验并发布文件，发送 `result`，server 把这个 `Reply` 作为 PUT 的响应返回。
-- **`terminal.attach`**：agent 校验目标后发送通道就绪帧 `ready`，收到 `start` 后开始输出。省略 `mode` 或 `mode:"web"` 使用 recorder 恢复，帧和输入类型为 `TerminalFrame`、`BrowserTerminalInput`；恢复完成前不允许输入。`mode:"tty"` 带本机 `cols/rows/term`，启动普通 tmux client 的 PTY；双向二进制帧为原始字节，JSON 仅使用 `TtyInput`、`TtyFrame`，没有 Web 恢复帧或粘贴归一化。类型位于 `shared/src/protocol/ipc.ts`，行为见[附着与恢复](terminal.md#附着与恢复)。
+- **`terminal.attach`**：agent 校验目标后发送通道就绪帧 `ready`，收到 `start` 后开始输出。省略 `mode` 或 `mode:"web"` 使用 recorder 恢复，帧和输入类型为 `TerminalFrame`、`BrowserTerminalInput`；恢复完成前不允许输入。`mode:"tty"` 带本机 `cols/rows/term`，启动普通 tmux client 的 PTY；双向二进制帧为原始字节，JSON 仅使用 `TtyInput`、`TtyFrame`，没有 Web 恢复帧或粘贴归一化。类型位于 `packages/shared/src/protocol/ipc.ts`，行为见[附着与恢复](terminal.md#附着与恢复)。
 - **`http.proxy`**：`ready` 的 `meta` 为空对象。`start` 之后通道只传二进制帧，收到文本帧按失败处理；连接以 1000 或无关闭码关闭表示正常结束，其他关闭码表示失败。见[请求转发](http-access.md#请求转发)。
 
 ### 流控与期限
@@ -302,12 +302,12 @@ server 在内存中保留每个设备/工作区/session 的最新待处理报告
 
 ## 本机 IPC
 
-`kiteline-agent` 的本机命令通过本机 IPC 调用正在运行的 agent（`agent/src/local.ts`）。
+`kiteline-agent` 的本机命令通过本机 IPC 调用正在运行的 agent（`packages/agent/src/local.ts`）。
 
 - **端点**：Linux 和 macOS 为 Unix socket `<运行目录>/agent.sock`，权限 0600，agent 启动时重新创建。Windows 为命名管道 `\\.\pipe\kiteline-<哈希>`，哈希是用户 SID 和运行目录真实路径的 SHA-256，访问控制见 [Windows](platforms.md#windows)。本机 IPC 不使用 TCP。
 - **协议**：在端点上使用 HTTP/1.1，只有 `POST /rpc`。请求体不超过 `controlMessageBytes`；响应是 `id` 为 `"local"` 的 `Reply`。每次调用在 agent 内的期限为 `rpcTimeout`（定时任务方法也一样），连接断开时取消；命令行最多等待 `rpcTimeout` 加 1 秒，其中 `doctor` 发起本机请求时使用默认的 `rpcTimeout`。
 
-允许的本机操作以 `agent/src/agent.ts` 的 `handleLocal()` 为准；它只开放本机诊断、工作区和终端管理及定时任务操作，不是全部远端 RPC 的镜像。
+允许的本机操作以 `packages/agent/src/agent.ts` 的 `handleLocal()` 为准；它只开放本机诊断、工作区和终端管理及定时任务操作，不是全部远端 RPC 的镜像。
 
 - 其他方法返回 `unsupported`，agent 正在停止时返回 `cancelled`。`sessions.end` 不需要 `workspaceId`。
 - `doctor` 的本机请求失败时，以当前 CLI 环境生成离线检查结果；运行态检查范围及提示见 [check 与 doctor](agent-lifecycle.md#check-与-doctor)。
@@ -315,9 +315,9 @@ server 在内存中保留每个设备/工作区/session 的最新待处理报告
 
 ## recorder IPC
 
-agent 按需启动 recorder，并通过 `RecorderConfig` 传入配置；Windows 上 recorder 运行在 Job 对象中。消息类型见 `shared/src/protocol/ipc.ts` 的 `RecorderRequest` 和 `RecorderMessage`，启动入口见 `agent/src/terminal/recorder.ts`，终端行为见[终端](terminal.md)。
+agent 按需启动 recorder，并通过 `RecorderConfig` 传入配置；Windows 上 recorder 运行在 Job 对象中。消息类型见 `packages/shared/src/protocol/ipc.ts` 的 `RecorderRequest` 和 `RecorderMessage`，启动入口见 `packages/agent/src/terminal/recorder.ts`，终端行为见[终端](terminal.md)。
 
-- **传输。** agent 写 recorder 的 stdin，recorder 写 stdout，每行一条 JSON，每行不超过 `controlMessageBytes`（`shared/src/protocol/stdio.ts`）。发送队列按附着分别计量：某个附着的积压超过 `terminalPendingBytes` 时，发往该附着的新消息被拒绝（agent 一侧返回 `limit_exceeded`），其他附着不受影响。recorder 的 stderr 只保留有界前缀，用作退出原因。
+- **传输。** agent 写 recorder 的 stdin，recorder 写 stdout，每行一条 JSON，每行不超过 `controlMessageBytes`（`packages/shared/src/protocol/stdio.ts`）。发送队列按附着分别计量：某个附着的积压超过 `terminalPendingBytes` 时，发往该附着的新消息被拒绝（agent 一侧返回 `limit_exceeded`），其他附着不受影响。recorder 的 stderr 只保留有界前缀，用作退出原因。
 - **请求结果。** 需要回复的请求带 `id`，recorder 用 `reply` 返回 `Reply`。agent 最多等待 `interactionTimeout`，超时按 `timeout` 和结果未确认处理；`redraw` 由 recorder 内部命令及尺寸的有效执行期限控制，不叠加包含背压等待的外层墙钟。recorder 退出时，所有等待中的请求以 `recording_unavailable` 和结果未确认结束。
 - **附着数据。** 终端帧和输出按会话、附着路由到浏览器。普通输入、粘贴、尺寸和消费确认不等待独立回复；一次粘贴始终是一条消息，不能拆成普通输入。
 - **短命令。** snapshot/wait 直接读取 recorder model；`sessions.send` 和 `sessions.resize` 进入该会话的输入队列并返回独立回复，不创建附着。超大快照仅该次请求返回 `limit_exceeded`，不会使 recording 进入故障。

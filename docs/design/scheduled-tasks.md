@@ -4,11 +4,11 @@
 
 ## 数据模型
 
-类型定义在 `shared/src/protocol/tasks.ts`，RPC 方法定义在 `shared/src/protocol/rpc.ts`。工作台通过设备 RPC、`kiteline-agent schedule` 通过本机 IPC 调用同一组方法（`agent/src/tasks/rpc.ts`），任务方法不带 `workspaceId`。
+类型定义在 `packages/shared/src/protocol/tasks.ts`，RPC 方法定义在 `packages/shared/src/protocol/rpc.ts`。工作台通过设备 RPC、`kiteline-agent schedule` 通过本机 IPC 调用同一组方法（`packages/agent/src/tasks/rpc.ts`），任务方法不带 `workspaceId`。
 
 ### 任务
 
-任务字段见 `shared/src/protocol/tasks.ts` 的 `ScheduledTask`。创建时省略 `cwd` 则保存项目用户的 HOME，省略 `timezone` 则保存 agent 进程的时区。修订号从 1 开始；没有待核查运行时不带 `reviewRunId`。暂停、待核查、单次计划已消耗或已错过时，`nextRunAt` 为 `null`。单次计划的状态变化见[调度](#调度)。
+任务字段见 `packages/shared/src/protocol/tasks.ts` 的 `ScheduledTask`。创建时省略 `cwd` 则保存项目用户的 HOME，省略 `timezone` 则保存 agent 进程的时区。修订号从 1 开始；没有待核查运行时不带 `reviewRunId`。暂停、待核查、单次计划已消耗或已错过时，`nextRunAt` 为 `null`。单次计划的状态变化见[调度](#调度)。
 
 修改定义、暂停、恢复、确认核查，以及 agent 启动时把未结束运行标为待核查，都会使 `revision` 加 1；运行的开始、结束和输出增长不改变它。`tasks.update` 必须携带 `expectedRevision`，与当前值不同时返回 `conflict`，定义保持不变。
 
@@ -16,7 +16,7 @@
 
 ### 运行
 
-运行记录的字段见 `shared/src/protocol/tasks.ts`。`state` 在进行中为 `starting`、`running` 或 `stopping`；`exitCode` 和 `signal` 是实际值，Windows 退出码保留 DWORD 值；`parameters` 保存接纳时任务的名称、命令、`cwd`、计划、时区和 `taskRevision`；`taskId` 在加载时从所在文件推导；跳过的运行没有 `startedAt`。
+运行记录的字段见 `packages/shared/src/protocol/tasks.ts`。`state` 在进行中为 `starting`、`running` 或 `stopping`；`exitCode` 和 `signal` 是实际值，Windows 退出码保留 DWORD 值；`parameters` 保存接纳时任务的名称、命令、`cwd`、计划、时区和 `taskRevision`；`taskId` 在加载时从所在文件推导；跳过的运行没有 `startedAt`。
 
 结束状态的判定：
 
@@ -32,24 +32,24 @@
 
 ### ID
 
-任务 ID 和手动运行 ID 由调用方在发送请求前生成，定时触发的运行 ID 由 agent 生成；语法由 `agent/src/tasks/schedule.ts` 的 `checkFileId()` 校验。
+任务 ID 和手动运行 ID 由调用方在发送请求前生成，定时触发的运行 ID 由 agent 生成；语法由 `packages/agent/src/tasks/schedule.ts` 的 `checkFileId()` 校验。
 
 ID 直接用作文件名，因此唯一性按 ASCII 大小写不敏感判断：已有任务 `Backup` 时不能创建 `backup`；运行 ID 在所有任务的保留运行和尚未删除的输出文件之间唯一。ID 按原拼写保存和显示。重复的 ID 返回 `conflict`，不会执行第二次。调用方失去回复时按原 ID 查询结果，规则见[结果语义](protocol.md#结果语义)。
 
 ## 调度
 
-周期计划由 Croner 计算，依赖版本见 `agent/package.json`。语法校验与发生点计算在 `agent/src/tasks/schedule.ts`，用户输入规则见[计划规则](../guide/scheduled-tasks.md#计划规则)。日期与星期同时指定时按逻辑或匹配，预览与实际调度必须使用相同规则。
+周期计划由 Croner 计算，依赖版本见 `packages/agent/package.json`。语法校验与发生点计算在 `packages/agent/src/tasks/schedule.ts`，用户输入规则见[计划规则](../guide/scheduled-tasks.md#计划规则)。日期与星期同时指定时按逻辑或匹配，预览与实际调度必须使用相同规则。
 
 - **时区和单次时刻。** `timezone` 用 `Intl` 校验，创建时保存，之后不随设备或浏览器的时区变化；`at` 保存为 UTC。两者的输入规则见[计划规则](../guide/scheduled-tasks.md#计划规则)。创建时单次时刻必须在未来；周期计划没有未来发生点时同样拒绝。
 - **计算下一次。** `nextOccurrence()` 从 `max(当前时间, lastScheduledAt)` 之后开始找。Croner 会把夏令时跳过的不存在时刻顺延，agent 用 `cron.match()` 再核对一次，因此不存在的时刻被跳过，重复的时刻只执行一次。`lastScheduledAt` 记录最近处理过的计划时刻并持久保存，系统时钟回拨后不会再次接纳已处理的时刻。预览（`tasks.preview`）、创建校验和实际定时使用同一个函数。
-- **定时器。** 每个任务独立设置定时器；回调接纳前确认任务仍存在、修订和下次时刻未变且 agent 未在停止。过时的回调不能启动命令，早于计划时刻触发时重新等待；计时实现见 `agent/src/tasks/index.ts` 的 `arm()`。
-- **不补跑。** 回调接纳时，当前时间晚于计划时刻超过 `taskLimits.lateToleranceMs`（`agent/src/limits.ts`，数值见[限额](../guide/reference.md#限额)）时，记录一条 `skipped`/`missed` 运行，然后计算下一次。agent 启动或任务恢复时从当前时间向后计算，停机期间错过的周期时刻不逐条记录。
+- **定时器。** 每个任务独立设置定时器；回调接纳前确认任务仍存在、修订和下次时刻未变且 agent 未在停止。过时的回调不能启动命令，早于计划时刻触发时重新等待；计时实现见 `packages/agent/src/tasks/index.ts` 的 `arm()`。
+- **不补跑。** 回调接纳时，当前时间晚于计划时刻超过 `taskLimits.lateToleranceMs`（`packages/agent/src/limits.ts`，数值见[限额](../guide/reference.md#限额)）时，记录一条 `skipped`/`missed` 运行，然后计算下一次。agent 启动或任务恢复时从当前时间向后计算，停机期间错过的周期时刻不逐条记录。
 - **单次计划状态。** 定时触发后 `onceStatus` 变为 `consumed`，因重叠或名额不足而跳过时也是如此；因超时而跳过时变为 `missed`。单次时刻在暂停期间或 agent 停机期间过去时，agent 在下一次加载、修改、暂停、恢复或确认核查时把它标为 `missed`，并补记一条 `skipped`/`missed` 运行。手动运行不改变 `onceStatus`。修改计划（或修改周期计划的时区）会清除 `lastScheduledAt`，单次计划回到 `pending`。
 - **暂停。** 暂停只取消定时器，不影响正在进行的运行，也不阻止手动运行。
 
 ## 接纳与并发
 
-所有改变任务状态的操作在 `ScheduledTasks` 的同一个串行队列中执行，手动运行和定时触发都经过 `admit()`（`agent/src/tasks/index.ts`）。接纳必须保持以下边界：
+所有改变任务状态的操作在 `ScheduledTasks` 的同一个串行队列中执行，手动运行和定时触发都经过 `admit()`（`packages/agent/src/tasks/index.ts`）。接纳必须保持以下边界：
 
 - 待核查任务不能接纳新运行，返回 `busy` 并带 `reviewRunId`；重复运行 ID 返回 `conflict`。运行名额包括正在执行的进程、进行中记录和待核查运行，同一 ID 只计一次。
 - 同一任务不重叠，设备容量不足时不启动。手动运行因此返回 `busy`，不写记录；定时触发则保存 `skipped` 及原因，超出迟到容差也按跳过处理，并继续计算下次时刻。
@@ -63,9 +63,9 @@ ID 直接用作文件名，因此唯一性按 ASCII 大小写不敏感判断：�
 
 ## 执行与停止
 
-命令由 agent 配置的 Shell 以非交互方式执行（`agent/src/tasks/process.ts`），Shell 的选择和参数见 [agent 配置文件](../guide/reference.md#agent-配置文件)。标准输入为空，标准输出和标准错误分别通过管道读取，没有 PTY，也不进入 tmux 或 recorder。命令继承 agent 进程的用户、环境变量和凭据。用户需要知道的影响见[执行环境](../guide/scheduled-tasks.md#执行环境)。
+命令由 agent 配置的 Shell 以非交互方式执行（`packages/agent/src/tasks/process.ts`），Shell 的选择和参数见 [agent 配置文件](../guide/reference.md#agent-配置文件)。标准输入为空，标准输出和标准错误分别通过管道读取，没有 PTY，也不进入 tmux 或 recorder。命令继承 agent 进程的用户、环境变量和凭据。用户需要知道的影响见[执行环境](../guide/scheduled-tasks.md#执行环境)。
 
-**进程集合。** Linux 和 macOS 上命令以新进程组启动（`detached`），进程组 ID 等于 Shell 的 PID。Windows 上 Job 的根进程是固定 Node 启动器，在私有隐藏控制台中先将输出代码页设为 UTF-8，再按原参数启动 PowerShell；这样在 Shell writer 初始化前确定编码，且不改变父进程或其他任务的控制台。输入代码页和 `$OutputEncoding` 保持 Shell 原生行为。怎样判断进程组或 Job 已空见[平台实现](platforms.md)（`agent/src/process-group.ts`）。
+**进程集合。** Linux 和 macOS 上命令以新进程组启动（`detached`），进程组 ID 等于 Shell 的 PID。Windows 上 Job 的根进程是固定 Node 启动器，在私有隐藏控制台中先将输出代码页设为 UTF-8，再按原参数启动 PowerShell；这样在 Shell writer 初始化前确定编码，且不改变父进程或其他任务的控制台。输入代码页和 `$OutputEncoding` 保持 Shell 原生行为。怎样判断进程组或 Job 已空见[平台实现](platforms.md)（`packages/agent/src/process-group.ts`）。
 
 **结束判定。** 一次运行在三个条件都满足后才结束：Shell 已退出；进程集合已空；两条输出管道已关闭。
 
@@ -113,11 +113,11 @@ JSON 按 [JSON 状态](agent-lifecycle.md#目录与权限)的规则原子写入�
 
 - **按任务整理。** 运行结束、接纳新运行、修改、暂停、恢复和确认核查之后，agent 只保留该任务最新的 `taskHistoryRuns` 条已结束运行，更早的记录连同输出文件一起删除。进行中的运行和 `reviewRunId` 对应的运行不计入、不删除。
 - **输出写入。** 写入前先按两个上限预留字节，超出部分丢弃并设置 `truncated`，命令继续运行，管道继续读取。
-- **跨任务腾空间。** 启动新运行前，agent 可能按接纳时间从旧到新删除其他任务的已结束运行及其输出，只删除不在核查中的记录。目标是为新运行在单次和全设备输出上限内腾出空间；如果全部可删除的输出仍不能达到目标，则一条也不删，新运行的输出可能被截断，甚至一字节也写不进去。具体计算见 `agent/src/tasks/index.ts` 的 `makeOutputRoom()`。
+- **跨任务腾空间。** 启动新运行前，agent 可能按接纳时间从旧到新删除其他任务的已结束运行及其输出，只删除不在核查中的记录。目标是为新运行在单次和全设备输出上限内腾出空间；如果全部可删除的输出仍不能达到目标，则一条也不删，新运行的输出可能被截断，甚至一字节也写不进去。具体计算见 `packages/agent/src/tasks/index.ts` 的 `makeOutputRoom()`。
 - **调低上限。** 新的上限只约束之后的写入，agent 不截短已有输出文件。
 - **残留输出。** 删除运行时先改写 JSON 记录，再删除输出文件。没删掉的输出文件继续计入合计用量，并继续占用它的运行 ID，直到下一次接纳前清理成功。删除任务时输出文件删除失败，结果为 `partial`，`result` 为 `{removed:true}`。
 
-**读取输出。** `runs.output` 从指定偏移读取一个流，单次最多 `taskLimits.outputReadBytes`（`agent/src/limits.ts`）。片段末尾不完整的 UTF-8 字符留到下一次读取。偏移超过当前文件长度，或输出文件已不存在时，从 0 开始返回，调用方应替换该流已显示的内容。响应中的 `finished` 表示输出已经停止增长，与命令是否成功无关。运行记录跨 agent 重启保留，但会按上述规则删除，`not_found` 不能证明某次运行从未发生。
+**读取输出。** `runs.output` 从指定偏移读取一个流，单次最多 `taskLimits.outputReadBytes`（`packages/agent/src/limits.ts`）。片段末尾不完整的 UTF-8 字符留到下一次读取。偏移超过当前文件长度，或输出文件已不存在时，从 0 开始返回，调用方应替换该流已显示的内容。响应中的 `finished` 表示输出已经停止增长，与命令是否成功无关。运行记录跨 agent 重启保留，但会按上述规则删除，`not_found` 不能证明某次运行从未发生。
 
 网页按流保留原始字节偏移和未结束控制序列的 carry，只清理新片及 carry，追加清理后的文本片段；复制使用同一份正文。只有 `finished && nextOffset >= storedBytes` 才是实际末片，空末片也必须释放 carry；终态但尚有未读字节时继续读取。输出重置时同时清除该流的旧片段和 carry。清理不改变原始偏移，不模拟终端光标或覆盖行为，CR 仍作为文本保留。
 
@@ -126,8 +126,8 @@ JSON 按 [JSON 状态](agent-lifecycle.md#目录与权限)的规则原子写入�
 server 只保存每台设备的任务摘要，用于离线时显示最近状态和通知网页刷新。
 
 - **发送。** agent 在每次收到 `welcome` 后，以及连接期间每次任务状态变化后，发送 `tasks.snapshot`。摘要的 `revision` 是 agent 内存中的计数器，每次变化加 1，agent 重启后从 0 开始。输出增长不产生摘要。
-- **内容。** 摘要类型见 `shared/src/protocol/tasks.ts` 的 `ScheduledTaskSummary` 与 `TaskRunSummary`。命令、工作目录、诊断文本和输出不在其中。
-- **接收。** server 用 `projectTaskSnapshot()`（`server/src/task-summary.ts`）投影允许的字段，带 `storageError` 时保存错误标记和空列表。server 只接受设备当前控制连接发来的摘要：每条连接的第一份摘要整体替换已有摘要，之后只接受 `revision` 更大的摘要。
+- **内容。** 摘要类型见 `packages/shared/src/protocol/tasks.ts` 的 `ScheduledTaskSummary` 与 `TaskRunSummary`。命令、工作目录、诊断文本和输出不在其中。
+- **接收。** server 用 `projectTaskSnapshot()`（`packages/server/src/task-summary.ts`）投影允许的字段，带 `storageError` 时保存错误标记和空列表。server 只接受设备当前控制连接发来的摘要：每条连接的第一份摘要整体替换已有摘要，之后只接受 `revision` 更大的摘要。
 - **保存与通知。** 摘要写入 SQLite 表 `taskSummaries`，每台设备一行，新摘要整体替换旧摘要；然后向有该设备权限的网页事件连接发送 `tasks.changed`，网页收到后重新读取。
 - **读取。** `GET /api/tasks` 返回各设备摘要，可按设备筛选；类型见 `DeviceTaskSummary`。从未收到摘要时，观察时间和摘要为 `null`；`current` 只在设备当前控制连接已经报告过摘要时为 true，不由设备在线状态推断。
 - **详细数据。** 定义、运行列表和输出只通过设备 RPC 读取，经 server 内存转发，不写入 SQLite 或设备快照。

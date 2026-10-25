@@ -145,17 +145,17 @@ agent 用设备令牌连接 `/api/agent/control`，握手期限 30 秒。重连�
 
 ### JSON 状态
 
-agent 的 JSON 状态（`agent.json`、`connection.json`、`temporary-files.json`、定时任务记录，以及 Linux 和 macOS 的安装记录）先以独占方式写入同目录的临时文件（`atomicJson()`，`shared/src/node/files.ts`；临时文件名为 `<文件>.<UUID>.tmp`），再以重命名替换，读者只会看到完整的旧内容或新内容。写入后不调用 fsync，不保证断电后的持久性。
+agent 的 JSON 状态（`agent.json`、`connection.json`、`temporary-files.json`、定时任务记录，以及 Linux 和 macOS 的安装记录）先以独占方式写入同目录的临时文件（`atomicJson()`，`packages/shared/src/node/files.ts`；临时文件名为 `<文件>.<UUID>.tmp`），再以重命名替换，读者只会看到完整的旧内容或新内容。写入后不调用 fsync，不保证断电后的持久性。
 
 读取时，`agent.json`、`connection.json`、`config.json`、定时任务记录和安装记录为空文件、损坏的 JSON 或不支持的结构时，agent 报告错误并保留原文件，不自动修复、迁移或覆盖。`temporary-files.json` 例外：读取失败时只记录日志并按空登记处理，下一次创建临时文件时被改写（见[临时文件](files.md#保存)）。
 
 ## check 与 doctor
 
-`check` 在当前环境中检查随包组件、宿主环境和目录，全部通过时成功退出，否则列出失败项并以非零状态退出。每个外部命令最多运行 5 秒；具体项目见 `agent/src/prerequisites.ts`。它会创建 agent 数据目录和运行目录，并检查运行目录长度及目录可写性。文件辅助程序的检查只确认程序能启动，不确认文件系统支持不覆盖的重命名。
+`check` 在当前环境中检查随包组件、宿主环境和目录，全部通过时成功退出，否则列出失败项并以非零状态退出。每个外部命令最多运行 5 秒；具体项目见 `packages/agent/src/prerequisites.ts`。它会创建 agent 数据目录和运行目录，并检查运行目录长度及目录可写性。文件辅助程序的检查只确认程序能启动，不确认文件系统支持不覆盖的重命名。
 
 `doctor` 先通过本机 IPC 请正在运行的 agent 检查自己（在线），输出每项的 `[ok]`、`[warn]` 或 `[error]`，有 `error` 时以 1 退出。
 
-- 在线 doctor 检查运行中 agent 的随包组件和宿主环境，并报告连接、终端、任务及 Git 凭据环境；它不重复 `check` 的目录长度、创建和可写检查。具体诊断项见 `agent/src/doctor.ts`。
+- 在线 doctor 检查运行中 agent 的随包组件和宿主环境，并报告连接、终端、任务及 Git 凭据环境；它不重复 `check` 的目录长度、创建和可写检查。具体诊断项见 `packages/agent/src/doctor.ts`。
 - 连接不到 agent 时（离线），doctor 在当前进程中检查安装、配置和随包组件，这些组件会实际运行；输出说明本机连接不可用、运行环境尚未检查，`config.json` 无效时追加错误。离线结果不代表后台 agent 的实际环境。
 
 `doctor` 不验证 Git 认证、hooks 和签名，也不修改 Git 配置；在工作台执行一次 Fetch 或提交可以确认它们是否可用。

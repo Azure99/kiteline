@@ -31,37 +31,37 @@ flowchart LR
 - **远程 CLI**（`kiteline`）：用选定设备的操作凭据经 server 访问设备。短命令走设备 RPC，交互接续走[终端数据通道](terminal.md#远程交互附着)，与工作台共用结果解释，与 agent 共用网络传输。使用方法见[远程 CLI](../guide/cli.md)。
 - **agent**（`kiteline-agent run`）：每台设备一个 Node 进程，以项目用户身份运行。agent 主动连接 server：一条控制 WebSocket 承载 RPC 和事件，每次文件读写、终端附着和开发服务请求另开一条数据 WebSocket。agent 不监听 TCP 端口；同一用户的本机命令行通过[本机 IPC](protocol.md#本机-ipc) 访问它。
 - **recorder**（`terminal-recorder`）：agent 在第一次需要时启动的 Node 子进程，每个 agent 最多一个，通过 stdin 和 stdout 与 agent 通信。它为每个终端会话运行一个 tmux control 客户端，把输出写入 `@xterm/headless` 屏幕模型，浏览器附着时从这个模型恢复画面。
-- **tmux server**：每个终端会话一个私有 tmux server，socket 为 `<运行目录>/<sessionId>/tmux.sock`，会话名固定为 `kiteline`（`shared/src/terminal/node.ts` 的 `tmuxSession`）。终端程序运行在其中，浏览器断开或 recorder 退出都不会结束它。Windows 上 tmux 运行在随包的私有 MSYS2 环境中，见[平台实现](platforms.md#windows)。
+- **tmux server**：每个终端会话一个私有 tmux server，socket 为 `<运行目录>/<sessionId>/tmux.sock`，会话名固定为 `kiteline`（`packages/shared/src/terminal/node.ts` 的 `tmuxSession`）。终端程序运行在其中，浏览器断开或 recorder 退出都不会结束它。Windows 上 tmux 运行在随包的私有 MSYS2 环境中，见[平台实现](platforms.md#windows)。
 - **文件 helper**：Linux 和 macOS 上，不覆盖目标的改名由一次性进程 `rename-noreplace` 完成；macOS 另用 `entry-name` 查询目录项在磁盘上的实际名称。Windows 不使用 helper，同类能力由 agent 进程加载的原生 addon（`native/windows/`）提供。
 
 ## 仓库结构
 
 ```text
-server/src/              kiteline-server：HTTP、WebSocket、转发与 SQLite
-agent/src/               kiteline-agent：设备操作、本机 IPC、安装与运行
-  cli/、install/          命令行与安装维护
-  terminal/              终端会话、recorder 管理与终端通道
-  files/、git/            文件与 Git 工具
-  http/、tasks/           开发服务访问与定时任务
-agent/patches/           agent 依赖补丁
-cli/src/                 kiteline：远程接入、目标选择与命令输出
-terminal-recorder/src/   tmux control 客户端、屏幕模型、附着流控与输入
-shared/src/              跨进程协议、终端与 Windows 平台适配
-web/src/                 React 工作台与本地 UI 组件
-web/postcss/             Chromium 97 的 CSS layer 适配
-web/patches/             Web 依赖补丁
-*/test/                  各包测试；web/test/*.typecheck.ts 只做类型检查
-native/                  helper、Windows addon、tmux 补丁与 terminfo
-installer/               安装脚本和 launcher；.in 文件是模板
-scripts/                 构建、组包、验证与本地开发脚本
-release/                 固定构建输入和 Dockerfile
-deploy/                  Compose、systemd、launchd、WinSW 示例
-.github/workflows/       CI 与发布
+packages/server/src/                kiteline-server：HTTP、WebSocket、转发与 SQLite
+packages/agent/src/                 kiteline-agent：设备操作、本机 IPC、安装与运行
+  cli/、install/                     命令行与安装维护
+  terminal/                         终端会话、recorder 管理与终端通道
+  files/、git/                       文件与 Git 工具
+  http/、tasks/                      开发服务访问与定时任务
+packages/agent/patches/             agent 依赖补丁
+packages/cli/src/                   kiteline：远程接入、目标选择与命令输出
+packages/terminal-recorder/src/     tmux control 客户端、屏幕模型、附着流控与输入
+packages/shared/src/                跨进程协议、终端与 Windows 平台适配
+packages/web/src/                   React 工作台与本地 UI 组件
+packages/web/postcss/               Chromium 97 的 CSS layer 适配
+packages/web/patches/               Web 依赖补丁
+packages/*/test/                    各包测试；packages/web/test/*.typecheck.ts 只做类型检查
+native/                             helper、Windows addon、tmux 补丁与 terminfo
+installer/                          安装脚本和 launcher；.in 文件是模板
+scripts/                            构建、组包、验证与本地开发脚本
+release/                            固定构建输入和 Dockerfile
+deploy/                             Compose、systemd、launchd、WinSW 示例
+.github/workflows/                  CI 与发布
 ```
 
 检查命令见[源码开发](../development/setup.md#检查与测试)，构建输入见 [release/README.md](../../release/README.md)。
 
-`shared` 按入口导出。浏览器不能使用依赖 Node 的入口，具体导入限制由根目录 `eslint.config.mjs` 中针对 `web/src/` 的 `no-restricted-imports` 规则维护。
+`shared` 按入口导出。浏览器不能使用依赖 Node 的入口，具体导入限制由根目录 `eslint.config.mjs` 中针对 `packages/web/src/` 的 `no-restricted-imports` 规则维护。
 
 `shared/protocol/client` 统一 Web 和 CLI 的 HTTP/RPC 结果及错误解释；宿主提供传输、请求 ID 和界面通知。`shared/node/network` 管理代理、TLS、连接取消及响应体消费期间的资源，`shared/node/files` 提供共用的原子 JSON 写入。它们是仓库内部入口。
 
@@ -101,12 +101,12 @@ agent 的 JSON 状态文件以原子替换写入，不调用 fsync；文件损�
 
 ## 请求流程
 
-| 流程                   | 入口文件                                                                                                                 | 行为契约                                                                           |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
-| RPC                    | `web/src/lib/api.ts`、`server/src/app.ts`、`agent/src/agent.ts`                                                          | [RPC](protocol.md#rpc)、[结果语义](protocol.md#结果语义)                           |
-| 数据通道与文件下载     | `server/src/channels.ts`、`server/src/file-transfer.ts`、`agent/src/files/channels.ts`、`agent/src/terminal/channels.ts` | [数据通道](protocol.md#数据通道)、[网页附着](terminal.md#网页附着)                 |
-| 开发服务代理           | `server/src/http-proxy.ts`、`agent/src/http/channels.ts`                                                                 | [请求转发](http-access.md#请求转发)                                                |
-| 本机终端与定时任务命令 | `agent/src/cli/terminal.ts`、`agent/src/cli/tasks.ts`、`agent/src/local.ts`                                              | [本机 IPC](protocol.md#本机-ipc)、[任务命令行](../guide/scheduled-tasks.md#命令行) |
+| 流程                   | 入口文件                                                                                                                                                     | 行为契约                                                                           |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| RPC                    | `packages/web/src/lib/api.ts`、`packages/server/src/app.ts`、`packages/agent/src/agent.ts`                                                                   | [RPC](protocol.md#rpc)、[结果语义](protocol.md#结果语义)                           |
+| 数据通道与文件下载     | `packages/server/src/channels.ts`、`packages/server/src/file-transfer.ts`、`packages/agent/src/files/channels.ts`、`packages/agent/src/terminal/channels.ts` | [数据通道](protocol.md#数据通道)、[网页附着](terminal.md#网页附着)                 |
+| 开发服务代理           | `packages/server/src/http-proxy.ts`、`packages/agent/src/http/channels.ts`                                                                                   | [请求转发](http-access.md#请求转发)                                                |
+| 本机终端与定时任务命令 | `packages/agent/src/cli/terminal.ts`、`packages/agent/src/cli/tasks.ts`、`packages/agent/src/local.ts`                                                       | [本机 IPC](protocol.md#本机-ipc)、[任务命令行](../guide/scheduled-tasks.md#命令行) |
 
 ## 协调与失败边界
 
@@ -114,11 +114,11 @@ agent 的 JSON 状态文件以原子替换写入，不调用 fsync；文件损�
 
 - **连接实例**：server 用 `connectionId` 标识每条控制连接。RPC 和数据通道属于建立它们时的连接；连接断开或被替换时，只有属于旧连接的请求和通道失效，迟到的回复和数据连接被丢弃。
 - **元数据**：agent 对 `agent.json` 的修改排队逐个执行。每次修改递增 `revision`，检查完整快照不超过 `controlMessageBytes`，写盘成功后发送 `metadata.snapshot`（server 的接受规则见 [WebSocket 连接](protocol.md#websocket-连接)）。
-- **Git 写操作**：同一 `commonDir` 的写方法在 `GitWriteQueue`（`agent/src/git/queue.ts`）中串行执行，见 [Git](git.md#写操作)。
-- **文件发布**：agent 内一把发布锁（`agent/src/files/publish.ts`）串行执行改变目录项的步骤，传输和复制正文在锁外进行，见[保存](files.md#保存)。
+- **Git 写操作**：同一 `commonDir` 的写方法在 `GitWriteQueue`（`packages/agent/src/git/queue.ts`）中串行执行，见 [Git](git.md#写操作)。
+- **文件发布**：agent 内一把发布锁（`packages/agent/src/files/publish.ts`）串行执行改变目录项的步骤，传输和复制正文在锁外进行，见[保存](files.md#保存)。
 - **工作区去重**：`workspaces.add` 先解析真实路径；路径与已登记的工作区相同，或指向同一文件系统对象（设备号和 inode 都相同）时，返回已有的工作区。
 - **变化通知**：agent 只为正在被查看的工作区发送 `workspace.changed`：文件监听的变化合并后发送，agent 自己完成的写操作结束后立即发送，见[变化监听](files.md#变化监听)。
-- **每台设备的上限**：server 检查 `pendingRequestsPerDevice` 和 `channelsPerDevice`，agent 检查 `transfersPerDevice`、`terminalSessionsPerDevice`、`taskRunsPerDevice`，数值见[限额](../guide/reference.md#限额)；agent 还限制同时打开的目录和仓库发现游标（`cursorsPerDevice`，16 个，`agent/src/limits.ts`）。到达上限时返回 `busy`，不排队，也不挤掉已有操作。
+- **每台设备的上限**：server 检查 `pendingRequestsPerDevice` 和 `channelsPerDevice`，agent 检查 `transfersPerDevice`、`terminalSessionsPerDevice`、`taskRunsPerDevice`，数值见[限额](../guide/reference.md#限额)；agent 还限制同时打开的目录和仓库发现游标（`cursorsPerDevice`，16 个，`packages/agent/src/limits.ts`）。到达上限时返回 `busy`，不排队，也不挤掉已有操作。
 
 ### 失败边界
 
@@ -153,9 +153,9 @@ agent 的出站代理规则见[出站代理与证书](../guide/devices.md#出站
 
 ## 前端约定
 
-- **样式**：主题变量和视觉规则见[视觉](interaction.md#视觉)；第三方组件的样式适配写在 `web/src/styles.css`。
-- **通用组件**：复用 `web/src/components/ui/`；来源和维护方式见该目录的 [README](../../web/src/components/ui/README.md)。
-- **文案**：资源在 `web/src/i18n/`，新增文案遵守[语言](interaction.md#语言)约定。server 和 agent 不接收语言，返回英文诊断；工作台按 `error.code` 显示本地化说明。
+- **样式**：主题变量和视觉规则见[视觉](interaction.md#视觉)；第三方组件的样式适配写在 `packages/web/src/styles.css`。
+- **通用组件**：复用 `packages/web/src/components/ui/`；来源和维护方式见该目录的 [README](../../packages/web/src/components/ui/README.md)。
+- **文案**：资源在 `packages/web/src/i18n/`，新增文案遵守[语言](interaction.md#语言)约定。server 和 agent 不接收语言，返回英文诊断；工作台按 `error.code` 显示本地化说明。
 - **专业组件**：xterm.js、CodeMirror 和 react-diff-view 直接使用，外面没有通用组件包装。它们的实例由各自的 React 组件创建和销毁，焦点、滚动和键盘处理由组件本身负责。
 
 布局、反馈、焦点和视觉规则见[界面交互](interaction.md)。
@@ -164,10 +164,10 @@ agent 的出站代理规则见[出站代理与证书](../guide/devices.md#出站
 
 支持的浏览器见[浏览器与界面](../guide/usage.md#浏览器与界面)。实现方式如下：
 
-- **构建目标**：`web/vite.config.ts` 把 `build.target` 和 `build.cssTarget` 设为 `chrome97`，JavaScript 语法和 CSS 都转换到 Chromium 97 可用的形式。
-- **CSS layer**：Chromium 97 不支持 `@layer`，构建时 `@csstools/postcss-cascade-layers` 把 layer 展开为选择器权重。展开后，Tailwind 的 `base` 重置和应用的 `kiteline-editor-reset` 重置权重变高，会覆盖 CodeMirror 运行时注入的无 layer 样式；`web/postcss/editor-reset-compat.ts` 因此让编辑器内只使用低权重的重置副本，编辑器外保留原规则。
-- **运行时补充**：`web/src/lib/browser-compat.ts` 在 `main.tsx` 中最先导入，补上 Chromium 97 缺少的 `structuredClone`。`eslint.config.mjs` 对 Web 及其消费的 shared 入口禁用 Chromium 97 不可用的 API，并限制 Web 导入仅能在 Node 运行的 shared 入口。
-- **视口高度**：Chromium 97 没有 `dvh`，`web/src/lib/viewport.ts` 此时用 `visualViewport` 测得的像素高度设置 `--app-height`，规则见[输入与焦点](interaction.md#输入与焦点)。
+- **构建目标**：`packages/web/vite.config.ts` 把 `build.target` 和 `build.cssTarget` 设为 `chrome97`，JavaScript 语法和 CSS 都转换到 Chromium 97 可用的形式。
+- **CSS layer**：Chromium 97 不支持 `@layer`，构建时 `@csstools/postcss-cascade-layers` 把 layer 展开为选择器权重。展开后，Tailwind 的 `base` 重置和应用的 `kiteline-editor-reset` 重置权重变高，会覆盖 CodeMirror 运行时注入的无 layer 样式；`packages/web/postcss/editor-reset-compat.ts` 因此让编辑器内只使用低权重的重置副本，编辑器外保留原规则。
+- **运行时补充**：`packages/web/src/lib/browser-compat.ts` 在 `main.tsx` 中最先导入，补上 Chromium 97 缺少的 `structuredClone`。`eslint.config.mjs` 对 Web 及其消费的 shared 入口禁用 Chromium 97 不可用的 API，并限制 Web 导入仅能在 Node 运行的 shared 入口。
+- **视口高度**：Chromium 97 没有 `dvh`，`packages/web/src/lib/viewport.ts` 此时用 `visualViewport` 测得的像素高度设置 `--app-height`，规则见[输入与焦点](interaction.md#输入与焦点)。
 
 以下改动后要在 Chromium 97 和当前 Chrome 中重新检查：
 
@@ -181,25 +181,25 @@ agent 的出站代理规则见[出站代理与证书](../guide/devices.md#出站
 
 ### 添加 RPC 方法
 
-在 `shared/src/protocol/rpc.ts` 定义方法、参数、结果和写分类，并按操作确定期限、本机调用权限及变化通知时点。
+在 `packages/shared/src/protocol/rpc.ts` 定义方法、参数、结果和写分类，并按操作确定期限、本机调用权限及变化通知时点。
 
 Git 写操作经过 `GitWriteQueue`；工作区变化通知分别发生在 RPC 完成、后台文件操作真正结束或内容已发布/结果未确认时。调用方按[结果语义](protocol.md#结果语义)处理失败及结果未确认；测试覆盖实际变化的行为。
 
 ### 添加事件
 
-在 `shared/src/protocol/index.ts` 定义协议事件，在接收边界检查新增字段，并按接收者构造允许转发的字段。
+在 `packages/shared/src/protocol/index.ts` 定义协议事件，在接收边界检查新增字段，并按接收者构造允许转发的字段。
 
-浏览器与 server 的事件消息见[浏览器事件](protocol.md#浏览器事件)。本地 window 事件的名称和载荷由 `web/src/lib/events.ts` 的 `WindowEventMap` 维护。
+浏览器与 server 的事件消息见[浏览器事件](protocol.md#浏览器事件)。本地 window 事件的名称和载荷由 `packages/web/src/lib/events.ts` 的 `WindowEventMap` 维护。
 
 ### 添加数据通道种类
 
-在 `shared/src/protocol/index.ts` 定义种类、参数和 meta，更新 `server/src/channels.ts` 的公开种类、purpose、meta 和内容类型检查。
+在 `packages/shared/src/protocol/index.ts` 定义种类、参数和 meta，更新 `packages/server/src/channels.ts` 的公开种类、purpose、meta 和内容类型检查。
 
 在 agent 中接入通道的 open 分派，确定取消、断连与关闭时的资源归属，以及是否占用文件传输额度。共用同一资源所有者的通道统一清理。
 
 ### 添加 HTTP 路由
 
-在 `server/src/app.ts` 中按 [HTTP 接口](protocol.md#http-接口)的检查列选择位置，核对登录、Origin、版本和读完请求体后的认证时点。路径不在 `/api/` 下时，还须考虑 `web/vite.config.ts` 的开发代理前缀。
+在 `packages/server/src/app.ts` 中按 [HTTP 接口](protocol.md#http-接口)的检查列选择位置，核对登录、Origin、版本和读完请求体后的认证时点。路径不在 `/api/` 下时，还须考虑 `packages/web/vite.config.ts` 的开发代理前缀。
 
 ### 添加限额或配置项
 

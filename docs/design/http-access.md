@@ -14,9 +14,9 @@ server 用路径代理把浏览器请求转给设备上监听本机端口的开�
 - server 只解析前缀这一段。之后的路径和查询串按浏览器发出的原始请求目标转发：不解码，不合并重复的 `/`，不处理 `.` 和 `..` 段，末尾空的 `?` 也保留。
 - 两种模式只差是否去掉前缀。server 不保存服务配置，也不按 Referer 或最近打开的页面推测目标。没有前缀的请求（例如普通路径模式下页面里写死的 `/script.js`）由工作台自身处理：对 `/assets/` 之外不存在路径的 GET 请求得到状态 200 的工作台 `index.html`，而不是 404，脚本和样式因此报 MIME 类型错误。
 
-工作台的端口入口和终端本地 HTTP 链接由 `web/src/lib/device-service.ts` 转换为设备代理链接；接受的本地主机形式及前缀处理以 `deviceServiceLink()` 为准。
+工作台的端口入口和终端本地 HTTP 链接由 `packages/web/src/lib/device-service.ts` 转换为设备代理链接；接受的本地主机形式及前缀处理以 `deviceServiceLink()` 为准。
 
-agent 只连接自己网络命名空间里的回环地址：先连 `127.0.0.1:<port>`，这次连接在建立前失败时再试一次 `[::1]:<port>`，不查询 DNS（`agent/src/http/channels.ts`）。连接建立后不更换地址，也不重发请求。同一端口上 IPv4 和 IPv6 是两个不同程序时，代理总是到达 IPv4 那一个。监听 `0.0.0.0` 或 `::` 的服务可以通过回环地址到达；只监听其他网卡地址的服务到达不了。容器内 agent 能到达的范围见[在容器中运行](../guide/devices.md#在容器中运行)。
+agent 只连接自己网络命名空间里的回环地址：先连 `127.0.0.1:<port>`，这次连接在建立前失败时再试一次 `[::1]:<port>`，不查询 DNS（`packages/agent/src/http/channels.ts`）。连接建立后不更换地址，也不重发请求。同一端口上 IPv4 和 IPv6 是两个不同程序时，代理总是到达 IPv4 那一个。监听 `0.0.0.0` 或 `::` 的服务可以通过回环地址到达；只监听其他网卡地址的服务到达不了。容器内 agent 能到达的范围见[在容器中运行](../guide/devices.md#在容器中运行)。
 
 ## 请求转发
 
@@ -61,10 +61,10 @@ agent 只连接自己网络命名空间里的回环地址：先连 `127.0.0.1:<p
 
 ## 连接寿命
 
-- server 的 `requestTimeout` 为 0，代理请求没有总时长限制。唯一的时限在准备阶段：从创建通道到 agent 发出 `ready`，超过 `interactionTimeout`（`shared/src/protocol/index.ts`）返回 504。
+- server 的 `requestTimeout` 为 0，代理请求没有总时长限制。唯一的时限在准备阶段：从创建通道到 agent 发出 `ready`，超过 `interactionTimeout`（`packages/shared/src/protocol/index.ts`）返回 504。
 - 进入字节流阶段后，代理不设空闲超时，文件通道的空闲时限和终端的确认规则都不适用于它。没有数据往来的 WebSocket 和 SSE 可以一直保持。
-- server 对经过 Upgrade 的浏览器 socket、agent 对数据 WebSocket 和本地 TCP 连接开启 TCP keepalive，间隔为 `tcpKeepAliveDelayMs`（`shared/src/protocol/index.ts`）。keepalive 只用于发现已经断开的对端，不会关闭安静但存活的连接。
-- 每个代理请求从创建通道到结束都占用设备的一个数据通道名额（`serverLimits.channelsPerDevice`，`server/src/limits.ts`），终端显示和文件读写的数据通道共用这个上限，长时间打开的 WebSocket 和 SSE 一直占用。名额用满时新请求返回 429，已有连接不受影响。数值见[限额](../guide/reference.md#限额)。
+- server 对经过 Upgrade 的浏览器 socket、agent 对数据 WebSocket 和本地 TCP 连接开启 TCP keepalive，间隔为 `tcpKeepAliveDelayMs`（`packages/shared/src/protocol/index.ts`）。keepalive 只用于发现已经断开的对端，不会关闭安静但存活的连接。
+- 每个代理请求从创建通道到结束都占用设备的一个数据通道名额（`serverLimits.channelsPerDevice`，`packages/server/src/limits.ts`），终端显示和文件读写的数据通道共用这个上限，长时间打开的 WebSocket 和 SSE 一直占用。名额用满时新请求返回 429，已有连接不受影响。数值见[限额](../guide/reference.md#限额)。
 
 连接在以下情况结束：
 
@@ -81,7 +81,7 @@ agent 只连接自己网络命名空间里的回环地址：先连 `127.0.0.1:<p
 
 ## 端口建议
 
-“访问端口”对话框通过 RPC `ports.list` 按需读取设备的 TCP 监听快照（`web/src/devices/port-dialog.tsx`）。工作台不保存端口列表，agent 不持续扫描，也不向端口发送 HTTP 探测。
+“访问端口”对话框通过 RPC `ports.list` 按需读取设备的 TCP 监听快照（`packages/web/src/devices/port-dialog.tsx`）。工作台不保存端口列表，agent 不持续扫描，也不向端口发送 HTTP 探测。
 
 | 系统    | 来源                                                                        | 计入的监听地址                      |
 | ------- | --------------------------------------------------------------------------- | ----------------------------------- |
@@ -89,13 +89,13 @@ agent 只连接自己网络命名空间里的回环地址：先连 `127.0.0.1:<p
 | macOS   | 系统 `/usr/sbin/netstat` 的 TCP 监听信息                                    | `*`、`127.0.0.1`、`::1`             |
 | Windows | 原生模块调用 `GetTcpTable` 和 `GetTcp6Table`（`native/windows/network.cc`） | `0.0.0.0`、`127.0.0.1`、`::`、`::1` |
 
-实现位于 `agent/src/http/ports.ts`。其他 `127.x` 地址和具体网卡地址上的监听不计入。结果按端口去重、升序排列，最多返回 `agentLimits.listPageEntries` 项（`agent/src/limits.ts`），超出时 `truncated` 为 true，界面显示“仅显示部分端口”。Linux 上不存在 `/proc/net/tcp6`（IPv6 未启用）时按没有 IPv6 监听处理；其他读取或解析错误使整次读取失败。
+实现位于 `packages/agent/src/http/ports.ts`。其他 `127.x` 地址和具体网卡地址上的监听不计入。结果按端口去重、升序排列，最多返回 `agentLimits.listPageEntries` 项（`packages/agent/src/limits.ts`），超出时 `truncated` 为 true，界面显示“仅显示部分端口”。Linux 上不存在 `/proc/net/tcp6`（IPv6 未启用）时按没有 IPv6 监听处理；其他读取或解析错误使整次读取失败。
 
 候选只反映 agent 所在网络命名空间里的监听 socket。通过 NAT 发布、在本命名空间没有监听 socket 的端口不会出现；手工输入端口始终可用。
 
 ## 错误响应
 
-server 在向浏览器发出响应头之前遇到的错误按下表返回（映射表在 `server/src/http-proxy.ts` 的 `failure()`）。检查顺序与[请求转发](#请求转发)第 1 步一致，因此格式错误的路径和无效的入口即使未登录也返回 400。
+server 在向浏览器发出响应头之前遇到的错误按下表返回（映射表在 `packages/server/src/http-proxy.ts` 的 `failure()`）。检查顺序与[请求转发](#请求转发)第 1 步一致，因此格式错误的路径和无效的入口即使未登录也返回 400。
 
 | 情况                                                              | 状态                                  | 错误码             |
 | ----------------------------------------------------------------- | ------------------------------------- | ------------------ |
@@ -112,7 +112,7 @@ server 在向浏览器发出响应头之前遇到的错误按下表返回（映�
 | 连接失败、上游异常或其他错误                                      | 502                                   | 其他               |
 
 - 502 包括本地端口拒绝连接、本地服务在请求前关闭连接、返回非 HTTP 数据或无效状态码。
-- 页面导航指带 `Sec-Fetch-Mode: navigate` 或 `Sec-Fetch-Dest: document` 的 GET 请求。登录成功后，工作台只在 `returnTo` 是同源的 `/proxy/…` 或 `/absproxy/…` 路径时跳回原地址（`web/src/lib/login-return.ts`），其他情况见[导航与上下文](interaction.md#导航与上下文)。
+- 页面导航指带 `Sec-Fetch-Mode: navigate` 或 `Sec-Fetch-Dest: document` 的 GET 请求。登录成功后，工作台只在 `returnTo` 是同源的 `/proxy/…` 或 `/absproxy/…` 路径时跳回原地址（`packages/web/src/lib/login-return.ts`），其他情况见[导航与上下文](interaction.md#导航与上下文)。
 - 426 依据的版本记录只在 server 内存中（`Connections.releases`）。server 重启后，在 agent 再次尝试连接之前，未连接的设备返回 503。版本一致规则见[契约来源](protocol.md#契约来源)。
 - 页面导航得到英文 HTML 错误页，显示端口和实际错误；只有登录、设备权限及适用的 Origin 检查通过且找到设备后，才显示该设备的名称，名称与错误文本均作 HTML 转义。页面提供按原 deviceId 返回设备详情及重新加载的操作；其他请求得到 `text/plain` 消息。连接类错误会提示检查端口、监听地址和容器网络。所有错误响应带 `Cache-Control: no-store` 和 `Connection: close`；升级请求的错误响应直接写在原始 socket 上。
 - 响应头已经发出或 WebSocket 已经升级后，任何失败都只能断开连接。

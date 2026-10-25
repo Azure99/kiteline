@@ -12,7 +12,7 @@ export default tseslint.config(
     rules: { "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }] },
   },
   {
-    files: ["web/**/*.{ts,tsx}"],
+    files: ["packages/web/**/*.{ts,tsx}"],
     plugins: { "react-hooks": hooks },
     rules: {
       "react-hooks/rules-of-hooks": "error",
@@ -21,9 +21,9 @@ export default tseslint.config(
   },
   {
     files: [
-      "web/src/**/*.{ts,tsx}",
-      "shared/src/protocol/{index,rpc,tasks,text,client,ipc,navigation,terminal-observation}.ts",
-      "shared/src/terminal/index.ts",
+      "packages/web/src/**/*.{ts,tsx}",
+      "packages/shared/src/protocol/{index,rpc,tasks,text,client,ipc,navigation,terminal-observation}.ts",
+      "packages/shared/src/terminal/index.ts",
     ],
     rules: {
       "no-restricted-properties": [
@@ -46,7 +46,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["web/src/**/*.{ts,tsx}"],
+    files: ["packages/web/src/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-imports": [
         "error",
