@@ -8,11 +8,45 @@ import { ErrorNotice } from "../components/error-notice";
 import { encodeText } from "@kiteline/shared/protocol/text";
 import type { Draft, DraftStore } from "./drafts";
 import { useTheme } from "../lib/appearance";
-import { editorAppearance } from "./editor-state";
+import { editorAppearance, syncTextTransactions } from "./editor-state";
 import { editorPhrases } from "./editor-locale";
 
 export interface TextEditorHandle {
   openSearch(): void;
+}
+
+function scrollSnapshot(editor: EditorView) {
+  const viewport = editor.scrollDOM.getBoundingClientRect();
+  let left = 0;
+  let top = 0;
+  for (const provider of editor.state.facet(EditorView.scrollMargins)) {
+    const margins = provider(editor);
+    left = Math.max(left, margins?.left ?? 0);
+    top = Math.max(top, margins?.top ?? 0);
+  }
+  left += viewport.left;
+  top += viewport.top;
+  const anchor = editor.posAtCoords({ x: left + 1, y: top + 1 }, false);
+  const coordinates = editor.coordsAtPos(anchor);
+  if (!coordinates) return;
+  const line = editor.state.doc.lineAt(anchor);
+  return {
+    line: line.number,
+    column: anchor - line.from,
+    offsetX: coordinates.left - left,
+    offsetY: coordinates.top - top,
+  };
+}
+
+function scrollTarget(state: EditorState, snapshot: NonNullable<Draft["scrollSnapshot"]>) {
+  const line = state.doc.line(Math.min(snapshot.line, state.doc.lines));
+  const position = line.from + Math.min(snapshot.column, line.length);
+  return EditorView.scrollIntoView(position, {
+    x: "start",
+    y: "start",
+    xMargin: snapshot.offsetX,
+    yMargin: snapshot.offsetY,
+  });
 }
 
 export function TextEditor({
@@ -34,6 +68,7 @@ export function TextEditor({
   const [languageError, setLanguageError] = useState<unknown>();
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView>(undefined);
+  const sourceVersion = useRef(draft.sourceVersion);
   const save = useRef(onSave);
   save.current = onSave;
   useLayoutEffect(() => {
@@ -41,7 +76,7 @@ export function TextEditor({
     const editor = new EditorView({
       parent: host.current,
       state: draft.state,
-      scrollTo: draft.scrollSnapshot,
+      scrollTo: draft.scrollSnapshot ? scrollTarget(draft.state, draft.scrollSnapshot) : undefined,
       dispatchTransactions(transactions, current) {
         // Undo can bypass transaction filters; reject before updating either the document or history.
         let measured: { text: string; bytes: number } | undefined;
@@ -61,6 +96,7 @@ export function TextEditor({
       },
     });
     view.current = editor;
+    sourceVersion.current = draft.sourceVersion;
     const keydown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
@@ -69,7 +105,7 @@ export function TextEditor({
     };
     editor.dom.addEventListener("keydown", keydown);
     return () => {
-      draft.scrollSnapshot = editor.scrollSnapshot();
+      draft.scrollSnapshot = scrollSnapshot(editor);
       editor.destroy();
       view.current = undefined;
     };
@@ -85,7 +121,21 @@ export function TextEditor({
   );
   useLayoutEffect(() => {
     const editor = view.current;
-    if (editor && draft.state && editor.state !== draft.state) editor.setState(draft.state);
+    if (editor && draft.state && editor.state !== draft.state) {
+      if (sourceVersion.current === draft.sourceVersion) {
+        const position = scrollSnapshot(editor);
+        editor.update(
+          syncTextTransactions(
+            editor.state,
+            draft.state.doc,
+            draft.state.selection,
+            position ? scrollTarget(draft.state, position) : undefined,
+          ),
+        );
+        store.update(draft, editor.state);
+      } else editor.setState(draft.state);
+    }
+    sourceVersion.current = draft.sourceVersion;
     if (
       editor &&
       (editor.state.facet(EditorView.darkTheme) !== dark || editor.lineWrapping !== wrap)

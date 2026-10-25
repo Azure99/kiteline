@@ -2,9 +2,12 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { mkdtemp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import { isolateHistory, redo, undo } from "@codemirror/commands";
+import { StateEffect, type Transaction } from "@codemirror/state";
+import { getSearchQuery, search, SearchQuery, setSearchQuery } from "@codemirror/search";
 import type { Device } from "@kiteline/shared/protocol";
-import { DraftStore, draftError, isDirty, type Draft } from "../src/files/drafts";
+import { DraftStore, draftError, isDirty } from "../src/files/drafts";
 import { ApiError } from "../src/lib/api";
 import type { DiskText, FileTarget } from "../src/files/content";
 import { LanguageDescription, syntaxTree } from "@codemirror/language";
@@ -399,7 +402,7 @@ test.each([
 ])(
   "save to $saved blocks rename $from until its reply, then preserves the editor on move",
   async (paths) => {
-    const root = await mkdtemp("/var/tmp/kiteline-draft-save-");
+    const root = await mkdtemp(join(tmpdir(), "kiteline-draft-save-"));
     const store = new DraftStore();
     store.limits([{ id: "device", editorBytes: 1024 } as Device]);
     const release = deferred<void>();
@@ -456,8 +459,7 @@ test.each([
           annotations: isolateHistory.of("full"),
         }).state,
       );
-      const state = draft.state;
-      const scrollSnapshot = {} as NonNullable<Draft["scrollSnapshot"]>;
+      const scrollSnapshot = { line: 1, column: 5, offsetX: -2, offsetY: -3 };
       draft.scrollSnapshot = scrollSnapshot;
       vi.stubGlobal("fetch", async () => {
         await rename(join(root, paths.from), join(root, paths.to));
@@ -475,8 +477,9 @@ test.each([
       expect(draft.path).toBe(paths.final);
       expect(draft.baseRaw).toBe("sent");
       expect(draft.revision).toBe((await read({ ...target, path: paths.final })).meta.revision);
-      expect(draft.state).toBe(state);
-      expect(draft.scrollSnapshot).toBe(scrollSnapshot);
+      expect(draft.state!.doc.toString()).toBe("sent later");
+      expect(draft.state!.selection.main).toMatchObject({ anchor: 5, head: 10 });
+      expect(draft.scrollSnapshot).toEqual(scrollSnapshot);
       expect(draft.unknownSave).toBeUndefined();
       expect(undo({ state: draft.state!, dispatch: (tr) => store.update(draft, tr.state) })).toBe(
         true,
@@ -941,4 +944,121 @@ test("background observations preserve edits, recover missing status and cannot 
   await observing;
   expect(draft.missing).toBe(true);
   expect(draft.state).toBe(state);
+});
+
+test("clean observations adopt matching disk metadata and preserve numeric selection and Find", async () => {
+  const { store, draft } = await opened();
+  store.adopt(draft, disk("first\nlong second\nthird", "before"));
+  store.update(
+    draft,
+    draft.state!.update({ effects: StateEffect.appendConfig.of(search()) }).state,
+  );
+  store.update(
+    draft,
+    draft.state!.update({
+      selection: { anchor: 20, head: 9 },
+      effects: setSearchQuery.of(new SearchQuery({ search: "second", caseSensitive: true })),
+    }).state,
+  );
+  const position = { line: 2, column: 1, offsetX: -2, offsetY: -3 };
+  draft.scrollSnapshot = position;
+  draft.error = new ApiError("io_error", "previous save failed");
+  const current = disk("FIRST\nx\nend", "after");
+  current.meta.bom = true;
+  current.raw = "\uFEFFFIRST\nx\nend";
+  transport.read.mockResolvedValueOnce(current);
+  await store.observe(draft, new AbortController().signal);
+  expect(draft.state!.doc.toString()).toBe(current.text);
+  expect(draft.baseText).toBe(current.text);
+  expect(draft.baseRaw).toBe(current.raw);
+  expect(draft.revision).toBe("after");
+  expect(draft.format.bom).toBe(true);
+  expect(draft.bytes).toBe(Buffer.byteLength(current.raw));
+  expect(draft.state!.selection.main).toMatchObject({ anchor: 10, head: 7 });
+  expect(getSearchQuery(draft.state!).search).toBe("second");
+  expect(getSearchQuery(draft.state!).caseSensitive).toBe(true);
+  expect(draft.scrollSnapshot).toEqual(position);
+  expect(draft.error).toMatchObject({ code: "io_error", message: "previous save failed" });
+  expect(draft.diskChanged).toBe(false);
+  expect(isDirty(draft)).toBe(false);
+});
+
+test.each(["undo", "redo"])(
+  "clean synchronization clears old %s and keeps new editing history",
+  async (history) => {
+    const { store, draft } = await opened();
+    const dispatch = (tr: Transaction) => store.update(draft, tr.state);
+    store.update(draft, draft.state!.update({ changes: { from: 1, to: 2 } }).state);
+    if (history === "redo") expect(undo({ state: draft.state!, dispatch })).toBe(true);
+    transport.write.mockResolvedValueOnce({ path: draft.path, revision: "saved" });
+    expect(await store.save(draft)).toBe(true);
+    transport.read.mockResolvedValueOnce(disk("NEW\nFILE", "external"));
+    await store.observe(draft, new AbortController().signal);
+    expect(undo({ state: draft.state!, dispatch })).toBe(false);
+    expect(redo({ state: draft.state!, dispatch })).toBe(false);
+    expect(draft.state!.doc.toString()).toBe("NEW\nFILE");
+    store.update(draft, draft.state!.update({ changes: { from: 8, insert: " fresh" } }).state);
+    expect(undo({ state: draft.state!, dispatch })).toBe(true);
+    expect(draft.state!.doc.toString()).toBe("NEW\nFILE");
+    expect(redo({ state: draft.state!, dispatch })).toBe(true);
+    expect(draft.state!.doc.toString()).toBe("NEW\nFILE fresh");
+  },
+);
+
+test("an observation that started clean keeps input made before its response arrives", async () => {
+  const { store, draft } = await opened();
+  expect(isDirty(draft)).toBe(false);
+  const pending = deferred<DiskText>();
+  transport.read.mockReturnValueOnce(pending.promise);
+  const observing = store.observe(draft, new AbortController().signal);
+  store.update(draft, draft.state!.update({ changes: { from: 4, insert: " local" } }).state);
+  pending.resolve(disk("external", "external"));
+  await observing;
+  expect(draft.state!.doc.toString()).toBe("base local");
+  expect(draft.baseText).toBe("base");
+  expect(draft.baseRaw).toBe("base");
+  expect(draft.revision).toBe("a-base");
+  expect(draft.diskChanged).toBe(true);
+  expect(isDirty(draft)).toBe(true);
+});
+
+test("metadata-only observations preserve editing history", async () => {
+  const { store, draft } = await opened();
+  store.update(draft, draft.state!.update({ changes: { from: 1, to: 2 } }).state);
+  transport.write.mockResolvedValueOnce({ path: draft.path, revision: "saved" });
+  expect(await store.save(draft)).toBe(true);
+  const current = disk("bse", "new-format");
+  current.meta.bom = true;
+  current.raw = "\uFEFFbse";
+  transport.read.mockResolvedValueOnce(current);
+  await store.observe(draft, new AbortController().signal);
+  expect(draft.state!.doc.toString()).toBe("bse");
+  expect(draft.baseRaw).toBe(current.raw);
+  expect(draft.revision).toBe("new-format");
+  expect(draft.format.bom).toBe(true);
+  expect(draft.bytes).toBe(6);
+  const dispatch = (tr: Transaction) => store.update(draft, tr.state);
+  expect(undo({ state: draft.state!, dispatch })).toBe(true);
+  expect(draft.state!.doc.toString()).toBe("base");
+  expect(redo({ state: draft.state!, dispatch })).toBe(true);
+  expect(draft.state!.doc.toString()).toBe("bse");
+});
+
+test("observations cannot confirm an unknown save or replace a file beyond editing capacity", async () => {
+  const { store, draft } = await opened();
+  transport.write.mockRejectedValueOnce(new ApiError("io_error", "lost response", "unknown"));
+  expect(await store.save(draft)).toBe(false);
+  transport.read.mockResolvedValueOnce(disk("base", "published"));
+  await store.observe(draft, new AbortController().signal);
+  expect(draft.unknownSave).toMatchObject({ target, raw: "base" });
+  expect(draft.revision).toBe("a-base");
+  expect(isDirty(draft)).toBe(true);
+  transport.read.mockResolvedValueOnce(disk("base", "published"));
+  await store.check(draft);
+  expect(draft.unknownSave).toBeUndefined();
+  transport.read.mockResolvedValueOnce(disk("x".repeat(1025), "too-large"));
+  await store.observe(draft, new AbortController().signal);
+  expect(draft.state!.doc.toString()).toBe("base");
+  expect(draft.revision).toBe("published");
+  expect(draft.observationError).toMatchObject({ code: "limit_exceeded" });
 });

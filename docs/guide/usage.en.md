@@ -151,7 +151,7 @@ Work-page tabs show only filenames. To distinguish files with the same name or d
 
 Handle names that are not valid UTF-8, FIFOs, sockets and device nodes in a terminal. Windows reparse points unsupported by the workbench remain listed as “Unsupported type” and cannot be operated on.
 
-The list refreshes automatically when other programs change files, and periodically while the page is visible. If the device cannot watch directory changes, "Live updates limited" appears; periodic refresh remains available.
+The list refreshes automatically when other programs change files, and periodically while the page is visible. During refresh, the current file adopts the disk version if it has no unsaved content; otherwise, the draft stays and indicates that the disk changed. Adopting different text clears the previous undo and redo history. If the device cannot watch directory changes, "Live updates limited" appears; periodic refresh remains available.
 
 ### Open and edit
 
@@ -199,9 +199,11 @@ Drafts are kept only in the current page's memory:
 
 ### Save conflicts
 
-If a file changed since it was opened or last saved, saving does not proceed and the file is not automatically reloaded. Use "Check disk content" to read the current disk text, then decide whether to load it and discard your draft, overwrite that version, or defer the decision.
+Save submits a named file directly. Only when that save encounters a disk version conflict does it read the current disk content and offer to overwrite that version, view the disk content, or cancel. Cancel keeps the draft. Viewing expands the full text in the same dialog, with Find, selection and copy; you can also load the disk version and discard the draft. Copy the text to an external tool for complex comparisons.
 
-If a save result is uncertain, for example after losing connection during saving, compare the disk content with the last submitted content before deciding what to do next.
+Overwrite applies only to the version read in the dialog. If that version changes again, the overwrite is rejected; check again before deciding. Overwrite is unavailable if the read fails.
+
+If a save result is unconfirmed, for example after losing connection during saving, use "Check disk content" to read the original target. An exact byte match with the last submitted content confirms the save and keeps any input made after submission. Otherwise, the draft remains unsaved, and the workbench does not resend automatically. Background refresh does not confirm that save.
 
 ### Search
 

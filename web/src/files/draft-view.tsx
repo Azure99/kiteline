@@ -24,7 +24,6 @@ import {
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
-import { Textarea } from "../components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -53,6 +52,7 @@ import { SaveDraftDialog } from "./save-draft-dialog";
 import { TextEditor, type TextEditorHandle } from "./text-editor";
 import { formatBytes } from "./format";
 import { downloadFile, type DiskText } from "./content";
+import { DiskReader } from "./disk-reader";
 import type { useTerminalFocus } from "../terminal/use-terminal-focus";
 
 const MarkdownPreview = deferredView(async () => ({
@@ -148,24 +148,68 @@ export function DraftView({
     }
   }, [preview, draft.location, rememberPreviewPosition, setPreview]);
   useLayoutEffect(() => () => void rememberPreviewPosition(), [rememberPreviewPosition]);
-  const [disk, setDisk] = useState<DiskText>();
+  const [diskDialog, setDiskDialog] = useState<{
+    disk?: DiskText;
+    reading: boolean;
+    error?: unknown;
+  }>();
+  const diskGeneration = useRef(0);
+  useLayoutEffect(
+    () => () => {
+      diskGeneration.current++;
+    },
+    [],
+  );
   const [saveAs, setSaveAs] = useState(false);
-  const [error, setError] = useState<unknown>();
   const { copied, error: copyError, copy, reset: resetCopy } = useCopyFeedback();
   const tabs = all.filter(
     (item) => item.deviceId === draft.deviceId && item.workspaceId === draft.workspaceId,
   );
-  async function save(revision?: string, target = draft.path) {
-    if (!target) {
+  async function save() {
+    if (!store.canSave(draft)) return;
+    if (!draft.path) {
       setSaveAs(true);
       return;
     }
-    if (await store.save(draft, target, revision ?? draft.revision, targetOS)) setDisk(undefined);
+    const generation = diskGeneration.current;
+    const saved = await store.save(draft, draft.path, draft.revision, targetOS);
+    if (generation !== diskGeneration.current || !store.has(draft)) return;
+    if (saved) closeDisk();
+    else if (draft.error instanceof ApiError && draft.error.code === "conflict") await check(true);
   }
-  async function check() {
+  function closeDisk() {
+    diskGeneration.current++;
+    setDiskDialog(undefined);
+  }
+  async function check(conflict = false) {
+    const generation = ++diskGeneration.current;
+    const reading = diskDialog?.reading ?? !conflict;
+    const unknown = draft.unknownSave;
+    if (conflict || diskDialog) setDiskDialog({ reading });
     const current = await store.check(draft);
-    if (current && (draft.unknownSave !== undefined || current.meta.revision !== draft.revision))
-      setDisk(current);
+    if (generation !== diskGeneration.current || !store.has(draft)) return;
+    if (current && unknown && !draft.unknownSave) {
+      closeDisk();
+      return;
+    }
+    if (
+      current &&
+      (conflict || draft.unknownSave !== undefined || current.meta.revision !== draft.revision)
+    )
+      setDiskDialog({ disk: current, reading });
+    else if (!current && (conflict || diskDialog))
+      setDiskDialog({ reading, error: draft.error ?? draft.observationError });
+    else closeDisk();
+  }
+  async function overwrite() {
+    const dialog = diskDialog;
+    if (!dialog?.disk) return;
+    const disk = dialog.disk;
+    const generation = diskGeneration.current;
+    const saved = await store.save(draft, disk.target.path, disk.meta.revision, targetOS);
+    if (generation !== diskGeneration.current || !store.has(draft)) return;
+    if (saved) closeDisk();
+    else setDiskDialog({ ...dialog, error: draft.error });
   }
   const downloadDisabled = !!unavailable || !draft.path;
   const checkDisabled = !!busy || !!unavailable || !canCheckDisk;
@@ -433,53 +477,69 @@ export function DraftView({
         )}
       </div>
       <Dialog
-        open={!!disk}
+        open={!!diskDialog}
         onOpenChange={(open) => {
-          if (!open) setDisk(undefined);
+          if (!open) closeDisk();
         }}
       >
-        {disk && (
-          <DialogContent>
+        {diskDialog && (
+          <DialogContent className={diskDialog.reading ? "max-w-[960px]" : undefined}>
             <DialogHeader>
               <DialogTitle>{t(($) => $.files.diskChanged)}</DialogTitle>
             </DialogHeader>
-            <div className="min-h-0 space-y-3 overflow-auto p-4">
-              <p className="break-all text-xs">{disk.target.path}</p>
-              <Textarea
-                aria-label={t(($) => $.files.diskText)}
-                value={disk.text}
-                readOnly
-                rows={12}
-                className="font-mono text-xs"
-              />
-              {!!error && (
+            <div className="flex min-h-0 flex-col gap-3 overflow-auto p-4">
+              <p className="break-all text-xs">{diskDialog.disk?.target.path ?? draft.path}</p>
+              {draft.error instanceof ApiError && draft.error.code === "conflict" && (
+                <p className="text-sm">{t(($) => $.files.saveConflict)}</p>
+              )}
+              {busy === "checking" && <p role="status">{t(($) => $.files.checking)}</p>}
+              {diskDialog.reading && diskDialog.disk && <DiskReader disk={diskDialog.disk} />}
+              {!!diskDialog.error && (
                 <div role="alert" className="text-sm text-destructive">
-                  <ErrorNotice error={error} />
+                  <ErrorNotice error={diskDialog.error} />
                 </div>
               )}
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setDisk(undefined)}>
+              <Button variant="outline" onClick={closeDisk}>
                 {t(($) => $.common.cancel)}
               </Button>
+              {!!diskDialog.error && (
+                <Button variant="outline" disabled={checkDisabled} onClick={() => void check(true)}>
+                  {t(($) => $.files.checkDisk)}
+                </Button>
+              )}
+              {!diskDialog.reading && (
+                <Button
+                  variant="outline"
+                  disabled={!diskDialog.disk}
+                  onClick={() => setDiskDialog({ ...diskDialog, reading: true })}
+                >
+                  {t(($) => $.files.viewDisk)}
+                </Button>
+              )}
+              {diskDialog.reading && diskDialog.disk && (
+                <Button
+                  variant="outline"
+                  disabled={!!busy}
+                  onClick={() => {
+                    if (isDirty(draft) && !window.confirm(t(($) => $.files.discardLoad))) return;
+                    try {
+                      store.adopt(draft, diskDialog.disk!);
+                      closeDisk();
+                    } catch (reason) {
+                      setDiskDialog({ ...diskDialog, error: reason });
+                    }
+                  }}
+                >
+                  {t(($) => $.files.loadDisk)}
+                </Button>
+              )}
               <Button
-                variant="outline"
-                disabled={!!busy}
-                onClick={() => {
-                  if (isDirty(draft) && !window.confirm(t(($) => $.files.discardLoad))) return;
-                  try {
-                    store.adopt(draft, disk);
-                    setDisk(undefined);
-                  } catch (reason) {
-                    setError(reason);
-                  }
-                }}
-              >
-                {t(($) => $.files.loadDisk)}
-              </Button>
-              <Button
-                disabled={!store.canSave(draft) || !!unavailable}
-                onClick={() => void save(disk.meta.revision, disk.target.path)}
+                disabled={
+                  !diskDialog.disk || !!diskDialog.error || !store.canSave(draft) || !!unavailable
+                }
+                onClick={() => void overwrite()}
               >
                 {t(($) => $.files.overwriteVersion)}
               </Button>

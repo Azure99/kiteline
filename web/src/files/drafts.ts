@@ -1,7 +1,6 @@
 import { newId } from "../lib/id";
 import { useCallback, useSyncExternalStore } from "react";
 import { Compartment, type EditorState } from "@codemirror/state";
-import type { EditorView } from "@codemirror/view";
 import type {
   AgentEnvironment,
   KitelineError,
@@ -12,7 +11,7 @@ import { encodeText } from "@kiteline/shared/protocol/text";
 import { apiError, ApiError, errorMessage, rpc } from "../lib/api";
 import { emit } from "../lib/events";
 import { readText, writeText, type DiskText, type FileTarget } from "./content";
-import { textState } from "./editor-state";
+import { syncTextTransactions, textState } from "./editor-state";
 import { isWithin, movedPath } from "./paths";
 
 export type DraftNotice =
@@ -46,7 +45,7 @@ export interface Draft extends FileTarget {
   baseRaw: string;
   revision?: string;
   resolvedPath?: string;
-  scrollSnapshot?: ReturnType<EditorView["scrollSnapshot"]>;
+  scrollSnapshot?: { line: number; column: number; offsetX: number; offsetY: number };
   markdownPreview?: boolean;
   markdownPosition?: { line: number; offset: number };
   location?: { line: number; range?: [number, number]; query?: string };
@@ -293,22 +292,26 @@ export class DraftStore {
         overLimit !== this.overLimit(draft),
     );
   }
-  adopt(draft: Draft, disk: DiskText) {
+  adopt(draft: Draft, disk: DiskText, observed = false) {
     const size = encodeText(disk.text, disk.meta as TextFormat).length;
     const error = this.limitError(draft, size);
     if (error) {
       draft.notice = error;
       throw new ApiError("limit_exceeded", "The text exceeds the available editor capacity");
     }
-    draft.sourceVersion++;
+    if (!observed) draft.sourceVersion++;
     draft.path = disk.target.path;
     draft.format = disk.meta as TextFormat;
-    draft.state = textState(
-      disk.text,
-      draft.language,
-      draft.phrases,
-      draft.state ? draft.language.get(draft.state) : undefined,
-    );
+    if (observed && draft.state) {
+      if (draft.state.doc.toString() !== disk.text)
+        draft.state = syncTextTransactions(draft.state, disk.text)[1].state;
+    } else
+      draft.state = textState(
+        disk.text,
+        draft.language,
+        draft.phrases,
+        draft.state ? draft.language.get(draft.state) : undefined,
+      );
     draft.bytes = size;
     draft.baseText = disk.text;
     draft.baseRaw = disk.raw;
@@ -316,11 +319,11 @@ export class DraftStore {
     draft.resolvedPath = disk.meta.resolvedPath;
     draft.unknownSave = undefined;
     draft.missing = false;
-    draft.error = undefined;
+    if (!observed) draft.error = undefined;
     draft.observationError = undefined;
     draft.notice = undefined;
     draft.diskChanged = false;
-    draft.scrollSnapshot = undefined;
+    if (!observed) draft.scrollSnapshot = undefined;
     this.changed();
   }
   async load(draft: Draft) {
@@ -457,6 +460,10 @@ export class DraftStore {
         draft.path !== path
       )
         return;
+      if (disk.meta.revision !== draft.revision && !isDirty(draft)) {
+        this.adopt(draft, disk, true);
+        return;
+      }
       draft.diskChanged = disk.meta.revision !== draft.revision;
       draft.observationError = undefined;
       draft.missing = false;

@@ -586,6 +586,11 @@ export const en = {
     saving: "Saving",
     checking: "Checking",
     diskText: "Current disk text",
+    saveConflict:
+      "The disk version changed. Keep editing, view it, or overwrite the version read here.",
+    viewDisk: "View disk content",
+    diskSnapshot: "Disk content read during this check.",
+    findInReading: "Find",
     discardLoad: "Discard unsaved changes and load the disk version?",
     loadDisk: "Load disk version",
     overwriteVersion: "Overwrite this version",

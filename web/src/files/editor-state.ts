@@ -1,4 +1,11 @@
-import { Compartment, EditorState, type Extension } from "@codemirror/state";
+import {
+  Compartment,
+  EditorSelection,
+  EditorState,
+  type Extension,
+  type StateEffect,
+  type Text,
+} from "@codemirror/state";
 import {
   EditorView,
   drawSelection,
@@ -13,8 +20,9 @@ import { searchKeymap } from "@codemirror/search";
 import { editorPhrases } from "./editor-locale";
 
 export const editorAppearance = new Compartment();
+const editorHistory = new Compartment();
 
-const theme = EditorView.theme({
+export const editorTheme = EditorView.theme({
   "&": { height: "100%", background: "var(--background)" },
   "&.cm-focused": { outline: "none" },
   ".cm-scroller": { fontFamily: "var(--font-mono)", overflow: "auto" },
@@ -52,10 +60,10 @@ export function textState(
   return EditorState.create({
     doc: text,
     extensions: [
-      theme,
+      editorTheme,
       editorAppearance.of([]),
       lineNumbers(),
-      history(),
+      editorHistory.of(history()),
       drawSelection(),
       highlightActiveLine(),
       bracketMatching(),
@@ -65,4 +73,34 @@ export function textState(
       phrases.of(EditorState.phrases.of(editorPhrases())),
     ],
   });
+}
+
+export function syncTextTransactions(
+  state: EditorState,
+  text: string | Text,
+  selection?: EditorSelection,
+  scrollTo?: StateEffect<unknown>,
+) {
+  // Removing the history field prevents old undo/redo from writing into the new disk text.
+  const replaced = state.update({
+    changes: { from: 0, to: state.doc.length, insert: text },
+    effects: editorHistory.reconfigure([]),
+  });
+  const position = (offset: number) => {
+    const previous = state.doc.lineAt(offset);
+    const current = replaced.state.doc.line(Math.min(previous.number, replaced.state.doc.lines));
+    return current.from + Math.min(offset - previous.from, current.length);
+  };
+  const restored = replaced.state.update({
+    selection:
+      selection ??
+      EditorSelection.create(
+        state.selection.ranges.map((range) =>
+          EditorSelection.range(position(range.anchor), position(range.head)),
+        ),
+        state.selection.mainIndex,
+      ),
+    effects: [editorHistory.reconfigure(history()), ...(scrollTo ? [scrollTo] : [])],
+  });
+  return [replaced, restored] as const;
 }
