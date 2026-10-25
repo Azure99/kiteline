@@ -14,7 +14,7 @@ export function AgentPlatformChoice({
     <fieldset className="flex flex-wrap items-center gap-3 text-sm">
       <legend className="mb-2 text-xs text-muted-foreground">{t(($) => $.devices.platform)}</legend>
       {(["linux", "windows", "macos"] as const).map((platform) => (
-        <label key={platform} className="flex cursor-pointer items-center gap-2">
+        <label key={platform} className="flex min-h-11 cursor-pointer items-center gap-2">
           <input
             type="radio"
             name="agent-platform"

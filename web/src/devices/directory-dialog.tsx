@@ -1,7 +1,7 @@
 import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, Folder, FolderPlus, RefreshCw, HardDrive, House } from "lucide-react";
+import { ArrowRight, ArrowUp, File, Folder, FolderPlus, HardDrive, House } from "lucide-react";
 import {
   windowsName,
   type AgentEnvironment,
@@ -46,6 +46,7 @@ export function DirectoryDialog({
   const [writing, setWriting] = useState(false);
   const environmentAvailable = environment !== undefined;
   const busy = reading || writing || !environmentAvailable;
+  const inputMatchesListing = listing !== undefined && input === listing.path;
   const [revision, setRevision] = useState(0);
   const [newName, setNewName] = useState<string>();
   const [cursor, setCursor] = useState<string>();
@@ -105,7 +106,7 @@ export function DirectoryDialog({
     setRevision((r) => r + 1);
   }
   async function add() {
-    if (!listing) return;
+    if (busy || error || !inputMatchesListing) return;
     setWriting(true);
     setError(undefined);
     setInvalid(false);
@@ -205,7 +206,7 @@ export function DirectoryDialog({
               autoComplete="off"
             />
             <IconButton label={t(($) => $.devices.goDirectory)} disabled={busy} type="submit">
-              <RefreshCw />
+              <ArrowRight />
             </IconButton>
             <IconButton
               label={t(($) => $.files.newDirectory)}
@@ -215,6 +216,14 @@ export function DirectoryDialog({
               <FolderPlus />
             </IconButton>
           </form>
+          {listing && (
+            <p className="break-all text-xs text-muted-foreground">
+              {t(($) => $.devices.listedDirectory, { path: listing.path })}
+            </p>
+          )}
+          {listing && !inputMatchesListing && (
+            <p className="text-sm text-muted-foreground">{t(($) => $.devices.goBeforeSelect)}</p>
+          )}
           {!environment && (
             <p role="alert" className="text-sm text-destructive">
               {t(($) => $.devices.environmentUnavailable)}
@@ -261,7 +270,11 @@ export function DirectoryDialog({
                 disabled={busy || !entry.path || !["directory", "symlink"].includes(entry.kind)}
                 onClick={() => go(entry.path!)}
               >
-                <Folder size={17} className="shrink-0 text-primary" />
+                {entry.kind === "file" ? (
+                  <File size={17} className="shrink-0 text-muted-foreground" />
+                ) : (
+                  <Folder size={17} className="shrink-0 text-primary" />
+                )}
                 <span className="min-w-0 break-all">{entry.name}</span>
                 {entry.unavailableReason && (
                   <span className="ml-auto shrink-0 text-xs text-muted-foreground">
@@ -303,7 +316,7 @@ export function DirectoryDialog({
           <DialogClose disabled={writing} render={<Button variant="outline" />}>
             {t(($) => $.common.cancel)}
           </DialogClose>
-          <Button disabled={busy || !listing || !!error} onClick={() => void add()}>
+          <Button disabled={busy || !inputMatchesListing || !!error} onClick={() => void add()}>
             {t(($) => $.devices.selectDirectory)}
           </Button>
         </DialogFooter>

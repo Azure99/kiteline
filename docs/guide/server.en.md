@@ -260,7 +260,7 @@ sudo -u kiteline /opt/kiteline-server/bin/kiteline-server setup-token --data-dir
 sudo systemctl start kiteline-server
 ```
 
-To reset the password, replace `setup-token` in the middle command with `reset-password`. "Sign-in recovery" on the sign-in page also displays the appropriate commands.
+To reset the password, replace `setup-token` in the middle command with `reset-password`. "Get a new setup token" on the setup page and "Reset sign-in password" on the sign-in page also display the appropriate commands.
 
 ## Backup and restore
 

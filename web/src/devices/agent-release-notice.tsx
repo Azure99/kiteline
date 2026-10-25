@@ -13,7 +13,7 @@ export function AgentReleaseNotice({ device }: { device: Device }) {
   const release = agentVersionMismatch(device) ? device.release : undefined;
   return (
     <>
-      {release && (
+      {release ? (
         <div
           role="alert"
           className="flex h-28 shrink-0 flex-col items-start justify-center gap-2 border-b border-border bg-warning-soft px-4 py-2 text-sm sm:h-16 sm:flex-row sm:items-center"
@@ -42,7 +42,27 @@ export function AgentReleaseNotice({ device }: { device: Device }) {
             {t(($) => $.devices.viewUpgrade)}
           </Button>
         </div>
-      )}
+      ) : device.status !== "online" ? (
+        <div
+          role="status"
+          className="shrink-0 space-y-1 border-b border-border bg-warning-soft px-4 py-2 text-xs"
+        >
+          <p className="flex gap-1 font-medium">
+            <span className="min-w-0 truncate" title={device.name}>
+              {device.name}
+            </span>
+            <span className="shrink-0">· {t(($) => $.common.offline)}</span>
+          </p>
+          {device.lastSeenAt && (
+            <p className="break-words text-muted-foreground">
+              {t(($) => $.devices.lastSeen, {
+                time: new Date(device.lastSeenAt).toLocaleString(i18n.resolvedLanguage),
+              })}
+            </p>
+          )}
+          <p className="break-words">{t(($) => $.devices.offlineHint)}</p>
+        </div>
+      ) : null}
       {open && (
         <UpgradeDialog
           deviceName={device.name}

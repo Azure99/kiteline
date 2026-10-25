@@ -260,7 +260,7 @@ sudo -u kiteline /opt/kiteline-server/bin/kiteline-server setup-token --data-dir
 sudo systemctl start kiteline-server
 ```
 
-重置密码时把中间命令里的 `setup-token` 换成 `reset-password`。登录页的“登录恢复”也会显示对应的命令。
+重置密码时把中间命令里的 `setup-token` 换成 `reset-password`。初始化页的“获取新的初始化凭据”和登录页的“重置登录密码”也会显示对应的命令。
 
 ## 备份与恢复
 

@@ -132,6 +132,7 @@ export function Workbench({
     [terminalLayouts],
   );
   const [binding, setBinding] = useState(false);
+  const bindingReturnFocus = useRef<boolean | HTMLElement | null>(true);
   const [cliSetup, setCliSetup] = useState(false);
   const [openFiles, setOpenFiles] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -349,6 +350,11 @@ export function Workbench({
       ),
     )
     .sort((a, b) => b.receivedAt - a.receivedAt);
+  function openBinding() {
+    bindingReturnFocus.current = mobile && mobileNavigation ? navigationToggle.current : true;
+    setMobileNavigation(false);
+    setBinding(true);
+  }
   const navigationProps = {
     reports: navigationReports,
     onReport: (report: ReceivedReport) => {
@@ -364,10 +370,7 @@ export function Workbench({
     workspaceId: workspace?.id,
     tool: route.tool,
     onNavigate: choose,
-    onBind: () => {
-      setMobileNavigation(false);
-      setBinding(true);
-    },
+    onBind: openBinding,
   };
   const navigationButton = (
     <IconButton
@@ -415,6 +418,7 @@ export function Workbench({
           connectionError={connectionError}
           recents={recents}
           onNavigate={choose}
+          onBind={openBinding}
         />
       );
     if (orphan)
@@ -761,9 +765,15 @@ export function Workbench({
           <BindingDialog
             devices={devices}
             connected={connected}
+            finalFocus={() => bindingReturnFocus.current}
             onDevice={(id) => {
               setBinding(false);
               choose(devicePath(id));
+            }}
+            onAddWorkspace={(device) => {
+              bindingReturnFocus.current = false;
+              setBinding(false);
+              setDirectoryDevice({ device, origin: currentPath() });
             }}
           />
         )}

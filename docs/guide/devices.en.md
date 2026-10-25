@@ -28,7 +28,7 @@ The install command checks the agent's prerequisites and lists missing items; se
 
 ## Connect using the web command
 
-Choose the device's system in "Connect device", copy the install command, and run it on the device as the project user. On Windows, use a regular, non-administrator PowerShell window; an administrator window is rejected. The command contains a single-use binding code and must run before it expires (see [Limits](reference.en.md#limits)).
+When there are no devices, select "Connect device" on the home page; the device navigation also provides this entry. Choose the device's system, copy the install command, and run it on the device as the project user. On Windows, use a regular, non-administrator PowerShell window; an administrator window is rejected. The command contains a single-use binding code and must run before it expires (see [Limits](reference.en.md#limits)).
 
 The server address in the command is the browser's current origin, which the device must be able to reach. If you opened the workbench through `127.0.0.1`, `localhost` or SSH forwarding, reopen it at an address the device can reach before generating the command. Commands generated from an HTTPS origin download only over HTTPS.
 
@@ -36,6 +36,8 @@ The command downloads the agent release matching the server, verifies SHA-256, a
 
 - Linux and macOS: installation uses sudo to write to `/opt/kiteline-agent`, with the public launcher at `/usr/local/bin/kiteline-agent`. Root installs directly.
 - Windows: after you confirm the UAC prompt, a new administrator PowerShell window installs to `C:\Program Files\kiteline-agent` and adds `kiteline-agent` to the system PATH. Binding and running still happen in the original window. The command relaxes PowerShell execution policy temporarily for this process only. You can use `kiteline-agent` in the current window; reopen other existing windows from the Start menu to use it there.
+
+After binding, the page distinguishes a registered device whose connection is not yet confirmed from one that is online. Start the agent if it is not online; once online, you can add a workspace directly from the binding dialog.
 
 For a foreground agent, Ctrl-C stops the agent and ends its terminal sessions and active scheduled-task runs. Closing the terminal also does this on Linux and macOS. On Windows, closing the PowerShell window directly or signing out forcibly ends the agent without cleanup: active scheduled-task runs require review at the next startup (see [Review after an agent restart](scheduled-tasks.en.md#review-after-an-agent-restart)). Remove leftover session directories as described in [Clean up leftover terminal sessions](reference.en.md#clean-up-leftover-terminal-sessions).
 
@@ -63,7 +65,7 @@ The binding dialog also provides a bind-only command. It runs `check` and binds 
 
 ## Add a workspace
 
-Once the device is online, register a project directory as described in [Devices and workspaces](usage.en.md#devices-and-workspaces), then open [Terminal](usage.en.md#terminal), Files and Git.
+Once the device is online, open "Add workspace" from the binding dialog or device details. When entering a new path, go there before registering it; see [Devices and workspaces](usage.en.md#devices-and-workspaces) for the steps. Register a project directory to open [Terminal](usage.en.md#terminal), Files and Git.
 
 ## Run in the background
 

@@ -1,7 +1,7 @@
 import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Copy } from "lucide-react";
+import { Check, CircleCheck, Copy, FolderPlus } from "lucide-react";
 import type { Device } from "@kiteline/shared/protocol";
 import { api, ApiError, post } from "../lib/api";
 import { useCopyFeedback } from "../lib/use-copy-feedback";
@@ -31,10 +31,14 @@ export function BindingDialog({
   devices,
   connected,
   onDevice,
+  onAddWorkspace,
+  finalFocus,
 }: {
   devices: Device[];
   connected: boolean;
   onDevice: (id: string) => void;
+  onAddWorkspace: (device: Device) => void;
+  finalFocus: () => boolean | HTMLElement | null;
 }) {
   const { t, i18n } = useTranslation();
 
@@ -103,7 +107,7 @@ export function BindingDialog({
     };
   }, [binding, attempt, boundDevicePresent]);
   const unavailable = error instanceof ApiError && error.code === "not_found";
-  const canCopy = result?.status === "pending" && !unavailable;
+  const pending = result?.status === "pending" && !unavailable;
   const commands = binding?.commands[platform];
   const command = commands?.install;
   const visibleCopyError =
@@ -112,8 +116,14 @@ export function BindingDialog({
       : undefined;
   const device = devices.find((entry) => entry.id === result?.deviceId);
   const online = connected && device?.status === "online";
+  const hostname = window.location.hostname;
+  const loopback =
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    hostname.startsWith("127.") ||
+    hostname === "[::1]";
   return (
-    <DialogContent>
+    <DialogContent finalFocus={finalFocus}>
       <DialogHeader>
         <DialogTitle>{t(($) => $.devices.bind)}</DialogTitle>
       </DialogHeader>
@@ -128,14 +138,30 @@ export function BindingDialog({
           )
         ) : (
           <>
-            <AgentPlatformChoice value={platform} onChange={setPlatform} />
+            {pending && (
+              <>
+                <p className="text-sm">{t(($) => $.devices.bindIntro)}</p>
+                {loopback && (
+                  <p className="rounded border border-border bg-muted p-3 text-sm">
+                    {t(($) => $.devices.loopbackOrigin, { origin: window.location.origin })}
+                  </p>
+                )}
+                <AgentPlatformChoice value={platform} onChange={setPlatform} />
+              </>
+            )}
             <div className="flex flex-wrap items-center justify-between gap-2 text-muted-foreground">
-              <span role="status" className="text-sm">
+              <span
+                role="status"
+                className={`flex items-center gap-2 text-sm ${online && result?.status === "consumed" ? "font-medium text-foreground" : ""}`}
+              >
+                {online && result?.status === "consumed" && (
+                  <CircleCheck size={18} className="text-primary" />
+                )}
                 {unavailable
                   ? t(($) => $.devices.bindingUnavailable)
                   : result?.status === "consumed"
                     ? online
-                      ? t(($) => $.devices.deviceOnline)
+                      ? t(($) => $.devices.deviceOnline, { name: device.name })
                       : !connected
                         ? t(($) => $.devices.registeredUnknown)
                         : t(($) => $.devices.registeredOffline)
@@ -143,58 +169,70 @@ export function BindingDialog({
                       ? t(($) => $.devices.bindingExpired)
                       : t(($) => $.devices.waitingDevice)}
               </span>
-              <span className="text-xs">
-                {t(($) => $.devices.expiresAt, {
-                  time: new Date(binding.expiresAt).toLocaleTimeString(i18n.resolvedLanguage),
-                })}
-              </span>
-            </div>
-            <div className="rounded border border-border">
-              <div className="flex items-center justify-between border-b border-border px-3 py-1">
-                <span className="text-xs text-muted-foreground">
-                  {t(($) => $.devices.projectUser)}
+              {pending && (
+                <span className="text-xs">
+                  {t(($) => $.devices.expiresAt, {
+                    time: new Date(binding.expiresAt).toLocaleTimeString(i18n.resolvedLanguage),
+                  })}
                 </span>
-                <IconButton
-                  label={
-                    copied === command
-                      ? t(($) => $.devices.copiedInstall)
-                      : t(($) => $.devices.copyInstall)
-                  }
-                  disabled={!canCopy}
-                  onPointerDown={(event) => event.preventDefault()}
-                  onClick={() => void copy(command!)}
-                >
-                  {copied === command ? <Check /> : <Copy />}
-                </IconButton>
-              </div>
-              <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all p-3 text-xs leading-relaxed">
-                {command}
-              </pre>
+              )}
             </div>
-            <details className="text-sm">
-              <summary className="cursor-pointer text-muted-foreground">
-                {t(($) => $.devices.bindOnly)}
-              </summary>
-              <div className="mt-2 flex items-start gap-2">
-                <code className="min-w-0 flex-1 whitespace-pre-wrap break-all text-xs">
-                  {commands!.bind}
-                </code>
-                <IconButton
-                  label={
-                    copied === commands!.bind
-                      ? t(($) => $.devices.copiedBind)
-                      : t(($) => $.devices.copyBind)
-                  }
-                  disabled={!canCopy}
-                  onPointerDown={(event) => event.preventDefault()}
-                  onClick={() => void copy(commands!.bind)}
-                >
-                  {copied === commands!.bind ? <Check /> : <Copy />}
-                </IconButton>
+            {pending && (
+              <div className="rounded border border-border">
+                <div className="flex items-center justify-between border-b border-border px-3 py-1">
+                  <span className="text-xs text-muted-foreground">
+                    {t(($) => $.devices.projectUser)}
+                  </span>
+                  <IconButton
+                    label={
+                      copied === command
+                        ? t(($) => $.devices.copiedInstall)
+                        : t(($) => $.devices.copyInstall)
+                    }
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={() => void copy(command!)}
+                  >
+                    {copied === command ? <Check /> : <Copy />}
+                  </IconButton>
+                </div>
+                <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all p-3 text-xs leading-relaxed">
+                  {command}
+                </pre>
               </div>
-            </details>
-            {result?.status === "consumed" && !online && !unavailable && (
-              <p className="text-sm text-muted-foreground">{t(($) => $.devices.lostCredentials)}</p>
+            )}
+            {pending && platform === "windows" && (
+              <p className="text-xs text-muted-foreground">{t(($) => $.devices.windowsHint)}</p>
+            )}
+            {pending && (
+              <details className="text-sm">
+                <summary className="min-h-11 cursor-pointer py-3 text-muted-foreground">
+                  {t(($) => $.devices.bindOnly)}
+                </summary>
+                <div className="mt-2 flex items-start gap-2">
+                  <code className="min-w-0 flex-1 whitespace-pre-wrap break-all text-xs">
+                    {commands!.bind}
+                  </code>
+                  <IconButton
+                    label={
+                      copied === commands!.bind
+                        ? t(($) => $.devices.copiedBind)
+                        : t(($) => $.devices.copyBind)
+                    }
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={() => void copy(commands!.bind)}
+                  >
+                    {copied === commands!.bind ? <Check /> : <Copy />}
+                  </IconButton>
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {t(($) => $.devices.bindOnlyRun)}
+                </p>
+              </details>
+            )}
+            {result?.status === "consumed" && !unavailable && (
+              <p className="text-sm text-muted-foreground">
+                {online ? t(($) => $.devices.nextWorkspace) : t(($) => $.devices.waitingRun)}
+              </p>
             )}
           </>
         )}
@@ -207,8 +245,17 @@ export function BindingDialog({
       <DialogFooter>
         <DialogClose render={<Button variant="outline" />}>{t(($) => $.common.close)}</DialogClose>
         {result?.deviceId && !unavailable && (
-          <Button onClick={() => onDevice(result.deviceId!)}>
+          <Button
+            variant={online ? "outline" : "default"}
+            onClick={() => onDevice(result.deviceId!)}
+          >
             {t(($) => $.devices.viewDevice)}
+          </Button>
+        )}
+        {online && device && !unavailable && (
+          <Button onClick={() => onAddWorkspace(device)}>
+            <FolderPlus />
+            {t(($) => $.devices.addWorkspace)}
           </Button>
         )}
         {(result?.status === "expired" || unavailable) && (

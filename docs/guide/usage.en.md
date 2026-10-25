@@ -52,7 +52,7 @@ Deleting a device removes its record, binding and scheduled-task summaries from 
 
 ### Workspaces
 
-A workspace is a registered project directory on a device. Select the project directory in "Add workspace" on an online device. The registered path is the real directory after resolving symbolic links. Adding the same directory again returns the existing workspace.
+A workspace is a registered project directory on a device. Select the project directory in "Add workspace" on an online device. After editing the path, press Enter or "Go to directory"; select the currently listed directory after it loads successfully. The registered path is the real directory after resolving symbolic links. Adding the same directory again returns the existing workspace.
 
 Use Search beside Devices and workspaces to filter registered workspaces by name or path, including those without terminal sessions. Matching is case-insensitive. Filtering temporarily expands matching devices and shows the full path when it matches; clearing the filter restores the previous collapsed state. When a nonempty filter has exactly one result, press Enter to open that workspace. X clears the query and keeps search open; Search or Escape closes it and clears the filter. Full paths are also available in the object menu and device details.
 

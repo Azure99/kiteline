@@ -5,6 +5,8 @@ import { useTranslation } from "react-i18next";
 import { AppearanceMenu } from "./components/appearance-menu";
 import { LanguageMenu } from "./components/language-menu";
 import { post } from "./lib/api";
+import { useServerVersion } from "./lib/release";
+import { appVersion } from "@kiteline/shared/protocol";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { ReleaseNotice } from "./components/release-notice";
@@ -21,7 +23,13 @@ export interface LoginSession {
 }
 
 export function Auth({ initialized, onLogin }: { initialized: boolean; onLogin: () => void }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const version = useServerVersion() ?? appVersion;
+  const chinese = i18n.language.startsWith("zh");
+  const recoveryGuide = `https://github.com/Azure99/kiteline/blob/v${version}/docs/guide/server${chinese ? "" : ".en"}.md#${chinese ? "重置初始化-token-与密码" : "reset-the-setup-token-or-password"}`;
+  const recoveryTitle = initialized
+    ? t(($) => $.auth.resetPassword)
+    : t(($) => $.auth.newSetupToken);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -60,24 +68,41 @@ export function Auth({ initialized, onLogin }: { initialized: boolean; onLogin: 
         </h2>
         <form onSubmit={(event) => void submit(event)} className="space-y-4">
           {!initialized && (
-            <label className="block space-y-2">
-              <span>{t(($) => $.auth.setupToken)}</span>
-              <Input name="setupToken" required autoComplete="off" autoFocus />
-            </label>
+            <div className="space-y-2">
+              <label className="block space-y-2">
+                <span className="block">{t(($) => $.auth.setupToken)}</span>
+                <Input
+                  name="setupToken"
+                  required
+                  autoComplete="off"
+                  autoFocus
+                  aria-describedby="setup-token-help"
+                />
+              </label>
+              <p id="setup-token-help" className="text-xs text-muted-foreground">
+                {t(($) => $.auth.setupTokenHelp)}
+              </p>
+            </div>
           )}
-          <label className="block space-y-2">
-            <span>{t(($) => $.auth.password)}</span>
-            <Input
-              name="password"
-              type="password"
-              required
-              autoComplete={initialized ? "current-password" : "new-password"}
-              autoFocus={initialized}
-            />
-          </label>
+          <div className="space-y-2">
+            <label className="block space-y-2">
+              <span className="block">{t(($) => $.auth.password)}</span>
+              <Input
+                name="password"
+                type="password"
+                required
+                autoComplete={initialized ? "current-password" : "new-password"}
+                autoFocus={initialized}
+                aria-describedby="password-help"
+              />
+            </label>
+            <p id="password-help" className="text-xs text-muted-foreground">
+              {t(($) => $.auth.passwordHelp)}
+            </p>
+          </div>
           {!!error && (
             <div role="alert" className="text-sm text-destructive">
-              <ErrorNotice error={error} context="login" />
+              <ErrorNotice error={error} context={initialized ? "login" : undefined} />
             </div>
           )}
           <Button type="submit" disabled={busy} className="w-full">
@@ -93,11 +118,11 @@ export function Auth({ initialized, onLogin }: { initialized: boolean; onLogin: 
           <DialogTrigger
             render={<Button variant="ghost" className="mt-3 w-full text-muted-foreground" />}
           >
-            {t(($) => $.auth.recovery)}
+            {recoveryTitle}
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>{t(($) => $.auth.recovery)}</DialogTitle>
+              <DialogTitle>{recoveryTitle}</DialogTitle>
             </DialogHeader>
             <div className="space-y-3 overflow-auto p-5 text-sm">
               <p>{t(($) => $.auth.recoveryCommand)}</p>
@@ -105,6 +130,14 @@ export function Auth({ initialized, onLogin }: { initialized: boolean; onLogin: 
                 {initialized ? "kiteline-server reset-password" : "kiteline-server setup-token"}
               </pre>
               <p>{t(($) => $.auth.restart)}</p>
+              <a
+                href={recoveryGuide}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-block text-primary underline underline-offset-4"
+              >
+                {t(($) => $.auth.recoveryGuide)}
+              </a>
             </div>
           </DialogContent>
         </Dialog>

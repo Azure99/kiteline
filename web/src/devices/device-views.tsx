@@ -30,12 +30,14 @@ export function Home({
   connectionError,
   recents,
   onNavigate,
+  onBind,
 }: {
   devices: Device[];
   loaded: boolean;
   connectionError?: unknown;
   recents: RecentWorkspace[];
   onNavigate: (path: string) => void;
+  onBind: () => void;
 }) {
   const { t } = useTranslation();
   const recentTargets = recents.flatMap((entry) => {
@@ -96,6 +98,10 @@ export function Home({
         <div className="py-16 text-center text-muted-foreground">
           <Monitor size={30} className="mx-auto mb-3" />
           <p>{t(($) => $.devices.noDevices)}</p>
+          <p className="mx-auto mt-2 max-w-sm text-sm">{t(($) => $.devices.noDevicesHint)}</p>
+          <Button className="mt-4" onClick={onBind}>
+            {t(($) => $.devices.bind)}
+          </Button>
         </div>
       ) : (
         <div className="divide-y divide-border border-y border-border">
@@ -245,7 +251,7 @@ export function DeviceDetail({
         onRefresh={() => refreshSessions.current()}
         onNavigate={onNavigate}
       />
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-sm font-semibold">
           {t(($) => $.devices.workspaces, { count: device.snapshot?.workspaces.length ?? 0 })}
         </h2>
@@ -255,9 +261,12 @@ export function DeviceDetail({
           onClick={() => onAdd(device)}
         >
           <FolderPlus />
-          {t(($) => $.common.add)}
+          {t(($) => $.devices.addWorkspace)}
         </Button>
       </div>
+      {device.snapshot?.workspaces.length === 0 && (
+        <p className="mb-4 text-sm text-muted-foreground">{t(($) => $.devices.noWorkspacesHint)}</p>
+      )}
       <div className="divide-y divide-border border-y border-border">
         {device.snapshot?.workspaces.map((w) => (
           <div key={w.id} className="group flex items-center gap-2">
