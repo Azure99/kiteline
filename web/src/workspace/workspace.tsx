@@ -65,7 +65,7 @@ export function Workspace({
   activationRequest,
   focusMode,
   reports,
-  onCliSetup,
+  onCliAttach,
   store,
   actions,
   onUpload,
@@ -368,7 +368,7 @@ export function Workspace({
           activationRequest,
           focusMode,
           reports,
-          onCliSetup,
+          onCliAttach,
         }}
         onSelectTerminal={() => setView((old) => ({ ...old, mobileMode: "terminal" }))}
         visible={terminalVisible}

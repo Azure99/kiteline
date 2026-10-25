@@ -93,7 +93,7 @@ kiteline auth status
 
 ## Attach to an existing terminal
 
-In the workbench session menu, choose “Continue in CLI” and copy the command with full target IDs. Run it in a local terminal logged in to this server. The same dialog's “Install and log in” opens setup when needed. You can also specify targets manually:
+In the workbench session menu, choose “Continue in CLI” and copy the command with full target IDs. Run it in a local terminal logged in to this server. “Install and log in” opens setup when needed; the selected platform also sets the shell for the attach command. “Return to attach”, X or Escape in setup returns to the original session command; close once more to leave the flow. “CLI setup” opened directly from the Settings menu exits when closed. You can also specify targets manually:
 
 ```sh
 kiteline terminal attach --device DEVICE_ID --workspace WORKSPACE_ID --session SESSION_ID

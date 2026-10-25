@@ -105,6 +105,7 @@ Git 浏览选择与当前正文分开，勾选不改变正文。打开源文件�
 ## 输入与焦点
 
 - **键盘。** 只有图标的按钮使用 `IconButton`（`web/src/components/icon-button.tsx`），同时提供 `aria-label` 和 tooltip。对话框、菜单和 tooltip 基于 `@base-ui/react`：对话框打开时焦点进入对话框（需要时用 `initialFocus` 指向输入框），关闭后焦点回到触发元素；没有触发元素的对话框用 `finalFocus` 指定返回位置。分屏分隔条可以获得焦点。
+- **CLI引导。** Workbench保存本次接续的设备、工作区和会话，CliDialog以一个Dialog Root持有接续/安装步骤和一份平台选择。接续中的安装步骤关闭时回原命令，接续步骤关闭才退出；全局安装入口没有返回目标，关闭直接退出。流程关闭或clearTransient时丢弃本次上下文，不创建终端输入焦点请求。
 - **进入正文。** 页首skip入口和侧栏导航的明确键盘选择将焦点交给稳定的main目标，不自动交给终端输入。原生按钮沿click.detail表达键盘意图，不另接管Enter/Space；筛选框的唯一结果Enter保留自己的分支。手机抽屉关闭时先消费一次正文目标，再判断是否尊重已移出的焦点；main等非Tab目标直接focus，普通开关沿Base UI返焦。路由同步和报告到达不建立这一请求，终端会话的明确键盘接手仍由[终端约定](terminal.md)处理。skip阻止默认锚点跳转，不写hash或历史。
 - **保持编辑焦点。** 作用于终端或编辑器的按钮在 `pointerdown` 时调用 `preventDefault()`，点击不会夺走终端或编辑器的焦点，手机软键盘也不会因此收起。
 - **软键盘与视口高度。** 工作台主体始终占满可见区域，底部操作不被软键盘遮住。`trackViewport()`（`web/src/lib/viewport.ts`）根据 `visualViewport` 和 VirtualKeyboard API 写入 `--app-height` 和 `--app-top`：能用 `dvh` 时取 `100dvh`，否则取测得的像素高度（Chromium 97 没有 `dvh`）。终端的软键盘和输入规则见[终端](terminal.md#输入)。

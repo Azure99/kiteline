@@ -56,6 +56,7 @@ import { GroupTabs, useTerminalDrag } from "./group-tabs";
 import { ApplicationTitle } from "./application-title";
 import type { useTerminalFocus } from "./use-terminal-focus";
 import type { ReceivedReport } from "./reports";
+import type { CliAttachTarget } from "../cli/cli-dialog";
 
 export function WorkspaceView({
   device,
@@ -67,7 +68,7 @@ export function WorkspaceView({
   activationRequest,
   focusMode,
   reports,
-  onCliSetup,
+  onCliAttach,
   onSelectTerminal,
 }: {
   device: Device;
@@ -79,7 +80,7 @@ export function WorkspaceView({
   activationRequest: number;
   focusMode: ReturnType<typeof useTerminalFocus>;
   reports: readonly ReceivedReport[];
-  onCliSetup(): void;
+  onCliAttach(target: CliAttachTarget): void;
   onSelectTerminal(): void;
 }) {
   const { t } = useTranslation();
@@ -438,8 +439,11 @@ export function WorkspaceView({
     else {
       const session = find(id);
       if (!session) return;
-      if (kind !== "attach") remote.clearMutationError();
-      setAction({ kind, session });
+      if (kind === "attach") onCliAttach({ device, workspace, session });
+      else {
+        remote.clearMutationError();
+        setAction({ kind, session });
+      }
     }
   }
   function menuProps(id: string): SessionMenuProps {
@@ -499,7 +503,7 @@ export function WorkspaceView({
         <WatchStatus reason={watchReason} onDismiss={() => setWatchDismissed(true)} />
       )}
       {!!remote.error &&
-        (!action || action.kind === "attach" || remote.error !== remote.mutationError) &&
+        (!action || remote.error !== remote.mutationError) &&
         (visible || remote.error !== remote.listError) && (
           <div
             role="alert"
@@ -653,9 +657,7 @@ export function WorkspaceView({
           mutationDisabled={!enabled}
           busy={remote.busy}
           error={remote.mutationError}
-          device={device}
           workspace={workspace}
-          onCliSetup={onCliSetup}
           onClose={() => setAction(undefined)}
           onChange={remote.change}
         />

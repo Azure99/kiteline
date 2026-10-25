@@ -442,6 +442,7 @@ export const zhCN = {
     play: "运行",
   },
   terminal: {
+    returnAttach: "返回接续 · {{name}}",
     maximized: "已放大",
     openFile: "打开文件 · 工作区根目录",
     openFileHint: "Ctrl/Cmd 点击在文件中打开 · 路径相对工作区根目录",

@@ -66,7 +66,7 @@ import { FileOperationDialog, type FileAction } from "./files/operation-dialog";
 import { PortDialog } from "./devices/port-dialog";
 import { ReleaseNotice } from "./components/release-notice";
 import { AgentReleaseNotice } from "./devices/agent-release-notice";
-import { CliSetupDialog } from "./cli/cli-setup-dialog";
+import { CliDialog, type CliAttachTarget } from "./cli/cli-dialog";
 import { useTerminalFocus } from "./terminal/use-terminal-focus";
 import { deferredView, ViewBoundary } from "./components/deferred-view";
 
@@ -133,7 +133,7 @@ export function Workbench({
   );
   const [binding, setBinding] = useState(false);
   const bindingReturnFocus = useRef<boolean | HTMLElement | null>(true);
-  const [cliSetup, setCliSetup] = useState(false);
+  const [cliDialog, setCliDialog] = useState<{ target?: CliAttachTarget }>();
   const [openFiles, setOpenFiles] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState<number>();
@@ -277,7 +277,7 @@ export function Workbench({
   const clearTransient = useCallback(() => {
     setReports(new Map());
     setBinding(false);
-    setCliSetup(false);
+    setCliDialog(undefined);
     setMobileNavigation(false);
     setMobileTools(false);
     setOpenFiles(false);
@@ -487,7 +487,7 @@ export function Workbench({
             activationRequest={activationRequest}
             focusMode={terminalFocus}
             reports={navigationReports}
-            onCliSetup={() => setCliSetup(true)}
+            onCliAttach={(target) => setCliDialog({ target })}
             store={drafts}
             actions={gitActions}
             views={workspaceViews}
@@ -649,7 +649,7 @@ export function Workbench({
                     )}
                   </MenuItem>
                 )}
-                <MenuItem onClick={() => setCliSetup(true)}>
+                <MenuItem onClick={() => setCliDialog({})}>
                   <Terminal />
                   {t(($) => $.cliSetup.title)}
                 </MenuItem>
@@ -750,9 +750,13 @@ export function Workbench({
         <div ref={setWorkspaceTools} className="contents" />
       </div>
       <OpenFiles store={drafts} devices={devices} open={openFiles} onOpenChange={setOpenFiles} />
-      <Dialog open={cliSetup} onOpenChange={setCliSetup}>
-        {cliSetup && <CliSetupDialog devices={devices} />}
-      </Dialog>
+      {cliDialog && (
+        <CliDialog
+          devices={devices}
+          target={cliDialog.target}
+          onClose={() => setCliDialog(undefined)}
+        />
+      )}
       {portTarget && (
         <PortDialog
           key={portTarget.id}

@@ -93,7 +93,7 @@ kiteline auth status
 
 ## 接续已有终端
 
-在工作台会话菜单中选择“在 CLI 中接续”，复制带完整目标 ID 的命令，在已登录此 server 的本机终端执行；尚未接入时可从同一弹窗打开“安装与登录”。也可以手工指定目标：
+在工作台会话菜单中选择“在 CLI 中接续”，复制带完整目标 ID 的命令，在已登录此 server 的本机终端执行。尚未接入时可打开“安装与登录”；引导中的平台选择会同步接续命令的 Shell。在引导中点“返回接续”、点 X 或按 Escape，会回到原会话命令，再关闭一次才退出流程。从设置菜单直接打开的“CLI 接入”关闭即退出。也可以手工指定目标：
 
 ```sh
 kiteline terminal attach --device DEVICE_ID --workspace WORKSPACE_ID --session SESSION_ID

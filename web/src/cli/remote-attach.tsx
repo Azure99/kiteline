@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Device, Session, Workspace } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
@@ -10,14 +9,17 @@ export function RemoteAttach({
   workspace,
   session,
   onSetup,
+  shell,
+  onShell,
 }: {
   device: Device;
   workspace: Workspace;
   session: Session;
   onSetup(): void;
+  shell: CliShell;
+  onShell(shell: CliShell): void;
 }) {
   const { t } = useTranslation();
-  const [shell, setShell] = useState<CliShell>("unix");
   const command = attachCommand(device.id, session.workspaceId, session.id, shell);
   return (
     <div className="space-y-4 overflow-auto p-5 text-sm">
@@ -31,11 +33,11 @@ export function RemoteAttach({
       </div>
       <p className="break-words">{t(($) => $.terminal.cliServer, { origin: location.origin })}</p>
       <label className="block space-y-1">
-        <span>{t(($) => $.terminal.cliShell)}</span>
+        <span className="block">{t(($) => $.terminal.cliShell)}</span>
         <select
           className="block min-h-11 w-full rounded border border-border bg-background px-3"
           value={shell}
-          onChange={(event) => setShell(event.target.value as CliShell)}
+          onChange={(event) => onShell(event.target.value as CliShell)}
         >
           <option value="unix">Linux / macOS</option>
           <option value="powershell">Windows (PowerShell)</option>

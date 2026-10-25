@@ -2,7 +2,6 @@ import { Copy } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ErrorNotice } from "../components/error-notice";
 import { Button } from "../components/ui/button";
-import { Textarea } from "../components/ui/textarea";
 import { useCopyFeedback } from "../lib/use-copy-feedback";
 
 export function CliCommand({ command, label }: { command: string; label: string }) {
@@ -10,13 +9,12 @@ export function CliCommand({ command, label }: { command: string; label: string 
   const { copied, copy, error } = useCopyFeedback();
   return (
     <div className="space-y-2">
-      <Textarea
+      <pre
         aria-label={label}
-        readOnly
-        value={command}
-        rows={3}
-        className="font-mono text-xs"
-      />
+        className="max-w-full overflow-x-auto whitespace-pre-wrap rounded border border-input bg-background p-3 font-mono text-xs"
+      >
+        <code>{command}</code>
+      </pre>
       <Button variant="outline" onClick={() => void copy(command)}>
         <Copy />
         {copied === command ? t(($) => $.common.copied) : t(($) => $.cliSetup.copyCommand)}

@@ -450,6 +450,7 @@ export const en = {
     play: "Run",
   },
   terminal: {
+    returnAttach: "Return to attach · {{name}}",
     maximized: "Maximized",
     openFile: "Open file · workspace root",
     openFileHint: "Ctrl/Cmd-click to open in Files · paths use the workspace root",

@@ -10,10 +10,19 @@ import { useServerVersion } from "../lib/release";
 import { cliDownload, cliGuide, cliTargets, loginCommand, type CliTarget } from "./commands";
 import { CliLogin } from "./cli-command";
 
-export function CliSetupDialog({ devices }: { devices: Device[] }) {
+export function CliSetupDialog({
+  devices,
+  target,
+  onTarget,
+  returnTo,
+}: {
+  devices: Device[];
+  target: CliTarget;
+  onTarget(target: CliTarget): void;
+  returnTo?: { name: string; onReturn(): void };
+}) {
   const { t, i18n } = useTranslation();
   const [tab, setTab] = useState<Tabs.Tab.Value>("setup");
-  const [target, setTarget] = useState<CliTarget>("linux-amd64");
   const version = useServerVersion() ?? appVersion;
   const download = cliDownload(version, target);
   const login = loginCommand(location.origin, target === "windows-amd64" ? "powershell" : "unix");
@@ -21,6 +30,11 @@ export function CliSetupDialog({ devices }: { devices: Device[] }) {
     <DialogContent>
       <DialogHeader>
         <DialogTitle>{t(($) => $.cliSetup.title)}</DialogTitle>
+        {returnTo && (
+          <Button variant="outline" className="mt-2" onClick={returnTo.onReturn}>
+            {t(($) => $.terminal.returnAttach, { name: returnTo.name })}
+          </Button>
+        )}
       </DialogHeader>
       <Tabs.Root value={tab} onValueChange={setTab} className="flex min-h-0 flex-col">
         <Tabs.List className="flex shrink-0 border-b border-border px-5">
@@ -35,11 +49,11 @@ export function CliSetupDialog({ devices }: { devices: Device[] }) {
           <section className="space-y-3">
             <h3 className="font-medium">{t(($) => $.cliSetup.install)}</h3>
             <label className="block space-y-1">
-              <span>{t(($) => $.cliSetup.platform)}</span>
+              <span className="block">{t(($) => $.cliSetup.platform)}</span>
               <select
                 className="block min-h-11 w-full rounded border border-border bg-background px-3"
                 value={target}
-                onChange={(event) => setTarget(event.target.value as CliTarget)}
+                onChange={(event) => onTarget(event.target.value as CliTarget)}
               >
                 {cliTargets.map((value) => (
                   <option key={value} value={value}>
