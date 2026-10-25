@@ -139,6 +139,7 @@ export interface RpcMethods {
     GitDiff
   >;
   "git.history": Contract<RepoParams & { anchorOid?: string; offset?: number }, GitHistory>;
+  "git.commitMessage": Contract<RepoParams & { commitOid: string }, { message: string }>;
   "git.commitFiles": Contract<
     RepoParams & { commitOid: string; parentOid?: string; offset?: number },
     CommitFiles
@@ -223,6 +224,7 @@ export const rpcMutates = {
   "git.status": false,
   "git.diff": false,
   "git.history": false,
+  "git.commitMessage": false,
   "git.commitFiles": false,
   "git.branches": false,
   "git.remotes": false,

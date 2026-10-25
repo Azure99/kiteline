@@ -706,6 +706,7 @@ export const en = {
     noBranches: "No branches",
     commit: "Commit",
     commitMessage: "Commit message",
+    fullCommitMessage: "Full commit message",
     branchName: "Branch name",
     switchAfterCreate: "Switch after creating",
     repository: "Repository",

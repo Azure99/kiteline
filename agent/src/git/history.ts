@@ -25,6 +25,27 @@ export async function commitOid(repo: Repo, oid: string, signal: AbortSignal) {
   if (actual !== oid) throw new AppError("invalid_argument", "OID is not a commit object");
   return actual;
 }
+export async function commitMessage(repo: Repo, oid: string, signal: AbortSignal) {
+  const commit = await commitOid(repo, oid, signal);
+  const output = await git(
+    repo.rootPath,
+    [
+      "show",
+      "--no-show-signature",
+      "--no-color",
+      "--no-patch",
+      "--encoding=UTF-8",
+      "--format=format:%B",
+      commit,
+      "--",
+    ],
+    signal,
+  );
+  const result = { message: utf8(output.bytes) };
+  if (Buffer.byteLength(JSON.stringify(result)) > agentLimits.resultBytes)
+    throw new AppError("limit_exceeded", "Commit message exceeds the size limit");
+  return result;
+}
 export async function history(
   repo: Repo,
   anchor: string | undefined,

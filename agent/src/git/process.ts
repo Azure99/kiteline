@@ -236,7 +236,7 @@ export async function gitHash(root: string, args: string[], signal: AbortSignal)
 }
 export function utf8(bytes: Buffer) {
   if (!isUtf8(bytes))
-    throw new AppError("unsupported", "Git path is not valid UTF-8; handle it in the terminal");
+    throw new AppError("unsupported", "Git output is not valid UTF-8; handle it in the terminal");
   return bytes.toString();
 }
 export function gitPath(bytes: Buffer, old?: Buffer): GitPath {

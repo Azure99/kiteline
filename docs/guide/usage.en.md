@@ -300,6 +300,8 @@ The first history page updates when a new HEAD is read. Later pages keep the ori
 
 History file line counts and diffs compare against the same parent commit. For merge commits, you can choose the parent. Binary files do not show line counts.
 
+After selecting a commit, click "Full commit message" on desktop to read its subject and body. On mobile, scroll through the message and files in the commit details. Line breaks are preserved and long lines wrap. If the message cannot be read, its error appears while files and diffs remain available.
+
 ### Synchronization and authentication
 
 On mobile, use the "Remote actions" menu for Pull and Push.

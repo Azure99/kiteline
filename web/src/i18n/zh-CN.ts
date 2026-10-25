@@ -692,6 +692,7 @@ export const zhCN = {
     noBranches: "暂无分支",
     commit: "提交",
     commitMessage: "提交消息",
+    fullCommitMessage: "完整提交消息",
     branchName: "分支名称",
     switchAfterCreate: "创建后切换",
     repository: "仓库",

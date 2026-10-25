@@ -6,7 +6,15 @@ import type { Commit, CommitFiles, GitHistory } from "@kiteline/shared/protocol"
 import { Button } from "../components/ui/button";
 import { IconButton } from "../components/icon-button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "../components/ui/dialog";
 import { rpc } from "../lib/api";
+import { useMobile } from "../lib/use-mobile";
 import { type DiffTarget } from "./diff-view";
 import { GitFilePath } from "./view-header";
 import { PageFooter } from "./page-footer";
@@ -370,6 +378,13 @@ function CommitView({
           className="scroll-area min-h-0 w-full flex-1 overflow-auto"
           aria-label={t(($) => $.git.commitFiles)}
         >
+          <CommitMessageView
+            deviceId={deviceId}
+            workspaceId={workspaceId}
+            repoId={repoId}
+            commit={commit}
+            active={active}
+          />
           {value?.files.map((file) =>
             file.path === undefined ? (
               <div
@@ -434,6 +449,74 @@ function CommitView({
           )}
         </aside>
       </div>
+    </div>
+  );
+}
+
+function CommitMessageView({
+  deviceId,
+  workspaceId,
+  repoId,
+  commit,
+  active,
+}: Pick<Props, "deviceId" | "workspaceId" | "repoId" | "active"> & { commit: Commit }) {
+  const { t, i18n } = useTranslation();
+  const mobile = useMobile();
+  const [message, setMessage] = useState<string>();
+  const [error, setError] = useState<unknown>();
+  useEffect(() => {
+    if (!active || message !== undefined) return;
+    const controller = new AbortController();
+    setError(undefined);
+    void rpc(
+      deviceId,
+      "git.commitMessage",
+      { workspaceId, repoId, commitOid: commit.oid },
+      controller.signal,
+    )
+      .then((result) => {
+        if (!controller.signal.aborted) setMessage(result.message);
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) setError(error);
+      });
+    return () => controller.abort();
+  }, [deviceId, workspaceId, repoId, commit.oid, active, message]);
+  const content = error ? (
+    <div role="alert" className="break-words text-destructive">
+      <ErrorNotice error={error} />
+    </div>
+  ) : message !== undefined ? (
+    <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{message}</p>
+  ) : (
+    <p role="status" className="text-muted-foreground">
+      {active ? t(($) => $.common.reading) : t(($) => $.common.deviceOffline)}
+    </p>
+  );
+  return (
+    <div className="border-b border-border p-3 text-xs">
+      <p className="break-words text-muted-foreground">
+        {commit.author} · {new Date(commit.time).toLocaleString(i18n.resolvedLanguage)}
+      </p>
+      <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{commit.oid}</p>
+      {mobile ? (
+        <div className="mt-3 text-sm">{content}</div>
+      ) : (
+        <Dialog>
+          <DialogTrigger render={<Button variant="ghost" className="mt-1" />}>
+            {t(($) => $.git.fullCommitMessage)}
+          </DialogTrigger>
+          {!!error && <div className="mt-1">{content}</div>}
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{t(($) => $.git.fullCommitMessage)}</DialogTitle>
+            </DialogHeader>
+            <div tabIndex={0} className="scroll-area min-h-0 overflow-auto p-5 text-sm">
+              {content}
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

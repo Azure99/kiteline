@@ -14,7 +14,7 @@ import type { Repositories } from "./repos.js";
 import type { GitWriteQueue } from "./queue.js";
 import { status } from "./status.js";
 import { workingDiff } from "./diff.js";
-import { branches, commitDiff, commitFiles, history } from "./history.js";
+import { branches, commitDiff, commitFiles, commitMessage, history } from "./history.js";
 import { changeIndex, checkedGitPaths, discard, discardScope, reviewDiscard } from "./changes.js";
 import { commit, createBranch, deleteBranch, switchBranch } from "./refs.js";
 import { expectedHead, remotes, syncRemote } from "./remotes.js";
@@ -164,6 +164,10 @@ export async function gitRpc(
           : integer(params.offset, "offset", 0, Number.MAX_SAFE_INTEGER),
         signal,
       ) satisfies Promise<RpcResult<typeof method>>;
+    case "git.commitMessage":
+      return commitMessage(await read(), string(params.commitOid), signal) satisfies Promise<
+        RpcResult<typeof method>
+      >;
     case "git.commitFiles":
       return commitFiles(
         await read(),

@@ -12,7 +12,7 @@ import { observeIndex } from "../src/git/observe.js";
 import { status } from "../src/git/status.js";
 import { workingDiff } from "../src/git/diff.js";
 import { changeIndex } from "../src/git/changes.js";
-import { branches, commitDiff, commitFiles, history } from "../src/git/history.js";
+import { branches, commitDiff, commitFiles, commitMessage, history } from "../src/git/history.js";
 
 const run = promisify(execFile);
 const roots: string[] = [];
@@ -321,6 +321,64 @@ test("diff preserves machine paths, rename, modes, binary and both sides without
   expect(links.entries.find((entry) => entry.path === "symlink")?.types.worktree).toBe("symlink");
   await repos.close();
 }, 15_000);
+test("commit messages preserve the selected commit's full text independently of HEAD", async () => {
+  const { home, cli, repo, repos } = await setup();
+  try {
+    const message =
+      "完整主题\n\n中文正文第一段。\n保留换行。\n\nSecond paragraph.\n\nSigned-off-by: Test <test@example.test>\n\n";
+    const path = join(home, "message");
+    await writeFile(path, message);
+    await cli("commit", "--allow-empty", "--cleanup=verbatim", "-F", path);
+    const oid = (await cli("rev-parse", "HEAD")).stdout.trim();
+    expect(oid).toHaveLength(40);
+    await cli("commit", "--allow-empty", "-m", "new HEAD without body");
+    const head = (await cli("rev-parse", "HEAD")).stdout.trim();
+    const raw = (await cli("cat-file", "commit", oid)).stdout;
+    expect(await commitMessage(repo, oid, signals())).toEqual({
+      message: raw.slice(raw.indexOf("\n\n") + 2),
+    });
+    expect((await commitMessage(repo, oid, signals())).message).toBe(message);
+    expect(await commitMessage(repo, head, signals())).toEqual({
+      message: "new HEAD without body\n",
+    });
+    for (const invalid of ["HEAD", oid.slice(0, 8), "-" + oid])
+      await expect(commitMessage(repo, invalid, signals())).rejects.toMatchObject({
+        code: "invalid_argument",
+      });
+    const tree = (await cli("rev-parse", "HEAD^{tree}")).stdout.trim();
+    await expect(commitMessage(repo, tree, signals())).rejects.toMatchObject({
+      code: "io_error",
+    });
+    const controller = new AbortController();
+    const pending = commitMessage(repo, oid, controller.signal);
+    const cancelled = expect(pending).rejects.toMatchObject({ code: "cancelled" });
+    controller.abort(new AppError("cancelled", "Read cancelled"));
+    await cancelled;
+  } finally {
+    await repos.close();
+  }
+});
+test.each(["output", "JSON"])("commit messages enforce the %s byte limit", async (budget) => {
+  const { home, cli, repo, repos } = await setup();
+  try {
+    const message =
+      "subject\n\n" +
+      (budget === "output"
+        ? "x".repeat(agentLimits.resultBytes)
+        : '"'.repeat(agentLimits.resultBytes / 2)) +
+      "\n";
+    if (budget === "JSON") expect(Buffer.byteLength(message)).toBeLessThan(agentLimits.resultBytes);
+    const path = join(home, "message");
+    await writeFile(path, message);
+    await cli("commit", "--allow-empty", "--cleanup=verbatim", "-F", path);
+    const oid = (await cli("rev-parse", "HEAD")).stdout.trim();
+    await expect(commitMessage(repo, oid, signals())).rejects.toMatchObject({
+      code: "limit_exceeded",
+    });
+  } finally {
+    await repos.close();
+  }
+});
 test("history anchors pages and root commit files continue with exact paths and binary metadata", async () => {
   const { root, cli, repo, repos } = await setup();
   expect(await history(repo, undefined, 0, signals())).toEqual({ commits: [] });

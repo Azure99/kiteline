@@ -153,3 +153,23 @@ test("Git dispatch cancels a queued write and the shared queue accepts the next 
   await agent.dispatch("git.stage", { ...params, paths: ["file.txt"] }, signal);
   expect(await cli("diff", "--cached", "--name-only")).toBe("file.txt\n");
 });
+
+test("commit message dispatch reads the selected OID within its registered workspace", async () => {
+  const { agent, cli, params, signal } = await setup();
+  const commitOid = (await cli("rev-parse", "HEAD")).trim();
+  await cli("commit", "--allow-empty", "-m", "new HEAD");
+  expect(await agent.dispatch("git.commitMessage", { ...params, commitOid }, signal)).toEqual({
+    message: "base\n",
+  });
+  await expect(
+    agent.dispatch("git.commitMessage", { ...params, commitOid: "HEAD" }, signal),
+  ).rejects.toMatchObject({ code: "invalid_argument" });
+  await expect(
+    agent.dispatch("git.commitMessage", { ...params, repoId: "unknown", commitOid }, signal),
+  ).rejects.toMatchObject({ code: "not_found" });
+  const outside = await agent.metadata.add(await mkdtemp("/var/tmp/kiteline-git-outside-"));
+  cleanups.push(() => rm(outside.path, { recursive: true, force: true }));
+  await expect(
+    agent.dispatch("git.commitMessage", { ...params, workspaceId: outside.id, commitOid }, signal),
+  ).rejects.toMatchObject({ code: "not_found" });
+});

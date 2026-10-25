@@ -87,6 +87,7 @@
 ### 历史与分支
 
 - `git.history` 从固定的 `anchorOid`（首次为当前 HEAD）开始，用 `git log --no-show-signature --encoding=UTF-8 -z` 每页读取最多 `listPageEntries` 个提交（多读一个判断是否还有下一页），返回 OID、父提交、作者、时间和主题。翻页沿用同一个 anchor，不受之后新提交的影响。
+- `git.commitMessage` 按选中的完整 40 或 64 位提交 OID 读取完整消息，与 HEAD 和父提交选择无关。它经现有仓库解析和只读 Git 进程执行 `git show --no-show-signature --no-color --no-patch --encoding=UTF-8 --format=format:%B <oid> --`，保留主题、正文和换行，不追加结尾换行。原始输出及最终 `{message}` JSON 均受 `resultBytes` 限制，超限返回 `limit_exceeded`，不返回部分消息。浏览器只在选中后读取；桌面通过“完整提交消息”弹窗阅读，手机与文件列表同区滚动。消息读取失败独立显示，文件列表和 diff 继续可用。
 - 网页历史首屏在已读取的 status HEAD 改变时更新；深页保留原 anchor，Previous 回到首屏或主动刷新历史时重新读取当前 HEAD。在途请求按目标页判断：HEAD 改变不取消深页翻页；首屏成功响应未覆盖读取期间观察到的 HEAD 时才补读，失败不自动补读。列表更新不清除按提交与父提交 OID 打开的详情或 diff。
 - `git.commitFiles` 和提交 diff 只接受完整的 40 或 64 位十六进制提交 OID。根提交与空树比较；合并提交必须由浏览器指定父提交，否则返回 `invalid_argument`。
 - `git.commitFiles` 的文本增删行数与 diff 使用同一父提交，来自完整 numstat，不受 patch 截断影响。纯 rename 或 mode 变化保留真实零值，二进制不返回行数。文件项按条目数和结果字节上限分页，预算包含稍后补入的统计字段。
