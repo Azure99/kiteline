@@ -155,7 +155,9 @@ try {
   const failure = remoteFailure
     ? { code: error.code, message: error.message, details: error.details }
     : asError(error);
-  if (process.argv.includes("--json"))
+  const optionEnd = process.argv.indexOf("--");
+  const optionArgs = process.argv.slice(2, optionEnd === -1 ? undefined : optionEnd);
+  if (optionArgs.includes("--json"))
     process.stdout.write(
       JSON.stringify({
         outcome,

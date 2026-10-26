@@ -156,6 +156,44 @@ test("download consumes delayed binary chunks before releasing the connection", 
   expect(request.headers.origin).toBe(server.url);
 });
 
+test("a literal --json file path does not enable structured error output", async () => {
+  const root = await directory();
+  const server = await fixture((_request, response) => json(response, { error: conflict }, 409));
+  const text = await cli(root, server.url, [
+    "files",
+    "download",
+    "--output",
+    join(root, "text.bin"),
+    "--",
+    "--json",
+  ]);
+  expect(text.code).toBe(1);
+  expect(text.signal).toBeNull();
+  expect(server.requests).toHaveLength(1);
+  expect(server.requests[0]!.url.searchParams.get("path")).toBe("--json");
+  expect(text.stdout).toBe("");
+  expect(text.stderr).toContain("failed [conflict]");
+
+  const structured = await cli(root, server.url, [
+    "files",
+    "download",
+    "--json",
+    "--output",
+    join(root, "json.bin"),
+    "--",
+    "--json",
+  ]);
+  expect(structured.code).toBe(1);
+  expect(structured.signal).toBeNull();
+  expect(structured.stderr).toBe("");
+  expect(JSON.parse(structured.stdout)).toMatchObject({
+    outcome: "failed",
+    error: { code: "conflict", details: conflict.details },
+  });
+  expect(server.requests).toHaveLength(2);
+  expect(server.requests[1]!.url.searchParams.get("path")).toBe("--json");
+});
+
 test("download wx collision preserves the local file and makes no request", async () => {
   const root = await directory();
   const output = join(root, "existing.bin");
