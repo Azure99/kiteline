@@ -85,14 +85,15 @@ async function runAgent() {
   }
 }
 async function main() {
-  const command = process.argv[2];
+  const args = process.argv.slice(2);
+  const command = args[0];
   if (command === "bind") {
-    await bindCli(process.argv.slice(3));
+    await bindCli(args.slice(1));
     return;
   }
   if (command === "workspace" || command === "terminal") {
     try {
-      await terminalCli(await agentConfig(), process.argv.slice(2));
+      await terminalCli(await agentConfig(), args);
     } catch (error) {
       const detail = asError(error);
       const result =
@@ -106,35 +107,38 @@ async function main() {
     }
     return;
   }
-  if (process.argv.includes("--version")) {
+  if (command === "--version" && args.length === 1) {
     console.log(appVersion);
     return;
   }
   if (command === "schedule") {
-    await scheduleCli(process.argv.slice(3));
+    await scheduleCli(args.slice(1));
     return;
   }
-  if (command === "--help" || command === "-h" || command === undefined) {
+  if (args.length === 0 || (args.length === 1 && (command === "--help" || command === "-h"))) {
     console.log(`${usage}\nScheduled Tasks: kiteline-agent schedule --help`);
     return;
   }
   if (command === "install" || command === "upgrade" || command === "uninstall") {
-    await installCli(command, process.argv.slice(3));
+    await installCli(command, args.slice(1));
     return;
   }
-  if (command === "check") {
-    await checkPrerequisites();
-    return;
+  if (args.length === 1) {
+    if (command === "check") {
+      await checkPrerequisites();
+      return;
+    }
+    if (command === "run") {
+      await runAgent();
+      return;
+    }
+    if (command === "doctor") {
+      await doctorCli();
+      return;
+    }
   }
-  if (command === "run") {
-    await runAgent();
-    return;
-  }
-  if (command === "doctor") {
-    await doctorCli();
-    return;
-  }
-  throw new Error(usage);
+  console.error(usage);
+  process.exitCode = 1;
 }
 main().catch((error: unknown) => {
   console.error(error);

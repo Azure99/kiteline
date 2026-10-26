@@ -41,7 +41,7 @@ On Linux and macOS, the public launcher is `/usr/local/bin/kiteline-agent`; use 
 
 Both entries relax execution policy only for the child process without changing persistent settings; Group Policy still takes precedence. Direct `& "$env:ProgramData\kiteline-agent\kiteline-agent.ps1"` invocation is for console interaction, requires a policy that permits local scripts, and does not send output into the PowerShell pipeline. Use the full invocation above for capture, pipelines or redirection.
 
-Running `kiteline-agent` with no arguments or with `--help` prints a subcommand summary; `--version` prints its version. Only `schedule` and its subcommands provide `--help`. Other subcommands have no `--help`; their arguments are listed below.
+Running `kiteline-agent` with no arguments, or with `--help` or `-h` alone, prints a subcommand summary; `--version` alone prints its version. Unknown top-level commands or extra arguments to root help/version, `check`, `run`, or `doctor` report an error and exit with a nonzero status. Only `schedule` and its subcommands provide `--help`. Other subcommands have no `--help`; their arguments are listed below.
 
 | Command                   | Options                                                                         | Run as                | Agent process           |
 | ------------------------- | ------------------------------------------------------------------------------- | --------------------- | ----------------------- |
