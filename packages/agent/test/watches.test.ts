@@ -111,6 +111,78 @@ test("directory replacement remains watched and deactivation stops events", asyn
   await new Promise((resolve) => setTimeout(resolve, 400));
   expect(events).toEqual([]);
 });
+test("an active discovered nested repository can move and keep file and Git notifications", async () => {
+  const { root, watches, events, workspace } = await setup();
+  const project = join(root, "project"),
+    nested = join(project, "nested"),
+    moved = join(project, "moved");
+  await mkdir(join(nested, "deep", "child"), { recursive: true });
+  await writeFile(join(nested, "deep", "child", "file"), "original\n");
+  await run("git", ["init", nested]);
+  const git = (path: string, ...args: string[]) => run("git", ["-C", path, ...args]);
+  await git(nested, "symbolic-ref", "HEAD", "refs/heads/main");
+  await git(nested, "add", ".");
+  await git(
+    nested,
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.test",
+    "commit",
+    "-m",
+    "base",
+  );
+  const metadata = new MetadataStore(testConfig(join(root, "data"), { runDir: join(root, "run") }));
+  const repos = new Repositories(metadata, new CursorBudget());
+  cleanups.push(() => repos.close());
+  const signal = new AbortController().signal;
+  watches.set([workspace("a", project)]);
+  await expect
+    .poll(() => events.some((event) => event.status === "normal"), pollOptions)
+    .toBe(true);
+  const repo = await repos.inspect(nested, project, signal);
+  events.length = 0;
+  watches.repo("a", repo);
+  await expect
+    .poll(() => events.some((event) => event.status === "normal"), pollOptions)
+    .toBe(true);
+  const expectExternalChange = async (change: () => Promise<unknown>) => {
+    // Drain the previous phase's debounced events before observing a new external action.
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    events.length = 0;
+    await change();
+    await expect
+      .poll(
+        () => [
+          ...new Set(
+            events
+              .filter((event) => event.type === "workspace.changed")
+              .map((event) => event.workspaceId),
+          ),
+        ],
+        pollOptions,
+      )
+      .toEqual(["a"]);
+  };
+  await expectExternalChange(() => rename(nested, moved));
+  const movedRepo = await repos.inspect(moved, project, signal);
+  expect(movedRepo.id).not.toBe(repo.id);
+  events.length = 0;
+  watches.repo("a", movedRepo);
+  watches.reposComplete("a", new Set([movedRepo.id]));
+  await expect
+    .poll(() => events.some((event) => event.status === "normal"), pollOptions)
+    .toBe(true);
+  await expectExternalChange(() => appendFile(join(moved, "deep", "child", "file"), "edit\n"));
+  await expectExternalChange(() => git(moved, "update-ref", "refs/heads/probe", "HEAD"));
+  await expectExternalChange(() => git(moved, "symbolic-ref", "HEAD", "refs/heads/probe"));
+  watches.set([]);
+  await watches.close();
+  events.length = 0;
+  await appendFile(join(moved, "deep", "child", "file"), "after unsubscribe\n");
+  await new Promise((resolve) => setTimeout(resolve, 450));
+  expect(events).toEqual([]);
+}, 15_000);
 test("shared Git metadata invalidates both active worktrees", async () => {
   const { root, watches, events, workspace } = await setup();
   const a = join(root, "a"),
@@ -447,7 +519,9 @@ test("closing during startup permits a new subscription and immediate write noti
     .toBe(true);
   expect(events.some((event) => event.workspaceId === "a")).toBe(false);
   events.length = 0;
-  watches.changed("b", true);
+  watches.notifyWritten("a");
+  expect(events).toEqual([]);
+  watches.notifyWritten("b");
   expect(events).toMatchObject([{ type: "workspace.changed", workspaceId: "b" }]);
   events.length = 0;
   watches.set([workspace("a", a), workspace("b", b)]);
@@ -460,6 +534,8 @@ test("closing during startup permits a new subscription and immediate write noti
     .toBe(true);
   await watches.close();
   events.length = 0;
+  watches.notifyWritten("b");
+  expect(events).toEqual([]);
   watches.set([workspace("a", a)]);
   await expect
     .poll(
@@ -546,31 +622,66 @@ test.runIf(process.platform === "linux" || process.platform === "darwin")(
   "replacing an active parent notifies nested workspaces and Git metadata owners",
   async () => {
     const { root, watches, events, workspace } = await setup();
+    const changedOwners = () =>
+      [
+        ...new Set(
+          events
+            .filter((event) => event.type === "workspace.changed")
+            .map((event) => event.workspaceId),
+        ),
+      ].sort();
+    const expectExternalChange = async (change: () => Promise<unknown>, owners: string[]) => {
+      // Separate each action from the previous phase's pending debounced events.
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      events.length = 0;
+      await change();
+      await expect.poll(changedOwners, pollOptions).toEqual(owners);
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      expect(changedOwners()).toEqual(owners);
+    };
     const project = join(root, "project"),
       child = join(project, "child"),
       metadata = join(project, "metadata"),
-      worktree = join(root, "worktree"),
+      a = join(root, "a"),
+      b = join(root, "b"),
       replacement = join(root, "replacement");
-    await mkdir(child, { recursive: true });
-    await writeFile(join(child, "file"), "original");
-    await mkdir(metadata);
-    await writeFile(join(metadata, "HEAD"), "ref: refs/heads/main\n");
-    await mkdir(worktree);
+    await mkdir(join(child, "deep"), { recursive: true });
+    const file = join(child, "deep", "file");
+    await writeFile(file, "original\n");
+    await run("git", ["init", "--separate-git-dir", metadata, a]);
+    const git = (path: string, ...args: string[]) => run("git", ["-C", path, ...args]);
+    await git(
+      a,
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.test",
+      "commit",
+      "--allow-empty",
+      "-m",
+      "base",
+    );
+    await git(a, "worktree", "add", "-b", "side", b);
+    const commit = (await git(a, "rev-parse", "HEAD")).stdout.trim();
+    const store = new MetadataStore(testConfig(join(root, "data"), { runDir: join(root, "run") }));
+    const repos = new Repositories(store, new CursorBudget());
+    cleanups.push(() => repos.close());
+    const signal = new AbortController().signal;
+    const repoA = await repos.inspect(a, a, signal);
+    const repoB = await repos.inspect(b, b, signal);
+    expect(repoA.gitDir).toBe(metadata);
+    expect(repoA.commonDir).toBe(metadata);
+    expect(repoB.commonDir).toBe(metadata);
+    expect(repoB.gitDir).not.toBe(repoB.commonDir);
     await cp(project, replacement, { recursive: true });
     watches.set([
       workspace("parent", project),
       workspace("child", child),
-      workspace("metadata-owner", worktree),
+      workspace("a", a),
+      workspace("b", b),
     ]);
-    watches.repo("metadata-owner", {
-      id: "repo",
-      path: ".",
-      rootPath: worktree,
-      gitDir: metadata,
-      commonDir: metadata,
-      available: true,
-      linked: true,
-    });
+    watches.repo("a", repoA);
+    watches.repo("b", repoB);
     await expect
       .poll(
         () =>
@@ -579,24 +690,35 @@ test.runIf(process.platform === "linux" || process.platform === "darwin")(
           ).size,
         pollOptions,
       )
-      .toBe(3);
-    events.length = 0;
-    await rename(project, join(root, "old-project"));
-    await rename(replacement, project);
-    await expect
-      .poll(
-        () =>
-          [
-            ...new Set(
-              events
-                .filter((event) => event.type === "workspace.changed")
-                .map((event) => event.workspaceId),
-            ),
-          ].sort(),
-        pollOptions,
-      )
-      .toEqual(["child", "metadata-owner", "parent"]);
+      .toBe(4);
+    await expectExternalChange(
+      () => rename(project, join(root, "old-project")),
+      ["a", "b", "child", "parent"],
+    );
+    await expectExternalChange(() => rename(replacement, project), ["a", "b", "child", "parent"]);
+    if (process.platform !== "linux") return;
+    await expectExternalChange(
+      () => appendFile(file, "after parent replacement\n"),
+      ["child", "parent"],
+    );
+    await expectExternalChange(() => git(a, "update-ref", "refs/heads/probe", "HEAD"), ["a", "b"]);
+    expect((await git(a, "rev-parse", "refs/heads/probe")).stdout.trim()).toBe(commit);
+    await expectExternalChange(() => git(b, "symbolic-ref", "HEAD", "refs/heads/probe"), ["b"]);
+    expect((await git(b, "symbolic-ref", "HEAD")).stdout.trim()).toBe("refs/heads/probe");
+    watches.set([workspace("child", child), workspace("b", b)]);
+    await expectExternalChange(() => appendFile(file, "remaining child owner\n"), ["child"]);
+    await expectExternalChange(
+      () => git(b, "update-ref", "refs/heads/after-release", "HEAD"),
+      ["b"],
+    );
+    expect((await git(b, "rev-parse", "refs/heads/after-release")).stdout.trim()).toBe(commit);
+    await expectExternalChange(
+      () => git(b, "symbolic-ref", "HEAD", "refs/heads/after-release"),
+      ["b"],
+    );
+    expect((await git(b, "symbolic-ref", "HEAD")).stdout.trim()).toBe("refs/heads/after-release");
   },
+  20_000,
 );
 
 test.runIf(process.platform === "darwin")(

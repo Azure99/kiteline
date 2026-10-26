@@ -6,7 +6,6 @@ export type WatchCommand =
   | { type: "set"; revision: number; workspaces: Workspace[] }
   | { type: "repo"; workspaceId: string; repo: Repo }
   | { type: "reposComplete"; workspaceId: string; repoIds: Set<string> }
-  | { type: "changed"; workspaceId: string }
   | { type: "close" };
 export interface WatchMessage {
   revision: number;
@@ -29,9 +28,6 @@ port.on("message", (message: WatchCommand) => {
       break;
     case "reposComplete":
       watches.reposComplete(message.workspaceId, message.repoIds);
-      break;
-    case "changed":
-      watches.changed(message.workspaceId);
       break;
     case "close":
       void watches.close().then(() => port.close());

@@ -21,6 +21,7 @@ interface Watched {
   owners: Set<string>;
   ready: boolean;
   error?: string;
+  observedRoot?: string;
 }
 interface Active {
   root: string;
@@ -34,7 +35,8 @@ export class WatchRoots {
   private git = new Map<string, Watched>();
   private closing = new Set<Promise<void>>();
   private pending = new Set<string>();
-  private events?: NodeJS.Timeout;
+  private flushTimer?: NodeJS.Timeout;
+  private rebuildPending = false;
   constructor(private send: (event: WorkspaceEvent) => void) {}
 
   set(workspaces: Workspace[]) {
@@ -68,26 +70,58 @@ export class WatchRoots {
     this.reconcile();
   }
 
-  changed(workspaceId: string, immediate = false) {
+  notifyWritten(workspaceId: string) {
     if (!this.active.has(workspaceId)) return;
-    if (immediate) {
-      this.pending.delete(workspaceId);
-      this.emit(workspaceId);
-      return;
-    }
+    this.pending.delete(workspaceId);
+    this.emit(workspaceId);
+  }
+
+  private scheduleChange(workspaceId: string) {
+    if (!this.active.has(workspaceId)) return;
     this.pending.add(workspaceId);
-    this.events ??= setTimeout(() => {
-      this.events = undefined;
-      for (const id of this.pending) this.emit(id);
-      this.pending.clear();
-    }, limits.watchDebounce);
+    this.scheduleFlush();
+  }
+
+  private scheduleRebuild() {
+    this.rebuildPending = true;
+    this.scheduleFlush();
+  }
+
+  private scheduleFlush() {
+    this.flushTimer ??= setTimeout(() => this.flush(), limits.watchDebounce);
+  }
+
+  private flush() {
+    this.flushTimer = undefined;
+    if (this.rebuildPending) {
+      this.rebuildPending = false;
+      this.reconcile();
+    }
+    for (const id of this.pending) this.emit(id);
+    this.pending.clear();
   }
 
   private observed(path: string, owners: Set<string>) {
-    for (const id of owners) this.changed(id);
-    for (const [id, active] of this.active) if (within(path, active.root)) this.changed(id);
+    for (const id of owners) this.scheduleChange(id);
+    for (const [id, active] of this.active)
+      if (isAncestorOrSelf(path, active.root)) {
+        this.scheduleChange(id);
+        if (process.platform === "linux" && path !== active.root && active.tree) {
+          // A missing ancestor can retire this registration before the path returns.
+          this.stop(active.tree);
+          active.tree = undefined;
+          this.scheduleRebuild();
+        }
+      }
     for (const [root, entry] of this.git)
-      if (within(path, root)) for (const id of entry.owners) this.changed(id);
+      if (isAncestorOrSelf(path, root)) {
+        for (const id of entry.owners) this.scheduleChange(id);
+        if (process.platform === "linux" && path !== root) {
+          this.stop(entry);
+          this.git.delete(root);
+          this.scheduleRebuild();
+        }
+      }
   }
 
   private emit(workspaceId: string) {
@@ -102,6 +136,22 @@ export class WatchRoots {
           if (!desired.has(root)) desired.set(root, new Set());
           desired.get(root)!.add(id);
         }
+    // Windows descendant handles prevent ancestor renames. Chokidar 6 shares
+    // a recursive handle when overlapping subscriptions use the same boundary.
+    const windowsBoundaries =
+      process.platform === "win32"
+        ? [
+            ...[...this.active.values()].map((active) => dirname(active.root)),
+            ...[...desired.keys()].map((root) => dirname(root)),
+          ]
+        : [];
+    const windowsObservationRoot = (root: string) => {
+      if (process.platform !== "win32") return undefined;
+      let outermost = dirname(root);
+      for (const boundary of windowsBoundaries)
+        if (isAncestorOrSelf(boundary, outermost)) outermost = boundary;
+      return outermost;
+    };
     for (const [root, entry] of this.git)
       if (!desired.has(root)) {
         this.stop(entry);
@@ -109,25 +159,31 @@ export class WatchRoots {
       }
     for (const [root, owners] of desired) {
       const existing = this.git.get(root);
-      if (existing) existing.owners = owners;
-      else
+      const observedRoot = windowsObservationRoot(root);
+      if (existing && existing.observedRoot === observedRoot) {
+        existing.owners = owners;
+      } else {
+        if (existing) this.stop(existing);
         this.git.set(
           root,
-          this.start(root, (path, info) => ignoreGit(root, path, info), owners),
+          this.start(root, (path, info) => ignoreGit(root, path, info), owners, { observedRoot }),
         );
+      }
     }
     for (const [id, active] of this.active) {
+      const observedRoot = windowsObservationRoot(active.root);
       const metadataRoots = [...desired.keys()]
         .filter((root) => {
           const path = relative(active.root, root);
           return (
-            within(active.root, root) &&
+            isAncestorOrSelf(active.root, root) &&
             !path.split(sep).some((name) => name === ".git" || excluded.has(name))
           );
         })
         .sort();
       if (
         !active.tree ||
+        active.tree.observedRoot !== observedRoot ||
         metadataRoots.length !== active.metadataRoots.length ||
         metadataRoots.some((root, index) => root !== active.metadataRoots[index])
       ) {
@@ -137,7 +193,10 @@ export class WatchRoots {
         active.tree =
           process.platform === "darwin"
             ? this.startNative(active.root, ignored, new Set([id]))
-            : this.start(active.root, ignored, new Set([id]), process.platform === "linux");
+            : this.start(active.root, ignored, new Set([id]), {
+                directoriesOnly: process.platform === "linux",
+                observedRoot,
+              });
       }
       this.report(id);
     }
@@ -147,23 +206,38 @@ export class WatchRoots {
     root: string,
     ignored: (path: string, info?: Stats) => boolean,
     owners: Set<string>,
-    directoriesOnly = false,
+    { directoriesOnly = false, observedRoot }: { directoriesOnly?: boolean; observedRoot?: string },
   ): Watched {
     const parent = dirname(root);
-    const watcher = watch([root, parent], {
+    const windows = process.platform === "win32";
+    const watcher = watch(observedRoot ?? [root, parent], {
       // Watching the parent boundary lets Chokidar reattach a replaced root.
-      ignored: (path, info) =>
-        path !== parent &&
-        (!within(root, path) ||
-          ignored(path, info) ||
-          (directoriesOnly && info !== undefined && !info.isDirectory())),
+      ignored: (path, info) => {
+        // Chokidar supplies forward slashes here, including on Windows.
+        path = resolve(path);
+        // A shared boundary must still reach this logical root through its ancestors.
+        if (windows && isAncestorOrSelf(path, root)) return false;
+        return (
+          path !== parent &&
+          (!isAncestorOrSelf(root, path) ||
+            ignored(path, info) ||
+            (directoriesOnly && info !== undefined && !info.isDirectory()))
+        );
+      },
       ignoreInitial: true,
       followSymlinks: false,
       usePolling: false,
     });
-    const entry: Watched = { watcher, owners, ready: false };
+    const entry: Watched = { watcher, owners, ready: false, observedRoot };
     watcher.on("raw", (_event, path, details) => {
       const { watchedPath } = details as { watchedPath?: string };
+      if (windows) {
+        if (watchedPath) {
+          const absolute = path ? resolve(watchedPath, path) : resolve(watchedPath);
+          if (isAncestorOrSelf(absolute, root)) this.observed(absolute, entry.owners);
+        }
+        return;
+      }
       // Root replacement can preserve every child name and emit no Chokidar all event.
       if (watchedPath === parent && (!path || resolve(parent, path) === root)) {
         this.observed(root, entry.owners);
@@ -171,7 +245,8 @@ export class WatchRoots {
       }
       if (!directoriesOnly || !watchedPath) return;
       const absolute = path ? resolve(watchedPath, path) : watchedPath;
-      if (within(root, absolute) && !ignored(absolute)) this.observed(absolute, entry.owners);
+      if (isAncestorOrSelf(root, absolute) && !ignored(absolute))
+        this.observed(absolute, entry.owners);
     });
     watcher.on("all", (_event, path) => this.observed(path, entry.owners));
     watcher.on("ready", () => {
@@ -220,7 +295,7 @@ export class WatchRoots {
         if (!lstatSync(root).isDirectory()) return;
         tree = nativeWatch(root, { recursive: true }, (_event, filename) => {
           const path = filename ? resolve(root, String(filename)) : root;
-          if (within(root, path) && !ignored(path)) changed(path);
+          if (isAncestorOrSelf(root, path) && !ignored(path)) changed(path);
         });
         tree.on("error", failed);
       } catch (error) {
@@ -274,16 +349,20 @@ export class WatchRoots {
   }
 
   async close() {
-    clearTimeout(this.events);
-    this.events = undefined;
+    clearTimeout(this.flushTimer);
+    this.flushTimer = undefined;
+    this.rebuildPending = false;
     this.pending.clear();
     this.set([]);
     await Promise.all(this.closing);
   }
 }
 
-function within(root: string, path: string) {
-  return path === root || path.startsWith(root.endsWith(sep) ? root : root + sep);
+function isAncestorOrSelf(ancestor: string, descendant: string) {
+  return (
+    descendant === ancestor ||
+    descendant.startsWith(ancestor.endsWith(sep) ? ancestor : ancestor + sep)
+  );
 }
 
 function ignoreTree(root: string, metadataRoots: string[], path: string) {
@@ -292,7 +371,7 @@ function ignoreTree(root: string, metadataRoots: string[], path: string) {
   return (
     parts.some((name) => excluded.has(name)) ||
     (git !== -1 && git < parts.length - 1) ||
-    metadataRoots.some((metadata) => path !== metadata && within(metadata, path))
+    metadataRoots.some((metadata) => path !== metadata && isAncestorOrSelf(metadata, path))
   );
 }
 

@@ -80,7 +80,7 @@ test("operation replies preserve diagnostics, uncertainty and observed Git progr
 
 test("Git dispatch preserves index, discard review, error invalidation and device directories", async () => {
   const { data, root, cli, agent, signal, params } = await setup();
-  const changed = vi.spyOn(agent.watches, "changed");
+  const changed = vi.spyOn(agent.watches, "notifyWritten");
   await writeFile(join(root, "file.txt"), "edited\n");
   expect(await agent.dispatch("git.status", params, signal)).toMatchObject({
     stagedCount: 0,
@@ -105,7 +105,7 @@ test("Git dispatch preserves index, discard review, error invalidation and devic
   await expect(
     agent.dispatch("git.branch.create", { ...params, name: "topic" }, signal),
   ).rejects.toMatchObject({ code: "invalid_argument" });
-  expect(changed).toHaveBeenCalledWith(params.workspaceId, true);
+  expect(changed).toHaveBeenCalledWith(params.workspaceId);
   const absolutePath = join(data, "outside-workspace");
   expect(await agent.dispatch("directories.mkdir", { absolutePath }, signal)).toEqual({
     path: absolutePath,

@@ -45,11 +45,9 @@ export class WorkspaceWatches {
     else this.post({ type: "reposComplete", workspaceId, repoIds });
   }
 
-  changed(workspaceId: string, immediate = false) {
-    if (this.local) this.local.changed(workspaceId, immediate);
-    else if (immediate && this.active.has(workspaceId))
-      this.send({ type: "workspace.changed", workspaceId });
-    else this.post({ type: "changed", workspaceId });
+  notifyWritten(workspaceId: string) {
+    if (this.local) this.local.notifyWritten(workspaceId);
+    else if (this.active.has(workspaceId)) this.send({ type: "workspace.changed", workspaceId });
   }
 
   private post(message: WatchCommand) {

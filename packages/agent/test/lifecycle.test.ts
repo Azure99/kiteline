@@ -49,7 +49,7 @@ test("agent shutdown waits for cancelled bulk cleanup and its completion notific
     deviceToken: "test",
     server: "https://localhost",
   });
-  const changed = vi.spyOn(agent.watches, "changed").mockImplementation(() => {});
+  const changed = vi.spyOn(agent.watches, "notifyWritten").mockImplementation(() => {});
   const controller = new AbortController();
   let resume!: () => void;
   const gate = new Promise<void>((resolve) => {
@@ -100,7 +100,7 @@ test("agent shutdown waits for cancelled bulk cleanup and its completion notific
     expect(closed).toBe(false);
     resume();
     await closing;
-    expect(changed).toHaveBeenCalledExactlyOnceWith(workspace.id, true);
+    expect(changed).toHaveBeenCalledExactlyOnceWith(workspace.id);
     expect((error as OperationError).result).toEqual(snapshot);
     await expect(access(join(root, "pending"))).rejects.toMatchObject({ code: "ENOENT" });
   } finally {

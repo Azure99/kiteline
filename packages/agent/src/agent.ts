@@ -134,7 +134,7 @@ export class Agent {
     });
     this.textFiles = new TextFiles(config, this.metadata, this.temporaryFiles);
     this.fileOperations = new FileOperations(this.metadata, this.temporaryFiles, (workspaceId) =>
-      this.watches.changed(workspaceId, true),
+      this.watches.notifyWritten(workspaceId),
     );
     this.terminalChannels = new TerminalChannels(this.sessions, config, identity);
     this.fileChannels = new FileChannels(
@@ -143,7 +143,7 @@ export class Agent {
       this.metadata,
       config,
       identity,
-      (workspaceId) => this.watches.changed(workspaceId, true),
+      (workspaceId) => this.watches.notifyWritten(workspaceId),
     );
     this.httpChannels = new HttpChannels(identity);
     this.local = new LocalServer(config, (method, params, signal) =>
@@ -412,7 +412,7 @@ export class Agent {
         (notifiedFileMethods.has(method) || gitWrites.has(method)) &&
         typeof params.workspaceId === "string"
       )
-        this.watches.changed(params.workspaceId, true);
+        this.watches.notifyWritten(params.workspaceId);
     });
     this.inflight.add(operation);
     void operation.finally(() => this.inflight.delete(operation)).catch(() => {});

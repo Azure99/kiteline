@@ -17,5 +17,4 @@ overrides:
 
 patchedDependencies:
   "@xterm/xterm@6.1.0-beta.304": packages/web/patches/@xterm__xterm@6.1.0-beta.304.patch
-  chokidar@5.0.0: packages/agent/patches/chokidar@5.0.0.patch
   https-proxy-agent@9.1.0: packages/agent/patches/https-proxy-agent@9.1.0.patch
