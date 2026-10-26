@@ -186,7 +186,7 @@ export class AuxiliaryInput {
   };
   forward(text: string) {
     const input = this.textInput;
-    if (!input || input.data !== text || input.isComposing || this.composing) return text;
+    if (!input || input.data !== text || this.composing) return text;
     this.textInput = undefined;
     const result = /^[\x20-\x7e]$/.test(text) ? this.encode(describe(text)).key : text;
     this.release();
@@ -197,7 +197,12 @@ export class AuxiliaryInput {
   };
   private compositionEnd = () => {
     this.composing = false;
-    this.release();
+    // xterm queues the committed text before this listener. Keep its input and modifiers until then.
+    clearTimeout(this.inputTimer);
+    this.inputTimer = window.setTimeout(() => {
+      this.textInput = undefined;
+      this.release();
+    }, 0);
   };
   dispose() {
     clearTimeout(this.inputTimer);

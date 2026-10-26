@@ -28,10 +28,9 @@ diff --git a/src/browser/Viewport.ts b/src/browser/Viewport.ts
          scrollTop: ydisp * this._renderService.dimensions.css.cell.height
        });
 diff --git a/src/browser/input/CompositionHelper.ts b/src/browser/input/CompositionHelper.ts
-index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..f0121cd4e81f337edf429ac87f3b15cb6103874a 100644
 --- a/src/browser/input/CompositionHelper.ts
 +++ b/src/browser/input/CompositionHelper.ts
-@@ -50,7 +50,7 @@ export class CompositionHelper {
+@@ -50,7 +50,7 @@
    /**
     * The pending textarea change timer, if any.
     */
@@ -40,7 +39,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..f0121cd4e81f337edf429ac87f3b15cb
  
    constructor(
      private readonly _textarea: HTMLTextAreaElement,
-@@ -71,11 +71,19 @@ export class CompositionHelper {
+@@ -71,11 +71,19 @@
     * Handles the compositionstart event, activating the composition view.
     */
    public compositionstart(): void {
@@ -61,7 +60,44 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..f0121cd4e81f337edf429ac87f3b15cb
      this._compositionPosition.start = Math.min(start, end);
      this._compositionPosition.end = Math.max(start, end);
      this._compositionSuffix = this._textarea.value.substring(this._compositionPosition.end);
-@@ -214,7 +222,7 @@ export class CompositionHelper {
+@@ -113,6 +121,13 @@
+    * @returns Whether the Terminal should continue processing the keydown event.
+    */
+   public keydown(ev: KeyboardEvent): boolean {
++    // Finish the pending IME observation before an ordinary key can clear the textarea.
++    if (ev.keyCode !== 229 && this._textareaChangeTimer &&
++        !this._isComposing && !this._isSendingComposition) {
++      const pending = this._textareaChangeTimer;
++      window.clearTimeout(pending.id);
++      pending.callback();
++    }
+     if (this._isComposing || this._isSendingComposition) {
+       if (ev.keyCode === 20 || ev.keyCode === 229) {
+         // 20 is CapsLock, 229 is Enter
+@@ -204,6 +219,22 @@
+   }
+ 
+   /**
++   * Handle committed text after a 229 keydown. Android may run the textarea timer before the
++   * insertion arrives; when input arrives first, cancel that timer to avoid sending twice.
++   */
++  public input(text: string): boolean {
++    if (this._isComposing || this._isSendingComposition) {
++      return false;
++    }
++    if (this._textareaChangeTimer) {
++      window.clearTimeout(this._textareaChangeTimer.id);
++      this._textareaChangeTimer = undefined;
++    }
++    this._coreService.triggerDataEvent(text, true);
++    return true;
++  }
++
++  /**
+    * Apply any changes made to the textarea after the current event chain is allowed to complete.
+    * This should be called when not currently composing but a keydown event with the "composition
+    * character" (229) is triggered, in order to allow non-composition text to be entered when an
+@@ -214,7 +245,7 @@
        return;
      }
      const oldValue = this._textarea.value;
@@ -70,7 +106,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..f0121cd4e81f337edf429ac87f3b15cb
        this._textareaChangeTimer = undefined;
        // Ignore if a composition has started since the timeout
        if (!this._isComposing) {
-@@ -233,7 +241,8 @@ export class CompositionHelper {
+@@ -233,7 +264,8 @@
          }
  
        }
@@ -364,3 +400,68 @@ diff --git a/src/common/buffer/BufferReflow.ts b/src/common/buffer/BufferReflow.
      }
  
      if (countToRemove > 0) {
+diff --git a/src/browser/CoreBrowserTerminal.ts b/src/browser/CoreBrowserTerminal.ts
+--- a/src/browser/CoreBrowserTerminal.ts
++++ b/src/browser/CoreBrowserTerminal.ts
+@@ -102,10 +102,10 @@
+   private _keyDownHandled: boolean = false;
+ 
+   /**
+-   * Records whether a keydown event has occurred since the last keyup event, i.e. whether a key
+-   * is currently "pressed".
++   * Records the key code pressed since the last keyup so IME insertions can be distinguished
++   * from input already handled by an ordinary keydown.
+    */
+-  private _keyDownSeen: boolean = false;
++  private _keyDownCode: number | undefined;
+ 
+   /**
+    * Records whether the keypress event has already been handled and triggered a data event, if so
+@@ -845,7 +845,7 @@
+    */
+   protected _keyDown(event: KeyboardEvent): boolean | undefined {
+     this._keyDownHandled = false;
+-    this._keyDownSeen = true;
++    this._keyDownCode = event.keyCode;
+ 
+     if (this._customKeyEventHandler && this._customKeyEventHandler(event) === false) {
+       return false;
+@@ -949,7 +949,7 @@
+   }
+ 
+   protected _keyUp(ev: KeyboardEvent): void {
+-    this._keyDownSeen = false;
++    this._keyDownCode = undefined;
+ 
+     if (this._customKeyEventHandler && this._customKeyEventHandler(ev) === false) {
+       return;
+@@ -1030,7 +1030,7 @@
+     // Only support emoji IMEs when screen reader mode is disabled as the event must bubble up to
+     // support reading out character input which can doubling up input characters
+     // Based on these event traces: https://github.com/xtermjs/xterm.js/issues/3679
+-    if (ev.data && ev.inputType === 'insertText' && (!ev.composed || !this._keyDownSeen) && !this.optionsService.rawOptions.screenReaderMode) {
++    if (ev.data && ev.inputType === 'insertText' && (!ev.composed || this._keyDownCode === undefined || this._keyDownCode === 229) && !this.optionsService.rawOptions.screenReaderMode) {
+       if (this._keyPressHandled) {
+         return false;
+       }
+@@ -1040,6 +1040,9 @@
+       this._unprocessedDeadKey = false;
+ 
+       const text = ev.data;
++      if (ev.composed && this._keyDownCode === 229) {
++        return this._compositionHelper!.input(text);
++      }
+       this.coreService.triggerDataEvent(text, true);
+       return true;
+     }
+diff --git a/src/browser/Types.ts b/src/browser/Types.ts
+--- a/src/browser/Types.ts
++++ b/src/browser/Types.ts
+@@ -44,6 +44,7 @@
+   compositionend(): void;
+   updateCompositionElements(dontRecurse?: boolean): void;
+   keydown(ev: KeyboardEvent): boolean;
++  input(text: string): boolean;
+ }
+ 
+ export interface IBrowser {
