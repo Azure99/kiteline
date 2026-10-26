@@ -584,14 +584,17 @@ export class ScheduledTasks {
         this.config.limits.taskOutputBytes,
       );
     } catch (error) {
-      Object.assign(run, {
+      const failed = structuredClone(this.record(id));
+      const saved = failed.runs.find((item) => item.id === runId)!;
+      Object.assign(saved, {
         state: "failed",
         reasonCode: "start_failed",
         endedAt: new Date().toISOString(),
         diagnostic: asError(error).message,
         exitCode: null,
       });
-      await this.saveKnown(record);
+      await this.saveKnown(failed);
+      await this.cleanup(() => this.prune(id));
       return this.getRun(runId);
     }
     const finished = this.finishRun(id, runId, process);

@@ -15,6 +15,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { setImmediate } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import {
   OperationError,
@@ -23,6 +24,7 @@ import {
   taskRunActive,
   type ScheduledTask,
   type TaskRun,
+  type TaskSnapshot,
 } from "@kiteline/shared/protocol";
 import { ptyBridgeBinary } from "@kiteline/shared/terminal/node";
 import { privateDirectory } from "../src/config.js";
@@ -35,6 +37,8 @@ import { Agent } from "../src/agent.js";
 import { localRequest } from "../src/local.js";
 
 const signal = new AbortController().signal;
+// Linux limits each argv/env string to 32 pages; x64/arm64 pages are at most 64 KiB.
+const oversizedLinuxEnvironmentBytes = 64 * 1024 * 32 + 1;
 const input = (cwd: string, command = "printf '你好'; printf error >&2") => ({
   name: "Daily",
   command,
@@ -478,6 +482,187 @@ test("spawn failure has no command exit code or start time", async () => {
     await f.close();
   }
 });
+
+test.runIf(process.platform === "linux" && ["x64", "arm64"].includes(process.arch))(
+  "synchronous spawn failure publishes its state with the revision and prunes before returning",
+  async () => {
+    const f = await fixture({ taskHistoryRuns: 1 });
+    const previousEnvironment = process.env.KITELINE_TASK_TEST_OVERSIZED_ENV;
+    let settled = false;
+    let sampling: Promise<void> | undefined;
+    try {
+      const parameters = input(f.root);
+      const task = await f.tasks.create("task", parameters, signal);
+      await f.tasks.start(task.id, "first", signal);
+      expect((await finished(f.tasks, "first")).state).toBe("succeeded");
+      await expect.poll(() => f.tasks.status().active).toBe(0);
+      const path = join(f.root, "tasks", "task.json");
+      expect(JSON.parse(await readFile(path, "utf8")).runs).toHaveLength(1);
+      expect(await readFile(join(f.root, "tasks", "first.stdout"), "utf8")).toBe("你好");
+      expect(await readFile(join(f.root, "tasks", "first.stderr"), "utf8")).toBe("error");
+
+      let startingRevision: number | undefined;
+      const notifications: TaskSnapshot[] = [];
+      const observations: {
+        revision: number;
+        runState: TaskRun["state"];
+        summaryState: TaskRun["state"] | undefined;
+        listedState: TaskRun["state"] | undefined;
+      }[] = [];
+      f.tasks.onChange = (snapshot) => {
+        notifications.push(snapshot);
+        if (snapshot.items[0]?.currentRun?.id !== "rejected") return;
+        startingRevision = snapshot.revision;
+        sampling = (async () => {
+          while (!settled) {
+            await setImmediate();
+            const current = f.tasks.snapshot();
+            observations.push({
+              revision: current.revision,
+              runState: f.tasks.getRun("rejected").state,
+              summaryState: current.items[0]?.latestRun?.state,
+              listedState: f.tasks.listRuns(task.id).items[0]?.state,
+            });
+          }
+        })();
+      };
+      process.env.KITELINE_TASK_TEST_OVERSIZED_ENV = "x".repeat(oversizedLinuxEnvironmentBytes);
+      const result = await f.tasks.start(task.id, "rejected", signal).finally(() => {
+        settled = true;
+      });
+      await sampling;
+
+      expect(result).toMatchObject({
+        state: "failed",
+        reasonCode: "start_failed",
+        exitCode: null,
+        diagnostic: expect.stringContaining("E2BIG"),
+        parameters: { ...parameters, taskRevision: task.revision },
+        output: { stdoutBytes: 0, stderrBytes: 0, truncated: false },
+      });
+      expect(result.startedAt).toBeUndefined();
+      expect(result.pid).toBeUndefined();
+      expect(f.tasks.status().active).toBe(0);
+      expect(f.tasks.get(task.id).revision).toBe(task.revision);
+      expect(startingRevision).toBeDefined();
+      const unpublished = observations.filter((read) => read.revision === startingRevision);
+      expect(unpublished.length).toBeGreaterThan(0);
+      expect
+        .soft(
+          new Set(
+            unpublished.flatMap((read) => [read.runState, read.summaryState, read.listedState]),
+          ),
+          "Public reads must stay starting until the failed revision is published",
+        )
+        .toEqual(new Set(["starting"]));
+      const failedNotification = notifications.find(
+        (snapshot) => snapshot.items[0]?.latestRun?.state === "failed",
+      );
+      expect(failedNotification?.revision).toBeGreaterThan(startingRevision!);
+      expect(f.tasks.snapshot()).toEqual(notifications.at(-1));
+      expect(f.tasks.getRun(result.id)).toEqual(result);
+      expect.soft(f.tasks.listRuns(task.id).items.map((run) => run.id)).toEqual([result.id]);
+      const stored = JSON.parse(await readFile(path, "utf8"));
+      expect.soft(stored.runs.map((run: TaskRun) => run.id)).toEqual([result.id]);
+      const files = await readdir(join(f.root, "tasks"));
+      for (const stream of ["stdout", "stderr"] as const) {
+        expect.soft(files).not.toContain(`first.${stream}`);
+        expect(files).not.toContain(`rejected.${stream}`);
+        expect(await f.tasks.output(result.id, stream, 0, 32, signal)).toMatchObject({
+          text: "",
+          storedBytes: 0,
+          finished: true,
+        });
+      }
+    } finally {
+      if (previousEnvironment === undefined) delete process.env.KITELINE_TASK_TEST_OVERSIZED_ENV;
+      else process.env.KITELINE_TASK_TEST_OVERSIZED_ENV = previousEnvironment;
+      settled = true;
+      await sampling;
+      await f.close();
+    }
+  },
+);
+
+test.runIf(process.platform === "linux" && ["x64", "arm64"].includes(process.arch))(
+  "synchronous spawn failure stays known when saving facts and pruning history both fail",
+  async () => {
+    const f = await fixture({ taskHistoryRuns: 1 });
+    const previousEnvironment = process.env.KITELINE_TASK_TEST_OVERSIZED_ENV;
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const path = join(f.root, "tasks", "task.json");
+    const saved = path + ".saved";
+    let blocked = false;
+    try {
+      await f.tasks.create("task", input(f.root), signal);
+      await f.tasks.start("task", "first", signal);
+      expect((await finished(f.tasks, "first")).state).toBe("succeeded");
+      await expect.poll(() => f.tasks.status().active).toBe(0);
+      let startingRevision: number | undefined;
+      const notifications: TaskSnapshot[] = [];
+      f.tasks.onChange = (snapshot) => {
+        notifications.push(snapshot);
+        if (snapshot.items[0]?.currentRun?.id !== "rejected") return;
+        startingRevision = snapshot.revision;
+        renameSync(path, saved);
+        blocked = true;
+        mkdirSync(path);
+      };
+      process.env.KITELINE_TASK_TEST_OVERSIZED_ENV = "x".repeat(oversizedLinuxEnvironmentBytes);
+      const result = await f.tasks.start("task", "rejected", signal);
+      expect(result).toMatchObject({
+        state: "failed",
+        reasonCode: "start_failed",
+        exitCode: null,
+        diagnostic: expect.stringContaining("E2BIG"),
+      });
+      expect(result.startedAt).toBeUndefined();
+      expect(result.pid).toBeUndefined();
+      expect(f.tasks.status().active).toBe(0);
+      expect(f.tasks.getRun(result.id)).toEqual(result);
+      expect(startingRevision).toBeDefined();
+      expect(f.tasks.snapshot().revision).toBeGreaterThan(startingRevision!);
+      expect(f.tasks.snapshot()).toEqual(notifications.at(-1));
+      expect(f.tasks.snapshot().items[0]?.latestRun?.state).toBe("failed");
+      expect(f.tasks.status().storageError).toContain("task not persisted");
+      expect(log).toHaveBeenCalledWith(
+        expect.stringContaining("facts"),
+        "task",
+        expect.stringContaining("EISDIR"),
+      );
+      expect
+        .soft(log)
+        .toHaveBeenCalledWith(
+          expect.stringContaining("retention"),
+          expect.stringContaining("EISDIR"),
+        );
+      expect(f.tasks.listRuns("task").items.map((run) => run.id)).toEqual(["rejected", "first"]);
+      expect(JSON.parse(await readFile(saved, "utf8")).runs.at(-1)).toMatchObject({
+        id: "rejected",
+        state: "starting",
+      });
+
+      await rm(path, { recursive: true });
+      await rename(saved, path);
+      blocked = false;
+      await f.tasks.setPaused("task", true, signal);
+      expect(f.tasks.listRuns("task").items.map((run) => run.id)).toEqual([result.id]);
+      expect(JSON.parse(await readFile(path, "utf8")).runs).toEqual([result]);
+    } finally {
+      if (previousEnvironment === undefined) delete process.env.KITELINE_TASK_TEST_OVERSIZED_ENV;
+      else process.env.KITELINE_TASK_TEST_OVERSIZED_ENV = previousEnvironment;
+      try {
+        if (blocked) {
+          await rm(path, { recursive: true });
+          await rename(saved, path);
+        }
+      } finally {
+        log.mockRestore();
+        await f.close();
+      }
+    }
+  },
+);
 
 test("stop queued by the terminal notification cannot change a completed run back to stopping", async () => {
   const f = await fixture();
