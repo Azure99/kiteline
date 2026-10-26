@@ -465,3 +465,21 @@ diff --git a/src/browser/Types.ts b/src/browser/Types.ts
  }
  
  export interface IBrowser {
+diff --git a/src/browser/scrollable/touch.ts b/src/browser/scrollable/touch.ts
+--- a/src/browser/scrollable/touch.ts
++++ b/src/browser/scrollable/touch.ts
+@@ -286,3 +286,6 @@
+     if (this._dispatched) {
+-      e.preventDefault();
++      // A native tap must be able to restore page focus after a permission dialog.
++      if (mainWindow.document.hasFocus()) {
++        e.preventDefault();
++      }
+       e.stopPropagation();
+@@ -352,3 +355,5 @@
+     if (this._dispatched) {
+-      e.preventDefault();
++      if (targetWindow.document.hasFocus()) {
++        e.preventDefault();
++      }
+       e.stopPropagation();

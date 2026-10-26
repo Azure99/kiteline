@@ -5,17 +5,10 @@ export function terminalKeyboard(terminal: Terminal, mobile: boolean) {
   const textarea = terminal.textarea!;
   const keyboard = mobile ? virtualKeyboard : undefined;
   const policySupported = "virtualKeyboardPolicy" in textarea;
-  const managed = mobile && policySupported;
-  let pending = false;
-  let focusing = false;
-  let frame = 0;
   const restore = () => {
-    cancelAnimationFrame(frame);
-    pending = false;
-    if (managed) textarea.setAttribute("virtualkeyboardpolicy", "manual");
-  };
-  const viewport = () => {
-    if (pending && !focusing && isKeyboardOpen()) restore();
+    // A native permission window can blur the document while keeping this editor active.
+    if (mobile && policySupported && document.activeElement !== textarea)
+      textarea.setAttribute("virtualkeyboardpolicy", "manual");
   };
   const selection =
     !mobile && policySupported
@@ -29,33 +22,26 @@ export function terminalKeyboard(terminal: Terminal, mobile: boolean) {
       mobile || terminal.hasSelection() ? "manual" : "auto",
     );
   textarea.addEventListener("blur", restore);
-  window.addEventListener("kiteline:viewport", viewport);
   return {
     activate() {
       if (terminal.options.disableStdin) return;
-      if (!mobile && policySupported) textarea.setAttribute("virtualkeyboardpolicy", "auto");
       prepareKeyboard();
-      if (!keyboard && managed && !isKeyboardOpen() && document.activeElement === textarea)
+      if (
+        !keyboard &&
+        mobile &&
+        policySupported &&
+        !isKeyboardOpen() &&
+        document.activeElement === textarea
+      )
         textarea.blur();
-      if (managed && document.activeElement !== textarea) {
-        pending = true;
-        focusing = true;
-        textarea.setAttribute("virtualkeyboardpolicy", "auto");
-        terminal.focus();
-        focusing = false;
-        // A keyboard already open for another editor need not resize again.
-        if (isKeyboardOpen()) frame = requestAnimationFrame(restore);
-      } else {
-        restore();
-        terminal.focus();
-      }
+      if (policySupported) textarea.setAttribute("virtualkeyboardpolicy", "auto");
+      terminal.focus();
       keyboard?.show();
     },
     dispose() {
       selection?.dispose();
       restore();
       textarea.removeEventListener("blur", restore);
-      window.removeEventListener("kiteline:viewport", viewport);
     },
   };
 }

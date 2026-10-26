@@ -373,7 +373,7 @@ export function TerminalView({
   async function paste() {
     const current = display.current;
     try {
-      current?.focus();
+      if (!mobile) current?.focus();
       current?.paste(await navigator.clipboard.readText());
     } catch (error) {
       setNotice(error);
