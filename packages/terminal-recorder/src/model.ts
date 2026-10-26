@@ -435,7 +435,8 @@ export class Model {
             if (position.epoch !== options.after.epoch) reason = "reset";
             else if (position.seq > options.after.seq) reason = "changed";
           }
-          if (options.mode === "quiet" && Date.now() >= quietAt) reason = "quiet";
+          if (options.mode === "quiet" && quietAt <= deadline && Date.now() >= quietAt)
+            reason = "quiet";
           if (!reason && Date.now() >= deadline) reason = "timeout";
           if (reason) {
             cleanup();

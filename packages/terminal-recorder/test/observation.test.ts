@@ -207,6 +207,42 @@ test("quiet counts identical repaint activity and a shorter deadline returns the
   }
 });
 
+test.each([
+  {
+    name: "quiet times out when the deadline precedes quiet and the timer runs late",
+    quietMs: 80,
+    timeoutMs: 20,
+    expectedReason: "timeout",
+  },
+  {
+    name: "quiet succeeds when quiet precedes the deadline and the timer runs late",
+    quietMs: 20,
+    timeoutMs: 80,
+    expectedReason: "quiet",
+  },
+])("$name", async ({ quietMs, timeoutMs, expectedReason }) => {
+  const terminal = model();
+  const callbackDelayMs = 120;
+  try {
+    terminal.output(Buffer.from("READY"));
+    await terminal.ordered(() => {});
+    const waiting = terminal.wait({ mode: "quiet", quietMs }, false, Date.now() + timeoutMs);
+    await terminal.ordered(() => {});
+    Atomics.wait(
+      new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT)),
+      0,
+      0,
+      callbackDelayMs,
+    );
+    expect(await waiting).toMatchObject({
+      reason: expectedReason,
+      snapshot: { screen: [{ text: "READY" }, {}, {}] },
+    });
+  } finally {
+    await terminal.dispose();
+  }
+});
+
 test("quiet starts after queued parsing, even when parsing consumes the request deadline", async () => {
   const terminal = model(80, 24);
   try {
