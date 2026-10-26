@@ -10,6 +10,16 @@ import {
   tmuxEnvironment,
 } from "@kiteline/shared/terminal/node";
 
+const frameHeaderBytes = 5;
+const frameLengthOffset = 1;
+const resizePayloadBytes = 4;
+const resizeColsOffset = 0;
+const resizeRowsOffset = 2;
+// Give the helper's 1000ms stop/drain phase time before forcing termination.
+const forceTerminationWaitMs = 1500;
+// Cleanup starts once, at stop or Windows leader exit, and allows draining after a force kill.
+const cleanupWaitMs = 2500;
+
 export class TtyBridge {
   private sent = 0;
   private consumed = 0;
@@ -72,7 +82,7 @@ export class TtyBridge {
           child.stdout!.destroy();
           child.stderr!.destroy();
           reject(new Error("Terminal client cleanup timed out"));
-        }, 2500);
+        }, cleanupWaitMs);
       };
     });
     let closed: Promise<{ code: number | null; signal?: string | null }>;
@@ -127,18 +137,18 @@ export class TtyBridge {
   }
 
   resize(cols: number, rows: number) {
-    const data = Buffer.allocUnsafe(4);
-    data.writeUInt16BE(cols, 0);
-    data.writeUInt16BE(rows, 2);
+    const data = Buffer.allocUnsafe(resizePayloadBytes);
+    data.writeUInt16BE(cols, resizeColsOffset);
+    data.writeUInt16BE(rows, resizeRowsOffset);
     this.write("R", data);
   }
 
-  private write(type: string, data: Buffer) {
+  private write(type: "I" | "R", data: Buffer) {
     if (this.stopping) throw new AppError("cancelled", "Terminal client is closing");
-    const frame = Buffer.allocUnsafe(5 + data.length);
+    const frame = Buffer.allocUnsafe(frameHeaderBytes + data.length);
     frame.write(type);
-    frame.writeUInt32BE(data.length, 1);
-    data.copy(frame, 5);
+    frame.writeUInt32BE(data.length, frameLengthOffset);
+    data.copy(frame, frameHeaderBytes);
     if (this.child.stdin!.writableLength + frame.length > limits.terminalPendingBytes)
       throw new AppError("limit_exceeded", "Terminal input backlog exceeds the limit");
     this.child.stdin!.write(frame);
@@ -154,7 +164,7 @@ export class TtyBridge {
     const kill = setTimeout(() => {
       if (child instanceof JobChild) child.terminate();
       else child.kill("SIGKILL");
-    }, 1500);
+    }, forceTerminationWaitMs);
     try {
       await this.closed;
     } finally {

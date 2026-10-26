@@ -17,7 +17,28 @@
 #endif
 
 static volatile sig_atomic_t interrupted;
-enum { drain_timeout_ms = 1000 };
+enum {
+  drain_timeout_ms = 1000,
+  kill_reap_timeout_ms = 500,
+};
+
+// stdin: type ('I' bytes or 'R' resize), uint32 BE length, then payload.
+enum {
+  frame_length_offset = 1,
+  frame_header_bytes = 5,
+  resize_payload_bytes = 4,
+  resize_cols_offset = 0,
+  resize_rows_offset = 2,
+};
+
+enum poll_slot { agent_stdin, agent_stdout, pty_master, poll_slot_count };
+
+struct input_frame {
+  unsigned char *buffer;
+  size_t received;
+  size_t expected;
+  size_t written; // Payload bytes already written to the PTY.
+};
 
 static void interrupt(int signal_number) { interrupted = signal_number; }
 
@@ -32,9 +53,62 @@ static int nonblocking(int fd) {
   return flags == -1 ? -1 : fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 }
 
-static uint32_t length(const unsigned char *data) {
+static uint32_t uint32_be(const unsigned char *data) {
   return (uint32_t)data[0] << 24 | (uint32_t)data[1] << 16 |
          (uint32_t)data[2] << 8 | data[3];
+}
+
+static void reset_input_frame(struct input_frame *frame) {
+  frame->received = 0;
+  frame->expected = frame_header_bytes;
+  frame->written = 0;
+}
+
+static const char *read_input_frame(struct input_frame *frame, size_t input_limit) {
+  ssize_t count = read(STDIN_FILENO, frame->buffer + frame->received,
+                       frame->expected - frame->received);
+  if (count > 0) {
+    frame->received += (size_t)count;
+    if (frame->received == frame_header_bytes) {
+      unsigned char type = frame->buffer[0];
+      uint32_t payload_bytes = uint32_be(frame->buffer + frame_length_offset);
+      if ((type != 'I' && type != 'R') || !payload_bytes ||
+          payload_bytes > input_limit ||
+          (type == 'R' && payload_bytes != resize_payload_bytes))
+        return "Invalid PTY input frame";
+      frame->expected = frame_header_bytes + payload_bytes;
+    }
+  } else if (!count) {
+    return "PTY input closed";
+  } else if (errno != EAGAIN && errno != EINTR) {
+    return "Cannot read PTY input";
+  }
+  return NULL;
+}
+
+static const char *consume_input_frame(struct input_frame *frame, int master,
+                                      int writable, struct winsize *size) {
+  const unsigned char *payload = frame->buffer + frame_header_bytes;
+  if (frame->buffer[0] == 'R') {
+    size->ws_col = (unsigned short)((unsigned)payload[resize_cols_offset] << 8 |
+                                    payload[resize_cols_offset + 1]);
+    size->ws_row = (unsigned short)((unsigned)payload[resize_rows_offset] << 8 |
+                                    payload[resize_rows_offset + 1]);
+    if (!size->ws_col || !size->ws_row || ioctl(master, TIOCSWINSZ, size) == -1)
+      return "Cannot resize PTY";
+    reset_input_frame(frame);
+  } else if (writable) {
+    size_t payload_bytes = frame->expected - frame_header_bytes;
+    ssize_t count = write(master, payload + frame->written,
+                         payload_bytes - frame->written);
+    if (count > 0) {
+      frame->written += (size_t)count;
+      if (frame->written == payload_bytes) reset_input_frame(frame);
+    } else if (count == -1 && errno != EAGAIN && errno != EINTR) {
+      return "Cannot write PTY input";
+    }
+  }
+  return NULL;
 }
 
 int main(int argc, char **argv) {
@@ -51,11 +125,12 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Invalid PTY dimensions or buffer limits\n");
     return 1;
   }
-  unsigned char *input = malloc(input_limit + 5);
+  struct input_frame input = {.buffer = malloc(input_limit + frame_header_bytes)};
+  reset_input_frame(&input);
   unsigned char *output = malloc(output_limit);
-  if (!input || !output) {
+  if (!input.buffer || !output) {
     fprintf(stderr, "Cannot allocate PTY buffers\n");
-    free(input);
+    free(input.buffer);
     free(output);
     return 1;
   }
@@ -63,7 +138,7 @@ int main(int argc, char **argv) {
   pid_t child = forkpty(&master, NULL, NULL, &size);
   if (child == -1) {
     perror("forkpty");
-    free(input);
+    free(input.buffer);
     free(output);
     return 1;
   }
@@ -78,7 +153,6 @@ int main(int argc, char **argv) {
   signal(SIGHUP, interrupt);
 
   const char *failure = NULL;
-  size_t received = 0, expected = 5, input_written = 0;
   size_t output_start = 0, output_size = 0;
   int status = 0, reaped = 0, stopping = 0, killed = 0;
   int64_t deadline = 0;
@@ -107,7 +181,8 @@ int main(int argc, char **argv) {
       deadline = now + drain_timeout_ms;
     }
     if (reaped && master == -1 && !output_size) break;
-    if (stopping && !reaped && !killed && now >= deadline - 500) {
+    // Allow time to reap the child after SIGKILL.
+    if (stopping && !reaped && !killed && now >= deadline - kill_reap_timeout_ms) {
       kill(child, SIGKILL);
       killed = 1;
     }
@@ -117,21 +192,25 @@ int main(int argc, char **argv) {
       continue;
     }
 
-    // stdin: type ('I' bytes or 'R' resize), uint32 BE length, then payload.
     // Only one input frame is buffered. A blocked PTY write must not stop output reads.
-    struct pollfd descriptors[] = {
-      {stopping || reaped || received == expected ? -1 : 0, POLLIN, 0},
-      {output_size ? 1 : -1, POLLOUT, 0},
-      {master, POLLIN | (received == expected && input[0] == 'I' ? POLLOUT : 0), 0},
+    struct pollfd descriptors[poll_slot_count] = {
+      [agent_stdin] = {
+        stopping || reaped || input.received == input.expected ? -1 : STDIN_FILENO,
+        POLLIN, 0},
+      [agent_stdout] = {output_size ? STDOUT_FILENO : -1, POLLOUT, 0},
+      [pty_master] = {
+        master,
+        POLLIN | (input.received == input.expected && input.buffer[0] == 'I' ? POLLOUT : 0),
+        0},
     };
-    int polled = poll(descriptors, 3, deadline ? 25 : 100);
+    int polled = poll(descriptors, poll_slot_count, deadline ? 25 : 100);
     if (polled == -1) {
       if (errno == EINTR) continue;
       failure = "PTY bridge poll failed";
       continue;
     }
-    if (descriptors[1].revents) {
-      ssize_t count = write(1, output + output_start, output_size);
+    if (descriptors[agent_stdout].revents) {
+      ssize_t count = write(STDOUT_FILENO, output + output_start, output_size);
       if (count > 0) {
         output_start += (size_t)count;
         output_size -= (size_t)count;
@@ -139,7 +218,7 @@ int main(int argc, char **argv) {
       } else if (count == -1 && errno != EAGAIN && errno != EINTR)
         failure = "Cannot write PTY output";
     }
-    if (descriptors[2].revents & (POLLIN | POLLHUP | POLLERR)) {
+    if (descriptors[pty_master].revents & (POLLIN | POLLHUP | POLLERR)) {
       unsigned char data[65536];
       ssize_t count = read(master, data, sizeof(data));
       if (count > 0) {
@@ -160,42 +239,14 @@ int main(int argc, char **argv) {
       } else if (errno != EAGAIN && errno != EINTR)
         failure = "Cannot read PTY output";
     }
-    if (descriptors[0].revents) {
-      ssize_t count = read(0, input + received, expected - received);
-      if (count > 0) {
-        received += (size_t)count;
-        if (received == 5) {
-          uint32_t bytes = length(input + 1);
-          if ((input[0] != 'I' && input[0] != 'R') || bytes > input_limit ||
-              !bytes || (input[0] == 'R' && bytes != 4))
-            failure = "Invalid PTY input frame";
-          else expected = 5 + bytes;
-        }
-      } else if (!count)
-        failure = "PTY input closed";
-      else if (errno != EAGAIN && errno != EINTR)
-        failure = "Cannot read PTY input";
+    if (descriptors[agent_stdin].revents) {
+      const char *input_failure = read_input_frame(&input, input_limit);
+      if (input_failure) failure = input_failure;
     }
     if (failure) continue;
-    if (received == expected && master != -1) {
-      if (input[0] == 'R') {
-        size.ws_col = (unsigned short)((unsigned)input[5] << 8 | input[6]);
-        size.ws_row = (unsigned short)((unsigned)input[7] << 8 | input[8]);
-        if (!size.ws_col || !size.ws_row || ioctl(master, TIOCSWINSZ, &size) == -1)
-          failure = "Cannot resize PTY";
-        received = input_written = 0;
-        expected = 5;
-      } else if (descriptors[2].revents & POLLOUT) {
-        ssize_t count = write(master, input + 5 + input_written, expected - 5 - input_written);
-        if (count > 0) {
-          input_written += (size_t)count;
-          if (input_written == expected - 5) {
-            received = input_written = 0;
-            expected = 5;
-          }
-        } else if (count == -1 && errno != EAGAIN && errno != EINTR)
-          failure = "Cannot write PTY input";
-      }
+    if (input.received == input.expected && master != -1) {
+      failure = consume_input_frame(&input, master,
+                                    descriptors[pty_master].revents & POLLOUT, &size);
     }
   }
   if (master != -1) close(master);
@@ -203,7 +254,7 @@ int main(int argc, char **argv) {
     kill(child, SIGKILL);
     failure = "PTY client cleanup timed out";
   }
-  free(input);
+  free(input.buffer);
   free(output);
   if (failure) {
     fprintf(stderr, "%s\n", failure);
