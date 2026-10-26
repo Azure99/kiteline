@@ -1,5 +1,7 @@
 import { expect, test, vi } from "vitest";
 import fs from "node:fs";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { syncBuiltinESMExports } from "node:module";
 import { createServer, type AddressInfo } from "node:net";
 import { once } from "node:events";
@@ -69,6 +71,60 @@ test.runIf(process.platform === "linux")(
       redirected.mockRestore();
       syncBuiltinESMExports();
       await new Promise<void>((resolve) => listener.close(() => resolve()));
+    }
+  },
+);
+
+test.runIf(process.platform === "linux")(
+  "partial suggestions require an additional unique port across both proc tables",
+  async () => {
+    const root = await mkdtemp("/var/tmp/kiteline-port-boundary-");
+    const createReadStream = fs.createReadStream;
+    const redirected = vi
+      .spyOn(fs, "createReadStream")
+      .mockImplementation((path, options) =>
+        createReadStream(
+          path === "/proc/net/tcp"
+            ? join(root, "tcp")
+            : path === "/proc/net/tcp6"
+              ? join(root, "tcp6")
+              : path,
+          options,
+        ),
+      );
+    syncBuiltinESMExports();
+    const row = (port: number, ipv6 = false) => {
+      const address = ipv6 ? "00000000000000000000000001000000" : "0100007F";
+      return `0: ${address}:${port.toString(16).padStart(4, "0")} 00000000:0000 0A`;
+    };
+    const scan = async (v4: number, v6: string[] = []) => {
+      await writeFile(
+        join(root, "tcp"),
+        "header\n" + Array.from({ length: v4 }, (_, i) => row(i + 1)).join("\n") + "\n",
+      );
+      await writeFile(join(root, "tcp6"), "header\n" + v6.join("\n") + "\n");
+      return listeningPorts(new AbortController().signal);
+    };
+    try {
+      expect(await scan(499)).toEqual({
+        ports: Array.from({ length: 499 }, (_, i) => i + 1),
+        truncated: false,
+      });
+      const full = { ports: Array.from({ length: 500 }, (_, i) => i + 1), truncated: false };
+      expect(await scan(500)).toEqual(full);
+      expect(await scan(500, [row(500, true)])).toEqual(full);
+      expect(await scan(501)).toEqual({ ...full, truncated: true });
+      expect(await scan(500, [row(501, true)])).toEqual({ ...full, truncated: true });
+      await expect(scan(500, ["unexpected data"])).rejects.toMatchObject({ code: "io_error" });
+      await rm(join(root, "tcp6"));
+      await mkdir(join(root, "tcp6"));
+      await expect(listeningPorts(new AbortController().signal)).rejects.toMatchObject({
+        code: "EISDIR",
+      });
+    } finally {
+      redirected.mockRestore();
+      syncBuiltinESMExports();
+      await rm(root, { recursive: true, force: true });
     }
   },
 );

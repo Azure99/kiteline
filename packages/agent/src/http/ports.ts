@@ -88,10 +88,12 @@ export async function listeningPorts(signal: AbortSignal): Promise<ListeningPort
         }
         if (!line.trim()) continue;
         const port = listeningPort(line, ipv6);
-        if (port !== undefined) ports.add(port);
-        if (ports.size >= agentLimits.listPageEntries) {
-          truncated = true;
-          break;
+        if (port !== undefined && !ports.has(port)) {
+          if (ports.size === agentLimits.listPageEntries) {
+            truncated = true;
+            break;
+          }
+          ports.add(port);
         }
       }
       signal.throwIfAborted();
