@@ -99,14 +99,16 @@ static napi_value privateDirectory(napi_env env, napi_callback_info info) {
 }
 static napi_value lock(napi_env env, napi_callback_info info) {
   return call(env, [&] {
-    auto args = arguments(env, info, 2); auto path = string(env, args[0]); bool shared;
-    if (napi_get_value_bool(env, args[1], &shared) != napi_ok) throw std::invalid_argument("Expected shared flag");
-    auto value = std::make_unique<Handle>(CreateFileW(path.c_str(), shared ? GENERIC_READ : GENERIC_READ | GENERIC_WRITE,
+    auto path = string(env, arguments(env, info, 1)[0]);
+    auto lockHandle = std::make_unique<Handle>(CreateFileW(
+      path.c_str(), GENERIC_READ | GENERIC_WRITE,
       FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr));
-    check(value->valid(), "open installation lock");
+    check(lockHandle->valid(), "open lock file");
     OVERLAPPED offset{};
-    check(LockFileEx(value->value, LOCKFILE_FAIL_IMMEDIATELY | (shared ? 0 : LOCKFILE_EXCLUSIVE_LOCK), 0, 1, 0, &offset), "installation is busy");
-    return resource(env, std::move(value));
+    check(LockFileEx(lockHandle->value,
+      LOCKFILE_FAIL_IMMEDIATELY | LOCKFILE_EXCLUSIVE_LOCK,
+      0, 1, 0, &offset), "acquire lock");
+    return resource(env, std::move(lockHandle));
   });
 }
 static napi_value closeHandle(napi_env env, napi_callback_info info) {

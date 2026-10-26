@@ -22,7 +22,7 @@ interface WindowsNative {
     mtimeMs: number;
   }>;
   renameFile(source: string, target: string, replace: boolean): Promise<void>;
-  lock(path: string, shared: boolean): NativeHandle;
+  lock(path: string): NativeHandle;
   closeHandle(handle: NativeHandle): void;
   jobStart(
     executable: string,

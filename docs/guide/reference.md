@@ -318,11 +318,12 @@ Linux 和 macOS 上，新建的数据目录权限为 `0700`，已有目录保留
 | ---------------------- | ------------------------------------------------- |
 | `agent.sock`           | 本机命令连接 agent 的 socket（Linux、macOS）      |
 | `agent.sock.lock`      | 同一运行目录只允许一个 agent 的锁（Linux、macOS） |
+| `agent.lock`           | 同一运行目录只允许一个 agent 的锁（Windows）      |
 | `SESSION_ID/tmux.sock` | 该终端会话的 tmux socket                          |
 | `SESSION_ID/tmux.conf` | 该终端会话的 tmux 配置                            |
 | `SESSION_ID/pane.json` | 该终端会话的启动参数和环境变量（Windows）         |
 
-会话结束时 agent 删除它的 `SESSION_ID/` 目录。Windows 的运行目录中只有会话目录，本机命令通过命名管道连接 agent。
+会话结束时 agent 删除它的 `SESSION_ID/` 目录。Windows 的 `agent.lock` 在 agent 停止后保留，本机命令通过命名管道连接 agent。
 
 ### server
 

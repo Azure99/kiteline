@@ -318,11 +318,12 @@ On Linux and macOS, new data directories have permissions `0700`; existing direc
 | ---------------------- | ---------------------------------------------------------------- |
 | `agent.sock`           | Socket used by local commands to reach the agent (Linux/macOS)   |
 | `agent.sock.lock`      | Lock allowing only one agent per runtime directory (Linux/macOS) |
+| `agent.lock`           | Lock allowing only one agent per runtime directory (Windows)     |
 | `SESSION_ID/tmux.sock` | Session's tmux socket                                            |
 | `SESSION_ID/tmux.conf` | Session's tmux configuration                                     |
 | `SESSION_ID/pane.json` | Session startup arguments and environment variables (Windows)    |
 
-The agent deletes a session's `SESSION_ID/` directory when it ends. On Windows the runtime directory contains only session directories; local commands connect through a named pipe.
+The agent deletes a session's `SESSION_ID/` directory when it ends. On Windows, `agent.lock` remains after the agent stops; local commands connect through a named pipe.
 
 ### Server
 

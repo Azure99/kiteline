@@ -60,10 +60,8 @@ async function runAgent() {
     if (stopping) return;
     await privateDirectory(config.runDir);
     if (stopping) return;
-    if (process.platform !== "win32") {
-      releaseRuntime = await lockAgentRuntime(config.runDir);
-      if (stopping) return;
-    }
+    releaseRuntime = await lockAgentRuntime(config.runDir);
+    if (stopping) return;
     const identity = await readIdentity(config);
     if (stopping) return;
     agent = new Agent(config, identity);

@@ -111,7 +111,8 @@ agent 和 recorder 在 Windows 上启动的每个进程（tmux server 和每次 
 本机 IPC 使用命名管道 `\\.\pipe\kiteline-<SHA-256(SID + "\0" + 运行目录的真实路径)>`，名称与登录会话编号无关：
 
 - 管道的 DACL 受保护，只授予 SYSTEM、Administrators 和当前用户完全控制；设置 `PIPE_REJECT_REMOTE_CLIENTS`，拒绝远程客户端。
-- 第一个实例用 `FILE_FLAG_FIRST_PIPE_INSTANCE` 创建，名称已被占用时创建失败。因此同一用户、同一运行目录只能运行一个 agent，Windows 不需要运行目录锁。
+- agent 在构造前取得运行目录的 `agent.lock` 文件锁，同一实体目录即使通过不同路径访问也只能运行一个 agent。锁在 agent 清理完成后释放；命名管道发生 fatal 错误时，agent 记录错误并关闭本机入口，其他工作继续，运行目录锁保持。
+- 第一个管道实例用 `FILE_FLAG_FIRST_PIPE_INSTANCE` 创建，名称已被占用时创建失败。
 - 客户端连接后核对管道服务端的属主 SID 与自己相同，否则拒绝。同一用户从其他登录会话（例如 SSH）也能连接。
 
 ### 安装与目录
