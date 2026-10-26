@@ -123,6 +123,8 @@ kiteline terminal list --device DEVICE_ID --workspace WORKSPACE_ID
 { "device": "DEVICE_ID", "workspace": "WORKSPACE_ID", "session": "SESSION_ID" }
 ```
 
+用 UTF-8 保存该文件；PowerShell 中可用 `Set-Content -Encoding UTF8` 写入。
+
 CLI 只读取当前目录中的这个文件，不向上级目录查找。命令行参数逐项覆盖文件中的值，不回写文件。不需要会话的命令忽略其中的 `session`，具体规则见各命令的 `--help`。
 
 ## 用短命令操作终端

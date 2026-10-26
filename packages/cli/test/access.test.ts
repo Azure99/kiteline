@@ -395,6 +395,32 @@ test("cwd target defaults are overridden per field for one call and ignore defau
   expect(server.requests).toHaveLength(5);
 });
 
+test("UTF-8 BOM target defaults select the saved device and workspace", async () => {
+  const root = await directory();
+  const path = join(root, ".kiteline.json");
+  const original = Buffer.from(
+    "\uFEFF" + JSON.stringify({ device: "device-full-id", workspace: "workspace-full-id" }),
+  );
+  await writeFile(path, original);
+  const server = await fixture((_request, response) =>
+    json(response, { outcome: "succeeded", result: { sessions: [] } }),
+  );
+  await save(root, server.url);
+
+  const reply = await cli(root, ["terminal", "list", "--json"]);
+
+  expect(reply.code, reply.stdout + reply.stderr).toBe(0);
+  expect(JSON.parse(reply.stdout)).toEqual({ outcome: "succeeded", result: { sessions: [] } });
+  expect(server.requests).toMatchObject([
+    { path: "/api/devices/device-full-id/rpc", authorization: "Bearer saved-token" },
+  ]);
+  expect(JSON.parse(server.requests[0]!.body)).toMatchObject({
+    method: "sessions.list",
+    params: { workspaceId: "workspace-full-id" },
+  });
+  expect(await readFile(path)).toEqual(original);
+});
+
 test("a child cwd does not inherit its parent target defaults", async () => {
   const root = await directory();
   await writeFile(

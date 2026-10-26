@@ -123,6 +123,8 @@ Put `.kiteline.json` in the current directory to avoid repeating targets:
 { "device": "DEVICE_ID", "workspace": "WORKSPACE_ID", "session": "SESSION_ID" }
 ```
 
+Save this file as UTF-8; in PowerShell, use `Set-Content -Encoding UTF8`.
+
 The CLI reads this file only in the current directory, without searching parents. Command-line arguments override individual fields without changing the file. Commands that do not need a session ignore its `session`; see each command's `--help` for the rules.
 
 ## Operate terminals with short commands
