@@ -53,6 +53,20 @@ async function setup() {
   return { data, root, cli, agent, signal, params };
 }
 
+test("Git path RPCs reject unpaired surrogates without changing a legal replacement-character entry", async () => {
+  const { root, cli, agent, signal, params } = await setup();
+  await writeFile(join(root, "\uFFFD"), "legal Unicode contents\n");
+  const index = await cli("ls-files", "--stage", "-z");
+  for (const path of ["\uD800", "\uDC00"])
+    await expect(
+      agent.dispatch("git.stage", { ...params, paths: [path] }, signal),
+    ).rejects.toMatchObject({
+      code: "invalid_argument",
+    });
+  expect(await cli("ls-files", "--stage", "-z")).toBe(index);
+  expect(await readFile(join(root, "\uFFFD"), "utf8")).toBe("legal Unicode contents\n");
+});
+
 test("operation replies preserve diagnostics, uncertainty and observed Git progress", () => {
   const reason = {
     code: "permission_denied",

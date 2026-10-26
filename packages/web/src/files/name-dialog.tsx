@@ -1,7 +1,7 @@
 import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
-import type { Entry } from "@kiteline/shared/protocol";
+import { checkEntryName, type AgentEnvironment, type Entry } from "@kiteline/shared/protocol";
 import { rpc } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { PathField } from "./path-field";
@@ -18,6 +18,7 @@ export type NameAction = { kind: "directory"; parent: string } | { kind: "rename
 export function FileNameDialog({
   deviceId,
   workspaceId,
+  targetOS,
   action,
   blocked,
   rename,
@@ -26,6 +27,7 @@ export function FileNameDialog({
 }: {
   deviceId: string;
   workspaceId: string;
+  targetOS: AgentEnvironment["os"] | undefined;
   action: NameAction;
   blocked: boolean;
   rename: (path: string, name: string) => Promise<{ from: string; to: string }>;
@@ -51,7 +53,9 @@ export function FileNameDialog({
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (blocked) return;
-    if (!name || name.includes("/") || name === "." || name === "..") {
+    try {
+      checkEntryName(name, targetOS);
+    } catch {
       setError(undefined);
       setInvalid(true);
       return;

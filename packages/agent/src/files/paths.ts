@@ -15,25 +15,30 @@ import {
   sep,
   toNamespacedPath,
 } from "node:path";
-import { AppError, absolutePath, string, windowsName, type Entry } from "@kiteline/shared/protocol";
+import {
+  AppError,
+  absolutePath,
+  checkEntryName,
+  string,
+  type Entry,
+} from "@kiteline/shared/protocol";
 import { resourceDirectory } from "@kiteline/shared/node/paths";
 import { windowsNative } from "@kiteline/shared/windows/native";
+
+const operatingSystem =
+  process.platform === "win32" ? "windows" : process.platform === "darwin" ? "macos" : "linux";
 
 export function relativePath(value: unknown): string {
   const path = string(value, "path");
   if (posix.isAbsolute(path) || path.split("/").includes(".."))
     throw new AppError("invalid_argument", "A relative path within the workspace is required");
-  if (process.platform === "win32")
-    for (const part of path.split("/")) if (part && part !== ".") windowsName(part);
+  for (const part of path.split("/"))
+    if (part && part !== ".") checkEntryName(part, operatingSystem);
   return posix.normalize(path).replace(/\/$/, "") || ".";
 }
 
 export function entryName(value: unknown): string {
-  const name = string(value, "name");
-  if (name.includes("/") || name === "." || name === "..")
-    throw new AppError("invalid_argument", "Enter a single file or directory name");
-  if (process.platform === "win32") windowsName(name);
-  return name;
+  return checkEntryName(value, operatingSystem);
 }
 
 const nameHelper = resolve(resourceDirectory, "dist/native/bin/entry-name");
@@ -108,10 +113,7 @@ export async function gitMetadataPath(root: string, path: string) {
 }
 
 export function devicePath(value: unknown) {
-  return absolutePath(
-    value,
-    process.platform === "win32" ? "windows" : process.platform === "darwin" ? "macos" : "linux",
-  );
+  return absolutePath(value, operatingSystem);
 }
 
 const windowsFileAttributeDirectory = 0x10;

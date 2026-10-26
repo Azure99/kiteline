@@ -8,7 +8,8 @@ import { gitRepoFixture } from "./support/git.js";
 import { CursorBudget } from "../src/cursor-budget.js";
 import { Repositories } from "../src/git/repos.js";
 import { agentLimits } from "../src/limits.js";
-import { absolutePath, windowsName } from "@kiteline/shared/protocol";
+import { absolutePath, checkEntryName, checkEnvironment } from "@kiteline/shared/protocol";
+import { relativePath } from "../src/files/paths.js";
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -25,6 +26,8 @@ test("device paths distinguish native absolute paths from Windows aliases", () =
     "C:/Users/Project",
     "\\\\host.example\\share\\folder",
     "\\\\host\\C$\\folder",
+    "C:\\😀\\\uFFFD\\e\u0301\\.\\..\\",
+    "\\\\😀\\\uFFFD\\folder",
   ])
     expect(absolutePath(path, "windows")).toBe(path);
   for (const path of [
@@ -38,12 +41,79 @@ test("device paths distinguish native absolute paths from Windows aliases", () =
     "C:\\folder.\\x",
   ])
     expect(() => absolutePath(path, "windows")).toThrow();
-  for (const name of ["a\\b", "a:b", "CON .txt", "CONOUT$", "a.", "a "])
-    expect(() => windowsName(name)).toThrow();
   for (const os of ["linux", "macos"] as const) {
-    expect(absolutePath("/a:b/CON.txt/space ", os)).toBe("/a:b/CON.txt/space ");
+    for (const path of ["/a:b/CON.txt/space ", "//😀/\uFFFD/e\u0301/./../"])
+      expect(absolutePath(path, os)).toBe(path);
     expect(() => absolutePath("relative", os)).toThrow();
   }
+});
+
+test("absolute paths reject unpaired surrogates in directory names and UNC roots", () => {
+  for (const surrogate of ["\uD800", "\uDC00"]) {
+    for (const os of ["linux", "macos"] as const)
+      expect(() => absolutePath(`/parent-${surrogate}/child`, os)).toThrow(
+        expect.objectContaining({ code: "invalid_argument" }),
+      );
+    for (const path of [
+      `C:\\parent-${surrogate}\\child`,
+      `\\\\host-${surrogate}\\share\\child`,
+      `\\\\host\\share-${surrogate}`,
+    ])
+      expect(() => absolutePath(path, "windows")).toThrow(
+        expect.objectContaining({ code: "invalid_argument" }),
+      );
+  }
+});
+
+test("device environment rejects paths that cannot preserve Unicode identity", () => {
+  expect(() =>
+    checkEnvironment({
+      os: "linux",
+      homePath: "/home/user",
+      rootPaths: ["/"],
+      dataDir: "/data/\uD800",
+    }),
+  ).toThrow(expect.objectContaining({ code: "invalid_argument" }));
+});
+
+test("entry names preserve Unicode identity and apply only the target OS restrictions", () => {
+  for (const os of ["linux", "macos", "windows", undefined] as const) {
+    for (const name of ["\uFFFD", "😀", "𐀀", "e\u0301", "COM0.txt", "x".repeat(4096)])
+      expect(checkEntryName(name, os)).toBe(name);
+    for (const name of [
+      undefined,
+      1,
+      "",
+      "a\0b",
+      "a/b",
+      ".",
+      "..",
+      "x".repeat(4097),
+      "\uD800",
+      "\uDBFF",
+      "\uDC00",
+      "\uDFFF",
+      "\uD800😀",
+      "😀\uDC00",
+    ])
+      expect(() => checkEntryName(name, os)).toThrow(
+        expect.objectContaining({ code: "invalid_argument" }),
+      );
+  }
+  for (const name of ["a\\b", "a:b", "CON .txt", "CONOUT$", "COM¹.txt", "a.", "a ", "a\nb"]) {
+    expect(() => checkEntryName(name, "windows")).toThrow();
+    for (const os of ["linux", "macos", undefined] as const)
+      expect(checkEntryName(name, os)).toBe(name);
+  }
+});
+
+test("relative paths retain dot normalization and their total length limit", () => {
+  expect(relativePath(".")).toBe(".");
+  expect(relativePath("./folder//./file/")).toBe("folder/file");
+  const longPath = `a/${"x".repeat(4094)}`;
+  expect(relativePath(longPath)).toBe(longPath);
+  expect(() => relativePath(`${longPath}x`)).toThrow();
+  for (const path of ["/absolute", "folder/../file"]) expect(() => relativePath(path)).toThrow();
 });
 
 test("directory pages keep raw names non-actionable and enforce the concurrent cursor limit", async () => {

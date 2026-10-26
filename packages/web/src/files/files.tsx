@@ -628,6 +628,7 @@ export function Files({
         <FileNameDialog
           deviceId={device.id}
           workspaceId={workspace.id}
+          targetOS={device.environment?.os}
           action={action}
           blocked={action.kind === "rename" && savingWithin(action.entry.path!)}
           rename={(path, name) =>

@@ -742,6 +742,35 @@ test("historical parameters are read without revalidating execution", async () =
   }
 });
 
+test("a stored lossy cwd rejects updates even when only another field changes", async () => {
+  const f = await fixture();
+  let restored: ScheduledTasks | undefined;
+  try {
+    const task = await f.tasks.create("task", input(f.root), signal);
+    await f.tasks.close();
+    const path = join(f.root, "tasks", "task.json");
+    const value = JSON.parse(await readFile(path, "utf8"));
+    value.task.cwd = join(f.root, "cwd-\uD800");
+    await writeFile(path, JSON.stringify(value));
+    restored = new ScheduledTasks(f.config);
+    await restored.load();
+    const stored = await readFile(path, "utf8");
+
+    await expect(
+      restored.update(task.id, task.revision, { name: "Changed" }, signal),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
+    expect(restored.get(task.id)).toMatchObject({
+      name: task.name,
+      cwd: value.task.cwd,
+      revision: task.revision,
+    });
+    expect(await readFile(path, "utf8")).toBe(stored);
+  } finally {
+    await restored?.close();
+    await f.close();
+  }
+});
+
 test("an unchanged missing cwd remains editable and a failed starting write never spawns", async () => {
   const f = await fixture();
   try {

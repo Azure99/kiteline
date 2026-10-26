@@ -459,7 +459,22 @@ export function asError(error: unknown): KitelineError {
     message: error instanceof Error ? error.message : String(error),
   };
 }
-export function windowsName(value: string) {
+function checkPathUnicode(value: string) {
+  for (const character of value) {
+    const codePoint = character.codePointAt(0)!;
+    if (codePoint >= 0xd800 && codePoint <= 0xdfff)
+      throw new AppError("invalid_argument", "Path or name must contain valid Unicode");
+  }
+}
+export function checkEntryName(value: unknown, os: AgentEnvironment["os"] | undefined): string {
+  const name = string(value, "name");
+  if (name.includes("/") || name === "." || name === "..")
+    throw new AppError("invalid_argument", "Enter a single file or directory name");
+  checkPathUnicode(name);
+  if (os === "windows") windowsName(name);
+  return name;
+}
+function windowsName(value: string) {
   if (
     /[<>:"/\\|?*]/.test(value) ||
     [...value].some((character) => character.charCodeAt(0) < 32) ||
@@ -469,10 +484,10 @@ export function windowsName(value: string) {
     )
   )
     throw new AppError("invalid_argument", "This name is not a regular Windows file name");
-  return value;
 }
 export function absolutePath(value: unknown, os: AgentEnvironment["os"]) {
   const path = string(value, "absolute path");
+  checkPathUnicode(path);
   if (os !== "windows") {
     if (!path.startsWith("/"))
       throw new AppError("invalid_argument", "An absolute directory path is required");

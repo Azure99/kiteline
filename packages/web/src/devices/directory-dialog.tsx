@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
 import { ArrowRight, ArrowUp, File, Folder, FolderPlus, HardDrive, House } from "lucide-react";
 import {
-  windowsName,
+  checkEntryName,
   type AgentEnvironment,
   type DirectoryListing,
   type Workspace,
@@ -122,19 +122,13 @@ export function DirectoryDialog({
     }
   }
   async function mkdir() {
-    if (!listing || !newName || newName.includes("/") || newName === "." || newName === "..") {
+    if (!listing) return;
+    try {
+      checkEntryName(newName, environment?.os);
+    } catch {
       setError(undefined);
       setInvalid(true);
       return;
-    }
-    if (environment?.os === "windows") {
-      try {
-        windowsName(newName);
-      } catch {
-        setError(undefined);
-        setInvalid(true);
-        return;
-      }
     }
     setWriting(true);
     setError(undefined);
