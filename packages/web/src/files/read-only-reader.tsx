@@ -8,8 +8,9 @@ import { classHighlighter } from "@lezer/highlight";
 import { useTranslation } from "react-i18next";
 import { ErrorNotice } from "../components/error-notice";
 import { useTheme } from "../lib/appearance";
+import { isMobile, useMobile } from "../lib/use-mobile";
 import { codeLanguage } from "../lib/code-language";
-import { editorTheme } from "./editor-state";
+import { editorTheme, resizeEditorFont } from "./editor-state";
 import { editorPhrases } from "./editor-locale";
 
 export interface ReadOnlyReaderHandle {
@@ -29,6 +30,7 @@ export function ReadOnlyReader({
 }) {
   const { t, i18n } = useTranslation();
   const dark = useTheme() === "dark";
+  const mobile = useMobile();
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView>(undefined);
   const [appearance] = useState(() => new Compartment());
@@ -62,6 +64,7 @@ export function ReadOnlyReader({
         ],
       }),
     });
+    editor.dom.style.fontSize = isMobile() ? "16px" : "12px";
     view.current = editor;
     return () => {
       editor.destroy();
@@ -78,6 +81,10 @@ export function ReadOnlyReader({
     }),
     [],
   );
+  useLayoutEffect(() => {
+    const editor = view.current;
+    if (editor) resizeEditorFont(editor, mobile ? 16 : 12);
+  }, [mobile]);
   useLayoutEffect(() => {
     view.current?.dispatch({
       effects: [
@@ -113,10 +120,7 @@ export function ReadOnlyReader({
           {t(($) => $.common.syntaxUnavailable)}: <ErrorNotice error={languageError} />
         </div>
       )}
-      <div
-        ref={host}
-        className="isolate min-h-0 min-w-0 flex-1 overflow-hidden text-xs max-desk:text-base"
-      />
+      <div ref={host} className="isolate min-h-0 min-w-0 flex-1 overflow-hidden" />
     </>
   );
 }

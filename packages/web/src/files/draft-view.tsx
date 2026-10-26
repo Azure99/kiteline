@@ -219,7 +219,7 @@ export function DraftView({
   if (!store.has(draft))
     return <div className="p-4 text-sm text-muted-foreground">{t(($) => $.files.closed)}</div>;
   return (
-    <>
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {showTabs && <DraftTabs store={store} tabs={tabs} draft={draft} hidden={focusMode?.active} />}
       <div className="flex min-h-10 shrink-0 flex-wrap items-center justify-end border-b border-border px-1">
         <span
@@ -556,6 +556,6 @@ export function DraftView({
           onSaved={() => setSaveAs(false)}
         />
       )}
-    </>
+    </div>
   );
 }

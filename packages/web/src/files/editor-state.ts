@@ -22,6 +22,33 @@ import { editorPhrases } from "./editor-locale";
 export const editorAppearance = new Compartment();
 const editorHistory = new Compartment();
 
+// Restoring the vertical position can reveal a wider line after scrollIntoView writes scrollLeft.
+// Reapply the horizontal anchor once the restored viewport has been measured.
+const restoreHorizontalScroll = EditorView.scrollHandler.of((view, range, options) => {
+  if (!range.empty || options.x !== "start" || options.y !== "start") return false;
+
+  view.requestMeasure({
+    read(current) {
+      const coordinates = current.coordsAtPos(range.head);
+      if (!coordinates) return undefined;
+
+      let leftMargin = 0;
+      for (const provider of current.state.facet(EditorView.scrollMargins)) {
+        leftMargin = Math.max(leftMargin, provider(current)?.left ?? 0);
+      }
+      const viewport = current.scrollDOM.getBoundingClientRect();
+      return (
+        current.scrollDOM.scrollLeft +
+        (coordinates.left - viewport.left - leftMargin - options.xMargin) / current.scaleX
+      );
+    },
+    write(left, current) {
+      if (left !== undefined) current.scrollDOM.scrollLeft = left;
+    },
+  });
+  return false;
+});
+
 export const editorTheme = EditorView.theme({
   "&": { height: "100%", background: "var(--background)" },
   "&.cm-focused": { outline: "none" },
@@ -51,6 +78,15 @@ export const editorTheme = EditorView.theme({
   ".cm-searchMatch-selected": { outline: "1px solid var(--primary)" },
 });
 
+export function resizeEditorFont(editor: EditorView, size: number) {
+  const fontSize = `${size}px`;
+  if (editor.dom.style.fontSize === fontSize) return;
+  // Capture the line anchor before a smaller font can clamp scrollTop.
+  const position = editor.scrollSnapshot();
+  editor.dom.style.fontSize = fontSize;
+  editor.dispatch({ effects: position });
+}
+
 export function textState(
   text: string,
   language: Compartment,
@@ -61,6 +97,7 @@ export function textState(
     doc: text,
     extensions: [
       editorTheme,
+      restoreHorizontalScroll,
       editorAppearance.of([]),
       lineNumbers(),
       editorHistory.of(history()),

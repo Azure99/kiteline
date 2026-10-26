@@ -8,7 +8,8 @@ import { ErrorNotice } from "../components/error-notice";
 import { encodeText } from "@kiteline/shared/protocol/text";
 import type { Draft, DraftStore } from "./drafts";
 import { useTheme } from "../lib/appearance";
-import { editorAppearance, syncTextTransactions } from "./editor-state";
+import { isMobile, useMobile } from "../lib/use-mobile";
+import { editorAppearance, resizeEditorFont, syncTextTransactions } from "./editor-state";
 import { editorPhrases } from "./editor-locale";
 
 export interface TextEditorHandle {
@@ -65,6 +66,7 @@ export function TextEditor({
   const { t, i18n } = useTranslation();
 
   const dark = useTheme() === "dark";
+  const mobile = useMobile();
   const [languageError, setLanguageError] = useState<unknown>();
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView>(undefined);
@@ -95,6 +97,7 @@ export function TextEditor({
         store.update(draft, current.state, measured);
       },
     });
+    editor.dom.style.fontSize = isMobile() ? "16px" : "13px";
     view.current = editor;
     sourceVersion.current = draft.sourceVersion;
     const keydown = (event: KeyboardEvent) => {
@@ -119,6 +122,10 @@ export function TextEditor({
     }),
     [],
   );
+  useLayoutEffect(() => {
+    const editor = view.current;
+    if (editor) resizeEditorFont(editor, mobile ? 16 : 13);
+  }, [mobile]);
   useLayoutEffect(() => {
     const editor = view.current;
     if (editor && draft.state && editor.state !== draft.state) {
@@ -212,7 +219,7 @@ export function TextEditor({
       )}
       <div
         ref={host}
-        className="isolate min-h-0 min-w-0 flex-1 overflow-hidden text-[13px] max-desk:min-h-12 max-desk:text-[16px]"
+        className="isolate min-h-0 min-w-0 flex-1 overflow-hidden max-desk:min-h-12"
         aria-label={t(($) => $.files.editor)}
       />
     </>
