@@ -7,21 +7,33 @@ import type { Credentials } from "./config.js";
 export function client(credentials: Credentials) {
   return createApiClient({
     newId: randomUUID,
-    request: (path, options, consume) =>
-      withServerResponse(
-        new URL(path, credentials.server),
-        {
-          ...options,
-          redirect: "error",
-          headers: {
-            ...options.headers,
-            origin: credentials.server,
-            authorization: `Bearer ${credentials.token}`,
+    request: async (path, options, consume) => {
+      try {
+        return await withServerResponse(
+          new URL(path, credentials.server),
+          {
+            ...options,
+            redirect: "error",
+            headers: {
+              ...options.headers,
+              origin: credentials.server,
+              authorization: `Bearer ${credentials.token}`,
+            },
+            signal: options.signal ?? AbortSignal.timeout(limits.interactionTimeout),
           },
-          signal: options.signal ?? AbortSignal.timeout(limits.interactionTimeout),
-        },
-        consume,
-      ),
+          consume,
+        );
+      } catch (error) {
+        if (error instanceof Error) {
+          let cause = error;
+          while (cause.cause instanceof Error) cause = cause.cause;
+          const detail = cause.message || (cause as NodeJS.ErrnoException).code;
+          // Keep the error type for createApiClient's outcome handling.
+          if (detail && detail !== error.message) error.message += `: ${detail}`;
+        }
+        throw error;
+      }
+    },
   });
 }
 

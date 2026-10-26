@@ -231,6 +231,41 @@ test("explicit stdin verifies the token before saving private credentials", asyn
   }
 });
 
+test("connection failures explain the cause for API reads and downloads", async () => {
+  const root = await directory();
+  const server = createServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as AddressInfo).port;
+  await new Promise<void>((resolve, reject) =>
+    server.close((error) => (error ? reject(error) : resolve())),
+  );
+  await save(root, `http://localhost:${port}`);
+  await writeFile(join(root, ".kiteline.json"), JSON.stringify({ device: "d", workspace: "w" }));
+  const status = await cli(root, ["auth", "status", "--json"], {
+    env: { NO_PROXY: "localhost", no_proxy: "localhost" },
+  });
+  expect(status.code).toBe(1);
+  expect(status.stderr).toBe("");
+  expect(JSON.parse(status.stdout)).toMatchObject({
+    outcome: "failed",
+    error: { code: "io_error", message: expect.stringContaining("ECONNREFUSED") },
+  });
+
+  const output = join(root, "download.bin");
+  const download = await cli(root, ["files", "download", "missing", "--output", output, "--json"], {
+    env: { KITELINE_URL: `http://127.0.0.1:${port}`, KITELINE_TOKEN: "saved-token" },
+  });
+  expect(download.code).toBe(1);
+  expect(download.stderr).toBe("");
+  const reply = JSON.parse(download.stdout);
+  expect(reply).toMatchObject({
+    outcome: "failed",
+    error: { code: "io_error", message: expect.stringContaining("ECONNREFUSED") },
+  });
+  expect(reply.error.message).toContain(`Download to ${JSON.stringify(output)} did not complete`);
+  expect(await readFile(output)).toEqual(Buffer.alloc(0));
+});
+
 test("rejected imports preserve the existing saved credential", async () => {
   const root = await directory();
   const server = await fixture((request, response) => {
