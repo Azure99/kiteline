@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { resourceDirectory } from "../node/paths.js";
 
 export type NativeHandle = object;
+export type JobStdio = "pipe" | "ignore";
 interface WindowsNative {
   identity(): {
     sid: string;
@@ -28,7 +29,7 @@ interface WindowsNative {
     command: string,
     cwd: string,
     environment: string,
-    stdio: number[],
+    stdio: [JobStdio, JobStdio, JobStdio],
     privateConsole: boolean,
   ): { handle: NativeHandle; pid: number; fds: [number, number, number] };
   jobResume(handle: NativeHandle): void;

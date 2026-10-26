@@ -114,10 +114,16 @@ export function devicePath(value: unknown) {
   );
 }
 
+const windowsFileAttributeDirectory = 0x10;
+const windowsFileAttributeReparsePoint = 0x400;
+const windowsReparseTagMountPoint = 0xa0000003;
+const windowsReparseTagSymlink = 0xa000000c;
+
 function windowsLinkType({ attributes, tag }: { attributes: number; tag: number }) {
-  if (!(attributes & 0x400)) return;
-  if (tag === 0xa0000003) return "junction";
-  if (tag === 0xa000000c) return attributes & 0x10 ? "dir" : "file";
+  if (!(attributes & windowsFileAttributeReparsePoint)) return;
+  if (tag === windowsReparseTagMountPoint) return "junction";
+  if (tag === windowsReparseTagSymlink)
+    return attributes & windowsFileAttributeDirectory ? "dir" : "file";
   return "unsupported";
 }
 
@@ -271,7 +277,12 @@ export async function readDirectoryEntry(
   return {
     name,
     path,
-    kind: linkTarget !== undefined ? "symlink" : info.attributes & 0x10 ? "directory" : "file",
+    kind:
+      linkTarget !== undefined
+        ? "symlink"
+        : info.attributes & windowsFileAttributeDirectory
+          ? "directory"
+          : "file",
     size: info.size,
     mtime: new Date(info.mtimeMs).toISOString(),
     ...(linkTarget !== undefined ? { linkTarget } : {}),

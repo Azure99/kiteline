@@ -1,8 +1,7 @@
 import { Socket } from "node:net";
 import { writeSync } from "node:fs";
-import { windowsNative, type NativeHandle } from "./native.js";
+import { windowsNative, type JobStdio, type NativeHandle } from "./native.js";
 
-type JobStdio = "pipe" | "inherit" | "ignore";
 interface JobOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
@@ -93,13 +92,12 @@ export class JobChild {
 
 export async function spawnJob(executable: string, args: string[], options: JobOptions = {}) {
   const native = windowsNative();
-  const modes = options.stdio ?? ["pipe", "pipe", "pipe"];
   const child = native.jobStart(
     executable,
     [executable, ...args].map(quote).join(" "),
     options.cwd ?? "",
     environmentBlock(options.env ?? process.env),
-    modes.map((mode) => ["pipe", "inherit", "ignore"].indexOf(mode)),
+    options.stdio ?? ["pipe", "pipe", "pipe"],
     options.privateConsole ?? false,
   );
   const streams: (Socket | undefined)[] = [];

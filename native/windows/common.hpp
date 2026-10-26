@@ -10,7 +10,10 @@
 #include <vector>
 
 namespace kiteline {
-struct WinError { DWORD code; const char *operation; };
+struct WinError {
+  DWORD code;
+  const char *operation;
+};
 inline void check(BOOL ok, const char *operation) {
   if (!ok) throw WinError{GetLastError(), operation};
 }
@@ -22,8 +25,15 @@ struct Handle {
   Handle &operator=(const Handle &) = delete;
   ~Handle() { reset(); }
   bool valid() const { return value && value != INVALID_HANDLE_VALUE; }
-  void reset(HANDLE next = nullptr) { if (valid()) CloseHandle(value); value = next; }
-  HANDLE take() { HANDLE result = value; value = nullptr; return result; }
+  void reset(HANDLE next = nullptr) {
+    if (valid()) CloseHandle(value);
+    value = next;
+  }
+  HANDLE take() {
+    HANDLE result = value;
+    value = nullptr;
+    return result;
+  }
 };
 inline void closeFd(int fd) {
   uv_fs_t request;
@@ -40,17 +50,24 @@ inline std::wstring string(napi_env env, napi_value value) {
 }
 inline napi_value text(napi_env env, const std::wstring &value) {
   napi_value result;
-  napi_create_string_utf16(env, reinterpret_cast<const char16_t *>(value.data()), value.size(), &result);
+  napi_create_string_utf16(
+    env, reinterpret_cast<const char16_t *>(value.data()), value.size(), &result);
   return result;
 }
 inline napi_value number(napi_env env, uint32_t value) {
-  napi_value result; napi_create_uint32(env, value, &result); return result;
+  napi_value result;
+  napi_create_uint32(env, value, &result);
+  return result;
 }
 inline napi_value boolean(napi_env env, bool value) {
-  napi_value result; napi_get_boolean(env, value, &result); return result;
+  napi_value result;
+  napi_get_boolean(env, value, &result);
+  return result;
 }
 inline napi_value nothing(napi_env env) {
-  napi_value result; napi_get_undefined(env, &result); return result;
+  napi_value result;
+  napi_get_undefined(env, &result);
+  return result;
 }
 inline std::vector<napi_value> arguments(napi_env env, napi_callback_info info, size_t count) {
   std::vector<napi_value> result(count);
@@ -65,24 +82,31 @@ template <class T> T *external(napi_env env, napi_value value) {
     throw std::invalid_argument("Invalid native resource");
   return static_cast<T *>(result);
 }
-template <class T> napi_value resource(napi_env env, std::unique_ptr<T> value) {
+template <class T> napi_value resource(napi_env env, std::unique_ptr<T> owner) {
   napi_value result;
-  if (napi_create_external(env, value.get(), [](napi_env, void *data, void *) {
-        delete static_cast<T *>(data);
-      }, nullptr, &result) != napi_ok) throw std::runtime_error("Could not export native resource");
-  value.release();
+  napi_status status = napi_create_external(
+    env, owner.get(),
+    [](napi_env, void *data, void *) { delete static_cast<T *>(data); },
+    nullptr, &result);
+  if (status != napi_ok) throw std::runtime_error("Could not export native resource");
+  owner.release();
   return result;
 }
 template <class F> napi_value call(napi_env env, F action) {
-  try { return action(); }
-  catch (const WinError &error) {
-    std::string message = std::string(error.operation) + ": Win32 error " + std::to_string(error.code);
-    napi_value value, messageValue;
+  try {
+    return action();
+  } catch (const WinError &error) {
+    std::string message =
+      std::string(error.operation) + ": Win32 error " + std::to_string(error.code);
+    napi_value errorValue;
+    napi_value messageValue;
     napi_create_string_utf8(env, message.c_str(), message.size(), &messageValue);
-    napi_create_error(env, nullptr, messageValue, &value);
-    napi_set_named_property(env, value, "win32Code", number(env, error.code));
-    napi_throw(env, value);
-  } catch (const std::exception &error) { napi_throw_error(env, nullptr, error.what()); }
+    napi_create_error(env, nullptr, messageValue, &errorValue);
+    napi_set_named_property(env, errorValue, "win32Code", number(env, error.code));
+    napi_throw(env, errorValue);
+  } catch (const std::exception &error) {
+    napi_throw_error(env, nullptr, error.what());
+  }
   return nullptr;
 }
 std::vector<BYTE> userSid();
