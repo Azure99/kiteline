@@ -14,5 +14,5 @@ export function PathField({ ref, ...props }: ComponentProps<typeof Textarea>) {
     input.addEventListener("beforeinput", handleBeforeInput);
     return () => input.removeEventListener("beforeinput", handleBeforeInput);
   }, []);
-  return <Textarea {...props} ref={field} enterKeyHint="done" />;
+  return <Textarea {...props} ref={field} autoCapitalize="none" enterKeyHint="done" />;
 }

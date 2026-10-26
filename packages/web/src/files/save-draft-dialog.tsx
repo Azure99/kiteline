@@ -52,7 +52,13 @@ export function SaveDraftDialog({
         if (!open) close();
       }}
     >
-      <DialogContent initialFocus={field}>
+      <DialogContent
+        initialFocus={() => {
+          const input = field.current!;
+          if (!draft.path) input.setSelectionRange(input.value.length, input.value.length);
+          return input;
+        }}
+      >
         <DialogHeader>
           <DialogTitle>
             {draft.path ? t(($) => $.files.saveAs) : t(($) => $.common.save)}
@@ -84,7 +90,6 @@ export function SaveDraftDialog({
               <PathField
                 ref={field}
                 aria-label={t(($) => $.files.savePath)}
-                autoCapitalize="none"
                 rows={2}
                 value={path}
                 onChange={(event) => setPath(event.target.value)}

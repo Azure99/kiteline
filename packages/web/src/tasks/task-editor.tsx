@@ -320,6 +320,8 @@ export function TaskEditor({
                   value={command}
                   required
                   onChange={(e) => setCommand(e.target.value)}
+                  autoCapitalize="off"
+                  autoCorrect="off"
                   spellCheck={false}
                 />
                 <p
