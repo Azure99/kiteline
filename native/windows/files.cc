@@ -41,8 +41,15 @@ static void executeFile(napi_env, void *data) {
       *reinterpret_cast<DWORD *>(info) = 3; // REPLACE_IF_EXISTS | POSIX_SEMANTICS
       info->FileNameLength = static_cast<DWORD>(length);
       std::memcpy(info->FileName, item.target.data(), length);
-      check(SetFileInformationByHandle(file.value, static_cast<FILE_INFO_BY_HANDLE_CLASS>(22),
-        info, static_cast<DWORD>(buffer.size())), "replace file atomically");
+      BOOL renamed = SetFileInformationByHandle(file.value,
+        static_cast<FILE_INFO_BY_HANDLE_CLASS>(22), info, static_cast<DWORD>(buffer.size()));
+      if (!renamed && GetLastError() == ERROR_INVALID_PARAMETER) {
+        // SMB can reject FileRenameInfoEx while supporting atomic FileRenameInfo.
+        info->ReplaceIfExists = TRUE;
+        renamed = SetFileInformationByHandle(file.value, FileRenameInfo,
+          info, static_cast<DWORD>(buffer.size()));
+      }
+      check(renamed, "replace file atomically");
     } else {
       check(GetFileInformationByHandleEx(file.value, FileAttributeTagInfo,
         &item.attributes, sizeof(item.attributes)), "read reparse attributes");
