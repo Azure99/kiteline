@@ -14,6 +14,9 @@ export default defineConfig({
   },
   oxc: { decorator: { legacy: true } },
   test: {
-    include: ["packages/{server,agent,terminal-recorder,web,cli}/test/**/*.test.ts"],
+    include: [
+      "packages/{server,agent,terminal-recorder,web,cli}/test/**/*.test.ts",
+      "scripts/**/*.test.mjs",
+    ],
   },
 });

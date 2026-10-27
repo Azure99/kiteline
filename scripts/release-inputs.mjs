@@ -16,6 +16,7 @@ import { dirname, join } from "node:path";
 export function run(command, args, options = {}) {
   const result = spawnSync(command, args, { stdio: "inherit", ...options });
   if (result.error) throw result.error;
+  if (result.signal) throw new Error(`${command} terminated by ${result.signal}`);
   if (result.status !== 0) throw new Error(`${command} exited with ${result.status}`);
   return result.stdout;
 }
