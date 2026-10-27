@@ -144,7 +144,7 @@ Task and run IDs stay unchanged throughout their records' lifetimes. Keep IDs fr
 See [kiteline-agent commands](reference.en.md#kiteline-agent-commands) for Windows invocation forms. To read the JSON list in PowerShell:
 
 ```powershell
-& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" schedule list --json | ConvertFrom-Json
+& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File (Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'kiteline-agent/kiteline-agent.ps1') schedule list --json | ConvertFrom-Json
 ```
 
 ### Let an AI CLI manage tasks

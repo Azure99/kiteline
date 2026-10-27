@@ -4,6 +4,7 @@ import { open } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { resourceDirectory } from "@kiteline/shared/node/paths";
+import { powershellQuote, renderValues, shellQuote } from "@kiteline/shared/template";
 import { AppError, appVersion } from "@kiteline/shared/protocol";
 import { closeIfBodyUnread } from "./http.js";
 
@@ -16,40 +17,32 @@ const windowsTemplate = readFileSync(
   resolve(resourceDirectory, "installer/windows-entry.in.ps1"),
   "utf8",
 );
-const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
-const psQuote = (value: string) => `'${value.replaceAll("'", "''")}'`;
-const windowsLauncher = "(Join-Path $env:ProgramData 'kiteline-agent/kiteline-agent.ps1')";
+const windowsLauncher =
+  "(Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'kiteline-agent/kiteline-agent.ps1')";
 const windowsShell =
   "(Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' }))";
 function powershellCommand(url: string, arguments_: string) {
-  return `& ([scriptblock]::Create((irm ${psQuote(url)} -ErrorAction Stop))) ${arguments_}`;
+  return `& ([scriptblock]::Create((irm ${powershellQuote(url)} -ErrorAction Stop))) ${arguments_}`;
 }
 function curlCommand(entryOrigin: string) {
   const protocols = entryOrigin.startsWith("https:") ? "=https" : "=http,https";
   return `curl -fsSL --proto '${protocols}' --proto-redir '${protocols}'`;
 }
 
-function fill(template: string, values: Record<string, string>) {
-  return template.replace(
-    new RegExp(Object.keys(values).join("|"), "g"),
-    (token) => values[token]!,
-  );
-}
-
 export function installationCommands(entryOrigin: string, code: string) {
-  const origin = quote(entryOrigin);
-  const bind = `kiteline-agent check && printf '%s\\n' ${quote(code)} | kiteline-agent bind --server ${origin} --if-unbound`;
+  const origin = shellQuote(entryOrigin);
+  const bind = `kiteline-agent check && printf '%s\\n' ${shellQuote(code)} | kiteline-agent bind --server ${origin} --if-unbound`;
   const install = (platform: "linux" | "macos") =>
-    `(kiteline_script=$(${curlCommand(entryOrigin)} ${quote(entryOrigin + "/connect.sh")}) && sh -c "$kiteline_script" -- ${platform} ${quote(code)})`;
+    `(kiteline_script=$(${curlCommand(entryOrigin)} ${shellQuote(entryOrigin + "/connect.sh")}) && sh -c "$kiteline_script" -- ${platform} ${shellQuote(code)})`;
   return {
     linux: { install: install("linux"), bind },
     macos: { install: install("macos"), bind },
     windows: {
       install: powershellCommand(
         entryOrigin + "/connect.ps1",
-        `-Version ${psQuote(appVersion)} -Code ${psQuote(code)}`,
+        `-Version ${powershellQuote(appVersion)} -Code ${powershellQuote(code)}`,
       ),
-      bind: `& ${windowsShell} -NoProfile -ExecutionPolicy Bypass -File ${windowsLauncher} check; if ($LASTEXITCODE -eq 0) { ${psQuote(code)} | & ${windowsShell} -NoProfile -ExecutionPolicy Bypass -File ${windowsLauncher} bind --server ${psQuote(entryOrigin)} --if-unbound }`,
+      bind: `& ${windowsShell} -NoProfile -ExecutionPolicy Bypass -File ${windowsLauncher} check; if ($LASTEXITCODE -eq 0) { ${powershellQuote(code)} | & ${windowsShell} -NoProfile -ExecutionPolicy Bypass -File ${windowsLauncher} bind --server ${powershellQuote(entryOrigin)} --if-unbound }`,
     },
   };
 }
@@ -57,44 +50,47 @@ export function installationCommands(entryOrigin: string, code: string) {
 function connectionScript(entryOrigin: string) {
   const values: Record<string, string> = {
     __KITELINE_CURL__: curlCommand(entryOrigin),
-    __KITELINE_INSTALL_URL__: quote(entryOrigin + "/install.sh"),
-    __KITELINE_ORIGIN__: quote(entryOrigin),
-    __KITELINE_VERSION__: quote(appVersion),
+    __KITELINE_INSTALL_URL__: shellQuote(entryOrigin + "/install.sh"),
+    __KITELINE_ORIGIN__: shellQuote(entryOrigin),
+    __KITELINE_VERSION__: shellQuote(appVersion),
   };
-  return fill(connectionTemplate, values);
+  return renderValues(connectionTemplate, values);
 }
 
 export function upgradeCommand(entryOrigin: string) {
   const unix = (platform: "linux" | "macos") =>
-    `(kiteline_script=$(${curlCommand(entryOrigin)} ${quote(entryOrigin + "/upgrade.sh")}) && sh -c "$kiteline_script" -- --version ${quote(appVersion)} --platform ${platform})`;
+    `(kiteline_script=$(${curlCommand(entryOrigin)} ${shellQuote(entryOrigin + "/upgrade.sh")}) && sh -c "$kiteline_script" -- --version ${shellQuote(appVersion)} --platform ${platform})`;
   return {
     version: appVersion,
     commands: {
       linux: unix("linux"),
       macos: unix("macos"),
-      windows: powershellCommand(entryOrigin + "/upgrade.ps1", `-Version ${psQuote(appVersion)}`),
+      windows: powershellCommand(
+        entryOrigin + "/upgrade.ps1",
+        `-Version ${powershellQuote(appVersion)}`,
+      ),
     },
   };
 }
 
 function windowsScript(entryOrigin: string, mode: "Connect" | "Upgrade") {
   const values: Record<string, string> = {
-    __KITELINE_VERSION__: psQuote(appVersion),
-    __KITELINE_INSTALL_URL__: psQuote(entryOrigin + "/install.ps1"),
+    __KITELINE_VERSION__: powershellQuote(appVersion),
+    __KITELINE_INSTALL_URL__: powershellQuote(entryOrigin + "/install.ps1"),
     __KITELINE_MODE__: mode,
-    __KITELINE_ORIGIN__: psQuote(entryOrigin),
+    __KITELINE_ORIGIN__: powershellQuote(entryOrigin),
   };
-  return fill(windowsTemplate, values);
+  return renderValues(windowsTemplate, values);
 }
 
 function upgradeScript(entryOrigin: string) {
   const values: Record<string, string> = {
-    __KITELINE_VERSION__: quote(appVersion),
+    __KITELINE_VERSION__: shellQuote(appVersion),
     __KITELINE_ARCHIVE_VERSION__: appVersion,
-    __KITELINE_DOWNLOAD_URL__: quote(entryOrigin + "/downloads/agent/" + appVersion + "/"),
+    __KITELINE_DOWNLOAD_URL__: shellQuote(entryOrigin + "/downloads/agent/" + appVersion + "/"),
     __KITELINE_CURL__: curlCommand(entryOrigin),
   };
-  return fill(upgradeTemplate, values);
+  return renderValues(upgradeTemplate, values);
 }
 
 export async function serveAgentInstallation(

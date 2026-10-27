@@ -6,3 +6,4 @@ const manifest = JSON.parse(readFileSync(resolve(sharedDirectory, "package.json"
 
 export const componentsDirectory = resolve(sharedDirectory, "..");
 export const resourceDirectory = resolve(sharedDirectory, manifest.kitelineResourceRoot);
+export const nativeDirectory = resolve(resourceDirectory, "dist/native");

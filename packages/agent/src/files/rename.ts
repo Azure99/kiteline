@@ -3,10 +3,10 @@ import { resolve, toNamespacedPath } from "node:path";
 import { rename } from "node:fs/promises";
 import { getSystemErrorName } from "node:util";
 import { OperationError } from "@kiteline/shared/protocol";
-import { resourceDirectory } from "@kiteline/shared/node/paths";
+import { nativeDirectory } from "@kiteline/shared/node/paths";
 import { windowsNative } from "@kiteline/shared/windows/native";
 
-const helper = resolve(resourceDirectory, "dist/native/bin/rename-noreplace");
+const helper = resolve(nativeDirectory, "bin/rename-noreplace");
 
 // A separate existence check cannot prevent rename from overwriting a concurrently created target.
 // The caller holds the publication lock until close; a started rename cannot be cancelled.

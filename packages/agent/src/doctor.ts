@@ -4,8 +4,7 @@ import { join } from "node:path";
 import { appVersion, terminalProfile, type Session } from "@kiteline/shared/protocol";
 import { windowsNative } from "@kiteline/shared/windows/native";
 import { stateFiles, type AgentConfig } from "./config.js";
-import { componentsDirectory } from "@kiteline/shared/node/paths";
-import { packageDirectory } from "./install/paths.js";
+import { componentsDirectory, nativeDirectory } from "@kiteline/shared/node/paths";
 import { checkComponents, checkHostEnvironment } from "./prerequisites.js";
 import type { ScheduledTasks } from "./tasks/index.js";
 import { toolCommand, windowsExecutable } from "./tools.js";
@@ -55,10 +54,9 @@ export async function diagnose(
     `data=${config.dataDir}; run=${config.runDir}; metadata=${join(config.dataDir, stateFiles.metadata)}; schedules=${join(config.dataDir, stateFiles.tasks)}`,
   );
   add("Node", `${process.execPath}; ${process.version} ${process.arch}; agent=${appVersion}`);
-  const native = join(packageDirectory, "dist/native");
   let nativeLinkage: string | undefined;
   await check("Native build", async () => {
-    const identity = JSON.parse(await readFile(join(native, "identity.json"), "utf8"));
+    const identity = JSON.parse(await readFile(join(nativeDirectory, "identity.json"), "utf8"));
     nativeLinkage = identity.linkage;
     return `tmux=${identity.tmux}; linkage=${nativeLinkage}`;
   });
@@ -73,7 +71,7 @@ export async function diagnose(
       await check(`${name} shared libraries`, async () => {
         if (nativeLinkage === "static-musl")
           return "Static musl; no host dynamic libraries required";
-        const result = await command("ldd", [join(native, "bin", name)]);
+        const result = await command("ldd", [join(nativeDirectory, "bin", name)]);
         if (result.includes("not found")) throw new Error(result);
         return result;
       });

@@ -151,13 +151,14 @@ $projectUser = 'PROJECT_USER'  # 替换为 C:\Users 下项目用户的目录名
 $service = "C:\Users\$projectUser\kiteline-service"
 New-Item -ItemType Directory -Force -Path $service
 Invoke-WebRequest -UseBasicParsing 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe' -OutFile "$service\kiteline-agent.exe"
-(Get-Content "$env:ProgramFiles\kiteline-agent\deploy\kiteline-agent.xml" -Raw).Replace('PROJECT_USER', $projectUser) |
+(Get-Content (Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'kiteline-agent/deploy/kiteline-agent.xml') -Raw).Replace('PROJECT_USER', $projectUser) |
   Set-Content "$service\kiteline-agent.xml" -Encoding utf8
 notepad "$service\kiteline-agent.xml"
 ```
 
 WinSW 按自身文件名查找配置，所以 `kiteline-agent.exe` 必须与 `kiteline-agent.xml` 同名并放在同一目录。在记事本中检查：
 
+- `arguments` 中的 `-File`：指向本机实际脚本入口，可用 `(Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'kiteline-agent/kiteline-agent.ps1')` 查询路径后填入 XML。
 - `PATH`：包含 Git 的 `cmd` 目录和项目工具所在的目录；使用 PowerShell 7 时也包含它的目录。
 - 数据和运行目录由安装记录提供，不要在 XML 中设置 `KITELINE_AGENT_HOME` 或 `KITELINE_AGENT_RUN_DIR`；沿用旧 XML 时，先确认 `%ProgramData%\kiteline-agent\installation.json` 的 `dataDir` 和 `runDir` 指向当前使用的目录，再删除这两项。
 - 代理：需要时加入 `<env name="HTTPS_PROXY" value="http://proxy.example.com:3128" />` 等行。
@@ -523,7 +524,7 @@ sudo /usr/local/bin/kiteline-agent uninstall
 Windows（管理员 PowerShell）：
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" uninstall
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'kiteline-agent/kiteline-agent.ps1') uninstall
 ```
 
 Windows 上两种模式都会从系统 PATH 中删除 `kiteline-agent` 的入口；已打开的窗口要重新打开。
@@ -537,7 +538,7 @@ sudo /usr/local/bin/kiteline-agent uninstall --purge
 ```
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" uninstall --purge
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'kiteline-agent/kiteline-agent.ps1') uninstall --purge
 ```
 
 `--purge` 还会删除 `/etc/kiteline-agent.env`、整个 agent 数据与运行目录（包括绑定、工作区登记、定时任务和运行记录）、协调锁和 agent 专用的空目录。检查命令列出的目录后输入 `yes` 确认；加 `--yes` 跳过确认。

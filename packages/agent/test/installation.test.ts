@@ -15,22 +15,17 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { agentLauncher } from "../../../scripts/agent-launcher.js";
-import {
-  installDirectory,
-  installationManagementFile,
-  installationUseFile,
-  lockFileDescriptor,
-  managementLockFd,
-} from "../src/install/paths.js";
+import { lockFileDescriptor } from "../src/install/paths.js";
 import { replaceProgram } from "../src/install/commands.js";
 import { lockAgentState } from "../src/state-lock.js";
+import { unixInstallationLayout } from "../src/install/layout.js";
 
 const cleanups: (() => Promise<unknown>)[] = [];
 const installedPaths = {
-  directory: installDirectory,
-  management: installationManagementFile,
-  managementFd: managementLockFd,
-  use: installationUseFile,
+  directory: unixInstallationLayout.directory,
+  management: unixInstallationLayout.managementFile,
+  managementFd: unixInstallationLayout.managementLockFd,
+  use: unixInstallationLayout.useFile,
 };
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
@@ -40,8 +35,8 @@ async function directory() {
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   return root;
 }
-function child(file: string, args: string[], env = process.env) {
-  const process = spawn(file, args, { env, stdio: ["pipe", "pipe", "pipe"] });
+function child(file: string, args: string[], env = process.env, cwd?: string) {
+  const process = spawn(file, args, { env, cwd, stdio: ["pipe", "pipe", "pipe"] });
   let output = "";
   process.stdout.on("data", (data) => {
     output += data.toString();
@@ -61,7 +56,7 @@ async function launcher(root: string, main: string) {
     directory: join(root, "program"),
     use: join(root, "use.lock"),
     management: join(root, "public/management.lock"),
-    managementFd: managementLockFd,
+    managementFd: unixInstallationLayout.managementLockFd,
   };
   await mkdir(join(paths.directory, "runtime/bin"), { recursive: true });
   await mkdir(join(paths.directory, "agent/dist"), { recursive: true });
@@ -69,45 +64,112 @@ async function launcher(root: string, main: string) {
   await writeFile(join(paths.directory, "agent/dist/main.js"), main);
   await writeFile(paths.use, "");
   const path = join(root, "kiteline-agent");
-  await writeFile(path, agentLauncher(paths.directory, paths));
+  await writeFile(path, agentLauncher(paths.directory, paths, "linux"));
   await chmod(path, 0o755);
   return { ...paths, path };
 }
 
-test("portable macOS launcher follows relative links and paths with spaces", async () => {
-  const root = await directory();
-  const source = join(root, "package with spaces");
-  await mkdir(join(source, "bin"), { recursive: true });
-  await mkdir(join(source, "runtime/bin"), { recursive: true });
-  await mkdir(join(source, "agent/dist"), { recursive: true });
-  await symlink(process.execPath, join(source, "runtime/bin/node"));
-  await writeFile(join(source, "agent/dist/main.js"), 'console.log("loaded " + process.argv[2]);');
-  await writeFile(
-    join(source, "bin/kiteline-agent"),
-    agentLauncher(undefined, installedPaths, "darwin"),
-    {
-      mode: 0o755,
-    },
-  );
-  await symlink("package with spaces/bin/kiteline-agent", join(root, "first"));
-  await symlink("first", join(root, "second"));
-  const running = child(join(root, "second"), ["--version"]);
-  expect((await running.closed)[0]).toBe(0);
-  expect(running.output()).toBe("loaded --version\n");
-});
+test.each([
+  ["linux", "portable"],
+  ["linux", "installed"],
+  ["darwin", "portable"],
+  ["darwin", "installed"],
+] as const)(
+  "%s %s launcher preserves paths and arguments through relative links",
+  async (platform, mode) => {
+    const root = await directory();
+    const source = join(root, "package with spaces, 'quotes' and $dollars");
+    await mkdir(join(source, "bin"), { recursive: true });
+    await mkdir(join(source, "runtime/bin"), { recursive: true });
+    await mkdir(join(source, "agent/dist"), { recursive: true });
+    await symlink(process.execPath, join(source, "runtime/bin/node"));
+    await writeFile(
+      join(source, "agent/dist/main.js"),
+      "console.log(JSON.stringify(process.argv.slice(2)));",
+    );
+    await writeFile(
+      join(source, "bin/kiteline-agent"),
+      agentLauncher(mode === "installed" ? source : undefined, installedPaths, platform),
+      {
+        mode: 0o755,
+      },
+    );
+    await symlink(
+      "package with spaces, 'quotes' and $dollars/bin/kiteline-agent",
+      join(root, "first"),
+    );
+    await symlink("first", join(root, "second"));
+    const args = ["argument with 'quotes' and $dollars", "", 'semi; and "double quotes"'];
+    for (const entry of [join(source, "bin/kiteline-agent"), join(root, "second")]) {
+      const running = child(entry, args);
+      expect((await running.closed)[0]).toBe(0);
+      expect(running.output()).toBe(`${JSON.stringify(args)}\n`);
+    }
+  },
+);
 
-test("portable macOS launcher stops when its entry cannot be resolved", async () => {
-  const root = await directory();
+async function unresolvedLauncher(root: string, platform: NodeJS.Platform) {
+  const paths = {
+    directory: join(root, "installed"),
+    management: join(root, "public/management.lock"),
+    managementFd: unixInstallationLayout.managementLockFd,
+    use: join(root, "use.lock"),
+  };
+  await mkdir(join(root, "runtime/bin"), { recursive: true });
+  await writeFile(
+    join(root, "runtime/bin/node"),
+    "#!/bin/sh\nprintf 'CWD_RUNTIME_EXECUTED\\n'\nexit 23\n",
+    { mode: 0o755 },
+  );
   const loop = join(root, "loop");
   await symlink("loop", loop);
-  const running = child("sh", [
-    "-c",
-    agentLauncher(undefined, installedPaths, "darwin"),
-    loop,
-    "--version",
-  ]);
-  expect((await running.closed)[0]).not.toBe(0);
-  expect(running.output()).not.toContain("runtime/bin/node");
+  return { script: agentLauncher(undefined, paths, platform), loop };
+}
+
+test.each(["linux", "darwin"] as const)(
+  "%s portable launcher stops when its entry cannot be resolved",
+  async (platform) => {
+    const root = await directory();
+    const entry = await unresolvedLauncher(root, platform);
+    const running = child("sh", ["-c", entry.script, entry.loop, "--version"], process.env, root);
+    expect((await running.closed)[0]).not.toBe(0);
+    expect(running.output()).not.toContain("CWD_RUNTIME_EXECUTED");
+  },
+);
+
+test.runIf(process.getuid?.() === 0).each(["linux", "darwin"] as const)(
+  "%s portable install stops before creating management paths when its entry cannot be resolved",
+  async (platform) => {
+    const root = await directory();
+    const entry = await unresolvedLauncher(root, platform);
+    const running = child("sh", ["-c", entry.script, entry.loop, "install"], process.env, root);
+    expect((await running.closed)[0]).not.toBe(0);
+    expect(running.output()).not.toContain("CWD_RUNTIME_EXECUTED");
+    await expect(access(join(root, "public"))).rejects.toMatchObject({ code: "ENOENT" });
+  },
+);
+
+test("portable launcher propagates a dirname failure without executing the cwd runtime", async () => {
+  const root = await directory();
+  const entry = await unresolvedLauncher(root, "linux");
+  const path = join(root, "bin/kiteline-agent");
+  const tools = join(root, "tools");
+  await mkdir(join(root, "bin"));
+  await mkdir(tools);
+  await writeFile(path, entry.script, { mode: 0o755 });
+  await writeFile(
+    join(tools, "dirname"),
+    '#!/bin/sh\n[ "$2" != "$TEST_ENTRY" ] || exit 41\ncommand -p dirname "$@"\n',
+    { mode: 0o755 },
+  );
+  const running = child(
+    path,
+    ["--version"],
+    { ...process.env, PATH: `${tools}:${process.env.PATH}`, TEST_ENTRY: path },
+    root,
+  );
+  expect((await running.closed)[0]).toBe(41);
+  expect(running.output()).not.toContain("CWD_RUNTIME_EXECUTED");
 });
 
 test("application state excludes another owner until cleanup releases it", async () => {
@@ -153,7 +215,7 @@ test.runIf(process.getuid?.() === 0).each([false, true])(
     const fs = require('node:fs');
     const { spawnSync } = require('node:child_process');
     process.on('SIGTERM', () => {});
-    if (spawnSync('flock', ['--exclusive', '--nonblock', '3'], {stdio:['ignore','ignore','ignore',${managementLockFd}]}).status !== 0) throw Error('management ownership lost');
+    if (spawnSync('flock', ['--exclusive', '--nonblock', '3'], {stdio:['ignore','ignore','ignore',${unixInstallationLayout.managementLockFd}]}).status !== 0) throw Error('management ownership lost');
     fs.unlinkSync(process.env.TEST_LAUNCHER);
     console.log('stdin=' + fs.readFileSync(0, 'utf8'));
     console.log('ready ' + __dirname);

@@ -3,7 +3,8 @@
   "compilerOptions": {
     "composite": false,
     "declaration": false,
-    "noEmit": true
+    "noEmit": true,
+    "allowImportingTsExtensions": true
   },
   "include": [
     "packages/agent/test/**/*.ts",

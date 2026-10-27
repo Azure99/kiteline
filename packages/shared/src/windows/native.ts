@@ -1,10 +1,14 @@
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
-import { resourceDirectory } from "../node/paths.js";
+import { nativeDirectory } from "../node/paths.js";
 
 export type NativeHandle = object;
 export type JobStdio = "pipe" | "ignore";
 interface WindowsNative {
+  installationDirectories(): {
+    programFiles: string;
+    programData: string;
+  };
   identity(): {
     sid: string;
     sessionId: number;
@@ -48,6 +52,6 @@ let binding: WindowsNative | undefined;
 export function windowsNative(): WindowsNative {
   if (process.platform !== "win32") throw new Error("Windows native API requires Windows");
   return (binding ??= createRequire(import.meta.url)(
-    resolve(resourceDirectory, "dist/native/kiteline-windows.node"),
+    resolve(nativeDirectory, "kiteline-windows.node"),
   ) as WindowsNative);
 }

@@ -31,6 +31,15 @@ static std::wstring folder(REFKNOWNFOLDERID id) {
   CoTaskMemFree(folderPath);
   return result;
 }
+static napi_value installationDirectories(napi_env env, napi_callback_info) {
+  return call(env, [&] {
+    napi_value result;
+    napi_create_object(env, &result);
+    napi_set_named_property(env, result, "programFiles", text(env, folder(FOLDERID_ProgramFiles)));
+    napi_set_named_property(env, result, "programData", text(env, folder(FOLDERID_ProgramData)));
+    return result;
+  });
+}
 static napi_value identity(napi_env env, napi_callback_info) {
   return call(env, [&] {
     auto sid = userSid();
@@ -123,6 +132,7 @@ static napi_value closeHandle(napi_env env, napi_callback_info info) {
 }
 void exportSystem(napi_env env, napi_value exports) {
   napi_property_descriptor properties[] = {
+    {"installationDirectories", nullptr, installationDirectories, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"identity", nullptr, identity, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"privateDirectory", nullptr, privateDirectory, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"lock", nullptr, lock, nullptr, nullptr, nullptr, napi_default, nullptr},

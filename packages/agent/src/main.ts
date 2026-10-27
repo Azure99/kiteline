@@ -16,7 +16,7 @@ const usage =
 Windows maintenance (PowerShell):
   powershell.exe -NoProfile -ExecutionPolicy Bypass -File NEW_PACKAGE\\bin\\kiteline-agent.ps1 install --user USER
   powershell.exe -NoProfile -ExecutionPolicy Bypass -File NEW_PACKAGE\\bin\\kiteline-agent.ps1 upgrade --archive RELEASE.zip
-  powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\\kiteline-agent\\kiteline-agent.ps1" uninstall`
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'kiteline-agent/kiteline-agent.ps1') uninstall`
     : `Usage: kiteline-agent install --user USER | upgrade --archive RELEASE.tar.gz | uninstall | ${commands}`;
 
 async function runAgent() {

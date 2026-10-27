@@ -36,10 +36,10 @@ The Docker image's `ENTRYPOINT` is `kiteline-server`, with default argument `ser
 On Linux and macOS, the public launcher is `/usr/local/bin/kiteline-agent`; use this absolute path with `sudo`. On Windows, run `kiteline-agent` directly for daily commands. Installation, upgrades and uninstallation use separate PowerShell commands; see [Upgrade the agent](devices.en.md#upgrade-the-agent) and [Uninstall](devices.en.md#uninstall). You can also use the full script entry for complex arguments, for example:
 
 ```powershell
-& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" doctor
+& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File (Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'kiteline-agent/kiteline-agent.ps1') doctor
 ```
 
-Both entries relax execution policy only for the child process without changing persistent settings; Group Policy still takes precedence. Direct `& "$env:ProgramData\kiteline-agent\kiteline-agent.ps1"` invocation is for console interaction, requires a policy that permits local scripts, and does not send output into the PowerShell pipeline. Use the full invocation above for capture, pipelines or redirection.
+Both entries relax execution policy only for the child process without changing persistent settings; Group Policy still takes precedence. Direct `& (Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'kiteline-agent/kiteline-agent.ps1')` invocation is for console interaction, requires a policy that permits local scripts, and does not send output into the PowerShell pipeline. Use the full invocation above for capture, pipelines or redirection.
 
 Running `kiteline-agent` with no arguments, or with `--help` or `-h` alone, prints a subcommand summary; `--version` alone prints its version. Unknown top-level commands or extra arguments to root help/version, `check`, `run`, or `doctor` report an error and exit with a nonzero status. Only `schedule` and its subcommands provide `--help`. Other subcommands have no `--help`; their arguments are listed below.
 
@@ -285,6 +285,8 @@ General device operations include file listing and renaming, Git reads, schedule
 See [Uninstall](devices.en.md#uninstall) for files retained after removal. If upgrading fails and the old programs cannot be restored automatically, output identifies the backup directory retained under `/opt`.
 
 ### Agent on Windows
+
+`%ProgramFiles%` and `%ProgramData%` in this table refer to Windows system directories. Installation and command entries query them through system APIs; changing the environment variables does not change the installation location.
 
 | Path                                                       | Content                                                     |
 | ---------------------------------------------------------- | ----------------------------------------------------------- |

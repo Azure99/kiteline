@@ -12,12 +12,12 @@ function Invoke-KitelineAgent {
         throw 'Windows x64 and Windows PowerShell 5.1 or PowerShell 7.4+ are required'
     }
     if ($PSVersionTable.PSVersion.Major -eq 5) { Add-Type -AssemblyName System.IO.Compression.FileSystem }
-    $program = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'kiteline-agent'
-    $management = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'kiteline-agent'
-    $root = __KITELINE_PACKAGE_ROOT__
+    $program = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) __KITELINE_DIRECTORY_NAME__
+    $management = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) __KITELINE_DIRECTORY_NAME__
+    $root = if (__KITELINE_MODE__ -eq 'installed') { $program } else { [IO.Directory]::GetParent($PSScriptRoot).FullName }
     $installed = $root.Equals($program, [StringComparison]::OrdinalIgnoreCase)
     $public = Join-Path $management 'kiteline-agent.ps1'
-    $recordFile = Join-Path $management 'installation.json'
+    $recordFile = Join-Path $management __KITELINE_RECORD_FILE__
     $useFile = Join-Path $management 'use.lock'
     $required = __KITELINE_REQUIRED_FILES__
     $nativeSource = @'

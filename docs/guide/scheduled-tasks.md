@@ -144,7 +144,7 @@ kiteline-agent schedule output RUN_ID --stream stdout --offset 0 --json
 Windows 上的调用方式见 [kiteline-agent 命令](reference.md#kiteline-agent-命令)。在 PowerShell 中读取 JSON 列表：
 
 ```powershell
-& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" schedule list --json | ConvertFrom-Json
+& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File (Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'kiteline-agent/kiteline-agent.ps1') schedule list --json | ConvertFrom-Json
 ```
 
 ### 让 AI CLI 管理任务

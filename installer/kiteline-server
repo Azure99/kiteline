@@ -1,4 +1,6 @@
 #!/bin/sh
 set -eu
-kiteline_root=$(dirname -- "$(dirname -- "$(readlink -f -- "$0")")")
+kiteline_entry=$(readlink -f -- "$0")
+kiteline_root=$(dirname -- "$kiteline_entry")
+kiteline_root=$(dirname -- "$kiteline_root")
 exec "$kiteline_root/runtime/bin/node" "$kiteline_root/server/dist/main.js" "$@"

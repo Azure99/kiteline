@@ -4,32 +4,10 @@ import { open, readFile, stat } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { parseEnv } from "node:util";
 import { asError } from "@kiteline/shared/protocol";
-import { resourceDirectory } from "@kiteline/shared/node/paths";
+import { nativeDirectory, resourceDirectory } from "@kiteline/shared/node/paths";
 import { windowsNative } from "@kiteline/shared/windows/native";
+import { unixInstallationLayout, windowsInstallationLayout } from "./layout.js";
 
-export const packageDirectory = resourceDirectory;
-export const managementLockFd = 9;
-const windows = process.platform === "win32";
-const windowsManagement = windows ? resolve(process.env.ProgramData!, "kiteline-agent") : "";
-export const installDirectory = windows
-  ? resolve(process.env.ProgramFiles!, "kiteline-agent")
-  : "/opt/kiteline-agent";
-export const installationUseFile = windows
-  ? resolve(windowsManagement, "use.lock")
-  : "/opt/.kiteline-agent-use.lock";
-export const installationFile = windows
-  ? resolve(windowsManagement, "installation.json")
-  : "/etc/kiteline-agent.json";
-export const environmentFile = "/etc/kiteline-agent.env";
-export const installationManagementFile = windows
-  ? resolve(windowsManagement, "management.lock")
-  : "/opt/.kiteline-agent-install.lock";
-export const launcherFile = windows
-  ? resolve(windowsManagement, "kiteline-agent.ps1")
-  : "/usr/local/bin/kiteline-agent";
-const installedProgram = windows
-  ? packageDirectory.toLowerCase() === installDirectory.toLowerCase()
-  : packageDirectory === installDirectory;
 export interface Installation {
   user: string;
   uid: number;
@@ -37,8 +15,7 @@ export interface Installation {
   home: string;
 }
 export async function lockFileDescriptor(fd: number) {
-  const flock =
-    process.platform === "darwin" ? resolve(packageDirectory, "dist/native/bin/flock") : "flock";
+  const flock = process.platform === "darwin" ? resolve(nativeDirectory, "bin/flock") : "flock";
   await new Promise<void>((resolve, reject) => {
     const child = spawn(flock, ["--exclusive", "--nonblock", "3"], {
       stdio: ["ignore", "ignore", "ignore", fd],
@@ -58,7 +35,7 @@ export async function lockFileDescriptor(fd: number) {
   });
 }
 export async function lockInstallation() {
-  const file = await open(installationUseFile, "r");
+  const file = await open(unixInstallationLayout.useFile, "r");
   try {
     // flock locks the shared open file description; Node retains it after the helper exits.
     await lockFileDescriptor(file.fd);
@@ -77,24 +54,26 @@ export async function lockInstallation() {
   }
 }
 export async function lockInstallationManagement() {
-  const expected = await stat(installationManagementFile).catch((error: NodeJS.ErrnoException) => {
-    if (error.code !== "ENOENT") throw error;
-    return undefined;
-  });
+  const expected = await stat(unixInstallationLayout.managementFile).catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code !== "ENOENT") throw error;
+      return undefined;
+    },
+  );
   let inherited;
   try {
-    inherited = fstatSync(managementLockFd);
+    inherited = fstatSync(unixInstallationLayout.managementLockFd);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EBADF") throw error;
   }
   if (expected && inherited?.dev === expected.dev && inherited.ino === expected.ino) {
-    return { close: async () => closeSync(managementLockFd) };
+    return { close: async () => closeSync(unixInstallationLayout.managementLockFd) };
   }
   throw new Error("Management lock was not inherited; use the public kiteline-agent launcher");
 }
 export async function readInstallation(): Promise<Installation | undefined> {
   try {
-    const value = JSON.parse(await readFile(installationFile, "utf8"));
+    const value = JSON.parse(await readFile(unixInstallationLayout.recordFile, "utf8"));
     if (
       !value ||
       typeof value !== "object" ||
@@ -112,7 +91,9 @@ export async function readInstallation(): Promise<Installation | undefined> {
     return value as Installation;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT")
-      throw new Error(`${installationFile}: ${asError(error).message}`, { cause: error });
+      throw new Error(`${unixInstallationLayout.recordFile}: ${asError(error).message}`, {
+        cause: error,
+      });
   }
 }
 export function applicationPaths(home: string, dataOverride?: string, runOverride?: string) {
@@ -125,7 +106,7 @@ export async function installationPaths(
 ) {
   let environment: NodeJS.Dict<string> = {};
   try {
-    const source = await readFile(environmentFile, "utf8");
+    const source = await readFile(unixInstallationLayout.environmentFile, "utf8");
     environment = parseEnv(source);
     for (const key of ["KITELINE_AGENT_HOME", "KITELINE_AGENT_RUN_DIR"]) {
       if (environment[key] === undefined) continue;
@@ -138,7 +119,7 @@ export async function installationPaths(
         !isAbsolute(environment[key]!)
       )
         throw new Error(
-          `${environmentFile}: ${key} must be a single-line absolute path in double quotes, for example ${key}="/var/lib/kiteline", without escapes or trailing comments`,
+          `${unixInstallationLayout.environmentFile}: ${key} must be a single-line absolute path in double quotes, for example ${key}="/var/lib/kiteline", without escapes or trailing comments`,
         );
     }
   } catch (error) {
@@ -151,8 +132,18 @@ export async function installationPaths(
   );
 }
 export async function installedPaths() {
-  if (!installedProgram) return;
-  if (windows) {
+  if (process.platform === "win32") {
+    const directories = windowsNative().installationDirectories();
+    const programDirectory = resolve(
+      directories.programFiles,
+      windowsInstallationLayout.directoryName,
+    );
+    if (resourceDirectory.toLowerCase() !== programDirectory.toLowerCase()) return;
+    const installationFile = resolve(
+      directories.programData,
+      windowsInstallationLayout.directoryName,
+      windowsInstallationLayout.recordFile,
+    );
     const installation = JSON.parse(await readFile(installationFile, "utf8"));
     if (windowsNative().identity().sid !== installation.sid)
       throw new Error(`Use project user ${installation.user} to run this command`);
@@ -165,8 +156,10 @@ export async function installedPaths() {
         throw new Error(`Broken installation: ${name} must be an absolute Windows path`);
     return { dataDir: resolve(values.dataDir), runDir: resolve(values.runDir) };
   }
+  if (resourceDirectory !== unixInstallationLayout.directory) return;
   const installation = await readInstallation();
-  if (!installation) throw new Error(`Broken installation: ${installationFile} is missing`);
+  if (!installation)
+    throw new Error(`Broken installation: ${unixInstallationLayout.recordFile} is missing`);
   if (process.getuid?.() !== installation.uid)
     throw new Error(`Use project user ${installation.user} to run this command`);
   return installationPaths(installation, {

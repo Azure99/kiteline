@@ -3,7 +3,8 @@ import fs from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { TemporaryFiles } from "../src/files/temporary.js";
-import { installationFile, readInstallation } from "../src/install/paths.js";
+import { readInstallation } from "../src/install/paths.js";
+import { unixInstallationLayout } from "../src/install/layout.js";
 
 test("unreadable temporary records are logged and ignored; readable residual paths are removed", async () => {
   const root = await fs.mkdtemp("/var/tmp/kiteline-temporary-records-");
@@ -56,7 +57,10 @@ test("installation records distinguish a missing file from damaged current data"
   const reader = vi
     .spyOn(fs, "readFile")
     .mockImplementation(((file, options) =>
-      read(file === installationFile ? path : file, options)) as typeof fs.readFile);
+      read(
+        file === unixInstallationLayout.recordFile ? path : file,
+        options,
+      )) as typeof fs.readFile);
   syncBuiltinESMExports();
   try {
     expect(await readInstallation()).toBeUndefined();
@@ -73,7 +77,7 @@ test("installation records distinguish a missing file from damaged current data"
       JSON.stringify({ ...value, home: "relative" }),
     ]) {
       await fs.writeFile(path, content);
-      await expect(readInstallation()).rejects.toThrow(installationFile);
+      await expect(readInstallation()).rejects.toThrow(unixInstallationLayout.recordFile);
       expect(await fs.readFile(path, "utf8")).toBe(content);
     }
   } finally {

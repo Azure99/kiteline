@@ -8,6 +8,7 @@
     "licenses"
   ],
   "exports": {
+    "./template": "./dist/template.js",
     "./protocol": "./dist/protocol/index.js",
     "./protocol/navigation": "./dist/protocol/navigation.js",
     "./protocol/ipc": "./dist/protocol/ipc.js",

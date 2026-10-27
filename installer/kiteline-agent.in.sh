@@ -1,8 +1,18 @@
 #!/bin/sh
 # The shell parses the whole function before maintenance replaces or removes the launcher.
 kiteline_main() {
-  __KITELINE_ROOT__
-  kiteline_flock=__KITELINE_FLOCK__
+  if [ __KITELINE_MODE__ = installed ]; then
+    kiteline_root=__KITELINE_SOURCE__
+  else
+    kiteline_entry=$(readlink -f -- "$0") || return
+    kiteline_root=$(dirname -- "$kiteline_entry") || return
+    kiteline_root=$(dirname -- "$kiteline_root") || return
+  fi
+  if [ __KITELINE_PLATFORM__ = darwin ]; then
+    kiteline_flock="$kiteline_root/dist/native/bin/flock"
+  else
+    kiteline_flock=flock
+  fi
   kiteline_installed=__KITELINE_INSTALLED__
   kiteline_management=__KITELINE_MANAGEMENT__
   kiteline_use=__KITELINE_USE__

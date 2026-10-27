@@ -1,57 +1,47 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { powershellQuote, renderValues, shellQuote } from "../packages/shared/src/template.ts";
 
 const template = readFileSync(
   new URL("../installer/kiteline-agent.in.sh", import.meta.url),
   "utf8",
 );
-const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
-
 export function windowsCliLauncher(terminalReset: Buffer) {
-  return readFileSync(new URL("../installer/kiteline.ps1", import.meta.url), "utf8").replace(
-    "__TERMINAL_RESET_BASE64__",
-    terminalReset.toString("base64"),
-  );
+  return renderValues(readFileSync(new URL("../installer/kiteline.ps1", import.meta.url), "utf8"), {
+    __TERMINAL_RESET_BASE64__: terminalReset.toString("base64"),
+  });
 }
 
 export function agentLauncher(
   source: string | undefined,
   paths: { directory: string; management: string; managementFd: number; use: string },
-  platform: NodeJS.Platform = process.platform,
+  platform: NodeJS.Platform,
 ) {
-  const macos = platform === "darwin";
-  const root = source
-    ? `kiteline_root=${quote(source)}`
-    : macos
-      ? `kiteline_entry=$(readlink -f -- "$0") || return
-  kiteline_root=$(dirname -- "$(dirname -- "$kiteline_entry")")`
-      : 'kiteline_root=$(dirname -- "$(dirname -- "$(readlink -f -- "$0")")")';
-  const values: Record<string, string> = {
-    __KITELINE_ROOT__: root,
-    __KITELINE_FLOCK__: macos ? '"$kiteline_root/dist/native/bin/flock"' : "flock",
-    __KITELINE_INSTALLED__: quote(paths.directory),
-    __KITELINE_MANAGEMENT__: quote(paths.management),
+  return renderValues(template, {
+    __KITELINE_MODE__: shellQuote(source ? "installed" : "portable"),
+    __KITELINE_SOURCE__: shellQuote(source ?? ""),
+    __KITELINE_PLATFORM__: shellQuote(platform),
+    __KITELINE_INSTALLED__: shellQuote(paths.directory),
+    __KITELINE_MANAGEMENT__: shellQuote(paths.management),
     __KITELINE_MANAGEMENT_FD__: String(paths.managementFd),
-    __KITELINE_USE__: quote(paths.use),
-  };
-  return template.replace(
-    /__KITELINE_(ROOT|FLOCK|INSTALLED|MANAGEMENT|MANAGEMENT_FD|USE)__/g,
-    (token) => values[token]!,
-  );
+    __KITELINE_USE__: shellQuote(paths.use),
+  });
 }
 
 export function windowsAgentLaunchers({
   runtimeFiles,
   nodeEnvironmentKeys,
+  layout,
 }: {
   runtimeFiles: readonly string[];
   nodeEnvironmentKeys: readonly string[];
+  layout: { directoryName: string; recordFile: string };
 }) {
-  const nativeSource = readFileSync(
-    new URL("../installer/launcher.in.cs", import.meta.url),
-    "utf8",
-  );
-  const type = `KitelineLauncher_${createHash("sha256").update(nativeSource).digest("hex").slice(0, 16)}`;
+  const nativeTemplate = readFileSync(new URL("../installer/launcher.in.cs", import.meta.url));
+  const type = `KitelineLauncher_${createHash("sha256").update(nativeTemplate).digest("hex").slice(0, 16)}`;
+  const nativeSource = renderValues(nativeTemplate.toString("utf8"), {
+    __KITELINE_LAUNCHER_TYPE__: type,
+  });
   const required = [
     "SHA256SUMS",
     "release.json",
@@ -69,21 +59,23 @@ export function windowsAgentLaunchers({
     "dist/native/identity.json",
     ...runtimeFiles,
   ];
-  const literal = (value: string) => `'${value.replaceAll("'", "''")}'`;
-  const list = (values: readonly string[]) => "@(" + values.map(literal).join(",") + ")";
+  const list = (values: readonly string[]) => "@(" + values.map(powershellQuote).join(",") + ")";
   const template = readFileSync(
     new URL("../installer/kiteline-agent.in.ps1", import.meta.url),
     "utf8",
-  )
-    .replace("__KITELINE_REQUIRED_FILES__", list(required))
-    .replace("__KITELINE_NODE_ENVIRONMENT_KEYS__", list(nodeEnvironmentKeys))
-    .replace("__KITELINE_NATIVE_SOURCE__", nativeSource)
-    .replaceAll("__KITELINE_LAUNCHER_TYPE__", type);
+  );
+  const render = (mode: "portable" | "installed") =>
+    renderValues(template, {
+      __KITELINE_MODE__: powershellQuote(mode),
+      __KITELINE_DIRECTORY_NAME__: powershellQuote(layout.directoryName),
+      __KITELINE_RECORD_FILE__: powershellQuote(layout.recordFile),
+      __KITELINE_REQUIRED_FILES__: list(required),
+      __KITELINE_NODE_ENVIRONMENT_KEYS__: list(nodeEnvironmentKeys),
+      __KITELINE_NATIVE_SOURCE__: nativeSource,
+      __KITELINE_LAUNCHER_TYPE__: type,
+    });
   return {
-    portable: template.replace(
-      "__KITELINE_PACKAGE_ROOT__",
-      "[IO.Directory]::GetParent($PSScriptRoot).FullName",
-    ),
-    installed: template.replace("__KITELINE_PACKAGE_ROOT__", "$program"),
+    portable: render("portable"),
+    installed: render("installed"),
   };
 }

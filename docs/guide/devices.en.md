@@ -151,13 +151,14 @@ $projectUser = 'PROJECT_USER'  # Replace with the project user's directory name 
 $service = "C:\Users\$projectUser\kiteline-service"
 New-Item -ItemType Directory -Force -Path $service
 Invoke-WebRequest -UseBasicParsing 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe' -OutFile "$service\kiteline-agent.exe"
-(Get-Content "$env:ProgramFiles\kiteline-agent\deploy\kiteline-agent.xml" -Raw).Replace('PROJECT_USER', $projectUser) |
+(Get-Content (Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'kiteline-agent/deploy/kiteline-agent.xml') -Raw).Replace('PROJECT_USER', $projectUser) |
   Set-Content "$service\kiteline-agent.xml" -Encoding utf8
 notepad "$service\kiteline-agent.xml"
 ```
 
 WinSW finds configuration by its own filename, so `kiteline-agent.exe` and `kiteline-agent.xml` must share a basename and directory. Check in Notepad:
 
+- `-File` in `arguments`: point it to the actual script entry on this machine. Run `(Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'kiteline-agent/kiteline-agent.ps1')` to get the path, then enter it in the XML.
 - `PATH`: include Git's `cmd` directory and your project tools; include the PS7 directory when using it.
 - Data and runtime directories come from the installation record; do not set `KITELINE_AGENT_HOME` or `KITELINE_AGENT_RUN_DIR` in the XML. When reusing an older XML, first confirm that `dataDir` and `runDir` in `%ProgramData%\kiteline-agent\installation.json` point to the directories currently in use, then remove those two entries.
 - Proxy: add lines such as `<env name="HTTPS_PROXY" value="http://proxy.example.com:3128" />` as needed.
@@ -523,7 +524,7 @@ sudo /usr/local/bin/kiteline-agent uninstall
 On Windows, in administrator PowerShell:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" uninstall
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'kiteline-agent/kiteline-agent.ps1') uninstall
 ```
 
 On Windows, both modes remove the `kiteline-agent` entry from the system PATH; reopen existing windows.
@@ -537,7 +538,7 @@ sudo /usr/local/bin/kiteline-agent uninstall --purge
 ```
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" uninstall --purge
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'kiteline-agent/kiteline-agent.ps1') uninstall --purge
 ```
 
 `--purge` also removes `/etc/kiteline-agent.env`, the entire agent data and runtime directories (including binding, workspace registrations, scheduled tasks and run records), coordination locks and empty agent-owned directories. Check the directories listed by the command, then type `yes` to confirm; add `--yes` to skip confirmation.

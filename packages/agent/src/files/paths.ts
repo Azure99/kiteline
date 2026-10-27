@@ -22,7 +22,7 @@ import {
   string,
   type Entry,
 } from "@kiteline/shared/protocol";
-import { resourceDirectory } from "@kiteline/shared/node/paths";
+import { nativeDirectory } from "@kiteline/shared/node/paths";
 import { windowsNative } from "@kiteline/shared/windows/native";
 
 const operatingSystem =
@@ -41,7 +41,7 @@ export function entryName(value: unknown): string {
   return checkEntryName(value, operatingSystem);
 }
 
-const nameHelper = resolve(resourceDirectory, "dist/native/bin/entry-name");
+const nameHelper = resolve(nativeDirectory, "bin/entry-name");
 
 async function storedName(path: string, signal?: AbortSignal) {
   let output: Buffer;

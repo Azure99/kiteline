@@ -3,23 +3,24 @@ import { resolve } from "node:path";
 import { finished } from "node:stream/promises";
 import { AppError, limits } from "../protocol/index.js";
 import type { CreateTerminal } from "../protocol/ipc.js";
-import { resourceDirectory } from "../node/paths.js";
+import { nativeDirectory } from "../node/paths.js";
+import { shellQuote } from "../template.js";
 import { JobChild, spawnJob } from "../windows/job.js";
 
 export const tmuxSession = "kiteline";
-export const msysDirectory = resolve(resourceDirectory, "dist/native/msys");
+export const msysDirectory = resolve(nativeDirectory, "msys");
 export const tmuxBinary =
   process.platform === "win32"
     ? resolve(msysDirectory, "usr/bin/tmux.exe")
-    : resolve(resourceDirectory, "dist/native/bin/tmux");
+    : resolve(nativeDirectory, "bin/tmux");
 export const ptyBridgeBinary =
   process.platform === "win32"
     ? resolve(msysDirectory, "usr/bin/pty-bridge.exe")
-    : resolve(resourceDirectory, "dist/native/bin/pty-bridge");
+    : resolve(nativeDirectory, "bin/pty-bridge");
 export const terminfoDirectory =
   process.platform === "win32"
     ? resolve(msysDirectory, "usr/share/terminfo")
-    : resolve(resourceDirectory, "dist/native/share/terminfo");
+    : resolve(nativeDirectory, "share/terminfo");
 
 export function msysPath(path: string) {
   return path.replaceAll("\\", "/");
@@ -36,7 +37,7 @@ export function tmuxAttachArgs(socket: string) {
   ];
 }
 export function shellWords(args: string[]) {
-  return args.map((value) => "'" + value.replaceAll("'", "'\\''") + "'").join(" ");
+  return args.map(shellQuote).join(" ");
 }
 export const nodeEnvironmentKeys = [
   "NODE_OPTIONS",

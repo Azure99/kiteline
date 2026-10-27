@@ -5,7 +5,7 @@ import { terminfoDirectory, tmuxBinary, tmuxEnvironment } from "@kiteline/shared
 import { windowsNative } from "@kiteline/shared/windows/native";
 import { asError } from "@kiteline/shared/protocol";
 import { agentConfig, privateDirectory } from "./config.js";
-import { packageDirectory } from "./install/paths.js";
+import { nativeDirectory } from "@kiteline/shared/node/paths";
 import { checkRunDir } from "./terminal/sessions.js";
 import { ripgrepBinary, toolCommand } from "./tools.js";
 
@@ -14,9 +14,7 @@ type Check = (name: string, action: () => Promise<string>) => Promise<void>;
 const gitRequirement = { file: "git", major: 2, minor: 23 };
 
 async function checkBundledRipgrep(command: Command) {
-  const identity = JSON.parse(
-    await readFile(join(packageDirectory, "dist/native/identity.json"), "utf8"),
-  );
+  const identity = JSON.parse(await readFile(join(nativeDirectory, "identity.json"), "utf8"));
   const { ripgrep } = identity;
   const line = (await command(ripgrepBinary, ["--version"])).split("\n")[0]!;
   const version = /^ripgrep (\S+)/.exec(line)?.[1];
@@ -80,19 +78,18 @@ async function checkFileHelper(path: string, command: Command) {
 export async function checkComponents(check: Check, command: Command) {
   const windows = process.platform === "win32";
   const macos = process.platform === "darwin";
-  const native = join(packageDirectory, "dist/native");
   await check("Bundled ripgrep", () => checkBundledRipgrep(command));
   await check("Bundled tmux", () => command(tmuxBinary, ["-V"], tmuxEnvironment()));
   await check("Bundled file helper", async () => {
-    if (!windows) return checkFileHelper(join(native, "bin/rename-noreplace"), command);
-    await windowsNative().fileAttributes(native);
+    if (!windows) return checkFileHelper(join(nativeDirectory, "bin/rename-noreplace"), command);
+    await windowsNative().fileAttributes(nativeDirectory);
     return "Windows native filesystem API is loadable";
   });
   if (macos) {
     await check("Bundled entry name helper", () =>
-      checkFileHelper(join(native, "bin/entry-name"), command),
+      checkFileHelper(join(nativeDirectory, "bin/entry-name"), command),
     );
-    await check("flock", () => command(join(native, "bin/flock"), ["--version"]));
+    await check("flock", () => command(join(nativeDirectory, "bin/flock"), ["--version"]));
   }
 }
 

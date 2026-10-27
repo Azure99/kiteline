@@ -36,10 +36,10 @@ Docker 镜像的 `ENTRYPOINT` 是 `kiteline-server`，默认参数是 `serve`，
 Linux 和 macOS 的命令入口是 `/usr/local/bin/kiteline-agent`；用 `sudo` 执行时写这个绝对路径。Windows 上日常命令直接执行 `kiteline-agent`；安装、升级和卸载使用独立的 PowerShell 命令，见[升级 agent](devices.md#升级-agent)和[卸载](devices.md#卸载)。参数复杂时也可以调用完整脚本入口，例如：
 
 ```powershell
-& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\kiteline-agent\kiteline-agent.ps1" doctor
+& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File (Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'kiteline-agent/kiteline-agent.ps1') doctor
 ```
 
-两种入口都只为子进程放宽执行策略，不修改持久设置，组策略仍优先。直接用 `& "$env:ProgramData\kiteline-agent\kiteline-agent.ps1"` 调用只适用于控制台交互，要求执行策略允许本地脚本，而且输出不进入 PowerShell 管道；需要捕获、管道或重定向时用上面的完整调用。
+两种入口都只为子进程放宽执行策略，不修改持久设置，组策略仍优先。直接用 `& (Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'kiteline-agent/kiteline-agent.ps1')` 调用只适用于控制台交互，要求执行策略允许本地脚本，而且输出不进入 PowerShell 管道；需要捕获、管道或重定向时用上面的完整调用。
 
 不带参数执行 `kiteline-agent`，或单独使用 `--help`、`-h`，会打印子命令概要；单独使用 `--version` 打印版本号。未知根命令，以及根帮助/版本选项或 `check`、`run`、`doctor` 的多余参数，都会报错并以非零状态退出。只有 `schedule` 及其子命令提供 `--help`；其他子命令没有 `--help`，参数以下表为准。
 
@@ -285,6 +285,8 @@ agent 数据目录中的 `agent.json`、`connection.json`、`temporary-files.jso
 卸载后留下的文件见[卸载](devices.md#卸载)。升级失败且旧程序无法自动恢复时，输出会给出 `/opt` 下保留的备份目录。
 
 ### Windows 上的 agent
+
+下表中的 `%ProgramFiles%` 和 `%ProgramData%` 表示 Windows 系统目录。安装和命令入口通过系统 API 查询它们，修改同名环境变量不会改变安装位置。
 
 | 路径                                                       | 内容                           |
 | ---------------------------------------------------------- | ------------------------------ |

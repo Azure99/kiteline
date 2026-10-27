@@ -117,6 +117,7 @@ agent 和 recorder 在 Windows 上启动的每个进程（tmux server 和每次 
 
 ### 安装与目录
 
+- Windows 安装根目录来自系统 Known Folders，不受 `ProgramFiles`、`ProgramData` 环境变量覆盖影响；数据和运行目录仍按 [agent 环境变量](../guide/reference.md#agent-环境变量)解析。
 - 程序目录和 `%ProgramData%\kiteline-agent\`（命令入口、安装记录和两个锁文件，见[文件位置](../guide/reference.md#文件位置)）的属主为 Administrators，SYSTEM 和 Administrators 完全控制，项目用户只读和执行。`%ProgramData%\kiteline-agent` 的属主不是 SYSTEM 或 Administrators，或允许其他账户写入时，维护命令拒绝执行。
 - 安装、升级和卸载需要提升权限的 PowerShell；其他命令以项目用户身份运行，agent 核对 SID。
 - 项目用户必须已有初始化的 Windows 配置文件（登录过一次）。agent 数据目录默认是该用户的 `%LOCALAPPDATA%\kiteline-agent`：为当前用户安装时直接读取；为其他用户安装时从该用户的注册表配置读取，读不到（例如该用户当前没有登录）时安装拒绝，需要用 `--data-dir`（以及可选的 `--run-dir`）指定绝对路径。会话 socket 路径按 MSYS 形式计算长度，运行目录太长时用 `--run-dir` 指定一个较短的目录。

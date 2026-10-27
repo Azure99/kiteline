@@ -6,11 +6,11 @@ import { promisify } from "node:util";
 import { finished } from "node:stream/promises";
 import { spawnJob } from "@kiteline/shared/windows/job";
 import { BytePrefix } from "./buffers.js";
-import { packageDirectory } from "./install/paths.js";
+import { nativeDirectory } from "@kiteline/shared/node/paths";
 
 export const ripgrepBinary = join(
-  packageDirectory,
-  "dist/native/bin",
+  nativeDirectory,
+  "bin",
   process.platform === "win32" ? "rg.exe" : "rg",
 );
 

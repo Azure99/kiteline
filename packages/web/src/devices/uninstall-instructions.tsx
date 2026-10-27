@@ -22,7 +22,7 @@ export function UninstallInstructions({
   const command =
     platform &&
     (platform === "windows"
-      ? `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\\kiteline-agent\\kiteline-agent.ps1" uninstall`
+      ? "powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'kiteline-agent/kiteline-agent.ps1') uninstall"
       : "sudo /usr/local/bin/kiteline-agent uninstall") + (purge ? " --purge" : "");
   return (
     <div className="space-y-3 text-sm">

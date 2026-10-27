@@ -21,21 +21,16 @@ import { createInterface } from "node:readline/promises";
 import { parseArgs, promisify, type ParseArgsOptionsConfig } from "node:util";
 import { lockAgentState } from "../state-lock.js";
 import { atomicJson } from "@kiteline/shared/node/files";
+import { resourceDirectory } from "@kiteline/shared/node/paths";
 import {
   applicationPaths,
-  environmentFile,
-  installationFile,
-  installationManagementFile,
   installationPaths,
-  installationUseFile,
-  installDirectory,
-  launcherFile,
   lockInstallation,
   lockInstallationManagement,
-  packageDirectory,
   readInstallation,
   type Installation,
 } from "./paths.js";
+import { unixInstallationLayout } from "./layout.js";
 
 const execute = promisify(execFile);
 async function exists(path: string) {
@@ -158,7 +153,7 @@ async function acquireInstallationLocks(dataDir?: string) {
     if (dataDir && (await exists(dataDir))) state = await lockAgentState(dataDir);
   } catch (error) {
     const errors = [error];
-    await cleanup(errors, installationUseFile, () => use.close());
+    await cleanup(errors, unixInstallationLayout.useFile, () => use.close());
     throw failures("Agent state is busy or unavailable; no running tasks were stopped", errors);
   }
   return {
@@ -166,17 +161,17 @@ async function acquireInstallationLocks(dataDir?: string) {
     async close() {
       const errors: unknown[] = [];
       if (state) await cleanup(errors, "agent state lock", state);
-      await cleanup(errors, installationUseFile, () => use.close());
+      await cleanup(errors, unixInstallationLayout.useFile, () => use.close());
       if (errors.length) throw failures("Installation locks could not be closed", errors);
     },
   };
 }
 async function writeLauncher(contents: string) {
-  const temporary = `${launcherFile}.${randomUUID()}.pending`;
+  const temporary = `${unixInstallationLayout.launcherFile}.${randomUUID()}.pending`;
   try {
     await writeFile(temporary, contents, { flag: "wx", mode: 0o755 });
     await chmod(temporary, 0o755);
-    await rename(temporary, launcherFile);
+    await rename(temporary, unixInstallationLayout.launcherFile);
   } finally {
     await rm(temporary, { force: true });
   }
@@ -215,52 +210,70 @@ async function installProgram(user: string, protectSignals: () => void) {
   if (previous) {
     if (previous.uid !== installation.uid)
       throw new Error(`Current installation belongs to ${previous.user}`);
-    const source = JSON.parse(await readFile(join(packageDirectory, "release.json"), "utf8"));
-    const installed = JSON.parse(await readFile(join(installDirectory, "release.json"), "utf8"));
+    const source = JSON.parse(await readFile(join(resourceDirectory, "release.json"), "utf8"));
+    const installed = JSON.parse(
+      await readFile(join(unixInstallationLayout.directory, "release.json"), "utf8"),
+    );
     if (source.version !== installed.version)
       throw new Error(
         "A different version is installed; explicitly run kiteline-agent upgrade first",
       );
     return "The same version is already installed; the program, identity and running tasks were not changed.";
   }
-  for (const path of [installDirectory, launcherFile])
+  for (const path of [unixInstallationLayout.directory, unixInstallationLayout.launcherFile])
     if (await exists(path)) throw new Error(`${path} already exists; verify its purpose first`);
-  await verifyPackage(packageDirectory);
+  await verifyPackage(resourceDirectory);
   protectSignals();
   try {
     await writeFile(
-      environmentFile,
+      unixInstallationLayout.environmentFile,
       `# Application directories only; background environment belongs to your process manager.\nKITELINE_AGENT_HOME=${JSON.stringify(applicationPaths(installation.home).dataDir)}\n`,
       { flag: "wx", mode: 0o640 },
     );
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
   }
-  await chown(environmentFile, 0, installation.gid);
-  await chmod(environmentFile, 0o640);
+  await chown(unixInstallationLayout.environmentFile, 0, installation.gid);
+  await chmod(unixInstallationLayout.environmentFile, 0o640);
   await installationPaths(installation);
-  await writeFile(installationUseFile, "", { flag: "a", mode: 0o640 });
-  await chown(installationUseFile, 0, installation.gid);
-  await chmod(installationUseFile, 0o640);
+  await writeFile(unixInstallationLayout.useFile, "", { flag: "a", mode: 0o640 });
+  await chown(unixInstallationLayout.useFile, 0, installation.gid);
+  await chmod(unixInstallationLayout.useFile, 0o640);
   const errors: unknown[] = [];
   try {
     if (process.platform === "darwin")
-      await command("/bin/cp", ["-a", "--", packageDirectory, installDirectory]);
-    else await cp(packageDirectory, installDirectory, { recursive: true, verbatimSymlinks: true });
-    await command("chown", ["-h", "-R", "-P", "0:0", installDirectory]);
-    await command("sh", ["-c", 'umask 022; mkdir -p -- "$1"', "sh", dirname(launcherFile)]);
-    await atomicJson(installationFile, installation);
-    await chmod(installationFile, 0o644);
+      await command("/bin/cp", ["-a", "--", resourceDirectory, unixInstallationLayout.directory]);
+    else
+      await cp(resourceDirectory, unixInstallationLayout.directory, {
+        recursive: true,
+        verbatimSymlinks: true,
+      });
+    await command("chown", ["-h", "-R", "-P", "0:0", unixInstallationLayout.directory]);
+    await command("sh", [
+      "-c",
+      'umask 022; mkdir -p -- "$1"',
+      "sh",
+      dirname(unixInstallationLayout.launcherFile),
+    ]);
+    await atomicJson(unixInstallationLayout.recordFile, installation);
+    await chmod(unixInstallationLayout.recordFile, 0o644);
     await writeLauncher(
-      await readFile(join(installDirectory, "bin/kiteline-agent-installed"), "utf8"),
+      await readFile(
+        join(unixInstallationLayout.directory, "bin/kiteline-agent-installed"),
+        "utf8",
+      ),
     );
   } catch (error) {
     errors.push(error);
-    for (const path of [launcherFile, installationFile, installDirectory])
+    for (const path of [
+      unixInstallationLayout.launcherFile,
+      unixInstallationLayout.recordFile,
+      unixInstallationLayout.directory,
+    ])
       await cleanup(errors, path, () => rm(path, { recursive: true, force: true }));
   }
   if (errors.length) throw failures("Installation did not complete", errors);
-  return `Installed but not started. As ${installation.user}, run kiteline-agent bind --server <http-or-https-origin>, then kiteline-agent run.\nApplication directories: ${environmentFile}`;
+  return `Installed but not started. As ${installation.user}, run kiteline-agent bind --server <http-or-https-origin>, then kiteline-agent run.\nApplication directories: ${unixInstallationLayout.environmentFile}`;
 }
 
 async function upgrade(
@@ -273,7 +286,9 @@ async function upgrade(
   // Report busy before preparation; reacquire for the actual transaction below.
   await (await acquireInstallationLocks()).close();
   const source = resolve(archive);
-  const temporary = await mkdtemp(join(dirname(installDirectory), ".kiteline-upgrade-"));
+  const temporary = await mkdtemp(
+    join(dirname(unixInstallationLayout.directory), ".kiteline-upgrade-"),
+  );
   const replacement = join(temporary, "new"),
     previous = join(temporary, "previous");
   const path = join(temporary, "input.tar.gz");
@@ -303,7 +318,7 @@ async function upgrade(
     signal.throwIfAborted();
     const version = await verifyPackage(replacement);
     const newLauncher = await readFile(join(replacement, "bin/kiteline-agent-installed"), "utf8");
-    const oldLauncher = await readFile(launcherFile, "utf8");
+    const oldLauncher = await readFile(unixInstallationLayout.launcherFile, "utf8");
     await confirm(
       `Install version ${version}, retaining binding, configuration, workspaces and task data? No instance will be started. Coordinate external restart policies before continuing.`,
       yes,
@@ -313,7 +328,7 @@ async function upgrade(
     use = await acquireInstallationLocks();
     await command("chown", ["-h", "-R", "-P", "0:0", replacement]);
     await replaceProgram(
-      installDirectory,
+      unixInstallationLayout.directory,
       replacement,
       previous,
       () => writeLauncher(newLauncher),
@@ -333,7 +348,7 @@ async function upgrade(
         );
       else await rm(temporary, { recursive: true, force: true });
     });
-    if (use) await cleanup(errors, installationUseFile, () => use!.close());
+    if (use) await cleanup(errors, unixInstallationLayout.useFile, () => use!.close());
   }
   if (errors.length)
     throw failures(
@@ -390,29 +405,31 @@ async function uninstall(
           await rm(join(dataDir, entry), { recursive: true, force: true });
       }
     }
-    if (purge) await rm(environmentFile, { force: true });
-    await rm(launcherFile, { force: true });
-    await rm(installDirectory, { recursive: true, force: true });
-    await rm(installationFile, { force: true });
-    if (purge) await rm(installationUseFile);
+    if (purge) await rm(unixInstallationLayout.environmentFile, { force: true });
+    await rm(unixInstallationLayout.launcherFile, { force: true });
+    await rm(unixInstallationLayout.directory, { recursive: true, force: true });
+    await rm(unixInstallationLayout.recordFile, { force: true });
+    if (purge) await rm(unixInstallationLayout.useFile);
   } catch (error) {
     errors.push(error);
     console.error(
-      `Uninstall is incomplete. Inspect ${installDirectory}, ${launcherFile}, ${installationFile} and ${dataDir}.`,
+      `Uninstall is incomplete. Inspect ${unixInstallationLayout.directory}, ${unixInstallationLayout.launcherFile}, ${unixInstallationLayout.recordFile} and ${dataDir}.`,
     );
   } finally {
-    await cleanup(errors, installationUseFile, () => use.close());
+    await cleanup(errors, unixInstallationLayout.useFile, () => use.close());
   }
   if (!errors.length && purge) {
     if (use.stateLocked) await cleanup(errors, dataDir, () => rmdir(dataDir));
 
     // No product mutation may follow the removal of this management-lock pathname.
     if (!errors.length)
-      await cleanup(errors, installationManagementFile, () => rm(installationManagementFile));
+      await cleanup(errors, unixInstallationLayout.managementFile, () =>
+        rm(unixInstallationLayout.managementFile),
+      );
   }
   if (errors.length) throw failures("Uninstall did not complete", errors);
   if (purge) return "Uninstalled; dedicated data, env and installation locks removed.";
-  return `Uninstalled; state retained. External manager configuration was not changed. Application directory configuration was not removed: ${environmentFile}. Stable installation lock files were not removed: ${installationUseFile}, ${installationManagementFile}.`;
+  return `Uninstalled; state retained. External manager configuration was not changed. Application directory configuration was not removed: ${unixInstallationLayout.environmentFile}. Stable installation lock files were not removed: ${unixInstallationLayout.useFile}, ${unixInstallationLayout.managementFile}.`;
 }
 
 export async function installCli(action: string, args: string[]) {
@@ -431,9 +448,14 @@ export async function installCli(action: string, args: string[]) {
     throw new Error("Usage: kiteline-agent upgrade --archive RELEASE.tar.gz [--yes]");
   if (process.getuid?.() !== 0)
     throw new Error("Installation changes require sudo or root; run the agent as the project user");
-  if (packageDirectory === installDirectory)
+  if (resourceDirectory === unixInstallationLayout.directory)
     throw new Error("Use the public kiteline-agent launcher for installation changes");
-  await command("sh", ["-c", 'umask 022; mkdir -p -- "$1"', "sh", dirname(installDirectory)]);
+  await command("sh", [
+    "-c",
+    'umask 022; mkdir -p -- "$1"',
+    "sh",
+    dirname(unixInstallationLayout.directory),
+  ]);
   const management = await lockInstallationManagement();
   const errors: unknown[] = [];
   let completion: string | undefined;
@@ -485,7 +507,7 @@ export async function installCli(action: string, args: string[]) {
   } catch (error) {
     errors.push(error);
   } finally {
-    await cleanup(errors, installationManagementFile, () => management.close());
+    await cleanup(errors, unixInstallationLayout.managementFile, () => management.close());
     for (const { signal, handler } of handlers) process.off(signal, handler);
   }
   if (errors.length)

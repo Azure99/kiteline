@@ -387,6 +387,7 @@ try {
   mkdirSync(join(destination, "bin"));
   const launcher = join(destination, "bin", `kiteline-${kind}${windows ? ".ps1" : ""}`);
   if (windowsAgent) {
+    const { windowsInstallationLayout } = await import("../packages/agent/dist/install/layout.js");
     const { nodeEnvironmentKeys } = await import("../packages/shared/dist/terminal/node.js");
     cpSync(join(resolve(windowsComponents), "command"), join(destination, "command"), {
       recursive: true,
@@ -394,23 +395,23 @@ try {
     const launchers = windowsAgentLaunchers({
       runtimeFiles: windowsRuntimeFiles.map(windowsComponentPath),
       nodeEnvironmentKeys,
+      layout: windowsInstallationLayout,
     });
     writeFileSync(launcher, launchers.portable);
     writeFileSync(join(destination, "bin/kiteline-agent-installed.ps1"), launchers.installed);
   } else if (kind === "agent") {
-    const { installDirectory, installationManagementFile, installationUseFile, managementLockFd } =
-      await import("../packages/agent/dist/install/paths.js");
+    const { unixInstallationLayout } = await import("../packages/agent/dist/install/layout.js");
     const paths = {
-      directory: installDirectory,
-      management: installationManagementFile,
-      managementFd: managementLockFd,
-      use: installationUseFile,
+      directory: unixInstallationLayout.directory,
+      management: unixInstallationLayout.managementFile,
+      managementFd: unixInstallationLayout.managementLockFd,
+      use: unixInstallationLayout.useFile,
     };
     const platform = macosAgent ? "darwin" : "linux";
     writeFileSync(launcher, agentLauncher(undefined, paths, platform));
     writeFileSync(
       join(destination, "bin/kiteline-agent-installed"),
-      agentLauncher(installDirectory, paths, platform),
+      agentLauncher(unixInstallationLayout.directory, paths, platform),
     );
     chmodSync(join(destination, "bin/kiteline-agent-installed"), 0o755);
   } else if (kind === "server") cpSync(join(root, "installer/kiteline-server"), launcher);
