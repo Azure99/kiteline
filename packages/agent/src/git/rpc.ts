@@ -47,10 +47,9 @@ export async function gitRpc(
         syncRemote(
           repo,
           method.slice(4) as "fetch" | "pull" | "push",
-          {
-            remote: optionalString(params.remote),
-            expectedHead: method === "git.fetch" ? undefined : expectedHead(params.expectedHead),
-          },
+          method === "git.fetch"
+            ? { remote: optionalString(params.remote) }
+            : { expectedHead: expectedHead(params.expectedHead) },
           signal,
         ),
       ) satisfies Promise<RpcResult<typeof method>>;

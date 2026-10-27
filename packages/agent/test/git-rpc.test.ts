@@ -7,6 +7,7 @@ import {
   errorReply,
   type RepoDiscovery,
   type GitReview,
+  type GitStatus,
 } from "@kiteline/shared/protocol";
 import { Agent } from "../src/agent.js";
 import { gitProgressError } from "../src/git/process.js";
@@ -52,6 +53,65 @@ async function setup() {
   const params = { workspaceId: workspace.id, repoId: found.repos[0]!.id };
   return { data, root, cli, agent, signal, params };
 }
+
+test.each([
+  { method: "git.pull", remote: "missing" },
+  { method: "git.pull", remote: 42 },
+  { method: "git.push", remote: "missing" },
+  { method: "git.push", remote: 42 },
+] as const)(
+  "$method dispatch ignores undeclared remote $remote and uses the configured upstream",
+  async ({ method, remote }) => {
+    const { data, root, cli, agent, signal, params } = await setup();
+    const bare = join(data, "origin.git");
+    await cli("clone", "--bare", root, bare);
+    await cli("remote", "add", "origin", bare);
+    await cli("push", "-u", "origin", "main");
+    const source = method === "git.pull" ? join(data, "other") : root;
+    if (method === "git.pull") {
+      await cli("clone", bare, source);
+      await cli("-C", source, "config", "user.name", "Other");
+      await cli("-C", source, "config", "user.email", "other@example.test");
+    }
+    const contents = `${method} ${remote}\n`;
+    await writeFile(join(source, "file.txt"), contents);
+    await cli("-C", source, "commit", "-am", "synchronize change");
+    const commitOid = await cli("-C", source, "rev-parse", "HEAD");
+    if (method === "git.pull") await cli("-C", source, "push");
+    const before = (await agent.dispatch("git.status", params, signal)) as GitStatus;
+    await agent.dispatch(method, { ...params, remote, expectedHead: before.head }, signal);
+    const destination = method === "git.pull" ? root : bare;
+    expect(await cli("-C", destination, "rev-parse", "main")).toBe(commitOid);
+    expect(await cli("-C", destination, "show", "main:file.txt")).toBe(contents);
+    if (method === "git.pull")
+      expect(await readFile(join(root, "file.txt"), "utf8")).toBe(contents);
+  },
+);
+
+test("fetch dispatch selects the requested remote and rejects stale names and wrong types", async () => {
+  const { data, root, cli, agent, signal, params } = await setup();
+  const origin = join(data, "origin.git");
+  await cli("clone", "--bare", root, origin);
+  await cli("remote", "add", "origin", origin);
+  await cli("push", "-u", "origin", "main");
+  const baseOid = (await cli("rev-parse", "HEAD")).trim();
+  await cli("commit", "--allow-empty", "-m", "selected remote only");
+  const selectedOid = (await cli("rev-parse", "HEAD")).trim();
+  const selected = join(data, "selected.git");
+  await cli("clone", "--bare", root, selected);
+  await cli("reset", "--hard", baseOid);
+  await cli("remote", "add", "selected", selected);
+  await agent.dispatch("git.fetch", { ...params, remote: "selected" }, signal);
+  expect((await cli("rev-parse", "selected/main")).trim()).toBe(selectedOid);
+  expect((await cli("rev-parse", "origin/main")).trim()).toBe(baseOid);
+  await cli("remote", "remove", "selected");
+  await expect(
+    agent.dispatch("git.fetch", { ...params, remote: "selected" }, signal),
+  ).rejects.toMatchObject({ code: "conflict" });
+  await expect(
+    agent.dispatch("git.fetch", { ...params, remote: 42 }, signal),
+  ).rejects.toMatchObject({ code: "invalid_argument" });
+});
 
 test("Git path RPCs reject unpaired surrogates without changing a legal replacement-character entry", async () => {
   const { root, cli, agent, signal, params } = await setup();
