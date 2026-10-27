@@ -6,13 +6,13 @@ import type { TerminalFrame } from "@kiteline/shared/protocol/ipc";
 
 test("Web admission, detach, competing conditions and queued expiry share one input sequence", async () => {
   const model = new Model(
-    10,
-    3,
-    100,
-    (error) => {
-      throw error;
+    { cols: 10, rows: 3, historyLines: 100 },
+    {
+      fault: (error) => {
+        throw error;
+      },
+      backlogChanged: () => {},
     },
-    () => {},
   );
   const control = new Control(
     {
@@ -31,12 +31,8 @@ test("Web admission, detach, competing conditions and queued expiry share one in
   // The existing flow-control pause holds execution while admission remains synchronous.
   control.setPaused(true);
   const errors: TerminalFrame[] = [];
-  const queue = new InputQueue(
-    control,
-    model,
-    { terminalInputBytes: 64 },
-    (_, frame) => errors.push(frame),
-    async () => {},
+  const queue = new InputQueue(control, model, { terminalInputBytes: 64 }, (_, frame) =>
+    errors.push(frame),
   );
   const send = (ifInput = model.inputState(), text = "x") =>
     queue.operation({
@@ -56,7 +52,7 @@ test("Web admission, detach, competing conditions and queued expiry share one in
     await expect(send({ ...model.inputState(), epoch: "previous" })).rejects.toMatchObject({
       code: "conflict",
     });
-    await expect(send(model.inputState(), "x".repeat(65))).rejects.toMatchObject({
+    await expect(send(initial.input, "x".repeat(65))).rejects.toMatchObject({
       code: "limit_exceeded",
     });
     queue.input("web", Buffer.alloc(65));

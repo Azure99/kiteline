@@ -47,6 +47,16 @@ export interface Snapshot {
 export function eventCost(event: TerminalEvent) {
   return event.type === "output" ? Buffer.byteLength(event.data) : 32;
 }
+interface ModelOptions {
+  cols: number;
+  rows: number;
+  historyLines: number;
+}
+interface ModelEvents {
+  fault: (error: Error) => void;
+  backlogChanged: () => void;
+  notice?: (notice: TerminalNotice) => void;
+}
 export class Model {
   readonly terminal: InstanceType<typeof Terminal>;
   private epoch = randomUUID();
@@ -69,13 +79,10 @@ export class Model {
   private listeners = new Set<(event: TerminalEvent) => void>();
   private waiting = new Set<() => void>();
   constructor(
-    cols: number,
-    rows: number,
-    readonly historyLines: number,
-    private fault: (error: Error) => void,
-    private changed: () => void,
-    notice?: (notice: TerminalNotice) => void,
+    options: ModelOptions,
+    private events: ModelEvents,
   ) {
+    const { cols, rows, historyLines } = options;
     this.terminal = new Terminal({ ...terminalOptions(historyLines), cols, rows });
     initializeTerminalUnicode(this.terminal);
     adaptTerminalProfile(this.terminal);
@@ -86,7 +93,7 @@ export class Model {
     for (const code of [9, 777, 7501])
       this.terminal.parser.registerOscHandler(code, (body) => {
         const report = terminalNotice(code, body);
-        if (report) notice?.(report);
+        if (report) this.events.notice?.(report);
         return true;
       });
     this.rotate();
@@ -107,9 +114,9 @@ export class Model {
     if (!data) return;
     const bytes = Buffer.byteLength(data);
     this.pendingBytes += bytes;
-    this.changed();
+    this.events.backlogChanged();
     if (this.pendingBytes > modelLimits.terminalModelPendingBytes) {
-      this.fault(
+      this.events.fault(
         new AppError("limit_exceeded", "Terminal recording parser backlog exceeds the limit"),
       );
       return;
@@ -129,16 +136,16 @@ export class Model {
         this.record({ type: "output", data });
       } finally {
         this.pendingBytes -= batch.bytes;
-        this.changed();
+        this.events.backlogChanged();
       }
-    }).catch((error: Error) => this.fault(error));
+    }).catch((error: Error) => this.events.fault(error));
     this.pendingOutput = batch;
   }
   resize(cols: number, rows: number) {
     const event: TerminalEvent = { type: "resize", cols, rows };
     const bytes = eventCost(event);
     this.pendingBytes += bytes;
-    this.changed();
+    this.events.backlogChanged();
     void this.ordered(() => {
       try {
         if (this.stopped || (this.terminal.cols === cols && this.terminal.rows === rows)) return;
@@ -146,9 +153,9 @@ export class Model {
         this.record(event);
       } finally {
         this.pendingBytes -= bytes;
-        this.changed();
+        this.events.backlogChanged();
       }
-    }).catch((error: Error) => this.fault(error));
+    }).catch((error: Error) => this.events.fault(error));
   }
   waitForSize(
     cols: number,
@@ -487,6 +494,8 @@ export class Model {
 }
 
 export const modelLimits = {
+  terminalModelHighWaterBytes: 512 * 1024,
+  terminalModelLowWaterBytes: 128 * 1024,
   terminalModelPendingBytes: 8 * 1024 * 1024,
   terminalCheckpointIntervalBytes: 4 * 1024 * 1024,
   terminalRecoveryTailBytes: 8 * 1024 * 1024,

@@ -4,13 +4,13 @@ import { Model } from "../src/model.js";
 
 const model = (cols = 10, rows = 3) =>
   new Model(
-    cols,
-    rows,
-    100,
-    (error) => {
-      throw error;
+    { cols, rows, historyLines: 100 },
+    {
+      fault: (error) => {
+        throw error;
+      },
+      backlogChanged: () => {},
     },
-    () => {},
   );
 
 test("snapshots preserve queue order, pending wrap and partially parsed control sequences", async () => {
@@ -283,11 +283,8 @@ test("dispose rejects an outstanding wait and subsequent observations", async ()
 test("an oversized styled history rejects the snapshot and leaves recording usable", async () => {
   const faults: Error[] = [];
   const terminal = new Model(
-    512,
-    2,
-    100,
-    (error) => faults.push(error),
-    () => {},
+    { cols: 512, rows: 2, historyLines: 100 },
+    { fault: (error) => faults.push(error), backlogChanged: () => {} },
   );
   try {
     const line = "\x1b[31mx\x1b[32my".repeat(256);

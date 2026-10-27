@@ -52,11 +52,8 @@ test("window titles stay out of text without hiding repeated output or OSC title
 test("retained recovery consumes a window title split across UTF-8 and escape boundaries", async () => {
   const faults: Error[] = [];
   const model = new Model(
-    80,
-    24,
-    100,
-    (error) => faults.push(error),
-    () => {},
+    { cols: 80, rows: 24, historyLines: 100 },
+    { fault: (error) => faults.push(error), backlogChanged: () => {} },
   );
   const restored = screen();
   let snapshot!: Snapshot;
@@ -94,13 +91,13 @@ test("retained recovery consumes a window title split across UTF-8 and escape bo
 
 test("snapshots replay the latest window title to a new display", async () => {
   const model = new Model(
-    80,
-    24,
-    100,
-    (error) => {
-      throw error;
+    { cols: 80, rows: 24, historyLines: 100 },
+    {
+      fault: (error) => {
+        throw error;
+      },
+      backlogChanged: () => {},
     },
-    () => {},
   );
   const restore = async (history: "retained" | "screen") => {
     let snapshot!: Snapshot;
@@ -143,11 +140,8 @@ test("snapshots replay the latest window title to a new display", async () => {
 test("batched output preserves UTF-8, non-ground recovery, resize and live order", async () => {
   const faults: Error[] = [];
   const model = new Model(
-    80,
-    24,
-    100,
-    (error) => faults.push(error),
-    () => {},
+    { cols: 80, rows: 24, historyLines: 100 },
+    { fault: (error) => faults.push(error), backlogChanged: () => {} },
   );
   const reference = screen();
   const restored = screen();
@@ -305,11 +299,8 @@ test("small output and resize frames share the consumption window without losing
 test("periodic checkpoints retain a bounded incomplete OSC after total output crosses the tail budget", async () => {
   const faults: Error[] = [];
   const model = new Model(
-    80,
-    24,
-    100,
-    (error) => faults.push(error),
-    () => {},
+    { cols: 80, rows: 24, historyLines: 100 },
+    { fault: (error) => faults.push(error), backlogChanged: () => {} },
   );
   const restored = screen();
   let snapshot!: Snapshot;
@@ -369,13 +360,13 @@ test("periodic checkpoints retain a bounded incomplete OSC after total output cr
 
 test("reattaching preserves snapshots across unchanged, mode-only and resized states", async () => {
   const model = new Model(
-    40,
-    10,
-    100,
-    (error) => {
-      throw error;
+    { cols: 40, rows: 10, historyLines: 100 },
+    {
+      fault: (error) => {
+        throw error;
+      },
+      backlogChanged: () => {},
     },
-    () => {},
   );
   const capture = async (history: "retained" | "screen" = "retained") => {
     let snapshot!: Snapshot;
@@ -437,11 +428,8 @@ test("reattaching preserves snapshots across unchanged, mode-only and resized st
 test("coalescing still rejects a real parser backlog above its byte budget", async () => {
   const faults: Error[] = [];
   const model = new Model(
-    80,
-    24,
-    100,
-    (error) => faults.push(error),
-    () => {},
+    { cols: 80, rows: 24, historyLines: 100 },
+    { fault: (error) => faults.push(error), backlogChanged: () => {} },
   );
   try {
     const chunk = Buffer.alloc(limits.dataChunkBytes / 4, 65);
@@ -558,11 +546,8 @@ test.each([
 ])("REP after a $name checkpoint matches continuous output", async ({ prefix }) => {
   const faults: Error[] = [];
   const model = new Model(
-    20,
-    6,
-    100,
-    (error) => faults.push(error),
-    () => {},
+    { cols: 20, rows: 6, historyLines: 100 },
+    { fault: (error) => faults.push(error), backlogChanged: () => {} },
   );
   const restored = screen(20, 6, 100);
   const serialized = new serialize.SerializeAddon();

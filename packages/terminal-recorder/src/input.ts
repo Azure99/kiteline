@@ -1,5 +1,11 @@
-import type { TerminalOperation, TerminalPosition, InputPosition } from "@kiteline/shared/protocol";
+import type {
+  TerminalOperation,
+  TerminalPosition,
+  InputPosition,
+  SessionInput,
+} from "@kiteline/shared/protocol";
 import { AppError, OperationError, asError, limits } from "@kiteline/shared/protocol";
+import { setTimeout as delay } from "node:timers/promises";
 import { normalizePaste } from "@kiteline/shared/terminal";
 import { tmux } from "@kiteline/shared/terminal/node";
 import type { RecorderConfig, TerminalFrame } from "@kiteline/shared/protocol/ipc";
@@ -15,26 +21,55 @@ export function isMissingInputBuffer(error: unknown) {
   );
 }
 
-interface Operation {
-  type: "operation";
-  attachmentId: undefined;
-  bytes: number;
-  run: () => Promise<void>;
-  fail: (error: unknown) => void;
+interface BytesRequest {
+  type: "bytes";
+  data: Buffer;
+  paste: boolean;
+  enter: boolean;
 }
-type Input =
-  | Operation
-  | { type: "input" | "paste"; attachmentId: string; data: Buffer }
-  | { type: "resize"; attachmentId: string; cols: number; rows: number }
-  | {
-      type: "redraw";
-      attachmentId: undefined;
-      resolve: () => void;
-      reject: (error: unknown) => void;
-    };
+interface KeyRequest {
+  type: "key";
+  key: Extract<SessionInput, { type: "key" }>["key"];
+}
+interface ResizeRequest {
+  type: "resize";
+  cols: number;
+  rows: number;
+}
+type Request = BytesRequest | KeyRequest | ResizeRequest;
+interface WebInput {
+  kind: "web";
+  attachmentId: string;
+  request: BytesRequest | ResizeRequest;
+}
+type RpcResult =
+  | { before: TerminalPosition; input: InputPosition }
+  | { cols: number; rows: number };
+interface RpcCompletion {
+  deadline: number;
+  started: boolean;
+  abort: AbortController;
+  timer?: NodeJS.Timeout;
+  resolve: (result: RpcResult) => void;
+  reject: (error: unknown) => void;
+}
+interface RpcInput {
+  kind: "rpc";
+  request: Request;
+  completion: RpcCompletion;
+}
+interface RedrawInput {
+  kind: "redraw";
+  resolve: () => void;
+  reject: (error: unknown) => void;
+}
+type Input = WebInput | RpcInput | RedrawInput;
 const inputCommandBytes = 32;
+const redrawDwellMs = 80;
+const requestCost = (request: Request) =>
+  request.type === "bytes" ? request.data.length + (request.enter ? 1 : 0) : inputCommandBytes;
 const cost = (item: Input) =>
-  item.type === "operation" ? item.bytes : "data" in item ? item.data.length : inputCommandBytes;
+  item.kind === "redraw" ? inputCommandBytes : requestCost(item.request);
 export class InputQueue {
   private queue: Input[] = [];
   private bytes = 0;
@@ -48,7 +83,6 @@ export class InputQueue {
     private model: Model,
     private config: RecorderConfig,
     private report: (id: string, frame: TerminalFrame) => void,
-    private redrawTask: () => Promise<void>,
   ) {}
   input(attachmentId: string, data: Buffer, paste = false) {
     if (this.closed || !data.length) return;
@@ -61,9 +95,20 @@ export class InputQueue {
       return;
     }
     const last = this.queue.at(-1);
-    if (!paste && last?.type === "input" && last.attachmentId === attachmentId)
-      last.data = Buffer.concat([last.data, data]);
-    else this.queue.push({ type: paste ? "paste" : "input", attachmentId, data });
+    if (
+      !paste &&
+      last?.kind === "web" &&
+      last.request.type === "bytes" &&
+      !last.request.paste &&
+      last.attachmentId === attachmentId
+    )
+      last.request.data = Buffer.concat([last.request.data, data]);
+    else
+      this.queue.push({
+        kind: "web",
+        attachmentId,
+        request: { type: "bytes", data, paste, enter: false },
+      });
     this.bytes += data.length;
     this.model.admitInput();
     void this.run();
@@ -74,22 +119,26 @@ export class InputQueue {
   resize(attachmentId: string, cols: number, rows: number) {
     if (this.closed) return;
     const last = this.queue.at(-1);
-    if (last?.type === "resize" && last.attachmentId === attachmentId) {
-      last.cols = cols;
-      last.rows = rows;
+    if (
+      last?.kind === "web" &&
+      last.request.type === "resize" &&
+      last.attachmentId === attachmentId
+    ) {
+      last.request.cols = cols;
+      last.request.rows = rows;
     } else {
       if (this.bytes + inputCommandBytes > this.config.terminalInputBytes) {
         this.reject(attachmentId, new AppError("busy", "Terminal input queue is full"), "failed");
         return;
       }
-      this.queue.push({ type: "resize", attachmentId, cols, rows });
+      this.queue.push({ kind: "web", attachmentId, request: { type: "resize", cols, rows } });
       this.bytes += inputCommandBytes;
     }
     void this.run();
   }
   detach(id: string) {
     this.queue = this.queue.filter((item) => {
-      if (item.attachmentId !== id) return true;
+      if (item.kind !== "web" || item.attachmentId !== id) return true;
       this.bytes -= cost(item);
       return false;
     });
@@ -100,10 +149,24 @@ export class InputQueue {
     if (this.bytes + inputCommandBytes > this.config.terminalInputBytes)
       return Promise.reject(new AppError("busy", "Terminal input queue is full"));
     return new Promise<void>((resolve, reject) => {
-      this.queue.push({ type: "redraw", attachmentId: undefined, resolve, reject });
+      this.queue.push({ kind: "redraw", resolve, reject });
       this.bytes += inputCommandBytes;
       void this.run();
     });
+  }
+  private async executeRedraw() {
+    const { cols, rows } = await this.model.ordered(() => ({
+      cols: this.model.terminal.cols,
+      rows: this.model.terminal.rows,
+    }));
+    try {
+      await this.control.resize(cols, rows + 1);
+      await this.model.waitForSize(cols, rows + 1, this.control.schedule, this.control.signal);
+      await delay(redrawDwellMs);
+    } finally {
+      await this.control.resize(cols, rows);
+      await this.model.waitForSize(cols, rows, this.control.schedule, this.control.signal);
+    }
   }
   private async inject(data: Buffer, paste: boolean, signal: AbortSignal) {
     const identity = this.control.identity;
@@ -148,103 +211,134 @@ export class InputQueue {
   operation(operation: TerminalOperation) {
     if (this.closed)
       return Promise.reject(new AppError("recording_unavailable", "Recording interrupted"));
-    const input = operation.type === "session.send" ? operation.input : undefined;
-    const data =
-      input && input.type !== "key"
-        ? Buffer.from(input.type === "paste" ? normalizePaste(input.text) : input.text)
-        : undefined;
-    const bytes = data
-      ? data.length + (input?.type !== "key" && input?.enter ? 1 : 0)
-      : inputCommandBytes;
+    let request: Request;
+    if (operation.type === "session.resize") {
+      request = { type: "resize", cols: operation.cols, rows: operation.rows };
+    } else {
+      const input = operation.input;
+      if (input.type === "key") {
+        request = { type: "key", key: input.key };
+      } else {
+        const paste = input.type === "paste";
+        request = {
+          type: "bytes",
+          data: Buffer.from(paste ? normalizePaste(input.text) : input.text),
+          paste,
+          enter: input.enter === true,
+        };
+      }
+    }
+    const bytes = requestCost(request);
     if (this.bytes + bytes > this.config.terminalInputBytes)
       return Promise.reject(
         new AppError("limit_exceeded", "Terminal input exceeds the capacity limit"),
       );
-    return new Promise<
-      { before: TerminalPosition; input: InputPosition } | { cols: number; rows: number }
-    >((resolve, reject) => {
+    return new Promise<RpcResult>((resolve, reject) => {
       if (operation.type === "session.send") this.model.admitInput(operation.ifInput);
-      let started = false;
-      const abort = new AbortController();
-      const signal = AbortSignal.any([abort.signal, this.abort.signal]);
-      const fail = (cause: unknown) => {
-        clearTimeout(timer);
-        const error = asError(cause);
-        reject(new OperationError(error.code, error.message, started ? "unknown" : "failed"));
-      };
-      const assertActive = () => {
-        signal.throwIfAborted();
-        if (Date.now() >= operation.deadline)
-          throw new AppError("timeout", "Terminal operation deadline expired");
-      };
-      const item: Operation = {
-        type: "operation",
-        attachmentId: undefined,
-        bytes,
-        fail,
-        run: async () => {
-          try {
-            assertActive();
-            const before = await this.model.ordered(() => this.model.position());
-            assertActive();
-            started = true;
-            if (operation.type === "session.resize") {
-              await this.control.resize(operation.cols, operation.rows, signal);
-              assertActive();
-              await this.model.waitForSize(
-                operation.cols,
-                operation.rows,
-                this.control.schedule,
-                signal,
-              );
-              resolve({ cols: operation.cols, rows: operation.rows });
-            } else {
-              if (input!.type === "key") {
-                const key = input!.key;
-                const keys = {
-                  Enter: "\r",
-                  Escape: "\x1b",
-                  CtrlC: "\x03",
-                  Tab: "\t",
-                  PageUp: "\x1b[5~",
-                  PageDown: "\x1b[6~",
-                };
-                const text =
-                  key === "Up" || key === "Down"
-                    ? `\x1b${this.model.terminal.modes.applicationCursorKeysMode ? "O" : "["}${key === "Up" ? "A" : "B"}`
-                    : keys[key];
-                await this.inject(Buffer.from(text), false, signal);
-              } else {
-                if (data!.length) await this.inject(data!, input!.type === "paste", signal);
-                if (input!.enter) {
-                  assertActive();
-                  await this.inject(Buffer.from("\r"), false, signal);
-                }
-              }
-              resolve({ before, input: this.model.inputState() });
-            }
-          } finally {
-            clearTimeout(timer);
-          }
+      const item: RpcInput = {
+        kind: "rpc",
+        request,
+        completion: {
+          deadline: operation.deadline,
+          started: false,
+          abort: new AbortController(),
+          resolve,
+          reject,
         },
       };
-      const timer = setTimeout(
-        () => {
-          const index = this.queue.indexOf(item);
-          if (index !== -1) {
-            this.queue.splice(index, 1);
-            this.bytes -= bytes;
-          }
-          const error = new AppError("timeout", "Terminal operation deadline expired");
-          abort.abort(error);
-          fail(error);
-        },
+      item.completion.timer = setTimeout(
+        () => this.expireRpc(item),
         Math.max(0, operation.deadline - Date.now()),
       );
       this.queue.push(item);
       this.bytes += bytes;
       void this.run();
     });
+  }
+  private assertRpcActive(completion: RpcCompletion, signal: AbortSignal) {
+    signal.throwIfAborted();
+    if (Date.now() >= completion.deadline)
+      throw new AppError("timeout", "Terminal operation deadline expired");
+  }
+  private async executeRpc(item: RpcInput) {
+    const { completion, request } = item;
+    const signal = AbortSignal.any([completion.abort.signal, this.abort.signal]);
+    try {
+      this.assertRpcActive(completion, signal);
+      const before = await this.model.ordered(() => this.model.position());
+      this.assertRpcActive(completion, signal);
+      completion.started = true;
+      await this.executeRequest(item, signal);
+      completion.resolve(
+        request.type === "resize"
+          ? { cols: request.cols, rows: request.rows }
+          : { before, input: this.model.inputState() },
+      );
+    } finally {
+      clearTimeout(completion.timer);
+    }
+  }
+  private async executeRequest(item: WebInput | RpcInput, signal: AbortSignal) {
+    const { request } = item;
+    if (request.type === "resize") {
+      // Web commands and size observation retain the Control lifetime; RPC adds its deadline.
+      await this.control.resize(
+        request.cols,
+        request.rows,
+        item.kind === "rpc" ? signal : undefined,
+      );
+      if (item.kind === "rpc") this.assertRpcActive(item.completion, signal);
+      await this.model.waitForSize(
+        request.cols,
+        request.rows,
+        this.control.schedule,
+        item.kind === "rpc" ? signal : this.control.signal,
+      );
+    } else if (request.type === "key") {
+      const key = request.key;
+      const keys = {
+        Enter: "\r",
+        Escape: "\x1b",
+        CtrlC: "\x03",
+        Tab: "\t",
+        PageUp: "\x1b[5~",
+        PageDown: "\x1b[6~",
+      };
+      let text: string;
+      if (key === "Up" || key === "Down") {
+        const prefix = this.model.terminal.modes.applicationCursorKeysMode ? "O" : "[";
+        const direction = key === "Up" ? "A" : "B";
+        text = `\x1b${prefix}${direction}`;
+      } else {
+        text = keys[key];
+      }
+      await this.inject(Buffer.from(text), false, signal);
+    } else {
+      if (request.data.length) await this.inject(request.data, request.paste, signal);
+      if (request.enter) {
+        if (item.kind === "rpc") this.assertRpcActive(item.completion, signal);
+        await this.inject(Buffer.from("\r"), false, signal);
+      }
+    }
+  }
+  private expireRpc(item: RpcInput) {
+    const index = this.queue.indexOf(item);
+    if (index !== -1) {
+      this.queue.splice(index, 1);
+      this.bytes -= cost(item);
+    }
+    // A reply can expire while drain still awaits the actual tmux client and its cleanup.
+    const error = new AppError("timeout", "Terminal operation deadline expired");
+    item.completion.abort.abort(error);
+    this.failRpc(item, error);
+  }
+  private failRpc(item: RpcInput, cause: unknown) {
+    const { completion } = item;
+    clearTimeout(completion.timer);
+    const error = asError(cause);
+    completion.reject(
+      new OperationError(error.code, error.message, completion.started ? "unknown" : "failed"),
+    );
   }
   private reject(id: string, error: unknown, outcome: "failed" | "unknown") {
     this.report(id, { type: "input.error", ...asError(error), outcome });
@@ -262,24 +356,14 @@ export class InputQueue {
       if (this.closed || !this.queue.length) break;
       const item = this.queue.shift()!;
       try {
-        if (item.type === "operation") await item.run();
-        else if (item.type === "redraw") {
-          await this.redrawTask();
+        if (item.kind === "rpc") await this.executeRpc(item);
+        else if (item.kind === "redraw") {
+          await this.executeRedraw();
           item.resolve();
-        } else if (item.type === "resize") {
-          await this.control.resize(item.cols, item.rows);
-          await this.model.waitForSize(
-            item.cols,
-            item.rows,
-            this.control.schedule,
-            this.control.signal,
-          );
-        } else {
-          await this.inject(item.data, item.type === "paste", this.abort.signal);
-        }
+        } else await this.executeRequest(item, this.abort.signal);
       } catch (error) {
-        if (item.type === "operation") item.fail(error);
-        else if (item.type === "redraw") item.reject(error);
+        if (item.kind === "rpc") this.failRpc(item, error);
+        else if (item.kind === "redraw") item.reject(error);
         else this.reject(item.attachmentId, error, "unknown");
       } finally {
         this.bytes -= cost(item);
@@ -290,8 +374,8 @@ export class InputQueue {
     this.abort.abort(new AppError("cancelled", "Terminal closed"));
     for (const item of this.queue.splice(0)) {
       this.bytes -= cost(item);
-      if (item.type === "operation") item.fail(new AppError("cancelled", "Terminal closed"));
-      else if (item.type === "redraw") item.reject(new AppError("cancelled", "Terminal closed"));
+      if (item.kind === "rpc") this.failRpc(item, new AppError("cancelled", "Terminal closed"));
+      else if (item.kind === "redraw") item.reject(new AppError("cancelled", "Terminal closed"));
     }
     return this.running ?? Promise.resolve();
   }

@@ -13,9 +13,8 @@ function decodeText(value: string, encodedLimit: number, decodedLimit: number) {
   let text: string;
   try {
     text = utf8.decode(bytes);
-  } catch (error) {
-    if (error instanceof TypeError) return undefined;
-    throw error;
+  } catch {
+    return undefined;
   }
   for (const character of text) {
     const code = character.charCodeAt(0);

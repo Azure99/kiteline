@@ -66,12 +66,12 @@ test("headless Model receives fragmented reports without any display attachment"
   const reports: TerminalNotice[] = [],
     faults: Error[] = [];
   const model = new Model(
-    80,
-    24,
-    100,
-    (error) => faults.push(error),
-    () => {},
-    (report) => reports.push(report),
+    { cols: 80, rows: 24, historyLines: 100 },
+    {
+      fault: (error) => faults.push(error),
+      backlogChanged: () => {},
+      notice: (report) => reports.push(report),
+    },
   );
   try {
     const bytes = Buffer.from(

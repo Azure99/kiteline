@@ -1,5 +1,4 @@
 import { AppError, asError, limits, type TerminalNotice } from "@kiteline/shared/protocol";
-import { setTimeout as delay } from "node:timers/promises";
 import type {
   TerminalSource,
   TerminalIdentity,
@@ -9,7 +8,7 @@ import type {
 } from "@kiteline/shared/protocol/ipc";
 import { tmux } from "@kiteline/shared/terminal/node";
 import { Control } from "./control.js";
-import { Model } from "./model.js";
+import { Model, modelLimits } from "./model.js";
 import { Attachment } from "./attachment.js";
 import { InputQueue, isMissingInputBuffer, webInputBuffer } from "./input.js";
 
@@ -37,12 +36,12 @@ export class RecordedSession {
   ) {
     this.initialized = options.type === "create";
     this.model = new Model(
-      options.cols,
-      options.rows,
-      options.historyLines,
-      (error) => this.fault(error),
-      () => this.pressure(),
-      (notice) => this.notice(notice),
+      { cols: options.cols, rows: options.rows, historyLines: options.historyLines },
+      {
+        fault: (error) => this.fault(error),
+        backlogChanged: () => this.pressure(),
+        notice: (notice) => this.notice(notice),
+      },
     );
     this.control = new Control(
       options,
@@ -58,15 +57,9 @@ export class RecordedSession {
       },
       limits.interactionTimeout,
     );
-    this.input = new InputQueue(
-      this.control,
-      this.model,
-      config,
-      (id, frame) => {
-        this.frame(id, frame);
-      },
-      () => this.redrawTask(),
-    );
+    this.input = new InputQueue(this.control, this.model, config, (id, frame) => {
+      this.frame(id, frame);
+    });
   }
   start() {
     return (this.starting ??= this.initialize());
@@ -103,20 +96,6 @@ export class RecordedSession {
     if (this.failed || this.ended)
       throw new AppError("recording_unavailable", "Terminal ended or recording interrupted");
     return identity;
-  }
-  private async redrawTask() {
-    const { cols, rows } = await this.model.ordered(() => ({
-      cols: this.model.terminal.cols,
-      rows: this.model.terminal.rows,
-    }));
-    try {
-      await this.control.resize(cols, rows + 1);
-      await this.model.waitForSize(cols, rows + 1, this.control.schedule, this.control.signal);
-      await delay(80);
-    } finally {
-      await this.control.resize(cols, rows);
-      await this.model.waitForSize(cols, rows, this.control.schedule, this.control.signal);
-    }
   }
   private frame(id: string, frame: TerminalFrame) {
     if (frame.type === "ready") {
@@ -178,8 +157,11 @@ export class RecordedSession {
   private pressure() {
     if (this.ended || this.failed) return;
     const pending = this.model.backlog;
+    const threshold = this.control.paused
+      ? modelLimits.terminalModelLowWaterBytes
+      : modelLimits.terminalModelHighWaterBytes;
     // Leave room for the current stdout chunk, which readLines still finishes after pause().
-    this.control.setPaused(pending >= (this.control.paused ? 128 * 1024 : 512 * 1024));
+    this.control.setPaused(pending >= threshold);
   }
   detach(id: string) {
     this.displays.get(id)?.attachment.close();
