@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { WebSocket } from "ws";
 import {
   appVersion,
+  type AgentControlMessage,
   type Reply,
   type ScheduledTask,
   type DeviceTaskSummary,
@@ -115,18 +116,23 @@ test("real device CLI/RPC share tasks, snapshots persist only summaries, and rem
         changes: { name: "stale" },
       }),
     ).toMatchObject({ outcome: "failed", error: { code: "conflict" } });
-    const notify = agent.schedules.onChange!;
-    agent.schedules.onChange = (snapshot) => {
-      notify(snapshot);
+    const connection = f.app.connections.online(f.identity.deviceId)!;
+    let interrupted = false;
+    connection.socket.on("message", (data) => {
+      const message = JSON.parse(data.toString()) as AgentControlMessage;
       if (
-        snapshot.items[0]?.currentRun?.id === "lost" &&
-        snapshot.items[0].currentRun.state === "starting"
-      )
-        agent.socket?.terminate();
-    };
+        message.type === "tasks.snapshot" &&
+        message.items.some(
+          (task) => task.currentRun?.id === "lost" && task.currentRun.state === "starting",
+        )
+      ) {
+        interrupted = true;
+        connection.socket.terminate();
+      }
+    });
     const lost = await f.rpc("tasks.run", { taskId: task.id, runId: "lost" });
+    expect(interrupted).toBe(true);
     expect(lost).toMatchObject({ outcome: "unknown" });
-    agent.schedules.onChange = notify;
     await expect
       .poll(async () => (await localRequest<TaskRun>(config, "runs.get", { runId: "lost" })).state)
       .toBe("succeeded");

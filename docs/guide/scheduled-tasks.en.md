@@ -109,6 +109,8 @@ You can also delete a task that needs review. Its deletion confirmation includes
 
 If the agent cannot read files under `tasks/` at startup, the device's task feature shows “Scheduled task storage is unavailable on this device.” The agent log identifies the failing file in a message beginning `Scheduled task storage:`. You can also run `kiteline-agent doctor` on that device and read the Scheduled Tasks diagnosis. Terminals, files and Git remain available. Follow the diagnosis to repair or move the failing file, then restart the agent. The agent does not automatically repair or delete these files.
 
+Scheduled Tasks also reports specific failures to save retention records, delete run output, or clean up startup temporary files. These errors do not disable all task operations. A retention save failure belongs to the task being reclaimed, including when another task needs room for a new run. Repair the problem using the task, run ID, and path in the diagnosis. The task's next successful save, such as an update or pause, or successful deletion clears its retention save failure. Later admission of a new run attempts to remove residual output; successful cleanup clears that run's diagnosis and releases its ID. Startup `.tmp` cleanup failures require an agent restart to confirm recovery. Repairing or deleting files externally does not immediately clear the current diagnosis.
+
 ## Command line
 
 `kiteline-agent schedule` manages the same tasks locally on the device. Managing tasks requires a running agent. Run commands as the same operating-system user and resolve to the same runtime directory as the agent. Commands do not start the agent.

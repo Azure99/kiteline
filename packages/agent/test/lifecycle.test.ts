@@ -3,13 +3,83 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import type { AddressInfo } from "node:net";
+import { WebSocketServer, type WebSocket } from "ws";
 import { Agent } from "../src/agent.js";
 import { privateDirectory } from "../src/config.js";
 import { testConfig } from "./support/config.js";
 import { ScheduledTasks } from "../src/tasks/index.js";
 import { TemporaryFiles } from "../src/files/temporary.js";
-import { AppError, type OperationError } from "@kiteline/shared/protocol";
+import {
+  AppError,
+  appVersion,
+  type AgentControlMessage,
+  type OperationError,
+} from "@kiteline/shared/protocol";
 import { localRequest } from "../src/local.js";
+
+test("task changes wait for welcome and then publish the current snapshot", async () => {
+  const root = await mkdtemp("/var/tmp/kiteline-task-events-");
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  await once(server, "listening");
+  const messages: AgentControlMessage[] = [];
+  const connected = new Promise<WebSocket>((resolve) => {
+    server.once("connection", (socket) => {
+      socket.on("message", (data) => messages.push(JSON.parse(data.toString())));
+      resolve(socket);
+    });
+  });
+  const agent = new Agent(testConfig(root), {
+    deviceId: "task-events",
+    deviceToken: "task-events",
+    server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+  });
+  const snapshots = () => messages.filter((message) => message.type === "tasks.snapshot");
+  try {
+    for (const path of [agent.config.dataDir, agent.config.runDir]) await privateDirectory(path);
+    await agent.start();
+    const socket = await connected;
+    await expect.poll(() => messages.some((message) => message.type === "hello")).toBe(true);
+    await localRequest(agent.config, "tasks.create", {
+      taskId: "before-welcome",
+      input: {
+        name: "Before welcome",
+        command: "true",
+        cwd: root,
+        timezone: "UTC",
+        schedule: { kind: "cron", expression: "0 0 1 1 *" },
+      },
+    });
+    const pong = once(socket, "pong");
+    socket.ping();
+    await pong;
+    expect(snapshots()).toEqual([]);
+
+    socket.send(
+      JSON.stringify({ type: "welcome", connectionId: "task-events", serverVersion: appVersion }),
+    );
+    await expect
+      .poll(() => snapshots())
+      .toMatchObject([{ revision: 1, items: [{ id: "before-welcome", name: "Before welcome" }] }]);
+    await localRequest(agent.config, "tasks.update", {
+      taskId: "before-welcome",
+      expectedRevision: 1,
+      changes: { name: "After welcome" },
+    });
+    await expect
+      .poll(() => snapshots().at(-1))
+      .toMatchObject({
+        revision: 2,
+        items: [{ id: "before-welcome", name: "After welcome" }],
+      });
+  } finally {
+    await agent.close();
+    const closed = once(server, "close");
+    server.close();
+    await closed;
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("agent shutdown waits for an accepted workspace publication", async () => {
   const dataDir = await mkdtemp("/var/tmp/kiteline-workspace-publication-");
@@ -173,7 +243,7 @@ test.runIf(process.platform !== "win32")(
 test("stopping during schedule load prevents late timers and local admission, and waits once", async () => {
   const root = await mkdtemp("/var/tmp/kiteline-startup-test-");
   const config = testConfig(root);
-  const saved = new ScheduledTasks(config);
+  const saved = new ScheduledTasks(config, () => {});
   const agent = new Agent(config, {
     deviceId: "test",
     deviceToken: "test",

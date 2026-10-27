@@ -110,10 +110,11 @@ export async function diagnose(
     runtime.sessions.length && !runtime.recorderPid ? "warn" : "ok",
   );
   const schedules = runtime.schedules;
+  const scheduleErrors = [schedules.loadError, ...schedules.failures].filter(Boolean).join("; ");
   add(
     "Scheduled Tasks",
-    `ready=${schedules.ready}; tasks=${schedules.tasks}; active=${schedules.active}; needs_review=${schedules.needsReview}${schedules.storageError ? `; ${schedules.storageError}` : ""}`,
-    schedules.storageError ? "error" : !schedules.ready || schedules.needsReview ? "warn" : "ok",
+    `ready=${!schedules.loadError}; tasks=${schedules.tasks}; active=${schedules.active}; needs_review=${schedules.needsReview}${scheduleErrors ? `; ${scheduleErrors}` : ""}`,
+    scheduleErrors ? "error" : schedules.needsReview ? "warn" : "ok",
   );
   for (const session of runtime.sessions)
     add(

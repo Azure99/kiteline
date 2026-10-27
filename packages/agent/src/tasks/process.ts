@@ -7,6 +7,7 @@ import { asError, type TaskRun } from "@kiteline/shared/protocol";
 import { stopGroup, waitForGroup } from "../process-group.js";
 import { JobChild, spawnJob } from "@kiteline/shared/windows/job";
 import { internalNodeEnvironment, nodeEnvironmentKeys } from "@kiteline/shared/terminal/node";
+import type { TaskOutputs } from "./outputs.js";
 
 function diagnostic(error: unknown) {
   return Buffer.from(asError(error).message).subarray(0, taskLimits.diagnosticBytes).toString();
@@ -26,14 +27,7 @@ export class TaskProcess {
   private lifecycleDiagnostic?: string;
   private stopping?: Promise<void>;
 
-  static async start(
-    shell: string,
-    run: TaskRun,
-    outputPath: (stream: "stdout" | "stderr") => string,
-    reserveBytes: (wanted: number) => number,
-    releaseBytes: (bytes: number) => void,
-    outputLimit: number,
-  ) {
+  static async start(shell: string, run: TaskRun, outputs: ReturnType<TaskOutputs["forRun"]>) {
     const child =
       process.platform === "win32"
         ? await spawnJob(
@@ -65,15 +59,12 @@ export class TaskProcess {
             detached: true,
             stdio: ["ignore", "pipe", "pipe"],
           });
-    return new TaskProcess(child, outputPath, reserveBytes, releaseBytes, outputLimit);
+    return new TaskProcess(child, outputs);
   }
 
   private constructor(
     private readonly child: ChildProcess | JobChild,
-    outputPath: (stream: "stdout" | "stderr") => string,
-    private readonly reserveBytes: (wanted: number) => number,
-    private readonly releaseBytes: (bytes: number) => void,
-    private readonly outputLimit: number,
+    private readonly outputs: ReturnType<TaskOutputs["forRun"]>,
   ) {
     this.pid = child.pid;
     let failure: string | undefined;
@@ -88,8 +79,8 @@ export class TaskProcess {
             child.once("exit", (exitCode, signal) => resolve({ exitCode, signal }));
           });
     const output = Promise.all([
-      this.drain(this.child.stdout!, "stdout", outputPath("stdout")),
-      this.drain(this.child.stderr!, "stderr", outputPath("stderr")),
+      this.drain(this.child.stdout!, "stdout", outputs.path("stdout")),
+      this.drain(this.child.stderr!, "stderr", outputs.path("stderr")),
     ]);
     const groupDone = (async () => {
       await exited;
@@ -160,11 +151,7 @@ export class TaskProcess {
         await opening;
         const chunk = Buffer.from(bytes as Uint8Array);
         if (!file || this.output.error) continue;
-        const remaining = Math.max(
-          0,
-          this.outputLimit - this.output.stdoutBytes - this.output.stderrBytes,
-        );
-        const reserved = this.reserveBytes(Math.min(chunk.length, remaining));
+        const reserved = this.outputs.reserve(chunk.length);
         if (reserved < chunk.length) this.output.truncated = true;
         // Reserve before awaiting: stdout and stderr share both budgets.
         this.output[key] += reserved;
@@ -179,7 +166,7 @@ export class TaskProcess {
           this.output.error ??= diagnostic(error);
         } finally {
           this.output[key] -= reserved - written;
-          this.releaseBytes(reserved - written);
+          this.outputs.release(reserved - written);
         }
       }
     } catch (error) {

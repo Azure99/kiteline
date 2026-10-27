@@ -106,10 +106,9 @@ export class Agent {
     private readonly identity: Identity,
   ) {
     this.metadata = new MetadataStore(config);
-    this.schedules = new ScheduledTasks(config);
-    this.schedules.onChange = (snapshot) => {
+    this.schedules = new ScheduledTasks(config, (snapshot) => {
       if (this.connectionId) this.send({ type: "tasks.snapshot", ...snapshot });
-    };
+    });
     this.watches = new WorkspaceWatches((event) => this.send(event));
     this.repos = new Repositories(this.metadata, this.cursorBudget);
     this.gitWrites = new GitWriteQueue(this.repos);

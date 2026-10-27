@@ -1,6 +1,6 @@
 import { agentLimits, taskLimits } from "../limits.js";
 import { randomUUID } from "node:crypto";
-import { lstat, mkdir, open, readdir, rm } from "node:fs/promises";
+import { lstat, mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AppError,
@@ -18,13 +18,10 @@ import { atomicJson, readJson } from "@kiteline/shared/node/files";
 import { stateFiles, type AgentConfig } from "../config.js";
 import { checkTaskInput, nextOccurrence, previewSchedule } from "./schedule.js";
 import { TaskProcess } from "./process.js";
+import { TaskOutputs } from "./outputs.js";
 import { taskRecord, type TaskRecord } from "./record.js";
 
-const outputSuffix = /\.(stdout|stderr)$/;
-
-function outputName(id: string, stream: "stdout" | "stderr") {
-  return `${id}.${stream}`;
-}
+type SkipReason = "missed" | "overlap" | "capacity";
 
 function removableRuns(record: TaskRecord) {
   return record.runs.filter(
@@ -32,7 +29,7 @@ function removableRuns(record: TaskRecord) {
   );
 }
 
-function skipRun(run: TaskRun, reason: "missed" | "overlap" | "capacity") {
+function skipRun(run: TaskRun, reason: SkipReason) {
   run.state = "skipped";
   run.reasonCode = reason;
   run.endedAt = new Date().toISOString();
@@ -40,6 +37,7 @@ function skipRun(run: TaskRun, reason: "missed" | "overlap" | "capacity") {
 
 export class ScheduledTasks {
   private readonly directory: string;
+  private readonly outputs: TaskOutputs;
   private readonly records = new Map<string, TaskRecord>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
   private readonly executions = new Map<
@@ -50,22 +48,24 @@ export class ScheduledTasks {
   private closing = false;
   private loadError?: string;
   private readonly pending = new Map<string, string>();
-  private readonly residuals = new Set<string>();
-  private readonly outputSizes = new Map<string, number>();
-  private cleanupError?: string;
+  private readonly retentionErrors = new Map<string, string>();
+  private readonly startupCleanupErrors: string[] = [];
   private revision = 0;
-  private outputBytes = 0;
-  onChange?: (snapshot: TaskSnapshot) => void;
 
-  constructor(private readonly config: AgentConfig) {
+  constructor(
+    private readonly config: AgentConfig,
+    private readonly onChange: (snapshot: TaskSnapshot) => void,
+  ) {
     this.directory = join(config.dataDir, stateFiles.tasks);
+    this.outputs = new TaskOutputs(
+      this.directory,
+      config.limits.taskOutputBytes,
+      config.limits.taskOutputTotalBytes,
+    );
   }
 
   private statePath(id: string) {
     return join(this.directory, `${id}.json`);
-  }
-  private outputPath(id: string, stream: "stdout" | "stderr") {
-    return join(this.directory, outputName(id, stream));
   }
 
   private serial<T>(action: () => Promise<T>, signal?: AbortSignal): Promise<T> {
@@ -99,13 +99,14 @@ export class ScheduledTasks {
     throw new AppError("not_found", "Run does not exist or has been cleaned up");
   }
 
-  private async save(record: TaskRecord) {
+  private async persistCandidateThenPublish(record: TaskRecord) {
     await atomicJson(this.statePath(record.task.id), record);
     this.pending.delete(record.task.id);
-    this.publish(record);
+    this.retentionErrors.delete(record.task.id);
+    this.publishRecordAndNotify(record);
   }
 
-  private publish(record: TaskRecord) {
+  private publishRecordAndNotify(record: TaskRecord) {
     this.records.set(record.task.id, record);
     this.notify();
   }
@@ -113,19 +114,19 @@ export class ScheduledTasks {
   private notify() {
     this.revision++;
     try {
-      this.onChange?.(this.snapshot());
+      this.onChange(this.snapshot());
     } catch (error) {
       console.error("Scheduled task notification:", asError(error).message);
     }
   }
 
-  private async saveKnown(record: TaskRecord) {
+  private async persistFactsAndPublish(record: TaskRecord) {
     try {
-      await this.save(record);
+      await this.persistCandidateThenPublish(record);
     } catch (error) {
       const detail = asError(error);
       this.pending.set(record.task.id, detail.message);
-      this.publish(record);
+      this.publishRecordAndNotify(record);
       console.error("Scheduled task facts not persisted:", record.task.id, detail.message);
       return detail;
     }
@@ -141,27 +142,19 @@ export class ScheduledTasks {
     ]);
   }
 
-  private outputSize(id: string, delta: number) {
-    this.outputBytes += delta;
-    const size = (this.outputSizes.get(id) ?? 0) + delta;
-    if (size) this.outputSizes.set(id, size);
-    else this.outputSizes.delete(id);
-  }
-
-  private async cleanup(action: () => Promise<void>) {
+  private async attemptRetention(action: () => Promise<void>) {
     try {
       await action();
     } catch (error) {
-      this.cleanupError = asError(error).message;
-      console.error("Scheduled task retention:", this.cleanupError);
+      console.error("Scheduled task retention:", asError(error).message);
     }
   }
 
   async load() {
     let files: string[];
     const candidates: TaskRecord[] = [];
-    const outputSizes = new Map<string, number>();
-    let source = this.directory;
+    let scannedOutputs: Awaited<ReturnType<TaskOutputs["load"]>>;
+    let source: string | undefined = this.directory;
     try {
       await mkdir(this.directory, { recursive: true, mode: 0o700 });
       files = await readdir(this.directory);
@@ -170,23 +163,15 @@ export class ScheduledTasks {
         if (!(await lstat(source)).isFile()) throw new Error("Task state is not a regular file");
         candidates.push(taskRecord(await readJson(source), file));
       }
-      for (const file of files.filter((name) => outputSuffix.test(name))) {
-        source = join(this.directory, file);
-        if (!(await lstat(source)).isFile()) throw new Error("Output is not a regular file");
-        const output = await open(source, "r");
-        try {
-          outputSizes.set(file, (await output.stat()).size);
-        } finally {
-          await output.close();
-        }
-      }
+      source = undefined;
+      scannedOutputs = await this.outputs.load(files);
       // Normalize every candidate before saving records or removing any files.
       for (const record of candidates) {
         source = this.statePath(record.task.id);
         for (const run of record.runs) {
-          for (const stream of ["stdout", "stderr"] as const) {
-            const key = stream === "stdout" ? "stdoutBytes" : "stderrBytes";
-            const bytes = outputSizes.get(outputName(run.id, stream)) ?? 0;
+          const output = scannedOutputs.get(run.id);
+          for (const key of ["stdoutBytes", "stderrBytes"] as const) {
+            const bytes = output?.[key] ?? 0;
             if (bytes < run.output[key]) run.output.truncated = true;
             run.output[key] = bytes;
           }
@@ -199,51 +184,48 @@ export class ScheduledTasks {
             record.task.revision++;
           }
         }
-        await this.expireOnce(record);
-        this.nextTime(record);
+        this.recordMissedOnce(record);
+        this.updateNextRunTime(record);
       }
     } catch (error) {
-      this.loadError = `${source}: ${asError(error).message}`;
+      this.loadError = source ? `${source}: ${asError(error).message}` : asError(error).message;
       console.error("Scheduled task storage:", this.loadError);
       return;
     }
-    for (const [file, bytes] of outputSizes) {
-      const id = file.replace(outputSuffix, "");
-      this.outputSize(id, bytes);
-    }
     for (const candidate of candidates) this.records.set(candidate.task.id, candidate);
     for (const record of candidates) {
-      await this.saveKnown(record);
-      await this.cleanup(() => this.prune(record.task.id));
+      await this.persistFactsAndPublish(record);
+      await this.attemptRetention(() => this.pruneHistory(record.task.id));
     }
     // A crash can leave an unpublished atomic file or output whose record was already removed.
     const retained = new Set(
       [...this.records.values()].flatMap((item) => item.runs.map((run) => run.id)),
     );
-    for (const file of files) {
-      if (file.endsWith(".tmp"))
-        await this.cleanup(() => rm(join(this.directory, file), { force: true }));
-      if (outputSuffix.test(file)) {
-        const id = file.replace(outputSuffix, "");
-        if (!retained.has(id)) this.residuals.add(id);
+    for (const file of files.filter((name) => name.endsWith(".tmp"))) {
+      try {
+        await rm(join(this.directory, file), { force: true });
+      } catch (error) {
+        const detail = `${file} startup cleanup failed: ${asError(error).message}`;
+        this.startupCleanupErrors.push(detail);
+        console.error("Scheduled task startup cleanup:", detail);
       }
     }
-    await this.cleanup(() => this.cleanResiduals());
-    for (const record of this.records.values()) this.arm(record);
+    for (const id of scannedOutputs.keys()) {
+      if (!retained.has(id)) this.outputs.markResidual(id);
+    }
+    await this.outputs.removeResiduals();
+    for (const record of this.records.values()) this.armTimer(record);
   }
 
   status() {
-    const storageError =
-      [
-        this.loadError,
-        ...[...this.pending].map(([id, error]) => `${id} not persisted: ${error}`),
-        this.cleanupError,
-      ]
-        .filter(Boolean)
-        .join("; ") || undefined;
     return {
-      ready: !this.closing && !storageError,
-      storageError,
+      loadError: this.loadError,
+      failures: [
+        ...[...this.pending].map(([id, error]) => `${id} not persisted: ${error}`),
+        ...[...this.retentionErrors].map(([id, error]) => `${id} retention failed: ${error}`),
+        ...this.outputs.diagnostics(),
+        ...this.startupCleanupErrors,
+      ],
       tasks: this.records.size,
       active: this.executions.size,
       needsReview: [...this.records.values()].filter((item) => item.task.reviewRunId).length,
@@ -320,10 +302,10 @@ export class ScheduledTasks {
         },
         runs: [],
       };
-      this.nextTime(record);
+      this.updateNextRunTime(record);
       signal.throwIfAborted();
-      await this.save(record);
-      this.arm(record);
+      await this.persistCandidateThenPublish(record);
+      this.armTimer(record);
       return this.get(id);
     }, signal);
   }
@@ -393,12 +375,12 @@ export class ScheduledTasks {
 
   private async commitDefinition(record: TaskRecord, signal?: AbortSignal) {
     record.task.revision++;
-    await this.expireOnce(record);
-    this.nextTime(record);
+    this.recordMissedOnce(record);
+    this.updateNextRunTime(record);
     signal?.throwIfAborted();
-    await this.save(record);
-    await this.cleanup(() => this.prune(record.task.id));
-    this.arm(record);
+    await this.persistCandidateThenPublish(record);
+    await this.attemptRetention(() => this.pruneHistory(record.task.id));
+    this.armTimer(record);
     return this.get(record.task.id);
   }
 
@@ -417,13 +399,14 @@ export class ScheduledTasks {
         });
       await rm(this.statePath(id));
       this.pending.delete(id);
+      this.retentionErrors.delete(id);
       clearTimeout(this.timers.get(id));
       this.timers.delete(id);
       this.records.delete(id);
       this.notify();
       try {
-        for (const run of record.runs) this.residuals.add(run.id);
-        for (const run of record.runs) await this.removeOutput(run.id);
+        for (const run of record.runs) this.outputs.markResidual(run.id);
+        for (const run of record.runs) await this.outputs.remove(run.id);
       } catch (error) {
         throw OperationError.from(asError(error), "partial", { removed: true });
       }
@@ -431,7 +414,7 @@ export class ScheduledTasks {
     }, signal);
   }
 
-  private nextTime(record: TaskRecord) {
+  private updateNextRunTime(record: TaskRecord) {
     const task = record.task;
     const after = new Date(Math.max(Date.now(), Date.parse(record.lastScheduledAt ?? "") || 0));
     task.nextRunAt =
@@ -442,7 +425,7 @@ export class ScheduledTasks {
         : null;
   }
 
-  private arm(record: TaskRecord) {
+  private armTimer(record: TaskRecord) {
     const { id, revision, nextRunAt } = record.task;
     clearTimeout(this.timers.get(id));
     this.timers.delete(id);
@@ -450,37 +433,40 @@ export class ScheduledTasks {
     const milliseconds = Math.max(0, Date.parse(nextRunAt) - Date.now());
     const timer = setTimeout(
       () => {
-        void this.serial(async () => {
-          const latest = this.records.get(id);
-          if (
-            !latest ||
-            latest.task.revision !== revision ||
-            latest.task.nextRunAt !== nextRunAt ||
-            this.closing
-          )
-            return;
-          if (Date.now() < Date.parse(nextRunAt)) {
-            this.arm(latest);
-            return;
-          }
-          try {
-            await this.admit(id, randomUUID(), nextRunAt);
-          } catch (error) {
-            console.error("Scheduled task admission:", asError(error).message);
-            const current = structuredClone(this.record(id));
-            if (current.task.nextRunAt === nextRunAt) {
-              current.lastScheduledAt = nextRunAt;
-              await this.expireOnce(current);
-              this.nextTime(current);
-              await this.saveKnown(current);
-              this.arm(current);
-            }
-          }
-        }).catch((error: unknown) => console.error("Scheduled task:", asError(error).message));
+        void this.serial(() => this.handleScheduledOccurrence(id, revision, nextRunAt)).catch(
+          (error: unknown) => console.error("Scheduled task:", asError(error).message),
+        );
       },
       Math.min(milliseconds, agentLimits.maxTimerDelay),
     );
     this.timers.set(id, timer);
+  }
+
+  private async handleScheduledOccurrence(id: string, revision: number, scheduledAt: string) {
+    const latest = this.records.get(id);
+    if (
+      !latest ||
+      latest.task.revision !== revision ||
+      latest.task.nextRunAt !== scheduledAt ||
+      this.closing
+    )
+      return;
+    if (Date.now() < Date.parse(scheduledAt)) {
+      this.armTimer(latest);
+      return;
+    }
+    try {
+      await this.startScheduledRun(id, randomUUID(), scheduledAt);
+    } catch (error) {
+      console.error("Scheduled task admission:", asError(error).message);
+      const current = structuredClone(this.record(id));
+      if (current.task.nextRunAt !== scheduledAt) return;
+      current.lastScheduledAt = scheduledAt;
+      this.recordMissedOnce(current);
+      this.updateNextRunTime(current);
+      await this.persistFactsAndPublish(current);
+      this.armTimer(current);
+    }
   }
 
   private newRun(record: TaskRecord, id: string, scheduledAt?: string): TaskRun {
@@ -497,7 +483,7 @@ export class ScheduledTasks {
     };
   }
 
-  private async expireOnce(record: TaskRecord) {
+  private recordMissedOnce(record: TaskRecord) {
     if (
       record.task.schedule.kind !== "once" ||
       record.task.onceStatus !== "pending" ||
@@ -511,78 +497,91 @@ export class ScheduledTasks {
   }
 
   start(id: string, runId: string, signal: AbortSignal) {
-    return this.serial(() => this.admit(id, runId), signal);
+    return this.serial(async () => {
+      const record = this.recordForAdmission(id, runId);
+      const run = this.newRun(record, runId);
+      const reason = this.runBlockReason(record);
+      if (reason === "overlap") throw new AppError("busy", "Task is already running");
+      if (reason === "capacity")
+        throw new AppError("busy", "Device task concurrency limit reached");
+
+      const prepared = await this.prepareStorageForRun(id);
+      prepared.runs.push(run);
+      await this.persistCandidateThenPublish(prepared);
+      return this.spawnAndPersistStartFacts(run);
+    }, signal);
   }
 
-  private async admit(id: string, runId: string, scheduledAt?: string): Promise<TaskRun> {
+  private recordForAdmission(id: string, runId: string) {
     this.writable();
-    let record = structuredClone(this.record(id));
+    const record = structuredClone(this.record(id));
     if (record.task.reviewRunId)
       throw new AppError("busy", "Review the unfinished run before starting another", {
         reviewRunId: record.task.reviewRunId,
       });
     const key = runId.toLowerCase();
     if (
-      [...this.residuals].some((id) => id.toLowerCase() === key) ||
+      this.outputs.hasResidualId(runId) ||
       [...this.records.values()].some((item) =>
         item.runs.some((run) => run.id.toLowerCase() === key),
       )
     )
       throw new AppError("conflict", "Run ID already exists; query that run");
+    return record;
+  }
+
+  private runBlockReason(record: TaskRecord): "overlap" | "capacity" | undefined {
+    if (record.runs.some((run) => taskRunActive(run.state))) return "overlap";
+    if (this.occupiedRuns().size >= this.config.limits.taskRunsPerDevice) return "capacity";
+  }
+
+  private async prepareStorageForRun(id: string) {
+    await this.outputs.removeResiduals();
+    await this.pruneHistory(id);
+    await this.makeOutputRoom();
+    // Retention may have published a shorter history; keep the original acceptance snapshot.
+    return structuredClone(this.record(id));
+  }
+
+  private async startScheduledRun(id: string, runId: string, scheduledAt: string) {
+    const record = this.recordForAdmission(id, runId);
     const run = this.newRun(record, runId, scheduledAt);
     const reason =
-      scheduledAt && Date.now() - Date.parse(scheduledAt) > taskLimits.lateToleranceMs
+      Date.now() - Date.parse(scheduledAt) > taskLimits.lateToleranceMs
         ? "missed"
-        : record.runs.some((item) => taskRunActive(item.state))
-          ? "overlap"
-          : this.occupiedRuns().size >= this.config.limits.taskRunsPerDevice
-            ? "capacity"
-            : undefined;
-    if (reason && !scheduledAt)
-      throw new AppError(
-        "busy",
-        reason === "overlap" ? "Task is already running" : "Device task concurrency limit reached",
-      );
-    if (!reason) {
-      await this.cleanResiduals();
-      await this.prune(id);
-      await this.makeOutputRoom();
-      record = structuredClone(this.record(id));
-    }
-    if (scheduledAt) {
-      record.lastScheduledAt = scheduledAt;
-      if (record.task.schedule.kind === "once")
-        record.task.onceStatus = reason === "missed" ? "missed" : "consumed";
-    }
-    if (reason) skipRun(run, reason);
-    record.runs.push(run);
-    if (scheduledAt) this.nextTime(record);
-    if (reason) await this.saveKnown(record);
-    else await this.save(record);
-    if (scheduledAt) this.arm(record);
+        : this.runBlockReason(record);
     if (reason) {
-      await this.cleanup(() => this.prune(id));
-      return structuredClone(run);
+      this.consumeScheduledOccurrence(record, scheduledAt, reason);
+      skipRun(run, reason);
+      record.runs.push(run);
+      this.updateNextRunTime(record);
+      await this.persistFactsAndPublish(record);
+      this.armTimer(record);
+      await this.attemptRetention(() => this.pruneHistory(id));
+      return;
     }
+
+    const prepared = await this.prepareStorageForRun(id);
+    this.consumeScheduledOccurrence(prepared, scheduledAt);
+    prepared.runs.push(run);
+    this.updateNextRunTime(prepared);
+    await this.persistCandidateThenPublish(prepared);
+    this.armTimer(prepared);
+    await this.spawnAndPersistStartFacts(run);
+  }
+
+  private consumeScheduledOccurrence(record: TaskRecord, scheduledAt: string, reason?: SkipReason) {
+    record.lastScheduledAt = scheduledAt;
+    if (record.task.schedule.kind === "once")
+      record.task.onceStatus = reason === "missed" ? "missed" : "consumed";
+  }
+
+  private async spawnAndPersistStartFacts(run: TaskRun) {
+    const id = run.taskId;
+    const runId = run.id;
     let process: TaskProcess;
     try {
-      process = await TaskProcess.start(
-        this.config.shell,
-        run,
-        (stream) => this.outputPath(runId, stream),
-        (wanted) => {
-          const bytes = Math.min(
-            wanted,
-            Math.max(0, this.config.limits.taskOutputTotalBytes - this.outputBytes),
-          );
-          this.outputSize(runId, bytes);
-          return bytes;
-        },
-        (bytes) => {
-          this.outputSize(runId, -bytes);
-        },
-        this.config.limits.taskOutputBytes,
-      );
+      process = await TaskProcess.start(this.config.shell, run, this.outputs.forRun(runId));
     } catch (error) {
       const failed = structuredClone(this.record(id));
       const saved = failed.runs.find((item) => item.id === runId)!;
@@ -593,18 +592,22 @@ export class ScheduledTasks {
         diagnostic: asError(error).message,
         exitCode: null,
       });
-      await this.saveKnown(failed);
-      await this.cleanup(() => this.prune(id));
+      await this.persistFactsAndPublish(failed);
+      await this.attemptRetention(() => this.pruneHistory(id));
       return this.getRun(runId);
     }
     const finished = this.finishRun(id, runId, process);
     this.executions.set(runId, { process, finished });
     const started = structuredClone(this.record(id));
     const saved = started.runs.find((item) => item.id === runId)!;
-    saved.state = process.pid ? "running" : "starting";
-    if (process.pid) saved.startedAt = new Date().toISOString();
+    if (process.pid) {
+      saved.state = "running";
+      saved.startedAt = new Date().toISOString();
+    } else {
+      saved.state = "starting";
+    }
     saved.pid = process.pid;
-    const detail = await this.saveKnown(started);
+    const detail = await this.persistFactsAndPublish(started);
     if (detail) {
       throw OperationError.from(detail, "unknown", { taskId: id, runId });
     }
@@ -620,17 +623,19 @@ export class ScheduledTasks {
         Object.assign(saved, result, {
           output: { ...process.output },
           endedAt: new Date().toISOString(),
-          state: process.stopReason ? "stopped" : result.exitCode === 0 ? "succeeded" : "failed",
-          reasonCode:
-            process.stopReason ??
-            (!process.pid && result.diagnostic
-              ? "start_failed"
-              : result.exitCode === 0
-                ? undefined
-                : "exit_nonzero"),
         });
-        await this.saveKnown(latest);
-        await this.cleanup(() => this.prune(id));
+        if (process.stopReason) {
+          saved.state = "stopped";
+          saved.reasonCode = process.stopReason;
+        } else {
+          if (result.exitCode === 0) saved.state = "succeeded";
+          else saved.state = "failed";
+          if (!process.pid && result.diagnostic) saved.reasonCode = "start_failed";
+          else if (result.exitCode !== 0) saved.reasonCode = "exit_nonzero";
+          else saved.reasonCode = undefined;
+        }
+        await this.persistFactsAndPublish(latest);
+        await this.attemptRetention(() => this.pruneHistory(id));
       });
     } catch (error) {
       console.error("Scheduled task result:", asError(error).message);
@@ -650,7 +655,7 @@ export class ScheduledTasks {
       void stopped.catch((error: unknown) =>
         console.error("Scheduled task stop:", asError(error).message),
       );
-      const detail = await this.saveKnown(record);
+      const detail = await this.persistFactsAndPublish(record);
       if (detail) {
         throw OperationError.from(detail, "unknown", { runId: id });
       }
@@ -667,97 +672,36 @@ export class ScheduledTasks {
   ): Promise<TaskOutput> {
     signal.throwIfAborted();
     const run = this.getRun(id);
-    const finished = !taskRunActive(run.state);
-    let file;
-    try {
-      file = await open(this.outputPath(id, stream), "r");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      return {
-        text: "",
-        offset: 0,
-        nextOffset: 0,
-        storedBytes: 0,
-        truncated: run.output.truncated,
-        finished,
-      };
-    }
-    try {
-      const size = (await file.stat()).size;
-      if (offset > size) offset = 0;
-      const bytes = Buffer.alloc(Math.min(limit, size - offset));
-      const { bytesRead } = await file.read(bytes, 0, bytes.length, offset);
-      signal.throwIfAborted();
-      const flush = finished && offset + bytesRead === size;
-      let complete = bytesRead;
-      if (!flush && bytesRead) {
-        let start = bytesRead - 1;
-        while (start > 0 && bytesRead - start < 4 && (bytes[start]! & 0xc0) === 0x80) start--;
-        const first = bytes[start]!;
-        const width =
-          first >= 0xc2 && first <= 0xdf
-            ? 2
-            : first >= 0xe0 && first <= 0xef
-              ? 3
-              : first >= 0xf0 && first <= 0xf4
-                ? 4
-                : 1;
-        if (bytesRead - start < width) complete = start;
-      }
-      return {
-        text: bytes.subarray(0, complete).toString("utf8"),
-        offset,
-        nextOffset: offset + complete,
-        storedBytes: size,
-        truncated: run.output.truncated,
-        finished,
-      };
-    } finally {
-      await file.close();
-    }
+    const output = await this.outputs.read({
+      id,
+      stream,
+      offset,
+      limit,
+      finished: !taskRunActive(run.state),
+      signal,
+    });
+    return { ...output, truncated: run.output.truncated };
   }
 
-  private async removeOutput(id: string) {
-    this.residuals.add(id);
-    for (const stream of ["stdout", "stderr"] as const) {
-      const path = this.outputPath(id, stream);
-      const bytes = await lstat(path).then(
-        (info) => {
-          if (!info.isFile()) throw new Error(`Task output is not a regular file: ${path}`);
-          return info.size;
-        },
-        (error: NodeJS.ErrnoException) => {
-          if (error.code === "ENOENT") return 0;
-          throw error;
-        },
-      );
-      await rm(path, { force: true });
-      this.outputSize(id, -Math.min(bytes, this.outputSizes.get(id) ?? 0));
-    }
-    this.outputSize(id, -(this.outputSizes.get(id) ?? 0));
-    this.residuals.delete(id);
-  }
-
-  private async cleanResiduals() {
-    for (const id of this.residuals) await this.cleanup(() => this.removeOutput(id));
-    if (!this.residuals.size) this.cleanupError = undefined;
-  }
-
-  private async removeRun(task: string, id: string) {
+  private async persistRunRemovalThenDeleteOutput(task: string, id: string) {
     const record = structuredClone(this.record(task));
     record.runs = record.runs.filter((run) => run.id !== id);
-    await this.save(record);
-    await this.removeOutput(id);
+    try {
+      await this.persistCandidateThenPublish(record);
+    } catch (error) {
+      this.retentionErrors.set(task, asError(error).message);
+      throw error;
+    }
+    await this.outputs.remove(id);
   }
 
-  private async prune(id: string) {
-    const record = this.record(id);
-    const ended = removableRuns(record);
+  private async pruneHistory(id: string) {
+    const ended = removableRuns(this.record(id));
     for (const run of ended.slice(
       0,
       Math.max(0, ended.length - this.config.limits.taskHistoryRuns),
     ))
-      await this.removeRun(id, run.id);
+      await this.persistRunRemovalThenDeleteOutput(id, run.id);
   }
 
   private async makeOutputRoom() {
@@ -766,16 +710,14 @@ export class ScheduledTasks {
       this.config.limits.taskOutputBytes,
       this.config.limits.taskOutputTotalBytes,
     );
-    const reclaimable = ended.reduce(
-      (bytes, run) => bytes + (this.outputSizes.get(run.id) ?? 0),
-      0,
-    );
-    if (this.outputBytes - reclaimable + target > this.config.limits.taskOutputTotalBytes) return;
+    const reclaimable = ended.reduce((bytes, run) => bytes + this.outputs.bytes(run.id), 0);
+    if (this.outputs.totalBytes - reclaimable + target > this.config.limits.taskOutputTotalBytes)
+      return;
     ended.sort((a, b) => a.acceptedAt.localeCompare(b.acceptedAt));
     for (const run of ended) {
-      if (this.outputBytes + target <= this.config.limits.taskOutputTotalBytes) break;
-      if (!this.outputSizes.get(run.id)) continue;
-      await this.removeRun(run.taskId, run.id);
+      if (this.outputs.totalBytes + target <= this.config.limits.taskOutputTotalBytes) break;
+      if (!this.outputs.bytes(run.id)) continue;
+      await this.persistRunRemovalThenDeleteOutput(run.taskId, run.id);
     }
   }
 
