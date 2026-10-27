@@ -4,6 +4,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { finished } from "node:stream/promises";
 import type { CreateTerminal } from "../protocol/ipc.js";
 import { spawnJob } from "../windows/job.js";
+import { BytePrefix } from "../node/buffers.js";
 import {
   msysPath,
   terminalPreset,
@@ -44,9 +45,9 @@ export async function startTerminalServer(options: CreateTerminal, timeout: numb
     { cwd: options.workspacePath, env: tmuxEnvironment(), stdio: ["ignore", "pipe", "pipe"] },
   );
   server.stdout!.resume();
-  let stderr = "";
+  const stderr = new BytePrefix(8192);
   server.stderr!.on("data", (data: Buffer) => {
-    if (stderr.length < 8192) stderr += data.toString();
+    stderr.append(data);
   });
   const drained = Promise.all([
     finished(server.stdout!, { writable: false, cleanup: true }),
@@ -59,7 +60,7 @@ export async function startTerminalServer(options: CreateTerminal, timeout: numb
     const signal = AbortSignal.timeout(timeout);
     while (true) {
       signal.throwIfAborted();
-      if (exited) throw new Error(stderr.trim() || "Terminal server exited during startup");
+      if (exited) throw new Error(stderr.text().trim() || "Terminal server exited during startup");
       try {
         // The first client loads the preset; -D keeps an empty server alive.
         if (

@@ -16,6 +16,11 @@ import { JsonWriter, readLines } from "@kiteline/shared/protocol/stdio";
 import { internalNodeEnvironment } from "@kiteline/shared/terminal/node";
 import { spawnJob, type JobChild } from "@kiteline/shared/windows/job";
 
+export const recorderEntry = resolve(
+  import.meta.dirname,
+  "../../../terminal-recorder/dist/main.js",
+);
+
 interface Pending {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
@@ -32,7 +37,7 @@ interface Instance {
   job?: JobChild;
   writer?: JsonWriter;
   pending: Map<string, Pending>;
-  stderr: string;
+  failure?: string;
 }
 export interface Creation {
   result: Promise<TerminalIdentity>;
@@ -71,11 +76,10 @@ export class Recorder {
         finished: false,
         stopping: false,
         pending: new Map(),
-        stderr: "",
       };
       this.instance = instance;
       instance.ready = this.launch(instance).catch((error: unknown) => {
-        instance.stderr = asError(error).message;
+        instance.failure = asError(error).message;
         this.exited(instance);
         throw error;
       });
@@ -86,11 +90,7 @@ export class Recorder {
     return instance;
   }
   private async launch(instance: Instance) {
-    const args = [
-      resolve(import.meta.dirname, "../../../terminal-recorder/dist/main.js"),
-      "--agent",
-      JSON.stringify(this.config),
-    ];
+    const args = [recorderEntry, "--agent", JSON.stringify(this.config)];
     let stdin;
     let stdout;
     let stderr;
@@ -105,30 +105,29 @@ export class Recorder {
         finished(stderr, { writable: false, cleanup: true }),
       ]);
       void drained.catch(() => {});
+      let code: number | undefined;
       void (async () => {
-        await job.exited;
+        code = (await job.exited).code;
         instance.stopping = true;
         await job.stop();
         // A final reply can already be buffered when the leader exits.
         await drained;
       })()
         .catch((error: unknown) => {
-          instance.stderr = String(error);
+          instance.failure = String(error);
         })
-        .finally(() => this.exited(instance));
+        .finally(() => this.exited(instance, code));
     } else {
       const child = spawn(process.execPath, args, { stdio: "pipe" });
       instance.child = child;
       ({ stdin, stdout, stderr } = child);
       child.on("error", (error) => {
-        instance.stderr = error.message;
+        instance.failure = error.message;
       });
-      child.on("close", () => this.exited(instance));
+      child.on("close", (code, signal) => this.exited(instance, code, signal));
     }
     instance.writer = new JsonWriter(stdin);
-    stderr.on("data", (data: Buffer) => {
-      if (instance.stderr.length < 8192) instance.stderr += data.toString();
-    });
+    stderr.on("data", (data: Buffer) => process.stderr.write(data));
     stdin.on("error", () => {});
     readLines(
       stdout,
@@ -156,26 +155,34 @@ export class Recorder {
         } else this.events.message(message);
       },
       (error) => {
-        instance.stderr = error.message;
+        instance.failure = error.message;
         void this.stop(instance, true).catch(console.error);
       },
     );
   }
-  private exited(instance: Instance) {
+  private exited(
+    instance: Instance,
+    code: number | null = null,
+    signal: NodeJS.Signals | null = null,
+  ) {
     if (instance.finished) return;
     instance.finished = true;
     instance.stopping = true;
     instance.writer?.close();
-    const reason = instance.stderr.trim() || "Terminal recorder exited";
+    const reason =
+      instance.failure?.trim() ||
+      (signal
+        ? `Terminal recorder exited with signal ${signal}`
+        : code !== null
+          ? `Terminal recorder exited with code ${code}`
+          : "Terminal recorder exited");
     for (const pending of instance.pending.values()) {
       clearTimeout(pending.timer);
       pending.reject(new OperationError("recording_unavailable", reason, "unknown"));
     }
     instance.pending.clear();
-    if (this.instance === instance) {
-      this.instance = undefined;
-      this.events.exit(reason);
-    }
+    this.instance = undefined;
+    this.events.exit(reason);
     instance.finish();
   }
   async request<T>(message: RecorderCall): Promise<T> {

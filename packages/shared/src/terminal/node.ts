@@ -5,6 +5,7 @@ import { AppError, limits } from "../protocol/index.js";
 import type { CreateTerminal } from "../protocol/ipc.js";
 import { nativeDirectory } from "../node/paths.js";
 import { shellQuote } from "../template.js";
+import { BytePrefix } from "../node/buffers.js";
 import { JobChild, spawnJob } from "../windows/job.js";
 
 export const tmuxSession = "kiteline";
@@ -138,16 +139,14 @@ export async function tmux(
       signal,
     });
   const stdout: Buffer[] = [];
-  const stderr: Buffer[] = [];
+  const stderr = new BytePrefix(8192);
   let outputBytes = 0;
-  let errorBytes = 0;
   child.stdout!.on("data", (data: Buffer) => {
     outputBytes += data.length;
     if (outputBytes <= limits.controlMessageBytes) stdout.push(data);
   });
   child.stderr!.on("data", (data: Buffer) => {
-    errorBytes += data.length;
-    if (errorBytes <= 8192) stderr.push(data);
+    stderr.append(data);
   });
   child.stdin!.on("error", () => {});
   let code: number | null;
@@ -188,9 +187,6 @@ export async function tmux(
   if (outputBytes > limits.controlMessageBytes)
     throw new AppError("limit_exceeded", "tmux output exceeds the size limit");
   if (code !== 0)
-    throw new AppError(
-      "command_failed",
-      Buffer.concat(stderr).toString().trim() || `tmux exited ${code}`,
-    );
+    throw new AppError("command_failed", stderr.text().trim() || `tmux exited ${code}`);
   return Buffer.concat(stdout).toString();
 }

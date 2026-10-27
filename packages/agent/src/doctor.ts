@@ -4,10 +4,11 @@ import { join } from "node:path";
 import { appVersion, terminalProfile, type Session } from "@kiteline/shared/protocol";
 import { windowsNative } from "@kiteline/shared/windows/native";
 import { stateFiles, type AgentConfig } from "./config.js";
-import { componentsDirectory, nativeDirectory } from "@kiteline/shared/node/paths";
+import { nativeDirectory } from "@kiteline/shared/node/paths";
 import { checkComponents, checkHostEnvironment } from "./prerequisites.js";
 import type { ScheduledTasks } from "./tasks/index.js";
 import { toolCommand, windowsExecutable } from "./tools.js";
+import { recorderEntry } from "./terminal/recorder.js";
 
 interface Item {
   name: string;
@@ -61,7 +62,7 @@ export async function diagnose(
     return `tmux=${identity.tmux}; linkage=${nativeLinkage}`;
   });
   await check("Recorder entry", async () => {
-    await access(join(componentsDirectory, "terminal-recorder/dist/main.js"), constants.R_OK);
+    await access(recorderEntry, constants.R_OK);
     return `profile=${terminalProfile}`;
   });
   if (!nativeLinkage)

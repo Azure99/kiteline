@@ -742,7 +742,11 @@ test("an unresponsive recorder cannot leave a phantom creation or block agent sh
   process.kill(agent.sessions.recorder.pid!, "SIGSTOP");
   const redraw = expect(
     agent.dispatch("sessions.redraw", { workspaceId: workspace.id, sessionId: session.id }, signal),
-  ).rejects.toMatchObject({ code: "recording_unavailable" });
+  ).rejects.toMatchObject({
+    code: "recording_unavailable",
+    message: "Terminal recorder exited with signal SIGKILL",
+    outcome: "unknown",
+  });
   await new Promise<void>((resolve) => setImmediate(resolve));
   await agent.close();
   await redraw;

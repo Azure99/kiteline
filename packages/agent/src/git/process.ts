@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { isUtf8 } from "node:buffer";
 import { createHash } from "node:crypto";
 import { AppError, asError, OperationError, type GitPath } from "@kiteline/shared/protocol";
-import { BytePrefix } from "../buffers.js";
+import { BytePrefix } from "@kiteline/shared/node/buffers";
 import { stopGroup, waitForGroup } from "../process-group.js";
 import { JobChild, spawnJob } from "@kiteline/shared/windows/job";
 import { windowsExecutable } from "../tools.js";

@@ -3,7 +3,7 @@ import { isUtf8 } from "node:buffer";
 import { sep } from "node:path";
 import type { Token } from "stream-json/parser.js";
 import { type SearchMatch } from "@kiteline/shared/protocol";
-import { BytePrefix } from "../buffers.js";
+import { BytePrefix } from "@kiteline/shared/node/buffers";
 
 interface MatchRecord {
   type: string;

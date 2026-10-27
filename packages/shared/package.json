@@ -24,6 +24,7 @@
     "./windows/job": "./dist/windows/job.js",
     "./windows/pipe": "./dist/windows/pipe.js",
     "./protocol/client": "./dist/protocol/client.js",
+    "./node/buffers": "./dist/node/buffers.js",
     "./node/network": "./dist/node/network.js",
     "./node/files": "./dist/node/files.js",
     "./node/paths": "./dist/node/paths.js"

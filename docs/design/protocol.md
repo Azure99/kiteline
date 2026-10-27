@@ -318,7 +318,7 @@ server 在内存中保留每个设备/工作区/session 的最新待处理报告
 
 agent 按需启动 recorder，并通过 `RecorderConfig` 传入配置；Windows 上 recorder 运行在 Job 对象中。消息类型见 `packages/shared/src/protocol/ipc.ts` 的 `RecorderRequest` 和 `RecorderMessage`，启动入口见 `packages/agent/src/terminal/recorder.ts`，终端行为见[终端](terminal.md)。
 
-- **传输。** agent 写 recorder 的 stdin，recorder 写 stdout，每行一条 JSON，每行不超过 `controlMessageBytes`（`packages/shared/src/protocol/stdio.ts`）。发送队列按附着分别计量：某个附着的积压超过 `terminalPendingBytes` 时，发往该附着的新消息被拒绝（agent 一侧返回 `limit_exceeded`），其他附着不受影响。recorder 的 stderr 只保留有界前缀，用作退出原因。
+- **传输。** agent 写 recorder 的 stdin，recorder 写 stdout，每行一条 JSON，每行不超过 `controlMessageBytes`（`packages/shared/src/protocol/stdio.ts`）。发送队列按附着分别计量：某个附着的积压超过 `terminalPendingBytes` 时，发往该附着的新消息被拒绝（agent 一侧返回 `limit_exceeded`），其他附着不受影响。recorder 的 stderr 即时转发到 agent stderr。
 - **请求结果。** 需要回复的请求带 `id`，recorder 用 `reply` 返回 `Reply`。agent 最多等待 `interactionTimeout`，超时按 `timeout` 和结果未确认处理；`redraw` 由 recorder 内部命令及尺寸的有效执行期限控制，不叠加包含背压等待的外层墙钟。recorder 退出时，所有等待中的请求以 `recording_unavailable` 和结果未确认结束。
 - **附着数据。** 终端帧和输出按会话、附着路由到浏览器。普通输入、粘贴、尺寸和消费确认不等待独立回复；一次粘贴始终是一条消息，不能拆成普通输入。
 - **短命令。** snapshot/wait 直接读取 recorder model；`sessions.send` 和 `sessions.resize` 进入该会话的输入队列并返回独立回复，不创建附着。超大快照仅该次请求返回 `limit_exceeded`，不会使 recording 进入故障。

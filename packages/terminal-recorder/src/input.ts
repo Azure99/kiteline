@@ -6,6 +6,15 @@ import type { RecorderConfig, TerminalFrame } from "@kiteline/shared/protocol/ip
 import type { Control } from "./control.js";
 import type { Model } from "./model.js";
 
+export const webInputBuffer = "kiteline-web-input";
+export function isMissingInputBuffer(error: unknown) {
+  return (
+    error instanceof AppError &&
+    error.code === "command_failed" &&
+    error.message === `unknown buffer: ${webInputBuffer}`
+  );
+}
+
 interface Operation {
   type: "operation";
   attachmentId: undefined;
@@ -106,7 +115,7 @@ export class InputQueue {
         [
           "load-buffer",
           "-b",
-          "kiteline-web-input",
+          webInputBuffer,
           "-",
           ";",
           "paste-buffer",
@@ -114,7 +123,7 @@ export class InputQueue {
           "-d",
           ...(paste ? ["-p"] : []),
           "-b",
-          "kiteline-web-input",
+          webInputBuffer,
           "-t",
           identity.paneId,
         ],
@@ -124,10 +133,15 @@ export class InputQueue {
     } catch (error) {
       await tmux(
         identity.socket,
-        ["delete-buffer", "-b", "kiteline-web-input"],
+        ["delete-buffer", "-b", webInputBuffer],
         undefined,
         AbortSignal.timeout(limits.interactionTimeout),
-      ).catch(() => {});
+      ).catch((cleanupError: unknown) => {
+        if (!isMissingInputBuffer(cleanupError))
+          console.error(
+            `Could not delete input buffer ${webInputBuffer} on ${identity.socket}: ${asError(cleanupError).message}`,
+          );
+      });
       throw error;
     }
   }

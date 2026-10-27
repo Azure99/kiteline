@@ -68,7 +68,7 @@ recorder 由 agent 在第一次需要时启动，通过标准输入输出交换�
 
 ### 顺序与故障
 
-控制流中的 `%output`、`%layout-change` 和存活订阅按到达顺序进入同一个队列：输出写入模型，布局变化调整模型尺寸，存活变化触发结束。以下情况属于记录故障：控制客户端退出、tmux 命令超过应答期限、出现 `%pause`、`%continue`、`%extended-output` 或 `%exit`、出现意外的 pane 或布局、模型待解析的输出超过 `terminalModelPendingBytes`。记录故障时 recorder 关闭该会话的所有显示（`recording_unavailable`），agent 把会话标为记录不可用并设置 `historyGap`；tmux 中的程序不受影响。整个 recorder 退出时，它的所有会话都按此处理。
+控制流中的 `%output`、`%layout-change` 和存活订阅按到达顺序进入同一个队列：输出写入模型，布局变化调整模型尺寸，存活变化触发结束。以下情况属于记录故障：控制客户端退出、tmux 命令超过应答期限、出现 `%pause`、`%continue`、`%extended-output` 或 `%exit`、出现意外的 pane 或布局、模型待解析的输出超过 `terminalModelPendingBytes`。记录故障时 recorder 关闭该会话的所有显示（`recording_unavailable`），agent 把会话标为记录不可用并设置 `historyGap`；tmux 中的程序不受影响。整个 recorder 退出时，它的所有会话都按此处理。退出提示优先使用 agent 已获知的故障，否则显示实际退出码或信号；recorder 的原始 stderr 诊断继续转发到 agent stderr。
 
 tmux 是终端查询的唯一应答方：headless 模型的应答被丢弃，网页只转发 xterm.js 标记为用户输入的数据（`forwardUserInput`）。
 
@@ -151,7 +151,7 @@ CLI 在目标检查和连接成功后才进入 raw 模式，以本机终端实�
 
 - 粘贴正文由 recorder 规范化（`normalizePaste`）：CRLF 和 LF 变为 CR，ESC 换成可见的 U+241B，正文因此不会被程序当作按键，也不会提前结束括号粘贴。普通输入不做替换。
 - 粘贴带 `-p`：程序开启括号粘贴时加起止标记。`paste.patch` 让 tmux 按程序自己的模式（`wp->base.mode`）判断，远程 TTY 客户端处于复制模式时网页粘贴仍带标记。
-- 注入失败时网页收到结果未确认的 `input.error`，recorder 只删除自己的 `kiteline-web-input` 缓冲。输入不自动重试；网页在断开和恢复期间不缓存输入。
+- 注入失败时网页收到结果未确认的 `input.error`，recorder 只删除自己的 `kiteline-web-input` 缓冲。清理仅忽略该缓冲不存在的精确错误，其他清理错误写到 agent stderr，原输入结果保持不变。输入不自动重试；网页在断开和恢复期间不缓存输入。
 - 网页输入不经过 tmux 键表，网页中的 Ctrl-b 直接交给程序。远程 TTY 客户端使用 tmux 键表：`Ctrl-b d` 断开，`Ctrl-b Ctrl-b` 发送 Ctrl-b。
 - 手机辅助键和待用修饰键用 xterm.js 的键盘编码函数生成，读取程序当前的应用光标键模式；虚拟 Alt 按 Meta 处理。
 - 当前活动搜索期间隐藏终端辅助键，关闭后恢复。关闭搜索时，可写终端复用现有输入激活以恢复手机键盘输入；只读终端仅恢复 xterm 焦点，保留历史导航。

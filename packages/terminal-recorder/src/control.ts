@@ -6,6 +6,7 @@ import { finished } from "node:stream/promises";
 import type { Readable, Writable } from "node:stream";
 import { AppError, limits } from "@kiteline/shared/protocol";
 import { readLines } from "@kiteline/shared/protocol/stdio";
+import { BytePrefix } from "@kiteline/shared/node/buffers";
 import {
   msysDirectory,
   msysPath,
@@ -52,7 +53,7 @@ export class Control {
   private pending: Pending[] = [];
   private block?: { guard: string; lines: string[]; bytes: number; pending: Pending };
   private disposed = false;
-  private stderr = "";
+  private stderr = new BytePrefix(8192);
   private initializing = true;
   private initialDeath?: number | null;
   identity?: TerminalIdentity;
@@ -184,7 +185,7 @@ export class Control {
       void drained.catch(() => {});
       this.stopped = (async () => {
         await job.exited;
-        this.fail(new Error(this.stderr.trim() || "tmux control connection closed"));
+        this.fail(new Error(this.stderr.text().trim() || "tmux control connection closed"));
         await job.stop();
         await drained;
       })().catch((error: unknown) =>
@@ -203,14 +204,14 @@ export class Control {
       this.child.on("error", (error) => this.fail(error));
       this.stopped = new Promise<void>((resolve) => {
         this.child!.on("close", () => {
-          this.fail(new Error(this.stderr.trim() || "tmux control connection closed"));
+          this.fail(new Error(this.stderr.text().trim() || "tmux control connection closed"));
           resolve();
         });
       });
     }
     this.stdin.on("error", (error) => this.fail(error));
     stderr.on("data", (data: Buffer) => {
-      if (this.stderr.length < 8192) this.stderr += data.toString();
+      this.stderr.append(data);
     });
     this.stdout = stdout;
     readLines(

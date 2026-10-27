@@ -11,7 +11,7 @@ import { tmux } from "@kiteline/shared/terminal/node";
 import { Control } from "./control.js";
 import { Model } from "./model.js";
 import { Attachment } from "./attachment.js";
-import { InputQueue } from "./input.js";
+import { InputQueue, isMissingInputBuffer, webInputBuffer } from "./input.js";
 
 interface Display {
   attachment: Attachment;
@@ -89,13 +89,8 @@ export class RecordedSession {
   private async initialize() {
     const identity = await this.control.start();
     if (!this.initialized) {
-      await this.control.command("delete-buffer -b kiteline-web-input").catch((error: unknown) => {
-        if (
-          !(error instanceof AppError) ||
-          error.code !== "command_failed" ||
-          error.message !== "unknown buffer: kiteline-web-input"
-        )
-          throw error;
+      await this.control.command(`delete-buffer -b ${webInputBuffer}`).catch((error: unknown) => {
+        if (!isMissingInputBuffer(error)) throw error;
       });
       const snapshot = await this.control.capture();
       this.model.resize(snapshot.cols, snapshot.rows);

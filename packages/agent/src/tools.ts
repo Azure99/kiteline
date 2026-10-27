@@ -5,7 +5,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { finished } from "node:stream/promises";
 import { spawnJob } from "@kiteline/shared/windows/job";
-import { BytePrefix } from "./buffers.js";
+import { BytePrefix } from "@kiteline/shared/node/buffers";
 import { nativeDirectory } from "@kiteline/shared/node/paths";
 
 export const ripgrepBinary = join(

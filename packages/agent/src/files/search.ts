@@ -8,7 +8,7 @@ import type { Token } from "stream-json/parser.js";
 import { AppError, type SearchMatch, type SearchResult } from "@kiteline/shared/protocol";
 import { SearchJson } from "./search-json.js";
 import { gitMetadataPath } from "./paths.js";
-import { BytePrefix } from "../buffers.js";
+import { BytePrefix } from "@kiteline/shared/node/buffers";
 import { ripgrepBinary } from "../tools.js";
 import { JobChild, spawnJob } from "@kiteline/shared/windows/job";
 import { finished } from "node:stream/promises";

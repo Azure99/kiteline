@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { finished } from "node:stream/promises";
 import { AppError, limits } from "@kiteline/shared/protocol";
+import { BytePrefix } from "@kiteline/shared/node/buffers";
 import { JobChild, spawnJob } from "@kiteline/shared/windows/job";
 import {
   msysPath,
@@ -57,9 +58,9 @@ export class TtyBridge {
     failed: (error: unknown) => void,
   ) {
     let error: Error | undefined;
-    let diagnostic = Buffer.alloc(0);
+    const diagnostic = new BytePrefix(8192);
     child.stderr!.on("data", (data: Buffer) => {
-      diagnostic = Buffer.concat([diagnostic, data.subarray(0, 8192 - diagnostic.length)]);
+      diagnostic.append(data);
     });
     child.stdout!.on("data", (data: Buffer) => {
       if (this.stopping) return;
@@ -116,7 +117,7 @@ export class TtyBridge {
             new AppError(
               "command_failed",
               error?.message ||
-                diagnostic.toString().trim() ||
+                diagnostic.text().trim() ||
                 `Terminal client exited ${signal ?? code}`,
             ),
           );
