@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import type { ScheduledTask } from "@kiteline/shared/protocol";
+import type { ScheduledTask, ScheduledTaskInput } from "@kiteline/shared/protocol";
 import {
   formSchedule,
   localDateTime,
@@ -56,6 +56,30 @@ test("editing an elapsed one-time task preserves its original timestamp and cons
     initial.once,
   );
   expect(changed).toEqual({ kind: "once", at: "2030-01-01T12:00:00.000Z" });
+});
+
+test("task changes submit changed input fields and omit unchanged or undefined values", () => {
+  const task: ScheduledTask = {
+    id: "task",
+    revision: 1,
+    name: "Original",
+    command: "printf old",
+    cwd: "/home/original",
+    timezone: "UTC",
+    schedule: { kind: "cron", expression: "0 9 * * *" },
+    state: "active",
+    nextRunAt: null,
+  };
+  const changes: Partial<ScheduledTaskInput>[] = [
+    { name: "Changed" },
+    { command: "printf new" },
+    { cwd: "/home/changed" },
+    { timezone: "Asia/Tokyo" },
+    { schedule: { kind: "cron", expression: "30 12 * * *" } },
+  ];
+  for (const change of changes) expect(taskChanges(task, { ...task, ...change })).toEqual(change);
+  expect(taskChanges(task, { ...task, schedule: { ...task.schedule } })).toEqual({});
+  expect(taskChanges(task, { ...task, cwd: undefined, timezone: undefined })).toEqual({});
 });
 
 test("an unchanged one-time input survives a browser time-zone change and preset round trip", () => {

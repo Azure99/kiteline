@@ -1,4 +1,5 @@
 import {
+  taskInputKeys,
   taskTextLimits,
   type ScheduledTask,
   type ScheduledTaskInput,
@@ -87,10 +88,12 @@ export function taskChanges(
   after: ScheduledTaskInput,
 ): Partial<ScheduledTaskInput> {
   const changes: Partial<ScheduledTaskInput> = {};
-  for (const key of ["name", "command", "cwd", "timezone"] as const)
-    if (after[key] !== undefined && after[key] !== before[key]) changes[key] = after[key];
-  if (JSON.stringify(after.schedule) !== JSON.stringify(before.schedule))
-    changes.schedule = after.schedule;
+  for (const key of taskInputKeys) {
+    if (key === "schedule") {
+      if (JSON.stringify(after.schedule) !== JSON.stringify(before.schedule))
+        changes.schedule = after.schedule;
+    } else if (after[key] !== undefined && after[key] !== before[key]) changes[key] = after[key];
+  }
   return changes;
 }
 

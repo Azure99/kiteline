@@ -5,6 +5,7 @@ import {
   record,
   string,
   rpcMutates,
+  taskInputKeys,
   type RpcMethod,
   type RpcResult,
   type ScheduledTaskInput,
@@ -48,7 +49,7 @@ export function scheduleRpc(
     case "tasks.update": {
       const changes = record(params.changes);
       for (const key of Object.keys(changes))
-        if (!["name", "command", "schedule", "cwd", "timezone"].includes(key))
+        if (!taskInputKeys.some((field) => field === key))
           throw new AppError("invalid_argument", `Unknown task field: ${key}`);
       return tasks.update(
         checkFileId(params.taskId),

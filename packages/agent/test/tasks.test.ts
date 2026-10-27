@@ -24,6 +24,7 @@ import {
   limits,
   taskRunActive,
   type ScheduledTask,
+  type ScheduledTaskInput,
   type TaskRun,
   type TaskSnapshot,
 } from "@kiteline/shared/protocol";
@@ -179,6 +180,81 @@ test("scheduled command admission, pause, immutable parameters, revision and bou
     expect(f.tasks.getRun("empty-second").output.stdoutBytes).toBe(0);
     await f.tasks.delete(task.id, undefined, signal);
     expect(f.tasks.list().total).toBe(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test("RPC updates preserve every input field and runs keep the full acceptance snapshot", async () => {
+  const f = await fixture();
+  try {
+    const originalInput: Required<ScheduledTaskInput> = {
+      ...input(f.root, "while [ ! -e release ]; do sleep .02; done; printf old"),
+      schedule: { kind: "cron", expression: "0 0 1 1 *" },
+      timezone: "America/New_York",
+    };
+    const task = await f.tasks.create("task", originalInput, signal);
+    const originalRun = await f.tasks.start(task.id, "original", signal);
+    const cwd = join(f.root, "changed-cwd");
+    await mkdir(cwd);
+    let expectedInput = originalInput;
+    let revision = task.revision;
+    const changes: Partial<ScheduledTaskInput>[] = [
+      { name: "Changed" },
+      { command: "printf new" },
+      { cwd },
+      { timezone: checkTimezone() === "Asia/Tokyo" ? "Asia/Shanghai" : "Asia/Tokyo" },
+      { schedule: { kind: "cron", expression: "30 12 1 1 *" } },
+    ];
+    for (const change of changes) {
+      const updated = await scheduleRpc(
+        f.tasks,
+        "tasks.update",
+        { taskId: task.id, expectedRevision: revision, changes: change },
+        signal,
+      );
+      expectedInput = { ...expectedInput, ...change };
+      revision++;
+      const current = f.tasks.get(task.id);
+      expect(updated).toEqual(current);
+      expect(current).toMatchObject({ ...expectedInput, revision });
+      const stored = JSON.parse(await readFile(join(f.root, "tasks", "task.json"), "utf8"));
+      expect(stored.task).toEqual(JSON.parse(JSON.stringify(current)));
+      expect(f.tasks.getRun(originalRun.id)).toMatchObject({
+        state: "running",
+        acceptedAt: originalRun.acceptedAt,
+        parameters: { ...originalInput, taskRevision: task.revision },
+      });
+    }
+
+    const snapshot = f.tasks.snapshot();
+    expect(() =>
+      scheduleRpc(
+        f.tasks,
+        "tasks.update",
+        { taskId: task.id, expectedRevision: revision, changes: { state: "paused" } },
+        signal,
+      ),
+    ).toThrow("Unknown task field: state");
+    await expect(
+      f.tasks.update(task.id, revision, { name: undefined }, signal),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
+    expect(f.tasks.snapshot()).toEqual(snapshot);
+    expect(f.tasks.get(task.id)).toMatchObject({ ...expectedInput, revision });
+
+    const reset = await f.tasks.update(task.id, revision, { timezone: undefined }, signal);
+    expectedInput = { ...expectedInput, timezone: checkTimezone() };
+    revision++;
+    expect(reset).toMatchObject({ ...expectedInput, revision });
+    await writeFile(join(f.root, "release"), "");
+    const originalResult = await finished(f.tasks, originalRun.id);
+    expect(originalResult.parameters).toEqual({ ...originalInput, taskRevision: task.revision });
+    expect(originalResult.acceptedAt).toBe(originalRun.acceptedAt);
+    expect((await f.tasks.output(originalRun.id, "stdout", 0, 32, signal)).text).toBe("old");
+    const next = await f.tasks.start(task.id, "updated", signal);
+    expect(next.parameters).toEqual({ ...expectedInput, taskRevision: revision });
+    expect((await finished(f.tasks, next.id)).state).toBe("succeeded");
+    expect((await f.tasks.output(next.id, "stdout", 0, 32, signal)).text).toBe("new");
   } finally {
     await f.close();
   }

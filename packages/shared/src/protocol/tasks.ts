@@ -38,6 +38,22 @@ export interface ScheduledTaskInput {
   timezone?: string;
 }
 
+const taskInputFields = {
+  name: true,
+  command: true,
+  schedule: true,
+  cwd: true,
+  timezone: true,
+} satisfies Record<keyof ScheduledTaskInput, true>;
+
+export const taskInputKeys = Object.keys(taskInputFields) as readonly (keyof ScheduledTaskInput)[];
+
+export function taskInput(task: Required<ScheduledTaskInput>): Required<ScheduledTaskInput> {
+  return Object.fromEntries(
+    taskInputKeys.map((key) => [key, task[key]]),
+  ) as Required<ScheduledTaskInput>;
+}
+
 export interface ScheduledTask extends Required<ScheduledTaskInput> {
   id: string;
   revision: number;
@@ -131,5 +147,19 @@ export function taskRunSummary(run: TaskRunSummary): TaskRunSummary {
     exitCode,
     signal,
     reasonCode,
+  };
+}
+
+export function taskSummary(task: ScheduledTaskSummary): ScheduledTaskSummary {
+  const { id, name, state, reviewRunId, nextRunAt, onceStatus, currentRun, latestRun } = task;
+  return {
+    id,
+    name,
+    state,
+    reviewRunId,
+    nextRunAt,
+    onceStatus,
+    currentRun: currentRun === undefined ? undefined : taskRunSummary(currentRun),
+    latestRun: latestRun === undefined ? undefined : taskRunSummary(latestRun),
   };
 }

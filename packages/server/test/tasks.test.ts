@@ -17,6 +17,7 @@ import { defaultAgentLimits, privateDirectory } from "../../agent/src/config.js"
 import { localRequest } from "../../agent/src/local.js";
 import { agentEnvironment, hello, serverFixture } from "./fixture.js";
 import { Store } from "../src/store.js";
+import { projectTaskSnapshot } from "../src/task-summary.js";
 
 async function fixture() {
   const { dataDir: root, store, app, origin, close } = await serverFixture();
@@ -277,26 +278,56 @@ test("summary DWORD results, ownership, revision and nested whitelist are indepe
   try {
     const first = await connect();
     const at = new Date().toISOString();
+    const currentRun = {
+      id: "current",
+      taskId: "task",
+      trigger: "manual",
+      acceptedAt: at,
+      startedAt: at,
+      state: "running",
+      exitCode: null,
+      signal: null,
+    };
+    const latestRun = {
+      id: "latest",
+      taskId: "task",
+      trigger: "scheduled",
+      scheduledAt: at,
+      acceptedAt: at,
+      startedAt: at,
+      endedAt: at,
+      state: "failed",
+      exitCode: 0xffffffff,
+      signal: "SIGTERM",
+      reasonCode: "exit_nonzero",
+    };
+    const item = {
+      id: "task",
+      name: "Task",
+      state: "active",
+      reviewRunId: "review",
+      nextRunAt: null,
+      onceStatus: "consumed",
+      currentRun,
+      latestRun,
+    };
     const snapshot = {
       type: "tasks.snapshot",
       revision: 9,
       extra: "NO_CACHE",
       items: [
         {
-          id: "task",
-          name: "Task",
-          state: "active",
-          nextRunAt: null,
+          ...item,
           command: "NO_CACHE",
           cwd: "NO_CACHE",
+          currentRun: {
+            ...currentRun,
+            parameters: { command: "NO_CACHE" },
+            diagnostic: "NO_CACHE",
+            output: { text: "NO_CACHE" },
+          },
           latestRun: {
-            id: "run",
-            taskId: "task",
-            trigger: "manual",
-            acceptedAt: at,
-            endedAt: at,
-            state: "succeeded",
-            exitCode: 0xffffffff,
+            ...latestRun,
             parameters: { command: "NO_CACHE" },
             diagnostic: "NO_CACHE",
             output: { text: "NO_CACHE" },
@@ -306,8 +337,10 @@ test("summary DWORD results, ownership, revision and nested whitelist are indepe
     };
     first.send(JSON.stringify(snapshot));
     await expect.poll(async () => (await f.summaries())[0]?.snapshot?.revision).toBe(9);
-    expect(JSON.stringify(f.store.taskSummaries())).not.toContain("NO_CACHE");
-    expect(f.store.taskSummaries()[0]?.snapshot?.items[0]?.latestRun?.exitCode).toBe(0xffffffff);
+    const expected = { revision: 9, items: [item] };
+    expect((await f.summaries())[0]?.snapshot).toEqual(expected);
+    const saved = f.store.db.prepare("SELECT snapshot FROM taskSummaries").get()!;
+    expect(JSON.parse(saved.snapshot as string)).toEqual(expected);
     const observedAt = (await f.summaries())[0]!.observedAt;
     first.send(JSON.stringify({ ...snapshot, revision: 8, items: [] }));
     // Snapshot handling is synchronous, so this pong follows the preceding snapshot.
@@ -353,4 +386,35 @@ test("summary DWORD results, ownership, revision and nested whitelist are indepe
     for (const socket of sockets) socket.terminate();
     await f.close();
   }
+});
+
+test("task summary envelopes and nested runs retain their object boundaries", () => {
+  const item = { id: "task", name: "Task", state: "active", nextRunAt: null };
+  const snapshot = { revision: 0, items: [item] };
+  for (const invalid of [null, [], "invalid"]) {
+    for (const value of [
+      invalid,
+      { ...snapshot, items: [invalid] },
+      { ...snapshot, items: [{ ...item, currentRun: invalid }] },
+      { ...snapshot, items: [{ ...item, latestRun: invalid }] },
+    ])
+      expect(() => projectTaskSnapshot(value)).toThrow(
+        expect.objectContaining({ code: "invalid_argument" }),
+      );
+  }
+  expect(() => projectTaskSnapshot({ ...snapshot, revision: -1 })).toThrow(
+    expect.objectContaining({ code: "invalid_argument" }),
+  );
+  expect(() => projectTaskSnapshot({ ...snapshot, items: null, storageError: true })).toThrow(
+    expect.objectContaining({ code: "invalid_argument" }),
+  );
+  expect(projectTaskSnapshot(snapshot)).toEqual(snapshot);
+  expect(
+    projectTaskSnapshot({
+      revision: 0,
+      storageError: false,
+      items: [null, { ...item, currentRun: [] }],
+      diagnostic: "LOCAL_ONLY_SENTINEL",
+    }),
+  ).toEqual({ revision: 0, storageError: true, items: [] });
 });

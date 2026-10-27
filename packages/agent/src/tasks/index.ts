@@ -6,8 +6,10 @@ import {
   AppError,
   OperationError,
   asError,
+  taskInput,
   taskRunActive,
   taskRunSummary,
+  taskSummary,
   type ScheduledTaskInput,
   type ScheduledTaskSummary,
   type TaskOutput,
@@ -233,19 +235,9 @@ export class ScheduledTasks {
   }
 
   private summary(record: TaskRecord): ScheduledTaskSummary {
-    const { id, name, state, reviewRunId, nextRunAt, onceStatus } = record.task;
     const current = record.runs.find((run) => taskRunActive(run.state));
     const latest = record.runs.at(-1);
-    return {
-      id,
-      name,
-      state,
-      reviewRunId,
-      nextRunAt,
-      onceStatus,
-      currentRun: current && taskRunSummary(current),
-      latestRun: latest && taskRunSummary(latest),
-    };
+    return taskSummary({ ...record.task, currentRun: current, latestRun: latest });
   }
 
   snapshot(): TaskSnapshot {
@@ -321,17 +313,9 @@ export class ScheduledTasks {
       const record = structuredClone(this.record(id));
       if (record.task.revision !== expectedRevision)
         throw new AppError("conflict", "Scheduled task changed; read it again before updating");
-      const { name, command, cwd, timezone, schedule } = record.task;
       const parameters = await checkTaskInput(
-        {
-          name,
-          command,
-          cwd,
-          timezone,
-          schedule,
-          ...changes,
-        },
-        cwd,
+        { ...taskInput(record.task), ...changes },
+        record.task.cwd,
       );
       if (
         changes.schedule !== undefined ||
@@ -470,7 +454,6 @@ export class ScheduledTasks {
   }
 
   private newRun(record: TaskRecord, id: string, scheduledAt?: string): TaskRun {
-    const { name, command, cwd, schedule, timezone, revision } = record.task;
     return {
       id,
       taskId: record.task.id,
@@ -478,7 +461,7 @@ export class ScheduledTasks {
       scheduledAt,
       acceptedAt: new Date().toISOString(),
       state: "starting",
-      parameters: { name, command, cwd, schedule, timezone, taskRevision: revision },
+      parameters: { ...taskInput(record.task), taskRevision: record.task.revision },
       output: { stdoutBytes: 0, stderrBytes: 0, truncated: false },
     };
   }
