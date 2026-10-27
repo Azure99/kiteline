@@ -28,8 +28,8 @@ __KITELINE_NATIVE_SOURCE__
         else { Add-Type -TypeDefinition $nativeSource }
     }
     $errors = [Collections.Generic.List[Exception]]::new()
-    $shared = $null; $exclusive = $null; $manager = $null; $state = $null
-    $temporary = $null; $previous = $null; $result = 1
+    $managementLease = $null
+    $result = 1
     $originalLocation = Get-Location
     $originalDirectory = [Environment]::CurrentDirectory
     if ($originalLocation.Provider.Name -ne 'FileSystem') { throw 'Run kiteline-agent from a filesystem directory' }
@@ -88,10 +88,10 @@ __KITELINE_NATIVE_SOURCE__
         return ,$files
     }
     function Get-KitelineHash([string]$Path) { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() }
-    function Test-KitelinePackage([string]$Directory) {
+    function Test-KitelinePackage([string]$Directory, [string[]]$RequiredFiles) {
         Assert-KitelineNoReparse $Directory
         $files = Get-KitelineTree $Directory
-        foreach ($name in $required) {
+        foreach ($name in $RequiredFiles) {
             if (-not $files.ContainsKey($name)) { throw "Missing required package file: $name" }
         }
         $expected = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -119,7 +119,7 @@ __KITELINE_NATIVE_SOURCE__
         }
         return $release
     }
-    function Expand-KitelineZip([string]$Archive, [string]$Destination) {
+    function Expand-KitelineZip([string]$Archive, [string]$Destination, $Guard) {
         $zip = [IO.Compression.ZipFile]::OpenRead($Archive)
         try {
             $entries = [Collections.Generic.List[object]]::new()
@@ -151,7 +151,7 @@ __KITELINE_NATIVE_SOURCE__
             }
             if (-not $entries.Count) { throw 'Empty agent ZIP' }
             foreach ($item in $entries) {
-                Test-KitelineCancellation
+                Test-KitelineCancellation $Guard
                 $path = Join-Path $Destination $item.Path
                 if ($item.Directory) { $null = [IO.Directory]::CreateDirectory($path); continue }
                 $null = [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($path))
@@ -180,17 +180,17 @@ __KITELINE_NATIVE_SOURCE__
         if (Test-KitelineExists $Path) { throw "Preparation directory already exists: $Path" }
         New-KitelineDirectoryAcl $Path (New-KitelineAcl $true '')
     }
-    function Assert-KitelineManagement {
-        Assert-KitelineNoReparse $management
-        if (-not (Test-KitelineExists $management)) {
-            New-KitelineDirectoryAcl $management (New-KitelineAcl $true '')
+    function Assert-KitelineManagement([string]$Management) {
+        Assert-KitelineNoReparse $Management
+        if (-not (Test-KitelineExists $Management)) {
+            New-KitelineDirectoryAcl $Management (New-KitelineAcl $true '')
         }
-        $acl = Get-Acl -LiteralPath $management
-        if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin @('S-1-5-18', 'S-1-5-32-544')) { throw "Untrusted installation directory owner: $management" }
+        $acl = Get-Acl -LiteralPath $Management
+        if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin @('S-1-5-18', 'S-1-5-32-544')) { throw "Untrusted installation directory owner: $Management" }
         $write = [Security.AccessControl.FileSystemRights]'Write,Delete,DeleteSubdirectoriesAndFiles,ChangePermissions,TakeOwnership'
         foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
             if ($rule.AccessControlType -eq 'Allow' -and ($rule.FileSystemRights -band $write) -and $rule.IdentityReference.Value -notin @('S-1-5-18', 'S-1-5-32-544')) {
-                throw "Installation directory permits untrusted writes: $management"
+                throw "Installation directory permits untrusted writes: $Management"
             }
         }
     }
@@ -211,9 +211,9 @@ __KITELINE_NATIVE_SOURCE__
             [__KITELINE_LAUNCHER_TYPE__]::PublishFile($pending, $Path, $Overwrite)
         } finally { if ([IO.File]::Exists($pending)) { [IO.File]::Delete($pending) } }
     }
-    function Read-KitelineInstallation {
-        if (-not (Test-KitelineExists $recordFile)) { return $null }
-        $value = [IO.File]::ReadAllText($recordFile) | ConvertFrom-Json
+    function Read-KitelineInstallation([string]$RecordFile) {
+        if (-not (Test-KitelineExists $RecordFile)) { return $null }
+        $value = [IO.File]::ReadAllText($RecordFile) | ConvertFrom-Json
         $null = [Security.Principal.SecurityIdentifier]::new($value.sid)
         foreach ($key in @('home', 'dataDir', 'runDir')) {
             if (-not (Test-KitelineAbsolute $value.$key)) { throw "Invalid installation $key" }
@@ -246,23 +246,23 @@ __KITELINE_NATIVE_SOURCE__
         Assert-KitelineNoReparse $Data; Assert-KitelineNoReparse $Run
         return [ordered]@{ user = $User; sid = $sid; home = $profile; dataDir = [IO.Path]::GetFullPath($Data); runDir = [IO.Path]::GetFullPath($Run) }
     }
-    function Lock-KitelineState($Installation) {
+    function Lock-KitelineState($Installation, $Guard) {
         if (-not (Test-KitelineExists $Installation.dataDir)) { return $null }
         Assert-KitelineNoReparse $Installation.dataDir
         $path = Join-Path $Installation.dataDir 'process.lock'
         $file = [IO.File]::Open($path, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::ReadWrite)
         $file.Dispose()
-        return $guard.Lock($path, $false)
+        return $Guard.Lock($path, $false)
     }
-    function Close-KitelineLease($Lease) {
+    function Close-KitelineLease($Lease, [Collections.Generic.List[Exception]]$Errors) {
         if ($null -eq $Lease) { return }
         try { $Lease.Dispose() }
-        catch { $errors.Add($_.Exception) }
+        catch { $Errors.Add($_.Exception) }
     }
-    function Test-KitelineCancellation {
-        if ($guard.Interrupted) { throw "Installation preparation cancelled (console status $($guard.Interrupted))" }
+    function Test-KitelineCancellation($Guard) {
+        if ($Guard.Interrupted) { throw "Installation preparation cancelled (console status $($Guard.Interrupted))" }
     }
-    function Invoke-KitelineNode([string]$Directory, [string[]]$NodeArguments) {
+    function Invoke-KitelineNode([string]$Directory, [string[]]$NodeArguments, $Guard) {
         $rootJson = ConvertTo-Json $Directory -Compress
         $saved = @{}
         foreach ($key in __KITELINE_NODE_ENVIRONMENT_KEYS__) {
@@ -271,20 +271,26 @@ __KITELINE_NATIVE_SOURCE__
         }
         $environmentJson = ConvertTo-Json $saved -Compress
         $bootstrap = @"
-const path=require('node:path'),url=require('node:url'),root=$rootJson;
-Object.assign(process.env,$environmentJson);
-process.argv.splice(1,0,path.join(root,'agent/dist/main.js'));
-import(url.pathToFileURL(process.argv[1]).href).catch(error=>{console.error(error);process.exitCode=1;});
+const path = require('node:path');
+const url = require('node:url');
+const root = $rootJson;
+
+Object.assign(process.env, $environmentJson);
+process.argv.splice(1, 0, path.join(root, 'agent/dist/main.js'));
+import(url.pathToFileURL(process.argv[1]).href).catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
 "@
         try {
             foreach ($key in $saved.Keys) { [Environment]::SetEnvironmentVariable($key, $null) }
-            return $guard.Run((Join-Path $Directory 'runtime/bin/node.exe'), $bootstrap, $NodeArguments, $Directory)
+            return $Guard.Run((Join-Path $Directory 'runtime/bin/node.exe'), $bootstrap, $NodeArguments, $Directory)
         } finally {
             foreach ($key in $saved.Keys) { [Environment]::SetEnvironmentVariable($key, $saved[$key]) }
         }
     }
-    function Update-KitelineMachinePath([bool]$Present) {
-        $directory = Join-Path $program 'command'
+    function Update-KitelineMachinePath([string]$Program, [bool]$Present) {
+        $directory = Join-Path $Program 'command'
         $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SYSTEM\CurrentControlSet\Control\Session Manager\Environment', $true)
         try {
             $raw = $key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
@@ -310,186 +316,397 @@ import(url.pathToFileURL(process.argv[1]).href).catch(error=>{console.error(erro
         $null = Get-KitelineTree $Path
         Remove-KitelineDirectory $Path $true
     }
+    function Initialize-KitelineMaintenanceDirectory([string]$Program, [string]$Temporary) {
+        # Move PowerShell's location and the process working directory outside the program
+        # tree so it can be replaced or deleted.
+        $safeDirectory = [IO.Path]::GetPathRoot($Program)
+        Set-Location -LiteralPath $safeDirectory
+        [Environment]::CurrentDirectory = $safeDirectory
+        New-KitelinePrivateDirectory $Temporary
+    }
+    function New-KitelineUseFile([string]$Path) {
+        if (-not [IO.File]::Exists($Path)) {
+            $file = [IO.File]::Open($Path, [IO.FileMode]::CreateNew)
+            $file.Dispose()
+        }
+    }
+    function Remove-KitelineMaintenanceDirectory {
+        param(
+            [string]$Temporary,
+            [string]$Previous,
+            [Collections.Generic.List[Exception]]$Errors
+        )
+        if (-not $Temporary) { return }
+        try {
+            if ($Previous -and (Test-KitelineExists $Previous)) {
+                [Console]::Error.WriteLine("Previous program files retained at $Previous")
+            } else { Remove-KitelineTree $Temporary }
+        } catch {
+            $Errors.Add($_.Exception)
+            [Console]::Error.WriteLine("Maintenance files retained at $Temporary")
+        }
+    }
+
+    function Install-KitelineAgent {
+        param(
+            [string]$Root,
+            [string]$Program,
+            [string]$Management,
+            [string]$Public,
+            [string]$RecordFile,
+            [string]$UseFile,
+            [string[]]$RequiredFiles,
+            $Installation,
+            [string]$User,
+            [string]$DataDir,
+            [string]$RunDir,
+            [bool]$FromInstalledEntry,
+            $Guard,
+            [Collections.Generic.List[Exception]]$Errors
+        )
+        $preparationLease = $null
+        $temporary = $null
+        try {
+            $requested = New-KitelineInstallation $User $DataDir $RunDir
+            if ($Installation -and $Installation.sid -cne $requested.sid) {
+                throw "Current installation belongs to $($Installation.user)"
+            }
+            Assert-KitelineNoReparse $Program
+            if ($FromInstalledEntry -or $Installation) {
+                $preparationLease = $Guard.Lock($UseFile, $true)
+            }
+            if ($Installation) {
+                $sourceRelease = Get-Content -Raw -LiteralPath (Join-Path $Root 'release.json') | ConvertFrom-Json
+                $oldRelease = Get-Content -Raw -LiteralPath (Join-Path $Program 'release.json') | ConvertFrom-Json
+                if ($sourceRelease.version -cne $oldRelease.version) {
+                    throw 'A different version is installed; explicitly run upgrade first'
+                }
+                Write-Host 'The same version is already installed; identity, configuration and running tasks were not changed.'
+                return 0
+            }
+            foreach ($path in @($Program, $Public, $RecordFile)) {
+                if (Test-KitelineExists $path) { throw "$path already exists; inspect it before installing" }
+            }
+            $Installation = $requested
+            Assert-KitelineNoReparse $Root
+
+            $temporary = Join-Path ([IO.Path]::GetDirectoryName($Program)) ".kiteline-maintenance-$([Guid]::NewGuid().ToString('N'))"
+            Initialize-KitelineMaintenanceDirectory -Program $Program -Temporary $temporary
+            $replacement = Join-Path $temporary 'new'
+            New-KitelinePrivateDirectory $replacement
+            $sourceFiles = Get-KitelineTree $Root
+            foreach ($directory in [IO.Directory]::EnumerateDirectories($Root, '*', [IO.SearchOption]::AllDirectories)) {
+                $relative = $directory.Substring($Root.TrimEnd('\','/').Length + 1)
+                $null = [IO.Directory]::CreateDirectory((Join-Path $replacement $relative))
+            }
+            foreach ($name in $sourceFiles.Keys) {
+                Test-KitelineCancellation $Guard
+                $target = Join-Path $replacement $name
+                $null = [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))
+                [IO.File]::Copy($sourceFiles[$name], $target, $false)
+            }
+            $release = Test-KitelinePackage $replacement $RequiredFiles
+            $newPublic = [IO.File]::ReadAllText((Join-Path $replacement 'bin/kiteline-agent-installed.ps1'))
+            if ((Invoke-KitelineNode $replacement @('--version') $Guard) -ne 0) {
+                throw 'Prepared package could not start native Node'
+            }
+            Set-KitelineTreeAcl $replacement $Installation.sid
+            Close-KitelineLease $preparationLease $Errors
+            $preparationLease = $null
+            Test-KitelineCancellation $Guard
+            if ($Errors.Count) { throw 'Preparation cleanup failed; no installation change attempted' }
+            New-KitelineUseFile $UseFile
+            Test-KitelineCancellation $Guard
+
+            $movedNew = $false
+            $wroteRecord = $false
+            try {
+                [IO.Directory]::Move($replacement, $Program)
+                $movedNew = $true
+                Write-KitelineAtomic $RecordFile ($Installation | ConvertTo-Json -Compress) $false
+                $wroteRecord = $true
+                Write-KitelineAtomic $Public $newPublic
+                Set-KitelineTreeAcl $Management $Installation.sid
+                Update-KitelineMachinePath $Program $true
+            } catch {
+                $primary = $_.Exception
+                try {
+                    if ($movedNew) { [IO.Directory]::Move($Program, $replacement) }
+                    if ($wroteRecord) { [IO.File]::Delete($RecordFile) }
+                    if ($movedNew) { [IO.File]::Delete($Public) }
+                } catch {
+                    throw [AggregateException]::new('Installation and rollback failed', [Exception[]]@($primary, $_.Exception))
+                }
+                throw $primary
+            }
+            [__KITELINE_LAUNCHER_TYPE__]::NotifyEnvironment()
+            Write-Host "Installed version $($release.version); not started. As $($Installation.user), run kiteline-agent run in a new non-elevated PowerShell window."
+            return 0
+        } catch {
+            $Errors.Add($_.Exception)
+            return 1
+        } finally {
+            Remove-KitelineMaintenanceDirectory -Temporary $temporary -Errors $Errors
+            Close-KitelineLease $preparationLease $Errors
+        }
+    }
+
+    function Upgrade-KitelineAgent {
+        param(
+            [string]$Program,
+            [string]$Public,
+            [string]$UseFile,
+            [string[]]$RequiredFiles,
+            $Installation,
+            [string]$Archive,
+            [bool]$Yes,
+            [bool]$FromInstalledEntry,
+            $Guard,
+            [Collections.Generic.List[Exception]]$Errors
+        )
+        $preparationLease = $null
+        $useLease = $null
+        $temporary = $null
+        $previous = $null
+        try {
+            if (-not $Installation) { throw 'kiteline-agent is not installed' }
+            Assert-KitelineNoReparse $Program
+            if ($FromInstalledEntry) { $preparationLease = $Guard.Lock($UseFile, $true) }
+            $temporary = Join-Path ([IO.Path]::GetDirectoryName($Program)) ".kiteline-maintenance-$([Guid]::NewGuid().ToString('N'))"
+            Initialize-KitelineMaintenanceDirectory -Program $Program -Temporary $temporary
+            $replacement = Join-Path $temporary 'new'
+            $previous = Join-Path $temporary 'previous'
+            if (-not $Archive) { throw 'Usage: kiteline-agent.ps1 upgrade --archive RELEASE.zip [--yes]' }
+            $checksum = [IO.File]::ReadAllText("$Archive.sha256").Trim().Split(' ', [StringSplitOptions]::RemoveEmptyEntries)[0]
+            $inputArchive = Join-Path $temporary 'input.zip'
+            [IO.File]::Copy($Archive, $inputArchive, $false)
+            if ($checksum -notmatch '^[a-fA-F0-9]{64}$' -or (Get-KitelineHash $inputArchive) -ine $checksum) {
+                throw 'Package SHA256 verification failed'
+            }
+            New-KitelinePrivateDirectory $replacement
+            Expand-KitelineZip $inputArchive $replacement $Guard
+            $release = Test-KitelinePackage $replacement $RequiredFiles
+            $newPublic = [IO.File]::ReadAllText((Join-Path $replacement 'bin/kiteline-agent-installed.ps1'))
+            if ((Invoke-KitelineNode $replacement @('--version') $Guard) -ne 0) {
+                throw 'Prepared package could not start native Node'
+            }
+            Set-KitelineTreeAcl $replacement $Installation.sid
+            Close-KitelineLease $preparationLease $Errors
+            $preparationLease = $null
+            Test-KitelineCancellation $Guard
+            if ($Errors.Count) { throw 'Preparation cleanup failed; no installation change attempted' }
+            Write-Host "Install version $($release.version), retaining state at $($Installation.dataDir)? No external manager will be controlled."
+            if (-not $Yes -and -not $Guard.Confirm('Type yes to continue: ')) { throw 'Cancelled' }
+            Test-KitelineCancellation $Guard
+            New-KitelineUseFile $UseFile
+            $useLease = $Guard.Lock($UseFile, $false)
+            $oldPublic = [IO.File]::ReadAllText($Public)
+            Test-KitelineCancellation $Guard
+
+            $movedNew = $false
+            $movedOld = $false
+            $publishedNew = $false
+            try {
+                [IO.Directory]::Move($Program, $previous)
+                $movedOld = $true
+                [IO.Directory]::Move($replacement, $Program)
+                $movedNew = $true
+                Write-KitelineAtomic $Public $newPublic
+                $publishedNew = $true
+                Update-KitelineMachinePath $Program $true
+            } catch {
+                $primary = $_.Exception
+                try {
+                    if ($movedNew) { [IO.Directory]::Move($Program, $replacement) }
+                    if ($movedOld) { [IO.Directory]::Move($previous, $Program) }
+                    if ($publishedNew) { Write-KitelineAtomic $Public $oldPublic }
+                } catch {
+                    throw [AggregateException]::new('Installation and rollback failed', [Exception[]]@($primary, $_.Exception))
+                }
+                throw $primary
+            }
+            [__KITELINE_LAUNCHER_TYPE__]::NotifyEnvironment()
+            try { Remove-KitelineTree $previous }
+            catch {
+                throw [IO.IOException]::new("Upgrade applied, but cleanup of previous program files failed at ${previous}: $($_.Exception.Message)", $_.Exception)
+            }
+            Write-Host "Installed version $($release.version); not started. As $($Installation.user), run kiteline-agent run in a new non-elevated PowerShell window."
+            return 0
+        } catch {
+            $Errors.Add($_.Exception)
+            return 1
+        } finally {
+            Remove-KitelineMaintenanceDirectory -Temporary $temporary -Previous $previous -Errors $Errors
+            Close-KitelineLease $useLease $Errors
+            Close-KitelineLease $preparationLease $Errors
+        }
+    }
+
+    function Uninstall-KitelineAgent {
+        param(
+            [string]$Program,
+            [string]$Management,
+            [string]$Public,
+            [string]$RecordFile,
+            [string]$UseFile,
+            [string]$ManagementFile,
+            $Installation,
+            [bool]$Yes,
+            [bool]$Purge,
+            [bool]$FromInstalledEntry,
+            $Guard,
+            [ref]$ManagementLease,
+            [Collections.Generic.List[Exception]]$Errors
+        )
+        $purgeManagementLease = $null
+        $preparationLease = $null
+        $useLease = $null
+        $stateLease = $null
+        $temporary = $null
+        $previous = $null
+        try {
+            if ($Purge) {
+                $purgeManagementLease = $ManagementLease.Value
+                $ManagementLease.Value = $null
+            }
+            if (-not $Installation) { throw 'kiteline-agent is not installed' }
+            Assert-KitelineNoReparse $Program
+            if ($FromInstalledEntry) { $preparationLease = $Guard.Lock($UseFile, $true) }
+            $temporary = Join-Path ([IO.Path]::GetDirectoryName($Program)) ".kiteline-maintenance-$([Guid]::NewGuid().ToString('N'))"
+            Initialize-KitelineMaintenanceDirectory -Program $Program -Temporary $temporary
+            $previous = Join-Path $temporary 'previous'
+            Close-KitelineLease $preparationLease $Errors
+            $preparationLease = $null
+            Test-KitelineCancellation $Guard
+            if ($Errors.Count) { throw 'Preparation cleanup failed; no installation change attempted' }
+            $scope = if ($Purge) { 'delete entire recorded agent data and runtime directories' } else { 'retain all state' }
+            $runtime = if ($Purge) { '; runtime at ' + $Installation.runDir } else { '' }
+            Write-Host "Remove the program; $scope at $($Installation.dataDir)${runtime}? No external manager will be controlled."
+            if (-not $Yes -and -not $Guard.Confirm('Type yes to continue: ')) { throw 'Cancelled' }
+            Test-KitelineCancellation $Guard
+            New-KitelineUseFile $UseFile
+            $useLease = $Guard.Lock($UseFile, $false)
+            if ($Purge) { $stateLease = Lock-KitelineState $Installation $Guard }
+            Test-KitelineCancellation $Guard
+            if ($Purge -and $Installation.dataDir.TrimEnd('\').StartsWith($Installation.runDir.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                throw "Cannot purge: runtime directory $($Installation.runDir) contains data directory $($Installation.dataDir); use default uninstall or separate these directories first"
+            }
+            Update-KitelineMachinePath $Program $false
+            [__KITELINE_LAUNCHER_TYPE__]::NotifyEnvironment()
+            if ($Purge) {
+                if ($Installation.runDir.TrimEnd('\') -ine $Installation.dataDir.TrimEnd('\') -and
+                    -not $Installation.runDir.StartsWith($Installation.dataDir.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                    Remove-KitelineTree $Installation.runDir
+                }
+                if ($null -ne $stateLease) {
+                    $null = Get-KitelineTree $Installation.dataDir
+                    foreach ($item in [IO.Directory]::EnumerateFileSystemEntries($Installation.dataDir)) {
+                        if ([IO.Path]::GetFileName($item) -ieq 'process.lock') { continue }
+                        if ([IO.Directory]::Exists($item)) { Remove-KitelineDirectory $item $true }
+                        else { [IO.File]::Delete($item) }
+                    }
+                    $stateLease.Dispose()
+                    $stateLease = $null
+                    [IO.File]::Delete((Join-Path $Installation.dataDir 'process.lock'))
+                    Remove-KitelineDirectory $Installation.dataDir $false
+                }
+            }
+            [IO.Directory]::Move($Program, $previous)
+            [IO.File]::Delete($Public)
+            [IO.File]::Delete($RecordFile)
+            try { Remove-KitelineTree $previous }
+            catch {
+                throw [IO.IOException]::new("Program entry points and installation record removed, but cleanup of previous program files failed at ${previous}: $($_.Exception.Message)", $_.Exception)
+            }
+            if ($Purge) {
+                $useLease.Dispose()
+                $useLease = $null
+                [IO.File]::Delete($UseFile)
+                $purgeManagementLease.Dispose()
+                $purgeManagementLease = $null
+                [IO.File]::Delete($ManagementFile)
+                if ([IO.Directory]::GetFileSystemEntries($Management).Length -eq 0) {
+                    Remove-KitelineDirectory $Management $false
+                }
+            }
+            Write-Host 'Uninstalled.'
+            return 0
+        } catch {
+            $Errors.Add($_.Exception)
+            return 1
+        } finally {
+            Remove-KitelineMaintenanceDirectory -Temporary $temporary -Previous $previous -Errors $Errors
+            Close-KitelineLease $stateLease $Errors
+            Close-KitelineLease $useLease $Errors
+            Close-KitelineLease $preparationLease $Errors
+            Close-KitelineLease $purgeManagementLease $Errors
+        }
+    }
 
     try {
         $action = if ($Arguments.Count) { $Arguments[0] } else { '--help' }
         if ($action -notin @('install', 'upgrade', 'uninstall')) {
-            if ($installed) {
-                $shared = $guard.Lock($useFile, $true)
-                if (-not (Read-KitelineInstallation)) { throw "Broken installation: $recordFile is missing" }
-            }
-            $result = Invoke-KitelineNode $root $Arguments
+            $useLease = $null
+            try {
+                if ($installed) {
+                    $useLease = $guard.Lock($useFile, $true)
+                    if (-not (Read-KitelineInstallation $recordFile)) { throw "Broken installation: $recordFile is missing" }
+                }
+                $result = Invoke-KitelineNode $root $Arguments $guard
+            } catch {
+                $errors.Add($_.Exception)
+            } finally { Close-KitelineLease $useLease $errors }
         } else {
             $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
-            if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Installation changes require an elevated PowerShell; bind and run as the project user' }
+            if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+                throw 'Installation changes require an elevated PowerShell; bind and run as the project user'
+            }
             $options = @{}
             for ($i = 1; $i -lt $Arguments.Count; $i++) {
                 $name = $Arguments[$i]
                 if ($options.ContainsKey($name)) { throw "Duplicate option: $name" }
-                if (($action -in @('upgrade', 'uninstall') -and $name -eq '--yes') -or ($action -eq 'uninstall' -and $name -eq '--purge')) { $options[$name] = $true }
-                elseif (($action -eq 'install' -and $name -in @('--user', '--data-dir', '--run-dir')) -or ($action -eq 'upgrade' -and $name -eq '--archive')) {
+                if (($action -in @('upgrade', 'uninstall') -and $name -eq '--yes') -or
+                    ($action -eq 'uninstall' -and $name -eq '--purge')) {
+                    $options[$name] = $true
+                } elseif (($action -eq 'install' -and $name -in @('--user', '--data-dir', '--run-dir')) -or
+                    ($action -eq 'upgrade' -and $name -eq '--archive')) {
                     if (++$i -ge $Arguments.Count) { throw "Missing value: $name" }
                     $options[$name] = $Arguments[$i]
                 } else { throw "Unknown $action option: $name" }
             }
             if ($options['--archive']) { $options['--archive'] = [IO.Path]::GetFullPath($options['--archive']) }
-            Assert-KitelineManagement
+            Assert-KitelineManagement $management
             $managementFile = Join-Path $management 'management.lock'
-            $file = [IO.File]::Open($managementFile, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::ReadWrite); $file.Dispose()
-            $manager = $guard.Lock($managementFile, $false)
-            $installation = Read-KitelineInstallation
-            if ($action -eq 'install') {
-                $requested = New-KitelineInstallation $options['--user'] $options['--data-dir'] $options['--run-dir']
-                if ($installation -and $installation.sid -cne $requested.sid) { throw "Current installation belongs to $($installation.user)" }
-            } elseif (-not $installation) { throw 'kiteline-agent is not installed' }
-            Assert-KitelineNoReparse $program
-            if ($installed) { $shared = $guard.Lock($useFile, $true) }
-            if ($action -eq 'install' -and $installation) {
-                if (-not $shared) { $shared = $guard.Lock($useFile, $true) }
-                $sourceRelease = Get-Content -Raw -LiteralPath (Join-Path $root 'release.json') | ConvertFrom-Json
-                $oldRelease = Get-Content -Raw -LiteralPath (Join-Path $program 'release.json') | ConvertFrom-Json
-                if ($sourceRelease.version -cne $oldRelease.version) { throw 'A different version is installed; explicitly run upgrade first' }
-                Write-Host 'The same version is already installed; identity, configuration and running tasks were not changed.'
-                $result = 0
-            } else {
-                if ($action -eq 'install') {
-                    foreach ($path in @($program, $public, $recordFile)) { if (Test-KitelineExists $path) { throw "$path already exists; inspect it before installing" } }
-                    $installation = $requested
-                    Assert-KitelineNoReparse $root
+            $file = [IO.File]::Open($managementFile, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::ReadWrite)
+            $file.Dispose()
+            $managementLease = $guard.Lock($managementFile, $false)
+            $installation = Read-KitelineInstallation $recordFile
+            switch ($action) {
+                'install' {
+                    $result = Install-KitelineAgent -Root $root -Program $program -Management $management `
+                        -Public $public -RecordFile $recordFile -UseFile $useFile -RequiredFiles $required `
+                        -Installation $installation -User $options['--user'] -DataDir $options['--data-dir'] `
+                        -RunDir $options['--run-dir'] -FromInstalledEntry $installed -Guard $guard -Errors $errors
                 }
-                # All maintenance code is already resident in this system PowerShell process.
-                Set-Location ([IO.Path]::GetPathRoot($program))
-                [Environment]::CurrentDirectory = [IO.Path]::GetPathRoot($program)
-                $temporary = Join-Path ([IO.Path]::GetDirectoryName($program)) ".kiteline-maintenance-$([Guid]::NewGuid().ToString('N'))"
-                New-KitelinePrivateDirectory $temporary
-                $replacement = Join-Path $temporary 'new'
-                $previous = Join-Path $temporary 'previous'
-                $newPublic = $null
-                if ($action -eq 'install') {
-                    New-KitelinePrivateDirectory $replacement
-                    $sourceFiles = Get-KitelineTree $root
-                    foreach ($directory in [IO.Directory]::EnumerateDirectories($root, '*', [IO.SearchOption]::AllDirectories)) {
-                        $null = [IO.Directory]::CreateDirectory((Join-Path $replacement ($directory.Substring($root.TrimEnd('\','/').Length + 1))))
-                    }
-                    foreach ($name in $sourceFiles.Keys) {
-                        Test-KitelineCancellation
-                        $target = Join-Path $replacement $name
-                        $null = [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))
-                        [IO.File]::Copy($sourceFiles[$name], $target, $false)
-                    }
-                } elseif ($action -eq 'upgrade') {
-                    if (-not $options['--archive']) { throw 'Usage: kiteline-agent.ps1 upgrade --archive RELEASE.zip [--yes]' }
-                    $archive = [IO.Path]::GetFullPath($options['--archive'])
-                    $checksum = [IO.File]::ReadAllText("$archive.sha256").Trim().Split(' ', [StringSplitOptions]::RemoveEmptyEntries)[0]
-                    $inputArchive = Join-Path $temporary 'input.zip'
-                    [IO.File]::Copy($archive, $inputArchive, $false)
-                    if ($checksum -notmatch '^[a-fA-F0-9]{64}$' -or (Get-KitelineHash $inputArchive) -ine $checksum) { throw 'Package SHA256 verification failed' }
-                    New-KitelinePrivateDirectory $replacement
-                    Expand-KitelineZip $inputArchive $replacement
+                'upgrade' {
+                    $result = Upgrade-KitelineAgent -Program $program -Public $public -UseFile $useFile `
+                        -RequiredFiles $required -Installation $installation -Archive $options['--archive'] `
+                        -Yes ([bool]$options['--yes']) -FromInstalledEntry $installed -Guard $guard -Errors $errors
                 }
-                if ($action -ne 'uninstall') {
-                    $release = Test-KitelinePackage $replacement
-                    $newPublic = [IO.File]::ReadAllText((Join-Path $replacement 'bin/kiteline-agent-installed.ps1'))
-                    if ((Invoke-KitelineNode $replacement @('--version')) -ne 0) { throw 'Prepared package could not start native Node' }
-                    Set-KitelineTreeAcl $replacement $installation.sid
+                'uninstall' {
+                    $result = Uninstall-KitelineAgent -Program $program -Management $management `
+                        -Public $public -RecordFile $recordFile -UseFile $useFile -ManagementFile $managementFile `
+                        -Installation $installation -Yes ([bool]$options['--yes']) -Purge ([bool]$options['--purge']) `
+                        -FromInstalledEntry $installed -Guard $guard -ManagementLease ([ref]$managementLease) -Errors $errors
                 }
-                Close-KitelineLease $shared; $shared = $null
-                Test-KitelineCancellation
-                if ($errors.Count) { throw 'Preparation cleanup failed; no installation change attempted' }
-                if ($action -ne 'install') {
-                    $message = if ($action -eq 'upgrade') { "Install version $($release.version), retaining state at $($installation.dataDir)?" } else { "Remove the program; $(if ($options['--purge']) {'delete entire recorded agent data and runtime directories'} else {'retain all state'}) at $($installation.dataDir)$(if ($options['--purge']) { '; runtime at ' + $installation.runDir })?" }
-                    Write-Host "$message No external manager will be controlled."
-                    if (-not $options['--yes'] -and -not $guard.Confirm('Type yes to continue: ')) { throw 'Cancelled' }
-                }
-                Test-KitelineCancellation
-                if (-not [IO.File]::Exists($useFile)) { $file = [IO.File]::Open($useFile, [IO.FileMode]::CreateNew); $file.Dispose() }
-                if ($action -ne 'install') { $exclusive = $guard.Lock($useFile, $false) }
-                if ($action -eq 'uninstall' -and $options['--purge']) { $state = Lock-KitelineState $installation }
-                $oldPublic = if ($action -ne 'install') { [IO.File]::ReadAllText($public) } else { $null }
-                Test-KitelineCancellation
-                if ($action -eq 'uninstall') {
-                    if ($options['--purge'] -and $installation.dataDir.TrimEnd('\').StartsWith($installation.runDir.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
-                        throw "Cannot purge: runtime directory $($installation.runDir) contains data directory $($installation.dataDir); use default uninstall or separate these directories first"
-                    }
-                    Update-KitelineMachinePath $false
-                    [__KITELINE_LAUNCHER_TYPE__]::NotifyEnvironment()
-                    if ($options['--purge']) {
-                        if ($installation.runDir.TrimEnd('\') -ine $installation.dataDir.TrimEnd('\') -and
-                            -not $installation.runDir.StartsWith($installation.dataDir.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
-                            Remove-KitelineTree $installation.runDir
-                        }
-                        if ($null -ne $state) {
-                            $null = Get-KitelineTree $installation.dataDir
-                            foreach ($item in [IO.Directory]::EnumerateFileSystemEntries($installation.dataDir)) {
-                                if ([IO.Path]::GetFileName($item) -ieq 'process.lock') { continue }
-                                if ([IO.Directory]::Exists($item)) { Remove-KitelineDirectory $item $true }
-                                else { [IO.File]::Delete($item) }
-                            }
-                            $state.Dispose(); $state = $null
-                            [IO.File]::Delete((Join-Path $installation.dataDir 'process.lock'))
-                            Remove-KitelineDirectory $installation.dataDir $false
-                        }
-                    }
-                    [IO.Directory]::Move($program, $previous)
-                    [IO.File]::Delete($public)
-                    [IO.File]::Delete($recordFile)
-                    Remove-KitelineTree $previous
-                    if ($options['--purge']) {
-                        $exclusive.Dispose(); $exclusive = $null
-                        [IO.File]::Delete($useFile)
-                        $manager.Dispose(); $manager = $null
-                        [IO.File]::Delete($managementFile)
-                        if ([IO.Directory]::GetFileSystemEntries($management).Length -eq 0) { Remove-KitelineDirectory $management $false }
-                    }
-                    Write-Host 'Uninstalled.'
-                } else {
-                    $movedNew = $false; $movedOld = $false; $wroteRecord = $false
-                    try {
-                        if ($action -eq 'upgrade') { [IO.Directory]::Move($program, $previous); $movedOld = $true }
-                        [IO.Directory]::Move($replacement, $program); $movedNew = $true
-                        if ($action -eq 'install') {
-                            Write-KitelineAtomic $recordFile ($installation | ConvertTo-Json -Compress) $false; $wroteRecord = $true
-                        }
-                        Write-KitelineAtomic $public $newPublic
-                        if ($action -eq 'install') { Set-KitelineTreeAcl $management $installation.sid }
-                        Update-KitelineMachinePath $true
-                    } catch {
-                        $primary = $_.Exception
-                        try {
-                            if ($movedNew) { [IO.Directory]::Move($program, $replacement) }
-                            if ($action -eq 'upgrade' -and $movedOld) {
-                                if (Test-KitelineExists $previous) { [IO.Directory]::Move($previous, $program) }
-                                Write-KitelineAtomic $public $oldPublic
-                            } elseif ($action -eq 'install') {
-                                if ($wroteRecord) { [IO.File]::Delete($recordFile) }
-                                if ($movedNew) { [IO.File]::Delete($public) }
-                            }
-                        } catch { throw [AggregateException]::new("Installation and rollback failed; inspect $temporary", [Exception[]]@($primary, $_.Exception)) }
-                        throw $primary
-                    }
-                    [__KITELINE_LAUNCHER_TYPE__]::NotifyEnvironment()
-                    if (Test-KitelineExists $previous) { Remove-KitelineTree $previous }
-                    Write-Host "Installed version $($release.version); not started. As $($installation.user), run kiteline-agent run in a new non-elevated PowerShell window."
-                }
-                $result = 0
             }
         }
     } catch {
         $errors.Add($_.Exception)
     } finally {
-        if ($temporary) {
-            if ($previous -and (Test-KitelineExists $previous)) { [Console]::Error.WriteLine("Program backup retained at $previous") }
-            else {
-                try { Remove-KitelineTree $temporary }
-                catch { $errors.Add($_.Exception); [Console]::Error.WriteLine("Maintenance files retained at $temporary") }
-            }
-        }
-        Close-KitelineLease $state
-        Close-KitelineLease $exclusive
-        Close-KitelineLease $shared
-        Close-KitelineLease $manager
+        Close-KitelineLease $managementLease $errors
         $interrupted = $guard.Interrupted
-        Close-KitelineLease $guard
+        Close-KitelineLease $guard $errors
         if ([IO.Directory]::Exists($originalLocation.ProviderPath)) { Set-Location -LiteralPath $originalLocation.ProviderPath }
         if ([IO.Directory]::Exists($originalDirectory)) { [Environment]::CurrentDirectory = $originalDirectory }
     }

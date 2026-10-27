@@ -26,15 +26,21 @@ $management = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 
 $public = Join-Path $management 'kiteline-agent.ps1'
 $recordFile = Join-Path $management 'installation.json'
 $temporary = Join-Path ([IO.Path]::GetTempPath()) ('kiteline-agent-download-' + [Guid]::NewGuid().ToString('N'))
-$script:retainTemporary = $false
+$retainTemporary = $false
 
 function Quote-Kiteline([string]$Value) { return "'" + $Value.Replace("'", "''") + "'" }
-function Assert-KitelineExit([string]$Operation) {
+function Assert-KitelineExit([string]$Operation, [int]$ExitCode, [ref]$RetainTemporary) {
     # Only managed product commands reach this boundary; terminal DWORD results do not.
-    if ($LASTEXITCODE -eq 125) { $script:retainTemporary = $true }
-    if ($LASTEXITCODE -ne 0) { throw "$Operation failed (exit $LASTEXITCODE); no automatic retry was made" }
+    if ($ExitCode -eq 125) { $RetainTemporary.Value = $true }
+    if ($ExitCode -ne 0) { throw "$Operation failed (exit $ExitCode); no automatic retry was made" }
 }
-function Invoke-KitelineElevated([string]$Script, [string[]]$Arguments) {
+function Invoke-KitelineElevated {
+    param(
+        [string]$PowerShell,
+        [string]$Script,
+        [string[]]$Arguments,
+        [ref]$RetainTemporary
+    )
     # The synchronous managed wait owns the download until the elevated transaction really exits.
     $source = @'
 using System;
@@ -42,71 +48,109 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
-public static class __KITELINE_DOWNLOAD_WAIT__ {
+public static class __KITELINE_DOWNLOAD_WAIT__
+{
     // Matches the launcher ownership failure defined in installer/launcher.in.cs.
-    const int FatalExitCode=125;
+    const int FatalExitCode = 125;
     public static bool RetainInput { get; private set; }
+
     delegate bool Handler(uint signal);
-    [DllImport("kernel32.dll", SetLastError=true)] static extern bool SetConsoleCtrlHandler(Handler handler,bool add);
-    public static int Run(string executable,string command) {
-        RetainInput=false;
-        int interrupted=0;
-        Handler handler=signal => {
-            if(signal>1) return false;
-            Interlocked.CompareExchange(ref interrupted,signal==0 ? 130 : 131,0);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool SetConsoleCtrlHandler(Handler handler, bool add);
+
+    public static int Run(string executable, string command)
+    {
+        RetainInput = false;
+        int interrupted = 0;
+        Handler handler = signal =>
+        {
+            if (signal > 1) return false;
+            Interlocked.CompareExchange(ref interrupted, signal == 0 ? 130 : 131, 0);
             return true;
         };
-        if(!SetConsoleCtrlHandler(handler,true)) throw new Win32Exception(Marshal.GetLastWin32Error());
-        Process child=null;
-        Exception failure=null;
-        int result=1;
-        try {
-            child=Process.Start(new ProcessStartInfo(executable,"-NoProfile -ExecutionPolicy Bypass -EncodedCommand "+command) { UseShellExecute=true, Verb="runas" });
-            RetainInput=true;
+        if (!SetConsoleCtrlHandler(handler, true))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+
+        Process child = null;
+        Exception failure = null;
+        int result = 1;
+        try
+        {
+            var start = new ProcessStartInfo(
+                executable,
+                "-NoProfile -ExecutionPolicy Bypass -EncodedCommand " + command)
+            {
+                UseShellExecute = true,
+                Verb = "runas"
+            };
+            child = Process.Start(start);
+            RetainInput = true;
             child.WaitForExit();
-            result=child.ExitCode;
-            RetainInput=result==FatalExitCode;
-            if(result!=FatalExitCode && interrupted!=0) result=interrupted;
-        } catch(Exception error) {
-            failure=error;
-        } finally {
-            try { if(child!=null) child.Dispose(); }
-            catch(Exception error) {
-                failure=failure==null ? error : new AggregateException(failure,error);
+            result = child.ExitCode;
+            RetainInput = result == FatalExitCode;
+            if (result != FatalExitCode && interrupted != 0) result = interrupted;
+        }
+        catch (Exception error)
+        {
+            failure = error;
+        }
+        finally
+        {
+            try
+            {
+                if (child != null) child.Dispose();
             }
-            if(!SetConsoleCtrlHandler(handler,false)) {
-                Exception error=new Win32Exception(Marshal.GetLastWin32Error(),"remove download console handler");
-                failure=failure==null ? error : new AggregateException(failure,error);
+            catch (Exception error)
+            {
+                failure = failure == null ? error : new AggregateException(failure, error);
+            }
+            if (!SetConsoleCtrlHandler(handler, false))
+            {
+                Exception error = new Win32Exception(
+                    Marshal.GetLastWin32Error(), "remove download console handler");
+                failure = failure == null ? error : new AggregateException(failure, error);
             }
             GC.KeepAlive(handler);
         }
-        if(failure!=null) throw failure;
+        if (failure != null) throw failure;
         return result;
     }
 }
 '@
     $hash = [Security.Cryptography.SHA256]::Create()
-    try { $typeName = 'KitelineDownload_' + [BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($source))).Replace('-', '').Substring(0, 16) }
+    try {
+        $digest = $hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($source))
+        $typeName = 'KitelineDownload_' + [BitConverter]::ToString($digest).Replace('-', '').Substring(0, 16)
+    }
     finally { $hash.Dispose() }
     if (-not ($typeName -as [type])) {
         $definition = $source.Replace('__KITELINE_DOWNLOAD_WAIT__', $typeName)
         if ($PSVersionTable.PSVersion.Major -eq 5) { Add-Type -TypeDefinition $definition -ReferencedAssemblies ([ComponentModel.Win32Exception].Assembly.Location) }
         else { Add-Type -TypeDefinition $definition }
     }
-    $command = '$ErrorActionPreference = ''Stop''; & ' + (Quote-Kiteline $Script) + ' ' + (($Arguments | ForEach-Object { Quote-Kiteline $_ }) -join ' ') + '; exit $LASTEXITCODE'
+    $quotedScript = Quote-Kiteline $Script
+    $quotedArguments = ($Arguments | ForEach-Object { Quote-Kiteline $_ }) -join ' '
+    $command = @"
+`$ErrorActionPreference = 'Stop'
+& $quotedScript $quotedArguments
+exit `$LASTEXITCODE
+"@
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
     try {
-        $result = ($typeName -as [type])::Run($powershell, $encoded)
+        $result = ($typeName -as [type])::Run($PowerShell, $encoded)
         if ($result -ne 0) { throw "Elevated maintenance failed or was cancelled (exit $result); the process has finished" }
     } finally {
-        if (($typeName -as [type])::RetainInput) { $script:retainTemporary = $true }
+        if (($typeName -as [type])::RetainInput) { $RetainTemporary.Value = $true }
     }
 }
-function Get-KitelineArchive {
+function Get-KitelineArchive([string]$Temporary, [string]$Server, [string]$Version) {
     $ProgressPreference = 'SilentlyContinue'
-    $null = [IO.Directory]::CreateDirectory($temporary)
+    $null = [IO.Directory]::CreateDirectory($Temporary)
     $name = "kiteline-agent-$Version-windows-amd64.zip"
-    $archive = Join-Path $temporary $name
+    $archive = Join-Path $Temporary $name
     $url = "$Server/downloads/agent/$Version/$name"
     Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $archive
     Invoke-WebRequest -UseBasicParsing -Uri "$url.sha256" -OutFile "$archive.sha256"
@@ -115,7 +159,7 @@ function Get-KitelineArchive {
     if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -cne $Matches[1]) { throw 'Archive checksum mismatch' }
     return $archive
 }
-function Expand-KitelineDownload([string]$Archive) {
+function Expand-KitelineDownload([string]$Archive, [string]$Temporary, [string]$Version) {
     $name = "kiteline-agent-$Version-windows-amd64"
     $zip = [IO.Compression.ZipFile]::OpenRead($Archive)
     try {
@@ -128,9 +172,9 @@ function Expand-KitelineDownload([string]$Archive) {
             $kind = ($entry.ExternalAttributes -shr 16) -band 0xf000
             if (($entry.ExternalAttributes -band 0x400) -or $kind -notin @(0, 0x4000, 0x8000)) { throw 'ZIP links are not allowed' }
         }
-        [IO.Compression.ZipFileExtensions]::ExtractToDirectory($zip, $temporary)
+        [IO.Compression.ZipFileExtensions]::ExtractToDirectory($zip, $Temporary)
     } finally { $zip.Dispose() }
-    $package = Join-Path $temporary $name
+    $package = Join-Path $Temporary $name
     $release = [IO.File]::ReadAllText((Join-Path $package 'release.json')) | ConvertFrom-Json
     if ($release.kind -cne 'agent' -or $release.platform -cne 'windows' -or $release.architecture -cne 'x64' -or $release.version -cne $Version) { throw 'Package release mismatch' }
     return $package
@@ -139,38 +183,41 @@ function Expand-KitelineDownload([string]$Archive) {
 try {
     if ($Mode -eq 'Upgrade') {
         if (-not [IO.File]::Exists($recordFile) -or -not [IO.File]::Exists($public)) { throw 'Install and bind the agent before upgrading' }
-        $archive = Get-KitelineArchive
-        $package = Expand-KitelineDownload $archive
-        Invoke-KitelineElevated (Join-Path $package 'bin/kiteline-agent.ps1') @('upgrade', '--archive', $archive)
+        $archive = Get-KitelineArchive $temporary $Server $Version
+        $package = Expand-KitelineDownload $archive $temporary $Version
+        Invoke-KitelineElevated -PowerShell $powershell -Script (Join-Path $package 'bin/kiteline-agent.ps1') `
+            -Arguments @('upgrade', '--archive', $archive) -RetainTemporary ([ref]$retainTemporary)
     } else {
         if (-not [IO.File]::Exists($recordFile)) {
             $null = Get-Command git.exe -CommandType Application
-            $package = Expand-KitelineDownload (Get-KitelineArchive)
+            $archive = Get-KitelineArchive $temporary $Server $Version
+            $package = Expand-KitelineDownload $archive $temporary $Version
             $launcher = Join-Path $package 'bin/kiteline-agent.ps1'
             & $powershell -NoProfile -ExecutionPolicy Bypass -File $launcher check
-            Assert-KitelineExit 'Package check'
-            Invoke-KitelineElevated $launcher @('install', '--user', $identity.Name)
+            Assert-KitelineExit 'Package check' $LASTEXITCODE ([ref]$retainTemporary)
+            Invoke-KitelineElevated -PowerShell $powershell -Script $launcher `
+                -Arguments @('install', '--user', $identity.Name) -RetainTemporary ([ref]$retainTemporary)
         }
         $record = [IO.File]::ReadAllText($recordFile) | ConvertFrom-Json
         if ($record.sid -cne $identity.User.Value) { throw 'This installation belongs to another project user' }
         $installedVersion = & $powershell -NoProfile -ExecutionPolicy Bypass -File $public --version
-        Assert-KitelineExit 'Installed version check'
+        Assert-KitelineExit 'Installed version check' $LASTEXITCODE ([ref]$retainTemporary)
         if ($installedVersion -cne $Version) { throw 'A different version is installed; explicitly upgrade before connecting' }
         & $powershell -NoProfile -ExecutionPolicy Bypass -File $public check
-        Assert-KitelineExit 'Installed check'
+        Assert-KitelineExit 'Installed check' $LASTEXITCODE ([ref]$retainTemporary)
         $Code | & $powershell -NoProfile -ExecutionPolicy Bypass -File $public bind --server $Server --if-unbound
-        Assert-KitelineExit 'Binding'
+        Assert-KitelineExit 'Binding' $LASTEXITCODE ([ref]$retainTemporary)
     }
     $commandDirectory = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'kiteline-agent/command'
     if ($env:Path.Split(';') -inotcontains $commandDirectory) { $env:Path += ';' + $commandDirectory }
 } finally {
     if ([IO.Directory]::Exists($temporary)) {
-        if ($script:retainTemporary) { [Console]::Error.WriteLine("Download files retained at $temporary; process cleanup could not be confirmed") }
+        if ($retainTemporary) { [Console]::Error.WriteLine("Download files retained at $temporary; process cleanup could not be confirmed") }
         else { [IO.Directory]::Delete($temporary, $true) }
     }
 }
 if ($Mode -eq 'Connect') {
     Write-Host 'The agent runs here in the foreground. Ctrl-C stops it and ends managed terminal tasks. Background deployment belongs to your external process manager.'
     & $powershell -NoProfile -ExecutionPolicy Bypass -File $public run
-    Assert-KitelineExit 'Agent run'
+    Assert-KitelineExit 'Agent run' $LASTEXITCODE ([ref]$retainTemporary)
 }

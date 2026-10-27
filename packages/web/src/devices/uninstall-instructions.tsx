@@ -17,7 +17,7 @@ export function UninstallInstructions({
   const { t, i18n } = useTranslation();
   const [platform, setPlatform] = useState<AgentPlatform | undefined>(initialPlatform);
   const [purge, setPurge] = useState(false);
-  const supportsPurge = appVersion !== "0.2.6" && release?.agentVersion === appVersion;
+  const supportsPurge = release?.agentVersion === appVersion;
   const { copied, error, copy, pending } = useCopyFeedback();
   const command =
     platform &&

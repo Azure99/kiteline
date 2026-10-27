@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createReadStream } from "node:fs";
 import {
   chmod,
@@ -18,7 +18,7 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
-import { parseArgs, promisify, type ParseArgsOptionsConfig } from "node:util";
+import { parseArgs, promisify } from "node:util";
 import { lockAgentState } from "../state-lock.js";
 import { atomicJson } from "@kiteline/shared/node/files";
 import { resourceDirectory } from "@kiteline/shared/node/paths";
@@ -70,14 +70,23 @@ async function verifyPackage(directory: string) {
     release.architecture !== process.arch
   )
     throw new Error("A complete agent package matching this platform and architecture is required");
-  await command(
-    "sh",
-    [
-      "-c",
-      `${process.platform === "darwin" ? "/usr/bin/shasum -a 256" : "sha256sum"} -c SHA256SUMS >/dev/null`,
-    ],
-    directory,
-  );
+  const checksum = process.platform === "darwin" ? "/usr/bin/shasum" : "sha256sum";
+  const checksumArgs = process.platform === "darwin" ? ["-a", "256"] : [];
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(checksum, [...checksumArgs, "-c", "SHA256SUMS"], {
+      cwd: directory,
+      stdio: ["ignore", "ignore", "inherit"],
+    });
+    child.once("error", reject);
+    child.once("close", (code, signal) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      const reason = signal ? `terminated by ${signal}` : `exited with code ${code}`;
+      reject(new Error(`Package checksum verification failed: ${checksum} ${reason}`));
+    });
+  });
   if ((await command(join(directory, "runtime/bin/node"), ["--version"])) !== `v${release.node}`)
     throw new Error("Bundled Node does not match the installation manifest");
   const identity = JSON.parse(await readFile(join(directory, "dist/native/identity.json"), "utf8"));
@@ -166,14 +175,20 @@ async function acquireInstallationLocks(dataDir?: string) {
     },
   };
 }
-async function writeLauncher(contents: string) {
-  const temporary = `${unixInstallationLayout.launcherFile}.${randomUUID()}.pending`;
+async function assertInstallationIdle(dataDir?: string) {
+  // This is a preflight check; each action reacquires its locks for the transaction.
+  const locks = await acquireInstallationLocks(dataDir);
+  await locks.close();
+}
+export async function writeLauncher(path: string, contents: string) {
+  const temporary = `${path}.${randomUUID()}.pending`;
   try {
     await writeFile(temporary, contents, { flag: "wx", mode: 0o755 });
     await chmod(temporary, 0o755);
-    await rename(temporary, unixInstallationLayout.launcherFile);
-  } finally {
+    await rename(temporary, path);
+  } catch (error) {
     await rm(temporary, { force: true });
+    throw error;
   }
 }
 
@@ -182,7 +197,6 @@ export async function replaceProgram(
   replacement: string,
   previous: string,
   publish: () => Promise<void>,
-  restore: () => Promise<void>,
 ) {
   await rename(current, previous);
   try {
@@ -194,7 +208,6 @@ export async function replaceProgram(
       rm(current, { recursive: true, force: true }),
     );
     await cleanup(errors, "previous program restore", () => rename(previous, current));
-    await cleanup(errors, "previous launcher restore", restore);
     throw failures(
       errors.length === 1
         ? "Upgrade failed; the previous program was restored. No instance was started"
@@ -204,7 +217,13 @@ export async function replaceProgram(
   }
 }
 
-async function installProgram(user: string, protectSignals: () => void) {
+async function installProgram({
+  user,
+  enterCommitPhase,
+}: {
+  user: string;
+  enterCommitPhase: () => void;
+}) {
   const installation = await account(user);
   const previous = await readInstallation();
   if (previous) {
@@ -223,7 +242,7 @@ async function installProgram(user: string, protectSignals: () => void) {
   for (const path of [unixInstallationLayout.directory, unixInstallationLayout.launcherFile])
     if (await exists(path)) throw new Error(`${path} already exists; verify its purpose first`);
   await verifyPackage(resourceDirectory);
-  protectSignals();
+  enterCommitPhase();
   try {
     await writeFile(
       unixInstallationLayout.environmentFile,
@@ -258,6 +277,7 @@ async function installProgram(user: string, protectSignals: () => void) {
     await atomicJson(unixInstallationLayout.recordFile, installation);
     await chmod(unixInstallationLayout.recordFile, 0o644);
     await writeLauncher(
+      unixInstallationLayout.launcherFile,
       await readFile(
         join(unixInstallationLayout.directory, "bin/kiteline-agent-installed"),
         "utf8",
@@ -276,15 +296,20 @@ async function installProgram(user: string, protectSignals: () => void) {
   return `Installed but not started. As ${installation.user}, run kiteline-agent bind --server <http-or-https-origin>, then kiteline-agent run.\nApplication directories: ${unixInstallationLayout.environmentFile}`;
 }
 
-async function upgrade(
-  installation: Installation,
-  archive: string,
-  yes: boolean,
-  protectSignals: () => void,
-  signal: AbortSignal,
-) {
-  // Report busy before preparation; reacquire for the actual transaction below.
-  await (await acquireInstallationLocks()).close();
+async function upgrade({
+  installation,
+  archive,
+  yes,
+  enterCommitPhase,
+  signal,
+}: {
+  installation: Installation;
+  archive: string;
+  yes: boolean;
+  enterCommitPhase: () => void;
+  signal: AbortSignal;
+}) {
+  await assertInstallationIdle();
   const source = resolve(archive);
   const temporary = await mkdtemp(
     join(dirname(unixInstallationLayout.directory), ".kiteline-upgrade-"),
@@ -318,21 +343,16 @@ async function upgrade(
     signal.throwIfAborted();
     const version = await verifyPackage(replacement);
     const newLauncher = await readFile(join(replacement, "bin/kiteline-agent-installed"), "utf8");
-    const oldLauncher = await readFile(unixInstallationLayout.launcherFile, "utf8");
     await confirm(
       `Install version ${version}, retaining binding, configuration, workspaces and task data? No instance will be started. Coordinate external restart policies before continuing.`,
       yes,
       signal,
     );
-    protectSignals();
+    enterCommitPhase();
     use = await acquireInstallationLocks();
     await command("chown", ["-h", "-R", "-P", "0:0", replacement]);
-    await replaceProgram(
-      unixInstallationLayout.directory,
-      replacement,
-      previous,
-      () => writeLauncher(newLauncher),
-      () => writeLauncher(oldLauncher),
+    await replaceProgram(unixInstallationLayout.directory, replacement, previous, () =>
+      writeLauncher(unixInstallationLayout.launcherFile, newLauncher),
     );
     completion = `Upgraded to ${version}; not started. Run kiteline-agent run as ${installation.user}, or start it using your external manager.`;
     await rm(previous, { recursive: true });
@@ -358,13 +378,19 @@ async function upgrade(
   return completion;
 }
 
-async function uninstall(
-  installation: Installation,
-  purge: boolean,
-  yes: boolean,
-  protectSignals: () => void,
-  signal: AbortSignal,
-) {
+async function uninstall({
+  installation,
+  purge,
+  yes,
+  enterCommitPhase,
+  signal,
+}: {
+  installation: Installation;
+  purge: boolean;
+  yes: boolean;
+  enterCommitPhase: () => void;
+  signal: AbortSignal;
+}) {
   let { dataDir, runDir } = await installationPaths(installation);
   let externalRun = false;
   if (purge) {
@@ -385,14 +411,13 @@ async function uninstall(
       throw new Error("Purge run directory must not contain the data directory");
     externalRun = runDir !== dataDir && !isWithin(dataDir, runDir);
   }
-  // Report busy before confirmation; reacquire for the actual transaction below.
-  await (await acquireInstallationLocks(purge ? dataDir : undefined)).close();
+  await assertInstallationIdle(purge ? dataDir : undefined);
   await confirm(
     `Remove the agent program? ${purge ? `Delete all contents of dedicated data ${dataDir} and run ${runDir}, including tasks and additional files.` : `Retain state and tasks at ${dataDir}.`} Project/work files outside the listed directories and external manager configuration are retained.`,
     yes,
     signal,
   );
-  protectSignals();
+  enterCommitPhase();
   const use = await acquireInstallationLocks(purge ? dataDir : undefined);
 
   const errors: unknown[] = [];
@@ -432,20 +457,32 @@ async function uninstall(
   return `Uninstalled; state retained. External manager configuration was not changed. Application directory configuration was not removed: ${unixInstallationLayout.environmentFile}. Stable installation lock files were not removed: ${unixInstallationLayout.useFile}, ${unixInstallationLayout.managementFile}.`;
 }
 
+function parseMaintenanceArguments(action: string, args: string[]) {
+  if (action === "install") {
+    const { values } = parseArgs({ args, options: { user: { type: "string" } } });
+    if (!values.user) throw new Error("Usage: kiteline-agent install --user PROJECT_USER");
+    return { action: "install" as const, user: values.user };
+  }
+  if (action === "upgrade") {
+    const { values } = parseArgs({
+      args,
+      options: { archive: { type: "string" }, yes: { type: "boolean" } },
+    });
+    if (!values.archive)
+      throw new Error("Usage: kiteline-agent upgrade --archive RELEASE.tar.gz [--yes]");
+    return { action: "upgrade" as const, archive: values.archive, yes: !!values.yes };
+  }
+  const { values } = parseArgs({
+    args,
+    options: { purge: { type: "boolean" }, yes: { type: "boolean" } },
+  });
+  return { action: "uninstall" as const, purge: !!values.purge, yes: !!values.yes };
+}
+
 export async function installCli(action: string, args: string[]) {
   if (process.platform === "win32")
     throw new Error("Use the public kiteline-agent.ps1 launcher for Windows installation changes");
-  const options: ParseArgsOptionsConfig =
-    action === "install"
-      ? { user: { type: "string" as const } }
-      : action === "upgrade"
-        ? { archive: { type: "string" as const }, yes: { type: "boolean" as const } }
-        : { purge: { type: "boolean" as const }, yes: { type: "boolean" as const } };
-  const { values } = parseArgs({ args, options });
-  if (action === "install" && !values.user)
-    throw new Error("Usage: kiteline-agent install --user PROJECT_USER");
-  if (action === "upgrade" && !values.archive)
-    throw new Error("Usage: kiteline-agent upgrade --archive RELEASE.tar.gz [--yes]");
+  const options = parseMaintenanceArguments(action, args);
   if (process.getuid?.() !== 0)
     throw new Error("Installation changes require sudo or root; run the agent as the project user");
   if (resourceDirectory === unixInstallationLayout.directory)
@@ -459,50 +496,50 @@ export async function installCli(action: string, args: string[]) {
   const management = await lockInstallationManagement();
   const errors: unknown[] = [];
   let completion: string | undefined;
-  let protectedSignals = false;
+  let commitPhase = false;
   const cancellation = new AbortController();
   const handlers = Object.entries({ SIGHUP: 129, SIGINT: 130, SIGTERM: 143 }).map(
     ([signal, code]) => ({
       signal: signal as NodeJS.Signals,
       handler: () => {
         process.exitCode = code;
-        if (!protectedSignals) cancellation.abort(new Error(`${signal}: cancelled`));
+        if (!commitPhase) cancellation.abort(new Error(`${signal}: cancelled`));
         console.error(
-          protectedSignals
+          commitPhase
             ? `${signal} received; finishing installation changes and cleanup before exit.`
             : `${signal} received; cancelling preparation and cleaning up before exit.`,
         );
       },
     }),
   );
-  const protectSignals = () => {
+  const enterCommitPhase = () => {
     cancellation.signal.throwIfAborted();
-    if (protectedSignals) return;
-    protectedSignals = true;
+    commitPhase = true;
   };
   for (const { signal, handler } of handlers) process.on(signal, handler);
   try {
-    if (action === "install")
-      completion = await installProgram(values.user as string, protectSignals);
+    if (options.action === "install")
+      completion = await installProgram({ user: options.user, enterCommitPhase });
     else {
       const installation = await readInstallation();
       if (!installation) throw new Error("kiteline-agent is not installed");
-      completion =
-        action === "upgrade"
-          ? await upgrade(
-              installation,
-              values.archive as string,
-              !!values.yes,
-              protectSignals,
-              cancellation.signal,
-            )
-          : await uninstall(
-              installation,
-              !!values.purge,
-              !!values.yes,
-              protectSignals,
-              cancellation.signal,
-            );
+      if (options.action === "upgrade") {
+        completion = await upgrade({
+          installation,
+          archive: options.archive,
+          yes: options.yes,
+          enterCommitPhase,
+          signal: cancellation.signal,
+        });
+      } else {
+        completion = await uninstall({
+          installation,
+          purge: options.purge,
+          yes: options.yes,
+          enterCommitPhase,
+          signal: cancellation.signal,
+        });
+      }
     }
   } catch (error) {
     errors.push(error);

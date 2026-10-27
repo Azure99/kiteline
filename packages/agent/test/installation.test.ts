@@ -16,7 +16,7 @@ import {
 import { join } from "node:path";
 import { agentLauncher } from "../../../scripts/agent-launcher.js";
 import { lockFileDescriptor } from "../src/install/paths.js";
-import { replaceProgram } from "../src/install/commands.js";
+import { replaceProgram, writeLauncher } from "../src/install/commands.js";
 import { lockAgentState } from "../src/state-lock.js";
 import { unixInstallationLayout } from "../src/install/layout.js";
 
@@ -268,14 +268,81 @@ test("program rollback restores the old tree when replacement publication fails"
   await mkdir(current);
   await writeFile(join(current, "version"), "old");
   // The second rename fails before any replacement is published.
+  await expect(replaceProgram(current, replacement, previous, async () => {})).rejects.toThrow(
+    "previous program was restored",
+  );
+  expect(await readFile(join(current, "version"), "utf8")).toBe("old");
+});
+
+test("program rollback restores the old tree when launcher publication fails", async () => {
+  const root = await directory();
+  const current = join(root, "program");
+  const replacement = join(root, "new");
+  const previous = join(root, "previous");
+  await mkdir(current);
+  await mkdir(replacement);
+  await writeFile(join(current, "version"), "old");
+  await writeFile(join(replacement, "version"), "new");
   await expect(
-    replaceProgram(
-      current,
-      replacement,
-      previous,
-      async () => {},
-      async () => {},
+    replaceProgram(current, replacement, previous, () =>
+      writeLauncher(join(root, "missing-directory", "launcher"), "new launcher"),
     ),
   ).rejects.toThrow("previous program was restored");
   expect(await readFile(join(current, "version"), "utf8")).toBe("old");
+  await expect(access(previous)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test("launcher publication failure preserves the existing file identity, contents and executable mode", async () => {
+  const root = await directory();
+  const launcher = join(root, "launcher");
+  const contents = "#!/bin/sh\nprintf 'old launcher\\n'\n";
+  await writeFile(launcher, contents, { mode: 0o755 });
+  const before = await lstat(launcher);
+  if (process.getuid?.() === 0) {
+    // The unprivileged writer can create its pending file but cannot replace this root-owned entry.
+    await chmod(root, 0o1777);
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+          import assert from "node:assert/strict";
+          const { writeLauncher } = await import(process.argv[1]);
+          process.setgid(65534);
+          process.setuid(65534);
+          await assert.rejects(writeLauncher(process.argv[2], "new launcher"), {
+            code: "EPERM",
+            syscall: "rename",
+            dest: process.argv[2],
+          });
+        `,
+        new URL("../dist/install/commands.js", import.meta.url).href,
+        launcher,
+      ],
+      { encoding: "utf8" },
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+  } else {
+    await chmod(root, 0o555);
+    try {
+      await expect(writeLauncher(launcher, "new launcher")).rejects.toMatchObject({
+        code: "EACCES",
+        syscall: "open",
+      });
+    } finally {
+      await chmod(root, 0o700);
+    }
+  }
+  const after = await lstat(launcher);
+  expect({ dev: after.dev, ino: after.ino, mode: after.mode }).toEqual({
+    dev: before.dev,
+    ino: before.ino,
+    mode: before.mode,
+  });
+  expect(await readFile(launcher, "utf8")).toBe(contents);
+  const executed = spawnSync(launcher, { encoding: "utf8" });
+  expect(executed.status, executed.stderr).toBe(0);
+  expect(executed.stdout).toBe("old launcher\n");
 });
