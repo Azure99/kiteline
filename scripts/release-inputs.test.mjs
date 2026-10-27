@@ -1,8 +1,9 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, expect, test } from "vitest";
-import { run } from "./release-inputs.mjs";
+import { digest, prepareInputs, run, verifyPreparedInputs } from "./release-inputs.mjs";
 
 const directories = [];
 
@@ -16,6 +17,45 @@ function temporaryDirectory() {
   directories.push(directory);
   return directory;
 }
+
+test.each(["prepared directory", "shared cache"])(
+  "prepareInputs preserves source paths and reuses checked downloads from %s",
+  (location) => {
+    const root = temporaryDirectory();
+    const directory = join(root, "prepared");
+    const download = join(root, "download");
+    const recipe = "scripts/recipe.sh";
+    mkdirSync(join(root, "scripts"));
+    writeFileSync(join(root, recipe), "printf 'prepared recipe\\n'\n");
+    writeFileSync(download, "pinned archive\n");
+    const expected = {
+      downloads: {
+        "archives/input.tar": { url: pathToFileURL(download).href, sha256: digest(download) },
+      },
+      files: { [recipe]: digest(join(root, recipe)) },
+    };
+    const downloadCache = location === "shared cache" ? join(root, "cache") : undefined;
+    const options = downloadCache ? { downloadCache } : undefined;
+    prepareInputs(directory, root, [recipe], expected, options);
+    expect(readFileSync(join(directory, recipe), "utf8")).toBe("printf 'prepared recipe\\n'\n");
+    verifyPreparedInputs(directory, expected, "test");
+
+    rmSync(download);
+    const reused = downloadCache ? join(root, "reused") : directory;
+    prepareInputs(reused, root, [recipe], expected, options);
+    verifyPreparedInputs(reused, expected, "test");
+
+    const archive = expected.downloads["archives/input.tar"];
+    const cached = downloadCache
+      ? join(downloadCache, archive.sha256)
+      : join(directory, "archives/input.tar");
+    writeFileSync(cached, "damaged archive\n");
+    writeFileSync(download, "pinned archive\n");
+    prepareInputs(directory, root, [recipe], expected, options);
+    expect(digest(cached)).toBe(archive.sha256);
+    verifyPreparedInputs(directory, expected, "test");
+  },
+);
 
 test("run preserves cwd, stdout bytes and the caller's capture options", () => {
   const cwd = temporaryDirectory();

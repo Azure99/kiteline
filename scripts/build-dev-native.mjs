@@ -1,14 +1,13 @@
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, cpSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import { prepareRipgrep } from "./prepare-ripgrep.mjs";
-import { digest, fetchPinned, run as execute } from "./release-inputs.mjs";
+import { fetchPinned, releaseCache, run as execute, tmuxPatchFiles } from "./release-inputs.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const destination = resolve(root, "dist/native");
 const directory = mkdtempSync("/var/tmp/kiteline-native-");
-const tarball = resolve(directory, "tmux.tar.gz");
-const { tmux } = JSON.parse(readFileSync(resolve(root, "release/inputs.json"), "utf8"));
-const checksum = tmux.sha256;
+const { tmux, ripgrep } = JSON.parse(readFileSync(resolve(root, "release/inputs.json"), "utf8"));
+const tarball = resolve(releaseCache, "static-sources", tmux.sha256);
 function run(command, args, cwd = directory) {
   return execute(command, args, { cwd });
 }
@@ -18,8 +17,7 @@ try {
   fetchPinned(tmux, tarball);
   run("tar", ["-xzf", tarball]);
   const source = resolve(directory, `tmux-${tmux.version}`);
-  run("patch", ["-p1", "-i", resolve(root, "native/tmux/paste.patch")], source);
-  run("patch", ["-p1", "-i", resolve(root, "native/tmux/flow-control.patch")], source);
+  for (const file of tmuxPatchFiles(root)) run("patch", ["-p1", "-i", resolve(root, file)], source);
   run("./configure", ["--quiet", "--disable-sixel", `--prefix=${destination}`], source);
   run("make", ["-s", "-j2"], source);
   mkdirSync(resolve(destination, "bin"), { recursive: true });
@@ -48,6 +46,7 @@ try {
     "-o",
     resolve(destination, "bin/pty-bridge"),
   ]);
+  prepareRipgrep(destination, process.arch === "x64" ? "amd64" : process.arch);
   writeFileSync(
     resolve(destination, "identity.json"),
     JSON.stringify(
@@ -56,18 +55,7 @@ try {
         node: process.version,
         architecture: process.arch,
         tmux: tmux.version,
-        tmuxSource: checksum,
-        patch: digest(resolve(root, "native/tmux/paste.patch")),
-        flowControlPatch: digest(resolve(root, "native/tmux/flow-control.patch")),
-        helper: digest(resolve(root, "native/linux/rename-noreplace.c")),
-        ptyBridge: digest(resolve(root, "native/terminal/pty-bridge.c")),
-        terminfo: digest(terminfoSource),
-        tmuxBinary: digest(resolve(destination, "bin/tmux")),
-        helperBinary: digest(resolve(destination, "bin/rename-noreplace")),
-        ptyBridgeBinary: digest(resolve(destination, "bin/pty-bridge")),
-        helperFlags: ["-Wall", "-Wextra", "-Werror", "-O2"],
-        configure: ["--disable-sixel"],
-        ripgrep: prepareRipgrep(destination, process.arch === "x64" ? "amd64" : process.arch),
+        ripgrep: { version: ripgrep.version },
       },
       null,
       2,

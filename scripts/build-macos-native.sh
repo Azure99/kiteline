@@ -24,8 +24,9 @@ cp LICENSE "$output/native/licenses/libevent.txt"
 
 tar -xzf "$inputs/tmux.tar.gz" -C "$build/tmux" --strip-components=1
 cd "$build/tmux"
-patch -p1 -i "$inputs/native/tmux/paste.patch"
-patch -p1 -i "$inputs/native/tmux/flow-control.patch"
+while IFS= read -r file || [ -n "$file" ]; do
+  patch -p1 -i "$inputs/native/tmux/$file"
+done < "$inputs/native/tmux/series"
 # System ioctl headers can load an incomplete queue.h with the same include guard.
 CPPFLAGS="-include $build/tmux/compat/queue.h" \
   LIBEVENT_CORE_CFLAGS="-I$build/dependencies/include" \

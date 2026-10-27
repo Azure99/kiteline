@@ -13,6 +13,8 @@ import {
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 
+export const releaseCache = "/var/tmp/kiteline-release-cache";
+
 export function run(command, args, options = {}) {
   const result = spawnSync(command, args, { stdio: "inherit", ...options });
   if (result.error) throw result.error;
@@ -24,6 +26,13 @@ export function run(command, args, options = {}) {
 export const digest = (file) => createHash("sha256").update(readFileSync(file)).digest("hex");
 export const hash = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 export const json = (file) => JSON.parse(readFileSync(file, "utf8"));
+
+export function tmuxPatchFiles(root) {
+  return readFileSync(join(root, "native/tmux/series"), "utf8")
+    .trimEnd()
+    .split("\n")
+    .map((file) => `native/tmux/${file}`);
+}
 
 export function ripgrepInput(version, input) {
   return {
@@ -54,10 +63,14 @@ export function files(directory, prefix = "") {
   return entries;
 }
 
-export function prepareInputs(directory, root, sourceFiles, expected) {
+export function prepareInputs(directory, root, sourceFiles, expected, { downloadCache } = {}) {
   mkdirSync(directory, { recursive: true });
-  for (const [file, input] of Object.entries(expected.downloads))
-    fetchPinned(input, join(directory, file));
+  for (const [file, input] of Object.entries(expected.downloads)) {
+    const target = join(directory, file);
+    const cached = downloadCache ? join(downloadCache, input.sha256) : target;
+    fetchPinned(input, cached);
+    if (downloadCache) copy(cached, target);
+  }
   for (const file of sourceFiles) copy(join(root, file), join(directory, file));
   writeJson(join(directory, "inputs.json"), expected);
 }

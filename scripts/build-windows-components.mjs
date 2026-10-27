@@ -12,6 +12,7 @@ import {
   prepareInputs,
   ripgrepInput,
   run,
+  tmuxPatchFiles,
   verifyComponentFiles,
   verifyPreparedInputs,
   writeJson,
@@ -22,24 +23,25 @@ const release = json(join(root, "release/inputs.json"));
 const recipe = json(join(root, "release/agent-windows.json"));
 const { tmux } = release;
 const msysRuntime = recipe.packages.find((pkg) => pkg.name === "msys2-runtime");
-const sourceFiles = [
+const inputSourceFiles = [
   "release/inputs.json",
   "release/agent-windows.json",
   "release/ubuntu.sources",
   "release/Dockerfile.windows-native",
   "scripts/build-windows-components.mjs",
   "scripts/release-inputs.mjs",
-  "scripts/build-windows-tmux.sh",
+  "scripts/build-windows-msys.sh",
   "scripts/build-windows-runtime.sh",
   "scripts/build-windows-addon.sh",
   "scripts/prepare-windows-notices.mjs",
   "scripts/windows-components.ts",
-  "native/tmux/paste.patch",
-  "native/tmux/flow-control.patch",
+  "native/tmux/series",
+  ...tmuxPatchFiles(root),
   "native/tmux/cygwin-outfd.patch",
   "native/msys/ctrl-c.patch",
   "native/tmux/tmux.terminfo",
   "native/terminal/pty-bridge.c",
+  // This scan records input identity; build-windows-addon.sh lists the compilation units.
   ...readdirSync(join(root, "native/windows"))
     .filter((file) => /\.(cc|hpp|def)$/.test(file))
     .sort()
@@ -65,7 +67,7 @@ const downloads = {
 function inputs() {
   return {
     downloads,
-    files: Object.fromEntries(sourceFiles.map((file) => [file, digest(join(root, file))])),
+    files: Object.fromEntries(inputSourceFiles.map((file) => [file, digest(join(root, file))])),
   };
 }
 function verifyInputs(directory) {
@@ -73,12 +75,12 @@ function verifyInputs(directory) {
 }
 
 export function prepareWindowsInputs(directory) {
-  prepareInputs(directory, root, sourceFiles, inputs());
+  prepareInputs(directory, root, inputSourceFiles, inputs());
 }
 
-export function buildWindowsTmux(directory, destination) {
+export function buildWindowsMsys(directory, destination) {
   if (process.platform !== "win32" || process.arch !== "x64")
-    throw new Error("tmux requires a Windows x64 build host");
+    throw new Error("MSYS components require a Windows x64 build host");
   const expected = verifyInputs(directory);
   // A fresh private root avoids installed packages, shell profiles and rolling updates.
   mkdirSync(destination);
@@ -138,7 +140,7 @@ export function buildWindowsTmux(directory, destination) {
       [
         "--noprofile",
         "--norc",
-        join(directory, "scripts/build-windows-tmux.sh").replaceAll("\\", "/"),
+        join(directory, "scripts/build-windows-msys.sh").replaceAll("\\", "/"),
         directory,
         destination,
         runtimeRecipe,
@@ -228,9 +230,9 @@ export function verifyWindowsComponents(directory) {
   return identity;
 }
 
-export function assembleWindowsComponents(directory, tmuxDirectory, addonDirectory, destination) {
+export function assembleWindowsComponents(directory, msysDirectory, addonDirectory, destination) {
   const expected = verifyInputs(directory);
-  verifiedBuild(tmuxDirectory, expected);
+  verifiedBuild(msysDirectory, expected);
   verifiedBuild(addonDirectory, expected);
   mkdirSync(destination);
   const temporary = mkdtempSync("/var/tmp/kiteline-windows-assemble-");
@@ -263,14 +265,14 @@ export function assembleWindowsComponents(directory, tmuxDirectory, addonDirecto
       run("tar", ["-xf", join(directory, "packages", `${pkg}.tar.zst`), "-C", extracted, ...paths]);
       for (const file of paths) copy(join(extracted, file), join(native, "msys", file));
     }
-    copy(join(tmuxDirectory, "tmux.exe"), join(native, "msys/usr/bin/tmux.exe"));
-    copy(join(tmuxDirectory, "pty-bridge.exe"), join(native, "msys/usr/bin/pty-bridge.exe"));
-    copy(join(tmuxDirectory, "msys-2.0.dll"), join(native, "msys/usr/bin/msys-2.0.dll"));
+    copy(join(msysDirectory, "tmux.exe"), join(native, "msys/usr/bin/tmux.exe"));
+    copy(join(msysDirectory, "pty-bridge.exe"), join(native, "msys/usr/bin/pty-bridge.exe"));
+    copy(join(msysDirectory, "msys-2.0.dll"), join(native, "msys/usr/bin/msys-2.0.dll"));
     copy(
-      join(tmuxDirectory, "terminfo/74/tmux-256color"),
+      join(msysDirectory, "terminfo/74/tmux-256color"),
       join(native, "msys/usr/share/terminfo/74/tmux-256color"),
     );
-    copy(join(tmuxDirectory, "tmux-LICENSE"), join(native, "licenses/tmux.txt"));
+    copy(join(msysDirectory, "tmux-LICENSE"), join(native, "licenses/tmux.txt"));
     for (const directory of ["etc", "tmp"]) mkdirSync(join(native, "msys", directory));
     copy(join(addonDirectory, "kiteline-windows.node"), join(native, "kiteline-windows.node"));
     copy(
@@ -321,26 +323,36 @@ export function assembleWindowsComponents(directory, tmuxDirectory, addonDirecto
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [mode, input, output, addon, destination, extra] = process.argv.slice(2);
+  const [mode, ...positionals] = process.argv.slice(2);
+  const [first, second, third, fourth, extra] = positionals;
   if (
-    !input ||
+    !first ||
     extra ||
-    (mode === "prepare" || mode === "verify" ? output : !output) ||
-    (mode === "assemble" ? !addon || !destination : addon)
+    (mode === "prepare" || mode === "verify" ? second : !second) ||
+    (mode === "assemble" ? !third || !fourth : third)
   )
     throw new Error(
       "Usage: node scripts/build-windows-components.mjs prepare INPUTS | tmux|addon INPUTS OUTPUT | assemble INPUTS TMUX ADDON OUTPUT | verify OUTPUT",
     );
-  if (mode === "prepare") prepareWindowsInputs(resolve(input));
-  else if (mode === "tmux") buildWindowsTmux(resolve(input), resolve(output));
-  else if (mode === "addon") buildWindowsAddon(resolve(input), resolve(output));
-  else if (mode === "assemble")
+  if (mode === "prepare") {
+    const [inputsDirectory] = positionals;
+    prepareWindowsInputs(resolve(inputsDirectory));
+  } else if (mode === "tmux") {
+    const [inputsDirectory, msysDirectory] = positionals;
+    buildWindowsMsys(resolve(inputsDirectory), resolve(msysDirectory));
+  } else if (mode === "addon") {
+    const [inputsDirectory, addonDirectory] = positionals;
+    buildWindowsAddon(resolve(inputsDirectory), resolve(addonDirectory));
+  } else if (mode === "assemble") {
+    const [inputsDirectory, msysDirectory, addonDirectory, componentsDirectory] = positionals;
     assembleWindowsComponents(
-      resolve(input),
-      resolve(output),
-      resolve(addon),
-      resolve(destination),
+      resolve(inputsDirectory),
+      resolve(msysDirectory),
+      resolve(addonDirectory),
+      resolve(componentsDirectory),
     );
-  else if (mode === "verify") verifyWindowsComponents(resolve(input));
-  else throw new Error(`Unknown Windows component build: ${mode}`);
+  } else if (mode === "verify") {
+    const [componentsDirectory] = positionals;
+    verifyWindowsComponents(resolve(componentsDirectory));
+  } else throw new Error(`Unknown Windows component build: ${mode}`);
 }

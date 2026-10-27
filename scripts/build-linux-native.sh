@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+inputs=$2
 
 case "$1" in
   x64) cpu_flags='-march=x86-64 -mtune=generic' ;;
@@ -14,8 +15,8 @@ mkdir -p "$prefix" /output/native/bin /output/native/licenses /output/native/sha
 
 for library in libevent ncurses; do
   mkdir "$library"
-  tar -xf "$library.tar.gz" --strip-components=1 -C "$library"
-  tar -xf "$library-patches.tar.xz" -C "$library"
+  tar -xf "$inputs/$library.tar.gz" --strip-components=1 -C "$library"
+  tar -xf "$inputs/$library-patches.tar.xz" -C "$library"
   (
     cd "$library"
     sed -e 's/#.*//' -e '/^[[:space:]]*$/d' debian/patches/series |
@@ -43,10 +44,11 @@ cp COPYING /output/native/licenses/ncurses.txt
 cd ..
 
 mkdir tmux
-tar -xf tmux.tar.gz --strip-components=1 -C tmux
+tar -xf "$inputs/tmux.tar.gz" --strip-components=1 -C tmux
 cd tmux
-patch -p1 -i ../tmux-paste.patch
-patch -p1 -i ../tmux-flow-control.patch
+while IFS= read -r file || [ -n "$file" ]; do
+  patch -p1 -i "$inputs/native/tmux/$file"
+done < "$inputs/native/tmux/series"
 ./configure --enable-static --disable-sixel
 make -j2
 cp tmux /output/native/bin/tmux
@@ -55,12 +57,12 @@ cd ..
 # The flags contain separate compiler arguments.
 # shellcheck disable=SC2086
 cc -static -Wall -Wextra -Werror -O2 $cpu_flags \
-  rename-noreplace.c -o /output/native/bin/rename-noreplace
+  "$inputs/native/linux/rename-noreplace.c" -o /output/native/bin/rename-noreplace
 # shellcheck disable=SC2086
 cc -static -Wall -Wextra -Werror -O2 $cpu_flags \
-  pty-bridge.c -lutil -o /output/native/bin/pty-bridge
-"$prefix/bin/tic" -x -o /output/native/share/terminfo tmux.terminfo
-[ "$(grep -c 'pairs#0x10000,' tmux.terminfo)" -eq 1 ]
-sed 's/pairs#0x10000,/pairs#32767,/' tmux.terminfo >tmux-legacy.terminfo
+  "$inputs/native/terminal/pty-bridge.c" -lutil -o /output/native/bin/pty-bridge
+"$prefix/bin/tic" -x -o /output/native/share/terminfo "$inputs/native/tmux/tmux.terminfo"
+[ "$(grep -c 'pairs#0x10000,' "$inputs/native/tmux/tmux.terminfo")" -eq 1 ]
+sed 's/pairs#0x10000,/pairs#32767,/' "$inputs/native/tmux/tmux.terminfo" >tmux-legacy.terminfo
 "$prefix/bin/tic" -x -o /output/native/share/terminfo-legacy tmux-legacy.terminfo
-rm -rf libevent ncurses tmux prefix ./*.tar.*
+rm -rf libevent ncurses tmux prefix

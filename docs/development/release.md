@@ -120,9 +120,9 @@ sudo apt-get install -y git curl xz-utils zstd zip unzip binutils libarchive-too
 
 ### 构建 Windows 组件
 
-CI 在 Windows x64 上准备输入并编译 tmux 和 MSYS2 runtime，再传到 Linux x64 编译 addon、组装和打包，步骤见 [`build.yml`](../../.github/workflows/build.yml)，组件入口见 [`build-windows-components.mjs`](../../scripts/build-windows-components.mjs)。Windows 需要匹配版本的 x64 Node、PATH 中的 Git、默认位置的 7-Zip 24.06 或更新版本和系统 `tar.exe`；验证 agent 入口使用 PowerShell 7，两个包的 CLI 入口分别使用 PowerShell 5.1 和 7。
+CI 在 Windows x64 上准备输入并编译 tmux、PTY bridge 和 MSYS2 runtime，再传到 Linux x64 编译 addon、组装和打包，步骤见 [`build.yml`](../../.github/workflows/build.yml)，组件入口见 [`build-windows-components.mjs`](../../scripts/build-windows-components.mjs)。Windows 需要匹配版本的 x64 Node、PATH 中的 Git、默认位置的 7-Zip 24.06 或更新版本和系统 `tar.exe`；验证 agent 入口使用 PowerShell 7，两个包的 CLI 入口分别使用 PowerShell 5.1 和 7。
 
-Windows checkout 前执行 `git config --global core.autocrlf false`，避免换行转换改变配方摘要。需要本机排错时，按工作流运行对应步骤；`tmux`、`addon`、`assemble` 的输出目录必须不存在，父目录必须存在。
+Windows checkout 前执行 `git config --global core.autocrlf false`，避免换行转换改变配方摘要。需要本机排错时，按工作流运行对应步骤；`tmux` 子命令构建整组 MSYS 组件。`tmux`、`addon`、`assemble` 的输出目录必须不存在，父目录必须存在。
 
 ### 构建 macOS 组件
 
@@ -157,7 +157,7 @@ Linux arm64 主机可将上述 `amd64` 改为 `arm64`。完整多平台产物请
 | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | `Build agent <目标> first`                                              | 缺少该 agent 包或 `.sha256`。先构建它；局部测试可用 `--agent-target` 只选择已构建的平台。 |
 | `Windows component inputs do not match this source; prepare them again` | 输入来自不同配方或 Windows checkout 转换了换行；修正后重新准备输入。                      |
-| `Windows component build is stale or damaged: …`                        | tmux 或 addon 输出与输入不符或被改动；重跑对应构建步骤。                                  |
+| `Windows component build is stale or damaged: …`                        | MSYS 组件或 addon 输出与输入不符或被改动；重跑对应构建步骤。                              |
 
 工作树不干净时，先提交或处理改动；组包中途源码变化时，重新构建。
 

@@ -2,16 +2,17 @@
 ARG ALPINE
 FROM ${ALPINE} AS toolchain
 ENV TMPDIR=/var/tmp
-COPY packages.txt /var/tmp/packages.txt
+COPY release/agent-linux-packages.txt /var/tmp/packages.txt
 RUN xargs apk add --no-cache < /var/tmp/packages.txt \
     && apk info -vv | sort > /var/tmp/build-packages.txt
 WORKDIR /var/tmp/build
 
 FROM toolchain AS native
 ARG NODE_ARCH
-COPY libevent* ncurses* tmux.tar.gz build-linux-native.sh ./
-COPY tmux-paste.patch tmux-flow-control.patch rename-noreplace.c pty-bridge.c tmux.terminfo native-inputs.json ./
-RUN sh build-linux-native.sh "$NODE_ARCH"
+COPY libevent* ncurses* tmux.tar.gz /inputs/
+COPY scripts/ /inputs/scripts/
+COPY native/ /inputs/native/
+RUN sh /inputs/scripts/build-linux-native.sh "$NODE_ARCH" /inputs
 COPY licenses/musl-COPYRIGHT /output/native/licenses/musl-COPYRIGHT
 COPY --from=toolchain /var/tmp/build-packages.txt /output/native/build-packages.txt
 COPY native-inputs.json /output/native/inputs.json

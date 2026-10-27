@@ -1,6 +1,12 @@
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { digest, fetchPinned, ripgrepInput, run as execute } from "./release-inputs.mjs";
+import {
+  digest,
+  fetchPinned,
+  releaseCache,
+  ripgrepInput,
+  run as execute,
+} from "./release-inputs.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 function run(command, args) {
@@ -17,7 +23,7 @@ export function prepareRipgrep(destination, architecture) {
   const archive = ripgrep.linuxArchives[architecture];
   if (!archive) throw new Error(`Unsupported ripgrep architecture: ${architecture}`);
   const input = ripgrepInput(ripgrep.version, archive);
-  const cache = "/var/tmp/kiteline-release-cache/ripgrep";
+  const cache = join(releaseCache, "ripgrep");
   const temporary = mkdtempSync("/var/tmp/kiteline-ripgrep-");
   try {
     mkdirSync(cache, { recursive: true });

@@ -10,6 +10,7 @@ import {
   prepareInputs,
   ripgrepInput,
   run,
+  tmuxPatchFiles,
   verifyComponentFiles,
   verifyPreparedInputs,
   writeJson,
@@ -27,8 +28,8 @@ const sourceFiles = [
   "native/macos/rename-noreplace.c",
   "native/macos/entry-name.c",
   "native/terminal/pty-bridge.c",
-  "native/tmux/paste.patch",
-  "native/tmux/flow-control.patch",
+  "native/tmux/series",
+  ...tmuxPatchFiles(root),
   "native/tmux/tmux.terminfo",
 ];
 function downloads(architecture) {

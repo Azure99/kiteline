@@ -11,8 +11,9 @@ output=$(cygpath -u "$2")
 mkdir -p "$output/source" "$output/terminfo"
 cd "$output/source"
 tar -xf "$inputs/tmux.tar.gz" --strip-components=1
-patch -p1 -i "$inputs/native/tmux/paste.patch"
-patch -p1 -i "$inputs/native/tmux/flow-control.patch"
+while IFS= read -r file || [ -n "$file" ]; do
+  patch -p1 -i "$inputs/native/tmux/$file"
+done < "$inputs/native/tmux/series"
 patch -p1 -i "$inputs/native/tmux/cygwin-outfd.patch"
 ./configure --disable-sixel --prefix=/usr/local
 make -j2

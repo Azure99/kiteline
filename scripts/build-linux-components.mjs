@@ -1,19 +1,29 @@
-import {
-  cpSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { digest, fetchPinned, json, run } from "./release-inputs.mjs";
+import {
+  digest,
+  fetchPinned,
+  json,
+  prepareInputs,
+  releaseCache,
+  run,
+  tmuxPatchFiles,
+} from "./release-inputs.mjs";
 import { staticNodeInput } from "./release-artifacts.mjs";
 import { prepareRipgrep } from "./prepare-ripgrep.mjs";
 
 const root = resolve(import.meta.dirname, "..");
+const sourceFiles = [
+  "release/Dockerfile.agent-linux",
+  "release/agent-linux-packages.txt",
+  "scripts/build-linux-native.sh",
+  "native/tmux/series",
+  ...tmuxPatchFiles(root),
+  "native/linux/rename-noreplace.c",
+  "native/terminal/pty-bridge.c",
+  "native/tmux/tmux.terminfo",
+];
 
 export function buildLinuxComponents(destination, architecture = "amd64") {
   const release = json(join(root, "release/inputs.json"));
@@ -22,7 +32,7 @@ export function buildLinuxComponents(destination, architecture = "amd64") {
   const nodeRecipe = json(join(root, "release/node-static.json"));
   const nodeArchive = staticNodeInput(release.node, nodeRecipe, architecture);
   const recipe = json(join(root, "release/agent-linux.json"));
-  const cache = "/var/tmp/kiteline-release-cache/static-sources";
+  const cache = join(releaseCache, "static-sources");
   const temporary = mkdtempSync("/var/tmp/kiteline-linux-");
   let container;
   let failed = false;
@@ -49,36 +59,25 @@ export function buildLinuxComponents(destination, architecture = "amd64") {
         Object.entries(recipe.licenses).map(([name, entry]) => [`licenses/${name}`, entry]),
       ),
     };
-    for (const [name, input] of Object.entries(downloads)) {
-      const cached = join(cache, input.sha256);
-      fetchPinned(input, cached);
-      const target = join(temporary, name);
-      mkdirSync(resolve(target, ".."), { recursive: true });
-      cpSync(cached, target);
-    }
-    const files = {
-      Dockerfile: "release/Dockerfile.agent-linux",
-      "packages.txt": "release/agent-linux-packages.txt",
-      "build-linux-native.sh": "scripts/build-linux-native.sh",
-      "tmux-paste.patch": "native/tmux/paste.patch",
-      "tmux-flow-control.patch": "native/tmux/flow-control.patch",
-      "rename-noreplace.c": "native/linux/rename-noreplace.c",
-      "pty-bridge.c": "native/terminal/pty-bridge.c",
-      "tmux.terminfo": "native/tmux/tmux.terminfo",
+    const expected = {
+      downloads,
+      files: Object.fromEntries(sourceFiles.map((file) => [file, digest(join(root, file))])),
     };
-    for (const [name, file] of Object.entries(files))
-      cpSync(join(root, file), join(temporary, name));
-    const toolchain = { image: recipe.alpine, packages: digest(join(temporary, "packages.txt")) };
+    prepareInputs(temporary, root, sourceFiles, expected, { downloadCache: cache });
+    const toolchain = {
+      image: recipe.alpine,
+      packages: expected.files["release/agent-linux-packages.txt"],
+    };
     const nativeInputs = {
       architecture: nodeArchitecture,
       sources: { tmux: release.tmux, ...sources },
       toolchain,
-      recipe: digest(join(temporary, "build-linux-native.sh")),
-      patch: digest(join(temporary, "tmux-paste.patch")),
-      flowControlPatch: digest(join(temporary, "tmux-flow-control.patch")),
-      helper: digest(join(temporary, "rename-noreplace.c")),
-      ptyBridge: digest(join(temporary, "pty-bridge.c")),
-      terminfo: digest(join(temporary, "tmux.terminfo")),
+      recipe: expected.files["scripts/build-linux-native.sh"],
+      patch: expected.files["native/tmux/paste.patch"],
+      flowControlPatch: expected.files["native/tmux/flow-control.patch"],
+      helper: expected.files["native/linux/rename-noreplace.c"],
+      ptyBridge: expected.files["native/terminal/pty-bridge.c"],
+      terminfo: expected.files["native/tmux/tmux.terminfo"],
     };
     writeFileSync(
       join(temporary, "native-inputs.json"),
@@ -99,6 +98,8 @@ export function buildLinuxComponents(destination, architecture = "amd64") {
       "HTTPS_PROXY",
       "--build-arg",
       "NO_PROXY",
+      "-f",
+      join(temporary, "release/Dockerfile.agent-linux"),
       "--iidfile",
       imageFile,
       temporary,

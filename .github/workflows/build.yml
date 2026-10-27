@@ -134,7 +134,7 @@ jobs:
           compression-level: 0
           if-no-files-found: error
 
-  windows-tmux:
+  windows-msys:
     needs: checks
     if: inputs.full
     runs-on: windows-2022
@@ -149,16 +149,16 @@ jobs:
         with:
           node-version-file: package.json
           package-manager-cache: false
-      - name: Prepare fixed inputs and build tmux
+      - name: Prepare fixed inputs and build MSYS components
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           $root = Join-Path $env:RUNNER_TEMP 'kiteline-ci'
           New-Item -ItemType Directory $root | Out-Null
           node scripts/build-windows-components.mjs prepare "$root/inputs"
-          node "$root/inputs/scripts/build-windows-components.mjs" tmux "$root/inputs" "$root/tmux"
+          node "$root/inputs/scripts/build-windows-components.mjs" tmux "$root/inputs" "$root/msys"
           $archive = Join-Path $env:RUNNER_TEMP 'windows-inputs.tar'
-          & "$env:SystemRoot/System32/tar.exe" -cf $archive -C $root inputs tmux
+          & "$env:SystemRoot/System32/tar.exe" -cf $archive -C $root inputs msys
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows-inputs
@@ -169,7 +169,7 @@ jobs:
           if-no-files-found: error
 
   windows-package:
-    needs: windows-tmux
+    needs: windows-msys
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -195,7 +195,7 @@ jobs:
           mkdir /var/tmp/kiteline-ci
           tar -xf /var/tmp/kiteline-ci-transfer/windows-inputs.tar -C /var/tmp/kiteline-ci
           node scripts/build-windows-components.mjs addon /var/tmp/kiteline-ci/inputs /var/tmp/kiteline-ci/addon
-          node scripts/build-windows-components.mjs assemble /var/tmp/kiteline-ci/inputs /var/tmp/kiteline-ci/tmux /var/tmp/kiteline-ci/addon /var/tmp/kiteline-ci/components
+          node scripts/build-windows-components.mjs assemble /var/tmp/kiteline-ci/inputs /var/tmp/kiteline-ci/msys /var/tmp/kiteline-ci/addon /var/tmp/kiteline-ci/components
           corepack enable pnpm
           pnpm install --frozen-lockfile
           pnpm package agent windows-amd64 --windows-components=/var/tmp/kiteline-ci/components
