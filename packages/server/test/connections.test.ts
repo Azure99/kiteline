@@ -175,6 +175,14 @@ test("version refusal is visible, blocks all device tools, and does not replace 
   const identity = f.store.bind(f.store.newBinding().code, "Mismatched device");
   const login = f.store.createLogin(60_000);
   const cookie = `kiteline_session_http=${login.token}`;
+  const events: Record<string, unknown>[] = [];
+  const browser = new WebSocket(f.origin.replace("http:", "ws:") + webPath("/api/events"), {
+    headers: { cookie, origin: f.origin },
+  });
+  browser.on("message", (data) => events.push(JSON.parse(data.toString())));
+  await once(browser, "open");
+  await expect.poll(() => events.some((event) => event.type === "devices.changed")).toBe(true);
+  events.length = 0;
   async function rejectVersion(token: string) {
     const socket = new WebSocket(
       f.origin.replace("http:", "ws:") + "/api/agent/control?appVersion=0.0.0-test",
@@ -209,6 +217,9 @@ test("version refusal is visible, blocks all device tools, and does not replace 
     lastSeenAt: null,
     release: { agentVersion: "0.0.0-test", serverVersion: appVersion },
   });
+  await expect
+    .poll(() => events.filter((event) => event.type === "devices.changed"))
+    .toEqual([{ type: "devices.changed", devices: [device] }]);
   for (const [path, method, input] of [
     [
       `/api/devices/${identity.deviceId}/rpc`,
@@ -296,7 +307,7 @@ test("pending device handshakes are owned by deletion and server shutdown", asyn
   await expect.poll(() => pending.readyState).toBe(WebSocket.CLOSED);
 });
 
-test("absolute expiry cancels RPC without an event socket and connection replacement ignores late results", async () => {
+test("absolute expiry forwards RPC cancellation without an event socket and still accepts its reply", async () => {
   const f = await fixture();
   const peer = await f.device();
   const login = f.store.createLogin(150);
@@ -322,27 +333,207 @@ test("absolute expiry cancels RPC without an event socket and connection replace
       },
     }),
   );
-  expect((await reply).status).toBe(200);
-  const nextLogin = f.store.createLogin(60_000);
-  const old = f.call(
-    `/api/devices/${peer.deviceId}/rpc`,
+  const response = await reply;
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    id: "expires",
+    outcome: "failed",
+    error: { code: "cancelled" },
+  });
+});
+
+test("logout forwards cancellation while the global RPC ID stays reserved until the original reply", async () => {
+  const f = await fixture();
+  const first = await f.device("First");
+  const second = await f.device("Second");
+  const originalLogin = f.store.createLogin(60_000);
+  const otherLogin = f.store.createLogin(60_000);
+  const originalCookie = `kiteline_session_http=${originalLogin.token}`;
+  const otherCookie = `kiteline_session_http=${otherLogin.token}`;
+  const input = { id: "shared-id", method: "directories.mkdir", params: { absolutePath: "/test" } };
+  const original = f.call(`/api/devices/${first.deviceId}/rpc`, "POST", input, originalCookie);
+  await expect
+    .poll(() =>
+      first.messages.some((message) => message.type === "rpc.request" && message.id === input.id),
+    )
+    .toBe(true);
+  const duplicate = await f.call(`/api/devices/${second.deviceId}/rpc`, "POST", input, otherCookie);
+  expect(duplicate.status).toBe(409);
+  expect(await duplicate.json()).toMatchObject({ error: { code: "conflict" } });
+
+  expect((await f.call("/api/logout", "POST", {}, originalCookie)).status).toBe(200);
+  await expect
+    .poll(() =>
+      first.messages.some((message) => message.type === "rpc.cancel" && message.id === input.id),
+    )
+    .toBe(true);
+  const afterCancel = await f.call(
+    `/api/devices/${second.deviceId}/rpc`,
     "POST",
-    { id: "old", method: "directories.mkdir", params: { absolutePath: "/test" } },
-    `kiteline_session_http=${nextLogin.token}`,
+    input,
+    otherCookie,
   );
-  await expect.poll(() => peer.messages.some((m) => m.id === "old")).toBe(true);
+  expect(afterCancel.status).toBe(409);
+  expect(await afterCancel.json()).toMatchObject({ error: { code: "conflict" } });
+
+  const originalReply = { id: input.id, outcome: "succeeded", result: { device: "first" } };
+  first.socket.send(JSON.stringify({ type: "rpc.result", reply: originalReply }));
+  const originalResponse = await original;
+  expect(originalResponse.status).toBe(200);
+  expect(await originalResponse.json()).toEqual(originalReply);
+
+  const reused = f.call(`/api/devices/${second.deviceId}/rpc`, "POST", input, otherCookie);
+  await expect
+    .poll(() =>
+      second.messages.some((message) => message.type === "rpc.request" && message.id === input.id),
+    )
+    .toBe(true);
+  const reusedReply = { id: input.id, outcome: "succeeded", result: { device: "second" } };
+  second.socket.send(JSON.stringify({ type: "rpc.result", reply: reusedReply }));
+  expect(await (await reused).json()).toEqual(reusedReply);
+});
+
+test("replacement broadcasts offline then online and isolates ready channels and late old replies", async () => {
+  const f = await fixture();
+  const peer = await f.device("Replaced");
+  cleanups.push(() => {
+    peer.socket.resume();
+    peer.socket.terminate();
+  });
+  const login = f.store.createLogin(60_000);
+  const cookie = `kiteline_session_http=${login.token}`;
+  const oldConnection = f.app.connections.online(peer.deviceId)!;
+
+  const deviceStates: string[] = [];
+  const browser = new WebSocket(f.origin.replace("http:", "ws:") + webPath("/api/events"), {
+    headers: { cookie, origin: f.origin },
+  });
+  browser.on("message", (data) => {
+    const event = JSON.parse(data.toString());
+    if (event.type === "devices.changed")
+      deviceStates.push(
+        event.devices.find((device: { id: string }) => device.id === peer.deviceId).status,
+      );
+  });
+  await once(browser, "open");
+  await expect.poll(() => deviceStates).toEqual(["online"]);
+  deviceStates.length = 0;
+
+  const fileParams = { workspaceId: "work", path: "file", purpose: "text" };
+  const oldChannel = f.app.channels.create(peer.deviceId, login, "file.read", fileParams);
+  const oldData = new WebSocket(
+    f.origin.replace("http:", "ws:") +
+      `/api/agent/channels/${oldChannel.id}?connectionId=${oldConnection.connectionId}`,
+    { headers: { authorization: `Bearer ${peer.deviceToken}` } },
+  );
+  cleanups.push(() => oldData.terminate());
+  await once(oldData, "open");
+  const fileReady = {
+    type: "ready",
+    meta: {
+      size: 4,
+      filename: "file",
+      targetPath: "file",
+      contentType: "text/plain; charset=utf-8",
+    },
+  };
+  oldData.send(JSON.stringify(fileReady));
+  await oldChannel.ready;
+  const oldDataClosed = once(oldData, "close");
+  const input = {
+    id: "generation-id",
+    method: "directories.mkdir",
+    params: { absolutePath: "/test" },
+  };
+  const original = f.call(`/api/devices/${peer.deviceId}/rpc`, "POST", input, cookie);
+  await expect
+    .poll(() =>
+      peer.messages.some((message) => message.type === "rpc.request" && message.id === input.id),
+    )
+    .toBe(true);
+  peer.socket.pause();
+
   const replacement = new WebSocket(f.origin.replace("http:", "ws:") + agentPath, {
     headers: { authorization: `Bearer ${peer.deviceToken}` },
   });
+  const replacementMessages: Record<string, unknown>[] = [];
+  replacement.on("message", (data) => replacementMessages.push(JSON.parse(data.toString())));
   await once(replacement, "open");
-  replacement.send(
-    JSON.stringify({
-      ...hello(),
-      snapshot: f.app.connections.devices()[0]!.snapshot,
-    }),
+  replacement.send(JSON.stringify(hello()));
+  await expect
+    .poll(() => replacementMessages.some((message) => message.type === "welcome"))
+    .toBe(true);
+  expect(await (await original).json()).toMatchObject({
+    id: input.id,
+    outcome: "unknown",
+    error: { code: "offline" },
+  });
+  await oldDataClosed;
+  await expect.poll(() => deviceStates).toEqual(["offline", "online"]);
+  expect(oldConnection.socket.readyState).toBe(WebSocket.CLOSING);
+  expect(peer.socket.readyState).toBe(WebSocket.OPEN);
+
+  const reused = f.call(`/api/devices/${peer.deviceId}/rpc`, "POST", input, cookie);
+  await expect
+    .poll(() =>
+      replacementMessages.some(
+        (message) => message.type === "rpc.request" && message.id === input.id,
+      ),
+    )
+    .toBe(true);
+  const lateReply = {
+    type: "rpc.result",
+    reply: { id: input.id, outcome: "succeeded", result: "old" },
+  };
+  const oldFrameReceived = once(oldConnection.socket, "message");
+  peer.socket.send(JSON.stringify(lateReply));
+  const [oldFrame, binary] = await oldFrameReceived;
+  expect(binary).toBe(false);
+  expect(JSON.parse(oldFrame.toString())).toEqual(lateReply);
+  const afterLateReply = await f.call(`/api/devices/${peer.deviceId}/rpc`, "POST", input, cookie);
+  expect(afterLateReply.status).toBe(409);
+  expect(await afterLateReply.json()).toMatchObject({ error: { code: "conflict" } });
+  const newReply = { id: input.id, outcome: "succeeded", result: "new" };
+  replacement.send(JSON.stringify({ type: "rpc.result", reply: newReply }));
+  expect(await (await reused).json()).toEqual(newReply);
+
+  const oldClosed = once(peer.socket, "close");
+  peer.socket.resume();
+  const [, reason] = await oldClosed;
+  expect(reason.toString()).toBe("connection_replaced");
+
+  const newChannel = f.app.channels.create(peer.deviceId, login, "file.read", fileParams);
+  const staleData = new WebSocket(
+    f.origin.replace("http:", "ws:") +
+      `/api/agent/channels/${newChannel.id}?connectionId=${oldConnection.connectionId}`,
+    { headers: { authorization: `Bearer ${peer.deviceToken}` } },
   );
-  expect(await (await old).json()).toMatchObject({ id: "old", outcome: "unknown" });
-  await expect.poll(() => peer.socket.readyState).toBe(WebSocket.CLOSED);
+  staleData.on("error", () => {});
+  const rejected = await new Promise<{ status: number; body: string }>((resolve) => {
+    staleData.once("unexpected-response", (_request, response) => {
+      let body = "";
+      response.on("data", (part) => {
+        body += String(part);
+      });
+      response.once("end", () => {
+        resolve({ status: response.statusCode!, body });
+        staleData.terminate();
+      });
+    });
+  });
+  expect(rejected.status).toBe(403);
+  expect(JSON.parse(rejected.body)).toMatchObject({ error: { code: "forbidden" } });
+  const newConnection = f.app.connections.online(peer.deviceId)!;
+  expect(newConnection.connectionId).not.toBe(oldConnection.connectionId);
+  const newData = new WebSocket(
+    f.origin.replace("http:", "ws:") +
+      `/api/agent/channels/${newChannel.id}?connectionId=${newConnection.connectionId}`,
+    { headers: { authorization: `Bearer ${peer.deviceToken}` } },
+  );
+  cleanups.push(() => newData.terminate());
+  await once(newData, "open");
+  newData.send(JSON.stringify(fileReady));
+  await newChannel.ready;
 });
 
 test("terminal reports reach permitted devices without workspace subscriptions and use connection identity", async () => {

@@ -31,6 +31,7 @@ import {
   versionMismatch,
 } from "./http.js";
 import { projectTaskSnapshot } from "./task-summary.js";
+import { Channels } from "./channels.js";
 
 export interface AgentConnection {
   id: string;
@@ -55,12 +56,10 @@ interface Browser {
   syncing?: boolean;
 }
 
-export function send(socket: WebSocket, value: ServerControlMessage | BrowserEvent) {
-  if (controlWritable(socket)) socket.send(JSON.stringify(value));
-}
 type Report = Extract<BrowserEvent, { type: "terminal.notice" }>;
 
 export class Connections {
+  readonly channels = new Channels(this);
   private readonly reports = new Map<string, Report>();
   private readonly agents = new Map<string, OnlineAgentConnection>();
   private readonly handshakes = new Set<AgentConnection>();
@@ -68,17 +67,19 @@ export class Connections {
   private readonly browsers = new Set<Browser>();
   private readonly pending = new Map<string, Pending>();
   private readonly expiry: NodeJS.Timeout;
-  onLoginClosed?: (loginId: string) => void;
-  onAgentClosed?: (connection: AgentConnection) => void;
 
   constructor(private store: Store) {
     this.expiry = setInterval(() => {
       for (const { id } of this.store.expiredLogins()) {
+        // Expiry already invalidated the login; deleting its row only clears persisted state.
         this.closeLogin(id);
         this.store.logout(id);
       }
     }, 1000);
     this.expiry.unref();
+  }
+  send(socket: WebSocket, value: ServerControlMessage | BrowserEvent) {
+    if (controlWritable(socket)) socket.send(JSON.stringify(value));
   }
   online(deviceId: string) {
     return this.agents.get(deviceId);
@@ -101,7 +102,7 @@ export class Connections {
           : known;
       });
   }
-  checkAgentVersion(id: string, version: string | null) {
+  observeAndRequireAgentVersion(id: string, version: string | null) {
     if (!this.agents.has(id)) {
       this.releases.set(id, {
         agentVersion: version,
@@ -118,19 +119,19 @@ export class Connections {
       return versionMismatch(release.agentVersion, "agent");
     return new AppError("offline", "Device offline");
   }
-  broadcastDevices() {
+  private broadcastDevices() {
     if (this.browsers.size === 0) return;
     const devices = this.devices();
     for (const browser of this.browsers)
-      send(browser.socket, {
+      this.send(browser.socket, {
         type: "devices.changed",
         devices: devices.filter((device) => permitsDevice(browser.login, device.id)),
       });
   }
-  taskSummaries(deviceId?: string, login?: Login) {
+  taskSummaries(login: Login, deviceId?: string) {
     return this.store
       .taskSummaries(deviceId)
-      .filter((item) => !login || permitsDevice(login, item.deviceId))
+      .filter((item) => permitsDevice(login, item.deviceId))
       .map((item) => ({
         ...item,
         current: this.agents.get(item.deviceId)?.taskRevision !== undefined,
@@ -138,7 +139,7 @@ export class Connections {
   }
   notify(loginId: string, event: BrowserEvent) {
     for (const browser of this.browsers)
-      if (browser.login.id === loginId) send(browser.socket, event);
+      if (browser.login.id === loginId) this.send(browser.socket, event);
   }
   acceptAgent(id: string, socket: WebSocket) {
     const connection: AgentConnection = { id, connectionId: randomUUID(), socket };
@@ -177,7 +178,7 @@ export class Connections {
           });
           this.store.saveSnapshot(id, online.snapshot);
           this.store.recordConnectedAt(id);
-          send(socket, {
+          this.send(socket, {
             type: "welcome",
             connectionId: connection.connectionId,
             serverVersion: appVersion,
@@ -207,7 +208,7 @@ export class Connections {
               this.store.saveTaskSnapshot(id, snapshot);
               for (const browser of this.browsers)
                 if (permitsDevice(browser.login, id))
-                  send(browser.socket, {
+                  this.send(browser.socket, {
                     type: "tasks.changed",
                     deviceId: id,
                   } satisfies BrowserEvent);
@@ -300,7 +301,7 @@ export class Connections {
             }
             for (const browser of this.browsers)
               if (browser.targets.some((t) => t.deviceId === id && t.workspaceId === workspaceId))
-                send(browser.socket, { ...event, deviceId: id });
+                this.send(browser.socket, { ...event, deviceId: id });
             break;
           }
           default:
@@ -332,7 +333,7 @@ export class Connections {
           },
         });
       }
-    this.onAgentClosed?.(connection);
+    this.channels.cancelConnection(connection, new AppError("offline", "Device connection lost"));
     this.broadcastDevices();
   }
   activateReport(deviceId: string, workspaceId: string, sessionId: string) {
@@ -344,7 +345,7 @@ export class Connections {
     const { deviceId, workspaceId, sessionId, noticeId } = report;
     for (const browser of this.browsers)
       if (permitsDevice(browser.login, deviceId))
-        send(browser.socket, {
+        this.send(browser.socket, {
           type: "notice.cleared",
           deviceId,
           workspaceId,
@@ -355,7 +356,7 @@ export class Connections {
   private syncReports(browser: Browser) {
     if (browser.syncing) return;
     browser.syncing = true;
-    send(browser.socket, { type: "notices.reset" });
+    this.send(browser.socket, { type: "notices.reset" });
     const keys = [...this.reports.keys()];
     let cursor = 0;
     const next = () => {
@@ -383,7 +384,10 @@ export class Connections {
     const browser: Browser = { socket, login, targets: [] };
     this.browsers.add(browser);
     heartbeat(socket);
-    send(socket, { type: "devices.changed", devices: this.devices(login) } satisfies BrowserEvent);
+    this.send(socket, {
+      type: "devices.changed",
+      devices: this.devices(login),
+    } satisfies BrowserEvent);
     this.syncReports(browser);
     socket.on("message", (data, binary) => {
       try {
@@ -427,7 +431,7 @@ export class Connections {
           connection.snapshot.workspaces.some((w) => w.id === target.workspaceId)
         )
           workspaceIds.add(target.workspaceId);
-    send(connection.socket, {
+    this.send(connection.socket, {
       type: "watch.set",
       workspaceIds: [...workspaceIds],
     } satisfies ServerControlMessage);
@@ -457,25 +461,43 @@ export class Connections {
       throw new AppError("limit_exceeded", "Request exceeds the size limit");
     return new Promise<Reply>((resolve) => {
       this.pending.set(requestId, { loginId: login.id, connection, resolve });
-      send(connection.socket, message);
+      this.send(connection.socket, message);
     });
   }
   cancel(deviceId: string, requestId: string, loginId: string) {
     const pending = this.pending.get(requestId);
     if (!pending || pending.loginId !== loginId || pending.connection.id !== deviceId) return false;
-    send(pending.connection.socket, {
+    this.send(pending.connection.socket, {
       type: "rpc.cancel",
       id: requestId,
     } satisfies ServerControlMessage);
     return true;
   }
-  closeLogin(loginId: string) {
-    this.onLoginClosed?.(loginId);
+  logout(loginId: string) {
+    this.store.logout(loginId);
+    this.closeLogin(loginId);
+  }
+  revokeCredential(id: string) {
+    const revoked = this.store.revokeCredential(id);
+    if (revoked) this.closeLogin(id);
+    return revoked;
+  }
+  private closeLogin(loginId: string) {
+    this.channels.cancelLogin(loginId, new AppError("unauthenticated", "Login session ended"));
     for (const browser of this.browsers)
       if (browser.login.id === loginId)
         browser.socket.close(controlCloseCodes.accessRevoked, "session_expired");
     for (const [id, pending] of this.pending)
       if (pending.loginId === loginId) this.cancel(pending.connection.id, id, loginId);
+  }
+  bind(code: string, name: string) {
+    const identity = this.store.bind(code, name);
+    this.broadcastDevices();
+    return identity;
+  }
+  renameDevice(deviceId: string, name: string) {
+    this.store.renameDevice(deviceId, name);
+    this.broadcastDevices();
   }
   deleteDevice(deviceId: string) {
     this.store.deleteDevice(deviceId);
@@ -494,6 +516,7 @@ export class Connections {
     } else this.broadcastDevices();
   }
   close() {
+    this.channels.close();
     clearInterval(this.expiry);
     for (const browser of this.browsers) browser.socket.terminate();
     for (const candidate of this.handshakes) candidate.socket.terminate();

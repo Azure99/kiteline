@@ -25,21 +25,20 @@ export function requireAgent(store: Store, request: IncomingMessage) {
 export function requireLogin(store: Store, request: IncomingMessage, entryOrigin: string) {
   // A project's proxy Authorization header must keep working with an owner Cookie.
   const login =
-    store.login(loginCookieToken(request, entryOrigin)) ??
-    store.login(
+    store.ownerLogin(loginCookieToken(request, entryOrigin)) ??
+    store.cliLogin(
       request.headers.authorization?.startsWith("Bearer ")
         ? request.headers.authorization.slice(7)
         : undefined,
-      "cli",
     );
   if (!login) throw new AppError("unauthenticated", "Please sign in");
   return login;
 }
 export function requireOwner(login: Login) {
-  if (login.deviceIds !== null) throw new AppError("forbidden", "Owner login required");
+  if (login.kind !== "owner") throw new AppError("forbidden", "Owner login required");
 }
 export function permitsDevice(login: Login, deviceId: string) {
-  return login.deviceIds === null || login.deviceIds.includes(deviceId);
+  return login.kind === "owner" || login.deviceIds.includes(deviceId);
 }
 export function requireDevice(login: Login, deviceId: string) {
   if (!permitsDevice(login, deviceId))

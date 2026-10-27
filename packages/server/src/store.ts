@@ -20,12 +20,9 @@ type DeviceRow = {
   lastSeenAt: string | null;
   snapshot: string | null;
 };
-export interface Login {
-  id: string;
-  expiresAt: string | null;
-  name: string | null;
-  deviceIds: string[] | null;
-}
+export type Login =
+  | { kind: "owner"; id: string; expiresAt: string | null }
+  | ({ kind: "cli" } & CliCredential);
 
 export function password(value: unknown): string {
   if (typeof value !== "string" || Buffer.byteLength(value) < 8 || Buffer.byteLength(value) > 72)
@@ -108,20 +105,32 @@ export class Store {
     const token = secret();
     const expiresAt = new Date(Date.now() + lifetime).toISOString();
     this.db.prepare("INSERT INTO sessions(id,expiresAt) VALUES(?,?)").run(digest(token), expiresAt);
-    return { token, id: digest(token), expiresAt, name: null, deviceIds: null };
+    return { kind: "owner" as const, token, id: digest(token), expiresAt };
   }
-  login(token: string | undefined, kind: "owner" | "cli" = "owner"): Login | undefined {
+  ownerLogin(token: string | undefined): Extract<Login, { kind: "owner" }> | undefined {
     if (!token) return undefined;
     const row = this.db
       .prepare(
-        `SELECT * FROM sessions WHERE id=? AND (expiresAt IS NULL OR expiresAt>?)
-        AND deviceIds IS ${kind === "cli" ? "NOT " : ""}NULL`,
+        `SELECT id,expiresAt FROM sessions WHERE id=? AND (expiresAt IS NULL OR expiresAt>?)
+        AND deviceIds IS NULL`,
       )
       .get(digest(token), new Date().toISOString()) as
-      | (Omit<Login, "deviceIds"> & { deviceIds: string | null })
+      | { id: string; expiresAt: string | null }
+      | undefined;
+    return row ? { kind: "owner", ...row } : undefined;
+  }
+  cliLogin(token: string | undefined): Extract<Login, { kind: "cli" }> | undefined {
+    if (!token) return undefined;
+    const row = this.db
+      .prepare(
+        `SELECT id,expiresAt,name,deviceIds FROM sessions WHERE id=? AND (expiresAt IS NULL OR expiresAt>?)
+        AND deviceIds IS NOT NULL`,
+      )
+      .get(digest(token), new Date().toISOString()) as
+      | (Omit<CliCredential, "deviceIds"> & { deviceIds: string })
       | undefined;
     return row
-      ? { ...row, deviceIds: row.deviceIds === null ? null : JSON.parse(row.deviceIds) }
+      ? { ...row, kind: "cli", deviceIds: JSON.parse(row.deviceIds) as string[] }
       : undefined;
   }
   createCredential(name: string, deviceIds: string[], expiresAt: string | null) {

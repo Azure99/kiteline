@@ -21,7 +21,7 @@ import type { Duplex } from "node:stream";
 import { heartbeat, sendFrame } from "@kiteline/shared/protocol/ws";
 import { httpStream } from "@kiteline/shared/protocol/http-stream";
 import type { Login } from "./store.js";
-import { send, type AgentConnection, type Connections } from "./connections.js";
+import type { AgentConnection, Connections } from "./connections.js";
 import { FileTransfer } from "./file-transfer.js";
 import { parseReplyError } from "./http.js";
 
@@ -44,17 +44,14 @@ interface Channel {
 }
 export class Channels {
   private entries = new Map<string, Channel>();
-  constructor(private connections: Connections) {
-    connections.onLoginClosed = (loginId) => {
-      for (const item of this.entries.values())
-        if (item.loginId === loginId)
-          this.cancel(item.id, new AppError("unauthenticated", "Login session ended"));
-    };
-    connections.onAgentClosed = (connection) => {
-      for (const item of this.entries.values())
-        if (item.connection === connection)
-          this.cancel(item.id, new AppError("offline", "Device connection lost"));
-    };
+  constructor(private connections: Connections) {}
+  cancelLogin(loginId: string, error: AppError) {
+    for (const item of this.entries.values())
+      if (item.loginId === loginId) this.cancel(item.id, error);
+  }
+  cancelConnection(connection: AgentConnection, error: AppError) {
+    for (const item of this.entries.values())
+      if (item.connection === connection) this.cancel(item.id, error);
   }
   create(
     deviceId: string,
@@ -150,7 +147,7 @@ export class Channels {
       };
       this.entries.set(id, item);
     });
-    send(connection.socket, message);
+    this.connections.send(connection.socket, message);
     return { id, ready, item: item! };
   }
   checkAgent(id: string, deviceId: string, connectionId: string) {
@@ -328,7 +325,7 @@ export class Channels {
     if (item.kind === "file.read")
       this.notifyFileFailure(id, item.loginId, item.connection.id, item.params, error);
     item.file?.stop(error);
-    send(item.connection.socket, {
+    this.connections.send(item.connection.socket, {
       type: "channel.cancel",
       channelId: id,
     } satisfies ServerControlMessage);

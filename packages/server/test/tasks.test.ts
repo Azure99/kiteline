@@ -171,7 +171,7 @@ test("real device CLI/RPC share tasks, snapshots persist only summaries, and rem
     await expect
       .poll(() => agent.schedules.listRuns("after-delete").items[0]?.state)
       .toBe("succeeded");
-    expect(f.app.connections.taskSummaries()).toEqual([]);
+    expect(f.app.connections.taskSummaries(f.login)).toEqual([]);
     expect(f.store.taskSummaries()).toEqual([]);
   } finally {
     events?.terminate();

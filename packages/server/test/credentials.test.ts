@@ -8,6 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, expect, test } from "vitest";
 import { WebSocket } from "ws";
 import {
+  appVersion,
   controlCloseCodes,
   type BrowserEvent,
   type CliCredential,
@@ -84,14 +85,12 @@ test("legacy owner sessions migrate and a credential with no expiry survives reo
   const dataDir = await mkdtemp("/var/tmp/kiteline-credentials-migration-");
   cleanups.push(() => rm(dataDir, { recursive: true, force: true }));
   const token = "legacy-owner-session";
+  const expiresAt = new Date(Date.now() + 60_000).toISOString();
   const database = new DatabaseSync(join(dataDir, "kiteline.sqlite"));
   database.exec("CREATE TABLE sessions (id TEXT PRIMARY KEY, expiresAt TEXT NOT NULL)");
   database
     .prepare("INSERT INTO sessions VALUES (?, ?)")
-    .run(
-      createHash("sha256").update(token).digest("hex"),
-      new Date(Date.now() + 60_000).toISOString(),
-    );
+    .run(createHash("sha256").update(token).digest("hex"), expiresAt);
   database.close();
   const config = {
     dataDir,
@@ -111,9 +110,9 @@ test("legacy owner sessions migrate and a credential with no expiry survives reo
   await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
   let origin = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
   const ownerHeaders = { cookie: `kiteline_session_http=${token}` };
-  expect((await fetch(origin + webPath("/api/session"), { headers: ownerHeaders })).status).toBe(
-    200,
-  );
+  expect(
+    await (await fetch(origin + webPath("/api/session"), { headers: ownerHeaders })).json(),
+  ).toEqual({ expiresAt });
   const device = store.bind(store.newBinding().code, "Persistent device");
   const created = await fetch(origin + webPath("/api/credentials"), {
     method: "POST",
@@ -122,15 +121,16 @@ test("legacy owner sessions migrate and a credential with no expiry survives reo
   });
   expect(created.status).toBe(200);
   const credential = (await created.json()) as { token: string; credential: CliCredential };
+  store.db.prepare("UPDATE sessions SET expiresAt=NULL WHERE deviceIds IS NULL").run();
   await app.close();
   store.close();
   store = new Store(dataDir);
   app = createKitelineServer(config, store);
   await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
   origin = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
-  expect((await fetch(origin + webPath("/api/session"), { headers: ownerHeaders })).status).toBe(
-    200,
-  );
+  expect(
+    await (await fetch(origin + webPath("/api/session"), { headers: ownerHeaders })).json(),
+  ).toEqual({ expiresAt: null });
   const session = await fetch(origin + webPath("/api/session"), {
     headers: bearer(credential.token),
   });
@@ -172,6 +172,14 @@ test("owner issues selected-device credentials; CLI scope and credential types h
   expect(await (await f.call("/api/session", "GET", undefined, auth)).json()).toEqual({
     kind: "cli",
     ...a.credential,
+  });
+  const stale = await fetch(f.origin + "/api/tasks?appVersion=old", { headers: auth });
+  expect(stale.status).toBe(426);
+  expect(await stale.json()).toMatchObject({
+    error: {
+      code: "version_mismatch",
+      details: { component: "cli", clientVersion: "old", serverVersion: appVersion },
+    },
   });
   const list = await (await f.call("/api/credentials")).json();
   expect(list).toEqual({ credentials: [b.credential, a.credential] });
@@ -402,6 +410,11 @@ test("revocation, absolute expiry and self logout close only the credential's ev
   const first = await f.events(bearer(a.token));
   const other = await f.events(bearer(b.token));
   const owner = await f.events(f.ownerHeaders);
+  expect(await (await f.call(`/api/credentials/${f.owner.id}`, "DELETE")).json()).toEqual({
+    revoked: false,
+  });
+  expect(await (await f.call("/api/session")).json()).toEqual({ expiresAt: f.owner.expiresAt });
+  expect(owner.socket.readyState).toBe(WebSocket.OPEN);
   const opening = f.call(
     `/api/devices/${peer.deviceId}/channels`,
     "POST",
@@ -456,6 +469,37 @@ test("revocation, absolute expiry and self logout close only the credential's ev
   expect((await f.call("/api/session", "GET", undefined, bearer(b.token))).status).toBe(401);
   expect(owner.socket.readyState).toBe(WebSocket.OPEN);
   expect((await f.call("/api/session")).status).toBe(200);
+});
+
+test("failed logout preserves authentication and device events until SQLite deletion succeeds", async () => {
+  const f = await fixture();
+  const owner = await f.events(f.ownerHeaders);
+  const binding = await (await f.call("/api/bindings", "POST")).json();
+  f.store.db.exec(`CREATE TRIGGER fail_logout BEFORE DELETE ON sessions
+    BEGIN SELECT RAISE(ABORT, 'fixture logout failure'); END`);
+  const failed = await f.call("/api/logout", "POST");
+  expect(failed.status).toBe(500);
+  expect(failed.headers.get("set-cookie")).toBeNull();
+  expect(await (await f.call("/api/session")).json()).toEqual({ expiresAt: f.owner.expiresAt });
+
+  const bound = await f.call("/api/agent/bind", "POST", { code: binding.code, name: "New device" });
+  expect(bound.status).toBe(200);
+  const identity = await bound.json();
+  expect(await (await f.call(`/api/bindings/${binding.bindingId}`)).json()).toMatchObject({
+    status: "consumed",
+    deviceId: identity.deviceId,
+  });
+  await expect
+    .poll(() => owner.received.filter((event) => event.type === "devices.changed").at(-1)?.devices)
+    .toMatchObject([{ id: identity.deviceId, name: "New device", status: "offline" }]);
+
+  f.store.db.exec("DROP TRIGGER fail_logout");
+  const closed = once(owner.socket, "close");
+  const logout = await f.call("/api/logout", "POST");
+  expect(logout.status).toBe(200);
+  expect(logout.headers.get("set-cookie")).toContain("Max-Age=0");
+  expect((await closed)[0]).toBe(controlCloseCodes.accessRevoked);
+  expect((await f.call("/api/session")).status).toBe(401);
 });
 
 test("revoking a credential while its RPC body is streaming prevents dispatch", async () => {

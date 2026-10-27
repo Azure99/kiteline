@@ -97,6 +97,8 @@ deploy/                             Compose、systemd、launchd、WinSW 示例
 
 server 不保存文件内容、diff、终端输出、定时任务的命令和输出。这些内容在 agent 与浏览器之间经过 server 转发，只停留在内存中的固定大小队列里（见[数据通道](protocol.md#数据通道)）。
 
+server 的 Connections 固定持有 Channels，直接决定登录、控制连接和停服时的资源失效顺序及原因。Channels 保有唯一的通道登记和预算，按登录或准确的控制连接实例取消资源；登录取消只转发 RPC 取消，原请求仍等待 Reply 或控制连接断开。
+
 agent 的 JSON 状态文件以原子替换写入，不调用 fsync；文件损坏时的处理见[目录与权限](agent-lifecycle.md#目录与权限)。
 
 ## 请求流程

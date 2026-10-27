@@ -246,7 +246,7 @@ export class HttpProxy {
         request.headers,
         entryOrigin,
         head !== undefined,
-        login.deviceIds !== null,
+        login.kind === "cli",
       ),
     });
     upstream.on("error", fail);

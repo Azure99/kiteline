@@ -299,6 +299,13 @@ test("real HTTP tunnel preserves raw paths, bodies, finite header rules and appl
   });
   expect(JSON.parse(raw.text).headers).not.toHaveProperty("x-hop");
   expect(JSON.parse(raw.text).headers).not.toHaveProperty("forwarded");
+  const cli = f.store.createCredential("Proxy access", [f.identity.deviceId], null);
+  const delegated = await f.call(f.prefix + "/", "GET", {
+    cookie: "",
+    authorization: `Bearer ${cli.token}`,
+  });
+  expect(delegated.status).toBe(200);
+  expect(JSON.parse(delegated.text).headers).not.toHaveProperty("authorization");
   const httpOrigin = `http://127.0.0.1:${f.port}`;
   const http = await f.call(
     f.prefix + "/http",
@@ -513,8 +520,7 @@ test("quiet SSE occupies the shared budget and logout closes only its original l
   expect((await f.call()).status).toBe(429);
   const closed = new Promise<void>((resolve) => response.once("close", resolve));
   response.on("error", () => {});
-  f.store.logout(f.login.id);
-  f.kiteline.connections.closeLogin(f.login.id);
+  expect((await f.call("/api/logout", "POST")).status).toBe(200);
   await closed;
   await expect.poll(() => open).toBe(1);
   expect(otherResponse.destroyed).toBe(false);

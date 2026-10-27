@@ -181,7 +181,7 @@ Web owner 在 `POST /api/credentials` 提交 `{name, deviceIds, expiresAt}`，�
 
 1. agent 带 Bearer 和 `appVersion` 连接 `/api/agent/control`，握手期限为 `interactionTimeout`。
 2. 连接打开后，agent 发送 `hello`。
-3. server 在 30 秒内没有收到 hello 时，以 1008 `hello_timeout` 关闭连接；hello 不合法时以 1008 `invalid_control_message` 关闭，同一设备已有的连接不受影响。hello 合法时，server 以 4001 `connection_replaced` 关闭同一设备的旧连接，保存快照和 `lastSeenAt`，发送 `welcome`，再发送 `watch.set`。从这时起设备在线，RPC 和数据通道都关联这个 `connectionId`。
+3. server 在 30 秒内没有收到 hello 时，以 1008 `hello_timeout` 关闭连接；hello 不合法时以 1008 `invalid_control_message` 关闭，同一设备已有的连接不受影响。hello 全部校验通过后，如同一设备已有连接，server 先将旧连接的 RPC 返回为 `unknown`/`offline`、取消旧通道并广播设备离线，再以 4001 `connection_replaced` 关闭旧连接。随后登记新连接、保存快照和 `lastSeenAt`，发送 `welcome`、广播设备在线，再发送 `watch.set`。RPC 和数据通道都关联新的 `connectionId`。
 4. agent 收到 welcome 后发送 `tasks.snapshot`。
 
 控制消息的类型和字段见 `packages/shared/src/protocol/index.ts` 的 `AgentControlMessage` 与 `ServerControlMessage`。

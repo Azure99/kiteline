@@ -27,7 +27,6 @@ import {
   loginCookie,
 } from "./http.js";
 import { Connections } from "./connections.js";
-import { Channels } from "./channels.js";
 import { HttpProxy, isProxyPath } from "./http-proxy.js";
 import {
   installationCommands,
@@ -37,7 +36,7 @@ import {
 
 export function createKitelineServer(config: ServerConfig, store: Store) {
   const connections = new Connections(store);
-  const channels = new Channels(connections);
+  const channels = connections.channels;
   const proxy = new HttpProxy(config, store, connections, channels);
   const bindingLimiter = new AttemptLimiter();
   const authenticationLimiter = new AttemptLimiter();
@@ -67,11 +66,10 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
     if (path === "/api/agent/bind" && method === "POST") {
       bindingLimiter.check(request.socket.remoteAddress ?? "unknown");
       const input = record(await body(request));
-      const result = store.bind(
+      const result = connections.bind(
         string(input.code, "binding code", 128),
         string(input.name, "device name", limits.nameLength),
       );
-      connections.broadcastDevices();
       return json(response, 200, result);
     }
     if (path.startsWith("/api/")) {
@@ -92,7 +90,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       if (path === "/api/session" && method === "GET")
         return json(response, 200, {
           expiresAt: login.expiresAt,
-          ...(login.deviceIds === null
+          ...(login.kind === "owner"
             ? {}
             : {
                 kind: "cli",
@@ -102,9 +100,8 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
               }),
         });
       if (path === "/api/logout" && method === "POST") {
-        store.logout(login.id);
-        connections.closeLogin(login.id);
-        if (login.deviceIds === null)
+        connections.logout(login.id);
+        if (login.kind === "owner")
           response.setHeader("set-cookie", loginCookie(entryOrigin, "", ""));
         return json(response, 200, {});
       }
@@ -114,7 +111,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
         requireOwner(login);
         return json(response, 200, upgradeCommand(entryOrigin));
       }
-      requireVersion(url.searchParams.get("appVersion"), login.deviceIds === null ? "web" : "cli");
+      requireVersion(url.searchParams.get("appVersion"), login.kind === "owner" ? "web" : "cli");
       if (path === "/api/credentials") {
         requireOwner(login);
         if (method === "GET") return json(response, 200, { credentials: store.credentials() });
@@ -151,15 +148,14 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       if (credential && method === "DELETE") {
         requireOwner(login);
         const id = decodePath(credential[1]!);
-        const revoked = store.revokeCredential(id);
-        if (revoked) connections.closeLogin(id);
+        const revoked = connections.revokeCredential(id);
         return json(response, 200, { revoked });
       }
       if (path === "/api/tasks" && method === "GET") {
         const deviceId = url.searchParams.get("deviceId") ?? undefined;
         if (deviceId) requireDevice(login, deviceId);
         return json(response, 200, {
-          devices: connections.taskSummaries(deviceId, login),
+          devices: connections.taskSummaries(login, deviceId),
         });
       }
       if (path === "/api/bindings" && method === "POST") {
@@ -219,8 +215,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
         if (!suffix && method === "PATCH") {
           requireOwner(login);
           const input = await loginBody(request, entryOrigin, login);
-          store.renameDevice(id, string(input.name, "device name", limits.nameLength));
-          connections.broadcastDevices();
+          connections.renameDevice(id, string(input.name, "device name", limits.nameLength));
           return json(response, 200, {});
         }
         if (!suffix && method === "DELETE") {
@@ -326,10 +321,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       function browserLogin() {
         requireOrigin(request, entryOrigin);
         const login = requireLogin(store, request, entryOrigin);
-        requireVersion(
-          url.searchParams.get("appVersion"),
-          login.deviceIds === null ? "web" : "cli",
-        );
+        requireVersion(url.searchParams.get("appVersion"), login.kind === "owner" ? "web" : "cli");
         return login;
       }
       const agentChannel = /^\/api\/agent\/channels\/([^/]+)$/.exec(url.pathname);
@@ -352,7 +344,7 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
         sockets.handleUpgrade(request, socket, head, (ws) => channels.acceptBrowser(id, ws));
       } else if (url.pathname === "/api/agent/control") {
         const device = requireAgent(store, request);
-        connections.checkAgentVersion(device.id, url.searchParams.get("appVersion"));
+        connections.observeAndRequireAgentVersion(device.id, url.searchParams.get("appVersion"));
         sockets.handleUpgrade(request, socket, head, (ws) =>
           connections.acceptAgent(device.id, ws),
         );
@@ -380,7 +372,6 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
     connections,
     channels,
     close: async () => {
-      channels.close();
       connections.close();
       sockets.close();
       httpSockets.close();
