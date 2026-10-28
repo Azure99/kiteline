@@ -3,7 +3,7 @@ import { Check, ChevronDown, Circle, Minus, Plus, Undo2 } from "lucide-react";
 import type { DiscardScope, GitEntry, GitStatus } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
 import { discardable, RowActions, stageable } from "./change-actions";
-import { inSide, type ChangeSelection, type ChangeSide } from "./selection";
+import { defaultIndexPaths, inSide, type ChangeSelection, type ChangeSide } from "./selection";
 import type { DiffTarget } from "./diff-view";
 import { GitFilePath } from "./view-header";
 import { useGitStatusLabel } from "./status-label";
@@ -85,11 +85,7 @@ export function ChangeSection({
               }
               onClick={() =>
                 onIndex(
-                  chosen.flatMap((entry) =>
-                    side === "staged" && entry.indexStatus === "R" && entry.oldPath
-                      ? [entry.path, entry.oldPath]
-                      : [entry.path],
-                  ),
+                  chosen.flatMap((entry) => defaultIndexPaths(entry, side)),
                   side === "staged" ? "unstage" : "stage",
                 )
               }

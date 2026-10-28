@@ -173,22 +173,15 @@ stage、unstage、review 和 discard 的路径最多 `listPageEntries × 2` 个�
 
 ### 识别
 
-每次 status 都从 gitDir 中的标记识别进行中的操作（`packages/agent/src/git/in-progress.ts`），不依赖浏览器的记录，所以在终端中开始的操作同样能被识别。按下表从上到下取第一个匹配：
+每次 status 都从 gitDir 中的原生状态识别进行中的操作，不依赖浏览器的记录，所以在终端中开始的操作同样能被识别。识别优先级和各操作的 token 文件由 [`readOperationState`](../../packages/agent/src/git/in-progress.ts) 定义。
 
-| 标记                                              | 操作                  | 计入 token 的文件                                     |
-| ------------------------------------------------- | --------------------- | ----------------------------------------------------- |
-| `rebase-merge/`                                   | rebase                | `rebase-merge/onto`、`REBASE_HEAD`                    |
-| `rebase-apply/` 和 `applying`                     | am                    | `rebase-apply/patch`                                  |
-| `rebase-apply/` 和 `rebasing`                     | rebase                | `rebase-apply/onto`、`rebase-apply/original-commit`   |
-| `CHERRY_PICK_HEAD`、`REVERT_HEAD` 或 `sequencer/` | cherry-pick 或 revert | 对应的 `*_HEAD`；只剩 sequencer 时为 `sequencer/todo` |
-| `MERGE_HEAD`                                      | merge                 | `MERGE_HEAD`                                          |
-
-- 只剩 `sequencer/` 时，`sequencer/todo` 的命令全部是 `pick` 才识别为 cherry-pick，全部是 `revert` 才识别为 revert。无法识别或读取失败时操作为 `unknown`，不返回 token，继续和中止都不可用，界面只给出原因和终端入口。
-- 操作 token 是 repoId、HEAD 身份、上表文件内容的摘要和操作类型的 SHA-256。编辑冲突文件和 stage 不改变 token。
+- 无法识别或读取失败时操作为 `unknown`，不返回 token，继续和中止都不可用，界面只给出原因和终端入口。
+- 操作 token 是 repoId、HEAD 身份、原生目标 marker 内容的摘要和操作类型的 SHA-256。编辑冲突文件和 stage 不改变 token。rebase 的 todo/done 影响继续许可，不作为目标身份；仅剩 sequencer 时，todo 本身标识待执行的操作。
 
 ### 继续与中止
 
 - 继续要求没有未解决的冲突。rebase-merge 还要求 `git-rebase-todo` 和 `done` 中除空行和注释外的命令都是 `pick` 或 `p`；出现其他命令（如 reword、edit、squash、fixup、exec、break、drop 或保留合并结构的步骤）时不能在网页中继续，需要在终端完成。注释前缀由 `git stripspace --comment-lines` 探测（输出不超过 4 KiB），探测失败时同样不能继续。todo 或 done 中单行超过 64 KiB 时操作识别为 `unknown`。apply 后端的 rebase 和 am 不检查 todo。
+- 仅当主要阻挡原因是未解决的冲突时，操作携带 `blocked: "conflicts"`，浏览器据此显示本地化提示。特殊 rebase 步骤、注释前缀探测失败和 unknown 使用自身 reason，不带该字段。
 - 中止对所有已识别的操作可用。
 - `git.continue` 和 `git.abort` 带确认时的 `expectedOperation`（类型和 token）。agent 在队列内重新识别并比较，不同时返回 `conflict`，不执行命令；一致时执行 `git <操作> --continue` 或 `git <操作> --abort`，并设置 `GIT_EDITOR=true` 以接受已有的提交说明，hooks 和签名照常生效。
 - 结果带执行后的 `headOid` 和 `operationAfter`。继续可能进入下一个冲突，一次成功不代表整个操作结束。

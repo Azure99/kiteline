@@ -1,10 +1,20 @@
-import type { GitEntry, GitStatus, HeadIdentity } from "@kiteline/shared/protocol";
+import {
+  indexRenameSource,
+  isStagedChange,
+  type GitEntry,
+  type GitStatus,
+  type HeadIdentity,
+} from "@kiteline/shared/protocol";
 
 export type ChangeSide = "staged" | "worktree" | "conflict";
 export interface ChangeSelection {
   side: ChangeSide;
   path: string;
   signature: string;
+}
+export function defaultIndexPaths(entry: GitEntry & { path: string }, side: ChangeSide) {
+  const oldPath = side === "staged" ? indexRenameSource(entry) : undefined;
+  return oldPath ? [entry.path, oldPath] : [entry.path];
 }
 export function withoutSelection(selected: ChangeSelection[], removed: ChangeSelection[]) {
   return selected.filter(
@@ -19,8 +29,9 @@ export function withoutSelection(selected: ChangeSelection[], removed: ChangeSel
 }
 export function inSide(entry: GitEntry, side: ChangeSide) {
   if (side === "conflict") return entry.conflict;
-  if (entry.conflict) return false;
-  return side === "staged" ? ![".", "?"].includes(entry.indexStatus) : entry.worktreeStatus !== ".";
+  return side === "staged"
+    ? isStagedChange(entry)
+    : !entry.conflict && entry.worktreeStatus !== ".";
 }
 export function selectionOf(entry: GitEntry & { path: string }, side: ChangeSide): ChangeSelection {
   const status = side === "staged" ? entry.indexStatus : entry.worktreeStatus;

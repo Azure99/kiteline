@@ -1,6 +1,12 @@
 import { expect, test } from "vitest";
 import type { GitEntry, GitStatus } from "@kiteline/shared/protocol";
-import { reconcileSelection, selectionOf, withoutSelection } from "../src/git/selection";
+import {
+  defaultIndexPaths,
+  inSide,
+  reconcileSelection,
+  selectionOf,
+  withoutSelection,
+} from "../src/git/selection";
 
 const entry: GitEntry = {
   path: "new",
@@ -93,4 +99,24 @@ test("successful consumption preserves unrelated invalidation notices", () => {
   const otherSide = selectionOf(entry, "staged");
   const notices = [completed, external, otherSide];
   expect(withoutSelection(notices, [completed])).toEqual([external, otherSide]);
+});
+
+test("default index paths include both rename ends only on the staged side", () => {
+  const renamed = { ...entry, path: "new" };
+  expect(defaultIndexPaths(renamed, "staged")).toEqual(["new", "old"]);
+  expect(defaultIndexPaths(renamed, "worktree")).toEqual(["new"]);
+  expect(defaultIndexPaths({ ...renamed, conflict: true }, "conflict")).toEqual(["new"]);
+  expect(defaultIndexPaths({ ...renamed, indexStatus: "C" }, "staged")).toEqual(["new"]);
+  expect(defaultIndexPaths({ ...renamed, oldPath: undefined }, "staged")).toEqual(["new"]);
+});
+
+test("intent-to-add stays in worktree and conflicts stay outside the ordinary change sections", () => {
+  const intent = { ...entry, indexStatus: ".", worktreeStatus: "A", oldPath: undefined };
+  expect(inSide(intent, "worktree")).toBe(true);
+  expect(inSide(intent, "staged")).toBe(false);
+  expect(inSide(intent, "conflict")).toBe(false);
+  const conflict = { ...entry, indexStatus: "U", worktreeStatus: "U", conflict: true };
+  expect(inSide(conflict, "conflict")).toBe(true);
+  expect(inSide(conflict, "staged")).toBe(false);
+  expect(inSide(conflict, "worktree")).toBe(false);
 });

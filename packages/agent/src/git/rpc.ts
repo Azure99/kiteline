@@ -15,7 +15,14 @@ import type { GitWriteQueue } from "./queue.js";
 import { status } from "./status.js";
 import { workingDiff } from "./diff.js";
 import { branches, commitDiff, commitFiles, commitMessage, history } from "./history.js";
-import { changeIndex, checkedGitPaths, discard, discardScope, reviewDiscard } from "./changes.js";
+import {
+  stagePaths,
+  unstagePaths,
+  checkedGitPaths,
+  discard,
+  discardScope,
+  reviewDiscard,
+} from "./changes.js";
 import { commit, createBranch, deleteBranch, switchBranch } from "./refs.js";
 import { expectedHead, remotes, syncRemote } from "./remotes.js";
 import { finishOperation } from "./in-progress.js";
@@ -107,10 +114,9 @@ export async function gitRpc(
               string(params.reviewToken),
               signal,
             )
-          : changeIndex(
+          : (method === "git.stage" ? stagePaths : unstagePaths)(
               repo,
               await checkedGitPaths(repo, params.paths, signal),
-              method === "git.stage" ? "stage" : "unstage",
               signal,
             ),
       ) satisfies Promise<RpcResult<typeof method>>;

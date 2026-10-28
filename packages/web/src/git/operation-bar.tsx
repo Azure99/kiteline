@@ -40,7 +40,7 @@ export function OperationBar({
         <p>{operationLabel}</p>
         {operation.reason && (
           <p className="mt-1 break-words text-muted-foreground">
-            {operation.reason === "Resolve and stage conflicting files first"
+            {operation.blocked === "conflicts"
               ? t(($) => $.git.resolveAndStageFirst)
               : operation.reason}
           </p>

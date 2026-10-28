@@ -11,6 +11,7 @@ export const defaultTerminalHistoryLines = 5_000;
 export { rpcMutates, gitWriteMethods } from "./rpc.js";
 export * from "./tasks.js";
 export * from "./terminal-observation.js";
+export * from "./git-status.js";
 export type {
   RpcMethods,
   RpcMethod,
@@ -199,6 +200,7 @@ export interface GitOperation {
   canContinue: boolean;
   canAbort: boolean;
   reason?: string;
+  blocked?: "conflicts";
 }
 export interface GitRemotes {
   remotes: { name: string; fetchUrls: string[]; pushUrls: string[] }[];

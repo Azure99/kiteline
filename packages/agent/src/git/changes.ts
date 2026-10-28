@@ -5,6 +5,8 @@ import { open, opendir, readlink, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AppError,
+  indexRenameSource,
+  isUntracked,
   type DiscardScope,
   type GitEntry,
   type GitReview,
@@ -131,7 +133,7 @@ async function selectedStatus(
   repo: Repo,
   paths: string[],
   signal: AbortSignal,
-  aliases?: "index" | "all",
+  { renameOrigins }: { renameOrigins: "none" | "index" | "all" },
 ) {
   const wanted = new Set(paths);
   const found = new Map<string, GitEntry>();
@@ -140,16 +142,17 @@ async function selectedStatus(
     if (entry.path === undefined) return;
     if (wanted.has(entry.path)) found.set(entry.path, entry);
     if (
-      aliases &&
+      renameOrigins !== "none" &&
       entry.oldPath &&
-      (entry.indexStatus === "R" || (aliases === "all" && entry.worktreeStatus === "R")) &&
+      (indexRenameSource(entry) || (renameOrigins === "all" && entry.worktreeStatus === "R")) &&
       wanted.has(entry.oldPath)
     )
       renamed.set(entry.oldPath, entry);
   });
-  for (const [path, entry] of renamed)
-    if (!found.has(path) || (aliases === "index" && found.get(path)?.indexStatus === "?"))
-      found.set(path, entry);
+  for (const [path, entry] of renamed) {
+    const current = found.get(path);
+    if (!current || (renameOrigins === "index" && isUntracked(current))) found.set(path, entry);
+  }
   return found;
 }
 async function checkIndex(repo: Repo, add: string[], remove: string[], signal: AbortSignal) {
@@ -178,7 +181,7 @@ async function checkIndex(repo: Repo, add: string[], remove: string[], signal: A
     "Stage the deletion of the related old item or unstage the related new item before operating on this file",
   );
 }
-async function diskTarget(repo: Repo, path: string, blocked?: Blockers) {
+async function diskTarget(repo: Repo, path: string) {
   const parts = path.split("/");
   for (let i = 0; i < parts.length; i++) {
     const current = parts.slice(0, i + 1).join("/");
@@ -189,33 +192,11 @@ async function diskTarget(repo: Repo, path: string, blocked?: Blockers) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
       throw error;
     }
-    if (i < parts.length - 1) {
-      if (info.isDirectory()) continue;
-      blocked?.add(current);
-      return;
-    }
-    if (blocked && info.isDirectory()) {
-      blocked.add(path);
-      const directory = await opendir(join(repo.rootPath, path), {
-        encoding: "buffer" as BufferEncoding,
-      });
-      try {
-        for await (const entry of directory) {
-          blocked.add(
-            Buffer.concat([
-              Buffer.from(path + "/"),
-              Buffer.isBuffer(entry.name) ? entry.name : Buffer.from(entry.name),
-            ]),
-          );
-          if (blocked.truncated) break;
-        }
-      } finally {
-        await directory.close().catch(() => {});
-      }
-    } else if (blocked && !info.isFile() && !info.isSymbolicLink()) blocked.add(path);
-    return info;
+    if (i < parts.length - 1 && info.isDirectory()) continue;
+    return { path: current, info };
   }
 }
+
 async function forceRemove(repo: Repo, paths: string[], signal: AbortSignal) {
   if (paths.length)
     await gitWrite(repo.rootPath, ["update-index", "--force-remove", "-z", "--stdin"], signal, {
@@ -231,38 +212,21 @@ async function steps(run: (done: (paths: string[]) => void) => Promise<void>) {
   }
   return { changedPaths: [...changed] };
 }
-export async function changeIndex(
-  repo: Repo,
-  paths: string[],
-  kind: "stage" | "unstage",
-  signal: AbortSignal,
-) {
-  const entries = await selectedStatus(
-    repo,
-    paths,
-    signal,
-    kind === "unstage" ? "index" : undefined,
-  );
-  const remove: string[] = [],
-    add: string[] = [];
-  const head = kind === "unstage" ? await leaves(repo, paths, "HEAD", signal) : undefined;
+export async function stagePaths(repo: Repo, paths: string[], signal: AbortSignal) {
+  const entries = await selectedStatus(repo, paths, signal, { renameOrigins: "none" });
+  const remove: string[] = [];
+  const add: string[] = [];
   for (const path of paths) {
     const entry = entries.get(path);
-    if (
-      !entry ||
-      (kind === "stage" ? entry.worktreeStatus === "." : [".", "?"].includes(entry.indexStatus))
-    )
+    if (!entry || entry.worktreeStatus === ".")
       throw new AppError("conflict", `${path} has changed state; refresh`);
-    if (kind === "unstage") {
-      (leaf(head!.get(path)) ? add : remove).push(path);
-      continue;
-    }
     if (entry.conflict && Object.values(entry.types).includes("gitlink"))
       throw new AppError(
         "unsupported",
         "Resolve submodule conflicts in the submodule repository or terminal",
       );
-    const info = await diskTarget(repo, path);
+    const target = await diskTarget(repo, path);
+    const info = target?.path === path ? target.info : undefined;
     if (!info || (info.isDirectory() && entry.worktreeStatus === "D")) remove.push(path);
     else if (entry.submodule) {
       if (!entry.submodule.commitChanged || !info.isDirectory())
@@ -283,12 +247,39 @@ export async function changeIndex(
     await forceRemove(repo, remove, signal);
     done(remove);
     if (add.length) {
-      const pathspecs = kind === "stage" ? leafPathspecs(add) : add.map(literalPathspec);
+      await gitWrite(repo.rootPath, ["add", "-A", "--", ...leafPathspecs(add)], signal);
+      done(add);
+    }
+  });
+}
+export async function unstagePaths(repo: Repo, paths: string[], signal: AbortSignal) {
+  const entries = await selectedStatus(repo, paths, signal, { renameOrigins: "index" });
+  const head = await leaves(repo, paths, "HEAD", signal);
+  const remove: string[] = [];
+  const add: string[] = [];
+  for (const path of paths) {
+    const entry = entries.get(path);
+    // Keep unmerged entries eligible so HEAD can replace the index without changing the worktree.
+    if (!entry || [".", "?"].includes(entry.indexStatus))
+      throw new AppError("conflict", `${path} has changed state; refresh`);
+    if (leaf(head.get(path))) add.push(path);
+    else remove.push(path);
+  }
+  await checkIndex(repo, add, remove, signal);
+  return steps(async (done) => {
+    await forceRemove(repo, remove, signal);
+    done(remove);
+    if (add.length) {
       await gitWrite(
         repo.rootPath,
-        kind === "stage"
-          ? ["add", "-A", "--", ...pathspecs]
-          : ["restore", "--no-recurse-submodules", "--source=HEAD", "--staged", "--", ...pathspecs],
+        [
+          "restore",
+          "--no-recurse-submodules",
+          "--source=HEAD",
+          "--staged",
+          "--",
+          ...add.map(literalPathspec),
+        ],
         signal,
       );
       done(add);
@@ -301,19 +292,84 @@ interface DiscardPlan {
   remove: string[];
   unlink: string[];
 }
-async function discardPlan(
+interface DiscardItem {
+  path: string;
+  source: Leaf | undefined;
+  untracked: boolean;
+  disk:
+    | {
+        mode: string;
+        contentDigest: Buffer;
+      }
+    | undefined;
+}
+
+async function readDiscardDisk(
+  repo: Repo,
+  path: string,
+  blocked: Blockers,
+  signal: AbortSignal,
+): Promise<DiscardItem["disk"]> {
+  const target = await diskTarget(repo, path);
+  if (!target) return;
+  if (target.path !== path) {
+    blocked.add(target.path);
+    return;
+  }
+  const { info } = target;
+  if (info.isDirectory()) {
+    blocked.add(path);
+    const directory = await opendir(join(repo.rootPath, path), {
+      encoding: "buffer" as BufferEncoding,
+    });
+    try {
+      for await (const entry of directory) {
+        blocked.add(
+          Buffer.concat([
+            Buffer.from(path + "/"),
+            Buffer.isBuffer(entry.name) ? entry.name : Buffer.from(entry.name),
+          ]),
+        );
+        if (blocked.truncated) break;
+      }
+    } finally {
+      await directory.close().catch(() => {});
+    }
+    return;
+  }
+  const mode = String(info.mode);
+  if (info.isFile()) {
+    const handle = await open(join(repo.rootPath, path), constants.O_RDONLY | constants.O_NOFOLLOW);
+    const content = createHash("sha256");
+    try {
+      for await (const data of handle.createReadStream()) {
+        signal.throwIfAborted();
+        content.update(data);
+      }
+    } finally {
+      await handle.close();
+    }
+    return { mode, contentDigest: content.digest() };
+  }
+  if (info.isSymbolicLink())
+    return {
+      mode,
+      contentDigest: createHash("sha256")
+        .update(await readlink(join(repo.rootPath, path), { encoding: "buffer" }))
+        .digest(),
+    };
+  blocked.add(path);
+}
+
+async function readDiscardItems(
   repo: Repo,
   requested: string[],
   scope: DiscardScope,
   signal: AbortSignal,
-): Promise<DiscardPlan> {
-  const observation = await observeIndex(repo, signal);
-  const selected = await selectedStatus(
-    repo,
-    requested,
-    signal,
-    scope === "all" ? "all" : undefined,
-  );
+) {
+  const selected = await selectedStatus(repo, requested, signal, {
+    renameOrigins: scope === "all" ? "all" : "none",
+  });
   const paths = new Set(requested);
   const renamedOrigins = new Set<string>();
   for (const path of requested) {
@@ -323,7 +379,7 @@ async function discardPlan(
     if (
       scope === "all" &&
       entry.oldPath &&
-      (entry.indexStatus === "R" || entry.worktreeStatus === "R")
+      (indexRenameSource(entry) || entry.worktreeStatus === "R")
     ) {
       paths.add(entry.oldPath);
       renamedOrigins.add(entry.oldPath);
@@ -335,17 +391,11 @@ async function discardPlan(
   const index = await leaves(repo, ordered, "index", signal);
   const source = scope === "all" ? await leaves(repo, ordered, "HEAD", signal) : index;
   const blocked = new Blockers();
-  const restore: string[] = [],
-    remove: string[] = [],
-    deleted: string[] = [];
-  const hash = createHash("sha256").update(
-    JSON.stringify([repo.id, scope, ordered, observation.token]),
-  );
-  const summary: GitReview["summary"] = [];
+  const items: DiscardItem[] = [];
   for (const path of ordered) {
     signal.throwIfAborted();
     const entry = selected.get(path);
-    const untracked = entry?.indexStatus === "?" && !renamedOrigins.has(path);
+    const untracked = !!entry && isUntracked(entry) && !renamedOrigins.has(path);
     const from = untracked ? undefined : source.get(path);
     if (
       from?.mode === "160000" ||
@@ -361,41 +411,49 @@ async function discardPlan(
         "unsupported",
         "Conflicting item has no single index content; edit the file or explicitly discard all changes",
       );
-    const info = await diskTarget(repo, path, blocked);
-    hash.update(JSON.stringify([path, from ?? null, info ? String(info.mode) : null]));
-    if (info?.isFile()) {
-      const handle = await open(
-        join(repo.rootPath, path),
-        constants.O_RDONLY | constants.O_NOFOLLOW,
-      );
-      const content = createHash("sha256");
-      try {
-        for await (const data of handle.createReadStream()) {
-          signal.throwIfAborted();
-          content.update(data);
-        }
-      } finally {
-        await handle.close();
-      }
-      hash.update(content.digest());
-    } else if (info?.isSymbolicLink())
-      hash.update(
-        createHash("sha256")
-          .update(await readlink(join(repo.rootPath, path), { encoding: "buffer" }))
-          .digest(),
-      );
-    if (leaf(from)) restore.push(path);
-    else {
-      if (scope === "all" && !untracked) remove.push(path);
-      if (info?.isFile() || info?.isSymbolicLink()) deleted.push(path);
-    }
-    summary.push({ path, action: leaf(from) ? "restore" : "delete" });
+    items.push({
+      path,
+      source: from,
+      untracked,
+      disk: await readDiscardDisk(repo, path, blocked, signal),
+    });
   }
   blocked.check("Move or delete blocking items in Files first, then review the discard again");
+  return items;
+}
+
+async function discardPlan(
+  repo: Repo,
+  requested: string[],
+  scope: DiscardScope,
+  signal: AbortSignal,
+): Promise<DiscardPlan> {
+  const observation = await observeIndex(repo, signal);
+  const items = await readDiscardItems(repo, requested, scope, signal);
+  const paths = items.map((item) => item.path);
+  const hash = createHash("sha256").update(
+    JSON.stringify([repo.id, scope, paths, observation.token]),
+  );
+  const summary: GitReview["summary"] = [];
+  const restore: string[] = [],
+    remove: string[] = [],
+    deleted: string[] = [];
+  for (const { path, source, untracked, disk } of items) {
+    hash.update(JSON.stringify([path, source ?? null, disk?.mode ?? null]));
+    if (disk) hash.update(disk.contentDigest);
+    if (leaf(source)) {
+      restore.push(path);
+      summary.push({ path, action: "restore" });
+    } else {
+      if (scope === "all" && !untracked) remove.push(path);
+      if (disk) deleted.push(path);
+      summary.push({ path, action: "delete" });
+    }
+  }
   if (scope === "all") await checkIndex(repo, restore, remove, signal);
   if ((await observeIndex(repo, signal)).token !== observation.token)
     throw new AppError("conflict", "HEAD/index changed during review; try again");
-  const review = { paths: ordered, summary, reviewToken: hash.digest("hex") };
+  const review = { paths, summary, reviewToken: hash.digest("hex") };
   if (Buffer.byteLength(JSON.stringify(review)) > agentLimits.resultBytes)
     throw new AppError("limit_exceeded", "Too many paths to confirm; select fewer items");
   return { review, restore, remove, unlink: deleted };

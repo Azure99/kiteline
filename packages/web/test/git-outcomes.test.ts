@@ -147,14 +147,29 @@ test.each([
 );
 
 test.each([
-  ["en", "Resolve conflicts and stage the affected files first.", "Continue", "Merge"],
-  ["zh-CN", "请先解决冲突并暂存相关文件。", "继续", "合并"],
+  ["en", "Resolve conflicts and stage the affected files first.", "Continue", "Abort", "Merge"],
+  ["zh-CN", "请先解决冲突并暂存相关文件。", "继续", "中止", "合并"],
 ] as const)(
-  "operation reasons translate only the known conflict sentence in %s",
-  async (language, translated, continueLabel, operationLabel) => {
+  "operation conflict hints use the machine field and preserve permissions in %s",
+  async (language, translated, continueLabel, abortLabel, operationLabel) => {
     await setLanguagePreference(language);
-    const reasons: { kind: GitOperation["kind"]; reason: string; displayed: string }[] = [
-      { kind: "merge", reason: "Resolve and stage conflicting files first", displayed: translated },
+    const reasons: {
+      kind: GitOperation["kind"];
+      blocked?: GitOperation["blocked"];
+      reason: string;
+      displayed: string;
+    }[] = [
+      {
+        kind: "merge",
+        blocked: "conflicts",
+        reason: "Unmerged files need attention",
+        displayed: translated,
+      },
+      {
+        kind: "merge",
+        reason: "Resolve and stage conflicting files first",
+        displayed: "Resolve and stage conflicting files first",
+      },
       {
         kind: "rebase",
         reason: "This rebase contains special steps; continue in the terminal",
@@ -172,15 +187,16 @@ test.each([
         displayed: "Permission denied reading rebase state",
       },
     ];
-    for (const { kind, reason, displayed } of reasons) {
+    for (const { kind, blocked, reason, displayed } of reasons) {
       const markup = render(
         createElement(OperationBar, {
           operation: {
             kind,
             token: kind === "unknown" ? undefined : "operation",
             canContinue: false,
-            canAbort: false,
+            canAbort: kind !== "unknown",
             reason,
+            blocked,
           },
           target,
           actions: new GitActions(),
@@ -190,9 +206,12 @@ test.each([
       );
       expect(markup).toContain(displayed);
       if (reason !== displayed) expect(markup).not.toContain(reason);
-      expect(markup).toMatch(
-        new RegExp(`<button[^>]*disabled[^>]*>[\\s\\S]*?${continueLabel}</button>`),
-      );
+      const buttons = markup.match(/<button\b[^>]*>[\s\S]*?<\/button>/g)!;
+      expect(buttons.find((button) => button.includes(continueLabel))).toMatch(/\sdisabled=/);
+      const abort = buttons.find((button) => button.includes(abortLabel));
+      expect(abort).toBeDefined();
+      if (kind === "unknown") expect(abort).toMatch(/\sdisabled=/);
+      else expect(abort).not.toMatch(/\sdisabled=/);
       if (kind === "merge") expect(markup).toContain(operationLabel);
     }
   },

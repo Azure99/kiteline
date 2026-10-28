@@ -8,11 +8,11 @@ import { AppError } from "@kiteline/shared/protocol";
 import { MetadataStore } from "../src/metadata.js";
 import { testConfig } from "./support/config.js";
 import { gitRepoFixture, isolateGitEnvironment, workspaceFixture } from "./support/git.js";
-import { gitRead } from "../src/git/process.js";
+import { gitRead, gitWrite } from "../src/git/process.js";
 import { observeIndex } from "../src/git/observe.js";
 import { status } from "../src/git/status.js";
 import { workingDiff } from "../src/git/diff.js";
-import { changeIndex } from "../src/git/changes.js";
+import { stagePaths, unstagePaths, reviewDiscard } from "../src/git/changes.js";
 import { branches, commitDiff, commitFiles, commitMessage, history } from "../src/git/history.js";
 
 const run = promisify(execFile);
@@ -124,8 +124,14 @@ test.each(["mod", "module[*]\n\\link", "[prefix]module", "-mod", "项目"])(
     await cli("clone", "--no-checkout", "--", ".", path);
     await run("git", ["checkout", two], { cwd: join(root, path) });
     const worktree = await workingDiff(repo, path, "worktree", signals());
-    await changeIndex(repo, [path], "stage", signals());
+    await stagePaths(repo, [path], signals());
     const staged = await workingDiff(repo, path, "staged", signals());
+    await unstagePaths(repo, [path], signals());
+    expect((await cli("rev-parse", `:${path}`)).stdout.trim()).toBe(one);
+    expect((await run("git", ["rev-parse", "HEAD"], { cwd: join(root, path) })).stdout.trim()).toBe(
+      two,
+    );
+    await stagePaths(repo, [path], signals());
     await cli("commit", "-m", "module pointer");
     const oid = (await cli("rev-parse", "HEAD")).stdout.trim();
     const historical = await commitDiff(repo, oid, undefined, path, signals());
@@ -294,6 +300,11 @@ test("status pages count the whole repo, reject stale pages, and use semantic in
   await cli("add", "-N", "empty");
   const intent = await observeIndex(repo, signals());
   expect(intent.hasStagedChanges).toBe(false);
+  const pending = await status(repo, 0, undefined, signals());
+  expect(pending.entries).toMatchObject([
+    { path: "empty", indexStatus: ".", worktreeStatus: "A", conflict: false },
+  ]);
+  expect(pending.stagedCount).toBe(0);
   await cli("add", "empty");
   expect((await observeIndex(repo, signals())).token).not.toBe(intent.token);
   expect((await observeIndex(repo, signals())).hasStagedChanges).toBe(true);
@@ -389,7 +400,7 @@ test("status trims the complete envelope and derives continuation after every tr
     await Promise.all(untrackedPaths.map((path) => writeFile(join(root, path), "new\n")));
     const complete = await status(repo, 0, undefined, signals());
     expect(complete.entries).toHaveLength(untrackedPaths.length + 1);
-    expect(complete.operation).toMatchObject({ kind: "merge", canContinue: false });
+    expect(complete.operation).toMatchObject({ kind: "merge", blocked: "conflicts" });
     expect(complete.truncated).toBe(false);
     const resultBytes = Buffer.byteLength(JSON.stringify(complete)) - 1;
     Object.assign(agentLimits, { resultBytes });
@@ -759,4 +770,32 @@ test("single-file diffs exclude descendants when a file becomes a directory", as
   expect(renamed.patch).toContain("-old item");
   expect(renamed.patch).toContain("+old item");
   await repos.close();
+});
+
+test("staging and discarding a real gitlink conflict remain unsupported", async () => {
+  const { root, cli, repo, repos } = await setup();
+  try {
+    await cli("commit", "--allow-empty", "-m", "one");
+    const one = (await cli("rev-parse", "HEAD")).stdout.trim();
+    await cli("commit", "--allow-empty", "-m", "two");
+    const two = (await cli("rev-parse", "HEAD")).stdout.trim();
+    await cli("commit", "--allow-empty", "-m", "three");
+    const three = (await cli("rev-parse", "HEAD")).stdout.trim();
+    await gitWrite(root, ["update-index", "--index-info"], signals(), {
+      input: Buffer.from(
+        `160000 ${one} 1\tmodule\n160000 ${two} 2\tmodule\n160000 ${three} 3\tmodule\n`,
+      ),
+    });
+    const before = (await cli("ls-files", "--unmerged")).stdout;
+    expect(before).toContain(`160000 ${three} 3\tmodule`);
+    await expect(stagePaths(repo, ["module"], signals())).rejects.toMatchObject({
+      code: "unsupported",
+    });
+    await expect(reviewDiscard(repo, ["module"], "all", signals())).rejects.toMatchObject({
+      code: "unsupported",
+    });
+    expect((await cli("ls-files", "--unmerged")).stdout).toBe(before);
+  } finally {
+    await repos.close();
+  }
 });

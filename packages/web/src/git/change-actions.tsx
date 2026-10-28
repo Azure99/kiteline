@@ -3,7 +3,13 @@ import { i18n } from "../i18n";
 import { useTranslation } from "react-i18next";
 import { useEffect, useState, type ReactElement } from "react";
 import { Check, FolderOpen, Minus, MoreHorizontal, Plus, Trash2, Undo2 } from "lucide-react";
-import type { DiscardScope, GitEntry, GitReview } from "@kiteline/shared/protocol";
+import {
+  indexRenameSource,
+  isUntracked,
+  type DiscardScope,
+  type GitEntry,
+  type GitReview,
+} from "@kiteline/shared/protocol";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "../components/ui/context-menu";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../components/ui/tooltip";
 import { Button } from "../components/ui/button";
@@ -20,7 +26,7 @@ import { rpc } from "../lib/api";
 import { cn } from "../lib/utils";
 import type { DraftStore } from "../files/drafts";
 import { hasUnsavedDraft } from "./drafts";
-import type { ChangeSide } from "./selection";
+import { defaultIndexPaths, type ChangeSide } from "./selection";
 import type { GitTarget } from "./actions";
 import { GitPathDetails } from "./feedback";
 
@@ -60,13 +66,7 @@ export function RowActions({
       staged ? $.git.unstageNamed : side === "conflict" ? $.git.resolveNamed : $.git.stageNamed,
     { path: entry.path },
   );
-  const index = () =>
-    onIndex(
-      staged && entry.indexStatus === "R" && entry.oldPath
-        ? [entry.path, entry.oldPath]
-        : [entry.path],
-      staged ? "unstage" : "stage",
-    );
+  const index = () => onIndex(defaultIndexPaths(entry, side), staged ? "unstage" : "stage");
   const details = (
     <>
       <p className="max-w-72 px-2 py-1 text-xs break-all text-muted-foreground">{entry.path}</p>
@@ -91,7 +91,7 @@ export function RowActions({
         <FolderOpen />
         {t(($) => $.git.openFiles)}
       </MenuItem>
-      {staged && entry.indexStatus === "R" && entry.oldPath && (
+      {staged && indexRenameSource(entry) && (
         <MenuItem disabled={disabled} onClick={() => onIndex([entry.path], "unstage")}>
           <Minus />
           {t(($) => $.git.unstageNewPath)}
@@ -107,7 +107,7 @@ export function RowActions({
           {t(($) => $.git.discardWorktree)}
         </MenuItem>
       )}
-      {entry.indexStatus !== "?" && (
+      {!isUntracked(entry) && (
         <MenuItem
           disabled={disabled || !discardable(entry)}
           onClick={() => onDiscard([entry.path], "all")}

@@ -4,6 +4,8 @@ import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AppError,
+  isStagedChange,
+  isUntracked,
   type GitEntry,
   type GitStatus,
   type GitType,
@@ -153,7 +155,7 @@ export async function status(
     signal,
     (entry) => {
       hasConflicts ||= entry.conflict;
-      if (entry.indexStatus !== "." && entry.indexStatus !== "?" && !entry.conflict) stagedCount++;
+      if (isStagedChange(entry)) stagedCount++;
       const size = Buffer.byteLength(JSON.stringify(entry)) + 1;
       if (size + statusEnvelopeReserveBytes > agentLimits.resultBytes)
         throw new AppError("limit_exceeded", "A Git change exceeds the size limit");
@@ -181,7 +183,7 @@ export async function status(
     },
   );
   for (const entry of entries)
-    if (entry.indexStatus === "?" && entry.path !== undefined) {
+    if (isUntracked(entry) && entry.path !== undefined) {
       const info = await lstat(join(repo.rootPath, entry.path));
       entry.types.worktree = info.isFile()
         ? "file"

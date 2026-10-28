@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { MetadataStore } from "../src/metadata.js";
 import { testConfig } from "./support/config.js";
 import { gitRepoFixture, isolateGitEnvironment, workspaceFixture } from "./support/git.js";
-import { changeIndex, reviewDiscard, discard } from "../src/git/changes.js";
+import { stagePaths, unstagePaths, reviewDiscard, discard } from "../src/git/changes.js";
 import { GitWriteQueue } from "../src/git/queue.js";
 import { gitRead, gitWrite } from "../src/git/process.js";
 import { commit, createBranch, deleteBranch, switchBranch } from "../src/git/refs.js";
@@ -61,8 +61,8 @@ async function setup() {
       await mkdir(join(root, path, ".."), { recursive: true });
       await writeFile(join(root, path), content);
     },
-    stage: (paths: string[]) => changeIndex(repo, paths, "stage", signal()),
-    unstage: (paths: string[]) => changeIndex(repo, paths, "unstage", signal()),
+    stage: (paths: string[]) => stagePaths(repo, paths, signal()),
+    unstage: (paths: string[]) => unstagePaths(repo, paths, signal()),
   };
 }
 test("stage and unstage exact names on unborn HEAD, keeping other staged data", async () => {
@@ -169,7 +169,7 @@ git diff --cached --name-only > hook-seen
           (entry) => entry.path === "selected.txt",
         ),
       ).toBe(true);
-      await changeIndex(selected, ["selected.txt"], "stage", signal());
+      await stagePaths(selected, ["selected.txt"], signal());
       await commit(selected, "selected", (await observeIndex(selected, signal())).token, signal());
       const actual = await exec("git", ["log", "-1", "--format=%an <%ae>: %s"], {
         cwd: selected.rootPath,
@@ -395,9 +395,14 @@ test("rename actions and discard token preserve independent old-path data until 
   const all = await reviewDiscard(repo, ["new"], "all", signal());
   expect(all.paths).toEqual(["new", "old"]);
   await write("old", "changed after review");
+  const beforeIndex = await cli("ls-files", "--stage", "-z");
+  const beforeNew = await readFile(join(root, "new"));
   await expect(discard(repo, all.paths, "all", all.reviewToken, signal())).rejects.toMatchObject({
     code: "conflict",
   });
+  expect(await cli("ls-files", "--stage", "-z")).toBe(beforeIndex);
+  expect(await readFile(join(root, "new"))).toEqual(beforeNew);
+  expect(await readFile(join(root, "old"), "utf8")).toBe("changed after review");
   const independent = await reviewDiscard(repo, ["old"], "all", signal());
   expect(independent.summary).toEqual([{ path: "old", action: "delete" }]);
   await discard(repo, independent.paths, "all", independent.reviewToken, signal());
@@ -969,4 +974,103 @@ exit 1
       head: { symbolicRef: "refs/heads/switched-with-hook-error" },
     },
   });
+});
+
+test("unstaging only the new rename path preserves the old deletion and both disk contents", async () => {
+  const { root, cli, write, unstage } = await setup();
+  await write("old", "one\ntwo\nthree\n");
+  await cli("add", "old");
+  await cli("commit", "-m", "base");
+  await cli("mv", "old", "new");
+  await write("old", "independent old content\n");
+  await unstage(["new"]);
+  expect(await cli("diff", "--cached", "--name-status")).toBe("D\told\n");
+  expect(await cli("ls-files", "--", "old", "new")).toBe("");
+  expect(await readFile(join(root, "new"), "utf8")).toBe("one\ntwo\nthree\n");
+  expect(await readFile(join(root, "old"), "utf8")).toBe("independent old content\n");
+});
+
+test("stage resolves an ordinary conflict from disk while unstage restores HEAD without changing disk", async () => {
+  const { root, cli, write, stage, unstage } = await setup();
+  await write("file", "base\n");
+  await cli("add", "file");
+  await cli("commit", "-m", "base");
+  await cli("checkout", "-b", "topic");
+  await write("file", "topic\n");
+  await cli("commit", "-am", "topic");
+  await cli("checkout", "main");
+  await write("file", "main\n");
+  await cli("commit", "-am", "main");
+  await expect(cli("merge", "topic")).rejects.toMatchObject({ code: 1 });
+  await write("file", "resolved on disk\n");
+  await stage(["file"]);
+  expect(await cli("ls-files", "--unmerged")).toBe("");
+  expect(await cli("show", ":file")).toBe("resolved on disk\n");
+  await unstage(["file"]);
+  expect(await cli("show", ":file")).toBe("main\n");
+  expect(await readFile(join(root, "file"), "utf8")).toBe("resolved on disk\n");
+  await cli("merge", "--abort");
+  await cli("checkout", "--", "file");
+  await expect(cli("merge", "topic")).rejects.toMatchObject({ code: 1 });
+  const disk = await readFile(join(root, "file"), "utf8");
+  await unstage(["file"]);
+  expect(await cli("ls-files", "--unmerged")).toBe("");
+  expect(await cli("show", ":file")).toBe("main\n");
+  expect(await readFile(join(root, "file"), "utf8")).toBe(disk);
+});
+
+test("discard all restores a conflicted file to HEAD while worktree scope refuses it", async () => {
+  const { root, cli, repo, write, stage } = await setup();
+  await write("file", "base\n");
+  await write("other", "base\n");
+  await cli("add", ".");
+  await cli("commit", "-m", "base");
+  await cli("checkout", "-b", "topic");
+  await write("file", "topic\n");
+  await cli("commit", "-am", "topic");
+  await cli("checkout", "main");
+  await write("file", "main\n");
+  await cli("commit", "-am", "main");
+  await expect(cli("merge", "topic")).rejects.toMatchObject({ code: 1 });
+  await write("other", "unselected staged\n");
+  await stage(["other"]);
+  await write("other", "unselected disk\n");
+  const index = await cli("ls-files", "--stage", "-z");
+  const conflicted = await readFile(join(root, "file"));
+  await expect(reviewDiscard(repo, ["file"], "worktree", signal())).rejects.toMatchObject({
+    code: "unsupported",
+  });
+  expect(await cli("ls-files", "--stage", "-z")).toBe(index);
+  expect(await readFile(join(root, "file"))).toEqual(conflicted);
+  const review = await reviewDiscard(repo, ["file"], "all", signal());
+  expect(review.paths).toEqual(["file"]);
+  expect(review.summary).toEqual([{ path: "file", action: "restore" }]);
+  await discard(repo, review.paths, "all", review.reviewToken, signal());
+  expect(await cli("ls-files", "--unmerged")).toBe("");
+  expect(await cli("show", ":file")).toBe("main\n");
+  expect(await readFile(join(root, "file"), "utf8")).toBe("main\n");
+  expect(await cli("show", ":other")).toBe("unselected staged\n");
+  expect(await readFile(join(root, "other"), "utf8")).toBe("unselected disk\n");
+});
+
+test("stage reports only the confirmed removal when a required clean filter rejects add", async () => {
+  const { root, cli, write, stage } = await setup();
+  await write("old", "remove me\n");
+  await write("third", "keep staged\n");
+  await cli("add", ".");
+  await cli("commit", "-m", "base");
+  await write("third", "unrelated staged content\n");
+  await cli("add", "third");
+  await rm(join(root, "old"));
+  await write("new", "filter must reject\n");
+  await write(".git/info/attributes", "new filter=reject\n");
+  await cli("config", "filter.reject.clean", "false");
+  await cli("config", "filter.reject.required", "true");
+  await expect(stage(["old", "new"])).rejects.toMatchObject({
+    outcome: "partial",
+    result: { changedPaths: ["old"] },
+  });
+  expect(await cli("ls-files", "-z")).toBe("third\0");
+  expect(await cli("show", ":third")).toBe("unrelated staged content\n");
+  expect(await readFile(join(root, "new"), "utf8")).toBe("filter must reject\n");
 });

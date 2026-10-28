@@ -3,6 +3,8 @@ import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AppError,
+  indexRenameSource,
+  isUntracked,
   type DiffSummary,
   type GitDiff,
   type GitPath,
@@ -163,7 +165,7 @@ export async function workingDiff(
     throw new AppError("conflict", "Selected change no longer applies; refresh", {
       reason: "change_unavailable",
     });
-  if (selected.indexStatus === "?") {
+  if (isUntracked(selected)) {
     const info = await lstat(join(repo.rootPath, path));
     if (!info.isFile() && !info.isSymbolicLink())
       throw new AppError(
@@ -191,10 +193,8 @@ export async function workingDiff(
     );
     return boundedDiff(patch.text, summary, patch.truncated);
   }
-  const paths =
-    side === "staged" && selected.indexStatus === "R" && selected.oldPath
-      ? [selected.oldPath, path]
-      : [path];
+  const oldPath = side === "staged" ? indexRenameSource(selected) : undefined;
+  const paths = oldPath ? [oldPath, path] : [path];
   const pathspecs = paths.map(literalPathspec);
   const args = [
     "diff",

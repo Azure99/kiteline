@@ -62,7 +62,12 @@ test("merge token binds its native target, survives staging, and continues throu
   const { repo, root, cli, write } = await divergent();
   await expect(cli("merge", "topic")).rejects.toThrow();
   const conflict = await operation(repo);
-  expect(conflict).toMatchObject({ kind: "merge", canContinue: false, canAbort: true });
+  expect(conflict).toMatchObject({
+    kind: "merge",
+    canContinue: false,
+    canAbort: true,
+    blocked: "conflicts",
+  });
   const marker = await readFile(join(repo.gitDir, "MERGE_HEAD"));
   await writeFile(join(repo.gitDir, "MERGE_HEAD"), (await headIdentity(root, signal())).oid!);
   await expect(
@@ -76,6 +81,7 @@ test("merge token binds its native target, survives staging, and continues throu
   const ready = await operation(repo);
   expect(ready.token).toBe(current.token);
   expect(ready.canContinue).toBe(true);
+  expect(ready.blocked).toBeUndefined();
   const result = await finishOperation(repo, "merge", ready.token!, "continue", signal());
   expect(result.operationAfter).toBeUndefined();
   expect(result.headOid).toBe((await headIdentity(root, signal())).oid);
@@ -139,12 +145,13 @@ test.each(["--merge", "--apply"])(
       cli("rebase", ...(backend === "--apply" ? ["--whitespace=nowarn"] : [backend]), "main"),
     ).rejects.toThrow();
     const first = await operation(repo);
-    expect(first.kind).toBe("rebase");
+    expect(first).toMatchObject({ kind: "rebase", blocked: "conflicts" });
     await write("f", "resolved one\n");
     await cli("add", "f");
     const ready = await operation(repo);
     expect(ready.token).toBe(first.token);
     expect(ready.canContinue).toBe(true);
+    expect(ready.blocked).toBeUndefined();
     await expect(
       finishOperation(repo, "rebase", ready.token!, "continue", signal()),
     ).rejects.toMatchObject({ outcome: "partial", result: { operationAfter: { kind: "rebase" } } });
@@ -170,12 +177,32 @@ test("special rebase steps disable only continue and custom comments are honored
     todo,
     " \t; comment\r\n" + original.replace(/^pick /gm, "\tp ").replace(/\n/g, "\r\n"),
   );
+  const ordinary = await operation(repo);
+  expect(ordinary.blocked).toBe("conflicts");
+  const customTodo = await readFile(todo);
+  await writeFile(todo, original + "exec true\n");
+  const conflicted = await status(repo, 0, undefined, signal());
+  expect(conflicted.hasConflicts).toBe(true);
+  expect(conflicted.operation).toMatchObject({
+    kind: "rebase",
+    token: ordinary.token,
+    canContinue: false,
+    canAbort: true,
+    reason: "This rebase contains special steps; continue in the terminal",
+  });
+  expect(conflicted.operation?.blocked).toBeUndefined();
+  await writeFile(todo, customTodo);
   await write("f", "resolved\n");
   await cli("add", "f");
-  expect((await operation(repo)).canContinue).toBe(true);
+  const ready = await operation(repo);
+  expect(ready.canContinue).toBe(true);
+  expect(ready.blocked).toBeUndefined();
+  expect(ready.token).toBe(ordinary.token);
   await writeFile(todo, original + "exec true\n");
   const special = await operation(repo);
   expect(special).toMatchObject({ kind: "rebase", canContinue: false, canAbort: true });
+  expect(special.blocked).toBeUndefined();
+  expect(special.token).toBe(ordinary.token);
   await expect(
     finishOperation(repo, "rebase", special.token!, "continue", signal()),
   ).rejects.toMatchObject({ code: "conflict" });
@@ -191,7 +218,10 @@ test("oversized rebase metadata is reported without enabling an unverified opera
     join(repo.gitDir, "rebase-merge/git-rebase-todo"),
     `#${"x".repeat(128 * 1024)}\n`,
   );
-  expect(await operation(repo)).toMatchObject({
+  const unknown = await operation(repo);
+  expect(unknown.token).toBeUndefined();
+  expect(unknown.blocked).toBeUndefined();
+  expect(unknown).toMatchObject({
     kind: "unknown",
     canContinue: false,
     canAbort: false,
