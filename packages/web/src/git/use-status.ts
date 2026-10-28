@@ -4,11 +4,16 @@ import { ApiError, rpc } from "../lib/api";
 import { reconcileSelection, withoutSelection, type ChangeSelection } from "./selection";
 import { useWorkspaceRefresh } from "../lib/use-workspace-refresh";
 
+type StatusRead =
+  | { mode: "refresh" | "background" }
+  | { mode: "page"; offset: number; expectedListToken?: string; visited: number[] };
+
 export function useGitStatus(
   deviceId: string,
   workspaceId: string,
   repoId: string,
   active: boolean,
+  completionRevision: number,
 ) {
   const [value, setValue] = useState<GitStatus>();
   const [busy, setBusy] = useState(false);
@@ -24,24 +29,21 @@ export function useGitStatus(
   const enabled = useRef(active);
   enabled.current = active;
   const load = useCallback(
-    async (
-      offset = current.current?.offset ?? 0,
-      expectedListToken?: string,
-      visited = history.current,
-      paging = false,
-      background = false,
-    ): Promise<void> => {
-      if (background && request.current) {
+    async (read: StatusRead): Promise<void> => {
+      if (read.mode === "background" && request.current) {
         queued.current = true;
         return;
       }
+      let offset = read.mode === "page" ? read.offset : (current.current?.offset ?? 0);
+      const expectedListToken = read.mode === "page" ? read.expectedListToken : undefined;
+      let visited = read.mode === "page" ? read.visited : history.current;
       request.current?.abort();
       const controller = new AbortController();
       request.current = controller;
       setBusy(true);
       setError(undefined);
-      if (!background) setNotice([]);
-      if (paging) {
+      if (read.mode !== "background") setNotice([]);
+      if (read.mode === "page") {
         selection.current = [];
         setSelected([]);
       }
@@ -92,7 +94,7 @@ export function useGitStatus(
           setBusy(false);
           if (queued.current && enabled.current && !document.hidden) {
             queued.current = false;
-            void load(undefined, undefined, undefined, false, true);
+            void load({ mode: "background" });
           }
         }
       }
@@ -105,9 +107,10 @@ export function useGitStatus(
       request.current?.abort();
     };
   }, [active, load]);
-  useWorkspaceRefresh(deviceId, workspaceId, active, () =>
-    load(undefined, undefined, undefined, false, true),
-  );
+  useWorkspaceRefresh(deviceId, workspaceId, active, () => load({ mode: "background" }));
+  useEffect(() => {
+    if (active && completionRevision) void load({ mode: "background" });
+  }, [completionRevision, active, load]);
   return {
     value,
     busy,
@@ -124,12 +127,22 @@ export function useGitStatus(
     previous: () => {
       const stack = history.current.slice();
       const offset = stack.pop() ?? 0;
-      void load(offset, current.current?.listToken, stack, true);
+      void load({
+        mode: "page",
+        offset,
+        expectedListToken: current.current?.listToken,
+        visited: stack,
+      });
     },
     next: () => {
       const value = current.current;
       if (value?.nextOffset !== undefined)
-        void load(value.nextOffset, value.listToken, [...history.current, value.offset], true);
+        void load({
+          mode: "page",
+          offset: value.nextOffset,
+          expectedListToken: value.listToken,
+          visited: [...history.current, value.offset],
+        });
     },
   };
 }

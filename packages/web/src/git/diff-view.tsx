@@ -85,7 +85,7 @@ export function DiffView({
   return (
     <section
       className="flex min-h-0 min-w-0 flex-1 flex-col"
-      aria-label="Git diff"
+      aria-label={t(($) => $.git.diffRegion)}
       aria-busy={busy}
     >
       {historyFeedback && busy && value && (

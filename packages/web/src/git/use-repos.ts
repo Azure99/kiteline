@@ -4,8 +4,13 @@ import { ApiError } from "../lib/api";
 import { cursorRpc, releaseCursor } from "../lib/cursors";
 import { useWorkspaceRefresh } from "../lib/use-workspace-refresh";
 
-export function useRepos(deviceId: string, workspaceId: string, enabled: boolean) {
-  const [repos, setRepos] = useState<Repo[]>([]);
+interface DiscoveredRepo extends Repo {
+  discovered: boolean;
+}
+
+export function useRepos(deviceId: string, workspaceId: string, online: boolean, active: boolean) {
+  const enabled = online && active;
+  const [repos, setRepos] = useState<DiscoveredRepo[]>([]);
   const [scan, setScan] = useState<RepoDiscovery>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
@@ -48,7 +53,8 @@ export function useRepos(deviceId: string, workspaceId: string, enabled: boolean
         for (const repo of found.repos) scanned.current.set(repo.id, repo);
         setRepos((old) => {
           const entries = new Map((found.complete ? [] : old).map((item) => [item.id, item]));
-          for (const repo of scanned.current.values()) entries.set(repo.id, repo);
+          for (const repo of scanned.current.values())
+            entries.set(repo.id, { ...repo, discovered: true });
           return [...entries.values()].sort((a, b) => a.path.localeCompare(b.path));
         });
         setScan(found);
@@ -77,6 +83,16 @@ export function useRepos(deviceId: string, workspaceId: string, enabled: boolean
       scanCursor.current = undefined;
     };
   }, [enabled, discover, deviceId]);
+  useEffect(() => {
+    const invalidate = () => setRepos((old) => old.map((repo) => ({ ...repo, discovered: false })));
+    window.addEventListener("kiteline:connected", invalidate);
+    return () => {
+      window.removeEventListener("kiteline:connected", invalidate);
+      invalidate();
+    };
+  }, [online, discover]);
   useWorkspaceRefresh(deviceId, workspaceId, enabled, discover);
-  return { repos, scan, busy, error, discover };
+  const scanComplete = !!scan?.complete && !error && !scan.issues.length;
+  const defaultRepoId = (repos.find((repo) => repo.available) ?? repos[0])?.id;
+  return { repos, scan, busy, error, discover, scanComplete, defaultRepoId };
 }

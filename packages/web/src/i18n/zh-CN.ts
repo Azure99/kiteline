@@ -696,6 +696,7 @@ export const zhCN = {
     imageDecodeFailed: "图片解码失败，可下载原文件",
   },
   git: {
+    diffRegion: "Git 差异",
     statusModified: "已修改",
     statusAdded: "新增",
     statusDeleted: "已删除",

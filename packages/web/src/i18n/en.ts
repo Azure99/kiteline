@@ -712,6 +712,7 @@ export const en = {
     imageDecodeFailed: "The image could not be decoded. You can download the original file.",
   },
   git: {
+    diffRegion: "Git diff",
     statusModified: "Modified",
     statusAdded: "Added",
     statusDeleted: "Deleted",

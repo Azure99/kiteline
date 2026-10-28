@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Columns2, FilePenLine, RefreshCw, Rows2 } from "lucide-react";
 import { DiffView, type DiffTarget } from "../git/diff-view";
@@ -58,6 +58,20 @@ export function DiffPageView({
     page.target.side === "commit"
       ? `${page.target.commitOid.slice(0, 8)}${page.target.parentOid ? ` ← ${page.target.parentOid.slice(0, 8)}` : ""}`
       : t(($) => (page.target.side === "staged" ? $.git.index : $.git.worktree));
+  let unavailableMessage: ReactNode;
+  if (!active) {
+    unavailableMessage = t(($) => $.common.deviceOffline);
+  } else if (repositories.error) {
+    unavailableMessage = <ErrorNotice error={repositories.error} />;
+  } else if (repositories.busy || !repositories.scan) {
+    unavailableMessage = t(($) => $.git.discovering);
+  } else if (repo) {
+    unavailableMessage = t(($) => $.git.bareUnsupported);
+  } else if (repositories.scanComplete) {
+    unavailableMessage = t(($) => $.git.repoMissing);
+  } else {
+    unavailableMessage = t(($) => $.git.repoNotFoundYet);
+  }
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-1 border-b border-border px-2 text-xs">
@@ -116,7 +130,8 @@ export function DiffPageView({
       )}
       {repo?.available ? (
         <DiffView
-          {...{ deviceId, workspaceId, active, refreshKey }}
+          {...{ deviceId, workspaceId, refreshKey }}
+          active={active && repo.discovered}
           repoId={page.repoId}
           target={page.target}
           viewType={mobile ? "unified" : view}
@@ -132,21 +147,7 @@ export function DiffPageView({
           onChanges={onChanges}
         />
       ) : (
-        <div className="p-4 text-sm text-muted-foreground">
-          {!active ? (
-            t(($) => $.common.deviceOffline)
-          ) : repositories.error ? (
-            <ErrorNotice error={repositories.error} />
-          ) : (
-            t(($) =>
-              repositories.busy || !repositories.scan
-                ? $.git.discovering
-                : !repositories.scan.complete || repositories.scan.issues.length
-                  ? $.git.repoNotFoundYet
-                  : $.git.repoMissing,
-            )
-          )}
-        </div>
+        <div className="p-4 text-sm text-muted-foreground">{unavailableMessage}</div>
       )}
     </div>
   );

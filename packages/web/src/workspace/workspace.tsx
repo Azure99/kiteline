@@ -222,9 +222,9 @@ export function Workspace({
   const repositories = useRepos(
     device.id,
     workspace.id,
-    device.status === "online" &&
-      ((rightToolsVisible && presentation.rightTool === "git") ||
-        (workPagesVisible && pages.activePage?.kind === "diff")),
+    device.status === "online",
+    (rightToolsVisible && presentation.rightTool === "git") ||
+      (workPagesVisible && pages.activePage?.kind === "diff"),
   );
   useLayoutEffect(() => {
     document.documentElement.toggleAttribute(
