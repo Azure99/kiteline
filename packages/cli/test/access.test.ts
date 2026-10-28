@@ -248,20 +248,22 @@ test("prototype property names are unknown commands and fall back to general hel
 test("help and version work offline with no credentials and a corrupt cwd target", async () => {
   const root = await directory();
   await writeFile(join(root, ".kiteline.json"), "{");
-  for (const args of [["--help"], ["targets", "--help"], ["--version"]]) {
+  for (const args of [
+    ["--help"],
+    ["targets", "--help"],
+    ["--version"],
+    ["--version", "--tail", "1e2", "--json"],
+  ]) {
     const reply = await cli(root, args);
     expect(reply.code, reply.stderr).toBe(0);
     expect(reply.stderr).toBe("");
-    expect(reply.stdout).toContain(
-      args.includes("--version")
-        ? appVersion
-        : args[0] === "targets"
-          ? "List authorized devices"
-          : "auth login",
-    );
+    if (args.includes("--version")) expect(reply.stdout).toBe(`${appVersion}\n`);
+    else
+      expect(reply.stdout).toContain(
+        args[0] === "targets" ? "List authorized devices" : "auth login",
+      );
   }
-  expect(existsSync(join(root, "credentials"))).toBe(false);
-  const invalidHelp = await cli(root, [
+  const snapshotHelp = await cli(root, [
     "terminal",
     "snapshot",
     "--help",
@@ -269,10 +271,24 @@ test("help and version work offline with no credentials and a corrupt cwd target
     "1e2",
     "--json",
   ]);
-  expect(invalidHelp.code).toBe(2);
-  expect(JSON.parse(invalidHelp.stdout)).toMatchObject({
-    error: { code: "invalid_argument", message: "--tail must contain only decimal digits" },
-  });
+  expect(snapshotHelp.code, snapshotHelp.stderr).toBe(0);
+  expect(snapshotHelp.stderr).toBe("");
+  expect(snapshotHelp.stdout).toContain("terminal snapshot [--tail N]");
+  expect(existsSync(join(root, "credentials"))).toBe(false);
+});
+
+test("help and version reject option syntax errors", async () => {
+  const root = await directory();
+  for (const args of [
+    ["terminal", "snapshot", "--help", "--unknown", "--json"],
+    ["terminal", "snapshot", "--help", "--json", "--tail"],
+    ["--version", "--unknown", "--json"],
+    ["--version", "--json", "--tail"],
+  ]) {
+    const reply = await cli(root, args);
+    expect(reply.code).toBe(2);
+    expect(JSON.parse(reply.stdout)).toMatchObject({ error: { code: "invalid_argument" } });
+  }
 });
 
 test("non-TTY login without explicit stdin permission exits while its input stays open", async () => {

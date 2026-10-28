@@ -185,3 +185,4 @@ Default output is readable text. With `--json`, stdout contains a structured rep
 An unknown result always exits 3, such as a local read failure during upload that leaves the write outcome uncertain. Missing or invalid local target configuration exits 2; a target not found on the device exits 1.
 
 JSON requests wait at most 30 seconds. File transfers end after 120 consecutive seconds without progress. `--help` and `--version` do not require a server connection.
+`--help` and `--version` queries do not validate option values; unknown options or missing option values still fail.

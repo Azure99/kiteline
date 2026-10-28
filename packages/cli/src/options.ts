@@ -274,8 +274,8 @@ export function parse(argv: string[]) {
     positionals[0] === "files" && ["download", "upload"].includes(positionals[1] ?? "");
   const requestedCommand = (fileCommand ? positionals.slice(0, 2) : positionals).join(" ");
   const path = fileCommand ? positionals[2] : raw.path;
-  const showHelp = !!raw.help || argv.length === 0;
-  if (!showHelp && !(raw.version && !positionals.length)) {
+  if (raw.help || argv.length === 0) return { command: "help" as const, requestedCommand };
+  if (!(raw.version && !positionals.length)) {
     const allowed = Object.hasOwn(commands, requestedCommand)
       ? (commands[requestedCommand as keyof typeof commands].options as readonly Option[])
       : undefined;
@@ -308,12 +308,7 @@ export function parse(argv: string[]) {
     if (requestedCommand === "web url" && raw.path !== undefined && raw.session !== undefined)
       throw new AppError("invalid_argument", "--path cannot be combined with --session");
   }
-  if (showHelp || raw.version) {
-    normalizeValues(raw, path);
-    return showHelp
-      ? { command: "help" as const, requestedCommand }
-      : { command: "version" as const };
-  }
+  if (raw.version) return { command: "version" as const };
   const command = requestedCommand as keyof typeof commands;
   const json = raw.json;
   if (command === "terminal send")
