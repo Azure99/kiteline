@@ -2,6 +2,8 @@ import { afterEach, expect, test, vi } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { agentConfig, agentPaths } from "../src/config.js";
+import { sessionFiles } from "@kiteline/shared/terminal/node";
+import { checkRunDir, sessionIdBytes } from "../src/terminal/paths.js";
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -14,6 +16,20 @@ test("paths use environment directories without reading Shell configuration", as
     expect((await agentPaths()).runDir).toBe(join(root, "other"));
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("the full runtime socket path accepts 103 UTF-8 bytes and rejects 104", () => {
+  const id = "0".repeat(sessionIdBytes * 2);
+  for (const prefix of ["/runtime", "/运行目录😀"]) {
+    const overhead = Buffer.byteLength(sessionFiles(join(prefix, id)).socket);
+    const runDir = prefix + "a".repeat(103 - overhead);
+    const socket = sessionFiles(join(runDir, id)).socket;
+    expect(Buffer.byteLength(socket)).toBe(103);
+    expect(() => checkRunDir(runDir)).not.toThrow();
+    expect(() => checkRunDir(runDir + "a")).toThrowError(
+      "KITELINE_AGENT_RUN_DIR is too long; configure a shorter user-writable directory",
+    );
   }
 });
 

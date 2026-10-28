@@ -10,13 +10,14 @@ import { BytePrefix } from "@kiteline/shared/node/buffers";
 import {
   msysDirectory,
   msysPath,
+  sessionFiles,
   shellWords,
   terminalPreset,
   tmuxBinary,
   tmuxEnvironment,
   tmuxSession,
 } from "@kiteline/shared/terminal/node";
-import { paneCommand, paneExitFile } from "@kiteline/shared/terminal/windows";
+import { paneCommand } from "@kiteline/shared/terminal/windows";
 import { spawnJob, type JobChild } from "@kiteline/shared/windows/job";
 import type { TerminalSource, TerminalIdentity } from "@kiteline/shared/protocol/ipc";
 
@@ -128,7 +129,7 @@ export class Control {
   private async initialize(): Promise<TerminalIdentity> {
     const o = this.options;
     const creating = o.type === "create";
-    const config = join(dirname(this.options.socket), "tmux.conf");
+    const { config } = sessionFiles(dirname(o.socket));
     if (creating && process.platform !== "win32")
       await writeFile(config, terminalPreset(o), { mode: 0o600 });
     if (this.disposed) throw new AppError("cancelled", "Terminal creation interrupted");
@@ -303,7 +304,7 @@ export class Control {
       let code: number | null;
       if (process.platform === "win32") {
         try {
-          code = readFileSync(join(dirname(this.options.socket), paneExitFile)).readUInt32LE();
+          code = readFileSync(sessionFiles(dirname(this.options.socket)).paneExit).readUInt32LE();
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== "ENOENT")
             console.error("Could not read the terminal exit code:", error);

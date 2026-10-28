@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { finished } from "node:stream/promises";
 import { AppError, limits } from "../protocol/index.js";
 import type { CreateTerminal } from "../protocol/ipc.js";
@@ -22,6 +22,15 @@ export const terminfoDirectory =
   process.platform === "win32"
     ? resolve(msysDirectory, "usr/share/terminfo")
     : resolve(nativeDirectory, "share/terminfo");
+
+export function sessionFiles(directory: string) {
+  return {
+    socket: join(directory, "tmux.sock"),
+    config: join(directory, "tmux.conf"),
+    paneLaunch: join(directory, "pane.json"),
+    paneExit: join(directory, "pane.exit"),
+  };
+}
 
 export function msysPath(path: string) {
   return path.replaceAll("\\", "/");

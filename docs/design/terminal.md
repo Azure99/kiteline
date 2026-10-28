@@ -12,6 +12,8 @@
 
 tmux 使用会话目录下的私有配置，不加载用户的 tmux 配置或插件，并收窄 prefix 键表。具体设置由 `packages/shared/src/terminal/node.ts` 的 `terminalPreset()` 定义。
 
+会话文件路径由同一模块的 `sessionFiles()` 生成；运行目录的 socket 长度预算与会话 ID 字节数由 `packages/agent/src/terminal/paths.ts` 管理。
+
 固定版本：tmux 版本见 [`release/inputs.json`](../../release/inputs.json)，各平台都禁用 Sixel，并应用 [`paste.patch`](../../native/tmux/paste.patch) 和 [`flow-control.patch`](../../native/tmux/flow-control.patch)。后者为 recorder 的 `flow-control` 客户端标志提供无损在线背压；普通客户端不设置该标志。xterm.js 及插件版本见 [`packages/web/package.json`](../../packages/web/package.json)、[`packages/terminal-recorder/package.json`](../../packages/terminal-recorder/package.json) 和 [`packages/shared/package.json`](../../packages/shared/package.json)。网页的 xterm.js 带有 [`packages/web/patches/`](../../packages/web/patches/) 中的补丁，让 DOM 渲染器按设备像素比测量字形宽度；维护方法见[构建与发布](../development/release.md#xtermjs)。
 
 网页和 recorder 的共同适配在 `packages/shared/src/terminal/index.ts`，两端必须同步升级。该模块的私有状态访问经过 `core()`，升级时以 `TerminalCore` 核对使用的成员。网页还依赖 `packages/web/src/terminal/` 的触控选择和画面保留适配，其中 `auxiliary-input.ts` 直接导入 xterm.js 的私有键盘编码；这些入口也要随升级复核。

@@ -27,22 +27,12 @@ import type {
   RecorderMessage,
   TerminalIdentity,
 } from "@kiteline/shared/protocol/ipc";
-import { msysPath, tmux, tmuxServerMissing } from "@kiteline/shared/terminal/node";
+import { sessionFiles, tmux, tmuxServerMissing } from "@kiteline/shared/terminal/node";
 import { startTerminalServer } from "@kiteline/shared/terminal/windows";
 import type { AgentConfig } from "../config.js";
 import type { MetadataStore } from "../metadata.js";
 import { Recorder, type Creation } from "./recorder.js";
-
-const sessionIdBytes = 8;
-
-export function checkRunDir(runDir: string) {
-  const socket = join(runDir, "0".repeat(sessionIdBytes * 2), "tmux.sock");
-  if (Buffer.byteLength(process.platform === "win32" ? msysPath(socket) : socket) > 103)
-    throw new AppError(
-      "invalid_argument",
-      "KITELINE_AGENT_RUN_DIR is too long; configure a shorter user-writable directory",
-    );
-}
+import { sessionIdBytes } from "./paths.js";
 
 interface Managed {
   session: Session;
@@ -246,7 +236,7 @@ export class Sessions {
       for (let attempt = 0; attempt < 8; attempt++) {
         const id = randomBytes(sessionIdBytes).toString("hex");
         if (this.records.has(id)) continue;
-        const socket = join(this.config.runDir, id, "tmux.sock");
+        const { socket } = sessionFiles(join(this.config.runDir, id));
         try {
           // Directory ownership and registration share the synchronous workspace boundary.
           mkdirSync(dirname(socket), { mode: 0o700 });

@@ -6,7 +6,7 @@ import { windowsNative } from "@kiteline/shared/windows/native";
 import { asError } from "@kiteline/shared/protocol";
 import { agentConfig, privateDirectory } from "./config.js";
 import { nativeDirectory } from "@kiteline/shared/node/paths";
-import { checkRunDir } from "./terminal/sessions.js";
+import { checkRunDir } from "./terminal/paths.js";
 import { ripgrepBinary, toolCommand } from "./tools.js";
 
 type Command = (file: string, args: string[], env?: NodeJS.ProcessEnv) => Promise<string>;

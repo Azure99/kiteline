@@ -1,9 +1,9 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { access, mkdtemp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { AppError, limits, type AgentEvent } from "@kiteline/shared/protocol";
-import { tmux } from "@kiteline/shared/terminal/node";
+import { sessionFiles, tmux } from "@kiteline/shared/terminal/node";
 import * as terminalNode from "@kiteline/shared/terminal/node";
 import {
   terminalOutputCost,
@@ -210,6 +210,9 @@ test("short session IDs match exactly and preserve occupied directories and acti
   const { agent, workspace, dataDir, signal } = await fixture();
   const first = await agent.sessions.create({ workspaceId: workspace.id }, signal);
   expect(first.id).toMatch(/^[a-f0-9]{16}$/);
+  const directory = join(dataDir, "run", first.id);
+  expect((await stat(directory)).mode & 0o777).toBe(0o700);
+  expect((await stat(sessionFiles(directory).config)).mode & 0o777).toBe(0o600);
   await expect(
     agent.dispatch(
       "sessions.snapshot",

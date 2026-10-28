@@ -1,5 +1,5 @@
 import { writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { finished } from "node:stream/promises";
 import type { CreateTerminal } from "../protocol/ipc.js";
@@ -7,6 +7,7 @@ import { spawnJob } from "../windows/job.js";
 import { BytePrefix } from "../node/buffers.js";
 import {
   msysPath,
+  sessionFiles,
   terminalPreset,
   tmux,
   tmuxBinary,
@@ -19,26 +20,24 @@ export interface PaneLaunch {
   args: string[];
   environment: NodeJS.ProcessEnv;
 }
-export const paneExitFile = "pane.exit";
 
 export function paneCommand(socket: string) {
   return [
     msysPath(process.execPath),
     msysPath(resolve(import.meta.dirname, "pane.js")),
-    msysPath(join(dirname(socket), "pane.json")),
+    msysPath(sessionFiles(dirname(socket)).paneLaunch),
   ];
 }
 
 export async function startTerminalServer(options: CreateTerminal, timeout: number) {
-  const directory = dirname(options.socket);
-  const config = join(directory, "tmux.conf");
+  const { config, paneLaunch } = sessionFiles(dirname(options.socket));
   const launch: PaneLaunch = {
     shell: options.shell,
     args: options.command === undefined ? ["-NoLogo"] : ["-NoLogo", "-Command", options.command],
     environment: { ...process.env },
   };
   await writeFile(config, terminalPreset(options), { mode: 0o600 });
-  await writeFile(join(directory, "pane.json"), JSON.stringify(launch), { mode: 0o600 });
+  await writeFile(paneLaunch, JSON.stringify(launch), { mode: 0o600 });
   const server = await spawnJob(
     tmuxBinary,
     ["-D", "-S", msysPath(options.socket), "-f", msysPath(config), "-u"],

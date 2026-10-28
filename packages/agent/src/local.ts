@@ -18,7 +18,7 @@ import {
   type RpcMethod,
 } from "@kiteline/shared/protocol";
 import type { AgentConfig } from "./config.js";
-import { checkRunDir } from "./terminal/sessions.js";
+import { checkRunDir } from "./terminal/paths.js";
 import { agentLimits } from "./limits.js";
 
 async function localEndpoint(runDir: string) {
