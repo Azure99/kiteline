@@ -23,6 +23,7 @@ import {
 import {
   formSchedule,
   scheduleForm,
+  sameSchedule,
   taskChanges,
   taskTextSize,
   taskTime,
@@ -32,32 +33,27 @@ import {
 export const scheduleSelectClass =
   "min-h-9 w-full min-w-0 rounded border border-border bg-background px-2 text-sm max-desk:min-h-11";
 
+type TaskEditorError = { kind: "cwdRequired" } | { kind: "request"; cause: unknown };
+
 export function TaskEditor({
   devices,
-  unavailableDevices,
-  connected,
+  manageableIds,
   initialDeviceId,
   task,
   onClose,
   onSaved,
 }: {
   devices: Device[];
-  unavailableDevices: string[];
-  connected: boolean;
+  manageableIds: string[];
   initialDeviceId?: string;
   task?: ScheduledTask;
   onClose: () => void;
   onSaved: (deviceId: string, taskId: string) => void;
 }) {
   const { t, i18n } = useTranslation();
-  const [deviceId, setDeviceId] = useState(
-    initialDeviceId ??
-      devices.find((d) => d.status === "online" && !unavailableDevices.includes(d.id))?.id ??
-      "",
-  );
+  const [deviceId, setDeviceId] = useState(initialDeviceId ?? manageableIds[0] ?? "");
   const device = devices.find((d) => d.id === deviceId);
-  const enabled =
-    connected && device?.status === "online" && !unavailableDevices.includes(deviceId);
+  const enabled = manageableIds.includes(deviceId);
   const [taskId] = useState(() => task?.id ?? newId());
   const [baseline, setBaseline] = useState(task);
   const [name, setName] = useState(task?.name ?? "");
@@ -70,7 +66,7 @@ export function TaskEditor({
   const initialOnce = useRef(form.once);
   const [preview, setPreview] = useState<{ timezone: string; nextRunAts: string[] }>();
   const [previewError, setPreviewError] = useState<unknown>();
-  const [error, setError] = useState<unknown>();
+  const [error, setError] = useState<TaskEditorError>();
   const [current, setCurrent] = useState<ScheduledTask>();
   const [busy, setBusy] = useState(false);
   const [uncertain, setUncertain] = useState(false);
@@ -82,24 +78,18 @@ export function TaskEditor({
       alive.current = false;
     };
   }, []);
-  const parsed = useMemo(() => {
-    try {
-      return { schedule: formSchedule(form, task?.schedule, initialOnce.current) };
-    } catch (error) {
-      if (error instanceof ApiError && error.code === "invalid_argument")
-        return { invalidLocalTime: true };
-      throw error;
-    }
-  }, [form, task?.schedule]);
+  const schedule = useMemo(
+    () => formSchedule(form, task?.schedule, initialOnce.current),
+    [form, task?.schedule],
+  );
   useEffect(() => {
     const abort = new AbortController();
     setPreview(undefined);
     setPreviewError(undefined);
-    if (!parsed.schedule || !enabled) return;
-    const schedule = parsed.schedule;
+    if (!schedule || !enabled) return;
     if (
       baseline?.schedule &&
-      JSON.stringify(baseline?.schedule) === JSON.stringify(schedule) &&
+      sameSchedule(baseline.schedule, schedule) &&
       schedule.kind === "once" &&
       new Date(schedule.at).valueOf() <= Date.now()
     ) {
@@ -124,12 +114,11 @@ export function TaskEditor({
       clearTimeout(timer);
       abort.abort();
     };
-  }, [deviceId, enabled, parsed.schedule, timezone, baseline?.schedule, baseline?.timezone]);
-  const unknown = uncertain;
+  }, [deviceId, enabled, schedule, timezone, baseline?.schedule, baseline?.timezone]);
   async function save() {
-    if (!parsed.schedule || !enabled || busy || unknown || textTooLong) return;
+    if (!schedule || !enabled || busy || uncertain || textTooLong) return;
     if (baseline && !cwd) {
-      setError("cwdRequired");
+      setError({ kind: "cwdRequired" });
       return;
     }
     setBusy(true);
@@ -140,7 +129,7 @@ export function TaskEditor({
         command,
         cwd: cwd || undefined,
         timezone: timezone || preview?.timezone,
-        schedule: parsed.schedule,
+        schedule,
       };
       if (baseline)
         await rpc(deviceId, "tasks.update", {
@@ -151,7 +140,7 @@ export function TaskEditor({
       else await rpc(deviceId, "tasks.create", { taskId, input });
       if (alive.current) onSaved(deviceId, taskId);
     } catch (cause) {
-      setError(cause);
+      setError({ kind: "request", cause });
       if (cause instanceof ApiError && cause.outcome === "unknown") setUncertain(true);
       if (cause instanceof ApiError && cause.code === "conflict") setConflict(true);
     } finally {
@@ -172,7 +161,7 @@ export function TaskEditor({
       setConflict(false);
       setError(undefined);
     } catch (cause) {
-      setError(cause);
+      setError({ kind: "request", cause });
     } finally {
       setBusy(false);
     }
@@ -198,7 +187,7 @@ export function TaskEditor({
           }}
         >
           <div className="scroll-area min-h-0 overflow-auto p-5">
-            <fieldset disabled={busy || unknown} className="min-w-0 space-y-4">
+            <fieldset disabled={busy || uncertain} className="min-w-0 space-y-4">
               <label className="block space-y-1 text-sm">
                 <span>{t(($) => $.schedules.device)}</span>
                 <select
@@ -215,11 +204,7 @@ export function TaskEditor({
                     {t(($) => $.schedules.device)}
                   </option>
                   {devices.map((d) => (
-                    <option
-                      key={d.id}
-                      value={d.id}
-                      disabled={d.status !== "online" || unavailableDevices.includes(d.id)}
-                    >
+                    <option key={d.id} value={d.id} disabled={!manageableIds.includes(d.id)}>
                       {d.name}
                     </option>
                   ))}
@@ -385,9 +370,9 @@ export function TaskEditor({
                   {!preview.nextRunAts.length && <p>{t(($) => $.schedules.noNext)}</p>}
                 </div>
               )}
-              {!!(parsed.invalidLocalTime || previewError) && (
+              {!!(schedule === null || previewError) && (
                 <div className="break-words text-sm text-destructive" role="alert">
-                  {parsed.invalidLocalTime ? (
+                  {schedule === null ? (
                     t(($) => $.schedules.invalidLocalTime)
                   ) : (
                     <ErrorNotice error={previewError} />
@@ -398,15 +383,15 @@ export function TaskEditor({
           </div>
           {!!error && (
             <div className="max-h-40 overflow-auto px-5 pb-3 text-sm text-destructive" role="alert">
-              {error === "cwdRequired" ? (
+              {error.kind === "cwdRequired" ? (
                 t(($) => $.schedules.cwdRequired)
               ) : (
-                <ErrorNotice error={error} />
+                <ErrorNotice error={error.cause} />
               )}
-              {(unknown || conflict) && (
+              {(uncertain || conflict) && (
                 <div className="mt-2 space-y-2">
                   <p>
-                    {unknown
+                    {uncertain
                       ? `${t(($) => $.schedules.taskId)}: ${taskId}`
                       : t(($) => $.schedules.conflict)}
                   </p>
@@ -415,7 +400,7 @@ export function TaskEditor({
                     disabled={busy || !enabled}
                     onClick={() => void readCurrent()}
                   >
-                    {unknown
+                    {uncertain
                       ? t(($) => $.schedules.queryResult)
                       : t(($) => $.schedules.readCurrent)}
                   </Button>
@@ -460,9 +445,7 @@ export function TaskEditor({
             </Button>
             <Button
               type="submit"
-              disabled={
-                busy || !enabled || !parsed.schedule || unknown || !!previewError || textTooLong
-              }
+              disabled={busy || !enabled || !schedule || uncertain || !!previewError || textTooLong}
             >
               <Save />
               {t(($) => $.common.save)}

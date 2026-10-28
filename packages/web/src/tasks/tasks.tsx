@@ -83,14 +83,15 @@ export function TasksPage({
   const summary = summaries?.find((s) => s.deviceId === route.deviceId);
   const available = connected && fresh && webCompatible();
   const storageError = summary?.snapshot?.storageError;
-  const unavailableDevices = devices
-    .filter((device) => {
-      const group = summaries?.find((item) => item.deviceId === device.id);
-      return !group?.current || group.snapshot?.storageError;
-    })
-    .map((device) => device.id);
-  const online =
-    available && selected?.status === "online" && summary?.current === true && !storageError;
+  const manageableIds = available
+    ? devices
+        .filter((device) => {
+          const group = summaries?.find((item) => item.deviceId === device.id);
+          return device.status === "online" && group?.current && !group.snapshot?.storageError;
+        })
+        .map((device) => device.id)
+    : [];
+  const online = route.deviceId !== undefined && manageableIds.includes(route.deviceId);
   const hasDetail = !!route.deviceId && !!route.taskId;
   const origin = currentPath();
   function select(next: TasksRoute) {
@@ -113,10 +114,7 @@ export function TasksPage({
           <RefreshCw />
         </IconButton>
         <Button
-          disabled={
-            !available ||
-            !devices.some((d) => d.status === "online" && !unavailableDevices.includes(d.id))
-          }
+          disabled={!manageableIds.length}
           onClick={() => setEditor({ deviceId: route.filter, origin, filter: route.filter })}
         >
           <Plus />
@@ -316,8 +314,7 @@ export function TasksPage({
       {editor && (
         <TaskEditor
           devices={devices}
-          unavailableDevices={unavailableDevices}
-          connected={available}
+          manageableIds={manageableIds}
           initialDeviceId={editor.deviceId}
           task={editor.task}
           onClose={() => setEditor(undefined)}

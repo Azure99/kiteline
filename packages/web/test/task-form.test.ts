@@ -1,9 +1,10 @@
-import { expect, test } from "vitest";
-import type { ScheduledTask, ScheduledTaskInput } from "@kiteline/shared/protocol";
+import { assert, expect, test } from "vitest";
+import type { ScheduledTask, ScheduledTaskInput, TaskSchedule } from "@kiteline/shared/protocol";
 import {
   formSchedule,
   localDateTime,
   scheduleForm,
+  sameSchedule,
   taskChanges,
   taskTextSize,
   taskTime,
@@ -43,12 +44,14 @@ test("editing an elapsed one-time task preserves its original timestamp and cons
   };
   const initial = scheduleForm(task.schedule);
   const schedule = formSchedule(initial, task.schedule, initial.once);
+  assert(schedule);
   expect(taskChanges(task, { ...task, name: "New", schedule })).toEqual({ name: "New" });
   const returned = formSchedule(
     { ...scheduleForm(task.schedule), time: "17:30", cron: "0 * * * *" },
     task.schedule,
     initial.once,
   );
+  assert(returned);
   expect(taskChanges(task, { ...task, name: "New", schedule: returned })).toEqual({ name: "New" });
   const changed = formSchedule(
     { ...scheduleForm(task.schedule), once: localDateTime("2030-01-01T12:00:00Z") },
@@ -130,7 +133,7 @@ test("common presets use one cron and local dates reject missing DST wall time",
   process.env.TZ = "America/New_York";
   try {
     const form = { ...scheduleForm(), preset: "once" as const, once: "2027-03-14T02:30" };
-    expect(() => formSchedule(form)).toThrow("existing local date");
+    expect(formSchedule(form)).toBeNull();
     expect(formSchedule({ ...form, once: "2027-03-14T03:30" })).toEqual({
       kind: "once",
       at: "2027-03-14T07:30:00.000Z",
@@ -139,4 +142,51 @@ test("common presets use one cron and local dates reject missing DST wall time",
     if (previous === undefined) delete process.env.TZ;
     else process.env.TZ = previous;
   }
+});
+
+test.each(["", "not a date", "2027-02-30T12:00"])(
+  "unavailable local one-time input returns null (%j)",
+  (once) => {
+    expect(formSchedule({ ...scheduleForm(), preset: "once", once })).toBeNull();
+  },
+);
+
+test("schedule changes compare members independently of property order", () => {
+  const task: ScheduledTask = {
+    id: "task",
+    revision: 1,
+    name: "Original",
+    command: "printf old",
+    cwd: "/home/original",
+    timezone: "UTC",
+    schedule: { kind: "cron", expression: "0 9 * * *" },
+    state: "active",
+    nextRunAt: null,
+  };
+  const cron: TaskSchedule = { kind: "cron", expression: "0 9 * * *" };
+  const once: TaskSchedule = { kind: "once", at: "2030-01-01T09:00:17.123Z" };
+  const cases: { before: TaskSchedule; reordered: TaskSchedule; changed: TaskSchedule }[] = [
+    {
+      before: cron,
+      reordered: { expression: cron.expression, kind: "cron" },
+      changed: { kind: "cron", expression: "30 9 * * *" },
+    },
+    {
+      before: once,
+      reordered: { at: once.at, kind: "once" },
+      changed: { kind: "once", at: "2030-01-01T09:00:17.124Z" },
+    },
+  ];
+  for (const { before, reordered, changed } of cases) {
+    expect(sameSchedule(before, reordered)).toBe(true);
+    expect(taskChanges({ ...task, schedule: before }, { ...task, schedule: reordered })).toEqual(
+      {},
+    );
+    expect(sameSchedule(before, changed)).toBe(false);
+    expect(taskChanges({ ...task, schedule: before }, { ...task, schedule: changed })).toEqual({
+      schedule: changed,
+    });
+  }
+  expect(sameSchedule(cron, once)).toBe(false);
+  expect(sameSchedule(once, cron)).toBe(false);
 });

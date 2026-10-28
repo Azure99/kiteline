@@ -1,3 +1,5 @@
+import type { TaskOutput } from "@kiteline/shared/protocol";
+
 // Task output is read without a terminal, so control sequences from programs that force colour
 // (or send terminal notifications) would show as stray characters. Only text is kept for display.
 const complete =
@@ -16,4 +18,33 @@ export function outputText(carry: string, piece: string, final: boolean) {
   const tail = final ? undefined : incomplete.exec(input);
   const body = tail ? input.slice(0, tail.index) : input;
   return { text: body.replace(complete, ""), carry: tail ? tail[0] : "" };
+}
+
+export type StreamOutput = {
+  chunks: { offset: number; text: string }[];
+  nextOffset: number;
+  carry: string;
+};
+
+export function mergeOutput(previous: StreamOutput, piece: TaskOutput) {
+  const reset = piece.offset !== previous.nextOffset;
+  const final = piece.finished && piece.nextOffset >= piece.storedBytes;
+  let output = previous;
+  if (piece.text || reset || (final && previous.carry)) {
+    const clean = outputText(reset ? "" : previous.carry, piece.text, final);
+    output = {
+      chunks: [
+        ...(reset ? [] : previous.chunks),
+        ...(clean.text ? [{ offset: piece.offset, text: clean.text }] : []),
+      ],
+      nextOffset: piece.nextOffset,
+      carry: clean.carry,
+    };
+  }
+  return {
+    output,
+    reset,
+    final,
+    hasUnreadBytes: piece.nextOffset < piece.storedBytes,
+  };
 }

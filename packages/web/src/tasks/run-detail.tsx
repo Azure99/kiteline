@@ -9,10 +9,9 @@ import { Button } from "../components/ui/button";
 import { IconButton } from "../components/icon-button";
 import { ErrorNotice } from "../components/error-notice";
 import { taskTime } from "./form";
-import { outputText } from "./output-text";
+import { mergeOutput, type StreamOutput } from "./output-text";
 
 type Stream = "stdout" | "stderr";
-type Output = { chunks: { offset: number; text: string }[]; nextOffset: number; carry: string };
 
 export function RunDetail({
   deviceId,
@@ -35,7 +34,7 @@ export function RunDetail({
   const stderrTab = useRef<HTMLButtonElement>(null);
   const [copied, setCopied] = useState<Stream>();
   const [outputChanged, setOutputChanged] = useState(false);
-  const outputs = useRef<Record<Stream, Output>>({
+  const outputs = useRef<Record<Stream, StreamOutput>>({
     stdout: { chunks: [], nextOffset: 0, carry: "" },
     stderr: { chunks: [], nextOffset: 0, carry: "" },
   });
@@ -73,26 +72,17 @@ export function RunDetail({
             abort.signal,
           );
           if (disposed || abort.signal.aborted) return;
-          const reset = piece.offset !== previous.nextOffset;
-          if (reset) setOutputChanged(true);
-          const final = piece.finished && piece.nextOffset >= piece.storedBytes;
-          if (piece.text || reset || (final && previous.carry)) {
-            const clean = outputText(reset ? "" : previous.carry, piece.text, final);
+          const merged = mergeOutput(previous, piece);
+          if (merged.reset) setOutputChanged(true);
+          if (merged.output !== previous) {
             outputs.current = {
               ...outputs.current,
-              [name]: {
-                chunks: [
-                  ...(reset ? [] : previous.chunks),
-                  ...(clean.text ? [{ offset: piece.offset, text: clean.text }] : []),
-                ],
-                nextOffset: piece.nextOffset,
-                carry: clean.carry,
-              },
+              [name]: merged.output,
             };
             setOutput(outputs.current);
           }
-          if (!final) complete = false;
-          if (piece.nextOffset < piece.storedBytes && piece.nextOffset > piece.offset) more = true;
+          if (!merged.final) complete = false;
+          if (merged.hasUnreadBytes && piece.nextOffset > piece.offset) more = true;
         }
         again = taskRunActive(next.state) || !complete;
         setError(undefined);
@@ -330,7 +320,7 @@ function OutputText({
   empty,
   truncated,
 }: {
-  chunks: Output["chunks"];
+  chunks: StreamOutput["chunks"];
   hidden: boolean;
   empty: ReactNode;
   truncated: boolean;

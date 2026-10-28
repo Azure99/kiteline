@@ -5,7 +5,6 @@ import {
   type ScheduledTaskInput,
   type TaskSchedule,
 } from "@kiteline/shared/protocol";
-import { ApiError } from "../lib/api";
 import { i18n } from "../i18n";
 
 export function taskTextSize(name: string, command: string) {
@@ -63,14 +62,14 @@ export function formSchedule(
   form: ScheduleForm,
   original?: TaskSchedule,
   initialOnce?: string,
-): TaskSchedule {
+): TaskSchedule | null {
   // An unchanged date control must not lose the saved seconds or consume a new once plan.
   if (original?.kind === "once" && form.preset === "once" && form.once === initialOnce)
     return original;
   if (form.preset === "once") {
     const date = new Date(form.once);
     if (!Number.isFinite(date.valueOf()) || localDateTime(date.toISOString()) !== form.once)
-      throw new ApiError("invalid_argument", "Choose an existing local date and time");
+      return null;
     return { kind: "once", at: date.toISOString() };
   }
   const [hour, minute] = form.time.split(":").map(Number);
@@ -83,6 +82,12 @@ export function formSchedule(
   return { kind: "cron", expression };
 }
 
+export function sameSchedule(before: TaskSchedule, after: TaskSchedule) {
+  return before.kind === "once"
+    ? after.kind === "once" && before.at === after.at
+    : after.kind === "cron" && before.expression === after.expression;
+}
+
 export function taskChanges(
   before: ScheduledTask,
   after: ScheduledTaskInput,
@@ -90,8 +95,7 @@ export function taskChanges(
   const changes: Partial<ScheduledTaskInput> = {};
   for (const key of taskInputKeys) {
     if (key === "schedule") {
-      if (JSON.stringify(after.schedule) !== JSON.stringify(before.schedule))
-        changes.schedule = after.schedule;
+      if (!sameSchedule(before.schedule, after.schedule)) changes.schedule = after.schedule;
     } else if (after[key] !== undefined && after[key] !== before[key]) changes[key] = after[key];
   }
   return changes;
