@@ -25,7 +25,7 @@ async function setup() {
   cleanups.push(() => rm(data, { recursive: true, force: true }));
   const root = join(data, "workspace");
   await mkdir(root);
-  const metadata = new MetadataStore(testConfig(data));
+  const metadata = new MetadataStore(testConfig(data), () => {});
   const workspace = await metadata.add(root);
   const directories = new Directories();
   cleanups.push(() => directories.close());

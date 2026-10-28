@@ -30,7 +30,7 @@ async function setup() {
   const root = join(home, "project");
   await mkdir(root);
   const cli = await gitRepoFixture(root);
-  const metadata = new MetadataStore(testConfig(home));
+  const metadata = new MetadataStore(testConfig(home), () => {});
   const { workspace, repos, repo } = await workspaceFixture(root, metadata);
   return { home, root, cli, metadata, workspace, repos, repo };
 }

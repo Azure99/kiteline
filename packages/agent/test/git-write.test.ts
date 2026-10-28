@@ -49,7 +49,7 @@ async function setup() {
   const cli = async (...args: string[]) => (await run(...args)).stdout;
   const home = await mkdtemp("/var/tmp/kiteline-git-write-meta-");
   roots.push(home);
-  const metadata = new MetadataStore(testConfig(home));
+  const metadata = new MetadataStore(testConfig(home), () => {});
   const { workspace, repos, repo } = await workspaceFixture(root, metadata);
   return {
     root,

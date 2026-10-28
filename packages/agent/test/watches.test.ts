@@ -132,7 +132,10 @@ test("an active discovered nested repository can move and keep file and Git noti
     "-m",
     "base",
   );
-  const metadata = new MetadataStore(testConfig(join(root, "data"), { runDir: join(root, "run") }));
+  const metadata = new MetadataStore(
+    testConfig(join(root, "data"), { runDir: join(root, "run") }),
+    () => {},
+  );
   const repos = new Repositories(metadata, new CursorBudget());
   cleanups.push(() => repos.close());
   const signal = new AbortController().signal;
@@ -484,7 +487,10 @@ test("discovery resolves a linked .git directory for external metadata watching"
   ]);
   await rename(join(project, ".git"), metadataPath);
   await symlink("../metadata", join(project, ".git"));
-  const metadata = new MetadataStore(testConfig(join(root, "data"), { runDir: join(root, "run") }));
+  const metadata = new MetadataStore(
+    testConfig(join(root, "data"), { runDir: join(root, "run") }),
+    () => {},
+  );
   const repos = new Repositories(metadata, new CursorBudget());
   cleanups.push(() => repos.close());
   const repo = await repos.inspect(project, root, new AbortController().signal);
@@ -663,7 +669,10 @@ test.runIf(process.platform === "linux" || process.platform === "darwin")(
     );
     await git(a, "worktree", "add", "-b", "side", b);
     const commit = (await git(a, "rev-parse", "HEAD")).stdout.trim();
-    const store = new MetadataStore(testConfig(join(root, "data"), { runDir: join(root, "run") }));
+    const store = new MetadataStore(
+      testConfig(join(root, "data"), { runDir: join(root, "run") }),
+      () => {},
+    );
     const repos = new Repositories(store, new CursorBudget());
     cleanups.push(() => repos.close());
     const signal = new AbortController().signal;

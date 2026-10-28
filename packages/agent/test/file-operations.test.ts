@@ -50,7 +50,7 @@ async function setup(changed?: (workspaceId: string) => void) {
   const root = join(data, "workspace");
   await mkdir(root);
   const config = testConfig(data);
-  const metadata = new MetadataStore(config);
+  const metadata = new MetadataStore(config, () => {});
   const workspace = await metadata.add(root);
   const temporary = new TemporaryFiles(data);
   cleanups.push(() => temporary.close());

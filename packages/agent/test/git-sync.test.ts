@@ -30,7 +30,7 @@ async function setup() {
   await mkdir(root);
   const run = await gitRepoFixture(root);
   const cli = async (...args: string[]) => (await run(...args)).stdout;
-  const metadata = new MetadataStore(testConfig(home));
+  const metadata = new MetadataStore(testConfig(home), () => {});
   const { repo } = await workspaceFixture(root, metadata);
   const write = (path: string, text: string) => writeFile(join(root, path), text);
   await write("f", "base\n");

@@ -31,7 +31,7 @@ async function setup() {
   const root = join(home, "project");
   await mkdir(root);
   const config = testConfig(home, { limits: { editorBytes: 4 } });
-  const metadata = new MetadataStore(config);
+  const metadata = new MetadataStore(config, () => {});
   const { id } = await metadata.add(root);
   const temporary = new TemporaryFiles(home);
   const files = new BinaryFiles(config, metadata, temporary);

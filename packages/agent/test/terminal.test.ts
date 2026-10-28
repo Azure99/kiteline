@@ -566,11 +566,12 @@ test("creation cancellation remains queryable, immediate end cleans up, and shor
   expect(interrupted).toMatchObject({ outcome: "unknown", result: { sessionId: pending.id } });
   await agent.sessions.end({ workspaceId: workspace.id, sessionId: pending.id });
   expect(agent.sessions.list().sessions).toEqual([]);
-  await agent.metadata.update((value) =>
-    value.shortcuts.push({ id: "short", name: "Short", command: "printf short; exit 17" }),
-  );
+  const shortcut = await agent.metadata.putShortcut({
+    name: "Short",
+    command: "printf short; exit 17",
+  });
   await agent.sessions
-    .create({ workspaceId: workspace.id, shortcutId: "short" }, signal)
+    .create({ workspaceId: workspace.id, shortcutId: shortcut.id }, signal)
     .catch((error: unknown) => {
       expect(error).toMatchObject({ outcome: "unknown" });
     });
@@ -873,13 +874,10 @@ test("an actual dead pane clears a timed-out creation before its delayed ended n
   const delayedEnd: DelayedEnd = { sessionId: "" };
   const { agent, workspace, dataDir, signal } = await fixture({ delayedEnd });
   await agent.sessions.create({ workspaceId: workspace.id }, signal);
-  await agent.metadata.update((value) =>
-    value.shortcuts.push({
-      id: "late-short",
-      name: "Late short",
-      command: "printf late-dead; exit 19",
-    }),
-  );
+  const shortcut = await agent.metadata.putShortcut({
+    name: "Late short",
+    command: "printf late-dead; exit 19",
+  });
   const recorder = agent.sessions.recorder;
   const recorderPid = recorder.pid!;
   const originalRequest = recorder.request.bind(recorder);
@@ -904,7 +902,7 @@ test("an actual dead pane clears a timed-out creation before its delayed ended n
   process.kill(recorderPid, "SIGSTOP");
   let paused = true;
   const creation = agent.sessions.create(
-    { workspaceId: workspace.id, shortcutId: "late-short" },
+    { workspaceId: workspace.id, shortcutId: shortcut.id },
     signal,
   );
   void creation.catch(() => {});

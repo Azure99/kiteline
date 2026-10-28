@@ -105,7 +105,9 @@ export class Agent {
     readonly config: AgentConfig,
     private readonly identity: Identity,
   ) {
-    this.metadata = new MetadataStore(config);
+    this.metadata = new MetadataStore(config, (snapshot) =>
+      this.send({ type: "metadata.snapshot", snapshot }),
+    );
     this.schedules = new ScheduledTasks(config, (snapshot) => {
       if (this.connectionId) this.send({ type: "tasks.snapshot", ...snapshot });
     });
@@ -116,7 +118,6 @@ export class Agent {
     this.repos.onComplete = (workspaceId, ids) => this.watches.reposComplete(workspaceId, ids);
     this.temporaryFiles = new TemporaryFiles(config.dataDir);
     this.files = new Files(this.metadata, this.directories);
-    this.metadata.onChange = (snapshot) => this.send({ type: "metadata.snapshot", snapshot });
     this.sessions = new Sessions(config, this.metadata, {
       frame: (message) => this.terminalChannels.frame(message),
       notice: (message) => {

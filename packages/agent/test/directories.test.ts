@@ -174,7 +174,7 @@ test("directory and repository pages share slots until their resources are relea
   const root = join(data, "project");
   await mkdir(join(root, "one"), { recursive: true });
   await mkdir(join(root, "two"));
-  const metadata = new MetadataStore(config(data));
+  const metadata = new MetadataStore(config(data), () => {});
   const workspace = await metadata.add(root);
   const budget = new CursorBudget();
   const directories = new Directories(budget);
@@ -217,7 +217,7 @@ test("repository continuation renews on acquisition and a busy reader cannot ren
   const nested = join(root, "repo");
   await mkdir(nested, { recursive: true });
   await gitRepoFixture(nested);
-  const metadata = new MetadataStore(config(data));
+  const metadata = new MetadataStore(config(data), () => {});
   const workspace = await metadata.add(root);
   const repos = new Repositories(metadata, new CursorBudget());
   const saved = { ...agentLimits };
