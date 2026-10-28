@@ -2,7 +2,9 @@ import { expect, test, vi } from "vitest";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { setImmediate } from "node:timers/promises";
-import { api, rpc } from "../src/lib/api";
+import { appVersion } from "@kiteline/shared/protocol";
+import { createApiClient } from "@kiteline/shared/protocol/client";
+import { api, cancelChannel, openChannel, rpc } from "../src/lib/api";
 import { cursorRpc } from "../src/lib/cursors";
 
 test("HTTP failure sources keep retryable reads separate from unknown writes", async () => {
@@ -14,7 +16,7 @@ test("HTTP failure sources keep retryable reads separate from unknown writes", a
   };
   const server = createServer((request, response) => {
     const path = new URL(request.url!, "http://local").pathname;
-    if (path === "/network") return request.socket.destroy();
+    if (path === "/network" || path === "/api/devices/lost/rpc") return request.socket.destroy();
     if (path === "/body-abort") {
       response.writeHead(502, { "content-type": "text/html" });
       response.write("<html>");
@@ -60,6 +62,19 @@ test("HTTP failure sources keep retryable reads separate from unknown writes", a
         retryable: false,
       });
     }
+    await expect(
+      rpc("lost", "cursors.release", { kind: "directory", id: "cursor" }),
+    ).rejects.toMatchObject({
+      code: "io_error",
+      outcome: undefined,
+      retryable: true,
+    });
+    await expect(
+      rpc("lost", "files.delete", { workspaceId: "w", paths: ["file"] }),
+    ).rejects.toMatchObject({
+      outcome: "unknown",
+      retryable: false,
+    });
     await expect(api("/500")).rejects.toMatchObject({ code: "io_error", retryable: false });
     await expect(api("/404")).rejects.toMatchObject({ code: "not_found", retryable: false });
     await expect(api("/invalid-json")).rejects.toBeInstanceOf(SyntaxError);
@@ -113,6 +128,152 @@ test("a partial cursor response retains its diagnostic details and result", asyn
     });
   } finally {
     fetch.mockRestore();
+  }
+});
+
+test("channel reservations keep read errors while cancellation encodes IDs and keeps write risk", async () => {
+  const requests: { method: string | undefined; url: URL; body: unknown }[] = [];
+  const channelId = "目录/a ?#%";
+  const ready = { channelId, meta: { terminalInputBytes: 4096 } };
+  const server = createServer((request, response) => {
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk: string) => (body += chunk));
+    request.on("end", () => {
+      const url = new URL(request.url!, "http://local");
+      requests.push({ method: request.method, url, body: body ? JSON.parse(body) : undefined });
+      if (url.pathname.includes("/lost/")) return response.destroy();
+      if (url.pathname.includes("/gateway/"))
+        return response.writeHead(502, { "content-type": "text/html" }).end("gateway");
+      if (url.pathname.includes("/rejected/"))
+        return response
+          .writeHead(409, { "content-type": "application/json" })
+          .end(JSON.stringify({ error: { code: "conflict", message: "Unavailable" } }));
+      if (url.pathname === "/api/channels/lost") return response.destroy();
+      response
+        .writeHead(200, { "content-type": "application/json" })
+        .end(JSON.stringify(request.method === "DELETE" ? { found: false } : ready));
+    });
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const nativeFetch = globalThis.fetch;
+  const fetch = vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation((path, options) => nativeFetch(origin + String(path), options));
+  try {
+    const params = { workspaceId: "workspace", sessionId: "session", history: "screen" } as const;
+    for (const deviceId of ["lost", "gateway"])
+      await expect(openChannel(deviceId, "terminal.attach", params)).rejects.toMatchObject({
+        code: "io_error",
+        outcome: undefined,
+        retryable: true,
+      });
+    await expect(openChannel("rejected", "terminal.attach", params)).rejects.toMatchObject({
+      code: "conflict",
+      outcome: undefined,
+      retryable: false,
+    });
+    const deviceId = "设备/a ?#%";
+    await expect(openChannel(deviceId, "terminal.attach", params)).resolves.toEqual(ready);
+    const opened = requests.at(-1)!;
+    expect(opened.method).toBe("POST");
+    expect(opened.url.pathname).toBe(`/api/devices/${encodeURIComponent(deviceId)}/channels`);
+    expect(opened.url.searchParams.get("appVersion")).toBe(appVersion);
+    expect(opened.body).toEqual({ kind: "terminal.attach", params });
+
+    await expect(cancelChannel(channelId)).resolves.toEqual({ found: false });
+    const cancelled = requests.at(-1)!;
+    expect(cancelled.method).toBe("DELETE");
+    expect(cancelled.url.pathname).toBe(`/api/channels/${encodeURIComponent(channelId)}`);
+    expect(cancelled.url.searchParams.get("appVersion")).toBe(appVersion);
+    expect(cancelled.body).toBeUndefined();
+    await expect(cancelChannel("lost")).rejects.toMatchObject({
+      code: "io_error",
+      outcome: "unknown",
+      retryable: false,
+    });
+  } finally {
+    fetch.mockRestore();
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
+
+test("a file reservation cancelled after consumption releases its late channel without waiting", async () => {
+  const abort = new AbortController();
+  const ready = {
+    channelId: "late/目录?%",
+    meta: { size: 0, contentType: "text/plain; charset=utf-8", filename: "file" },
+  };
+  let finishCancellation!: () => void;
+  let cancelled!: () => void;
+  const cancelling = new Promise<void>((resolve) => {
+    cancelled = resolve;
+  });
+  let settled!: () => void;
+  const cancellationSettled = new Promise<void>((resolve) => {
+    settled = resolve;
+  });
+  let prepared: unknown;
+  const server = createServer((request, response) => {
+    if (request.method === "DELETE") {
+      expect(new URL(request.url!, "http://local").pathname).toBe(
+        `/api/channels/${encodeURIComponent(ready.channelId)}`,
+      );
+      finishCancellation = () => response.destroy();
+      cancelled();
+      return;
+    }
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk: string) => (body += chunk));
+    request.on("end", () => {
+      prepared = JSON.parse(body);
+      response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(ready));
+    });
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const client = createApiClient({
+    newId: () => "unused",
+    request: async (path, options, consume) => {
+      try {
+        const result = await consume(await fetch(origin + path, options));
+        // The real body is consumed; cancel before fileChannel resumes with its ready result.
+        if (options.method === "POST") abort.abort();
+        return result;
+      } finally {
+        if (options.method === "DELETE") settled();
+      }
+    },
+  });
+  try {
+    await expect(
+      client.fileChannel(
+        { deviceId: "d", workspaceId: "w", path: "file" },
+        "file.read",
+        { purpose: "text" },
+        abort.signal,
+      ),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(prepared).toEqual({
+      kind: "file.read",
+      params: { workspaceId: "w", path: "file", purpose: "text" },
+    });
+    await cancelling;
+    finishCancellation();
+    await cancellationSettled;
+    await setImmediate();
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
   }
 });
 

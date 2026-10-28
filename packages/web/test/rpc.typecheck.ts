@@ -1,25 +1,70 @@
-import type { ChannelParams, FileListing, RpcMethod, RpcResult } from "@kiteline/shared/protocol";
-import { rpc, rpcReply } from "../src/lib/api";
+import type { FileListing, Outcome, RpcMethod, RpcResult } from "@kiteline/shared/protocol";
+import { ApiError, apiError, fileChannel, openChannel, rpc, rpcReply } from "../src/lib/api";
 import { GitActions, type GitTarget } from "../src/git/actions";
 
-export function checkChannelParams() {
-  const target = { workspaceId: "w", path: "f" };
-  const save = {
-    ...target,
+export async function checkChannelContracts(deviceId: string) {
+  const target = { deviceId, workspaceId: "w", path: "f" };
+  const web = await openChannel(deviceId, "terminal.attach", { workspaceId: "w", sessionId: "s" });
+  web.meta.terminalInputBytes.toFixed();
+  // @ts-expect-error terminal metadata is not file metadata
+  web.meta.size.toFixed();
+  const tty = await openChannel(deviceId, "terminal.attach", {
+    workspaceId: "w",
+    sessionId: "s",
+    mode: "tty",
+    cols: 80,
+    rows: 24,
+    term: "xterm-256color",
+  });
+  tty.meta.terminalInputBytes.toFixed();
+  const read = await fileChannel(target, "file.read", { purpose: "text" });
+  read.meta.size.toFixed();
+  // @ts-expect-error file metadata is not terminal metadata
+  read.meta.terminalInputBytes.toFixed();
+  await fileChannel(target, "file.write", {
+    purpose: "save",
+    size: 0,
+    createOnly: false,
+    expectedRevision: "revision",
+  });
+  const upload = await openChannel(deviceId, "file.write", {
+    workspaceId: "w",
+    path: "f",
+    purpose: "upload",
+    size: 0,
+    createOnly: false,
+    expectedTargetVersion: "version",
+  });
+  upload.meta.size.toFixed();
+  // @ts-expect-error terminal attach needs a session identity
+  await openChannel(deviceId, "terminal.attach", { workspaceId: "w" });
+  // @ts-expect-error tty attach requires dimensions and TERM
+  await openChannel(deviceId, "terminal.attach", { workspaceId: "w", sessionId: "s", mode: "tty" });
+  // @ts-expect-error file reads cannot use a write purpose
+  await openChannel(deviceId, "file.read", { workspaceId: "w", path: "f", purpose: "upload" });
+  // @ts-expect-error file.read cannot use a save purpose through fileChannel either
+  await fileChannel(target, "file.read", { purpose: "save" });
+  await fileChannel(target, "file.write", {
     purpose: "save",
     size: 0,
     createOnly: true,
-  } satisfies ChannelParams["file.write"];
-  // @ts-expect-error file reads cannot use a write purpose
-  const read = { ...target, purpose: "upload" } satisfies ChannelParams["file.read"];
-  const wrongVersion = {
-    ...save,
     // @ts-expect-error text saves use expectedRevision, not the upload target version
-    expectedTargetVersion: "v",
-  } satisfies ChannelParams["file.write"];
-  // @ts-expect-error terminal attach needs a session identity
-  const terminal = { workspaceId: "w" } satisfies ChannelParams["terminal.attach"];
-  void [save, read, wrongVersion, terminal];
+    expectedTargetVersion: "version",
+  });
+  // @ts-expect-error proxy channels are created internally by the server
+  await openChannel(deviceId, "http.proxy", { port: 3000 });
+  // @ts-expect-error download uses its dedicated GET endpoint
+  await openChannel(deviceId, "file.read", { workspaceId: "w", path: "f", purpose: "download" });
+  // @ts-expect-error fileChannel also reserves through the public POST endpoint
+  await fileChannel(target, "file.read", { purpose: "download" });
+
+  const error = { code: "io_error", message: "The response was lost" };
+  const outcome: Outcome | undefined = apiError(error).outcome;
+  void outcome;
+  // @ts-expect-error API errors use the protocol outcome vocabulary
+  new ApiError(error.code, error.message, "indeterminate");
+  // @ts-expect-error the conversion helper uses the same outcome vocabulary
+  apiError(error, "indeterminate");
 }
 
 // Compiled by typecheck, never executed. Each rejected call reproduces a contract mistake.
@@ -57,6 +102,16 @@ export async function checkRpcContracts(deviceId: string, target: GitTarget, met
     { workspaceId: "w", items: [{ path: "a", targetPath: "b", collision: "error" }] },
   ]);
   write.result?.items.map((item) => item.outcome);
+  const copied = await rpcReply(deviceId, "request-id", [
+    "files.copy",
+    { workspaceId: "w", items: [{ path: "a", targetPath: "b", collision: "error" }] },
+  ]);
+  if (copied.outcome !== "succeeded") copied.result?.items.map((item) => item.outcome);
+  const deleted = await rpcReply(deviceId, "request-id", [
+    "files.delete",
+    { workspaceId: "w", paths: ["a"] },
+  ]);
+  if (deleted.outcome !== "succeeded") deleted.result?.items.map((item) => item.outcome);
   // @ts-expect-error file delete uses paths, not copy items
   await rpcReply(deviceId, "request-id", ["files.delete", { workspaceId: "w", items: [] }]);
   const created = await rpcReply(deviceId, "request-id", ["sessions.create", { workspaceId: "w" }]);

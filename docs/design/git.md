@@ -104,7 +104,7 @@
 
 ### 队列
 
-- 所有写方法（`packages/shared/src/protocol/rpc.ts` 的 `gitWriteMethods`）都进入 `GitWriteQueue`（`packages/agent/src/git/queue.ts`），按 `commonDir` 串行执行：同一仓库及其全部 linked worktree 的写操作一次只执行一个。轮到某个写操作时，agent 先重新核验仓库身份。
+- 写契约由 `packages/shared/src/protocol/rpc.ts` 的 `GitWriteMethods` 定义；`packages/agent/src/git/rpc.ts` 的 handler 按方法约束参数字段与结果，并提供运行时写方法识别。所有写都进入 `GitWriteQueue`（`packages/agent/src/git/queue.ts`），按 `commonDir` 串行执行：同一仓库及其全部 linked worktree 的写操作一次只执行一个。轮到某个写操作时，agent 先重新核验仓库身份。
 - 排队期间可以取消，被取消的写操作不执行。写超时 `gitWriteTimeout` 从 agent 收到请求开始计时，包括排队时间；读方法使用 `rpcTimeout`。
 - 浏览器对每个仓库同时只发出一个写请求（`packages/web/src/git/actions.ts`），取消时调用 `DELETE /api/devices/<deviceId>/requests/<requestId>`。
 - 队列只协调本 agent 的写操作。外部写入者不加锁：终端或其他程序中的 Git 可以同时修改仓库，竞争由 Git 自己的 `index.lock` 和后续检查反馈。agent 不删除 `index.lock`，也不自动重试。

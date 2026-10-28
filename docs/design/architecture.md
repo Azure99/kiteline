@@ -183,7 +183,7 @@ agent 的出站代理规则见[出站代理与证书](../guide/devices.md#出站
 
 ### 添加 RPC 方法
 
-在 `packages/shared/src/protocol/rpc.ts` 定义方法、参数、结果和写分类，并按操作确定期限、本机调用权限及变化通知时点。
+在 `packages/shared/src/protocol/rpc.ts` 定义方法、参数及成功与非成功结果类型，并为 `rpcTraits` 填写丢响应分类、总期限和成功结果超限策略。同时在本机入口确定调用权限，在领域执行处确定变化通知时点。
 
 Git 写操作经过 `GitWriteQueue`；工作区变化通知分别发生在 RPC 完成、后台文件操作真正结束或内容已发布/结果未确认时。调用方按[结果语义](protocol.md#结果语义)处理失败及结果未确认；测试覆盖实际变化的行为。
 
@@ -195,7 +195,7 @@ Git 写操作经过 `GitWriteQueue`；工作区变化通知分别发生在 RPC �
 
 ### 添加数据通道种类
 
-在 `packages/shared/src/protocol/index.ts` 定义种类、参数和 meta，更新 `packages/server/src/channels.ts` 的公开种类、purpose、meta 和内容类型检查。
+在 `packages/shared/src/protocol/index.ts` 定义种类、参数和 meta，更新 `packages/server/src/channels.ts` 的公开种类、purpose、meta 和内容类型检查。公开预约同时更新 `shared/protocol/client` 的 `openChannel` 参数与 meta 类型；取消使用 `cancelChannel`，等待和错误处理由调用方决定。
 
 在 agent 中接入通道的 open 分派，确定取消、断连与关闭时的资源归属，以及是否占用文件传输额度。共用同一资源所有者的通道统一清理。
 

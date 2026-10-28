@@ -31,37 +31,52 @@ test.each([
   ["failed", "Not completed"],
   ["unknown", "Result unconfirmed"],
   ["partial", "Partially completed"],
-])("Git feedback preserves the %s outcome and full diagnostics", async (outcome, label) => {
+] as const)(
+  "Git feedback preserves the %s outcome and full diagnostics",
+  async (outcome, label) => {
+    await setLanguagePreference("en");
+    const actions = new GitActions();
+    const value = actions.get(target);
+    const stderr = "first diagnostic\nsecond diagnostic\n";
+    value.lastMethod = "git.stage";
+    value.error = new ApiError(
+      "io_error",
+      stderr.trim(),
+      outcome,
+      { blockedPaths: ["blocked.txt"], invalidPaths: ["invalid bytes"], truncated: true },
+      {
+        stdout: "standard output\n",
+        stderr,
+        truncated: true,
+        changedPaths: outcome === "partial" ? ["changed.txt"] : [],
+      },
+    );
+    const markup = feedback(actions);
+    expect(markup).toContain(`Stage · ${label}`);
+    expect(markup).toContain("standard output\n");
+    expect(markup).toContain(stderr);
+    expect(markup.match(/first diagnostic/g)).toHaveLength(1);
+    expect(markup).toContain("Only the beginning of the output was retained");
+    if (outcome === "partial") expect(markup).toContain("changed.txt");
+    expect(markup).toContain("blocked.txt");
+    expect(markup).toContain("Non-UTF-8 path: invalid bytes");
+    expect(markup).toContain("Additional blocking paths are not shown");
+    expect(markup).toContain("io_error");
+    expect(markup).toContain("blockedPaths");
+    expect(markup).toContain('aria-label="Close"');
+  },
+);
+
+test("Git feedback leaves an absent outcome unlabeled", async () => {
   await setLanguagePreference("en");
   const actions = new GitActions();
   const value = actions.get(target);
-  const stderr = "first diagnostic\nsecond diagnostic\n";
-  value.lastMethod = "git.stage";
-  value.error = new ApiError(
-    "io_error",
-    stderr.trim(),
-    outcome,
-    { blockedPaths: ["blocked.txt"], invalidPaths: ["invalid bytes"], truncated: true },
-    {
-      stdout: "standard output\n",
-      stderr,
-      truncated: true,
-      changedPaths: outcome === "partial" ? ["changed.txt"] : [],
-    },
-  );
+  value.lastMethod = "git.fetch";
+  value.error = new ApiError("offline", "Device is offline");
   const markup = feedback(actions);
-  expect(markup).toContain(`Stage · ${label}`);
-  expect(markup).toContain("standard output\n");
-  expect(markup).toContain(stderr);
-  expect(markup.match(/first diagnostic/g)).toHaveLength(1);
-  expect(markup).toContain("Only the beginning of the output was retained");
-  if (outcome === "partial") expect(markup).toContain("changed.txt");
-  expect(markup).toContain("blocked.txt");
-  expect(markup).toContain("Non-UTF-8 path: invalid bytes");
-  expect(markup).toContain("Additional blocking paths are not shown");
-  expect(markup).toContain("io_error");
-  expect(markup).toContain("blockedPaths");
-  expect(markup).toContain('aria-label="Close"');
+  expect(markup).toContain("Fetch");
+  expect(markup).toContain("Device is offline");
+  expect(markup).not.toContain("Fetch ·");
 });
 
 test("Git feedback merges identical streams while retaining a distinct error message", async () => {

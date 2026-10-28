@@ -6,7 +6,7 @@
 
 - `packages/shared/src/protocol/index.ts`：公共协议入口，再导出 `limits`、基础校验和终端值 parser，并定义 `appVersion`、`Reply`、各对象类型、控制消息、浏览器事件和 `ChannelKind`。
 - `packages/shared/src/protocol/validation.ts`、`limits.ts`：基础校验与 `AppError`、固定限额。`terminal-observation.ts`：终端类型和纯值 parser，由 Agent 和远程 CLI 的同义值消费共用；CLI 另行处理文本词法与命令组合。
-- `packages/shared/src/protocol/rpc.ts`：RPC 方法及参数、结果类型，`rpcMutates`，`gitWriteMethods`。
+- `packages/shared/src/protocol/rpc.ts`：RPC 方法及参数、成功与非成功结果类型，Git 写契约 `GitWriteMethods`，逐方法策略 `rpcTraits` 和自有键判断 `isRpcMethod`。
 - `packages/shared/src/protocol/tasks.ts`：定时任务对象。`packages/shared/src/protocol/ipc.ts`：recorder IPC 消息和终端帧。
 - `packages/shared/src/protocol/ws.ts`、`file-stream.ts`、`http-stream.ts`、`stdio.ts`：心跳、帧发送、文件帧队列、HTTP 字节流、逐行 JSON。
 - `packages/server/src/limits.ts`、`packages/agent/src/limits.ts`、`packages/agent/src/config.ts`：其他固定限额和可调限额。
@@ -42,7 +42,7 @@ RPC、文件写入和本机 IPC 返回 `Reply`，字段定义见 `packages/share
 - agent 的成功结果超过 `controlMessageBytes`：agent 返回 `unknown` 和 `limit_exceeded`，不返回结果正文；`sessions.snapshot` 和 `sessions.wait` 是例外，超限时返回 `failed` 和 `limit_exceeded`。非成功结果超限时，agent 保留该结果的 `outcome`，同样返回 `limit_exceeded`。
 - 文件写入在 server 开始发送 `end` 后、尚未收到 agent 的 `result` 时通道失败；开始发送之前失败为 `failed`。收到 `result` 时保留其中的 `Reply`。
 - recorder 请求超时或 recorder 退出。
-- 工作台发出写请求后没有收到可解析的响应（网络中断、反向代理返回非 JSON 错误页）：工作台记为 `io_error` 和 `unknown`。写请求指 `rpcMutates` 为 `true` 的 RPC 和其他非 GET、非 HEAD 请求；打开数据通道的 POST 仅预约通道，不按写请求处理。本机命令行对写方法采用同样规则。
+- HTTP RPC 没有收到可解析的响应（网络中断、反向代理返回非 JSON 错误页）时，`rpcTraits.responseLoss` 为 `unknown` 的方法记为 `io_error` 和 `unknown`。其他非 GET、非 HEAD 请求也按此处理；打开数据通道的 POST 仅预约通道，不按此处理。本机命令行还要求请求已经触发 `finish`，发送前失败保留原传输错误。
 
 **不自动重放。** server、agent、工作台和命令行都不会自动重发写请求：结果为 `failed` 或 `unknown` 时不重发，连接恢复后也不补发。正确的处理是先重新读取实际状态，再由拥有者决定是否重试。读取请求可以重试：工作台把读取遇到的网络错误和 502、503、504，以及 server 在转发前以 502、503、504 拒绝的请求，标为可重试（`ApiError.retryable`）。
 
@@ -244,18 +244,13 @@ server 在内存中保留每个设备/工作区/session 的最新待处理报告
 
 1. 工作台通过 `POST /api/devices/:deviceId/rpc` 发送 RPC 请求。
 2. server 检查：设备在线（否则 `offline` 或 `version_mismatch`），`id` 不在进行中（否则 `conflict`），该连接进行中的 RPC 少于 `pendingRequestsPerDevice`（否则 `busy`），`rpc.request` 不超过 `controlMessageBytes`（否则 `limit_exceeded`）。server 不检查方法名和参数字段，也不设期限，只等待 agent 回复或连接断开。
-3. agent 对未知方法返回 `unsupported`，其他方法按下表设置期限后执行，到期时以 `timeout` 结束。
+3. agent 先检查停止和取消，再对未知方法返回 `unsupported`，通过准入后执行请求。
 4. 取消：调用 `DELETE /api/devices/:deviceId/requests/:requestId`（只能取消同一登录的请求），或者原 HTTP 请求在响应前关闭，server 都会向 agent 发送 `rpc.cancel`。原请求仍以自己的 `Reply` 结束，通常为 `cancelled`。
 5. 进度：长操作通过 `request.progress` 报告排队或执行进度，只通知发起请求的登录；字段见 `FileProgress`。
 
-| 期限              | 方法                                       |
-| ----------------- | ------------------------------------------ |
-| `searchTimeout`   | `files.search`                             |
-| `gitWriteTimeout` | `gitWriteMethods` 中的 Git 写方法          |
-| 无总期限          | `files.copy`、`files.move`、`files.delete` |
-| `rpcTimeout`      | 其他方法                                   |
+Agent 根据 `rpcTraits.deadline` 选择 `rpcTimeout`、`searchTimeout` 或 `gitWriteTimeout`，到期时以 `timeout` 结束；`none` 不设置 RPC 总期限。期限的数值见[限额](../guide/reference.md#限额)。方法、参数和结果类型以 `packages/shared/src/protocol/rpc.ts` 的 `RpcMethods` 为准；`files.copy`、`files.move`、`files.delete` 的非成功 `result` 可包含逐项文件结果。
 
-期限的数值见[限额](../guide/reference.md#限额)。方法、参数和结果类型以 `packages/shared/src/protocol/rpc.ts` 的 `RpcMethods` 为准；`rpcMutates` 定义哪些方法按写请求处理，结果不明时遵守[结果语义](#结果语义)。
+`rpcTraits` 的三项策略独立声明：`responseLoss` 决定没有可解析响应时的传输错误分类，`deadline` 决定 RPC 总期限，`oversizedSuccess` 决定成功结果超限后的 outcome。它们不决定领域写操作身份或是否允许 `partial`；结果不明时遵守[结果语义](#结果语义)。
 
 运行时分派入口是 `packages/agent/src/agent.ts` 的 `perform()`；定时任务、Git 和全部会话方法分别交给 `packages/agent/src/tasks/rpc.ts`、`packages/agent/src/git/rpc.ts` 与 `packages/agent/src/terminal/rpc.ts`。终端短 RPC 的位置、屏幕和输入类型在 `packages/shared/src/protocol/terminal-observation.ts`；snapshot、wait 为读取，send、resize、recover 为写入。各方法的业务规则见相应的终端、文件、Git、定时任务和开发服务访问文档。
 

@@ -9,7 +9,7 @@ import type {
   UploadedFile,
 } from "@kiteline/shared/protocol";
 import { decodeText } from "@kiteline/shared/protocol/text";
-import { ApiError, api, apiError, fileChannel, request } from "../lib/api";
+import { ApiError, api, apiError, cancelChannel, fileChannel, request } from "../lib/api";
 import { observeServerVersion, webCompatible } from "../lib/release";
 
 export type { FileTarget } from "@kiteline/shared/protocol";
@@ -24,7 +24,7 @@ export interface DiskImage {
   meta: FileMeta;
 }
 async function release(id: string) {
-  await api(`/api/channels/${id}`, { method: "DELETE" }).catch(() => {});
+  await cancelChannel(id).catch(() => {});
 }
 async function readContentBytes(
   target: FileTarget,
@@ -178,7 +178,7 @@ export async function uploadFile(
       request.send(file);
       onReady(() => {
         cancelled = true;
-        return api(`/api/channels/${ready.channelId}`, { method: "DELETE" });
+        return cancelChannel(ready.channelId);
       });
       if (signal.aborted) cancel();
     });

@@ -341,7 +341,7 @@ test("unknown channel kinds close control without opening a data connection and 
   }
 });
 
-test("bulk file requests outlive the RPC timeout and still cancel while publication is blocked", async () => {
+test("copy, move and delete outlive the RPC timeout and still cancel while publication is blocked", async () => {
   const root = await mkdtemp("/var/tmp/kiteline-bulk-control-");
   const server = createHttpServer();
   const sockets = new WebSocketServer({ server });
@@ -391,18 +391,48 @@ test("bulk file requests outlive the RPC timeout and still cancel while publicat
           },
         }),
       );
-    await hold();
-    copy("waited");
-    await expect.poll(() => agent.requests.has("waited")).toBe(true);
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    expect(replies).toEqual([]);
-    expect(agent.requests.get("waited")!.signal.aborted).toBe(false);
-    release!();
-    await held;
-    await expect
-      .poll(() => replies.find((reply) => reply.id === "waited"))
-      .toMatchObject({ outcome: "succeeded" });
-    expect(await readFile(join(root, "workspace/waited"), "utf8")).toBe("actual copy");
+    const operations = [
+      {
+        method: "files.copy",
+        params: { items: [{ path: "source", targetPath: "waited-copy", collision: "error" }] },
+        path: "waited-copy",
+      },
+      {
+        method: "files.move",
+        params: { items: [{ path: "waited-copy", targetPath: "waited-move", collision: "error" }] },
+        path: "waited-move",
+      },
+      { method: "files.delete", params: { paths: ["waited-move"] }, path: "waited-move" },
+    ];
+    for (const operation of operations) {
+      const id = operation.method;
+      await hold();
+      peer.send(
+        JSON.stringify({
+          type: "rpc.request",
+          id,
+          method: operation.method,
+          params: { workspaceId: workspace.id, ...operation.params },
+        }),
+      );
+      await expect.poll(() => agent.requests.has(id)).toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(replies.some((reply) => reply.id === id)).toBe(false);
+      expect(agent.requests.get(id)!.signal.aborted).toBe(false);
+      release!();
+      await held;
+      await expect
+        .poll(() => replies.find((reply) => reply.id === id))
+        .toMatchObject({ outcome: "succeeded" });
+      const result = readFile(join(root, "workspace", operation.path), "utf8");
+      if (operation.method === "files.delete")
+        await expect(result).rejects.toMatchObject({ code: "ENOENT" });
+      else await expect(result).resolves.toBe("actual copy");
+      if (operation.method === "files.move")
+        await expect(readFile(join(root, "workspace/waited-copy"))).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+    }
 
     await hold();
     copy("cancelled");
@@ -427,6 +457,69 @@ test("bulk file requests outlive the RPC timeout and still cancel while publicat
   } finally {
     release?.();
     await held;
+    await agent.close();
+    for (const peer of sockets.clients) peer.terminate();
+    await new Promise<void>((resolve) => sockets.close(() => resolve()));
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("control selects the ordinary and search deadlines independently", async () => {
+  const root = await mkdtemp("/var/tmp/kiteline-control-deadlines-");
+  const server = createHttpServer();
+  const sockets = new WebSocketServer({ server });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const agent = new Agent(
+    testConfig(root, {
+      limits: { rpcTimeout: 50, searchTimeout: 600, gitWriteTimeout: 8000 },
+    }),
+    {
+      deviceId: "test",
+      deviceToken: "test",
+      server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    },
+  );
+  const signals = new Map<string, AbortSignal>();
+  // Observe the control timer without depending on the duration of a domain operation.
+  const dispatch = vi.spyOn(agent, "dispatch").mockImplementation((method, _params, signal) => {
+    signals.set(method, signal);
+    return new Promise((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    });
+  });
+  try {
+    const connected = once(sockets, "connection");
+    for (const path of [agent.config.dataDir, agent.config.runDir]) await privateDirectory(path);
+    await agent.start();
+    const [peer] = (await connected) as [WebSocket];
+    const replies = new Map<string, Reply>();
+    peer.on("message", (data) => {
+      const message = JSON.parse(data.toString());
+      if (message.type === "rpc.result") replies.set(message.reply.id, message.reply);
+    });
+    peer.send(JSON.stringify({ type: "welcome", connectionId: "test", serverVersion: appVersion }));
+    for (const method of ["sessions.list", "files.search"])
+      peer.send(JSON.stringify({ type: "rpc.request", id: method, method, params: {} }));
+    await expect
+      .poll(() => replies.get("sessions.list"))
+      .toMatchObject({
+        outcome: "failed",
+        error: { code: "timeout" },
+      });
+    expect(signals.get("files.search")?.aborted).toBe(false);
+    expect(replies.has("files.search")).toBe(false);
+    await expect
+      .poll(() => replies.get("files.search"), { timeout: 2000 })
+      .toMatchObject({
+        outcome: "failed",
+        error: { code: "timeout" },
+      });
+    expect(signals.get("sessions.list")?.aborted).toBe(true);
+    expect(signals.get("files.search")?.aborted).toBe(true);
+  } finally {
+    dispatch.mockRestore();
     await agent.close();
     for (const peer of sockets.clients) peer.terminate();
     await new Promise<void>((resolve) => sockets.close(() => resolve()));

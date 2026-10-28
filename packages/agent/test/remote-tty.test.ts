@@ -49,7 +49,7 @@ async function fixture() {
         params: { ...params, mode, cols: 80, rows: 24, term: "xterm-256color", ...extra },
       },
       undefined,
-      false,
+      "read-error",
     );
   }
   async function connect(mode: "tty" | "web", ready: ChannelReady) {

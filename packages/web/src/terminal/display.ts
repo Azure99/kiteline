@@ -5,13 +5,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { deviceServiceLink } from "../lib/device-service";
 import type { BrowserTerminalInput } from "@kiteline/shared/protocol/ipc";
 import { terminalOutputCost } from "@kiteline/shared/protocol/ipc";
-import {
-  integer,
-  limits,
-  record,
-  type ChannelParams,
-  type TerminalMeta,
-} from "@kiteline/shared/protocol";
+import { integer, limits, record, type TerminalMeta } from "@kiteline/shared/protocol";
 import {
   forwardUserInput,
   freezeMouse,
@@ -20,7 +14,7 @@ import {
   terminalOptions,
   initializeTerminalUnicode,
 } from "@kiteline/shared/terminal";
-import { ApiError, api, post } from "../lib/api";
+import { ApiError, cancelChannel, openChannel } from "../lib/api";
 import { i18n } from "../i18n";
 import { retainReadonlyViewport } from "./clipped-screen";
 import { isMobile } from "../lib/use-mobile";
@@ -90,18 +84,15 @@ export class TerminalDisplay {
   }
   private async connect(history: "retained" | "screen") {
     try {
-      const channel = await post<{ channelId: string; meta: TerminalMeta }>(
-        `/api/devices/${encodeURIComponent(this.deviceId)}/channels`,
+      const channel = await openChannel(
+        this.deviceId,
+        "terminal.attach",
         {
-          kind: "terminal.attach",
-          params: {
-            workspaceId: this.workspaceId,
-            sessionId: this.sessionId,
-            history,
-          } satisfies ChannelParams["terminal.attach"],
+          workspaceId: this.workspaceId,
+          sessionId: this.sessionId,
+          history,
         },
         this.abort.signal,
-        false,
       );
       this.channelId = channel.channelId;
       if (this.disposed) {
@@ -489,9 +480,7 @@ export class TerminalDisplay {
   }
   private cancelChannel() {
     if (this.channelId) {
-      void api(`/api/channels/${encodeURIComponent(this.channelId)}`, { method: "DELETE" }).catch(
-        () => {},
-      );
+      void cancelChannel(this.channelId).catch(() => {});
       this.channelId = undefined;
     }
   }

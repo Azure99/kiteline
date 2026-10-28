@@ -4,7 +4,7 @@ import {
   integer,
   record,
   string,
-  rpcMutates,
+  rpcTraits,
   taskInputKeys,
   type RpcMethod,
   type RpcResult,
@@ -14,7 +14,7 @@ import { ScheduledTasks } from "./index.js";
 import { previewSchedule, checkFileId } from "./schedule.js";
 
 export type ScheduleMethod = Extract<RpcMethod, `tasks.${string}` | `runs.${string}`>;
-export const scheduleMethods = Object.keys(rpcMutates).filter(
+export const scheduleMethods = Object.keys(rpcTraits).filter(
   (method): method is ScheduleMethod => method.startsWith("tasks.") || method.startsWith("runs."),
 );
 

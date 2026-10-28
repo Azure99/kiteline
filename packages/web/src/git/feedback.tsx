@@ -83,7 +83,7 @@ export function GitFeedback({
     : value.error instanceof ApiError
       ? value.error.outcome
       : undefined;
-  const outcomeLabels: Record<string, string> = {
+  const outcomeLabels = {
     succeeded: t(($) => $.files.succeeded),
     failed: t(($) => $.files.failed),
     partial: t(($) => $.files.partial),

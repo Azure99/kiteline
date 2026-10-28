@@ -8,12 +8,11 @@ export { AppError, record, string, optionalString, integer, limits };
 export const appVersion = release.version;
 export const terminalProfile = "xterm-c2-unicode11";
 export const defaultTerminalHistoryLines = 5_000;
-export { rpcMutates, gitWriteMethods } from "./rpc.js";
+export { rpcTraits, isRpcMethod } from "./rpc.js";
 export * from "./tasks.js";
 export * from "./terminal-observation.js";
 export * from "./git-status.js";
 export type {
-  RpcMethods,
   RpcMethod,
   RpcParams,
   RpcResult,

@@ -44,7 +44,7 @@ import type {
   ScreenWaitResult,
 } from "./terminal-observation.js";
 
-type Contract<P, R> = { params: P; result: R };
+type Contract<P, R, E = unknown> = { params: P; result: R; errorResult: E };
 type WorkspaceParams = { workspaceId: string };
 type FileParams = WorkspaceParams & { path: string };
 type RepoParams = WorkspaceParams & { repoId: string };
@@ -55,7 +55,37 @@ type GitFinish = RepoParams & { expectedOperation: { kind: GitOperation["kind"];
 type BranchTarget = RepoParams & { name: string; refOid: string };
 type FileResults = { items: FileItemResult[] };
 
-export interface RpcMethods {
+interface GitWriteMethods {
+  "git.stage": Contract<GitPaths, { changedPaths: string[] }>;
+  "git.unstage": Contract<GitPaths, { changedPaths: string[] }>;
+  "git.discard": Contract<
+    GitPaths & { scope: DiscardScope; reviewToken: string },
+    { changedPaths: string[] }
+  >;
+  "git.commit": Contract<
+    RepoParams & { message: string; indexToken: string },
+    { commitOid: string }
+  >;
+  "git.branch.create": Contract<
+    RepoParams & { name: string; startOid?: string; switch: boolean },
+    { created: boolean; switched: boolean; head: HeadIdentity }
+  >;
+  "git.branch.switch": Contract<BranchTarget, { head: HeadIdentity }>;
+  "git.branch.delete": Contract<BranchTarget, { deleted: boolean }>;
+  "git.fetch": Contract<RepoParams & { remote?: string }, GitOutput>;
+  "git.pull": Contract<RepoParams & { expectedHead: HeadIdentity }, GitOutput>;
+  "git.push": Contract<RepoParams & { expectedHead: HeadIdentity }, GitOutput>;
+  "git.continue": Contract<
+    GitFinish,
+    GitOutput & { headOid: string | null; operationAfter?: GitOperation }
+  >;
+  "git.abort": Contract<
+    GitFinish,
+    GitOutput & { headOid: string | null; operationAfter?: GitOperation }
+  >;
+}
+
+interface RpcMethods extends GitWriteMethods {
   "tasks.list": Contract<
     { offset?: number },
     { items: ScheduledTaskSummary[]; offset: number; total: number }
@@ -122,9 +152,9 @@ export interface RpcMethods {
   "files.inspect": Contract<FileParams & { suggestCopyName?: boolean }, FileInspection>;
   "files.create": Contract<FileParams & { kind: "file" | "directory" }, Entry>;
   "files.rename": Contract<FileParams & { newName: string }, { from: string; to: string }>;
-  "files.copy": Contract<WorkspaceParams & { items: CopyItem[] }, FileResults>;
-  "files.move": Contract<WorkspaceParams & { items: CopyItem[] }, FileResults>;
-  "files.delete": Contract<WorkspaceParams & { paths: string[] }, FileResults>;
+  "files.copy": Contract<WorkspaceParams & { items: CopyItem[] }, FileResults, FileResults>;
+  "files.move": Contract<WorkspaceParams & { items: CopyItem[] }, FileResults, FileResults>;
+  "files.delete": Contract<WorkspaceParams & { paths: string[] }, FileResults, FileResults>;
   "files.search": Contract<
     WorkspaceParams & { mode: "name" | "content"; query: string; includeIgnored: boolean },
     SearchResult
@@ -147,123 +177,113 @@ export interface RpcMethods {
   "git.branches": Contract<RepoParams, { branches: Branch[] }>;
   "git.remotes": Contract<RepoParams, GitRemotes>;
   "git.review": Contract<GitPaths & { scope: DiscardScope }, GitReview>;
-  "git.stage": Contract<GitPaths, { changedPaths: string[] }>;
-  "git.unstage": Contract<GitPaths, { changedPaths: string[] }>;
-  "git.discard": Contract<
-    GitPaths & { scope: DiscardScope; reviewToken: string },
-    { changedPaths: string[] }
-  >;
-  "git.commit": Contract<
-    RepoParams & { message: string; indexToken: string },
-    { commitOid: string }
-  >;
-  "git.branch.create": Contract<
-    RepoParams & { name: string; startOid?: string; switch: boolean },
-    { created: boolean; switched: boolean; head: HeadIdentity }
-  >;
-  "git.branch.switch": Contract<BranchTarget, { head: HeadIdentity }>;
-  "git.branch.delete": Contract<BranchTarget, { deleted: boolean }>;
-  "git.fetch": Contract<RepoParams & { remote?: string }, GitOutput>;
-  "git.pull": Contract<RepoParams & { expectedHead: HeadIdentity }, GitOutput>;
-  "git.push": Contract<RepoParams & { expectedHead: HeadIdentity }, GitOutput>;
-  "git.continue": Contract<
-    GitFinish,
-    GitOutput & { headOid: string | null; operationAfter?: GitOperation }
-  >;
-  "git.abort": Contract<
-    GitFinish,
-    GitOutput & { headOid: string | null; operationAfter?: GitOperation }
-  >;
 }
 
 export type RpcMethod = keyof RpcMethods;
-export const rpcMutates = {
-  "tasks.list": false,
-  "tasks.get": false,
-  "tasks.preview": false,
-  "tasks.create": true,
-  "tasks.update": true,
-  "tasks.pause": true,
-  "tasks.resume": true,
-  "tasks.acknowledge": true,
-  "tasks.delete": true,
-  "tasks.run": true,
-  "runs.list": false,
-  "runs.get": false,
-  "runs.output": false,
-  "runs.stop": true,
-  "ports.list": false,
-  "directories.list": false,
-  "cursors.release": false,
-  "directories.mkdir": true,
-  "workspaces.add": true,
-  "workspaces.rename": true,
-  "workspaces.remove": true,
-  "sessions.list": false,
-  "sessions.create": true,
-  "sessions.rename": true,
-  "sessions.end": true,
-  "sessions.recover": true,
-  "sessions.redraw": true,
-  "sessions.snapshot": false,
-  "sessions.send": true,
-  "sessions.wait": false,
-  "sessions.resize": true,
-  "settings.update": true,
-  "shortcuts.put": true,
-  "shortcuts.remove": true,
-  "files.list": false,
-  "files.inspect": false,
-  "files.create": true,
-  "files.rename": true,
-  "files.copy": true,
-  "files.move": true,
-  "files.delete": true,
-  "files.search": false,
-  "repos.discover": false,
-  "git.status": false,
-  "git.diff": false,
-  "git.history": false,
-  "git.commitMessage": false,
-  "git.commitFiles": false,
-  "git.branches": false,
-  "git.remotes": false,
-  "git.review": false,
-  "git.stage": true,
-  "git.unstage": true,
-  "git.discard": true,
-  "git.commit": true,
-  "git.branch.create": true,
-  "git.branch.switch": true,
-  "git.branch.delete": true,
-  "git.fetch": true,
-  "git.pull": true,
-  "git.push": true,
-  "git.continue": true,
-  "git.abort": true,
-} satisfies Record<RpcMethod, boolean>;
+interface RpcTraits {
+  responseLoss: "read-error" | "unknown";
+  deadline: "rpcTimeout" | "searchTimeout" | "gitWriteTimeout" | "none";
+  oversizedSuccess: "failed" | "unknown";
+}
+
+const read = {
+  responseLoss: "read-error",
+  deadline: "rpcTimeout",
+  oversizedSuccess: "unknown",
+} satisfies RpcTraits;
+const write = {
+  responseLoss: "unknown",
+  deadline: "rpcTimeout",
+  oversizedSuccess: "unknown",
+} satisfies RpcTraits;
+const gitWrite = {
+  responseLoss: "unknown",
+  deadline: "gitWriteTimeout",
+  oversizedSuccess: "unknown",
+} satisfies RpcTraits;
+
+export const rpcTraits = {
+  "tasks.list": read,
+  "tasks.get": read,
+  "tasks.preview": read,
+  "tasks.create": write,
+  "tasks.update": write,
+  "tasks.pause": write,
+  "tasks.resume": write,
+  "tasks.acknowledge": write,
+  "tasks.delete": write,
+  "tasks.run": write,
+  "runs.list": read,
+  "runs.get": read,
+  "runs.output": read,
+  "runs.stop": write,
+  "ports.list": read,
+  "directories.list": read,
+  "cursors.release": read,
+  "directories.mkdir": write,
+  "workspaces.add": write,
+  "workspaces.rename": write,
+  "workspaces.remove": write,
+  "sessions.list": read,
+  "sessions.create": write,
+  "sessions.rename": write,
+  "sessions.end": write,
+  "sessions.recover": write,
+  "sessions.redraw": write,
+  "sessions.snapshot": { ...read, oversizedSuccess: "failed" },
+  "sessions.send": write,
+  "sessions.wait": { ...read, oversizedSuccess: "failed" },
+  "sessions.resize": write,
+  "settings.update": write,
+  "shortcuts.put": write,
+  "shortcuts.remove": write,
+  "files.list": read,
+  "files.inspect": read,
+  "files.create": write,
+  "files.rename": write,
+  "files.copy": { ...write, deadline: "none" },
+  "files.move": { ...write, deadline: "none" },
+  "files.delete": { ...write, deadline: "none" },
+  "files.search": { ...read, deadline: "searchTimeout" },
+  "repos.discover": read,
+  "git.status": read,
+  "git.diff": read,
+  "git.history": read,
+  "git.commitMessage": read,
+  "git.commitFiles": read,
+  "git.branches": read,
+  "git.remotes": read,
+  "git.review": read,
+  "git.stage": gitWrite,
+  "git.unstage": gitWrite,
+  "git.discard": gitWrite,
+  "git.commit": gitWrite,
+  "git.branch.create": gitWrite,
+  "git.branch.switch": gitWrite,
+  "git.branch.delete": gitWrite,
+  "git.fetch": gitWrite,
+  "git.pull": gitWrite,
+  "git.push": gitWrite,
+  "git.continue": gitWrite,
+  "git.abort": gitWrite,
+} satisfies Record<RpcMethod, RpcTraits> &
+  Record<GitWriteMethod, { responseLoss: "unknown"; deadline: "gitWriteTimeout" }>;
+
+export function isRpcMethod(value: string): value is RpcMethod {
+  return Object.hasOwn(rpcTraits, value);
+}
 export type RpcParams<M extends RpcMethod> = RpcMethods[M]["params"];
 export type RpcResult<M extends RpcMethod> = RpcMethods[M]["result"];
 export type RpcReply<M extends RpcMethod> = Reply<
-  RpcResult<M>,
-  M extends "files.copy" | "files.move" | "files.delete" ? FileResults : unknown
+  RpcMethods[M]["result"],
+  RpcMethods[M]["errorResult"]
 >;
 
 export type RpcArguments<M extends RpcMethod = RpcMethod> = {
   [K in M]: [method: K, params: RpcParams<K>, signal?: AbortSignal];
 }[M];
 
-export type GitWriteMethod = {
-  [M in RpcMethod]: M extends `git.${string}`
-    ? (typeof rpcMutates)[M] extends true
-      ? M
-      : never
-    : never;
-}[RpcMethod];
-export const gitWriteMethods: readonly GitWriteMethod[] = Object.keys(rpcMutates).filter(
-  (method): method is GitWriteMethod =>
-    method.startsWith("git.") && rpcMutates[method as RpcMethod],
-);
+export type GitWriteMethod = keyof GitWriteMethods;
 type GitParams<M extends GitWriteMethod> = Omit<RpcParams<M>, keyof RepoParams>;
 export type GitWriteArguments = {
   [M in GitWriteMethod]: [method: M, params: GitParams<M>];

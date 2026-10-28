@@ -185,7 +185,7 @@ test("cancelling a real reservation cleans disk state before another write is ad
       createOnly: true,
     }),
   ).rejects.toMatchObject({ code: "busy" });
-  await f.api.api(`/api/channels/${ready.channelId}`, { method: "DELETE" });
+  await f.api.cancelChannel(ready.channelId);
   await expect.poll(f.temporaryRecords).toEqual([]);
   await expect.poll(() => readdir(f.workspacePath)).toEqual([]);
   const next = await f.api.fileChannel(f.target("next"), "file.write", {

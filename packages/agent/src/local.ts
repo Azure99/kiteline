@@ -12,10 +12,10 @@ import {
   errorReply,
   limits,
   record,
-  rpcMutates,
+  isRpcMethod,
+  rpcTraits,
   string,
   type Reply,
-  type RpcMethod,
 } from "@kiteline/shared/protocol";
 import type { AgentConfig } from "./config.js";
 import { checkRunDir } from "./terminal/paths.js";
@@ -153,8 +153,8 @@ export async function localRequest<T>(
     const fail = (error: unknown) => {
       const detail = asError(error);
       reject(
-        sent && rpcMutates[method as RpcMethod]
-          ? new OperationError(detail.code, detail.message, "unknown", undefined, detail.details)
+        sent && isRpcMethod(method) && rpcTraits[method].responseLoss === "unknown"
+          ? OperationError.from(detail, "unknown")
           : error,
       );
     };
@@ -181,16 +181,7 @@ export async function localRequest<T>(
           try {
             const reply = JSON.parse(Buffer.concat(chunks).toString()) as Reply<T>;
             if (reply.outcome === "succeeded") resolve(reply.result);
-            else
-              reject(
-                new OperationError(
-                  reply.error.code,
-                  reply.error.message,
-                  reply.outcome,
-                  reply.result,
-                  reply.error.details,
-                ),
-              );
+            else reject(OperationError.from(reply.error, reply.outcome, reply.result));
           } catch (error) {
             fail(error);
           }

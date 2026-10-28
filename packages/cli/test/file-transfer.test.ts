@@ -330,6 +330,29 @@ test("prepare conflict keeps the version in text and JSON and never sends a PUT"
   expect(server.requests.map((request) => request.method)).toEqual(["POST", "POST"]);
 });
 
+test("a lost upload reservation exits as a remote failure without sending content or retrying", async () => {
+  const root = await directory();
+  const input = join(root, "local.bin");
+  await writeFile(input, binary);
+  const server = await fixture((_request, response) => response.destroy());
+  const reply = await cli(root, server.url, [
+    "files",
+    "upload",
+    remotePath,
+    "--file",
+    input,
+    "--json",
+  ]);
+  expect(reply.code, reply.stdout + reply.stderr).toBe(1);
+  expect(reply.signal).toBeNull();
+  expect(reply.stderr).toBe("");
+  expect(JSON.parse(reply.stdout)).toMatchObject({
+    outcome: "failed",
+    error: { code: "io_error" },
+  });
+  expect(server.requests.map((request) => request.method)).toEqual(["POST"]);
+});
+
 test("explicit replacement maps the version and preserves HTTP 200 failed and unknown results", async () => {
   const root = await directory();
   const input = join(root, "local.bin");

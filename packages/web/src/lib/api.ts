@@ -5,7 +5,17 @@ import { en } from "../i18n/en";
 import { observeServerVersion } from "./release";
 
 export { ApiError, apiError } from "@kiteline/shared/protocol/client";
-export const { request, api, post, fileChannel, cancelRequest, rpcReply, rpc } = createApiClient({
+export const {
+  request,
+  api,
+  post,
+  openChannel,
+  cancelChannel,
+  fileChannel,
+  cancelRequest,
+  rpcReply,
+  rpc,
+} = createApiClient({
   request: async (path, options, consume) => consume(await fetch(path, options)),
   newId,
   observeServerVersion,
@@ -21,9 +31,10 @@ export function errorMessage(error: unknown, context?: "login") {
       : code && Object.hasOwn(en.errors, code)
         ? i18n.t(($) => $.errors[code as keyof typeof en.errors])
         : i18n.t(($) => $.errors.requestFailed);
-  const outcome =
-    error instanceof ApiError && (error.outcome === "unknown" || error.outcome === "partial")
-      ? i18n.t(($) => $.errors[error.outcome as "unknown" | "partial"])
-      : "";
-  return [outcome, summary, code ? `[${code}] ${message}` : message].filter(Boolean).join(" ");
+  const outcome = error instanceof ApiError ? error.outcome : undefined;
+  const outcomeMessage =
+    outcome === "unknown" || outcome === "partial" ? i18n.t(($) => $.errors[outcome]) : "";
+  return [outcomeMessage, summary, code ? `[${code}] ${message}` : message]
+    .filter(Boolean)
+    .join(" ");
 }

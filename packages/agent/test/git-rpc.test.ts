@@ -1,8 +1,14 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { once } from "node:events";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { WebSocket, WebSocketServer } from "ws";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AppError,
+  appVersion,
+  type Reply,
   OperationError,
   errorReply,
   type RepoDiscovery,
@@ -10,6 +16,7 @@ import {
   type GitStatus,
 } from "@kiteline/shared/protocol";
 import { Agent } from "../src/agent.js";
+import { privateDirectory, type AgentConfig } from "../src/config.js";
 import { gitProgressError } from "../src/git/process.js";
 import { testConfig } from "./support/config.js";
 import { gitRepoFixture, isolateGitEnvironment } from "./support/git.js";
@@ -25,7 +32,7 @@ afterEach(async () => {
   vi.unstubAllEnvs();
 });
 
-async function setup() {
+async function setup(options: { server?: string; limits?: Partial<AgentConfig["limits"]> } = {}) {
   const data = await mkdtemp("/var/tmp/kiteline-git-rpc-");
   cleanups.push(() => rm(data, { recursive: true, force: true }));
   const root = join(data, "workspace");
@@ -35,10 +42,10 @@ async function setup() {
   await writeFile(join(root, "file.txt"), "original\n");
   await cli("add", "file.txt");
   await cli("commit", "-m", "base");
-  const agent = new Agent(testConfig(data), {
+  const agent = new Agent(testConfig(data, { limits: options.limits }), {
     deviceId: "test",
     deviceToken: "test",
-    server: "https://localhost",
+    server: options.server ?? "https://localhost",
   });
   cleanups.push(() => agent.close());
   const workspace = await agent.metadata.add(root);
@@ -247,3 +254,85 @@ test("commit message dispatch reads the selected OID within its registered works
     agent.dispatch("git.commitMessage", { ...params, workspaceId: outside.id, commitOid }, signal),
   ).rejects.toMatchObject({ code: "not_found" });
 });
+
+test("control Git writes outlive the ordinary RPC deadline but time out while queued", async () => {
+  const server = createServer();
+  const sockets = new WebSocketServer({ server });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  cleanups.push(async () => {
+    for (const socket of sockets.clients) socket.terminate();
+    await new Promise<void>((resolve) => sockets.close(() => resolve()));
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+  const { agent, params, signal, root, cli } = await setup({
+    server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    limits: { rpcTimeout: 50, gitWriteTimeout: 1500 },
+  });
+  await writeFile(join(root, "completed.txt"), "within the Git deadline\n");
+  await writeFile(join(root, "expired.txt"), "must not be staged\n");
+  for (const path of [agent.config.dataDir, agent.config.runDir]) await privateDirectory(path);
+  const connected = once(sockets, "connection");
+  await agent.start();
+  const [peer] = (await connected) as [WebSocket];
+  const replies = new Map<string, Reply>();
+  const progress = new Map<string, string[]>();
+  peer.on("message", (raw) => {
+    const message = JSON.parse(raw.toString());
+    if (message.type === "rpc.result") replies.set(message.reply.id, message.reply);
+    if (message.type === "request.progress") {
+      const phases = progress.get(message.id) ?? [];
+      phases.push(message.phase);
+      progress.set(message.id, phases);
+    }
+  });
+  peer.send(JSON.stringify({ type: "welcome", connectionId: "test", serverVersion: appVersion }));
+  for (const id of ["completed", "expired"]) {
+    let entered!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => (entered = resolve));
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const held = agent.gitWrites.run(params.workspaceId, params.repoId, signal, async () => {
+      entered();
+      await gate;
+    });
+    await started;
+    try {
+      peer.send(
+        JSON.stringify({
+          type: "rpc.request",
+          id,
+          method: "git.stage",
+          params: { ...params, paths: [`${id}.txt`] },
+        }),
+      );
+      await expect.poll(() => progress.get(id)).toEqual(["queued"]);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(replies.has(id)).toBe(false);
+      if (id === "completed") {
+        release();
+        await held;
+        await expect
+          .poll(() => replies.get(id))
+          .toMatchObject({
+            outcome: "succeeded",
+            result: { changedPaths: ["completed.txt"] },
+          });
+        expect(progress.get(id)).toEqual(["queued", "running"]);
+      } else {
+        await expect
+          .poll(() => replies.get(id), { timeout: 3000 })
+          .toMatchObject({
+            outcome: "failed",
+            error: { code: "timeout" },
+          });
+        expect(progress.get(id)).toEqual(["queued"]);
+      }
+    } finally {
+      release();
+      await held;
+    }
+  }
+  expect(await cli("diff", "--cached", "--name-only")).toBe("completed.txt\n");
+  expect(await cli("show", ":completed.txt")).toBe("within the Git deadline\n");
+}, 10000);

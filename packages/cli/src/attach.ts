@@ -1,6 +1,6 @@
 import { write } from "node:fs";
 import { writeFile } from "node:fs/promises";
-import { AppError, asError, limits, record, type ChannelReady } from "@kiteline/shared/protocol";
+import { AppError, asError, limits, record } from "@kiteline/shared/protocol";
 import { ApiError, versionedPath } from "@kiteline/shared/protocol/client";
 import { heartbeat, sendFrame } from "@kiteline/shared/protocol/ws";
 import type { TtyInput } from "@kiteline/shared/protocol/ipc";
@@ -33,21 +33,13 @@ export async function attach(
 ) {
   const { deviceId, workspaceId, sessionId } = await target(options, true);
   const ready = await remote(
-    api.post<ChannelReady>(
-      `/api/devices/${encodeURIComponent(deviceId)}/channels`,
-      {
-        kind: "terminal.attach",
-        params: {
-          mode: "tty",
-          workspaceId,
-          sessionId,
-          ...dimensions(),
-          term: process.env.TERM || "xterm-256color",
-        },
-      },
-      undefined,
-      false,
-    ),
+    api.openChannel(deviceId, "terminal.attach", {
+      mode: "tty",
+      workspaceId,
+      sessionId: sessionId!,
+      ...dimensions(),
+      term: process.env.TERM || "xterm-256color",
+    }),
   );
   const url = new URL(
     versionedPath(`/api/channels/${encodeURIComponent(ready.channelId)}/terminal`),

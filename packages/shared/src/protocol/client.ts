@@ -1,14 +1,17 @@
 import {
   appVersion,
-  rpcMutates,
+  rpcTraits,
   type KitelineError,
   type ChannelParams,
   type ChannelReady,
   type FileMeta,
+  type FileReadPurpose,
   type FileTarget,
+  type Outcome,
   type RpcArguments,
   type RpcReply,
   type RpcResult,
+  type TerminalMeta,
 } from "./index.js";
 
 export class ApiError extends Error {
@@ -16,17 +19,23 @@ export class ApiError extends Error {
   constructor(
     public code: string,
     message: string,
-    public outcome?: string,
+    public outcome?: Outcome,
     public details?: unknown,
     public result?: unknown,
   ) {
     super(message);
   }
 }
-export function apiError(error: KitelineError, outcome?: string, result?: unknown) {
+export function apiError(error: KitelineError, outcome?: Outcome, result?: unknown) {
   return new ApiError(error.code, error.message, outcome, error.details, result);
 }
 const gatewayStatuses = new Set([502, 503, 504]);
+type ResponseLoss = (typeof rpcTraits)[keyof typeof rpcTraits]["responseLoss"];
+type PublicChannelParams = Omit<ChannelParams, "http.proxy" | "file.read"> & {
+  "file.read": ChannelParams["file.read"] & {
+    purpose: Exclude<FileReadPurpose, "download">;
+  };
+};
 type ContentParams<T> = T extends unknown ? Omit<T, "workspaceId" | "path"> : never;
 
 export function fileDownloadPath(target: FileTarget) {
@@ -55,7 +64,9 @@ export function createApiClient(host: ClientHost) {
     path: string,
     options: RequestInit,
     consume: (response: Response) => Promise<T>,
-    mutation = !!options.method && !["GET", "HEAD"].includes(options.method),
+    responseLoss: ResponseLoss = !!options.method && !["GET", "HEAD"].includes(options.method)
+      ? "unknown"
+      : "read-error",
   ): Promise<T> {
     let response: Response | undefined;
     try {
@@ -76,7 +87,8 @@ export function createApiClient(host: ClientHost) {
       });
     } catch (error) {
       if (error instanceof ApiError) throw error;
-      if (mutation) throw new ApiError("io_error", "No operation result was received", "unknown");
+      if (responseLoss === "unknown")
+        throw new ApiError("io_error", "No operation result was received", "unknown");
       if (options.signal?.aborted) throw error;
       if (response ? gatewayStatuses.has(response.status) : error instanceof TypeError) {
         const failure = new ApiError(
@@ -92,7 +104,7 @@ export function createApiClient(host: ClientHost) {
   function api<T>(
     path: string,
     options: RequestInit = {},
-    mutation = !!options.method && !["GET", "HEAD"].includes(options.method),
+    responseLoss?: ResponseLoss,
   ): Promise<T> {
     return request(
       path,
@@ -104,11 +116,16 @@ export function createApiClient(host: ClientHost) {
         },
       },
       (response) => response.json() as Promise<T>,
-      mutation,
+      responseLoss,
     );
   }
-  function post<T>(path: string, value: unknown = {}, signal?: AbortSignal, mutation = true) {
-    return api<T>(path, { method: "POST", body: JSON.stringify(value), signal }, mutation);
+  function post<T>(
+    path: string,
+    value: unknown = {},
+    signal?: AbortSignal,
+    responseLoss?: ResponseLoss,
+  ) {
+    return api<T>(path, { method: "POST", body: JSON.stringify(value), signal }, responseLoss);
   }
   function cancelRequest(deviceId: string, requestId: string) {
     return api(
@@ -116,20 +133,44 @@ export function createApiClient(host: ClientHost) {
       { method: "DELETE" },
     );
   }
+  function openChannel<K extends keyof PublicChannelParams>(
+    deviceId: string,
+    kind: K,
+    params: PublicChannelParams[K],
+    signal?: AbortSignal,
+  ): Promise<ChannelReady<K extends "terminal.attach" ? TerminalMeta : FileMeta>> {
+    return post(
+      `/api/devices/${encodeURIComponent(deviceId)}/channels`,
+      { kind, params },
+      signal,
+      "read-error",
+    );
+  }
+  function cancelChannel(channelId: string) {
+    return api<{ found: boolean }>(`/api/channels/${encodeURIComponent(channelId)}`, {
+      method: "DELETE",
+    });
+  }
   async function fileChannel<K extends "file.read" | "file.write">(
     target: FileTarget,
     kind: K,
-    params: ContentParams<ChannelParams[K]>,
+    params: ContentParams<PublicChannelParams[K]>,
     signal?: AbortSignal,
   ) {
-    const ready = await post<ChannelReady<FileMeta>>(
-      `/api/devices/${encodeURIComponent(target.deviceId)}/channels`,
-      { kind, params: { workspaceId: target.workspaceId, path: target.path, ...params } },
+    // Restore the target fields omitted from the content parameters.
+    const channelParams: PublicChannelParams["file.read" | "file.write"] = {
+      workspaceId: target.workspaceId,
+      path: target.path,
+      ...params,
+    };
+    const ready = await openChannel(
+      target.deviceId,
+      kind,
+      channelParams as PublicChannelParams[K],
       signal,
-      false,
     );
     if (signal?.aborted) {
-      void api(`/api/channels/${ready.channelId}`, { method: "DELETE" }).catch(() => {});
+      void cancelChannel(ready.channelId).catch(() => {});
       throw new DOMException("The operation was aborted", "AbortError");
     }
     return ready;
@@ -143,7 +184,7 @@ export function createApiClient(host: ClientHost) {
       `/api/devices/${encodeURIComponent(deviceId)}/rpc`,
       { id, method, params },
       signal,
-      rpcMutates[method],
+      rpcTraits[method].responseLoss,
     );
   }
   async function rpc<A extends RpcArguments>(
@@ -155,5 +196,15 @@ export function createApiClient(host: ClientHost) {
     return reply.result;
   }
 
-  return { request, api, post, fileChannel, cancelRequest, rpcReply, rpc };
+  return {
+    request,
+    api,
+    post,
+    openChannel,
+    cancelChannel,
+    fileChannel,
+    cancelRequest,
+    rpcReply,
+    rpc,
+  };
 }

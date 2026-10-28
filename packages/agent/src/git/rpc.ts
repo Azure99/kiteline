@@ -6,8 +6,10 @@ import {
   record,
   string,
   type FileProgress,
+  type GitWriteMethod,
   type Repo,
   type RpcMethod,
+  type RpcParams,
   type RpcResult,
 } from "@kiteline/shared/protocol";
 import type { Repositories } from "./repos.js";
@@ -29,6 +31,96 @@ import { finishOperation } from "./in-progress.js";
 
 type GitMethod = Extract<RpcMethod, `git.${string}` | "repos.discover">;
 
+type RawGitWriteParams<M extends GitWriteMethod> = { [K in keyof RpcParams<M>]?: unknown };
+type RunQueuedGitWrite = <T>(operation: (repo: Repo) => Promise<T>) => Promise<T>;
+type GitWriteHandlers = {
+  [M in GitWriteMethod]: (
+    params: RawGitWriteParams<M>,
+    runQueuedWrite: RunQueuedGitWrite,
+    signal: AbortSignal,
+  ) => Promise<RpcResult<M>>;
+};
+
+const gitWriteHandlers = {
+  "git.fetch": (params, runQueuedWrite, signal) =>
+    runQueuedWrite((repo) =>
+      syncRemote(repo, "fetch", { remote: optionalString(params.remote) }, signal),
+    ),
+  "git.pull": (params, runQueuedWrite, signal) =>
+    runQueuedWrite((repo) =>
+      syncRemote(repo, "pull", { expectedHead: expectedHead(params.expectedHead) }, signal),
+    ),
+  "git.push": (params, runQueuedWrite, signal) =>
+    runQueuedWrite((repo) =>
+      syncRemote(repo, "push", { expectedHead: expectedHead(params.expectedHead) }, signal),
+    ),
+  "git.continue": (params, runQueuedWrite, signal) => {
+    const expected = record(params.expectedOperation);
+    return runQueuedWrite((repo) =>
+      finishOperation(repo, string(expected.kind), string(expected.token), "continue", signal),
+    );
+  },
+  "git.abort": (params, runQueuedWrite, signal) => {
+    const expected = record(params.expectedOperation);
+    return runQueuedWrite((repo) =>
+      finishOperation(repo, string(expected.kind), string(expected.token), "abort", signal),
+    );
+  },
+  "git.commit": (params, runQueuedWrite, signal) =>
+    runQueuedWrite((repo) =>
+      commit(
+        repo,
+        string(params.message, "message", limits.controlMessageBytes),
+        string(params.indexToken),
+        signal,
+      ),
+    ),
+  "git.branch.create": (params, runQueuedWrite, signal) => {
+    const switchToBranch = params.switch;
+    if (typeof switchToBranch !== "boolean")
+      throw new AppError("invalid_argument", "Choose whether to switch branches");
+    return runQueuedWrite((repo) =>
+      createBranch(
+        repo,
+        string(params.name),
+        optionalString(params.startOid),
+        switchToBranch,
+        signal,
+      ),
+    );
+  },
+  "git.branch.switch": (params, runQueuedWrite, signal) =>
+    runQueuedWrite((repo) =>
+      switchBranch(repo, string(params.name), string(params.refOid), signal),
+    ),
+  "git.branch.delete": (params, runQueuedWrite, signal) =>
+    runQueuedWrite((repo) =>
+      deleteBranch(repo, string(params.name), string(params.refOid), signal),
+    ),
+  "git.stage": (params, runQueuedWrite, signal) =>
+    runQueuedWrite(async (repo) =>
+      stagePaths(repo, await checkedGitPaths(repo, params.paths, signal), signal),
+    ),
+  "git.unstage": (params, runQueuedWrite, signal) =>
+    runQueuedWrite(async (repo) =>
+      unstagePaths(repo, await checkedGitPaths(repo, params.paths, signal), signal),
+    ),
+  "git.discard": (params, runQueuedWrite, signal) =>
+    runQueuedWrite(async (repo) =>
+      discard(
+        repo,
+        await checkedGitPaths(repo, params.paths, signal),
+        discardScope(params.scope),
+        string(params.reviewToken),
+        signal,
+      ),
+    ),
+} satisfies GitWriteHandlers;
+
+function isGitWriteMethod(method: string): method is GitWriteMethod {
+  return Object.hasOwn(gitWriteHandlers, method);
+}
+
 export function isGitMethod(method: RpcMethod): method is GitMethod {
   return method === "repos.discover" || method.startsWith("git.");
 }
@@ -42,84 +134,12 @@ export async function gitRpc(
   progress?: (value: FileProgress) => void,
 ): Promise<RpcResult<GitMethod>> {
   const read = () => repos.resolve(string(params.workspaceId), string(params.repoId), signal);
-  const write = <T>(operation: (repo: Repo) => Promise<T>) =>
+  const runQueuedWrite: RunQueuedGitWrite = (operation) =>
     writes.run(string(params.workspaceId), string(params.repoId), signal, operation, progress);
+  if (isGitWriteMethod(method)) return gitWriteHandlers[method](params, runQueuedWrite, signal);
   switch (method) {
     case "git.remotes":
       return remotes(await read(), signal) satisfies Promise<RpcResult<typeof method>>;
-    case "git.fetch":
-    case "git.pull":
-    case "git.push":
-      return write((repo) =>
-        syncRemote(
-          repo,
-          method.slice(4) as "fetch" | "pull" | "push",
-          method === "git.fetch"
-            ? { remote: optionalString(params.remote) }
-            : { expectedHead: expectedHead(params.expectedHead) },
-          signal,
-        ),
-      ) satisfies Promise<RpcResult<typeof method>>;
-    case "git.continue":
-    case "git.abort": {
-      const expected = record(params.expectedOperation);
-      return write((repo) =>
-        finishOperation(
-          repo,
-          string(expected.kind),
-          string(expected.token),
-          method === "git.continue" ? "continue" : "abort",
-          signal,
-        ),
-      ) satisfies Promise<RpcResult<typeof method>>;
-    }
-    case "git.commit":
-      return write((repo) =>
-        commit(
-          repo,
-          string(params.message, "message", limits.controlMessageBytes),
-          string(params.indexToken),
-          signal,
-        ),
-      ) satisfies Promise<RpcResult<typeof method>>;
-    case "git.branch.create":
-      if (typeof params.switch !== "boolean")
-        throw new AppError("invalid_argument", "Choose whether to switch branches");
-      return write((repo) =>
-        createBranch(
-          repo,
-          string(params.name),
-          optionalString(params.startOid),
-          params.switch === true,
-          signal,
-        ),
-      ) satisfies Promise<RpcResult<typeof method>>;
-    case "git.branch.switch":
-      return write((repo) =>
-        switchBranch(repo, string(params.name), string(params.refOid), signal),
-      ) satisfies Promise<RpcResult<typeof method>>;
-    case "git.branch.delete":
-      return write((repo) =>
-        deleteBranch(repo, string(params.name), string(params.refOid), signal),
-      ) satisfies Promise<RpcResult<typeof method>>;
-    case "git.stage":
-    case "git.unstage":
-    case "git.discard":
-      return write(async (repo) =>
-        method === "git.discard"
-          ? discard(
-              repo,
-              await checkedGitPaths(repo, params.paths, signal),
-              discardScope(params.scope),
-              string(params.reviewToken),
-              signal,
-            )
-          : (method === "git.stage" ? stagePaths : unstagePaths)(
-              repo,
-              await checkedGitPaths(repo, params.paths, signal),
-              signal,
-            ),
-      ) satisfies Promise<RpcResult<typeof method>>;
     case "git.review": {
       const repo = await read();
       return reviewDiscard(

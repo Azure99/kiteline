@@ -7,12 +7,12 @@ import {
   checkShortcutIcon,
   controlCloseCodes,
   errorReply,
-  gitWriteMethods,
   integer,
   limits,
   optionalString,
   record,
-  rpcMutates,
+  isRpcMethod,
+  rpcTraits,
   string,
   type Reply,
   type AgentEvent,
@@ -48,16 +48,6 @@ import { connectServer } from "./network.js";
 import { ScheduledTasks } from "./tasks/index.js";
 import { isScheduleMethod, scheduleRpc } from "./tasks/rpc.js";
 
-const gitWrites = new Set<string>(gitWriteMethods);
-const unboundedMethods = new Set<string>([
-  "files.copy",
-  "files.move",
-  "files.delete",
-] satisfies readonly RpcMethod[]);
-const specializedTimeouts = new Map<string, "searchTimeout" | "gitWriteTimeout">([
-  ["files.search" satisfies RpcMethod, "searchTimeout"],
-  ...gitWriteMethods.map((method) => [method, "gitWriteTimeout"] as const),
-]);
 const notifiedFileMethods = new Set<string>([
   "files.create",
   "files.rename",
@@ -68,9 +58,8 @@ const localSessionMethods = new Set<string>([
 ] satisfies readonly RpcMethod[]);
 
 function knownRpcMethod(method: string): RpcMethod {
-  if (!Object.hasOwn(rpcMutates, method))
-    throw new AppError("unsupported", `Unsupported operation: ${method}`);
-  return method as RpcMethod;
+  if (!isRpcMethod(method)) throw new AppError("unsupported", `Unsupported operation: ${method}`);
+  return method;
 }
 
 export class Agent {
@@ -352,12 +341,15 @@ export class Agent {
     const method = string(message.method);
     const params = record(message.params);
     this.requests.set(id, controller);
-    const timeout = unboundedMethods.has(method)
-      ? undefined
-      : setTimeout(
-          () => controller.abort(new AppError("timeout", "Operation timed out")),
-          this.config.limits[specializedTimeouts.get(method) ?? "rpcTimeout"],
-        );
+    const traits = isRpcMethod(method) ? rpcTraits[method] : undefined;
+    const deadline = traits?.deadline;
+    const timeout =
+      deadline === undefined || deadline === "none"
+        ? undefined
+        : setTimeout(
+            () => controller.abort(new AppError("timeout", "Operation timed out")),
+            this.config.limits[deadline],
+          );
     void this.dispatch(method, params, controller.signal, (progress) => {
       if (this.socket === socket)
         this.send({ type: "request.progress", id, ...progress } satisfies AgentEvent);
@@ -376,12 +368,7 @@ export class Agent {
               type: "rpc.result",
               reply: {
                 id,
-                outcome:
-                  reply.outcome === "succeeded"
-                    ? method === "sessions.snapshot" || method === "sessions.wait"
-                      ? "failed"
-                      : "unknown"
-                    : reply.outcome,
+                outcome: reply.outcome === "succeeded" ? traits!.oversizedSuccess : reply.outcome,
                 error: {
                   code: "limit_exceeded",
                   message: "Operation result exceeds the size limit; refresh to verify",
@@ -409,7 +396,10 @@ export class Agent {
   ): Promise<unknown> {
     const operation = this.perform(method, params, signal, progress).finally(() => {
       if (
-        (notifiedFileMethods.has(method) || gitWrites.has(method)) &&
+        (notifiedFileMethods.has(method) ||
+          (isRpcMethod(method) &&
+            method.startsWith("git.") &&
+            rpcTraits[method].responseLoss === "unknown")) &&
         typeof params.workspaceId === "string"
       )
         this.watches.notifyWritten(params.workspaceId);
