@@ -36,7 +36,12 @@ export class Files {
   ): Promise<FileListing> {
     const root = this.metadata.workspace(workspaceId).path;
     const path = await logicalPath(root, input, false, signal);
-    const result = await this.directories.list(join(root, path), cursor, signal, path);
+    const result = await this.directories.list(join(root, path), {
+      entries: "relative",
+      parent: path,
+      cursor,
+      signal,
+    });
     return {
       path,
       resolvedPath: result.path,

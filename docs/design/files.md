@@ -198,6 +198,8 @@ HTML 预览直接以当前稿件构造 `srcdoc`，只授予 iframe `sandbox="all
 
 `open`、`text`、`image`、`download`、`save`、`upload` 共用每台设备 `transfersPerDevice` 个文件通道名额，通道清理完成前仍占用名额，超出时返回 `busy`。消费方变慢时来源暂停读取。帧格式、配对、server 的通道上限与空闲超时，以及读取完成的判定见[数据通道](protocol.md#数据通道)。
 
+agent 结束通道时先等准备工作返回，再停止并等待接帧队列，最后关闭读取或释放临时写入资源；取消后晚到的资源和仍在写入的帧都在这个清理顺序内。零字节读取在发送 `ready` 前完成句柄关闭，因为 server 发出 `start` 后即可结束空正文响应。
+
 ## 变化监听
 
 - 浏览器通过事件 WebSocket 的 `watch.set` 声明正在使用的设备和工作区。server 汇总所有浏览器的目标，按设备下发，agent 只监听其中仍登记的工作区。监听实现位于 `packages/agent/src/watch-roots.ts`，不跟随符号链接，默认不轮询。macOS 工作树使用 Node 原生递归监听，其他平台工作树及所有 Git 元数据使用 Chokidar。Linux 在独立 worker 内处理监听建立、文件系统事件和关闭，避免这些工作阻塞 agent 的交互请求；其他平台在主线程运行。

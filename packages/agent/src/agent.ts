@@ -493,11 +493,11 @@ export class Agent {
           signal,
         ) satisfies Promise<RpcResult<typeof method>>;
       case "directories.list":
-        return this.directories.list(
-          string(params.absolutePath),
-          optionalString(params.cursor),
+        return this.directories.list(string(params.absolutePath), {
+          entries: "absolute",
+          cursor: optionalString(params.cursor),
           signal,
-        ) satisfies Promise<RpcResult<typeof method>>;
+        }) satisfies Promise<RpcResult<typeof method>>;
       case "cursors.release": {
         if (params.kind !== "directory" && params.kind !== "repo")
           throw new AppError("invalid_argument", "Invalid cursor kind");

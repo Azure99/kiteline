@@ -15,6 +15,7 @@ import { Directories } from "../src/files/directories.js";
 import { MetadataStore } from "../src/metadata.js";
 import { testConfig } from "./support/config.js";
 import { withPublicationLock } from "../src/files/publish.js";
+import { CursorBudget } from "../src/cursor-budget.js";
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -27,7 +28,7 @@ async function setup() {
   await mkdir(root);
   const metadata = new MetadataStore(testConfig(data), () => {});
   const workspace = await metadata.add(root);
-  const directories = new Directories();
+  const directories = new Directories(new CursorBudget());
   cleanups.push(() => directories.close());
   return {
     root,

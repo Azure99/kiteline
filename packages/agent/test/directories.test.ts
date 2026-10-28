@@ -120,10 +120,13 @@ test("directory pages keep raw names non-actionable and enforce the concurrent c
   const path = await directory();
   for (let index = 0; index < 501; index++) await writeFile(join(path, `file-${index}`), "");
   await writeFile(Buffer.concat([Buffer.from(path + "/"), Buffer.from([255])]), "raw");
-  const directories = new Directories();
+  const directories = new Directories(new CursorBudget());
   cleanups.push(() => directories.close());
-  const first = await directories.list(path);
-  const second = await directories.list(path, first.entries.nextCursor);
+  const first = await directories.list(path, { entries: "absolute" });
+  const second = await directories.list(path, {
+    entries: "absolute",
+    cursor: first.entries.nextCursor,
+  });
   const entries = [...first.entries.items, ...second.entries.items];
   expect(entries).toHaveLength(502);
   expect(entries.find((entry) => entry.unavailableReason)).toMatchObject({
@@ -135,36 +138,41 @@ test("directory pages keep raw names non-actionable and enforce the concurrent c
     size: 0,
     mtime: expect.any(String),
   });
-  const peer = await directories.list(path);
+  const peer = await directories.list(path, { entries: "absolute" });
   for (let index = 0; index < 20; index++) {
-    const page = await directories.list(path);
+    const page = await directories.list(path, { entries: "absolute" });
     await directories.release(page.entries.nextCursor!);
     await directories.release(page.entries.nextCursor!);
   }
-  const peerMore = await directories.list(path, peer.entries.nextCursor);
+  const peerMore = await directories.list(path, {
+    entries: "absolute",
+    cursor: peer.entries.nextCursor,
+  });
   expect(peer.entries.items.length + peerMore.entries.items.length).toBe(502);
   const concurrent = await Promise.allSettled(
-    Array.from({ length: 32 }, () => directories.list(path)),
+    Array.from({ length: 32 }, () => directories.list(path, { entries: "absolute" })),
   );
   expect(concurrent.filter((result) => result.status === "fulfilled")).toHaveLength(16);
   const saved = concurrent.find((result) => result.status === "fulfilled");
   expect(saved?.status).toBe("fulfilled");
   await directories.close();
   if (saved?.status === "fulfilled")
-    await expect(directories.list(path, saved.value.entries.nextCursor)).rejects.toMatchObject({
+    await expect(
+      directories.list(path, { entries: "absolute", cursor: saved.value.entries.nextCursor }),
+    ).rejects.toMatchObject({
       code: "conflict",
     });
 });
 
 test("closing a first directory read waits for it and prevents a late live cursor", async () => {
   const path = await directory();
-  const directories = new Directories();
+  const directories = new Directories(new CursorBudget());
   cleanups.push(() => directories.close());
-  const pending = directories.list(path);
+  const pending = directories.list(path, { entries: "absolute" });
   const cancelled = expect(pending).rejects.toMatchObject({ code: "cancelled" });
   await Promise.all([directories.close(), directories.close()]);
   await cancelled;
-  await expect(directories.list(path)).resolves.toMatchObject({
+  await expect(directories.list(path, { entries: "absolute" })).resolves.toMatchObject({
     entries: { items: [], truncated: false },
   });
 });
@@ -187,20 +195,24 @@ test("directory and repository pages share slots until their resources are relea
       discoveryDirectories: 1,
       cursorsPerDevice: 2,
     });
-    const listing = await directories.list(root);
+    const listing = await directories.list(root, { entries: "absolute" });
     expect(listing.entries.nextCursor).toBeTruthy();
     const scan = await repos.discover(workspace.id, undefined, signal);
     expect(scan.scanCursor).toBeTruthy();
-    await expect(directories.list(root)).rejects.toMatchObject({ code: "busy" });
+    await expect(directories.list(root, { entries: "absolute" })).rejects.toMatchObject({
+      code: "busy",
+    });
     await Promise.all([
       directories.release(listing.entries.nextCursor!),
       directories.release(listing.entries.nextCursor!),
     ]);
     const second = await repos.discover(workspace.id, undefined, signal);
     expect(second.scanCursor).toBeTruthy();
-    await expect(directories.list(root)).rejects.toMatchObject({ code: "busy" });
+    await expect(directories.list(root, { entries: "absolute" })).rejects.toMatchObject({
+      code: "busy",
+    });
     await repos.release(scan.scanCursor!);
-    const available = await directories.list(root);
+    const available = await directories.list(root, { entries: "absolute" });
     expect(available.entries.items).toHaveLength(1);
   } finally {
     try {

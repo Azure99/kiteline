@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { once } from "node:events";
 import { syncBuiltinESMExports } from "node:module";
 import type { AddressInfo } from "node:net";
-import { WebSocketServer } from "ws";
+import { WebSocketServer, type WebSocket } from "ws";
 import {
   mkdtemp,
   mkdir,
@@ -23,7 +23,7 @@ import {
   rename,
 } from "node:fs/promises";
 import { join } from "node:path";
-import { AppError, OperationError } from "@kiteline/shared/protocol";
+import { AppError, OperationError, limits } from "@kiteline/shared/protocol";
 import { withPublicationLock } from "../src/files/publish.js";
 import { FileOperations } from "../src/files/operations.js";
 import { TemporaryFiles, type StagedFile } from "../src/files/temporary.js";
@@ -35,6 +35,9 @@ import { BinaryFiles } from "../src/files/upload.js";
 import { TextFiles } from "../src/files/save.js";
 import { FileChannels } from "../src/files/channels.js";
 import * as renameFiles from "../src/files/rename.js";
+import * as fileReads from "../src/files/read.js";
+import { stateFiles } from "../src/config.js";
+import { CursorBudget } from "../src/cursor-budget.js";
 
 const exec = promisify(execFile);
 const cleanups: (() => Promise<unknown>)[] = [];
@@ -54,7 +57,7 @@ async function setup(changed?: (workspaceId: string) => void) {
   const workspace = await metadata.add(root);
   const temporary = new TemporaryFiles(data);
   cleanups.push(() => temporary.close());
-  const directories = new Directories();
+  const directories = new Directories(new CursorBudget());
   cleanups.push(() => directories.close());
   const operations = new FileOperations(metadata, temporary, changed);
   cleanups.push(() => operations.close());
@@ -87,34 +90,68 @@ function observeNextFile(temporary: TemporaryFiles, observe: (file: StagedFile) 
   });
 }
 
-test("file channel sizes use the write owner's byte limit before creating temporary files", async () => {
-  const f = await setup();
-  f.config.limits.editorBytes = 4;
-  f.config.limits.transferBytes = 8;
+async function channelServer(
+  f: Awaited<ReturnType<typeof setup>>,
+  notifyWritten: (workspaceId: string) => void = vi.fn(),
+) {
   const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
   await once(server, "listening");
-  const channels = new FileChannels(f.text, f.binary, f.metadata, f.config, {
-    deviceId: "test",
-    deviceToken: "test",
-    server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
-  });
+  const channels = new FileChannels(
+    f.text,
+    f.binary,
+    f.metadata,
+    f.config,
+    {
+      deviceId: "test",
+      deviceToken: "test",
+      server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    },
+    notifyWritten,
+  );
   cleanups.push(async () => {
     await channels.close();
     for (const socket of server.clients) socket.terminate();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
+  async function connect(id: string, kind: string, params: Record<string, unknown>) {
+    const incoming = once(server, "connection");
+    channels.open(id, "test", kind, { workspaceId: f.id, ...params });
+    const [socket] = (await incoming) as [WebSocket];
+    const controls: Record<string, unknown>[] = [];
+    const body: Buffer[] = [];
+    const order: string[] = [];
+    socket.on("message", (data, binary) => {
+      if (binary) {
+        body.push(data as Buffer);
+        order.push("body");
+      } else {
+        const frame = JSON.parse(data.toString()) as Record<string, unknown>;
+        controls.push(frame);
+        order.push(String(frame.type));
+      }
+    });
+    socket.on("close", () => order.push("close"));
+    return { socket, controls, body, order, closed: once(socket, "close") };
+  }
+  return { channels, connect };
+}
+
+test("file channel sizes use the write owner's byte limit before creating temporary files", async () => {
+  const f = await setup();
+  f.config.limits.editorBytes = 4;
+  f.config.limits.transferBytes = 8;
+  const notifyWritten = vi.fn();
+  const { channels, connect } = await channelServer(f, notifyWritten);
   for (const purpose of ["save", "upload"]) {
     const limit = purpose === "save" ? 4 : 8;
     for (const size of [limit, limit + 1, -1]) {
-      const incoming = once(server, "connection");
-      channels.open(`${purpose}-${size}`, "test", "file.write", {
+      const { socket } = await connect(`${purpose}-${size}`, "file.write", {
         workspaceId: f.id,
         path: "new-file",
         purpose,
         size,
         createOnly: true,
       });
-      const [socket] = await incoming;
       const [raw] = await once(socket, "message");
       const message = JSON.parse(raw.toString());
       if (size === limit) {
@@ -138,43 +175,23 @@ test.each(["save", "upload"])(
   "%s channels notify only after published or uncertain writes and before results",
   async (purpose) => {
     const f = await setup();
-    const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
-    await once(server, "listening");
     const events: string[] = [];
     let target = "";
-    const channels = new FileChannels(
-      f.text,
-      f.binary,
-      f.metadata,
-      f.config,
-      {
-        deviceId: "test",
-        deviceToken: "test",
-        server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
-      },
-      (workspaceId) => {
-        expect(workspaceId).toBe(f.id);
-        expect(readFileSync(join(f.root, target), "utf8")).toBe("data");
-        events.push("changed");
-      },
-    );
-    cleanups.push(async () => {
-      await channels.close();
-      for (const socket of server.clients) socket.terminate();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+    const { channels, connect } = await channelServer(f, (workspaceId) => {
+      expect(workspaceId).toBe(f.id);
+      expect(readFileSync(join(f.root, target), "utf8")).toBe("data");
+      events.push("changed");
     });
     for (const outcome of ["incomplete", "succeeded", "unknown"]) {
       events.length = 0;
       target = `${purpose}-${outcome}`;
-      const incoming = once(server, "connection");
-      channels.open(target, "test", "file.write", {
+      const { socket } = await connect(target, "file.write", {
         workspaceId: f.id,
         path: target,
         purpose,
         size: 4,
         createOnly: true,
       });
-      const [socket] = await incoming;
       const [ready] = await once(socket, "message");
       expect(JSON.parse(ready.toString()).type).toBe("ready");
       expect(events).toEqual([]);
@@ -204,6 +221,244 @@ test.each(["save", "upload"])(
     }
   },
 );
+
+function gate() {
+  let resume!: () => void;
+  const wait = new Promise<void>((resolve) => {
+    resume = resolve;
+  });
+  return { wait, resume };
+}
+
+test.each(["cancel", "early start"])(
+  "%s during file preparation retains capacity and cleans the late resource",
+  async (ending) => {
+    const f = await setup();
+    f.config.limits.transfersPerDevice = 1;
+    const { channels, connect } = await channelServer(f);
+    const preparation = gate();
+    const prepare = f.binary.prepare.bind(f.binary);
+    let prepared = false;
+    vi.spyOn(f.binary, "prepare").mockImplementationOnce(async (...args) => {
+      const item = await prepare(...args);
+      prepared = true;
+      await preparation.wait;
+      return item;
+    });
+    try {
+      const pending = await connect("late", "file.write", {
+        path: "late",
+        purpose: "upload",
+        size: 4,
+        createOnly: true,
+      });
+      await expect.poll(() => prepared).toBe(true);
+      expect(await readdir(f.root)).toHaveLength(1);
+      if (ending === "cancel") channels.cancel("late");
+      else pending.socket.send(JSON.stringify({ type: "start" }));
+      const [code] = await pending.closed;
+      if (ending === "early start") {
+        expect(pending.controls).toMatchObject([{ type: "error", code: "invalid_argument" }]);
+        expect(pending.order).toEqual(["error", "close"]);
+        expect(code).toBe(1000);
+      } else expect(pending.controls).toEqual([]);
+      expect(channels.count).toBe(1);
+      // Admission wins over malformed parameters while the late resource is still owned.
+      const busy = await connect("busy", "file.write", {});
+      expect((await busy.closed)[0]).toBe(1000);
+      expect(busy.controls).toMatchObject([{ type: "error", code: "busy" }]);
+      expect(await readdir(f.root)).toHaveLength(1);
+      preparation.resume();
+      await expect.poll(() => channels.count).toBe(0);
+      expect(await readdir(f.root)).toEqual([]);
+      expect(JSON.parse(await readFile(join(f.data, stateFiles.temporaryFiles), "utf8"))).toEqual(
+        [],
+      );
+      const next = await connect("next", "file.write", {
+        path: "next",
+        purpose: "upload",
+        size: 0,
+        createOnly: true,
+      });
+      await expect.poll(() => next.controls).toMatchObject([{ type: "ready" }]);
+    } finally {
+      preparation.resume();
+      await channels.close();
+    }
+  },
+);
+
+test("file channel cleanup waits for the writing frame and staged disposal before releasing capacity", async () => {
+  const f = await setup();
+  f.config.limits.transfersPerDevice = 1;
+  const { channels, connect } = await channelServer(f);
+  const writing = gate();
+  const disposing = gate();
+  let written = false;
+  let disposalStarted = false;
+  observeNextFile(f.temporary, (file) => {
+    const write = file.write.bind(file);
+    vi.spyOn(file, "write").mockImplementationOnce(async (...args) => {
+      await write(...args);
+      written = true;
+      await writing.wait;
+    });
+    const dispose = file.dispose.bind(file);
+    vi.spyOn(file, "dispose").mockImplementationOnce(async () => {
+      disposalStarted = true;
+      await disposing.wait;
+      await dispose();
+    });
+  });
+  try {
+    const pending = await connect("writing", "file.write", {
+      path: "target",
+      purpose: "upload",
+      size: 4,
+      createOnly: true,
+    });
+    await expect.poll(() => pending.controls).toMatchObject([{ type: "ready" }]);
+    pending.socket.send(JSON.stringify({ type: "start" }));
+    pending.socket.send(Buffer.from("data"));
+    await expect.poll(() => written).toBe(true);
+    channels.cancel("writing");
+    await pending.closed;
+    let closed = false;
+    const closing = channels.close().then(() => {
+      closed = true;
+    });
+    const busyWriting = await connect("busy-writing", "file.write", {});
+    await busyWriting.closed;
+    expect(busyWriting.controls).toMatchObject([{ type: "error", code: "busy" }]);
+    expect(disposalStarted).toBe(false);
+    expect(closed).toBe(false);
+    expect(channels.count).toBe(1);
+    writing.resume();
+    await expect.poll(() => disposalStarted).toBe(true);
+    const busyDisposing = await connect("busy-disposing", "file.write", {});
+    await busyDisposing.closed;
+    expect(busyDisposing.controls).toMatchObject([{ type: "error", code: "busy" }]);
+    expect(closed).toBe(false);
+    expect(channels.count).toBe(1);
+    const [temporary] = await readdir(f.root);
+    expect(await readFile(join(f.root, temporary!), "utf8")).toBe("data");
+    disposing.resume();
+    await closing;
+    expect(channels.count).toBe(0);
+    expect(await readdir(f.root)).toEqual([]);
+    expect(JSON.parse(await readFile(join(f.data, stateFiles.temporaryFiles), "utf8"))).toEqual([]);
+    const next = await connect("next", "file.write", {
+      path: "next",
+      purpose: "upload",
+      size: 0,
+      createOnly: true,
+    });
+    await expect.poll(() => next.controls).toMatchObject([{ type: "ready" }]);
+  } finally {
+    writing.resume();
+    disposing.resume();
+    await channels.close();
+  }
+});
+
+test.each(["excess body", "repeated start"])(
+  "file channels send an error before graceful close for %s",
+  async (violation) => {
+    const f = await setup();
+    const { channels, connect } = await channelServer(f);
+    const peer = await connect("invalid", "file.write", {
+      path: "target",
+      purpose: "upload",
+      size: 4,
+      createOnly: true,
+    });
+    await expect.poll(() => peer.controls).toMatchObject([{ type: "ready" }]);
+    peer.socket.send(JSON.stringify({ type: "start" }));
+    peer.socket.send(
+      violation === "excess body" ? Buffer.from("extra") : JSON.stringify({ type: "start" }),
+    );
+    expect((await peer.closed)[0]).toBe(1000);
+    expect(peer.controls).toMatchObject([
+      { type: "ready" },
+      { type: "error", code: "invalid_argument" },
+    ]);
+    expect(peer.order).toEqual(["ready", "error", "close"]);
+    await expect.poll(() => channels.count).toBe(0);
+    expect(await readdir(f.root)).toEqual([]);
+  },
+);
+
+test("file reads finish before their last body block is sent", async () => {
+  const f = await setup();
+  const body = Buffer.alloc(limits.dataChunkBytes * 2 + 3, 0x61);
+  await writeFile(join(f.root, "source"), body);
+  const { channels, connect } = await channelServer(f);
+  const finishing = gate();
+  let finished = false;
+  const read = fileReads.readWorkspaceFile;
+  vi.spyOn(fileReads, "readWorkspaceFile").mockImplementationOnce(async (...args) => {
+    const resource = await read(...args);
+    const finish = resource.finish.bind(resource);
+    resource.finish = async () => {
+      await finish();
+      finished = true;
+      await finishing.wait;
+    };
+    return resource;
+  });
+  try {
+    const peer = await connect("read", "file.read", { path: "source", purpose: "download" });
+    await expect.poll(() => peer.controls).toMatchObject([{ type: "ready" }]);
+    peer.socket.send(JSON.stringify({ type: "start" }));
+    await expect.poll(() => finished).toBe(true);
+    await expect.poll(() => Buffer.concat(peer.body).length).toBeGreaterThan(0);
+    expect(Buffer.concat(peer.body).length).toBeLessThan(body.length);
+    finishing.resume();
+    expect((await peer.closed)[0]).toBe(1000);
+    expect(Buffer.concat(peer.body)).toEqual(body);
+    await expect.poll(() => channels.count).toBe(0);
+  } finally {
+    finishing.resume();
+    await channels.close();
+  }
+});
+
+test("empty downloads close their actual handle before ready is sent", async () => {
+  const f = await setup();
+  const path = join(f.root, "empty");
+  await writeFile(path, "");
+  const { channels, connect } = await channelServer(f);
+  const closing = gate();
+  let closeStarted = false;
+  const open = fs.open.bind(fs);
+  vi.spyOn(fs, "open").mockImplementation(async (...args) => {
+    const handle = await open(...args);
+    if (args[0] === path) {
+      const close = handle.close.bind(handle);
+      vi.spyOn(handle, "close").mockImplementationOnce(async () => {
+        closeStarted = true;
+        await closing.wait;
+        await close();
+      });
+    }
+    return handle;
+  });
+  syncBuiltinESMExports();
+  try {
+    const peer = await connect("empty", "file.read", { path: "empty", purpose: "download" });
+    await expect.poll(() => closeStarted).toBe(true);
+    expect(peer.controls).toEqual([]);
+    closing.resume();
+    await expect.poll(() => peer.controls).toMatchObject([{ type: "ready", meta: { size: 0 } }]);
+    peer.socket.send(JSON.stringify({ type: "start" }));
+    expect((await peer.closed)[0]).toBe(1000);
+    expect(peer.body).toEqual([]);
+    await expect.poll(() => channels.count).toBe(0);
+  } finally {
+    closing.resume();
+    await channels.close();
+  }
+});
 
 test("cancel settles while cleanup waits for a real publication owner and later removes temporary files", async () => {
   const changed = vi.fn();

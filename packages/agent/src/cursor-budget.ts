@@ -8,10 +8,8 @@ export class CursorBudget {
     if (this.count >= agentLimits.cursorsPerDevice)
       throw new AppError("busy", "Too many active list reads; try again later");
     this.count++;
-    let released = false;
     return () => {
-      if (!released) this.count--;
-      released = true;
+      this.count--;
     };
   }
 }

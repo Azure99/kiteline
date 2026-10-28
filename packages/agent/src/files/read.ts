@@ -51,53 +51,51 @@ async function readFile(
     if (!info.isFile()) throw new AppError("unsupported", "Only regular files can be read");
     const size = Number(info.size);
     if (!Number.isSafeInteger(size)) throw new AppError("limit_exceeded", "File is too large");
+    let resolvedPurpose: Exclude<FileReadPurpose, "open">;
     if (purpose === "open") {
       const header = await readExact(handle, Math.min(size, 32), signal);
       try {
-        purpose = [PNG, JPG, GIF, WEBP].some((type) => type.validate(header)) ? "image" : "text";
+        resolvedPurpose = [PNG, JPG, GIF, WEBP].some((type) => type.validate(header))
+          ? "image"
+          : "text";
       } catch {
         throw new AppError("unsupported", "Image format is corrupt or unsupported");
       }
-    }
-    const limit =
-      purpose === "text"
-        ? capacity.editorBytes
-        : purpose === "image"
-          ? capacity.imageBytes
-          : capacity.transferBytes;
-    if (size > limit)
-      throw new AppError(
-        "limit_exceeded",
-        purpose === "text"
-          ? "File exceeds the text editing size limit"
-          : purpose === "image"
-            ? "Image exceeds the preview size limit"
-            : "File exceeds the transfer size limit",
-      );
-    const meta: FileMeta = {
-      size,
-      filename: basename(path),
-      contentType: "application/octet-stream",
-    };
-    const bytes = purpose === "download" ? undefined : await readExact(handle, size, signal);
-    if (purpose === "text") {
-      const { text, format } = decodeText(bytes!);
+    } else resolvedPurpose = purpose;
+    const { maxBytes, message } = {
+      text: { maxBytes: capacity.editorBytes, message: "File exceeds the text editing size limit" },
+      image: { maxBytes: capacity.imageBytes, message: "Image exceeds the preview size limit" },
+      download: {
+        maxBytes: capacity.transferBytes,
+        message: "File exceeds the transfer size limit",
+      },
+    }[resolvedPurpose];
+    if (size > maxBytes) throw new AppError("limit_exceeded", message);
+    const filename = basename(path);
+    let meta: FileMeta;
+    let bytes: Buffer | undefined;
+    if (resolvedPurpose === "text") {
+      bytes = await readExact(handle, size, signal);
+      const { text, format } = decodeText(bytes);
       if (encodeText(text, format).length > capacity.editorBytes)
         throw new AppError(
           "limit_exceeded",
           "Content encoded with the saved line ending format exceeds the editing size limit",
         );
-      Object.assign(meta, {
+      meta = {
+        size,
+        filename,
         contentType: "text/plain; charset=utf-8",
         resolvedPath,
         mode: Number(info.mode & 0o777n),
-        revision: revisionOf(resolvedPath, info.dev, bytes!),
+        revision: revisionOf(resolvedPath, info.dev, bytes),
         ...format,
-      });
-    } else if (purpose === "image") {
+      };
+    } else if (resolvedPurpose === "image") {
+      bytes = await readExact(handle, size, signal);
       let dimensions;
       try {
-        dimensions = imageSize(bytes!);
+        dimensions = imageSize(bytes);
       } catch {
         throw new AppError("unsupported", "Image format is corrupt or unsupported");
       }
@@ -109,7 +107,9 @@ async function readFile(
         throw new AppError("unsupported", "Only PNG, JPEG, WebP, and GIF images are supported");
       if (width * height > capacity.imagePixels)
         throw new AppError("limit_exceeded", "Image dimensions exceed the preview limit");
-      Object.assign(meta, { contentType: mime, width, height });
+      meta = { size, filename, contentType: mime, width, height };
+    } else {
+      meta = { size, filename, contentType: "application/octet-stream" };
     }
     if (bytes) {
       const after = await handle.stat({ bigint: true });

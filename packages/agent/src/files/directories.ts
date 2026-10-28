@@ -5,7 +5,7 @@ import { basename, dirname, join, posix } from "node:path";
 import { AppError, type DirectoryListing, type Entry } from "@kiteline/shared/protocol";
 import { withPublicationLock } from "./publish.js";
 import { devicePath, entryName, readDirectoryEntry, realPath, sameObject } from "./paths.js";
-import { CursorBudget, CursorTable } from "../cursor-budget.js";
+import { CursorTable, type CursorBudget } from "../cursor-budget.js";
 
 interface Cursor {
   path: string;
@@ -14,9 +14,13 @@ interface Cursor {
   carry: Dirent | null;
   info?: BigIntStats;
 }
+type ListingOptions = { cursor?: string; signal?: AbortSignal } & (
+  | { entries: "absolute" }
+  | { entries: "relative"; parent: string }
+);
 export class Directories {
   private cursors: CursorTable<Cursor>;
-  constructor(budget = new CursorBudget()) {
+  constructor(budget: CursorBudget) {
     this.cursors = new CursorTable(
       budget,
       async (cursor) => {
@@ -32,14 +36,11 @@ export class Directories {
   release(id: string) {
     return this.cursors.release(id);
   }
-  async list(
-    path: string,
-    token?: string,
-    signal?: AbortSignal,
-    entryParent?: string,
-  ): Promise<DirectoryListing> {
+  async list(path: string, options: ListingOptions): Promise<DirectoryListing> {
     devicePath(path);
-    const relativeEntries = entryParent !== undefined;
+    const { cursor: token } = options;
+    let { signal } = options;
+    let entryParent = options.entries === "relative" ? options.parent : undefined;
     signal?.throwIfAborted();
     const page = this.cursors.acquire(token, () => ({ path, entryParent, carry: null }), signal);
     const { id, value: cursor } = page;
@@ -78,13 +79,13 @@ export class Directories {
         signal.throwIfAborted();
         if (!item) break;
         const rawName: Buffer = Buffer.isBuffer(item.name) ? item.name : Buffer.from(item.name);
+        const entryPath =
+          options.entries === "relative"
+            ? posix.join(entryParent, rawName.toString("utf8"))
+            : join(entryParent, rawName.toString("utf8"));
         let entry: Entry;
         try {
-          entry = await readDirectoryEntry(
-            path,
-            rawName,
-            (relativeEntries ? posix.join : join)(entryParent, rawName.toString("utf8")),
-          );
+          entry = await readDirectoryEntry(path, rawName, entryPath);
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
           throw error;
