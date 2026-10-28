@@ -18,7 +18,7 @@ import { testConfig } from "./support/config.js";
 import { gitRepoFixture, isolateGitEnvironment, workspaceFixture } from "./support/git.js";
 import { changeIndex, reviewDiscard, discard } from "../src/git/changes.js";
 import { GitWriteQueue } from "../src/git/queue.js";
-import { git } from "../src/git/process.js";
+import { gitRead, gitWrite } from "../src/git/process.js";
 import { commit, createBranch, deleteBranch, switchBranch } from "../src/git/refs.js";
 import { observeIndex, headIdentity } from "../src/git/observe.js";
 import { status } from "../src/git/status.js";
@@ -100,7 +100,16 @@ test.each(["file", "symlink", "untracked"])(
     await mkdir(bin);
     await writeFile(
       join(bin, "git"),
-      `#!/bin/sh\ncase " $* " in\n  *" add -A "*)\n    rm -- selected\n    mkdir -- selected\n    printf '%s' unselected > selected/child\n    ;;\nesac\nexec '${actual.replaceAll("'", "'\\''")}' "$@"\n`,
+      `#!/bin/sh
+case " $* " in
+  *" add -A "*)
+    rm -- selected
+    mkdir -- selected
+    printf '%s' unselected > selected/child
+    ;;
+esac
+exec '${actual.replaceAll("'", "'\\''")}' "$@"
+`,
     );
     await chmod(join(bin, "git"), 0o755);
     vi.stubEnv("PATH", bin + ":" + process.env.PATH);
@@ -125,7 +134,9 @@ test("selected repositories and linked worktrees own storage while retaining ide
   await mkdir(hooks);
   await writeFile(
     join(hooks, "pre-commit"),
-    "#!/bin/sh\ngit diff --cached --name-only > hook-seen\n",
+    `#!/bin/sh
+git diff --cached --name-only > hook-seen
+`,
   );
   await chmod(join(hooks, "pre-commit"), 0o755);
   const config = join(process.env.HOME!, ".gitconfig");
@@ -251,12 +262,19 @@ test.each([
   await cli("commit", "-m", "base");
   await write(
     ".git/hooks/post-index-change",
-    "#!/bin/sh\ngit diff --cached --name-only -z -- '*.txt' > .git/hook-files\n",
+    `#!/bin/sh
+git diff --cached --name-only -z -- '*.txt' > .git/hook-files
+`,
   );
   await chmod(join(root, ".git/hooks/post-index-change"), 0o755);
   await write(
     ".git/hooks/pre-commit",
-    "#!/bin/sh\nif test -n \"$(git diff --cached --name-only -- '*.txt')\"; then\n  echo hook-rejected >&2\n  exit 1\nfi\n",
+    `#!/bin/sh
+if test -n "$(git diff --cached --name-only -- '*.txt')"; then
+  echo hook-rejected >&2
+  exit 1
+fi
+`,
   );
   await chmod(join(root, ".git/hooks/pre-commit"), 0o755);
   await write(path, "changed\n");
@@ -425,11 +443,17 @@ test("write queue cancellation is prompt, preserves ordering and bounded output 
   const { root, repo, repos, workspace, cli, write } = await setup();
   await write("base", "base");
   await cli("add", ".");
-  await write(".git/hooks/pre-commit", "#!/bin/sh\nseq 1 10000\nsleep 0.2\n");
+  await write(
+    ".git/hooks/pre-commit",
+    `#!/bin/sh
+seq 1 10000
+sleep 0.2
+`,
+  );
   await exec("chmod", ["+x", join(root, ".git/hooks/pre-commit")]);
   const queue = new GitWriteQueue(repos);
   const first = queue.run(workspace.id, repo.id, signal(), () =>
-    git(root, ["commit", "-m", "base"], signal(), { write: true, maxBytes: 100 }),
+    gitWrite(root, ["commit", "-m", "base"], signal()),
   );
   const controller = new AbortController();
   const waiting = queue.run(workspace.id, repo.id, controller.signal, async () => {
@@ -442,6 +466,26 @@ test("write queue cancellation is prompt, preserves ordering and bounded output 
   expect(await cli("log", "-1", "--format=%s")).toBe("base\n");
 });
 
+test("write startup failure is failed while native rejection after startup is unknown", async () => {
+  const { root, cli } = await setup();
+  await expect(
+    gitWrite(join(root, "missing-directory"), ["tag", "not-started"], signal()),
+  ).rejects.toMatchObject({ code: "not_found", outcome: "failed" });
+  await expect(
+    gitWrite(root, ["tag", "not-created", "missing-commit"], signal()),
+  ).rejects.toMatchObject({
+    code: "io_error",
+    outcome: "unknown",
+    result: {
+      stdout: "",
+      stderr: expect.stringContaining("missing-commit"),
+      truncated: false,
+      exitCode: 128,
+    },
+  });
+  expect(await cli("tag", "--list")).toBe("");
+});
+
 test("a newly started credential cache survives completion and releases the write queue", async () => {
   const { root, cli, repo, repos, workspace } = await setup();
   const socket = join(root, ".git/credential-cache/socket");
@@ -452,20 +496,20 @@ test("a newly started credential cache survives completion and releases the writ
   const timeout = setTimeout(() => controller.abort(new Error("cache blocked completion")), 2000);
   try {
     const first = queue.run(workspace.id, repo.id, controller.signal, () =>
-      git(
+      gitWrite(
         root,
         ["-c", `credential.helper=cache --timeout=30 --socket=${socket}`, "credential", "approve"],
         controller.signal,
-        { write: true, input },
+        { input },
       ),
     );
     const next = queue.run(workspace.id, repo.id, controller.signal, () =>
-      git(root, ["tag", "after-cache"], controller.signal, { write: true }),
+      gitWrite(root, ["tag", "after-cache"], controller.signal),
     );
     await Promise.all([first, next]);
     clearTimeout(timeout);
     controller.abort(new Error("operation already completed"));
-    const credential = await git(
+    const credential = await gitRead(
       root,
       ["credential-cache", `--socket=${socket}`, "get"],
       signal(),
@@ -492,18 +536,23 @@ test("Git waits for a synchronous hook but leaves its background task running", 
   try {
     await write(
       ".git/hooks/post-commit",
-      "#!/bin/sh\nsleep 0.1\necho synchronous > .git/sync-done\nsleep 30 </dev/null >/dev/null 2>&1 &\necho $! > .git/background.pid\n",
+      `#!/bin/sh
+sleep 0.1
+echo synchronous > .git/sync-done
+sleep 30 </dev/null >/dev/null 2>&1 &
+echo $! > .git/background.pid
+`,
     );
     await chmod(join(root, ".git/hooks/post-commit"), 0o755);
     const queue = new GitWriteQueue(repos);
     const first = queue.run(workspace.id, repo.id, controller.signal, () =>
-      git(root, ["commit", "--allow-empty", "-m", "hook"], controller.signal, { write: true }),
+      gitWrite(root, ["commit", "--allow-empty", "-m", "hook"], controller.signal),
     );
     const next = queue.run(workspace.id, repo.id, controller.signal, async () => {
       expect(await readFile(join(root, ".git/sync-done"), "utf8")).toBe("synchronous\n");
       background = Number(await readFile(join(root, ".git/background.pid"), "utf8"));
       expect(process.kill(background, 0)).toBe(true);
-      return git(root, ["tag", "after-background"], controller.signal, { write: true });
+      return gitWrite(root, ["tag", "after-background"], controller.signal);
     });
     await Promise.all([first, next]);
     expect(await cli("tag", "--list")).toBe("after-background\n");
@@ -516,13 +565,22 @@ test("Git waits for a synchronous hook but leaves its background task running", 
 
 test("Git collects delayed hook output within the output drain deadline", async () => {
   const { root, write } = await setup();
-  await write(".git/hooks/post-commit", "#!/bin/sh\n(sleep 0.1; echo delayed-hook-output >&2) &\n");
+  await write(
+    ".git/hooks/post-commit",
+    `#!/bin/sh
+(
+  sleep 0.1
+  echo delayed-hook-output >&2
+) &
+`,
+  );
   await chmod(join(root, ".git/hooks/post-commit"), 0o755);
-  const result = await git(root, ["commit", "--allow-empty", "-m", "output"], signal(), {
-    write: true,
+  const result = await gitWrite(root, ["commit", "--allow-empty", "-m", "output"], signal());
+  expect(result).toEqual({
+    stdout: expect.any(String),
+    stderr: expect.stringContaining("delayed-hook-output"),
+    truncated: false,
   });
-  expect(result.stderr).toContain("delayed-hook-output");
-  expect(result.code).toBe(0);
 });
 
 test.each(["", "setsid "])(
@@ -535,12 +593,17 @@ test.each(["", "setsid "])(
       await cli("add", "file");
       await write(
         ".git/hooks/post-commit",
-        `#!/bin/sh\n${prefix}sh -c 'echo $$ > .git/escaped.pid; exec sleep 30' &\n`,
+        `#!/bin/sh
+${prefix}sh -c '
+  echo $$ > .git/escaped.pid
+  exec sleep 30
+' &
+`,
       );
       await chmod(join(root, ".git/hooks/post-commit"), 0o755);
       const queue = new GitWriteQueue(repos);
       const result = queue.run(workspace.id, repo.id, signal(), () =>
-        git(root, ["commit", "-m", "committed"], signal(), { write: true }),
+        gitWrite(root, ["commit", "-m", "committed"], signal()),
       );
       const rejected = expect(result).rejects.toMatchObject({
         outcome: "unknown",
@@ -555,7 +618,7 @@ test.each(["", "setsid "])(
       await rejected;
       expect(await cli("log", "-1", "--format=%s")).toBe("committed\n");
       await queue.run(workspace.id, repo.id, signal(), () =>
-        git(root, ["tag", "after-hook"], signal(), { write: true }),
+        gitWrite(root, ["tag", "after-hook"], signal()),
       );
       expect(process.kill(escaped!, 0)).toBe(true);
     } finally {
@@ -572,13 +635,19 @@ test.each(["cancelled", "timeout"] as const)(
     await cli("add", ".");
     await write(
       ".git/hooks/pre-commit",
-      "#!/bin/sh\ntrap '' TERM\nexec >/dev/null 2>&1\necho $PPID $$ >.git/hook-ready\nsleep 2\necho leaked >.git/hook-leaked\n",
+      `#!/bin/sh
+trap '' TERM
+exec >/dev/null 2>&1
+echo $PPID $$ >.git/hook-ready
+sleep 2
+echo leaked >.git/hook-leaked
+`,
     );
     await exec("chmod", ["+x", join(root, ".git/hooks/pre-commit")]);
-    const queue = new GitWriteQueue(repos),
-      controller = new AbortController();
+    const queue = new GitWriteQueue(repos);
+    const controller = new AbortController();
     const running = queue.run(workspace.id, repo.id, controller.signal, () =>
-      git(root, ["commit", "-m", "cancel"], controller.signal, { write: true }),
+      gitWrite(root, ["commit", "-m", "cancel"], controller.signal),
     );
     const assertion = expect(running).rejects.toMatchObject({ code: reason, outcome: "unknown" });
     let group: number | undefined;
@@ -606,7 +675,7 @@ test.each(["cancelled", "timeout"] as const)(
           return { stdout: "" };
         });
         expect(state.stdout.trim()).toMatch(/^(Z.*)?$/);
-        return git(root, ["commit", "-m", "next"], signal(), { write: true });
+        return gitWrite(root, ["commit", "-m", "next"], signal());
       });
       await expect(readFile(join(root, ".git/hook-leaked"))).rejects.toMatchObject({
         code: "ENOENT",
@@ -624,13 +693,20 @@ test("cancellation during output drain still cleans the group before the next wr
   const { root, repo, repos, workspace, write } = await setup();
   await write(
     ".git/hooks/post-commit",
-    "#!/bin/sh\necho $PPID > .git/git.pid\nsh -c 'trap \"\" TERM; echo $$ > .git/background.pid; exec sleep 30' &\n",
+    `#!/bin/sh
+echo $PPID > .git/git.pid
+sh -c '
+  trap "" TERM
+  echo $$ > .git/background.pid
+  exec sleep 30
+' &
+`,
   );
   await chmod(join(root, ".git/hooks/post-commit"), 0o755);
   const queue = new GitWriteQueue(repos);
   const controller = new AbortController();
   const running = queue.run(workspace.id, repo.id, controller.signal, () =>
-    git(root, ["commit", "--allow-empty", "-m", "draining"], controller.signal, { write: true }),
+    gitWrite(root, ["commit", "--allow-empty", "-m", "draining"], controller.signal),
   );
   const assertion = expect(running).rejects.toMatchObject({
     code: "cancelled",
@@ -659,7 +735,7 @@ test("cancellation during output drain still cleans the group before the next wr
         return { stdout: "" };
       });
       expect(state.stdout.trim()).toMatch(/^(Z.*)?$/);
-      return git(root, ["tag", "after-drain-cancel"], signal(), { write: true });
+      return gitWrite(root, ["tag", "after-drain-cancel"], signal());
     });
     controller.abort(new AppError("cancelled", "cancel while draining"));
     await Promise.all([assertion, next]);
@@ -689,7 +765,13 @@ test("commit observes semantic index identity and commits every staged file", as
   expect(await cli("show", "HEAD:two")).toBe("two");
   expect(await readFile(join(root, "one"), "utf8")).toBe("not staged");
   await stage(["one"]);
-  await write(".git/hooks/pre-commit", "#!/bin/sh\necho hook-rejected >&2\nexit 1\n");
+  await write(
+    ".git/hooks/pre-commit",
+    `#!/bin/sh
+echo hook-rejected >&2
+exit 1
+`,
+  );
   await exec("chmod", ["+x", join(root, ".git/hooks/pre-commit")]);
   await expect(
     commit(repo, "rejected", (await observeIndex(repo, signal())).token, signal()),
@@ -697,6 +779,43 @@ test("commit observes semantic index identity and commits every staged file", as
   expect((await headIdentity(root, signal())).oid).toBe(result.commitOid);
   expect(await cli("diff", "--cached", "--name-only")).toBe("one\n");
 });
+test("a completed commit retains its known fact when readback finds an unborn HEAD", async () => {
+  const { root, repo, cli, write } = await setup();
+  await write("file", "committed content\n");
+  await cli("add", "file");
+  const token = (await observeIndex(repo, signal())).token;
+  const actualGit = (await exec("/bin/sh", ["-c", "command -v git"])).stdout.trim();
+  const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
+  const bin = join(root, ".git/bin");
+  await mkdir(bin);
+  await writeFile(
+    join(bin, "git"),
+    `#!/bin/sh
+case " $* " in
+  *" commit -F - "*)
+    ${quote(actualGit)} "$@" || exit $?
+    exec ${quote(actualGit)} symbolic-ref HEAD refs/heads/readback-missing
+    ;;
+  *) exec ${quote(actualGit)} "$@" ;;
+esac
+`,
+  );
+  await chmod(join(bin, "git"), 0o755);
+  vi.stubEnv("PATH", bin + ":" + process.env.PATH);
+  try {
+    await expect(commit(repo, "written", token, signal())).rejects.toMatchObject({
+      outcome: "unknown",
+      code: "io_error",
+      message: expect.stringContaining("HEAD is unreadable"),
+      result: { committed: true },
+    });
+    expect(await cli("log", "main", "-1", "--format=%s")).toBe("written\n");
+    expect(await cli("show", "main:file")).toBe("committed content\n");
+  } finally {
+    await cli("symbolic-ref", "HEAD", "refs/heads/main");
+  }
+});
+
 test("commit rejects an external branch change during its observation", async () => {
   const { root, repo, cli, write } = await setup();
   await write("x", "base x\n");
@@ -713,13 +832,23 @@ test("commit rejects an external branch change during its observation", async ()
   const token = (await observeIndex(repo, signal())).token;
   const actual = (await exec("/bin/sh", ["-c", "command -v git"])).stdout.trim();
   const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
-  const release = join(root, ".git/release"),
-    ready = join(root, ".git/ready");
+  const release = join(root, ".git/release");
+  const ready = join(root, ".git/ready");
   const bin = await mkdtemp("/var/tmp/kiteline-git-gate-");
   roots.push(bin);
   await writeFile(
     join(bin, "git"),
-    `#!/bin/sh\ncase " $* " in\n  *" diff --cached "*)\n    : > ${quote(ready)}\n    while [ ! -e ${quote(release)} ]; do sleep 0.01; done\n    ;;\nesac\nexec ${quote(actual)} "$@"\n`,
+    `#!/bin/sh
+case " $* " in
+  *" diff --cached "*)
+    : > ${quote(ready)}
+    while [ ! -e ${quote(release)} ]; do
+      sleep 0.01
+    done
+    ;;
+esac
+exec ${quote(actual)} "$@"
+`,
   );
   await chmod(join(bin, "git"), 0o755);
   vi.stubEnv("PATH", bin + ":" + process.env.PATH);
@@ -757,7 +886,7 @@ test("index observations retain unmerged stage identities and commit refuses the
   const one = (await cli("rev-parse", "HEAD:a")).trim(),
     two = (await cli("rev-parse", "HEAD:b")).trim();
   const conflict = async (ours: string) =>
-    git(repo.rootPath, ["update-index", "--index-info"], signal(), {
+    gitWrite(repo.rootPath, ["update-index", "--index-info"], signal(), {
       input: `0 ${"0".repeat(40)}\ta\n100644 ${one} 1\ta\n100644 ${ours} 2\ta\n100644 ${two} 3\ta\n`,
     });
   await conflict(one);
@@ -822,7 +951,13 @@ test("branch creation remains reported when switching would overwrite local edit
   expect((await headIdentity(root, signal())).symbolicRef).toBe("refs/heads/main");
   expect(await readFile(join(root, "base"), "utf8")).toBe("local edit");
   await cli("restore", "base");
-  await write(".git/hooks/post-checkout", "#!/bin/sh\necho checkout-hook-failed >&2\nexit 1\n");
+  await write(
+    ".git/hooks/post-checkout",
+    `#!/bin/sh
+echo checkout-hook-failed >&2
+exit 1
+`,
+  );
   await exec("chmod", ["+x", join(root, ".git/hooks/post-checkout")]);
   await expect(
     createBranch(repo, "switched-with-hook-error", first, true, signal()),

@@ -23,10 +23,11 @@
 
 ### Git 进程
 
-- 所有 Git 命令由 `packages/agent/src/git/process.ts` 用 argv 启动，不经过 Shell，工作目录是仓库根目录。stdin 只用于传入数据，写完即关闭。Linux 和 macOS 上 Git 在独立的进程组中运行，没有控制终端。
+- 所有 Git 命令通过 `packages/agent/src/git/process.ts` 的 `gitRead` 或 `gitWrite` 用 argv 启动，不经过 Shell，工作目录是仓库根目录。stdin 只用于传入数据，写完即关闭。Linux 和 macOS 上 Git 在独立的进程组中运行，没有控制终端。
 - 环境继承 agent 的环境，设置 `GIT_TERMINAL_PROMPT=0`，并删除会改变仓库定位或路径匹配方式的变量（如 `GIT_DIR`、`GIT_WORK_TREE`、`GIT_INDEX_FILE`、`GIT_LITERAL_PATHSPECS`，完整列表见源码），Windows 上按不区分大小写匹配变量名。用户的 Git 配置、身份、凭据、SSH、hooks 和签名保持不变。
 - 读命令带 `--no-pager --no-optional-locks -c color.ui=false`，不顺带刷新 index，避免自己的读取触发变化事件；写命令只带 `--no-pager`。
-- 一次性读取的 stdout 不超过结果上限，超出时返回 `limit_exceeded`；流式解析的命令逐条处理，单条记录不超过结果上限。stderr 保留前 32 KiB。
+- 一次性读取的 stdout 超限时停止进程，默认返回 `limit_exceeded`，显式允许截断的 diff 返回前缀；写命令超限只保留前缀，继续执行。流式解析的命令逐条处理，单条记录不超过结果上限。stderr 保留前 32 KiB，截断不触发 stdout 的停止策略。
+- UTF-8、路径参数和 NUL 记录的共同格式规则位于 `packages/agent/src/git/format.ts`；具体机器记录的解释仍由读取该命令的模块负责。
 - 路径参数写成 `:(top,literal)<path>`，按字面匹配；`git diff --no-index` 的磁盘路径加 `./` 前缀。
 
 ## 状态与分页
@@ -38,6 +39,7 @@
 - 未跟踪项的类型只对当前页的合法路径用 `lstat` 取得；`lstat` 失败时整页读取失败。
 - 路径不是合法 UTF-8 的条目返回 `pathError`（`\xNN` 转义的诊断名），不返回 `path`，不能被选中，也不能跳转到文件工具；它仍参与计数、冲突判断和 token。rename 或 copy 任一端无效时整条无效。合法的 U+FFFD 字符是普通路径。
 - 结果还包括 HEAD 身份（`symbolicRef` 和 `oid`；未提交过时 `oid` 为 null，detached 时 `symbolicRef` 为 null）、upstream、ahead 和 behind，以及[进行中的操作](#冲突与进行中的操作)。
+- 初选条目后按包含 operation 等最终字段的完整 JSON 裁剪页尾；`nextOffset` 始终指向实际返回条目之后，`truncated` 由是否存在 `nextOffset` 决定。offset 前和页满后的条目仍检查单项上限，超限时整页失败。
 
 ### token
 
@@ -89,10 +91,12 @@
 ### 历史与分支
 
 - `git.history` 从固定的 `anchorOid`（首次为当前 HEAD）开始，用 `git log --no-show-signature --encoding=UTF-8 -z` 每页读取最多 `listPageEntries` 个提交（多读一个判断是否还有下一页），返回 OID、父提交、作者、时间和主题。翻页沿用同一个 anchor，不受之后新提交的影响。
+- history 的 offset 由 Git 的 `--skip` 应用，单项限额检查覆盖本次窗口内的全部提交，包括页满后多读的一项；不会为分页扫描窗口外的历史。`nextOffset` 加实际返回数量，字节限额导致的短页也沿此偏移继续。
 - `git.commitMessage` 按选中的完整 40 或 64 位提交 OID 读取完整消息，与 HEAD 和父提交选择无关。它经现有仓库解析和只读 Git 进程执行 `git show --no-show-signature --no-color --no-patch --encoding=UTF-8 --format=format:%B <oid> --`，保留主题、正文和换行，不追加结尾换行。原始输出及最终 `{message}` JSON 均受 `resultBytes` 限制，超限返回 `limit_exceeded`，不返回部分消息。浏览器只在选中后读取；桌面通过“完整提交消息”弹窗阅读，手机与文件列表同区滚动。消息读取失败独立显示，文件列表和 diff 继续可用。
 - 网页历史首屏在已读取的 status HEAD 改变时更新；深页保留原 anchor，Previous 回到首屏或主动刷新历史时重新读取当前 HEAD。在途请求按目标页判断：HEAD 改变不取消深页翻页；首屏成功响应未覆盖读取期间观察到的 HEAD 时才补读，失败不自动补读。列表更新不清除按提交与父提交 OID 打开的详情或 diff。
 - `git.commitFiles` 和提交 diff 只接受完整的 40 或 64 位十六进制提交 OID。根提交与空树比较；合并提交必须由浏览器指定父提交，否则返回 `invalid_argument`。
 - `git.commitFiles` 的文本增删行数与 diff 使用同一父提交，来自完整 numstat，不受 patch 截断影响。纯 rename 或 mode 变化保留真实零值，二进制不返回行数。文件项按条目数和结果字节上限分页，预算包含稍后补入的统计字段。
+- commitFiles 全量读取 raw diff 并检查单项上限，offset 前和页满后的项也不能跳过检查；完整 numstat 只为入选项保留统计，`nextOffset` 按实际返回文件数推进。
 - `git.branches` 用 `git for-each-ref refs/heads/` 一次返回全部本地分支和检出它的工作树路径，不分页，超过结果上限时返回 `limit_exceeded`。
 
 ## 写操作

@@ -4,12 +4,12 @@ import { join } from "node:path";
 import {
   AppError,
   asError,
-  OperationError,
   type GitOperation,
   type HeadIdentity,
   type Repo,
 } from "@kiteline/shared/protocol";
-import { commandLine, git, gitProgressError } from "./process.js";
+import { gitRead, gitProgressError, gitWrite, readAfterWrite } from "./process.js";
+import { commandLine } from "./format.js";
 import { observeIndex } from "./observe.js";
 
 export async function readOperation(
@@ -115,7 +115,7 @@ export async function readOperation(
       try {
         comment = commandLine(
           (
-            await git(repo.rootPath, ["stripspace", "--comment-lines"], signal, {
+            await gitRead(repo.rootPath, ["stripspace", "--comment-lines"], signal, {
               input: "\n",
               maxBytes: 4096,
             })
@@ -216,8 +216,7 @@ export async function finishOperation(
     throw new AppError("conflict", operation.reason ?? "Current operation does not apply");
   let result;
   try {
-    result = await git(repo.rootPath, [kind, `--${action}`], signal, {
-      write: true,
+    result = await gitWrite(repo.rootPath, [kind, `--${action}`], signal, {
       env: { GIT_EDITOR: "true" },
     });
   } catch (error) {
@@ -231,21 +230,6 @@ export async function finishOperation(
       operationAfter: after.operation,
     });
   }
-  try {
-    const after = await currentOperation(repo, signal);
-    return {
-      headOid: after.head.oid,
-      operationAfter: after.operation,
-      stdout: result.text,
-      stderr: result.stderr,
-      truncated: result.truncated,
-    };
-  } catch (error) {
-    const reason = asError(error);
-    throw new OperationError(reason.code, `Git command completed; ${reason.message}`, "unknown", {
-      stdout: result.text,
-      stderr: result.stderr,
-      truncated: result.truncated,
-    });
-  }
+  const after = await readAfterWrite(result, () => currentOperation(repo, signal));
+  return { headOid: after.head.oid, operationAfter: after.operation, ...result };
 }

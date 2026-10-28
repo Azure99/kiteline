@@ -2,12 +2,13 @@ import { agentLimits } from "../src/limits.js";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, mkdir, writeFile, rm, rename, chmod, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, rm, rename, chmod, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { AppError } from "@kiteline/shared/protocol";
 import { MetadataStore } from "../src/metadata.js";
 import { testConfig } from "./support/config.js";
 import { gitRepoFixture, isolateGitEnvironment, workspaceFixture } from "./support/git.js";
+import { gitRead } from "../src/git/process.js";
 import { observeIndex } from "../src/git/observe.js";
 import { status } from "../src/git/status.js";
 import { workingDiff } from "../src/git/diff.js";
@@ -34,6 +35,51 @@ async function setup() {
   const { workspace, repos, repo } = await workspaceFixture(root, metadata);
   return { home, root, cli, metadata, workspace, repos, repo };
 }
+test.each([false, true])(
+  "read stdout overflow stops the running Git alias with truncate=%s",
+  async (truncate) => {
+    const { root, cli, repos } = await setup();
+    const script = join(root, ".git/output-loop");
+    await writeFile(
+      script,
+      `#!/bin/sh
+echo $$ > .git/output.pid
+while :; do
+  printf '0123456789abcdef\\n'
+done
+`,
+    );
+    await chmod(script, 0o755);
+    await cli("config", "alias.output-loop", "!./.git/output-loop");
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(new AppError("timeout", "Read overflow did not stop Git")),
+      2500,
+    );
+    const maxBytes = 64;
+    const pending = gitRead(root, ["output-loop"], controller.signal, { maxBytes, truncate });
+    try {
+      if (truncate) {
+        const result = await pending;
+        expect(result.bytes.length).toBe(maxBytes);
+        expect(result.text).toBe(result.bytes.toString());
+        expect(result.truncated).toBe(true);
+      } else await expect(pending).rejects.toMatchObject({ code: "limit_exceeded" });
+      const pid = Number(await readFile(join(root, ".git/output.pid"), "utf8"));
+      const state = await run("ps", ["-p", String(pid), "-o", "stat="]).catch((error) => {
+        if (error.code !== 1) throw error;
+        return { stdout: "" };
+      });
+      expect(state.stdout.trim()).toMatch(/^(Z.*)?$/);
+    } finally {
+      clearTimeout(timeout);
+      controller.abort(new AppError("cancelled", "Clean up read overflow test"));
+      await pending.catch(() => {});
+      await repos.close();
+    }
+  },
+);
+
 test("leaving a workspace cancels its active discovery without returning a dead cursor", async () => {
   const { workspace, repos } = await setup();
   const pending = repos.discover(workspace.id, undefined, signals());
@@ -252,29 +298,124 @@ test("status pages count the whole repo, reject stale pages, and use semantic in
   expect((await observeIndex(repo, signals())).token).not.toBe(intent.token);
   expect((await observeIndex(repo, signals())).hasStagedChanges).toBe(true);
   await cli("commit", "-m", "base");
+  const remainingEntries = 3;
+  const initialCount = agentLimits.listPageEntries + remainingEntries;
   await Promise.all(
-    Array.from({ length: 503 }, (_, i) =>
+    Array.from({ length: initialCount }, (_, i) =>
       writeFile(join(root, `item-${String(i).padStart(4, "0")}`), "x"),
     ),
   );
   const first = await status(repo, 0, undefined, signals());
-  expect(first.totalCount).toBe(503);
+  expect(first.totalCount).toBe(initialCount);
   expect(first.entries.length).toBe(agentLimits.listPageEntries);
   expect((await status(repo, first.nextOffset!, first.listToken, signals())).entries.length).toBe(
-    3,
+    remainingEntries,
   );
   const token = (await observeIndex(repo, signals())).token;
   await cli("status", "--porcelain");
   expect((await observeIndex(repo, signals())).token).toBe(token);
   await writeFile(join(root, "another"), "x");
-  await expect(status(repo, 500, first.listToken, signals())).rejects.toMatchObject({
+  await expect(status(repo, first.nextOffset!, first.listToken, signals())).rejects.toMatchObject({
     code: "conflict",
   });
-  expect((await status(repo, 999, undefined, signals())).totalCount).toBe(504);
+  const updatedCount = initialCount + 1;
+  const beyondLastEntry = updatedCount + 1;
+  expect((await status(repo, beyondLastEntry, undefined, signals())).totalCount).toBe(updatedCount);
   await cli("add", "item-0000");
-  expect((await status(repo, 500, undefined, signals())).stagedCount).toBe(1);
+  expect((await status(repo, first.nextOffset!, undefined, signals())).stagedCount).toBe(1);
   await repos.close();
 }, 15_000);
+test.each(["status", "commitFiles"] as const)(
+  "%s checks oversized JSON entries after a full page and before the requested offset",
+  async (reader) => {
+    const { root, cli, repo, repos } = await setup();
+    const originalLimits = { ...agentLimits };
+    try {
+      const resultBytes = 3 * 1024;
+      const directory = ["z", ...Array.from({ length: 8 }, () => '"'.repeat(200))].join("/");
+      const largePath = `${directory}/file`;
+      await mkdir(join(root, directory), { recursive: true });
+      await writeFile(join(root, "a"), "small\n");
+      await writeFile(join(root, largePath), "large path\n");
+      await cli("add", ".");
+      await cli("commit", "-m", "paths");
+      const oid = (await cli("rev-parse", "HEAD")).stdout.trim();
+      if (reader === "status") {
+        await writeFile(join(root, "a"), "changed\n");
+        await writeFile(join(root, largePath), "changed\n");
+      }
+      const read = (offset: number) =>
+        reader === "status"
+          ? status(repo, offset, undefined, signals())
+          : commitFiles(repo, oid, undefined, offset, signals());
+      const complete = await read(0);
+      const items = "entries" in complete ? complete.entries : complete.files;
+      expect(items.map((item) => item.path)).toEqual(["a", largePath]);
+      expect(Buffer.byteLength(largePath)).toBeLessThan(resultBytes);
+      expect(Buffer.byteLength(JSON.stringify(items[1]))).toBeGreaterThan(resultBytes);
+      Object.assign(agentLimits, { resultBytes, listPageEntries: 1 });
+      for (const offset of [0, items.length]) {
+        await expect(read(offset)).rejects.toMatchObject({
+          code: "limit_exceeded",
+          message:
+            reader === "status"
+              ? "A Git change exceeds the size limit"
+              : "A commit file entry exceeds the size limit",
+        });
+      }
+    } finally {
+      Object.assign(agentLimits, originalLimits);
+      await repos.close();
+    }
+  },
+);
+test("status trims the complete envelope and derives continuation after every trim", async () => {
+  const { root, cli, repo, repos } = await setup();
+  const originalLimits = { ...agentLimits };
+  try {
+    await writeFile(join(root, "conflict"), "base\n");
+    await cli("add", ".");
+    await cli("commit", "-m", "base");
+    await cli("switch", "-c", "other");
+    await writeFile(join(root, "conflict"), "other\n");
+    await cli("commit", "-am", "other");
+    await cli("switch", "main");
+    await writeFile(join(root, "conflict"), "main\n");
+    await cli("commit", "-am", "main");
+    const longBranch = Array.from({ length: 6 }, () => "b".repeat(200)).join("/");
+    await cli("branch", "-m", longBranch);
+    await expect(cli("merge", "other")).rejects.toMatchObject({ code: 1 });
+    const untrackedPaths = Array.from({ length: 20 }, (_, i) => `untracked-${i}`);
+    await Promise.all(untrackedPaths.map((path) => writeFile(join(root, path), "new\n")));
+    const complete = await status(repo, 0, undefined, signals());
+    expect(complete.entries).toHaveLength(untrackedPaths.length + 1);
+    expect(complete.operation).toMatchObject({ kind: "merge", canContinue: false });
+    expect(complete.truncated).toBe(false);
+    const resultBytes = Buffer.byteLength(JSON.stringify(complete)) - 1;
+    Object.assign(agentLimits, { resultBytes });
+    const first = await status(repo, 0, undefined, signals());
+    expect(first.entries.length).toBeGreaterThan(0);
+    expect(first.entries.length).toBeLessThan(complete.entries.length);
+    expect(first.nextOffset).toBe(first.offset + first.entries.length);
+    expect(first.truncated).toBe(first.nextOffset !== undefined);
+    expect(first.operation).toEqual(complete.operation);
+    expect(Buffer.byteLength(JSON.stringify(first))).toBeLessThanOrEqual(resultBytes);
+    const last = await status(repo, first.nextOffset!, first.listToken, signals());
+    expect([...first.entries, ...last.entries]).toEqual(complete.entries);
+    expect(last.nextOffset).toBeUndefined();
+    expect(last.truncated).toBe(false);
+    expect(Buffer.byteLength(JSON.stringify(last))).toBeLessThanOrEqual(resultBytes);
+    const envelopeBytes = Buffer.byteLength(JSON.stringify({ ...complete, entries: [] }));
+    Object.assign(agentLimits, { resultBytes: envelopeBytes - 1 });
+    await expect(status(repo, 0, undefined, signals())).rejects.toMatchObject({
+      code: "limit_exceeded",
+      message: "A Git change and repository information exceed the size limit",
+    });
+  } finally {
+    Object.assign(agentLimits, originalLimits);
+    await repos.close();
+  }
+});
 test("diff preserves machine paths, rename, modes, binary and both sides without loading old untracked content", async () => {
   const { root, cli, repo, repos } = await setup();
   const old = "old\n[abc]",
@@ -382,8 +523,10 @@ test.each(["output", "JSON"])("commit messages enforce the %s byte limit", async
 test("history anchors pages and root commit files continue with exact paths and binary metadata", async () => {
   const { root, cli, repo, repos } = await setup();
   expect(await history(repo, undefined, 0, signals())).toEqual({ commits: [] });
+  const extraTextFiles = 3;
+  const textFileCount = agentLimits.listPageEntries + extraTextFiles;
   await Promise.all(
-    Array.from({ length: 503 }, (_, i) => writeFile(join(root, `item-${i}`), "text\n")),
+    Array.from({ length: textFileCount }, (_, i) => writeFile(join(root, `item-${i}`), "text\n")),
   );
   await writeFile(join(root, "special\n[]"), "root text\n");
   await writeFile(join(root, "binary"), Buffer.from([0, 1, 2]));
@@ -404,14 +547,15 @@ test("history anchors pages and root commit files continue with exact paths and 
   controller.abort(new AppError("cancelled", "Read cancelled"));
   await cancelled;
   const first = await commitFiles(repo, oid, undefined, 0, signals());
-  expect(first.files.length).toBe(500);
-  expect(first.nextOffset).toBe(500);
+  expect(first.files.length).toBe(agentLimits.listPageEntries);
+  expect(first.nextOffset).toBe(first.files.length);
   expect(await commitFiles(repo, oid, undefined, 0, signals())).toEqual(first);
   const second = await commitFiles(repo, oid, undefined, first.nextOffset!, signals());
   expect(second.nextOffset).toBeUndefined();
   const all = [...first.files, ...second.files];
-  expect(all.length).toBe(505);
-  expect(new Set(all.map((item) => item.path)).size).toBe(505);
+  const totalFiles = textFileCount + 2; // The special pathname and binary file.
+  expect(all.length).toBe(totalFiles);
+  expect(new Set(all.map((item) => item.path)).size).toBe(totalFiles);
   expect(all.find((item) => item.path === "binary")).toEqual({
     path: "binary",
     status: "A",
@@ -431,6 +575,46 @@ test("history anchors pages and root commit files continue with exact paths and 
   expect((await history(repo, undefined, 0, signals())).commits.length).toBe(2);
   await repos.close();
 }, 15_000);
+test("history skips within its anchor and checks oversized JSON only inside the Git window", async () => {
+  const { cli, repo, repos } = await setup();
+  const originalLimits = { ...agentLimits };
+  try {
+    const resultBytes = 3 * 1024;
+    const listPageEntries = 2;
+    const subject = '"'.repeat(1800);
+    await cli("commit", "--allow-empty", "-m", subject);
+    const large = (await history(repo, undefined, 0, signals())).commits[0]!;
+    expect(Buffer.byteLength(subject)).toBeLessThan(resultBytes);
+    expect(Buffer.byteLength(JSON.stringify(large))).toBeGreaterThan(resultBytes);
+    const oids: string[] = [];
+    const normalCommitCount = listPageEntries * 3;
+    for (let i = 0; i < normalCommitCount; i++) {
+      await cli("commit", "--allow-empty", "-m", `small commit ${i}`);
+      oids.unshift((await cli("rev-parse", "HEAD")).stdout.trim());
+    }
+    Object.assign(agentLimits, { resultBytes, listPageEntries });
+    const first = await history(repo, undefined, 0, signals());
+    expect(first.commits.map((commit) => commit.oid)).toEqual(oids.slice(0, listPageEntries));
+    expect(first.nextOffset).toBe(first.commits.length);
+    await cli("commit", "--allow-empty", "-m", "new HEAD outside the anchor");
+    const second = await history(repo, first.anchorOid, first.nextOffset!, signals());
+    expect(second.anchorOid).toBe(first.anchorOid);
+    expect(second.commits.map((commit) => commit.oid)).toEqual(
+      oids.slice(first.nextOffset, first.nextOffset! + listPageEntries),
+    );
+    expect(second.nextOffset).toBe(first.nextOffset! + second.commits.length);
+    // The next window has a full page of small commits, then the oversized commit.
+    await expect(
+      history(repo, first.anchorOid, second.nextOffset!, signals()),
+    ).rejects.toMatchObject({
+      code: "limit_exceeded",
+      message: "A commit message exceeds the size limit",
+    });
+  } finally {
+    Object.assign(agentLimits, originalLimits);
+    await repos.close();
+  }
+});
 test("commit file offsets continue at the actual byte-limited page length", async () => {
   const { root, cli, repo, repos } = await setup();
   const prefix = Array.from({ length: 8 }, () => "d".repeat(220)).join("/");

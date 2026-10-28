@@ -13,7 +13,8 @@ import {
 } from "@kiteline/shared/protocol";
 import { CursorBudget, CursorTable } from "../cursor-budget.js";
 import type { MetadataStore } from "../metadata.js";
-import { commandLine, git } from "./process.js";
+import { gitRead } from "./process.js";
+import { commandLine } from "./format.js";
 import { entryInfo, realPath, sameObject } from "../files/paths.js";
 
 interface Scan {
@@ -72,9 +73,11 @@ export class Repositories {
   async inspect(path: string, workspaceRoot: string, signal: AbortSignal): Promise<Repo> {
     const root = await realPath(path);
     const readPath = async (option: string) =>
-      realPath(resolve(root, commandLine((await git(root, ["rev-parse", option], signal)).bytes)));
+      realPath(
+        resolve(root, commandLine((await gitRead(root, ["rev-parse", option], signal)).bytes)),
+      );
     const bare =
-      commandLine((await git(root, ["rev-parse", "--is-bare-repository"], signal)).bytes) ===
+      commandLine((await gitRead(root, ["rev-parse", "--is-bare-repository"], signal)).bytes) ===
       "true";
     const rootPath = bare ? root : await readPath("--show-toplevel");
     const within = relative(workspaceRoot, rootPath);

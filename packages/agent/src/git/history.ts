@@ -13,21 +13,36 @@ import {
 } from "@kiteline/shared/protocol";
 import { relativePath } from "../files/paths.js";
 import { boundedDiff, numstatReader, selectedPatch, rawReader, type RawChange } from "./diff.js";
-import { commandLine, git, gitPathKey, NulRecords, utf8 } from "./process.js";
+import { gitRead } from "./process.js";
+import { commandLine, gitPathKey, NulRecords, utf8 } from "./format.js";
 import { diffOptions, emptyTree, headIdentity } from "./observe.js";
+
+// Conservative space for each page's fields outside its item array.
+const historyEnvelopeReserveBytes = 256;
+const commitFilesEnvelopeReserveBytes = 512;
+// Reserve the separator and both line counts populated by numstat after selection.
+const commitFileStatisticsReserveBytes = 65;
+const logFields: [oid: string, parents: string, author: string, time: string, subject: string] = [
+  "%H",
+  "%P",
+  "%an",
+  "%aI",
+  "%s",
+];
+const branchRefPrefix = "refs/heads/";
 
 export async function commitOid(repo: Repo, oid: string, signal: AbortSignal) {
   if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(oid))
     throw new AppError("invalid_argument", "A full commit OID is required");
   const actual = commandLine(
-    (await git(repo.rootPath, ["rev-parse", "--verify", `${oid}^{commit}`], signal)).bytes,
+    (await gitRead(repo.rootPath, ["rev-parse", "--verify", `${oid}^{commit}`], signal)).bytes,
   );
   if (actual !== oid) throw new AppError("invalid_argument", "OID is not a commit object");
   return actual;
 }
 export async function commitMessage(repo: Repo, oid: string, signal: AbortSignal) {
   const commit = await commitOid(repo, oid, signal);
-  const output = await git(
+  const output = await gitRead(
     repo.rootPath,
     [
       "show",
@@ -56,24 +71,18 @@ export async function history(
   if (!anchor) return { commits: [] };
   const anchorOid = await commitOid(repo, anchor, signal);
   const commits: Commit[] = [];
-  let fields: string[] = [],
-    count = 0,
-    bytes = 256,
-    full = false;
+  let fields: string[] = [];
+  let count = 0;
+  let bytes = historyEnvelopeReserveBytes;
+  let full = false;
   const reader = new NulRecords((record) => {
     fields.push(utf8(record));
-    if (fields.length !== 5) return;
-    const [oid, parents, author, time, subject] = fields as [
-      string,
-      string,
-      string,
-      string,
-      string,
-    ];
+    if (fields.length !== logFields.length) return;
+    const [oid, parents, author, time, subject] = fields as typeof logFields;
     fields = [];
     const commit = { oid, parents: parents ? parents.split(" ") : [], author, time, subject };
     const size = Buffer.byteLength(JSON.stringify(commit)) + 1;
-    if (size + 256 > agentLimits.resultBytes)
+    if (size + historyEnvelopeReserveBytes > agentLimits.resultBytes)
       throw new AppError("limit_exceeded", "A commit message exceeds the size limit");
     count++;
     if (
@@ -87,7 +96,7 @@ export async function history(
     bytes += size;
     commits.push(commit);
   });
-  await git(
+  await gitRead(
     repo.rootPath,
     [
       "log",
@@ -95,7 +104,7 @@ export async function history(
       "--no-color",
       "--encoding=UTF-8",
       "-z",
-      "--format=%H%x00%P%x00%an%x00%aI%x00%s",
+      `--format=${logFields.join("%x00")}`,
       `--max-count=${agentLimits.listPageEntries + 1}`,
       `--skip=${offset}`,
       anchorOid,
@@ -121,7 +130,7 @@ async function comparison(
   const commit = await commitOid(repo, oid, signal);
   const value = commandLine(
     (
-      await git(
+      await gitRead(
         repo.rootPath,
         ["show", "--no-show-signature", "--no-color", "--no-patch", "--format=%P", commit, "--"],
         signal,
@@ -145,7 +154,7 @@ async function changes(
   each: (change: RawChange) => void,
 ) {
   const reader = rawReader(each);
-  await git(
+  await gitRead(
     repo.rootPath,
     ["diff", ...diffOptions, "--find-renames", "--raw", "--no-abbrev", "-z", base, commit, "--"],
     signal,
@@ -166,7 +175,7 @@ async function statistics(
     const key = gitPathKey(path);
     if (wanted.has(key)) result.set(key, { binary: isBinary, ...lines });
   });
-  await git(
+  await gitRead(
     repo.rootPath,
     ["diff", ...diffOptions, "--find-renames", "--numstat", "-z", base, commit, "--"],
     signal,
@@ -184,9 +193,9 @@ export async function commitFiles(
 ): Promise<CommitFiles> {
   const { commit, base, parentOid } = await comparison(repo, oid, parent, signal);
   const files: CommitFile[] = [];
-  let count = 0,
-    bytes = 512,
-    full = false;
+  let count = 0;
+  let bytes = commitFilesEnvelopeReserveBytes;
+  let full = false;
   await changes(repo, base, commit, signal, (change) => {
     const item: CommitFile = {
       ...(change.path === undefined
@@ -195,9 +204,8 @@ export async function commitFiles(
       status: change.status,
       binary: false,
     };
-    // Reserve space for the two line counts populated by numstat below.
-    const size = Buffer.byteLength(JSON.stringify(item)) + 65;
-    if (size + 512 > agentLimits.resultBytes)
+    const size = Buffer.byteLength(JSON.stringify(item)) + commitFileStatisticsReserveBytes;
+    if (size + commitFilesEnvelopeReserveBytes > agentLimits.resultBytes)
       throw new AppError("limit_exceeded", "A commit file entry exceeds the size limit");
     if (count++ < offset || full) return;
     if (files.length >= agentLimits.listPageEntries || bytes + size > agentLimits.resultBytes) {
@@ -247,40 +255,43 @@ export async function commitDiff(
 }
 export async function branches(repo: Repo, signal: AbortSignal) {
   const head = await headIdentity(repo.rootPath, signal);
-  const output = await git(
+  const output = await gitRead(
     repo.rootPath,
     [
       "for-each-ref",
       "--color=never",
       "--format=%(refname)%00%(objectname)%00%(worktreepath)%00",
-      "refs/heads/",
+      branchRefPrefix,
     ],
     signal,
   );
-  const fields = utf8(output.bytes).split("\0");
+  // Git appends LF after our final %00. Worktree paths may themselves contain LF.
+  const records = utf8(output.bytes).split("\0\n").slice(0, -1);
+  const result: Branch[] = records.map((record) => {
+    const [ref, oid, worktreePath] = record.split("\0") as [string, string, string];
+    return {
+      name: ref.slice(branchRefPrefix.length),
+      oid,
+      current: ref === head.symbolicRef,
+      worktreePath: worktreePath || undefined,
+    };
+  });
   // Git also reports the bare main entry as a worktree path.
   const mainPath = basename(repo.commonDir) === ".git" ? dirname(repo.commonDir) : repo.commonDir;
   const bareRoot =
-    fields.includes(mainPath) &&
+    result.some((branch) => branch.worktreePath === mainPath) &&
     commandLine(
       (
-        await git(
+        await gitRead(
           repo.rootPath,
           [`--git-dir=${repo.commonDir}`, "rev-parse", "--is-bare-repository"],
           signal,
         )
       ).bytes,
     ) === "true";
-  const result: Branch[] = [];
-  for (let i = 0; i + 2 < fields.length; i += 3) {
-    const ref = fields[i]!.replace(/^\n/, "");
-    result.push({
-      name: ref.slice(11),
-      oid: fields[i + 1]!,
-      current: ref === head.symbolicRef,
-      worktreePath: bareRoot && fields[i + 2] === mainPath ? undefined : fields[i + 2] || undefined,
-    });
-  }
+  if (bareRoot)
+    for (const branch of result)
+      if (branch.worktreePath === mainPath) branch.worktreePath = undefined;
   if (Buffer.byteLength(JSON.stringify({ branches: result })) > agentLimits.resultBytes)
     throw new AppError("limit_exceeded", "Branch list exceeds the size limit");
   return { branches: result };

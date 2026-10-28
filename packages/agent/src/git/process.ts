@@ -1,21 +1,21 @@
 import { agentLimits } from "../limits.js";
 import { spawn } from "node:child_process";
-import { isUtf8 } from "node:buffer";
 import { createHash } from "node:crypto";
-import { AppError, asError, OperationError, type GitPath } from "@kiteline/shared/protocol";
+import { AppError, asError, OperationError } from "@kiteline/shared/protocol";
 import { BytePrefix } from "@kiteline/shared/node/buffers";
 import { stopGroup, waitForGroup } from "../process-group.js";
 import { JobChild, spawnJob } from "@kiteline/shared/windows/job";
 import { windowsExecutable } from "../tools.js";
 
-interface Options {
+interface WriteOptions {
   input?: Buffer | string;
-  onData?: (data: Buffer) => void;
+  env?: NodeJS.ProcessEnv;
+}
+interface ReadOptions extends WriteOptions {
   maxBytes?: number;
+  onData?: (data: Buffer) => void;
   truncate?: boolean;
   allowedCodes?: number[];
-  env?: NodeJS.ProcessEnv;
-  write?: boolean;
 }
 const repositoryEnvironment = new Set([
   "GIT_DIR",
@@ -40,12 +40,70 @@ const repositoryEnvironment = new Set([
   "GIT_NOGLOB_PATHSPECS",
   "GIT_ICASE_PATHSPECS",
 ]);
-export async function git(
+const processGroupStopGraceMs = 1000;
+const outputDrainTimeoutMs = 1000;
+export async function gitRead(
   root: string,
   args: string[],
   signal: AbortSignal,
-  options: Options = {},
+  options: ReadOptions = {},
 ) {
+  const { stdout, stderr, code, error } = await runGit(root, args, signal, {
+    kind: "read",
+    options,
+  });
+  signal.throwIfAborted();
+  if (error) throw error;
+  if (!stdout.truncated && !(options.allowedCodes ?? [0]).includes(code ?? -1))
+    throw new AppError("io_error", stderr.text().trim() || "Git command failed", {
+      exitCode: code,
+    });
+  return {
+    bytes: stdout.bytes,
+    text: stdout.text(),
+    stderr: stderr.text(),
+    truncated: stdout.truncated || stderr.truncated,
+    code,
+  };
+}
+
+export async function gitWrite(
+  root: string,
+  args: string[],
+  signal: AbortSignal,
+  options: WriteOptions = {},
+) {
+  const { stdout, stderr, code, error, started } = await runGit(root, args, signal, {
+    kind: "write",
+    options,
+  });
+  const result = {
+    stdout: stdout.text(),
+    stderr: stderr.text(),
+    truncated: stdout.truncated || stderr.truncated,
+  };
+  if (signal.aborted || error || code !== 0) {
+    const reason = asError(
+      signal.aborted
+        ? signal.reason
+        : (error ?? new AppError("io_error", result.stderr.trim() || "Git command failed")),
+    );
+    throw OperationError.from(reason, started ? "unknown" : "failed", {
+      ...result,
+      exitCode: code,
+    });
+  }
+  return result;
+}
+
+async function runGit(
+  root: string,
+  args: string[],
+  signal: AbortSignal,
+  request: { kind: "read"; options: ReadOptions } | { kind: "write"; options: WriteOptions },
+) {
+  const { options } = request;
+  const readOptions = request.kind === "read" ? request.options : undefined;
   signal.throwIfAborted();
   const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0", ...options.env };
   for (const name of Object.keys(env))
@@ -53,7 +111,7 @@ export async function git(
       delete env[name];
   const command = [
     "--no-pager",
-    ...(options.write ? [] : ["--no-optional-locks", "-c", "color.ui=false"]),
+    ...(request.kind === "read" ? ["--no-optional-locks", "-c", "color.ui=false"] : []),
     ...args,
   ];
   let child;
@@ -70,14 +128,15 @@ export async function git(
             stdio: ["pipe", "pipe", "pipe"],
           });
   } catch (error) {
-    if (!options.write) throw error;
+    if (request.kind === "read") throw error;
     const reason = asError(error);
     throw new OperationError(reason.code, reason.message, "failed");
   }
-  const stdout = new BytePrefix(options.onData ? 0 : (options.maxBytes ?? agentLimits.resultBytes));
+  const stdout = new BytePrefix(
+    readOptions?.onData ? 0 : (readOptions?.maxBytes ?? agentLimits.resultBytes),
+  );
   const stderr = new BytePrefix(32 * 1024);
   let error: unknown;
-  let clipped = false;
   let stopping: Promise<void> | undefined;
   let groupFailure = false;
   const groupError = (reason: unknown) => {
@@ -95,7 +154,7 @@ export async function git(
       stopping = stopGroup(
         pid,
         exited.then(() => waitForGroup(pid, groupError)),
-        1000,
+        processGroupStopGraceMs,
         groupError,
       );
     }
@@ -123,18 +182,15 @@ export async function git(
     }
   });
   child.stdout!.on("data", (chunk: Buffer) => {
-    if (error || clipped) return;
+    if (error || stdout.truncated) return;
     try {
-      if (options.onData) options.onData(chunk);
+      if (readOptions?.onData) readOptions.onData(chunk);
       else {
         stdout.append(chunk);
-        if (stdout.truncated) {
-          clipped = true;
-          if (!options.write) {
-            if (!options.truncate)
-              error = new AppError("limit_exceeded", "Git output exceeds the size limit");
-            stop();
-          }
+        if (stdout.truncated && readOptions) {
+          if (!readOptions.truncate)
+            error = new AppError("limit_exceeded", "Git output exceeds the size limit");
+          stop();
         }
       }
     } catch (reason) {
@@ -174,7 +230,7 @@ export async function git(
       child.stdout!.destroy();
       child.stderr!.destroy();
     }
-  }, 1000);
+  }, outputDrainTimeoutMs);
   try {
     await output;
   } finally {
@@ -184,37 +240,23 @@ export async function git(
   }
   // Cancellation or a stream error can start cleanup during output draining.
   await stopping;
-  const result = {
-    stdout: stdout.text(),
-    stderr: stderr.text(),
-    truncated: clipped || stderr.truncated,
-    exitCode: code,
-  };
-  if (
-    options.write &&
-    (signal.aborted || error || !(options.allowedCodes ?? [0]).includes(code ?? -1))
-  ) {
-    const reason = asError(
-      signal.aborted
-        ? signal.reason
-        : (error ?? new AppError("io_error", stderr.text().trim() || "Git command failed")),
-    );
-    throw OperationError.from(reason, child.pid ? "unknown" : "failed", result);
-  }
-  signal.throwIfAborted();
-  if (error) throw error;
-  if (!clipped && !(options.allowedCodes ?? [0]).includes(code ?? -1))
-    throw new AppError("io_error", stderr.text().trim() || "Git command failed", {
-      exitCode: code,
-    });
-  return {
-    bytes: stdout.bytes,
-    text: stdout.text(),
-    stderr: stderr.text(),
-    truncated: clipped || stderr.truncated,
-    code,
-  };
+  return { stdout, stderr, code, error, started: !!child.pid };
 }
+
+export async function readAfterWrite<T>(known: object, read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (error) {
+    const reason = asError(error);
+    throw new OperationError(
+      reason.code,
+      `Write completed, but the result could not be read: ${reason.message}`,
+      "unknown",
+      known,
+    );
+  }
+}
+
 export function gitProgressError(error: unknown, progressed: boolean, result: object) {
   return OperationError.from(
     asError(error),
@@ -227,60 +269,10 @@ export function gitProgressError(error: unknown, progressed: boolean, result: ob
 }
 export async function gitHash(root: string, args: string[], signal: AbortSignal) {
   const hash = createHash("sha256");
-  await git(root, args, signal, {
+  await gitRead(root, args, signal, {
     onData: (chunk) => {
       hash.update(chunk);
     },
   });
   return hash.digest("hex");
-}
-export function utf8(bytes: Buffer) {
-  if (!isUtf8(bytes))
-    throw new AppError("unsupported", "Git output is not valid UTF-8; handle it in the terminal");
-  return bytes.toString();
-}
-export function gitPath(bytes: Buffer, old?: Buffer): GitPath {
-  if (isUtf8(bytes) && (!old || isUtf8(old)))
-    return { path: bytes.toString(), ...(old ? { oldPath: old.toString() } : {}) };
-  const escaped = (value: Buffer) =>
-    Array.from(value, (byte) => `\\x${byte.toString(16).padStart(2, "0")}`).join("");
-  return { pathError: old ? `${escaped(old)} -> ${escaped(bytes)}` : escaped(bytes) };
-}
-export function gitPathKey(path: GitPath) {
-  return JSON.stringify([path.path, path.oldPath, path.pathError]);
-}
-export function literalPathspec(path: string) {
-  return `:(top,literal)${path}`;
-}
-export function leafPathspecs(paths: string[]) {
-  return paths.flatMap((path) => {
-    const escaped = path.replace(/[\\*?[\]]/g, "\\$&");
-    // Git 2.23 otherwise treats the plain prefix as the gitlink itself.
-    const prefix = escaped.startsWith("\\") ? escaped : `\\${escaped}`;
-    return [literalPathspec(path), `:(top,glob,exclude)${prefix}/**`];
-  });
-}
-export function commandLine(bytes: Buffer) {
-  return utf8(bytes.at(-1) === 10 ? bytes.subarray(0, -1) : bytes);
-}
-export class NulRecords {
-  private partial = Buffer.alloc(0);
-  constructor(private each: (record: Buffer) => void) {}
-  data = (chunk: Buffer) => {
-    const bytes = this.partial.length ? Buffer.concat([this.partial, chunk]) : chunk;
-    let start = 0,
-      end: number;
-    while ((end = bytes.indexOf(0, start)) !== -1) {
-      if (end - start > agentLimits.resultBytes)
-        throw new AppError("limit_exceeded", "A Git record exceeds the size limit");
-      this.each(bytes.subarray(start, end));
-      start = end + 1;
-    }
-    this.partial = Buffer.from(bytes.subarray(start));
-    if (this.partial.length > agentLimits.resultBytes)
-      throw new AppError("limit_exceeded", "A Git record exceeds the size limit");
-  };
-  end() {
-    if (this.partial.length) throw new AppError("io_error", "Git record is incomplete");
-  }
 }

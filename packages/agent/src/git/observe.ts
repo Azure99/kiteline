@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { AppError, type HeadIdentity, type Repo } from "@kiteline/shared/protocol";
-import { commandLine, git, gitHash, NulRecords } from "./process.js";
+import { gitRead, gitHash } from "./process.js";
+import { commandLine, NulRecords } from "./format.js";
 
 export const diffOptions = [
   "--no-color",
@@ -10,10 +11,10 @@ export const diffOptions = [
   "--ignore-submodules=none",
 ];
 export async function headIdentity(root: string, signal: AbortSignal): Promise<HeadIdentity> {
-  const ref = await git(root, ["symbolic-ref", "--quiet", "HEAD"], signal, {
+  const ref = await gitRead(root, ["symbolic-ref", "--quiet", "HEAD"], signal, {
     allowedCodes: [0, 1],
   });
-  const commit = await git(root, ["rev-parse", "--verify", "--quiet", "HEAD"], signal, {
+  const commit = await gitRead(root, ["rev-parse", "--verify", "--quiet", "HEAD"], signal, {
     allowedCodes: [0, 1],
   });
   return {
@@ -24,7 +25,7 @@ export async function headIdentity(root: string, signal: AbortSignal): Promise<H
 export async function emptyTree(root: string, signal: AbortSignal) {
   // Use this repository's object format without writing the tree.
   return commandLine(
-    (await git(root, ["hash-object", "-t", "tree", "--stdin"], signal, { input: "" })).bytes,
+    (await gitRead(root, ["hash-object", "-t", "tree", "--stdin"], signal, { input: "" })).bytes,
   );
 }
 export async function observeIndex(repo: Repo, signal: AbortSignal) {
@@ -42,7 +43,7 @@ export async function observeIndex(repo: Repo, signal: AbortSignal) {
     }
     header = !header;
   });
-  await git(
+  await gitRead(
     repo.rootPath,
     ["diff", "--cached", "--raw", "-z", "--no-abbrev", "--no-renames", ...diffOptions, base, "--"],
     signal,

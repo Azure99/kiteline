@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, rm, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import type { Repo } from "@kiteline/shared/protocol";
 import { MetadataStore } from "../src/metadata.js";
@@ -11,7 +11,7 @@ import { headIdentity } from "../src/git/observe.js";
 import { status } from "../src/git/status.js";
 import { finishOperation } from "../src/git/in-progress.js";
 import { remotes, syncRemote } from "../src/git/remotes.js";
-import { git } from "../src/git/process.js";
+import { gitWrite } from "../src/git/process.js";
 
 const exec = promisify(execFile),
   roots: string[] = [];
@@ -80,6 +80,56 @@ test("merge token binds its native target, survives staging, and continues throu
   expect(result.operationAfter).toBeUndefined();
   expect(result.headOid).toBe((await headIdentity(root, signal())).oid);
 });
+
+test("successful continue keeps its output when the following observation fails", async () => {
+  const { repo, cli, write } = await divergent();
+  await expect(cli("merge", "topic")).rejects.toThrow();
+  await write("f", "resolved one\n");
+  await write("g", "resolved two\n");
+  await cli("add", "f", "g");
+  const ready = await operation(repo);
+  const headPath = join(repo.gitDir, "HEAD");
+  const originalHead = await readFile(headPath);
+  const actualGit = (await exec("/bin/sh", ["-c", "command -v git"])).stdout.trim();
+  const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
+  const bin = join(repo.gitDir, "bin");
+  await mkdir(bin);
+  await writeFile(
+    join(bin, "git"),
+    `#!/bin/sh
+case " $* " in
+  *" merge --continue "*)
+    ${quote(actualGit)} "$@" || exit $?
+    printf 'write-stdout\\n'
+    printf 'write-stderr\\n' >&2
+    printf 'unreadable HEAD\\n' > .git/HEAD
+    ;;
+  *) exec ${quote(actualGit)} "$@" ;;
+esac
+`,
+  );
+  await chmod(join(bin, "git"), 0o755);
+  vi.stubEnv("PATH", bin + ":" + process.env.PATH);
+  try {
+    await expect(
+      finishOperation(repo, "merge", ready.token!, "continue", signal()),
+    ).rejects.toMatchObject({
+      outcome: "unknown",
+      code: "io_error",
+      message: expect.stringContaining("Write completed"),
+      result: {
+        stdout: expect.stringContaining("write-stdout"),
+        stderr: expect.stringContaining("write-stderr"),
+        truncated: false,
+      },
+    });
+  } finally {
+    await writeFile(headPath, originalHead);
+  }
+  expect((await cli("rev-list", "--parents", "-n1", "HEAD")).trim().split(" ")).toHaveLength(3);
+  expect((await status(repo, 0, undefined, signal())).operation).toBeUndefined();
+});
+
 test.each(["--merge", "--apply"])(
   "ordinary rebase %s can continue through consecutive conflicts",
   async (backend) => {
@@ -190,16 +240,12 @@ test("sequencer-only cherry-pick remains actionable after a manual conflict comm
 test("am and revert native conflict state can be resolved or aborted", async () => {
   const { repo, root, cli, write, first, second } = await divergent();
   const otherPatch = await cli("format-patch", "-1", "--stdout", second);
-  await expect(
-    git(root, ["am", "--3way"], signal(), { input: otherPatch, write: true }),
-  ).rejects.toThrow();
+  await expect(gitWrite(root, ["am", "--3way"], signal(), { input: otherPatch })).rejects.toThrow();
   const otherAm = await operation(repo);
   const head = await headIdentity(root, signal());
   await finishOperation(repo, "am", otherAm.token!, "abort", signal());
   const patch = await cli("format-patch", "-1", "--stdout", first);
-  await expect(
-    git(root, ["am", "--3way"], signal(), { input: patch, write: true }),
-  ).rejects.toThrow();
+  await expect(gitWrite(root, ["am", "--3way"], signal(), { input: patch })).rejects.toThrow();
   const am = await operation(repo);
   expect(am.kind).toBe("am");
   expect(await headIdentity(root, signal())).toEqual(head);

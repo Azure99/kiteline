@@ -9,7 +9,8 @@ import {
   type Repo,
 } from "@kiteline/shared/protocol";
 import { relativePath } from "../files/paths.js";
-import { git, gitPath, gitPathKey, leafPathspecs, literalPathspec, NulRecords } from "./process.js";
+import { gitRead } from "./process.js";
+import { gitPath, gitPathKey, leafPathspecs, literalPathspec, NulRecords } from "./format.js";
 import { diffOptions } from "./observe.js";
 import { readStatus } from "./status.js";
 
@@ -19,25 +20,27 @@ export type RawChange = GitPath & {
   newMode: string;
 };
 export function rawReader(each: (change: RawChange) => void) {
-  let header: string[] | undefined, from: Buffer | undefined;
+  let header: { oldMode: string; newMode: string; status: string } | undefined;
+  let renameSource: Buffer | undefined;
   const reader = new NulRecords((record) => {
     if (!header) {
-      header = record.toString("ascii").replace(/^:/, "").split(" ");
+      // :oldMode newMode oldOid newOid status, followed by NUL pathname records.
+      const [oldMode, newMode, , , status] = record.toString("ascii").slice(1).split(" ");
+      header = { oldMode: oldMode!, newMode: newMode!, status: status! };
       return;
     }
-    const status = header[4]!;
-    if (status.startsWith("R") && from === undefined) {
-      from = record;
+    if (header.status.startsWith("R") && renameSource === undefined) {
+      renameSource = record;
       return;
     }
     each({
-      ...gitPath(record, from),
-      status: status[0]!,
-      oldMode: header[0]!,
-      newMode: header[1]!,
+      ...gitPath(record, renameSource),
+      status: header.status[0]!,
+      oldMode: header.oldMode,
+      newMode: header.newMode,
     });
     header = undefined;
-    from = undefined;
+    renameSource = undefined;
   });
   return {
     data: reader.data,
@@ -50,38 +53,42 @@ export function rawReader(each: (change: RawChange) => void) {
 export function numstatReader(
   each: (path: GitPath, binary: boolean, lines?: { additions: number; deletions: number }) => void,
 ) {
-  let renamed = 0,
-    binary = false;
+  let renamePath: "source" | "target" | undefined;
+  let binary = false;
   let lines: { additions: number; deletions: number } | undefined;
-  let from: Buffer | undefined;
+  let renameSource: Buffer | undefined;
   const reader = new NulRecords((record) => {
-    if (renamed) {
-      if (renamed === 2) from = record;
-      else {
-        each(gitPath(record, from), binary, lines);
-        from = undefined;
-      }
-      renamed--;
+    if (renamePath === "source") {
+      renameSource = record;
+      renamePath = "target";
       return;
     }
-    const first = record.indexOf(9),
-      second = record.indexOf(9, first + 1);
-    if (first < 0 || second < 0) throw new AppError("io_error", "Git numstat is incomplete");
+    if (renamePath === "target") {
+      each(gitPath(record, renameSource), binary, lines);
+      renameSource = undefined;
+      renamePath = undefined;
+      return;
+    }
+    const additionsEnd = record.indexOf(9);
+    const deletionsEnd = record.indexOf(9, additionsEnd + 1);
+    if (additionsEnd < 0 || deletionsEnd < 0)
+      throw new AppError("io_error", "Git numstat is incomplete");
     binary = record[0] === 45;
     lines = binary
       ? undefined
       : {
-          additions: Number(record.subarray(0, first).toString("ascii")),
-          deletions: Number(record.subarray(first + 1, second).toString("ascii")),
+          additions: Number(record.subarray(0, additionsEnd).toString("ascii")),
+          deletions: Number(record.subarray(additionsEnd + 1, deletionsEnd).toString("ascii")),
         };
-    if (second === record.length - 1) renamed = 2;
-    else each(gitPath(record.subarray(second + 1)), binary, lines);
+    // An empty pathname introduces separate source and target NUL records.
+    if (deletionsEnd === record.length - 1) renamePath = "source";
+    else each(gitPath(record.subarray(deletionsEnd + 1)), binary, lines);
   });
   return {
     data: reader.data,
     end() {
       reader.end();
-      if (renamed) throw new AppError("io_error", "Git numstat rename record is incomplete");
+      if (renamePath) throw new AppError("io_error", "Git numstat rename record is incomplete");
     },
   };
 }
@@ -124,7 +131,7 @@ export async function selectedPatch(
     remaining = agentLimits.resultBytes,
     truncated = false;
   for (const group of groups) {
-    const result = await git(
+    const result = await gitRead(
       repo.rootPath,
       [...patchConfig, ...args, "--patch", "--", ...leafPathspecs(group)],
       signal,
@@ -164,7 +171,7 @@ export async function workingDiff(
         "Open the directory or use the terminal to inspect this item",
       );
     const args = ["diff", "--no-index", ...diffOptions];
-    const nums = await git(
+    const nums = await gitRead(
       repo.rootPath,
       [...args, "--numstat", "-z", "--", "/dev/null", `./${path}`],
       signal,
@@ -176,7 +183,7 @@ export async function workingDiff(
       binary: binaryPaths(nums.bytes).size > 0,
       newMode: info.isSymbolicLink() ? "120000" : info.mode & 0o111 ? "100755" : "100644",
     };
-    const patch = await git(
+    const patch = await gitRead(
       repo.rootPath,
       [...patchConfig, ...args, "--patch", "--", "/dev/null", `./${path}`],
       signal,
@@ -199,9 +206,14 @@ export async function workingDiff(
   const raw = rawReader((item) => {
     if (item.path === path) change = item;
   });
-  await git(repo.rootPath, [...args, "--raw", "--no-abbrev", "-z", "--", ...pathspecs], signal, {
-    onData: raw.data,
-  });
+  await gitRead(
+    repo.rootPath,
+    [...args, "--raw", "--no-abbrev", "-z", "--", ...pathspecs],
+    signal,
+    {
+      onData: raw.data,
+    },
+  );
   raw.end();
   if (change?.path === undefined)
     throw new AppError("conflict", "Selected change no longer applies; refresh", {
@@ -211,7 +223,7 @@ export async function workingDiff(
   const nums = numstatReader((item, isBinary) => {
     if (item.path === path) binary = isBinary;
   });
-  await git(repo.rootPath, [...args, "--numstat", "-z", "--", ...pathspecs], signal, {
+  await gitRead(repo.rootPath, [...args, "--numstat", "-z", "--", ...pathspecs], signal, {
     onData: nums.data,
   });
   nums.end();

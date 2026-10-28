@@ -9,9 +9,15 @@ import {
   type GitType,
   type Repo,
 } from "@kiteline/shared/protocol";
-import { git, gitPath, NulRecords, utf8 } from "./process.js";
+import { gitRead } from "./process.js";
+import { gitPath, NulRecords, utf8 } from "./format.js";
 import { observeIndex } from "./observe.js";
 import { readOperation } from "./in-progress.js";
+
+// The final response is measured again after untracked types and operation are known.
+const statusEnvelopeReserveBytes = 2048;
+// Porcelain v2 ASCII fields before the pathname, including the record kind.
+const porcelainHeaderFields = { "1": 8, "2": 9, u: 10 };
 
 export function modeType(mode: string): GitType {
   if (mode === "000000") return "absent";
@@ -21,16 +27,16 @@ export function modeType(mode: string): GitType {
   if (mode === "040000") return "directory";
   return "other";
 }
-function fields(record: Buffer, count: number) {
-  const parts: string[] = [];
+function porcelainFields(record: Buffer, count: number) {
+  const header: string[] = [];
   let start = 0;
   for (let i = 0; i < count; i++) {
     const end = record.indexOf(32, start);
     if (end < 0) throw new AppError("io_error", "Git status record is incomplete");
-    parts.push(record.subarray(start, end).toString("ascii"));
+    header.push(record.subarray(start, end).toString("ascii"));
     start = end + 1;
   }
-  return { parts, path: record.subarray(start) };
+  return { header, path: record.subarray(start) };
 }
 export async function readStatus(
   repo: Repo,
@@ -39,18 +45,21 @@ export async function readStatus(
   onHeader?: (header: string) => void,
   onRaw?: (data: Buffer) => void,
 ) {
-  let rename: { entry: Omit<GitEntry, "path" | "oldPath" | "pathError">; path: Buffer } | undefined;
+  let pendingRename:
+    | { entry: Omit<GitEntry, "path" | "oldPath" | "pathError">; targetPath: Buffer }
+    | undefined;
   const reader = new NulRecords((record) => {
-    if (rename) {
-      each({ ...rename.entry, ...gitPath(rename.path, record) });
-      rename = undefined;
+    if (pendingRename) {
+      each({ ...pendingRename.entry, ...gitPath(pendingRename.targetPath, record) });
+      pendingRename = undefined;
       return;
     }
-    if (record[0] === 35) {
+    const kind = String.fromCharCode(record[0] ?? 0);
+    if (kind === "#") {
       onHeader?.(utf8(record));
       return;
     }
-    if (record[0] === 63) {
+    if (kind === "?") {
       each({
         ...gitPath(record.subarray(2)),
         types: { worktree: "other" },
@@ -60,43 +69,47 @@ export async function readStatus(
       });
       return;
     }
-    const type = String.fromCharCode(record[0] ?? 0);
-    if (!["1", "2", "u"].includes(type))
+    if (kind !== "1" && kind !== "2" && kind !== "u")
       throw new AppError("io_error", "Unsupported Git status record");
-    const { parts, path } = fields(record, type === "1" ? 8 : type === "2" ? 9 : 10);
-    const xy = parts[1]!,
-      sub = parts[2]!;
+    const { header, path } = porcelainFields(record, porcelainHeaderFields[kind]);
+    const [, statuses, submodule] = header;
+    let types: GitEntry["types"];
+    if (kind === "u") {
+      const [, , , baseMode, oursMode, theirsMode, worktreeMode] = header;
+      types = {
+        base: modeType(baseMode!),
+        ours: modeType(oursMode!),
+        theirs: modeType(theirsMode!),
+        worktree: modeType(worktreeMode!),
+      };
+    } else {
+      const [, , , headMode, indexMode, worktreeMode] = header;
+      types = {
+        head: modeType(headMode!),
+        index: modeType(indexMode!),
+        worktree: modeType(worktreeMode!),
+      };
+    }
     const entry: Omit<GitEntry, "path" | "oldPath" | "pathError"> = {
-      indexStatus: xy[0]!,
-      worktreeStatus: xy[1]!,
-      conflict: type === "u",
-      types:
-        type === "u"
-          ? {
-              base: modeType(parts[3]!),
-              ours: modeType(parts[4]!),
-              theirs: modeType(parts[5]!),
-              worktree: modeType(parts[6]!),
-            }
-          : {
-              head: modeType(parts[3]!),
-              index: modeType(parts[4]!),
-              worktree: modeType(parts[5]!),
-            },
-      ...(sub[0] === "S"
+      indexStatus: statuses![0]!,
+      worktreeStatus: statuses![1]!,
+      conflict: kind === "u",
+      types,
+      ...(submodule![0] === "S"
         ? {
             submodule: {
-              commitChanged: sub[1] === "C",
-              trackedDirty: sub[2] === "M",
-              untrackedDirty: sub[3] === "U",
+              commitChanged: submodule![1] === "C",
+              trackedDirty: submodule![2] === "M",
+              untrackedDirty: submodule![3] === "U",
             },
           }
         : {}),
     };
-    if (type === "2") rename = { entry, path };
+    // Unlike raw diff, porcelain gives the target before the rename source.
+    if (kind === "2") pendingRename = { entry, targetPath: path };
     else each({ ...entry, ...gitPath(path) });
   });
-  await git(
+  await gitRead(
     repo.rootPath,
     [
       "status",
@@ -115,7 +128,7 @@ export async function readStatus(
     },
   );
   reader.end();
-  if (rename) throw new AppError("io_error", "Git rename record is incomplete");
+  if (pendingRename) throw new AppError("io_error", "Git rename record is incomplete");
 }
 export async function status(
   repo: Repo,
@@ -126,11 +139,11 @@ export async function status(
   const before = await observeIndex(repo, signal);
   const entries: GitEntry[] = [];
   const hash = createHash("sha256");
-  let totalCount = 0,
-    stagedCount = 0,
-    hasConflicts = false,
-    bytes = 2048,
-    full = false;
+  let totalCount = 0;
+  let stagedCount = 0;
+  let hasConflicts = false;
+  let bytes = statusEnvelopeReserveBytes;
+  let full = false;
   let branch: string | undefined,
     upstream: string | undefined,
     ahead: number | undefined,
@@ -142,7 +155,7 @@ export async function status(
       hasConflicts ||= entry.conflict;
       if (entry.indexStatus !== "." && entry.indexStatus !== "?" && !entry.conflict) stagedCount++;
       const size = Buffer.byteLength(JSON.stringify(entry)) + 1;
-      if (size + 2048 > agentLimits.resultBytes)
+      if (size + statusEnvelopeReserveBytes > agentLimits.resultBytes)
         throw new AppError("limit_exceeded", "A Git change exceeds the size limit");
       if (totalCount++ < offset || full) return;
       if (entries.length >= agentLimits.listPageEntries || bytes + size > agentLimits.resultBytes) {
@@ -183,33 +196,33 @@ export async function status(
     .digest("hex");
   if (expectedListToken !== undefined && expectedListToken !== listToken)
     throw new AppError("conflict", "Git list has changed; refresh the current page");
-  const nextOffset = offset + entries.length < totalCount ? offset + entries.length : undefined;
-  const result: GitStatus = {
-    head: before.head,
-    branch,
-    upstream,
-    ahead,
-    behind,
-    entries,
-    offset,
-    nextOffset,
-    totalCount,
-    listToken,
-    stagedCount,
-    hasConflicts,
-    indexToken: hasConflicts ? undefined : before.token,
-    operation: await readOperation(repo, before.head, hasConflicts, signal),
-    truncated: nextOffset !== undefined,
-  };
-  while (Buffer.byteLength(JSON.stringify(result)) > agentLimits.resultBytes && entries.length) {
+  const operation = await readOperation(repo, before.head, hasConflicts, signal);
+  for (;;) {
+    if (!entries.length && offset < totalCount)
+      throw new AppError(
+        "limit_exceeded",
+        "A Git change and repository information exceed the size limit",
+      );
+    const nextOffset = offset + entries.length < totalCount ? offset + entries.length : undefined;
+    const result: GitStatus = {
+      head: before.head,
+      branch,
+      upstream,
+      ahead,
+      behind,
+      entries,
+      offset,
+      nextOffset,
+      totalCount,
+      listToken,
+      stagedCount,
+      hasConflicts,
+      indexToken: hasConflicts ? undefined : before.token,
+      operation,
+      truncated: nextOffset !== undefined,
+    };
+    if (Buffer.byteLength(JSON.stringify(result)) <= agentLimits.resultBytes || !entries.length)
+      return result;
     entries.pop();
-    result.nextOffset = offset + entries.length;
-    result.truncated = true;
   }
-  if (!entries.length && offset < totalCount)
-    throw new AppError(
-      "limit_exceeded",
-      "A Git change and repository information exceed the size limit",
-    );
-  return result;
 }

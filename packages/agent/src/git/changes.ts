@@ -11,14 +11,8 @@ import {
   type Repo,
 } from "@kiteline/shared/protocol";
 import { entryInfo, gitMetadataPath, relativePath } from "../files/paths.js";
-import {
-  git,
-  gitPath,
-  gitProgressError,
-  leafPathspecs,
-  literalPathspec,
-  NulRecords,
-} from "./process.js";
+import { gitRead, gitProgressError, gitWrite } from "./process.js";
+import { gitPath, leafPathspecs, literalPathspec, NulRecords } from "./format.js";
 import { headIdentity, observeIndex } from "./observe.js";
 import { modeType, readStatus } from "./status.js";
 
@@ -105,7 +99,7 @@ async function indexRecords(
     const [mode, oid, stage] = record.subarray(0, tab).toString("ascii").split(" ");
     each(record.subarray(tab + 1), { mode: mode!, oid: oid!, stage: Number(stage) });
   });
-  await git(repo.rootPath, ["ls-files", "--stage", "-z"], signal, { onData: reader.data });
+  await gitRead(repo.rootPath, ["ls-files", "--stage", "-z"], signal, { onData: reader.data });
   reader.end();
 }
 async function leaves(repo: Repo, paths: string[], source: "HEAD" | "index", signal: AbortSignal) {
@@ -123,7 +117,7 @@ async function leaves(repo: Repo, paths: string[], source: "HEAD" | "index", sig
       const [mode, , oid] = record.subarray(0, tab).toString("ascii").split(" ");
       if (path !== undefined) found.set(path, { mode: mode!, oid: oid!, stage: 0 });
     });
-    await git(
+    await gitRead(
       repo.rootPath,
       ["ls-tree", "-z", "--full-tree", "HEAD", "--", ...paths.map(literalPathspec)],
       signal,
@@ -224,9 +218,8 @@ async function diskTarget(repo: Repo, path: string, blocked?: Blockers) {
 }
 async function forceRemove(repo: Repo, paths: string[], signal: AbortSignal) {
   if (paths.length)
-    await git(repo.rootPath, ["update-index", "--force-remove", "-z", "--stdin"], signal, {
+    await gitWrite(repo.rootPath, ["update-index", "--force-remove", "-z", "--stdin"], signal, {
       input: nul(paths),
-      write: true,
     });
 }
 async function steps(run: (done: (paths: string[]) => void) => Promise<void>) {
@@ -291,13 +284,12 @@ export async function changeIndex(
     done(remove);
     if (add.length) {
       const pathspecs = kind === "stage" ? leafPathspecs(add) : add.map(literalPathspec);
-      await git(
+      await gitWrite(
         repo.rootPath,
         kind === "stage"
           ? ["add", "-A", "--", ...pathspecs]
           : ["restore", "--no-recurse-submodules", "--source=HEAD", "--staged", "--", ...pathspecs],
         signal,
-        { write: true },
       );
       done(add);
     }
@@ -438,7 +430,7 @@ export async function discard(
       done([path]);
     }
     if (plan.restore.length) {
-      await git(
+      await gitWrite(
         repo.rootPath,
         [
           "restore",
@@ -449,7 +441,6 @@ export async function discard(
           ...plan.restore.map(literalPathspec),
         ],
         signal,
-        { write: true },
       );
       done(plan.restore);
     }

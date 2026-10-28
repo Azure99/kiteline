@@ -1,16 +1,17 @@
 import { agentLimits } from "../limits.js";
 import { AppError, type GitRemotes, type HeadIdentity, type Repo } from "@kiteline/shared/protocol";
-import { commandLine, git, utf8 } from "./process.js";
+import { gitRead, gitWrite } from "./process.js";
+import { commandLine, utf8 } from "./format.js";
 import { headIdentity } from "./observe.js";
 
 async function config(repo: Repo, name: string, signal: AbortSignal) {
-  const result = await git(repo.rootPath, ["config", "--null", "--get-all", name], signal, {
+  const result = await gitRead(repo.rootPath, ["config", "--null", "--get-all", name], signal, {
     allowedCodes: [0, 1],
   });
   return result.code === 0 ? utf8(result.bytes).split("\0").slice(0, -1) : [];
 }
 export async function remotes(repo: Repo, signal: AbortSignal): Promise<GitRemotes> {
-  const result = await git(
+  const result = await gitRead(
     repo.rootPath,
     ["config", "--null", "--get-regexp", "^remote\\."],
     signal,
@@ -38,7 +39,7 @@ export async function remotes(repo: Repo, signal: AbortSignal): Promise<GitRemot
     for (const push of [false, true]) {
       const count = push ? pushCount : fetchCount;
       if (!count) continue;
-      const urls = await git(
+      const urls = await gitRead(
         repo.rootPath,
         ["remote", "get-url", ...(push ? ["--push"] : []), "--all", "--", entry.name],
         signal,
@@ -69,7 +70,7 @@ export async function remotes(repo: Repo, signal: AbortSignal): Promise<GitRemot
     (branch ? (await config(repo, `branch.${branch}.pushRemote`, signal)).at(-1) : undefined) ??
     (await config(repo, "remote.pushDefault", signal)).at(-1) ??
     defaultFetchRemote;
-  const upstreamResult = await git(
+  const upstreamResult = await gitRead(
     repo.rootPath,
     ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
     signal,
@@ -137,7 +138,7 @@ export async function syncRemote(
     !(await remotes(repo, signal)).remotes.some((entry) => entry.name === params.remote)
   )
     throw new AppError("conflict", "Remote has changed; refresh");
-  const result = await git(
+  return gitWrite(
     repo.rootPath,
     [
       kind,
@@ -146,9 +147,7 @@ export async function syncRemote(
     ],
     signal,
     {
-      write: true,
       ...(kind === "pull" ? { env: { GIT_EDITOR: "true", GIT_SEQUENCE_EDITOR: "false" } } : {}),
     },
   );
-  return { stdout: result.text, stderr: result.stderr, truncated: result.truncated };
 }
