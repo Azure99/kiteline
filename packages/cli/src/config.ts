@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { AppError, record, string } from "@kiteline/shared/protocol";
 import { atomicJson, readJson } from "@kiteline/shared/node/files";
-import type { Options } from "./options.js";
+import type { SessionSelection, TargetSelection, WorkspaceSelection } from "./options.js";
 
 export interface Credentials {
   server: string;
@@ -84,18 +84,34 @@ export async function removeCredentials(value: Awaited<ReturnType<typeof credent
   if (value.source === "file") await rm(value.path, { force: true });
 }
 
-export async function target(options: Options, session = false) {
+interface WorkspaceTarget {
+  deviceId: string;
+  workspaceId: string;
+}
+interface SessionTarget extends WorkspaceTarget {
+  sessionId: string;
+}
+
+export function target(selection: SessionSelection): Promise<SessionTarget>;
+export function target(selection: WorkspaceSelection): Promise<WorkspaceTarget>;
+export async function target(selection: TargetSelection): Promise<WorkspaceTarget | SessionTarget> {
   const saved = (await jsonFile(resolve(process.cwd(), ".kiteline.json"))) ?? {};
   const deviceId = string(
-    options.device ?? saved.device,
+    selection.device ?? saved.device,
     "device: use --device or cwd .kiteline.json",
   );
   const workspaceId = string(
-    options.workspace ?? saved.workspace,
+    selection.workspace ?? saved.workspace,
     "workspace: use --workspace or cwd .kiteline.json",
   );
-  const sessionId = session
-    ? string(options.session ?? saved.session, "session: use --session or cwd .kiteline.json")
-    : undefined;
-  return { deviceId, workspaceId, sessionId };
+  if (selection.kind === "session")
+    return {
+      deviceId,
+      workspaceId,
+      sessionId: string(
+        selection.session ?? saved.session,
+        "session: use --session or cwd .kiteline.json",
+      ),
+    };
+  return { deviceId, workspaceId };
 }

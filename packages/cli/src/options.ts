@@ -2,7 +2,12 @@ import { parseArgs } from "node:util";
 import { posix } from "node:path";
 import {
   AppError,
+  defaultTerminalOperationTimeoutMs,
+  defaultTerminalQuietMs,
+  defaultTerminalWaitTimeoutMs,
   limits,
+  maxTerminalQuietMs,
+  maxTerminalTimeoutMs,
   parseInputPosition,
   parseScreenPosition,
   parseTerminalCols,
@@ -15,6 +20,7 @@ import {
   parseTerminalWaitMode,
   string,
   terminalKeys,
+  type RpcParams,
 } from "@kiteline/shared/protocol";
 
 const options = {
@@ -51,24 +57,59 @@ type Option = keyof typeof options;
 const workspace = ["device", "workspace"] as const;
 const session = [...workspace, "session"] as const;
 const screen = ["tail", "attrs"] as const;
-const commands: Record<string, readonly Option[]> = {
-  "auth login": ["server", "token-stdin"],
-  "auth status": [],
-  "auth logout": [],
-  targets: [],
-  inspect: workspace,
-  "terminal list": workspace,
-  "terminal create": [...workspace, "name"],
-  "terminal attach": session,
-  "terminal snapshot": [...session, ...screen, "if-changed"],
-  "terminal send": [...session, "text", "paste", "enter", "key", "if-input", "timeout-ms"],
-  "terminal wait": [...session, ...screen, "mode", "after", "quiet-ms", "timeout-ms"],
-  "terminal resize": [...session, "cols", "rows", "timeout-ms"],
-  "terminal recover": session,
-  "files download": [...workspace, "output"],
-  "files upload": [...workspace, "file", "replace-version"],
-  "web url": [...session, "path"],
-};
+const commands = {
+  "auth login": { target: "none", options: ["server", "token-stdin"] },
+  "auth status": { target: "none", options: [] },
+  "auth logout": { target: "none", options: [] },
+  targets: { target: "none", options: [] },
+  inspect: { target: "workspace", options: workspace },
+  "terminal list": { target: "workspace", options: workspace },
+  "terminal create": { target: "workspace", options: [...workspace, "name"] },
+  "terminal attach": { target: "session", options: session },
+  "terminal snapshot": { target: "session", options: [...session, ...screen, "if-changed"] },
+  "terminal send": {
+    target: "session",
+    options: [...session, "text", "paste", "enter", "key", "if-input", "timeout-ms"],
+  },
+  "terminal wait": {
+    target: "session",
+    options: [...session, ...screen, "mode", "after", "quiet-ms", "timeout-ms"],
+  },
+  "terminal resize": { target: "session", options: [...session, "cols", "rows", "timeout-ms"] },
+  "terminal recover": { target: "session", options: session },
+  "files download": { target: "workspace", options: [...workspace, "output"] },
+  "files upload": { target: "workspace", options: [...workspace, "file", "replace-version"] },
+  "web url": {
+    target: { terminal: "session", file: "workspace" },
+    options: [...session, "path"],
+  },
+} as const satisfies Record<
+  string,
+  {
+    target: "none" | "workspace" | "session" | { terminal: "session"; file: "workspace" };
+    options: readonly Option[];
+  }
+>;
+
+export interface WorkspaceSelection {
+  kind: "workspace";
+  device?: string;
+  workspace?: string;
+}
+export interface SessionSelection {
+  kind: "session";
+  device?: string;
+  workspace?: string;
+  session?: string;
+}
+export type TargetSelection = WorkspaceSelection | SessionSelection;
+
+function selectTarget(kind: "workspace", raw: RawOptions): WorkspaceSelection;
+function selectTarget(kind: "session", raw: RawOptions): SessionSelection;
+function selectTarget(kind: TargetSelection["kind"], raw: RawOptions): TargetSelection {
+  const selection = { device: raw.device, workspace: raw.workspace };
+  return kind === "session" ? { kind, ...selection, session: raw.session } : { kind, ...selection };
+}
 
 function filePath(value: string | undefined) {
   if (value === undefined) return undefined;
@@ -129,77 +170,23 @@ function screenPosition(value: string) {
   return optionValue("if-changed", () => parseScreenPosition(position));
 }
 
-export function parse(argv: string[]) {
+function parseArguments(argv: string[]) {
   let parsed;
   try {
     parsed = parseArgs({ args: argv, options, allowPositionals: true, tokens: true });
   } catch (error) {
     throw new AppError("invalid_argument", (error as Error).message);
   }
-  const { values: raw, positionals, tokens } = parsed;
-  const fileCommand =
-    positionals[0] === "files" && ["download", "upload"].includes(positionals[1] ?? "");
-  const command = (fileCommand ? positionals.slice(0, 2) : positionals).join(" ");
-  const showHelp = !!raw.help || argv.length === 0;
-  if (!showHelp && !(raw.version && !positionals.length)) {
-    const allowed = Object.hasOwn(commands, command) ? commands[command] : undefined;
-    if (!allowed)
-      throw new AppError(
-        "invalid_argument",
-        `Unknown command: ${command || "(none)"}. Use --help.`,
-      );
-    const seen = new Set<string>();
-    for (const token of tokens) {
-      if (token.kind !== "option") continue;
-      if (seen.has(token.name))
-        throw new AppError("invalid_argument", `--${token.name} may only be specified once`);
-      seen.add(token.name);
-      if (token.name !== "json" && !allowed.includes(token.name))
-        throw new AppError("invalid_argument", `--${token.name} is not valid for ${command}`);
-    }
-    if (fileCommand) {
-      if (positionals.length !== 3)
-        throw new AppError("invalid_argument", `${command} requires exactly one PATH`);
-      const local = command === "files download" ? "output" : "file";
-      if (raw[local] === undefined)
-        throw new AppError("invalid_argument", `${command} requires --${local} LOCAL`);
-    }
-    if (command === "terminal attach" && raw.json)
-      throw new AppError("invalid_argument", "terminal attach does not accept --json");
-    if (command === "web url" && raw.path !== undefined && raw.session !== undefined)
-      throw new AppError("invalid_argument", "--path cannot be combined with --session");
-    if (command === "terminal send") {
-      if ([raw.text, raw.paste, raw.key].filter((v) => v !== undefined).length !== 1)
-        throw new AppError(
-          "invalid_argument",
-          "send requires exactly one of --text, --paste, or --key",
-        );
-      if (raw.key !== undefined && raw.enter)
-        throw new AppError("invalid_argument", "--enter cannot be combined with --key");
-    }
-    if (command === "terminal wait") {
-      const mode =
-        raw.mode === undefined
-          ? undefined
-          : optionValue("mode", () => parseTerminalWaitMode(raw.mode));
-      if (mode === "change") {
-        if (raw.after === undefined)
-          throw new AppError("invalid_argument", "--mode change requires --after EPOCH:SEQ");
-        if (raw["quiet-ms"] !== undefined)
-          throw new AppError(
-            "invalid_argument",
-            "--quiet-ms cannot be combined with --mode change",
-          );
-      } else if (raw.after !== undefined)
-        throw new AppError("invalid_argument", "--after requires --mode change");
-    }
-    if (command === "terminal resize" && (raw.cols === undefined || raw.rows === undefined))
-      throw new AppError("invalid_argument", "resize requires --cols and --rows");
-  }
+  return parsed;
+}
+
+type RawOptions = ReturnType<typeof parseArguments>["values"];
+
+function normalizeValues(raw: RawOptions, path: string | undefined) {
   const after = raw.after;
-  const values = {
+  return {
     ...raw,
-    path: filePath(fileCommand ? positionals[2] : raw.path),
+    path: filePath(path),
     file: raw.file === undefined ? undefined : string(raw.file, "--file"),
     output: raw.output === undefined ? undefined : string(raw.output, "--output"),
     "replace-version":
@@ -219,10 +206,214 @@ export function parse(argv: string[]) {
         ? undefined
         : optionValue("after", () => parseTerminalPosition(positionParts(after))),
   };
-  return { command, values, help: showHelp };
 }
 
-export type Options = ReturnType<typeof parse>["values"];
+function parseSend(raw: RawOptions) {
+  if ([raw.text, raw.paste, raw.key].filter((value) => value !== undefined).length !== 1)
+    throw new AppError(
+      "invalid_argument",
+      "send requires exactly one of --text, --paste, or --key",
+    );
+  if (raw.key !== undefined && raw.enter)
+    throw new AppError("invalid_argument", "--enter cannot be combined with --key");
+  const values = normalizeValues(raw, raw.path);
+  let input: RpcParams<"sessions.send">["input"];
+  if (values.key !== undefined) {
+    input = { type: "key", key: values.key };
+  } else if (values.paste !== undefined) {
+    input = { type: "paste", text: values.paste, enter: values.enter };
+  } else {
+    input = { type: "text", text: values.text!, enter: values.enter };
+  }
+  return {
+    input,
+    ifInput: values["if-input"],
+    timeoutMs: values["timeout-ms"],
+  };
+}
+
+type WaitObservation =
+  | Omit<Extract<RpcParams<"sessions.wait">, { mode: "change" }>, "workspaceId" | "sessionId">
+  | Omit<Extract<RpcParams<"sessions.wait">, { mode?: "quiet" }>, "workspaceId" | "sessionId">;
+
+function parseWait(raw: RawOptions) {
+  const mode =
+    raw.mode === undefined ? undefined : optionValue("mode", () => parseTerminalWaitMode(raw.mode));
+  if (mode === "change") {
+    if (raw.after === undefined)
+      throw new AppError("invalid_argument", "--mode change requires --after EPOCH:SEQ");
+    if (raw["quiet-ms"] !== undefined)
+      throw new AppError("invalid_argument", "--quiet-ms cannot be combined with --mode change");
+  } else if (raw.after !== undefined)
+    throw new AppError("invalid_argument", "--after requires --mode change");
+  const values = normalizeValues(raw, raw.path);
+  const observation: WaitObservation =
+    mode === "change" ? { mode, after: values.after! } : { mode, quietMs: values["quiet-ms"] };
+  return {
+    ...observation,
+    tail: values.tail,
+    attrs: values.attrs,
+    timeoutMs: values["timeout-ms"],
+  };
+}
+
+function parseResize(raw: RawOptions) {
+  if (raw.cols === undefined || raw.rows === undefined)
+    throw new AppError("invalid_argument", "resize requires --cols and --rows");
+  const values = normalizeValues(raw, raw.path);
+  return {
+    cols: values.cols!,
+    rows: values.rows!,
+    timeoutMs: values["timeout-ms"],
+  };
+}
+
+export function parse(argv: string[]) {
+  const { values: raw, positionals, tokens } = parseArguments(argv);
+  const fileCommand =
+    positionals[0] === "files" && ["download", "upload"].includes(positionals[1] ?? "");
+  const requestedCommand = (fileCommand ? positionals.slice(0, 2) : positionals).join(" ");
+  const path = fileCommand ? positionals[2] : raw.path;
+  const showHelp = !!raw.help || argv.length === 0;
+  if (!showHelp && !(raw.version && !positionals.length)) {
+    const allowed = Object.hasOwn(commands, requestedCommand)
+      ? (commands[requestedCommand as keyof typeof commands].options as readonly Option[])
+      : undefined;
+    if (!allowed)
+      throw new AppError(
+        "invalid_argument",
+        `Unknown command: ${requestedCommand || "(none)"}. Use --help.`,
+      );
+    const seen = new Set<string>();
+    for (const token of tokens) {
+      if (token.kind !== "option") continue;
+      if (seen.has(token.name))
+        throw new AppError("invalid_argument", `--${token.name} may only be specified once`);
+      seen.add(token.name);
+      if (token.name !== "json" && !allowed.includes(token.name))
+        throw new AppError(
+          "invalid_argument",
+          `--${token.name} is not valid for ${requestedCommand}`,
+        );
+    }
+    if (fileCommand) {
+      if (positionals.length !== 3)
+        throw new AppError("invalid_argument", `${requestedCommand} requires exactly one PATH`);
+      const local = requestedCommand === "files download" ? "output" : "file";
+      if (raw[local] === undefined)
+        throw new AppError("invalid_argument", `${requestedCommand} requires --${local} LOCAL`);
+    }
+    if (requestedCommand === "terminal attach" && raw.json)
+      throw new AppError("invalid_argument", "terminal attach does not accept --json");
+    if (requestedCommand === "web url" && raw.path !== undefined && raw.session !== undefined)
+      throw new AppError("invalid_argument", "--path cannot be combined with --session");
+  }
+  if (showHelp || raw.version) {
+    normalizeValues(raw, path);
+    return showHelp
+      ? { command: "help" as const, requestedCommand }
+      : { command: "version" as const };
+  }
+  const command = requestedCommand as keyof typeof commands;
+  const json = raw.json;
+  if (command === "terminal send")
+    return {
+      command: "terminal send" as const,
+      json,
+      target: selectTarget(commands[command].target, raw),
+      params: parseSend(raw),
+    };
+  if (command === "terminal wait")
+    return {
+      command: "terminal wait" as const,
+      json,
+      target: selectTarget(commands[command].target, raw),
+      params: parseWait(raw),
+    };
+  if (command === "terminal resize")
+    return {
+      command: "terminal resize" as const,
+      json,
+      target: selectTarget(commands[command].target, raw),
+      params: parseResize(raw),
+    };
+  const values = normalizeValues(raw, path);
+  switch (command) {
+    case "auth login":
+      return { command, json, server: values.server, tokenStdin: values["token-stdin"] };
+    case "auth status":
+      return { command, json };
+    case "auth logout":
+      return { command, json };
+    case "targets":
+      return { command, json };
+    case "inspect":
+      return { command, json, target: selectTarget(commands[command].target, raw) };
+    case "terminal attach":
+      return { command, target: selectTarget(commands[command].target, raw) };
+    case "terminal list":
+      return {
+        command,
+        json,
+        target: selectTarget(commands[command].target, raw),
+      };
+    case "terminal create":
+      return {
+        command,
+        json,
+        target: selectTarget(commands[command].target, raw),
+        params: { name: values.name },
+      };
+    case "terminal snapshot":
+      return {
+        command,
+        json,
+        target: selectTarget(commands[command].target, raw),
+        params: { tail: values.tail, attrs: values.attrs, ifChanged: values["if-changed"] },
+      };
+    case "terminal recover":
+      return {
+        command,
+        json,
+        target: selectTarget(commands[command].target, raw),
+      };
+    case "files download":
+      return {
+        command,
+        json,
+        target: selectTarget(commands[command].target, raw),
+        path: values.path!,
+        output: values.output!,
+      };
+    case "files upload":
+      return {
+        command,
+        json,
+        target: selectTarget(commands[command].target, raw),
+        path: values.path!,
+        file: values.file!,
+        replaceVersion: values["replace-version"],
+      };
+    case "web url":
+      return values.path === undefined
+        ? { command, json, target: selectTarget(commands[command].target.terminal, raw) }
+        : {
+            command,
+            json,
+            target: selectTarget(commands[command].target.file, raw),
+            path: values.path,
+          };
+  }
+}
+
+type CommandPlan = ReturnType<typeof parse>;
+export type TerminalPlan = Exclude<
+  Extract<CommandPlan, { command: `terminal ${string}` }>,
+  AttachPlan
+>;
+export type FilePlan = Extract<CommandPlan, { command: `files ${string}` }>;
+export type AttachPlan = Extract<CommandPlan, { command: "terminal attach" }>;
+export type WebUrlPlan = Extract<CommandPlan, { command: "web url" }>;
 
 const targetHelp = `Use --device D --workspace W --session S, or defaults in cwd .kiteline.json.
 Full IDs come from targets and terminal list. Explicit options override this call.
@@ -238,7 +429,7 @@ Ignores a cwd default session; rejects explicit --session.
 PATH is workspace-relative, uses / separators and cannot contain .. segments.
 `;
 const commandHelp: Record<string, string> = {
-  "auth login": `auth login --server ORIGIN [--token-stdin]\nImport a token issued in Web: Owner menu → CLI setup → CLI credentials. Prompt requires a TTY;\n--token-stdin explicitly reads a piped token. KITELINE_URL/KITELINE_TOKEN override saved credentials.\n`,
+  "auth login": `auth login --server ORIGIN [--token-stdin]\nImport a token issued in Web: Settings → CLI setup → CLI credentials. Prompt requires a TTY;\n--token-stdin explicitly reads a piped token. KITELINE_URL/KITELINE_TOKEN override saved credentials.\n`,
   "auth status": `auth status\nShow current credential access, source and expiry.\n`,
   "auth logout": `auth logout\nRevoke the active credential. Environment credentials must also be removed from\nthe calling environment; saved credentials are removed after revocation.\n`,
   targets: `targets\nList authorized devices and workspace metadata snapshots, including offline devices.\n`,
@@ -247,9 +438,9 @@ const commandHelp: Record<string, string> = {
   "terminal create": `terminal create --device D --workspace W [--name NAME]\nCreate a persistent terminal in the workspace, shared with Web.\nIgnores a cwd default session; rejects explicit --session.\n`,
   "terminal attach": `terminal attach\n${targetHelp}Interact with an existing running terminal. Requires stdin and stdout TTYs.\nCtrl+B d detaches; Ctrl+B [ opens tmux history; Ctrl+B Ctrl+B sends the prefix.\nInput and size are shared with Web. --if-input does not count attach input.\nSlow output can end this connection; run attach again to reconnect.\nExit 0 means detached and local output drained, not the last remote command status.\n`,
   "terminal snapshot": `terminal snapshot [--tail N] [--attrs] [--if-changed JSON]\n${targetHelp}${observationHelp}Copy the entire position JSON into --if-changed, using the same target and options.\nunchanged has empty stdout but current input metadata; a new epoch returns reset\nwith a full screen. Changing tail/attrs returns full data. There is no position cache.\n`,
-  "terminal send": `terminal send (--text TEXT | --paste TEXT) [--enter] [--if-input EPOCH:INPUTSEQ] [--timeout-ms N]\nterminal send --key KEY [--if-input EPOCH:INPUTSEQ] [--timeout-ms N]\n${targetHelp}Keys: ${terminalKeys.join(", ")}. --key cannot use --enter.\n--text sends literal text; the word Enter is not a key. --paste uses terminal paste\nmode. --enter appends Enter after the text or paste. No stdin is read.\n--if-input compares input accepted by this recorder, including Web input; conflict\nmeans no input accepted. Reobserve before choosing a new condition. Acceptance\ndoes not mean echo, exclusivity or command completion. Local tmux and remote attach input is uncounted.\nTimeout: 1..10000ms, default 5000ms. unknown may have sent input; observe before\ndeciding to repeat. No automatic resend or waiting. before is EPOCH:SEQ for wait,\nnot a conditional snapshot position. recording_unavailable requires explicit recover.\n`,
-  "terminal wait": `terminal wait [--mode quiet] [--quiet-ms N] [--timeout-ms N] [--tail N] [--attrs]\nterminal wait --mode change --after EPOCH:SEQ [--timeout-ms N] [--tail N] [--attrs]\n${targetHelp}${observationHelp}quiet defaults to 300ms within a total 1000ms; values are 1..10000ms and timeout\nmay be shorter than quiet. Output/resize activity resets quiet, even for identical\ntext. change requires --after from snapshot.position or send.before; it rejects\n--quiet-ms. quiet rejects --after. quiet/changed/timeout/reset return full screens.\nA quiet terminal does not confirm program or command completion.\n`,
-  "terminal resize": `terminal resize --cols N --rows N [--timeout-ms N]\n${targetHelp}Explicitly resize the same shared terminal.\ncols: 1..${limits.terminalMaxCols}; rows: 1..${limits.terminalMaxRows}. Timeout: 1..10000ms, default 5000ms.\nunknown requires observing the terminal before deciding to repeat.\n`,
+  "terminal send": `terminal send (--text TEXT | --paste TEXT) [--enter] [--if-input EPOCH:INPUTSEQ] [--timeout-ms N]\nterminal send --key KEY [--if-input EPOCH:INPUTSEQ] [--timeout-ms N]\n${targetHelp}Keys: ${terminalKeys.join(", ")}. --key cannot use --enter.\n--text sends literal text; the word Enter is not a key. --paste uses terminal paste\nmode. --enter appends Enter after the text or paste. No stdin is read.\n--if-input compares input accepted by this recorder, including Web input; conflict\nmeans no input accepted. Reobserve before choosing a new condition. Acceptance\ndoes not mean echo, exclusivity or command completion. Local tmux and remote attach input is uncounted.\nTimeout: 1..${maxTerminalTimeoutMs}ms, default ${defaultTerminalOperationTimeoutMs}ms. unknown may have sent input; observe before\ndeciding to repeat. No automatic resend or waiting. before is EPOCH:SEQ for wait,\nnot a conditional snapshot position. recording_unavailable requires explicit recover.\n`,
+  "terminal wait": `terminal wait [--mode quiet] [--quiet-ms N] [--timeout-ms N] [--tail N] [--attrs]\nterminal wait --mode change --after EPOCH:SEQ [--timeout-ms N] [--tail N] [--attrs]\n${targetHelp}${observationHelp}quiet defaults to ${defaultTerminalQuietMs}ms within a total ${defaultTerminalWaitTimeoutMs}ms; quiet: 1..${maxTerminalQuietMs}ms,\ntimeout: 1..${maxTerminalTimeoutMs}ms. Timeout may be shorter than quiet.\nOutput/resize activity resets quiet, even for identical text. change requires\n--after from snapshot.position or send.before; it rejects --quiet-ms.\nquiet rejects --after. quiet/changed/timeout/reset return full screens.\nA quiet terminal does not confirm program or command completion.\n`,
+  "terminal resize": `terminal resize --cols N --rows N [--timeout-ms N]\n${targetHelp}Explicitly resize the same shared terminal.\ncols: 1..${limits.terminalMaxCols}; rows: 1..${limits.terminalMaxRows}. Timeout: 1..${maxTerminalTimeoutMs}ms, default ${defaultTerminalOperationTimeoutMs}ms.\nunknown requires observing the terminal before deciding to repeat.\n`,
   "terminal recover": `terminal recover\n${targetHelp}Request recorder recovery and show actual Session/webStatus. Acceptance does not\nconfirm availability; use terminal list/snapshot afterward. Recovery can reset\nepoch and report a history gap. Input is not resent; there is no automatic polling.\n`,
   "files download": `files download PATH --output LOCAL\n${fileTargetHelp}Stream the remote file into a new local file; an existing LOCAL is never overwritten.\nFailure may leave an empty or partial LOCAL. Download follows a leaf symlink.\nSuccess returns path, output and size; file bytes are not JSON output.\n`,
   "files upload": `files upload PATH --file LOCAL [--replace-version VERSION]\n${fileTargetHelp}Stream a local regular file. By default, create only; an existing target conflicts.\nTo choose replacement after conflict, copy error.details.current.targetVersion\nfrom the error into --replace-version. VERSION is not a download revision.\nReplacement checks the current target; a leaf symlink is replaced, not followed.\nAn unknown result may have published the file: observe through the terminal or\ndownload before deciding to repeat. Success returns path and size.\n`,
@@ -284,7 +475,7 @@ Commands:
   web url [--path PATH]                     Print a terminal or file Web URL
 
 Use COMMAND --help for parameters and behavior. All commands except attach accept --json.
-Help and --version work offline. Owner menu → CLI setup → CLI credentials in Web issues tokens.
+Help and --version work offline. Settings → CLI setup → CLI credentials in Web issues tokens.
 KITELINE_URL and KITELINE_TOKEN must be supplied together and override saved
 credentials. Saved credentials: ~/.kiteline/credentials.json; KITELINE_CLI_HOME
 changes that directory. Logout revokes the active token, including an env token.

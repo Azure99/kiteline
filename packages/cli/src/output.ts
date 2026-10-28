@@ -4,11 +4,10 @@ import type {
   SnapshotResult,
   TerminalScreen,
 } from "@kiteline/shared/protocol";
-import type { Options } from "./options.js";
 
-export function result(value: unknown, text: string, options: Options) {
+export function result(value: unknown, text: string, json: boolean | undefined) {
   process.stdout.write(
-    options.json ? JSON.stringify({ outcome: "succeeded", result: value }) + "\n" : text + "\n",
+    json ? JSON.stringify({ outcome: "succeeded", result: value }) + "\n" : text + "\n",
   );
 }
 
@@ -31,9 +30,9 @@ function textLines(lines: ScreenLine[]) {
 
 export function screenResult(
   value: SnapshotResult | { reason: string; snapshot: TerminalScreen },
-  options: Options,
+  json: boolean | undefined,
 ) {
-  if (options.json) return result(value, "", options);
+  if (json) return result(value, "", json);
   const snapshot = "snapshot" in value ? value.snapshot : value;
   const metadata: string[] = [
     `reason=${value.reason}`,

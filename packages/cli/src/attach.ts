@@ -7,7 +7,7 @@ import type { TtyInput } from "@kiteline/shared/protocol/ipc";
 import { connectServerSocket } from "@kiteline/shared/node/network";
 import { target, type Credentials } from "./config.js";
 import { client, remote } from "./client.js";
-import type { Options } from "./options.js";
+import type { AttachPlan } from "./options.js";
 import { terminalReset } from "./terminal-reset.js";
 
 async function output(fd: number, data: Buffer) {
@@ -27,16 +27,16 @@ function dimensions() {
 }
 
 export async function attach(
-  options: Options,
+  plan: AttachPlan,
   api: ReturnType<typeof client>,
   credentials: Credentials,
 ) {
-  const { deviceId, workspaceId, sessionId } = await target(options, true);
+  const { deviceId, workspaceId, sessionId } = await target(plan.target);
   const ready = await remote(
     api.openChannel(deviceId, "terminal.attach", {
       mode: "tty",
       workspaceId,
-      sessionId: sessionId!,
+      sessionId,
       ...dimensions(),
       term: process.env.TERM || "xterm-256color",
     }),

@@ -10,7 +10,7 @@ import { ApiError, apiError, fileDownloadPath } from "@kiteline/shared/protocol/
 import { client, remote } from "./client.js";
 import { target } from "./config.js";
 import { result } from "./output.js";
-import type { Options } from "./options.js";
+import type { FilePlan } from "./options.js";
 
 async function local<T>(path: string, operation: Promise<T>) {
   try {
@@ -123,17 +123,17 @@ async function upload(
   }
 }
 
-export async function files(command: string, options: Options, api: ReturnType<typeof client>) {
-  const { deviceId, workspaceId } = await target(options);
-  const file = { deviceId, workspaceId, path: options.path! };
-  if (command === "files download") {
-    const value = await download(api, file, options.output!);
+export async function files(plan: FilePlan, api: ReturnType<typeof client>) {
+  const { deviceId, workspaceId } = await target(plan.target);
+  const file = { deviceId, workspaceId, path: plan.path };
+  if (plan.command === "files download") {
+    const value = await download(api, file, plan.output);
     return result(
       value,
       `Downloaded ${value.path} to ${value.output} (${value.size} bytes).`,
-      options,
+      plan.json,
     );
   }
-  const value = await upload(api, file, options.file!, options["replace-version"]);
-  return result(value, `Uploaded ${value.path} (${value.size} bytes).`, options);
+  const value = await upload(api, file, plan.file, plan.replaceVersion);
+  return result(value, `Uploaded ${value.path} (${value.size} bytes).`, plan.json);
 }

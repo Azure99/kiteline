@@ -13,7 +13,7 @@ import { credentials, removeCredentials, saveCredentials, serverOrigin, target }
 import { client, remote } from "./client.js";
 import { help, parse } from "./options.js";
 import { result, sessionLines } from "./output.js";
-import { terminal } from "./terminal.js";
+import { terminal, webUrl } from "./terminal.js";
 import { files } from "./files.js";
 import { attach } from "./attach.js";
 
@@ -25,10 +25,10 @@ async function session(api: ReturnType<typeof client>) {
 }
 
 async function run() {
-  const { command, values: options, help: showHelp } = parse(process.argv.slice(2));
-  if (showHelp) return process.stdout.write(help(command));
-  if (options.version) return process.stdout.write(appVersion + "\n");
-  if (command === "terminal attach") {
+  const plan = parse(process.argv.slice(2));
+  if (plan.command === "help") return process.stdout.write(help(plan.requestedCommand));
+  if (plan.command === "version") return process.stdout.write(appVersion + "\n");
+  if (plan.command === "terminal attach") {
     if (!process.stdin.isTTY || !process.stdout.isTTY)
       throw new AppError("invalid_argument", "terminal attach requires stdin and stdout TTYs");
     if (process.platform === "win32" && !process.env.KITELINE_ATTACH_RESULT)
@@ -37,10 +37,10 @@ async function run() {
         "Windows terminal attach requires the kiteline.ps1 entry",
       );
   }
-  if (command === "auth login") {
-    const server = serverOrigin(options.server);
+  if (plan.command === "auth login") {
+    const server = serverOrigin(plan.server);
     let token: string;
-    if (options["token-stdin"]) {
+    if (plan.tokenStdin) {
       process.stdin.setEncoding("utf8");
       token = "";
       for await (const chunk of process.stdin) token += chunk;
@@ -69,22 +69,22 @@ async function run() {
     return result(
       { server, ...access, source: "file" },
       `Saved ${access.name} for ${server}\nDevices: ${access.deviceIds.join(", ")}\nExpires: ${access.expiresAt ?? "never"}`,
-      options,
+      plan.json,
     );
   }
   const auth = await credentials();
   const api = client(auth);
-  if (command === "terminal attach") return attach(options, api, auth);
-  if (command.startsWith("files ")) return files(command, options, api);
-  if (command === "auth status") {
+  if (plan.command === "terminal attach") return attach(plan, api, auth);
+  if (plan.command === "files download" || plan.command === "files upload") return files(plan, api);
+  if (plan.command === "auth status") {
     const access = await session(api);
     return result(
       { server: auth.server, ...access, source: auth.source },
       `${access.name} at ${auth.server} (${auth.source})\nDevices: ${access.deviceIds.join(", ")}\nExpires: ${access.expiresAt ?? "never"}`,
-      options,
+      plan.json,
     );
   }
-  if (command === "auth logout") {
+  if (plan.command === "auth logout") {
     try {
       await remote(api.post("/api/logout"));
     } catch (error) {
@@ -94,10 +94,10 @@ async function run() {
     return result(
       { revoked: true, source: auth.source },
       `Current token revoked or already invalid.${auth.source === "environment" ? " Remove KITELINE_URL/KITELINE_TOKEN from the calling environment." : " Saved credentials removed."}`,
-      options,
+      plan.json,
     );
   }
-  if (command === "targets") {
+  if (plan.command === "targets") {
     const reply = await remote(api.api<{ devices: Device[] }>("/api/devices"));
     const devices = reply.devices.map((d) => ({
       id: d.id,
@@ -118,33 +118,30 @@ async function run() {
             )
             .join("\n")
         : "No authorized devices.",
-      options,
+      plan.json,
     );
   }
-  if (command.startsWith("terminal ") || command === "web url")
-    return terminal(command, options, api, auth.server);
-  const { deviceId, workspaceId } = await target(options);
-  if (command === "inspect") {
-    const reply = await remote(api.api<{ devices: Device[] }>("/api/devices"));
-    const device = reply.devices.find((d) => d.id === deviceId);
-    if (!device)
-      throw new ApiError("not_found", "Device is not in the authorized device list; check targets");
-    const workspace = device.snapshot?.workspaces.find((w) => w.id === workspaceId);
-    if (!workspace)
-      throw new ApiError("not_found", "Workspace is not in this device snapshot; check targets");
-    const { sessions } = await remote(api.rpc(deviceId, "sessions.list", { workspaceId }));
-    return result(
-      {
-        device: { id: device.id, name: device.name, status: device.status },
-        workspace,
-        workspaceSource: "device_snapshot",
-        sessions,
-      },
-      `${device.id}  ${device.name}\n${workspace.id}  ${workspace.name}  ${workspace.path} (device snapshot)\n${sessionLines(sessions)}`,
-      options,
-    );
-  }
-  throw new AppError("invalid_argument", `Unknown command: ${command}`);
+  if (plan.command === "web url") return webUrl(plan, api, auth.server);
+  if (plan.command !== "inspect") return terminal(plan, api);
+  const { deviceId, workspaceId } = await target(plan.target);
+  const reply = await remote(api.api<{ devices: Device[] }>("/api/devices"));
+  const device = reply.devices.find((d) => d.id === deviceId);
+  if (!device)
+    throw new ApiError("not_found", "Device is not in the authorized device list; check targets");
+  const workspace = device.snapshot?.workspaces.find((w) => w.id === workspaceId);
+  if (!workspace)
+    throw new ApiError("not_found", "Workspace is not in this device snapshot; check targets");
+  const { sessions } = await remote(api.rpc(deviceId, "sessions.list", { workspaceId }));
+  return result(
+    {
+      device: { id: device.id, name: device.name, status: device.status },
+      workspace,
+      workspaceSource: "device_snapshot",
+      sessions,
+    },
+    `${device.id}  ${device.name}\n${workspace.id}  ${workspace.name}  ${workspace.path} (device snapshot)\n${sessionLines(sessions)}`,
+    plan.json,
+  );
 }
 
 try {

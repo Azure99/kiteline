@@ -1,119 +1,76 @@
-import { AppError, type SessionInput } from "@kiteline/shared/protocol";
 import { ApiError } from "@kiteline/shared/protocol/client";
 import { workspacePath } from "@kiteline/shared/protocol/navigation";
 import { target } from "./config.js";
 import { client, remote } from "./client.js";
 import { result, screenResult, sessionLines } from "./output.js";
-import type { Options } from "./options.js";
+import type { TerminalPlan, WebUrlPlan } from "./options.js";
 
-export async function terminal(
-  command: string,
-  options: Options,
-  api: ReturnType<typeof client>,
-  server: string,
-) {
-  const requiresSession =
-    command !== "terminal create" &&
-    command !== "terminal list" &&
-    !(command === "web url" && options.path !== undefined);
-  const { deviceId, workspaceId, sessionId } = await target(options, requiresSession);
-  if (command === "terminal list") {
-    const reply = await remote(api.rpc(deviceId, "sessions.list", { workspaceId }));
-    return result(reply, sessionLines(reply.sessions), options);
-  }
-  if (command === "terminal create") {
-    const reply = await remote(
-      api.rpc(deviceId, "sessions.create", { workspaceId, name: options.name }),
-    );
-    return result(reply, sessionLines([reply]), options);
-  }
-  const params = { workspaceId, sessionId: sessionId! };
-  if (command === "web url") {
-    const reply = await remote(api.rpc(deviceId, "sessions.list", { workspaceId }));
-    if (
-      options.path === undefined &&
-      !reply.sessions.some((s) => s.workspaceId === workspaceId && s.id === sessionId)
-    )
-      throw new ApiError("not_found", "Terminal is not in this workspace; check terminal list");
-    const url = new URL(
-      options.path === undefined
-        ? workspacePath(deviceId, workspaceId, "terminal", { session: sessionId })
-        : workspacePath(deviceId, workspaceId, "files", { file: options.path }),
-      server,
-    ).href;
-    return result({ url }, url, options);
-  }
-  if (command === "terminal snapshot") {
-    const reply = await remote(
-      api.rpc(deviceId, "sessions.snapshot", {
-        ...params,
-        tail: options.tail,
-        attrs: options.attrs,
-        ifChanged: options["if-changed"],
-      }),
-    );
-    return screenResult(reply, options);
-  }
-  if (command === "terminal send") {
-    let input: SessionInput;
-    if (options.key !== undefined) {
-      input = { type: "key", key: options.key };
-    } else if (options.paste !== undefined) {
-      input = { type: "paste", text: options.paste, enter: options.enter };
-    } else {
-      input = { type: "text", text: options.text!, enter: options.enter };
+export async function terminal(plan: TerminalPlan, api: ReturnType<typeof client>) {
+  if (plan.command === "terminal list" || plan.command === "terminal create") {
+    const { deviceId, ...params } = await target(plan.target);
+    if (plan.command === "terminal list") {
+      const reply = await remote(api.rpc(deviceId, "sessions.list", params));
+      return result(reply, sessionLines(reply.sessions), plan.json);
     }
-    const reply = await remote(
-      api.rpc(deviceId, "sessions.send", {
-        ...params,
-        input,
-        ifInput: options["if-input"],
-        timeoutMs: options["timeout-ms"],
-      }),
-    );
-    return result(
-      reply,
-      `Input handled.\nbefore=${reply.before.epoch}:${reply.before.seq}\ninput=${reply.input.epoch}:${reply.input.inputSeq}`,
-      options,
-    );
+    const reply = await remote(api.rpc(deviceId, "sessions.create", { ...params, ...plan.params }));
+    return result(reply, sessionLines([reply]), plan.json);
   }
-  if (command === "terminal wait") {
-    const observation =
-      options.mode === "change"
-        ? { mode: "change" as const, after: options.after! }
-        : {
-            mode: options.mode as "quiet" | undefined,
-            quietMs: options["quiet-ms"],
-          };
-    const reply = await remote(
-      api.rpc(deviceId, "sessions.wait", {
-        ...params,
-        ...observation,
-        tail: options.tail,
-        attrs: options.attrs,
-        timeoutMs: options["timeout-ms"],
-      }),
-    );
-    return screenResult(reply, options);
+  const { deviceId, ...params } = await target(plan.target);
+  switch (plan.command) {
+    case "terminal snapshot": {
+      const reply = await remote(
+        api.rpc(deviceId, "sessions.snapshot", { ...params, ...plan.params }),
+      );
+      return screenResult(reply, plan.json);
+    }
+    case "terminal send": {
+      const reply = await remote(api.rpc(deviceId, "sessions.send", { ...params, ...plan.params }));
+      return result(
+        reply,
+        `Input handled.\nbefore=${reply.before.epoch}:${reply.before.seq}\ninput=${reply.input.epoch}:${reply.input.inputSeq}`,
+        plan.json,
+      );
+    }
+    case "terminal wait": {
+      const reply = await remote(api.rpc(deviceId, "sessions.wait", { ...params, ...plan.params }));
+      return screenResult(reply, plan.json);
+    }
+    case "terminal resize": {
+      const reply = await remote(
+        api.rpc(deviceId, "sessions.resize", { ...params, ...plan.params }),
+      );
+      return result(reply, `Shared terminal resized to ${reply.cols}x${reply.rows}.`, plan.json);
+    }
+    case "terminal recover": {
+      const reply = await remote(api.rpc(deviceId, "sessions.recover", params));
+      return result(
+        reply,
+        `${sessionLines([reply])}\nUse terminal list or snapshot to observe recovery.`,
+        plan.json,
+      );
+    }
   }
-  if (command === "terminal resize") {
-    const reply = await remote(
-      api.rpc(deviceId, "sessions.resize", {
-        ...params,
-        cols: options.cols!,
-        rows: options.rows!,
-        timeoutMs: options["timeout-ms"],
-      }),
-    );
-    return result(reply, `Shared terminal resized to ${reply.cols}x${reply.rows}.`, options);
+}
+
+export async function webUrl(plan: WebUrlPlan, api: ReturnType<typeof client>, server: string) {
+  if (plan.path !== undefined) {
+    const { deviceId, workspaceId } = await target(plan.target);
+    await remote(api.rpc(deviceId, "sessions.list", { workspaceId }));
+    const url = new URL(workspacePath(deviceId, workspaceId, "files", { file: plan.path }), server)
+      .href;
+    return result({ url }, url, plan.json);
   }
-  if (command === "terminal recover") {
-    const reply = await remote(api.rpc(deviceId, "sessions.recover", params));
-    return result(
-      reply,
-      `${sessionLines([reply])}\nUse terminal list or snapshot to observe recovery.`,
-      options,
-    );
-  }
-  throw new AppError("invalid_argument", `Unknown command: ${command}`);
+  const { deviceId, workspaceId, sessionId } = await target(plan.target);
+  const reply = await remote(api.rpc(deviceId, "sessions.list", { workspaceId }));
+  if (
+    !reply.sessions.some(
+      (session) => session.workspaceId === workspaceId && session.id === sessionId,
+    )
+  )
+    throw new ApiError("not_found", "Terminal is not in this workspace; check terminal list");
+  const url = new URL(
+    workspacePath(deviceId, workspaceId, "terminal", { session: sessionId }),
+    server,
+  ).href;
+  return result({ url }, url, plan.json);
 }

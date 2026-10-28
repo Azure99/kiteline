@@ -6,7 +6,8 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join, resolve } from "node:path";
-import { appVersion, type Device } from "@kiteline/shared/protocol";
+import { appVersion, limits, type Device } from "@kiteline/shared/protocol";
+import { ptyBridgeBinary } from "@kiteline/shared/terminal/node";
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -71,24 +72,39 @@ function cli(
     env?: NodeJS.ProcessEnv;
     input?: string;
     keepStdinOpen?: boolean;
+    tty?: boolean;
   } = {},
 ) {
   const env = { ...process.env };
   delete env.KITELINE_URL;
   delete env.KITELINE_TOKEN;
-  const child = spawn(process.execPath, [resolve("packages/cli/dist/main.js"), ...args], {
-    cwd: options.cwd ?? root,
-    env: {
-      ...env,
-      KITELINE_CLI_HOME: join(root, "credentials"),
-      NO_PROXY: "127.0.0.1",
-      no_proxy: "127.0.0.1",
-      ...options.env,
+  const entry = [resolve("packages/cli/dist/main.js"), ...args];
+  const child = spawn(
+    options.tty ? ptyBridgeBinary : process.execPath,
+    options.tty
+      ? [
+          "91",
+          "29",
+          String(limits.dataChunkBytes),
+          String(limits.terminalPendingBytes),
+          process.execPath,
+          ...entry,
+        ]
+      : entry,
+    {
+      cwd: options.cwd ?? root,
+      env: {
+        ...env,
+        KITELINE_CLI_HOME: join(root, "credentials"),
+        NO_PROXY: "127.0.0.1",
+        no_proxy: "127.0.0.1",
+        ...options.env,
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+      timeout: 3_000,
+      killSignal: options.tty ? "SIGTERM" : "SIGKILL",
     },
-    stdio: ["pipe", "pipe", "pipe"],
-    timeout: 3_000,
-    killSignal: "SIGKILL",
-  });
+  );
   let stdout = "",
     stderr = "";
   child.stdout.on("data", (part) => {
@@ -97,10 +113,11 @@ function cli(
   child.stderr.on("data", (part) => {
     stderr += part.toString();
   });
-  if (!options.keepStdinOpen) child.stdin.end(options.input ?? "");
+  if (!options.keepStdinOpen && !options.tty) child.stdin.end(options.input ?? "");
   const closed = once(child, "close");
   cleanups.push(async () => {
-    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    if (child.exitCode === null && child.signalCode === null)
+      child.kill(options.tty ? "SIGTERM" : "SIGKILL");
     await closed;
   });
   return closed.then(([code, signal]) => ({ code, signal, stdout, stderr }));
@@ -152,6 +169,69 @@ test("attach help is offline and JSON or redirected terminals fail before connec
   expect(redirected.stderr).toContain("requires stdin and stdout TTYs");
 });
 
+test.runIf(process.platform === "linux")(
+  "CLI attach reserves the selected session from a real TTY and reports rejection through main",
+  async () => {
+    const root = await directory();
+    await writeFile(
+      join(root, ".kiteline.json"),
+      JSON.stringify({
+        device: "saved-device",
+        workspace: "saved-workspace",
+        session: "saved-session",
+      }),
+    );
+    const server = await fixture((_request, response) =>
+      json(
+        response,
+        {
+          error: { code: "permission_denied", message: "Attach rejected before streaming" },
+        },
+        403,
+      ),
+    );
+    await save(root, server.url);
+    for (const args of [[], ["--device", "chosen-device", "--session", "chosen-session"]]) {
+      const reply = await cli(root, ["terminal", "attach", ...args], {
+        tty: true,
+        env: { TERM: "xterm-256color" },
+      });
+      expect(reply.signal, reply.stdout + reply.stderr).toBeNull();
+      expect(reply.code, reply.stdout + reply.stderr).toBe(1);
+      expect(reply.stdout).toContain("failed [permission_denied] Attach rejected before streaming");
+      expect(reply.stderr).toBe("");
+    }
+    expect(server.requests.map((request) => request.path)).toEqual([
+      "/api/devices/saved-device/channels",
+      "/api/devices/chosen-device/channels",
+    ]);
+    expect(server.requests.map((request) => JSON.parse(request.body))).toEqual([
+      {
+        kind: "terminal.attach",
+        params: {
+          workspaceId: "saved-workspace",
+          sessionId: "saved-session",
+          mode: "tty",
+          cols: 91,
+          rows: 29,
+          term: "xterm-256color",
+        },
+      },
+      {
+        kind: "terminal.attach",
+        params: {
+          workspaceId: "saved-workspace",
+          sessionId: "chosen-session",
+          mode: "tty",
+          cols: 91,
+          rows: 29,
+          term: "xterm-256color",
+        },
+      },
+    ]);
+  },
+);
+
 test("prototype property names are unknown commands and fall back to general help", async () => {
   const root = await directory();
   for (const name of ["toString", "__proto__", "constructor"]) {
@@ -181,6 +261,18 @@ test("help and version work offline with no credentials and a corrupt cwd target
     );
   }
   expect(existsSync(join(root, "credentials"))).toBe(false);
+  const invalidHelp = await cli(root, [
+    "terminal",
+    "snapshot",
+    "--help",
+    "--tail",
+    "1e2",
+    "--json",
+  ]);
+  expect(invalidHelp.code).toBe(2);
+  expect(JSON.parse(invalidHelp.stdout)).toMatchObject({
+    error: { code: "invalid_argument", message: "--tail must contain only decimal digits" },
+  });
 });
 
 test("non-TTY login without explicit stdin permission exits while its input stays open", async () => {
@@ -428,6 +520,99 @@ test("cwd target defaults are overridden per field for one call and ignore defau
     expect(JSON.parse(reply.stdout)).toMatchObject({ error: { code: "invalid_argument" } });
   }
   expect(server.requests).toHaveLength(5);
+});
+
+test("create ignores a saved session but rejects an explicit session before requesting", async () => {
+  const root = await directory();
+  await writeFile(
+    join(root, ".kiteline.json"),
+    JSON.stringify({ device: "d", workspace: "w", session: "saved-session" }),
+  );
+  const session = {
+    id: "created-session",
+    workspaceId: "w",
+    name: "Build",
+    createdAt: "2026-10-28T00:00:00.000Z",
+    historyLines: 100,
+    state: "running",
+    webStatus: "available",
+    historyGap: false,
+  };
+  const server = await fixture((_request, response) =>
+    json(response, { outcome: "succeeded", result: session }),
+  );
+  await save(root, server.url);
+  const created = await cli(root, ["terminal", "create", "--name", "Build", "--json"]);
+  expect(created.code, created.stdout + created.stderr).toBe(0);
+  expect(JSON.parse(created.stdout)).toEqual({ outcome: "succeeded", result: session });
+  const { method, params } = JSON.parse(server.requests[0]!.body);
+  expect({ method, params }).toEqual({
+    method: "sessions.create",
+    params: { workspaceId: "w", name: "Build" },
+  });
+  const rejected = await cli(root, ["terminal", "create", "--session", "explicit", "--json"]);
+  expect(rejected.code).toBe(2);
+  expect(JSON.parse(rejected.stdout)).toMatchObject({ error: { code: "invalid_argument" } });
+  expect(server.requests).toHaveLength(1);
+});
+
+test("recover sends the selected session and preserves the returned recorder state", async () => {
+  const root = await directory();
+  await writeFile(
+    join(root, ".kiteline.json"),
+    JSON.stringify({ device: "d", workspace: "w", session: "saved-session" }),
+  );
+  const session = {
+    id: "chosen-session",
+    workspaceId: "w",
+    name: "Build",
+    createdAt: "2026-10-28T00:00:00.000Z",
+    historyLines: 100,
+    state: "running",
+    webStatus: "recovering",
+    historyGap: true,
+  };
+  const server = await fixture((_request, response) =>
+    json(response, { outcome: "succeeded", result: session }),
+  );
+  await save(root, server.url);
+  const reply = await cli(root, ["terminal", "recover", "--session", "chosen-session", "--json"]);
+  expect(reply.code, reply.stdout + reply.stderr).toBe(0);
+  expect(JSON.parse(reply.stdout)).toEqual({ outcome: "succeeded", result: session });
+  expect(server.requests).toHaveLength(1);
+  expect(server.requests[0]!.path).toBe("/api/devices/d/rpc");
+  const { method, params } = JSON.parse(server.requests[0]!.body);
+  expect({ method, params }).toEqual({
+    method: "sessions.recover",
+    params: { workspaceId: "w", sessionId: "chosen-session" },
+  });
+});
+
+test("credentials precede cwd config and explicit targets still require valid cwd config", async () => {
+  const root = await directory();
+  await writeFile(join(root, ".kiteline.json"), "{");
+  const args = [
+    "terminal",
+    "snapshot",
+    "--device",
+    "d",
+    "--workspace",
+    "w",
+    "--session",
+    "s",
+    "--json",
+  ];
+  const missing = await cli(root, args);
+  expect(missing.code).toBe(2);
+  expect(JSON.parse(missing.stdout)).toMatchObject({ error: { code: "unauthenticated" } });
+  const server = await fixture((_request, response) => json(response, {}));
+  await save(root, server.url);
+  const corrupt = await cli(root, args);
+  expect(corrupt.code).toBe(2);
+  expect(JSON.parse(corrupt.stdout)).toMatchObject({
+    error: { code: "invalid_argument", message: expect.stringContaining("Invalid JSON in") },
+  });
+  expect(server.requests).toEqual([]);
 });
 
 test("UTF-8 BOM target defaults select the saved device and workspace", async () => {
@@ -696,6 +881,72 @@ test("terminal condition epochs use 128 UTF-16 units before any HTTP request", a
     error: { code: "invalid_argument", message: "Rejected by device" },
   });
   expect(server.requests).toHaveLength(count + 1);
+});
+
+test("wait preserves omitted defaults and maps quiet options with a session override", async () => {
+  const root = await directory();
+  await writeFile(
+    join(root, ".kiteline.json"),
+    JSON.stringify({ device: "d", workspace: "w", session: "saved-session" }),
+  );
+  const result = {
+    reason: "quiet",
+    snapshot: {
+      position: { epoch: "e", seq: 1, tail: null, attrs: false },
+      input: { epoch: "e", inputSeq: 0 },
+      cols: 80,
+      rows: 24,
+      active: "normal",
+      cursor: { x: 0, y: 0, visible: true },
+      historyGap: false,
+      synchronizedOutput: false,
+      screen: [],
+    },
+  };
+  const server = await fixture((_request, response) =>
+    json(response, { outcome: "succeeded", result }),
+  );
+  await save(root, server.url);
+  for (const args of [
+    [],
+    [
+      "--session",
+      "chosen-session",
+      "--mode",
+      "quiet",
+      "--quiet-ms",
+      "0012",
+      "--timeout-ms",
+      "0034",
+      "--tail",
+      "0005",
+      "--attrs",
+    ],
+  ]) {
+    const reply = await cli(root, ["terminal", "wait", ...args, "--json"]);
+    expect(reply.code, reply.stdout + reply.stderr).toBe(0);
+    expect(JSON.parse(reply.stdout)).toEqual({ outcome: "succeeded", result });
+  }
+  expect(
+    server.requests.map((request) => {
+      const { method, params } = JSON.parse(request.body);
+      return { method, params };
+    }),
+  ).toEqual([
+    { method: "sessions.wait", params: { workspaceId: "w", sessionId: "saved-session" } },
+    {
+      method: "sessions.wait",
+      params: {
+        workspaceId: "w",
+        sessionId: "chosen-session",
+        mode: "quiet",
+        quietMs: 12,
+        timeoutMs: 34,
+        tail: 5,
+        attrs: true,
+      },
+    },
+  ]);
 });
 
 test("terminal text preserves physical lines and keeps attrs outside the body", async () => {
