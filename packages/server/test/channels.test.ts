@@ -22,6 +22,19 @@ async function fixture() {
   const base = await apiFixture();
   cleanups.push(base.close);
   const { device, store, app, origin } = base;
+  async function events(cookie: string) {
+    const socket = new WebSocket(origin.replace("http:", "ws:") + webPath("/api/events"), {
+      headers: { origin, cookie },
+    });
+    cleanups.push(() => socket.terminate());
+    const messages: Record<string, unknown>[] = [];
+    socket.on("message", (data) => messages.push(JSON.parse(data.toString())));
+    await once(socket, "open");
+    await expect
+      .poll(() => messages.some((message) => message.type === "devices.changed"))
+      .toBe(true);
+    return { socket, messages };
+  }
   async function fileChannel(
     kind: "file.read" | "file.write",
     size: number,
@@ -63,7 +76,7 @@ async function fixture() {
       headers: { origin, cookie: `kiteline_session_http=${login.token}` },
     };
   }
-  return { ...base, fileChannel };
+  return { ...base, events, fileChannel };
 }
 
 test.each(["file.read", "file.write"] as const)(
@@ -106,6 +119,73 @@ test("channel envelope budget is checked before reserving a channel", async () =
   await cancelled.arrayBuffer();
   await (await pending).arrayBuffer();
   expect(f.app.connections.devices()[0]!.status).toBe("online");
+});
+
+test("public channel purposes are strings and cannot open internal download or proxy channels", async () => {
+  const f = await fixture();
+  Object.assign(serverLimits, { channelsPerDevice: 1 });
+  const login = f.store.createLogin(60_000);
+  const cookie = `kiteline_session_http=${login.token}`;
+  const events = await f.events(cookie);
+  const offline = f.store.bind(f.store.newBinding().code, "Offline");
+  const params = { workspaceId: "workspace", path: "file", purpose: "text" };
+  const open = (deviceId: string, purpose: unknown) =>
+    f.call(
+      `/api/devices/${deviceId}/channels`,
+      "POST",
+      {
+        kind: "file.read",
+        params: { ...params, purpose },
+      },
+      cookie,
+    );
+  const unavailable = await open(offline.deviceId, "text");
+  expect(unavailable.status).toBe(503);
+  expect(await unavailable.json()).toMatchObject({ error: { code: "offline" } });
+  await expect
+    .poll(() => events.messages.filter((event) => event.type === "channel.failed").length)
+    .toBe(1);
+  const malformed = await open(offline.deviceId, ["text"]);
+  expect(malformed.status).toBe(400);
+  expect(await malformed.json()).toMatchObject({ error: { code: "unsupported" } });
+
+  const peer = await f.device();
+  for (const input of [
+    { kind: "file.read", params: { ...params, purpose: ["text"] } },
+    { kind: "file.read", params: { ...params, purpose: "download" } },
+    { kind: "http.proxy", params: { port: 5173 } },
+  ]) {
+    const rejected = await f.call(`/api/devices/${peer.deviceId}/channels`, "POST", input, cookie);
+    expect(rejected.status).toBe(400);
+    expect(await rejected.json()).toMatchObject({ error: { code: "unsupported" } });
+  }
+  expect(peer.messages.some((message) => message.type === "channel.open")).toBe(false);
+  const observed = once(events.socket, "pong");
+  events.socket.ping();
+  await observed;
+  expect(events.messages.filter((event) => event.type === "channel.failed")).toHaveLength(1);
+
+  const pending = f.call(
+    `/api/devices/${peer.deviceId}/channels`,
+    "POST",
+    {
+      kind: "file.read",
+      params,
+    },
+    cookie,
+  );
+  await expect
+    .poll(() => peer.messages.some((message) => message.type === "channel.open"))
+    .toBe(true);
+  const opening = peer.messages.find((message) => message.type === "channel.open")!;
+  const invalidWhileBusy = await open(peer.deviceId, ["text"]);
+  expect(await invalidWhileBusy.json()).toMatchObject({ error: { code: "unsupported" } });
+  const busy = await open(peer.deviceId, "text");
+  expect(busy.status).toBe(429);
+  expect(await busy.json()).toMatchObject({ error: { code: "busy" } });
+  const cancelled = await f.call(`/api/channels/${opening.channelId}`, "DELETE", undefined, cookie);
+  expect(await cancelled.json()).toEqual({ found: true });
+  await (await pending).arrayBuffer();
 });
 
 test.each([

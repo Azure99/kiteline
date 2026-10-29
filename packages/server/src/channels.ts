@@ -74,7 +74,7 @@ export class Channels {
               ...(download ? ["download" as const] : []),
             ] satisfies FileReadPurpose[])
           : (["save", "upload"] satisfies FileWritePurpose[]);
-      if (!purposes.includes(String(params.purpose)))
+      if (typeof params.purpose !== "string" || !purposes.includes(params.purpose))
         throw new AppError("unsupported", "Unsupported file purpose");
       if (kind === "file.write") integer(params.size, "size", 0, Number.MAX_SAFE_INTEGER);
     }
