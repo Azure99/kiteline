@@ -976,9 +976,6 @@ test("branch mutations check target OID and preserve native occupancy and unmerg
   expect(await deleteBranch(repo, "removable", first, signal())).toEqual({
     deleted: true,
   });
-  await expect(createBranch(repo, "bad..name", first, false, signal())).rejects.toMatchObject({
-    code: "invalid_argument",
-  });
 });
 test("branch creation remains reported when switching would overwrite local edits", async () => {
   const { root, repo, cli, write } = await setup();

@@ -24,7 +24,7 @@
 
 ### Git 进程
 
-- 所有 Git 命令通过 `packages/agent/src/git/process.ts` 的 `gitRead` 或 `gitWrite` 用 argv 启动，不经过 Shell，工作目录是仓库根目录。stdin 只用于传入数据，写完即关闭。Linux 和 macOS 上 Git 在独立的进程组中运行，没有控制终端。
+- 所有 Git 命令通过 `packages/agent/src/git/process.ts` 的 `gitRead` 或 `gitWrite` 用 argv 启动，不经过 Shell；操作仓库的命令以仓库根目录为工作目录。stdin 只用于传入数据，写完即关闭。Linux 和 macOS 上 Git 在独立的进程组中运行，没有控制终端。
 - 环境继承 agent 的环境，设置 `GIT_TERMINAL_PROMPT=0`，并删除会改变仓库定位或路径匹配方式的变量（如 `GIT_DIR`、`GIT_WORK_TREE`、`GIT_INDEX_FILE`、`GIT_LITERAL_PATHSPECS`，完整列表见源码），Windows 上按不区分大小写匹配变量名。用户的 Git 配置、身份、凭据、SSH、hooks 和签名保持不变。
 - 读命令带 `--no-pager --no-optional-locks -c color.ui=false`，不顺带刷新 index，避免自己的读取触发变化事件；写命令只带 `--no-pager`。
 - 一次性读取的 stdout 超限时停止进程，默认返回 `limit_exceeded`，显式允许截断的 diff 返回前缀；写命令超限只保留前缀，继续执行。流式解析的命令逐条处理，单条记录不超过结果上限。stderr 保留前 32 KiB，截断不触发 stdout 的停止策略。
@@ -104,7 +104,7 @@
 
 ### 队列
 
-- 写契约由 `packages/shared/src/protocol/rpc.ts` 的 `GitWriteMethods` 定义；`packages/agent/src/git/rpc.ts` 的 handler 按方法约束参数字段与结果，并提供运行时写方法识别。所有写都进入 `GitWriteQueue`（`packages/agent/src/git/queue.ts`），按 `commonDir` 串行执行：同一仓库及其全部 linked worktree 的写操作一次只执行一个。轮到某个写操作时，agent 先重新核验仓库身份。
+- 写契约由 `packages/shared/src/protocol/rpc.ts` 定义；`packages/agent/src/git/rpc.ts` 的 handler 按方法约束参数字段与结果。写请求先解析全部 JS 参数，再执行必要的 Git 分支名称检查；这些检查失败时不入队、不通知工作区变化。通过后进入 `GitWriteQueue`（`packages/agent/src/git/queue.ts`），按 `commonDir` 串行执行：同一仓库及其全部 linked worktree 的写操作一次只执行一个。轮到某个写操作时，agent 重新核验仓库身份及相关 HEAD、index、token 和磁盘状态。队列调用结束时通知工作区变化，包括仓库不可用、状态冲突及取消。
 - 排队期间可以取消，被取消的写操作不执行。写超时 `gitWriteTimeout` 从 agent 收到请求开始计时，包括排队时间；读方法使用 `rpcTimeout`。
 - 浏览器对每个仓库同时只发出一个写请求（`packages/web/src/git/actions.ts`），取消时调用 `DELETE /api/devices/<deviceId>/requests/<requestId>`。
 - 队列只协调本 agent 的写操作。外部写入者不加锁：终端或其他程序中的 Git 可以同时修改仓库，竞争由 Git 自己的 `index.lock` 和后续检查反馈。agent 不删除 `index.lock`，也不自动重试。

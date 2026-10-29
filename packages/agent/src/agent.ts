@@ -33,7 +33,7 @@ import { Files } from "./files/index.js";
 import { TextFiles } from "./files/save.js";
 import { FileChannels } from "./files/channels.js";
 import { BinaryFiles } from "./files/upload.js";
-import { searchFiles } from "./files/search.js";
+import { fileRpc, isFileMethod } from "./files/rpc.js";
 import { FileOperations } from "./files/operations.js";
 import { CursorBudget } from "./cursor-budget.js";
 import { Repositories } from "./git/repos.js";
@@ -48,19 +48,10 @@ import { connectServer } from "./network.js";
 import { ScheduledTasks } from "./tasks/index.js";
 import { isScheduleMethod, scheduleRpc } from "./tasks/rpc.js";
 
-const notifiedFileMethods = new Set<string>([
-  "files.create",
-  "files.rename",
-] satisfies readonly RpcMethod[]);
 const localSessionMethods = new Set<string>([
   "sessions.list",
   "sessions.create",
 ] satisfies readonly RpcMethod[]);
-
-function knownRpcMethod(method: string): RpcMethod {
-  if (!isRpcMethod(method)) throw new AppError("unsupported", `Unsupported operation: ${method}`);
-  return method;
-}
 
 export class Agent {
   readonly metadata: MetadataStore;
@@ -90,6 +81,7 @@ export class Agent {
   private starting?: Promise<void>;
   private closing?: Promise<void>;
   private delay = 1000;
+  private readonly notifyWritten = (workspaceId: string) => this.watches.notifyWritten(workspaceId);
   constructor(
     readonly config: AgentConfig,
     private readonly identity: Identity,
@@ -107,7 +99,7 @@ export class Agent {
     });
     this.gitWrites = new GitWriteQueue(this.repos);
     this.temporaryFiles = new TemporaryFiles(config.dataDir);
-    this.files = new Files(this.metadata, this.directories);
+    this.files = new Files(this.metadata, this.directories, this.notifyWritten);
     this.sessions = new Sessions(config, this.metadata, {
       frame: (message) => this.terminalChannels.frame(message),
       notice: (message) => {
@@ -123,8 +115,10 @@ export class Agent {
         this.send({ type: "sessions.changed", workspaceId } satisfies AgentEvent),
     });
     this.textFiles = new TextFiles(config, this.metadata, this.temporaryFiles);
-    this.fileOperations = new FileOperations(this.metadata, this.temporaryFiles, (workspaceId) =>
-      this.watches.notifyWritten(workspaceId),
+    this.fileOperations = new FileOperations(
+      this.metadata,
+      this.temporaryFiles,
+      this.notifyWritten,
     );
     this.terminalChannels = new TerminalChannels(this.sessions, config, identity);
     this.fileChannels = new FileChannels(
@@ -133,7 +127,7 @@ export class Agent {
       this.metadata,
       config,
       identity,
-      (workspaceId) => this.watches.notifyWritten(workspaceId),
+      this.notifyWritten,
     );
     this.httpChannels = new HttpChannels(identity);
     this.local = new LocalServer(config, (method, params, signal) =>
@@ -395,16 +389,7 @@ export class Agent {
     signal: AbortSignal,
     progress?: (value: FileProgress) => void,
   ): Promise<unknown> {
-    const operation = this.perform(method, params, signal, progress).finally(() => {
-      if (
-        (notifiedFileMethods.has(method) ||
-          (isRpcMethod(method) &&
-            method.startsWith("git.") &&
-            rpcTraits[method].responseLoss === "unknown")) &&
-        typeof params.workspaceId === "string"
-      )
-        this.watches.notifyWritten(params.workspaceId);
-    });
+    const operation = this.perform(method, params, signal, progress);
     this.inflight.add(operation);
     void operation.finally(() => this.inflight.delete(operation)).catch(() => {});
     return operation;
@@ -415,12 +400,32 @@ export class Agent {
     signal: AbortSignal,
     progress?: (value: FileProgress) => void,
   ): Promise<unknown> {
-    if (this.stopped) throw new AppError("cancelled", "Agent is stopping");
-    signal.throwIfAborted();
-    const method = knownRpcMethod(rawMethod);
-    if (isScheduleMethod(method)) return scheduleRpc(this.schedules, method, params, signal);
+    this.assertRpcActive(signal);
+    if (!isRpcMethod(rawMethod))
+      throw new AppError("unsupported", `Unsupported operation: ${rawMethod}`);
+    const method = rawMethod;
+    if (isFileMethod(method))
+      return fileRpc(
+        method,
+        params,
+        signal,
+        { files: this.files, operations: this.fileOperations, metadata: this.metadata },
+        progress,
+      );
     if (isGitMethod(method))
-      return gitRpc(this.repos, this.gitWrites, method, params, signal, progress);
+      return gitRpc(
+        method,
+        params,
+        signal,
+        {
+          repos: this.repos,
+          writes: this.gitWrites,
+          dataDir: this.config.dataDir,
+          notifyWritten: this.notifyWritten,
+        },
+        progress,
+      );
+    if (isScheduleMethod(method)) return scheduleRpc(this.schedules, method, params, signal);
     if (isSessionMethod(method))
       return terminalRpc(method, params, signal, {
         sessions: this.sessions,
@@ -429,60 +434,6 @@ export class Agent {
     switch (method) {
       case "ports.list":
         return listeningPorts(signal) satisfies Promise<RpcResult<typeof method>>;
-      case "files.search": {
-        if (
-          (params.mode !== "name" && params.mode !== "content") ||
-          typeof params.includeIgnored !== "boolean"
-        )
-          throw new AppError("invalid_argument", "Invalid search parameters");
-        return searchFiles(
-          this.metadata.workspace(string(params.workspaceId)).path,
-          params.mode,
-          string(params.query, "query"),
-          params.includeIgnored,
-          signal,
-        ) satisfies Promise<RpcResult<typeof method>>;
-      }
-      case "files.copy":
-      case "files.move":
-      case "files.delete":
-        return this.fileOperations.run(
-          method.slice(6) as "copy" | "move" | "delete",
-          string(params.workspaceId),
-          method === "files.delete" ? params.paths : params.items,
-          signal,
-          progress,
-        ) satisfies Promise<RpcResult<typeof method>>;
-      case "files.list": {
-        const result = await this.files.list(
-          string(params.workspaceId),
-          string(params.path),
-          optionalString(params.cursor),
-          signal,
-        );
-        return result satisfies RpcResult<typeof method>;
-      }
-      case "files.inspect":
-        return this.files.inspect(
-          string(params.workspaceId),
-          string(params.path),
-          params.suggestCopyName === true,
-          signal,
-        ) satisfies Promise<RpcResult<typeof method>>;
-      case "files.create":
-        return this.files.create(
-          string(params.workspaceId),
-          string(params.path),
-          string(params.kind),
-          signal,
-        ) satisfies Promise<RpcResult<typeof method>>;
-      case "files.rename":
-        return this.files.rename(
-          string(params.workspaceId),
-          string(params.path),
-          string(params.newName),
-          signal,
-        ) satisfies Promise<RpcResult<typeof method>>;
       case "directories.list":
         return this.directories.list(string(params.absolutePath), {
           entries: "absolute",
@@ -545,6 +496,10 @@ export class Agent {
         throw new AppError("unsupported", `Unsupported operation: ${unhandled}`);
       }
     }
+  }
+  private assertRpcActive(signal: AbortSignal) {
+    if (this.stopped) throw new AppError("cancelled", "Agent is stopping");
+    signal.throwIfAborted();
   }
   close() {
     if (this.closing) return this.closing;

@@ -56,7 +56,7 @@ export class FileChannels {
     private metadata: MetadataStore,
     private config: AgentConfig,
     private identity: Identity,
-    private changed: (workspaceId: string) => void = () => {},
+    private readonly notifyWritten: (workspaceId: string) => void,
   ) {}
   get count() {
     return this.cleaningCount + [...this.entries.values()].filter((item) => item.admitted).length;
@@ -209,7 +209,7 @@ export class FileChannels {
     } catch (error) {
       reply = errorReply(id, error);
     }
-    if (write.value.temporary.mayHaveChangedTarget) this.changed(write.value.workspaceId);
+    if (write.value.temporary.mayHaveChangedTarget) this.notifyWritten(write.value.workspaceId);
     await sendFileFrame(channel.socket, JSON.stringify({ type: "result", reply }), signal);
     this.finish(id, { graceful: true });
   }

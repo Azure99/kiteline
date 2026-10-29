@@ -1,27 +1,33 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { once } from "node:events";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { chmod, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { WebSocket, WebSocketServer } from "ws";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { WebSocket, WebSocketServer } from "ws";
 import {
   AppError,
   appVersion,
-  type Reply,
   OperationError,
   errorReply,
+  rpcTraits,
   type RepoDiscovery,
   type GitReview,
   type GitStatus,
+  type RpcMethod,
+  type Reply,
 } from "@kiteline/shared/protocol";
 import { Agent } from "../src/agent.js";
 import { privateDirectory, type AgentConfig } from "../src/config.js";
+import { Repositories } from "../src/git/repos.js";
 import { gitProgressError } from "../src/git/process.js";
 import { testConfig } from "./support/config.js";
 import { gitRepoFixture, isolateGitEnvironment } from "./support/git.js";
 
 const cleanups: (() => Promise<unknown>)[] = [];
+const exec = promisify(execFile);
 beforeEach(async () => {
   const home = await isolateGitEnvironment();
   cleanups.push(() => rm(home, { recursive: true, force: true }));
@@ -186,7 +192,7 @@ test("Git dispatch preserves index, discard review, error invalidation and devic
   await expect(
     agent.dispatch("git.branch.create", { ...params, name: "topic" }, signal),
   ).rejects.toMatchObject({ code: "invalid_argument" });
-  expect(changed).toHaveBeenCalledWith(params.workspaceId);
+  expect(changed).not.toHaveBeenCalled();
   const absolutePath = join(data, "outside-workspace");
   expect(await agent.dispatch("directories.mkdir", { absolutePath }, signal)).toEqual({
     path: absolutePath,
@@ -199,6 +205,7 @@ test("Git dispatch preserves index, discard review, error invalidation and devic
 
 test("Git dispatch cancels a queued write and the shared queue accepts the next write", async () => {
   const { root, cli, agent, signal, params } = await setup();
+  const changed = vi.spyOn(agent.watches, "notifyWritten");
   await writeFile(join(root, "file.txt"), "edited\n");
   let release!: () => void;
   let entered!: () => void;
@@ -223,8 +230,11 @@ test("Git dispatch cancels a queued write and the shared queue accepts the next 
       (value) => progress.push(value.phase),
     );
     const rejected = expect(queued).rejects.toMatchObject({ code: "cancelled" });
+    await expect.poll(() => progress).toEqual(["queued"]);
+    expect(changed).not.toHaveBeenCalled();
     controller.abort(new AppError("cancelled", "Cancelled by caller"));
     await rejected;
+    expect(changed).toHaveBeenCalledExactlyOnceWith(params.workspaceId);
     expect(progress).toEqual(["queued"]);
     expect(await cli("diff", "--cached", "--name-only")).toBe("");
   } finally {
@@ -235,27 +245,181 @@ test("Git dispatch cancels a queued write and the shared queue accepts the next 
   expect(await cli("diff", "--cached", "--name-only")).toBe("file.txt\n");
 });
 
-test("commit message dispatch reads the selected OID within its registered workspace", async () => {
-  const { agent, cli, params, signal } = await setup();
-  const commitOid = (await cli("rev-parse", "HEAD")).trim();
-  await cli("commit", "--allow-empty", "-m", "new HEAD");
-  expect(await agent.dispatch("git.commitMessage", { ...params, commitOid }, signal)).toEqual({
-    message: "base\n",
-  });
+test.each([
+  { method: "git.continue", input: { expectedOperation: null } },
+  { method: "git.abort", input: { expectedOperation: [] } },
+  { method: "git.branch.create", input: { switch: "yes", name: "topic" } },
+  {
+    method: "git.continue",
+    input: { expectedOperation: { kind: 42, token: "token" } },
+  },
+  {
+    method: "git.abort",
+    input: { expectedOperation: { kind: "merge", token: 42 } },
+  },
+  { method: "git.branch.create", input: { switch: false, name: 42 } },
+  { method: "git.commit", input: { message: " \n", indexToken: "token" } },
+  { method: "git.stage", input: { paths: ["../outside"] } },
+  { method: "git.discard", input: { paths: ["file.txt"], scope: "invalid", reviewToken: "token" } },
+  { method: "git.pull", input: { expectedHead: { oid: null } } },
+] as const)(
+  "$method rejects invalid parameters before waiting for the write gate",
+  async ({ method, input }) => {
+    const { agent, params, signal, cli } = await setup();
+    const changed = vi.spyOn(agent.watches, "notifyWritten");
+    const before = await cli("ls-files", "--stage", "-z");
+    let entered!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => (entered = resolve));
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const held = agent.gitWrites.run(params.workspaceId, params.repoId, signal, async () => {
+      entered();
+      await gate;
+    });
+    await started;
+    const progress: string[] = [];
+    let settled = false;
+    const pending = agent
+      .dispatch(method, { ...params, ...input }, signal, (value) => progress.push(value.phase))
+      .then(
+        (result) => ({ result }),
+        (error: unknown) => ({ error }),
+      )
+      .then((result) => {
+        settled = true;
+        return result;
+      });
+    try {
+      await expect.poll(() => settled).toBe(true);
+      expect(progress).toEqual([]);
+      expect(changed).not.toHaveBeenCalled();
+    } finally {
+      release();
+      await held;
+      await pending;
+    }
+    expect(await pending).toMatchObject({ error: { code: "invalid_argument" } });
+    expect(progress).toEqual([]);
+    expect(await cli("ls-files", "--stage", "-z")).toBe(before);
+  },
+);
+
+test("branch JS parameters precede Git startup and startup failures stay outside the queue", async () => {
+  const { data, agent, params, signal } = await setup();
+  const changed = vi.spyOn(agent.watches, "notifyWritten");
+  const progress: string[] = [];
+  const branch = { ...params, name: "topic", switch: false };
+  vi.stubEnv("PATH", join(data, "no-git"));
+  for (const input of [{ workspaceId: 42 }, { repoId: 42 }, { startOid: "HEAD" }])
+    await expect(
+      agent.dispatch("git.branch.create", { ...branch, ...input }, signal, (value) =>
+        progress.push(value.phase),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
   await expect(
-    agent.dispatch("git.commitMessage", { ...params, commitOid: "HEAD" }, signal),
+    agent.dispatch("git.branch.switch", { ...branch, refOid: 42 }, signal),
   ).rejects.toMatchObject({ code: "invalid_argument" });
+  const failed = await agent
+    .dispatch("git.branch.create", branch, signal, (value) => progress.push(value.phase))
+    .catch((error: unknown) => errorReply("startup", error));
+  expect(failed).toMatchObject({
+    outcome: "failed",
+    error: {
+      code: "not_found",
+      message: expect.not.stringContaining("Repository is unavailable"),
+    },
+  });
+  expect(progress).toEqual([]);
+  expect(changed).not.toHaveBeenCalled();
+
   await expect(
-    agent.dispatch("git.commitMessage", { ...params, repoId: "unknown", commitOid }, signal),
-  ).rejects.toMatchObject({ code: "not_found" });
-  const outside = await agent.metadata.add(await mkdtemp("/var/tmp/kiteline-git-outside-"));
-  cleanups.push(() => rm(outside.path, { recursive: true, force: true }));
-  await expect(
-    agent.dispatch("git.commitMessage", { ...params, workspaceId: outside.id, commitOid }, signal),
-  ).rejects.toMatchObject({ code: "not_found" });
+    agent.dispatch("git.stage", { ...params, paths: ["file.txt"] }, signal, (value) =>
+      progress.push(value.phase),
+    ),
+  ).rejects.toMatchObject({
+    code: "not_found",
+    message: expect.stringContaining("Repository is unavailable"),
+  });
+  expect(progress).toEqual(["queued"]);
+  expect(changed).toHaveBeenCalledExactlyOnceWith(params.workspaceId);
 });
 
-test("control Git writes outlive the ordinary RPC deadline but time out while queued", async () => {
+test("branch grammar precedes repository lookup while valid names retain queue state checks", async () => {
+  const { data, root, cli, agent, params, signal } = await setup();
+  const changed = vi.spyOn(agent.watches, "notifyWritten");
+  const oid = (await cli("rev-parse", "HEAD")).trim();
+  const progress: string[] = [];
+  const report = (value: { phase: string }) => progress.push(value.phase);
+  for (const method of ["git.branch.create", "git.branch.switch", "git.branch.delete"])
+    await expect(
+      agent.dispatch(
+        method,
+        {
+          workspaceId: "missing",
+          repoId: "missing",
+          name: "bad..name",
+          switch: false,
+          refOid: oid,
+        },
+        signal,
+        report,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
+  expect(progress).toEqual([]);
+  expect(changed).not.toHaveBeenCalled();
+
+  const branch = { ...params, name: "topic", switch: false, startOid: oid };
+  await expect(
+    agent.dispatch("git.branch.create", { ...branch, repoId: "missing" }, signal, report),
+  ).rejects.toMatchObject({ code: "not_found" });
+  expect(progress).toEqual([]);
+  expect(changed).toHaveBeenCalledExactlyOnceWith(params.workspaceId);
+  changed.mockClear();
+  await expect(
+    agent.dispatch("git.branch.create", { ...branch, workspaceId: "missing" }, signal, report),
+  ).rejects.toMatchObject({ code: "not_found" });
+  expect(progress).toEqual(["queued"]);
+  expect(changed).toHaveBeenCalledExactlyOnceWith("missing");
+  changed.mockClear();
+  progress.length = 0;
+
+  await rename(root, root + ".moved");
+  try {
+    await expect(agent.dispatch("git.branch.create", branch, signal, report)).rejects.toMatchObject(
+      {
+        code: "not_found",
+      },
+    );
+    expect(progress).toEqual(["queued"]);
+    expect(changed).toHaveBeenCalledExactlyOnceWith(params.workspaceId);
+  } finally {
+    await rename(root + ".moved", root);
+  }
+  changed.mockClear();
+  progress.length = 0;
+  await rename(data, data + ".moved");
+  try {
+    await expect(agent.dispatch("git.branch.create", branch, signal, report)).rejects.toMatchObject(
+      {
+        code: "ENOENT",
+      },
+    );
+    expect(progress).toEqual([]);
+    expect(changed).not.toHaveBeenCalled();
+  } finally {
+    await rename(data + ".moved", data);
+  }
+
+  await agent.dispatch("git.branch.create", branch, signal, report);
+  expect(progress).toEqual(["queued", "running"]);
+  await agent.dispatch("git.branch.switch", { ...params, name: "topic", refOid: oid }, signal);
+  expect(await cli("branch", "--show-current")).toBe("topic\n");
+  await agent.dispatch("git.branch.switch", { ...params, name: "main", refOid: oid }, signal);
+  await agent.dispatch("git.branch.delete", { ...params, name: "topic", refOid: oid }, signal);
+  expect(await cli("branch", "--list", "topic")).toBe("");
+});
+
+test("control Git deadlines cover queueing and branch validation, with process cleanup on cancel and close", async () => {
   const server = createServer();
   const sockets = new WebSocketServer({ server });
   server.listen(0, "127.0.0.1");
@@ -335,4 +499,301 @@ test("control Git writes outlive the ordinary RPC deadline but time out while qu
   }
   expect(await cli("diff", "--cached", "--name-only")).toBe("completed.txt\n");
   expect(await cli("show", ":completed.txt")).toBe("within the Git deadline\n");
+
+  const actualGit = (await exec("/bin/sh", ["-c", "command -v git"])).stdout.trim();
+  const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
+  const bin = join(agent.config.dataDir, "git-bin");
+  const ready = join(bin, "grammar-ready");
+  await mkdir(bin);
+  await writeFile(
+    join(bin, "git"),
+    `#!/bin/sh
+case " $* " in
+  *" check-ref-format "*)
+    trap '' TERM
+    sleep 30 &
+    echo $$ $! > ${quote(ready)}
+    wait
+    ;;
+esac
+exec ${quote(actualGit)} "$@"
+`,
+  );
+  await chmod(join(bin, "git"), 0o755);
+  vi.stubEnv("PATH", bin + ":" + process.env.PATH);
+  const changed = vi.spyOn(agent.watches, "notifyWritten");
+  for (const ending of ["cancelled", "timeout", "close"] as const) {
+    const id = `grammar-${ending}`;
+    peer.send(
+      JSON.stringify({
+        type: "rpc.request",
+        id,
+        method: "git.branch.create",
+        params: { ...params, name: id, switch: false },
+      }),
+    );
+    await expect.poll(() => readFile(ready, "utf8")).toMatch(/^\d+ \d+\n$/);
+    const pids = (await readFile(ready, "utf8")).trim().split(" ");
+    expect(replies.has(id)).toBe(false);
+    expect(progress.has(id)).toBe(false);
+    if (ending === "close") await agent.close();
+    else {
+      if (ending === "cancelled") peer.send(JSON.stringify({ type: "rpc.cancel", id }));
+      await expect
+        .poll(() => replies.get(id), { timeout: 4000 })
+        .toMatchObject({ outcome: "failed", error: { code: ending } });
+    }
+    const state = await exec("/bin/ps", ["-p", pids.join(","), "-o", "stat="]).catch((error) => {
+      if (error.code !== 1) throw error;
+      return { stdout: "" };
+    });
+    for (const status of state.stdout.trim().split("\n")) expect(status).toMatch(/^(Z.*)?$/);
+    expect(progress.has(id)).toBe(false);
+    expect(changed).not.toHaveBeenCalled();
+    await rm(ready);
+  }
+  expect(await cli("branch", "--list", "grammar-*")).toBe("");
+}, 15000);
+
+test("commit message dispatch reads the selected OID within its registered workspace", async () => {
+  const { agent, cli, params, signal } = await setup();
+  const commitOid = (await cli("rev-parse", "HEAD")).trim();
+  await cli("commit", "--allow-empty", "-m", "new HEAD");
+  expect(await agent.dispatch("git.commitMessage", { ...params, commitOid }, signal)).toEqual({
+    message: "base\n",
+  });
+  await expect(
+    agent.dispatch("git.commitMessage", { ...params, commitOid: "HEAD" }, signal),
+  ).rejects.toMatchObject({ code: "invalid_argument" });
+  await expect(
+    agent.dispatch("git.commitMessage", { ...params, repoId: "unknown", commitOid }, signal),
+  ).rejects.toMatchObject({ code: "not_found" });
+  const outside = await agent.metadata.add(await mkdtemp("/var/tmp/kiteline-git-outside-"));
+  cleanups.push(() => rm(outside.path, { recursive: true, force: true }));
+  await expect(
+    agent.dispatch("git.commitMessage", { ...params, workspaceId: outside.id, commitOid }, signal),
+  ).rejects.toMatchObject({ code: "not_found" });
+});
+
+test("Git admission rejects stopped before aborted without entering the queue or notifying", async () => {
+  const { agent, params, signal } = await setup();
+  const changed = vi.spyOn(agent.watches, "notifyWritten");
+  const runQueuedWrite = vi.spyOn(agent.gitWrites, "run");
+  const controller = new AbortController();
+  const reason = new AppError("cancelled", "Caller cancelled");
+  controller.abort(reason);
+  const methods = (Object.keys(rpcTraits) as RpcMethod[]).filter(
+    (method) => method === "repos.discover" || method.startsWith("git."),
+  );
+  for (const method of methods) {
+    changed.mockClear();
+    await expect(agent.dispatch(method, params, controller.signal)).rejects.toBe(reason);
+    expect(changed).not.toHaveBeenCalled();
+    expect(runQueuedWrite).not.toHaveBeenCalled();
+  }
+  await expect(agent.dispatch("git.unknown", params, signal)).rejects.toMatchObject({
+    code: "unsupported",
+  });
+  await expect(agent.dispatch("git.unknown", params, controller.signal)).rejects.toBe(reason);
+  await agent.close();
+  for (const method of ["git.stage", "git.status", "git.unknown"]) {
+    changed.mockClear();
+    await expect(agent.dispatch(method, params, controller.signal)).rejects.toMatchObject({
+      code: "cancelled",
+      message: "Agent is stopping",
+    });
+    expect(changed).not.toHaveBeenCalled();
+    expect(runQueuedWrite).not.toHaveBeenCalled();
+  }
+});
+
+test("a cancelled Git hook reports unknown through dispatch, notifies once, and releases the next write", async () => {
+  const { agent, params, signal, root, cli } = await setup();
+  await writeFile(join(root, "file.txt"), "ready to commit\n");
+  await agent.dispatch("git.stage", { ...params, paths: ["file.txt"] }, signal);
+  const before = (await agent.dispatch("git.status", params, signal)) as GitStatus;
+  const hook = join(root, ".git/hooks/pre-commit");
+  await writeFile(hook, "#!/bin/sh\necho ready > .git/hook-ready\nsleep 30\n");
+  await chmod(hook, 0o755);
+  const changed = vi.spyOn(agent.watches, "notifyWritten");
+  const controller = new AbortController();
+  const pending = agent.dispatch(
+    "git.commit",
+    { ...params, message: "cancelled commit", indexToken: before.indexToken },
+    controller.signal,
+  );
+  const rejected = expect(pending).rejects.toMatchObject({
+    code: "cancelled",
+    outcome: "unknown",
+  });
+  try {
+    await expect.poll(() => readFile(join(root, ".git/hook-ready"), "utf8")).toBe("ready\n");
+    expect(changed).not.toHaveBeenCalled();
+    controller.abort(new AppError("cancelled", "Cancel running Git"));
+    await rejected;
+    expect(changed).toHaveBeenCalledExactlyOnceWith(params.workspaceId);
+    expect(await cli("log", "-1", "--format=%s")).toBe("base\n");
+
+    await rm(hook);
+    const current = (await agent.dispatch("git.status", params, signal)) as GitStatus;
+    await agent.dispatch(
+      "git.commit",
+      { ...params, message: "after cancellation", indexToken: current.indexToken },
+      signal,
+    );
+    expect(await cli("log", "-1", "--format=%s")).toBe("after cancellation\n");
+    expect(await cli("show", "HEAD:file.txt")).toBe("ready to commit\n");
+    expect(changed).toHaveBeenCalledTimes(2);
+  } finally {
+    controller.abort(new AppError("cancelled", "Finish test Git operation"));
+    await Promise.allSettled([pending, rejected]);
+  }
 }, 10000);
+
+test("accepted Git dispatch awaits the queued write and notifies before close releases repositories and watches", async () => {
+  const { root, cli, agent, signal, params } = await setup();
+  await writeFile(join(root, "file.txt"), "edited\n");
+  const order: string[] = [];
+  const changed = vi.spyOn(agent.watches, "notifyWritten").mockImplementation(() => {
+    order.push("changed");
+  });
+  const originalRepoClose = Repositories.prototype.close;
+  const repoClose = vi.spyOn(Repositories.prototype, "close").mockImplementation(async function (
+    this: Repositories,
+  ) {
+    order.push("repos.close");
+    await originalRepoClose.call(this);
+  });
+  const originalWatchClose = agent.watches.close.bind(agent.watches);
+  const watchClose = vi.spyOn(agent.watches, "close").mockImplementation(async () => {
+    order.push("watches.close");
+    await originalWatchClose();
+  });
+  let entered!: () => void;
+  let release!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const held = agent.gitWrites.run(params.workspaceId, params.repoId, signal, async () => {
+    entered();
+    await gate;
+  });
+  await started;
+  let queued!: () => void;
+  const enqueued = new Promise<void>((resolve) => {
+    queued = resolve;
+  });
+  let completed = false;
+  const pending = agent
+    .dispatch("git.stage", { ...params, paths: ["file.txt"] }, signal, (value) => {
+      if (value.phase === "queued") queued();
+    })
+    .then((result) => {
+      completed = true;
+      return result;
+    });
+  let closing: Promise<void> | undefined;
+  try {
+    await enqueued;
+    expect(completed).toBe(false);
+    expect(changed).not.toHaveBeenCalled();
+    expect(await cli("diff", "--cached", "--name-only")).toBe("");
+    closing = agent.close();
+    expect(repoClose).not.toHaveBeenCalled();
+    expect(watchClose).not.toHaveBeenCalled();
+    release();
+    await held;
+    expect(await pending).toEqual({ changedPaths: ["file.txt"] });
+    await closing;
+    expect(changed).toHaveBeenCalledExactlyOnceWith(params.workspaceId);
+    expect(order[0]).toBe("changed");
+    expect(order.slice(1).sort()).toEqual(["repos.close", "watches.close"]);
+    expect(await cli("show", ":file.txt")).toBe("edited\n");
+  } finally {
+    release();
+    await held;
+    await pending;
+    await closing;
+  }
+});
+
+test("linked worktrees share the write gate and queued commits validate the current index token", async () => {
+  const { root, cli, agent, signal, params } = await setup();
+  const linked = join(root, "linked");
+  await cli("worktree", "add", "-b", "linked", linked);
+  const discovery = (await agent.dispatch(
+    "repos.discover",
+    { workspaceId: params.workspaceId },
+    signal,
+  )) as RepoDiscovery;
+  const primary = discovery.repos.find((repo) => repo.id === params.repoId)!;
+  const secondary = discovery.repos.find((repo) => repo.rootPath === linked)!;
+  expect(secondary.id).not.toBe(primary.id);
+  expect(secondary.commonDir).toBe(primary.commonDir);
+  const linkedParams = { workspaceId: params.workspaceId, repoId: secondary.id };
+  const changed = vi.spyOn(agent.watches, "notifyWritten");
+  await writeFile(join(linked, "file.txt"), "linked edit\n");
+  // Hold the primary worktree, then submit through the distinct linked repo ID.
+  async function holdPrimary() {
+    let entered!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const held = agent.gitWrites.run(params.workspaceId, params.repoId, signal, async () => {
+      entered();
+      await gate;
+    });
+    await started;
+    return { release, held };
+  }
+  const first = await holdPrimary();
+  const phases: string[] = [];
+  const stage = agent.dispatch(
+    "git.stage",
+    { ...linkedParams, paths: ["file.txt"] },
+    signal,
+    (value) => phases.push(value.phase),
+  );
+  try {
+    await expect.poll(() => phases).toEqual(["queued"]);
+    expect(changed).not.toHaveBeenCalled();
+    expect(await cli("-C", linked, "diff", "--cached", "--name-only")).toBe("");
+  } finally {
+    first.release();
+    await first.held;
+    await stage;
+  }
+  expect(phases).toEqual(["queued", "running"]);
+  expect(changed).toHaveBeenCalledExactlyOnceWith(params.workspaceId);
+  expect(await cli("-C", linked, "show", ":file.txt")).toBe("linked edit\n");
+  expect(await cli("diff", "--cached", "--name-only")).toBe("");
+  const before = (await agent.dispatch("git.status", linkedParams, signal)) as GitStatus;
+  const head = await cli("-C", linked, "rev-parse", "HEAD");
+  const second = await holdPrimary();
+  const commitPhases: string[] = [];
+  const pending = agent.dispatch(
+    "git.commit",
+    { ...linkedParams, message: "stale", indexToken: before.indexToken },
+    signal,
+    (value) => commitPhases.push(value.phase),
+  );
+  const rejected = expect(pending).rejects.toMatchObject({ code: "conflict" });
+  try {
+    await expect.poll(() => commitPhases).toEqual(["queued"]);
+    await writeFile(join(linked, "file.txt"), "external index change\n");
+    await cli("-C", linked, "add", "file.txt");
+  } finally {
+    second.release();
+    await second.held;
+    await rejected;
+  }
+  expect(await cli("-C", linked, "rev-parse", "HEAD")).toBe(head);
+  expect(await cli("-C", linked, "show", ":file.txt")).toBe("external index change\n");
+});

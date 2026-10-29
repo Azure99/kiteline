@@ -1,12 +1,15 @@
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { AppError } from "@kiteline/shared/protocol";
 import { Agent } from "../src/agent.js";
+import { withPublicationLock } from "../src/files/publish.js";
 import { testConfig } from "./support/config.js";
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
@@ -22,7 +25,8 @@ async function setup() {
   });
   cleanups.push(() => agent.close());
   const workspace = await agent.metadata.add(root);
-  return { root, agent, id: workspace.id };
+  const changed = vi.spyOn(agent.watches, "notifyWritten").mockImplementation(() => {});
+  return { root, agent, id: workspace.id, changed };
 }
 
 test.each([
@@ -125,4 +129,111 @@ test.each(["\uFFFD", "😀"])("file and directory RPCs preserve the legal name %
     path: absolutePath,
   });
   expect(await readdir(root)).toEqual([`directory-${name}`]);
+});
+
+test.each(["files.create", "files.rename"])(
+  "%s notifies after execution, excluding parameter and workspace rejections",
+  async (method) => {
+    const { root, agent, id, changed } = await setup();
+    await writeFile(join(root, "source"), "contents");
+    const params = { workspaceId: id, path: "source", kind: "file", newName: "target" };
+    if (method === "files.create") params.path = "target";
+    const signal = new AbortController().signal;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered!: () => void;
+    const held = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const owner = withPublicationLock(async () => {
+      entered();
+      await gate;
+    });
+    await held;
+    changed.mockImplementation(() => {
+      expect(existsSync(join(root, "target"))).toBe(true);
+      if (method === "files.rename") expect(existsSync(join(root, "source"))).toBe(false);
+    });
+    try {
+      const response = agent.dispatch(method, params, signal);
+      expect(changed).not.toHaveBeenCalled();
+      expect(existsSync(join(root, "target"))).toBe(false);
+      release();
+      await owner;
+      await response;
+      expect(changed).toHaveBeenCalledExactlyOnceWith(id);
+      expect(await readFile(join(root, "target"), "utf8")).toBe(
+        method === "files.create" ? "" : "contents",
+      );
+    } finally {
+      release();
+      await owner;
+    }
+    changed.mockReset();
+
+    await expect(
+      agent.dispatch(method, { ...params, path: undefined }, signal),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
+    const invalid = method === "files.create" ? { kind: "invalid" } : { newName: "bad/name" };
+    await expect(agent.dispatch(method, { ...params, ...invalid }, signal)).rejects.toMatchObject({
+      code: "invalid_argument",
+    });
+    await expect(
+      agent.dispatch(method, { ...params, workspaceId: "missing" }, signal),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(changed).not.toHaveBeenCalled();
+
+    await expect(
+      agent.dispatch(method, { ...params, path: "target" }, signal),
+    ).rejects.toMatchObject({ code: method === "files.create" ? "EEXIST" : "invalid_argument" });
+    expect(changed).toHaveBeenCalledExactlyOnceWith(id);
+    changed.mockClear();
+
+    const controller = new AbortController();
+    controller.abort(new AppError("cancelled", "Caller already cancelled"));
+    await expect(agent.dispatch(method, params, controller.signal)).rejects.toMatchObject({
+      message: "Caller already cancelled",
+    });
+    expect(changed).not.toHaveBeenCalled();
+    changed.mockClear();
+    await agent.close();
+    for (const currentSignal of [signal, controller.signal]) {
+      await expect(agent.dispatch(method, params, currentSignal)).rejects.toMatchObject({
+        code: "cancelled",
+        message: "Agent is stopping",
+      });
+      expect(changed).not.toHaveBeenCalled();
+      changed.mockClear();
+    }
+  },
+);
+
+test("unknown files methods and rejected bulk requests retain admission priority without completion notification", async () => {
+  const { agent, id, changed } = await setup();
+  const signal = new AbortController().signal;
+  const controller = new AbortController();
+  controller.abort(new AppError("cancelled", "Caller already cancelled"));
+  await expect(agent.dispatch("files.unknown", { workspaceId: id }, signal)).rejects.toMatchObject({
+    code: "unsupported",
+  });
+  await expect(
+    agent.dispatch("files.unknown", { workspaceId: id }, controller.signal),
+  ).rejects.toMatchObject({ message: "Caller already cancelled" });
+  for (const method of ["files.copy", "files.move", "files.delete"]) {
+    await expect(agent.dispatch(method, { workspaceId: id }, signal)).rejects.toMatchObject({
+      code: "invalid_argument",
+    });
+    await expect(
+      agent.dispatch(method, { workspaceId: id }, controller.signal),
+    ).rejects.toMatchObject({ message: "Caller already cancelled" });
+  }
+  expect(changed).not.toHaveBeenCalled();
+  await agent.close();
+  for (const method of ["files.unknown", "files.copy", "files.move", "files.delete"])
+    await expect(
+      agent.dispatch(method, { workspaceId: id }, controller.signal),
+    ).rejects.toMatchObject({ message: "Agent is stopping" });
+  expect(changed).not.toHaveBeenCalled();
 });

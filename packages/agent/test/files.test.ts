@@ -34,7 +34,7 @@ async function setup() {
     root,
     data,
     id: workspace.id,
-    files: new Files(metadata, directories),
+    files: new Files(metadata, directories, () => {}),
   };
 }
 

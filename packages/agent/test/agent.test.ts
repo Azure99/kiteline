@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import type { AddressInfo, Socket } from "node:net";
 import { join } from "node:path";
@@ -10,6 +10,7 @@ import { privateDirectory } from "../src/config.js";
 import { testConfig } from "./support/config.js";
 import { localRequest } from "../src/local.js";
 import {
+  AppError,
   appVersion,
   checkMetadata,
   limits,
@@ -20,6 +21,8 @@ import {
 } from "@kiteline/shared/protocol";
 import type { DoctorReport } from "../src/doctor.js";
 import { withPublicationLock } from "../src/files/publish.js";
+import { Files } from "../src/files/index.js";
+import { FileOperations } from "../src/files/operations.js";
 
 test("shortcut icons round-trip through RPC and metadata, and omitting one clears the old value", async () => {
   const dataDir = await mkdtemp("/var/tmp/kiteline-shortcut-rpc-");
@@ -62,6 +65,83 @@ test("shortcut icons round-trip through RPC and metadata, and omitting one clear
     });
     expect(agent.metadata.hello().snapshot.shortcuts[0]?.icon).toBeUndefined();
   } finally {
+    await agent.close();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("RPC admission rejects stopped before aborted before unknown without domain work or write notifications", async () => {
+  const dataDir = await mkdtemp("/var/tmp/kiteline-rpc-admission-");
+  const root = join(dataDir, "workspace");
+  await mkdir(root);
+  await writeFile(join(root, "source"), "unchanged");
+  const agent = new Agent(testConfig(dataDir), {
+    deviceId: "test",
+    deviceToken: "test",
+    server: "https://localhost",
+  });
+  const workspace = await agent.metadata.add(root);
+  const domainCalls = [
+    vi.spyOn(Files.prototype, "create"),
+    vi.spyOn(FileOperations.prototype, "run"),
+    vi.spyOn(agent.gitWrites, "run"),
+    vi.spyOn(agent.schedules, "assertAvailable"),
+    vi.spyOn(agent.sessions, "list"),
+  ];
+  const notified = vi.spyOn(agent.watches, "notifyWritten");
+  const progress = vi.fn();
+  const signal = new AbortController().signal;
+  const controller = new AbortController();
+  const reason = new AppError("cancelled", "Cancelled before admission");
+  controller.abort(reason);
+  const params = {
+    workspaceId: workspace.id,
+    path: "target",
+    kind: "file",
+    items: [{ path: "source", targetPath: "copy", collision: "error" }],
+    repoId: "unresolved",
+    paths: ["source"],
+  };
+  const unknown = ["missing.operation", "toString", "constructor"];
+  const methods = [
+    "files.create",
+    "files.copy",
+    "git.stage",
+    "tasks.list",
+    "sessions.list",
+    ...unknown,
+  ];
+  try {
+    for (const method of unknown)
+      await expect(agent.dispatch(method, params, signal, progress)).rejects.toMatchObject({
+        code: "unsupported",
+      });
+    for (const method of methods)
+      await expect(agent.dispatch(method, params, controller.signal, progress)).rejects.toBe(
+        reason,
+      );
+    for (const call of domainCalls) expect(call).not.toHaveBeenCalled();
+    expect(notified).not.toHaveBeenCalled();
+    expect(progress).not.toHaveBeenCalled();
+
+    await agent.close();
+    for (const call of domainCalls) call.mockClear();
+    for (const currentSignal of [signal, controller.signal])
+      for (const method of methods)
+        await expect(agent.dispatch(method, params, currentSignal, progress)).rejects.toMatchObject(
+          {
+            code: "cancelled",
+            message: "Agent is stopping",
+          },
+        );
+    for (const call of domainCalls) expect(call).not.toHaveBeenCalled();
+    expect(notified).not.toHaveBeenCalled();
+    expect(progress).not.toHaveBeenCalled();
+    expect(await readdir(root)).toEqual(["source"]);
+    expect(await readFile(join(root, "source"), "utf8")).toBe("unchanged");
+  } finally {
+    for (const call of domainCalls) call.mockRestore();
+    notified.mockRestore();
     await agent.close();
     await rm(dataDir, { recursive: true, force: true });
   }

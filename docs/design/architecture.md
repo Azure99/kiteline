@@ -185,7 +185,9 @@ agent 的出站代理规则见[出站代理与证书](../guide/devices.md#出站
 
 在 `packages/shared/src/protocol/rpc.ts` 定义方法、参数及成功与非成功结果类型，并为 `rpcTraits` 填写丢响应分类、总期限和成功结果超限策略。同时在本机入口确定调用权限，在领域执行处确定变化通知时点。
 
-Git 写操作经过 `GitWriteQueue`；工作区变化通知分别发生在 RPC 完成、后台文件操作真正结束或内容已发布/结果未确认时。调用方按[结果语义](protocol.md#结果语义)处理失败及结果未确认；测试覆盖实际变化的行为。
+Agent 在分派前统一检查停止、取消和方法是否已知；总准入拒绝不进入领域，也不通知工作区变化。文件方法由 [`files/rpc.ts`](../../packages/agent/src/files/rpc.ts) 解释参数。create/rename 在 Files 完成参数检查与工作区查找后执行，并在执行 promise 结束前通知；参数或工作区查找拒绝不通知。批量 copy/move/delete 由 `FileOperations` 在后台执行及清理结束后通知；save/upload 通道由 `FileChannels` 在内容已发布或发布结果未确认时通知，再交付结果。文件行为见[文件契约](files.md)。
+
+Git 方法由 [`git/rpc.ts`](../../packages/agent/src/git/rpc.ts) 解释参数。写方法先完成全部 JS 参数检查及必要的 Git 分支名称检查，再进入 `GitWriteQueue`；这些检查失败不通知工作区变化。队列按 commonDir 串行执行写操作，获得执行权后复验仓库身份及 HEAD、index、token 等实际状态。进入队列调用后的成功、拒绝及取消都由 Git 领域在返回的 promise 结束前通知，Agent 总停等待该 promise。调用方按[结果语义](protocol.md#结果语义)处理失败及结果未确认；测试覆盖实际变化的行为。
 
 ### 添加事件
 

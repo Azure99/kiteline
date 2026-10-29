@@ -62,7 +62,7 @@ export class FileOperations {
   constructor(
     private metadata: MetadataStore,
     private temporary: TemporaryFiles,
-    private changed: (workspaceId: string) => void = () => {},
+    private readonly notifyWritten: (workspaceId: string) => void,
   ) {}
 
   async close() {
@@ -199,7 +199,7 @@ export class FileOperations {
       .finally(() => {
         signal.removeEventListener("abort", cancel);
         this.executions.delete(execution);
-        this.changed(workspaceId);
+        this.notifyWritten(workspaceId);
       })
       .catch((error: unknown) => console.error("File operation completion:", error));
     return response;

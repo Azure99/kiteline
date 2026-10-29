@@ -313,7 +313,7 @@ test("fetch pull push reuse local remotes and pull strategy; queued HEAD identit
   await remote("add", ".");
   await remote("commit", "-m", "remote");
   await remote("push");
-  await syncRemote(repo, "fetch", { remote: "origin" }, signal());
+  await syncRemote(repo, { kind: "fetch", remote: "origin" }, signal());
   expect((await cli("rev-parse", "origin/main")).trim()).toBe(
     (await remote("rev-parse", "HEAD")).trim(),
   );
@@ -321,18 +321,21 @@ test("fetch pull push reuse local remotes and pull strategy; queued HEAD identit
   await cli("add", ".");
   await cli("commit", "-m", "local");
   await cli("config", "pull.rebase", "false");
-  await syncRemote(repo, "pull", { expectedHead: await headIdentity(root, signal()) }, signal());
+  await syncRemote(
+    repo,
+    { kind: "pull", expectedHead: await headIdentity(root, signal()) },
+    signal(),
+  );
   expect((await cli("rev-list", "--parents", "-n1", "HEAD")).trim().split(" ")).toHaveLength(3);
   const expected = await headIdentity(root, signal());
   await cli("switch", "-c", "same-oid");
   await expect(
-    syncRemote(repo, "push", { expectedHead: expected }, signal()),
+    syncRemote(repo, { kind: "push", expectedHead: expected }, signal()),
   ).rejects.toMatchObject({ code: "conflict" });
   await cli("switch", "main");
   const pushed = await syncRemote(
     repo,
-    "push",
-    { expectedHead: await headIdentity(root, signal()) },
+    { kind: "push", expectedHead: await headIdentity(root, signal()) },
     signal(),
   );
   expect(pushed.stdout).toContain("Done");

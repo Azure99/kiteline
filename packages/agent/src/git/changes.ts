@@ -26,7 +26,7 @@ interface Leaf {
 const leaf = (item?: Leaf) => item && ["file", "symlink", "gitlink"].includes(modeType(item.mode));
 const nul = (paths: string[]) => Buffer.from(paths.join("\0") + "\0");
 
-function gitPaths(value: unknown) {
+export function gitPaths(value: unknown) {
   if (!Array.isArray(value) || !value.length || value.length > agentLimits.listPageEntries * 2)
     throw new AppError("invalid_argument", "Select files from the current page");
   const paths = [...new Set(value.map(relativePath))];
@@ -47,8 +47,7 @@ function gitPaths(value: unknown) {
     throw new AppError("invalid_argument", "Cannot operate on the repository root or Git metadata");
   return paths.sort();
 }
-export async function checkedGitPaths(repo: Repo, value: unknown, signal: AbortSignal) {
-  const paths = gitPaths(value);
+export async function checkedGitPaths(repo: Repo, paths: string[], signal: AbortSignal) {
   for (const path of paths) {
     signal.throwIfAborted();
     if (await gitMetadataPath(repo.rootPath, path))

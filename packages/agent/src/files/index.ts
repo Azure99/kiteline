@@ -26,6 +26,7 @@ export class Files {
   constructor(
     private metadata: MetadataStore,
     private directories: Directories,
+    private readonly notifyWritten: (workspaceId: string) => void,
   ) {}
 
   async list(
@@ -111,7 +112,7 @@ export class Files {
           },
         );
       }
-    }, signal);
+    }, signal).finally(() => this.notifyWritten(workspaceId));
   }
 
   rename(workspaceId: string, input: string, newName: string, signal?: AbortSignal) {
@@ -129,6 +130,6 @@ export class Files {
       signal?.throwIfAborted();
       await renameEntry(source.absolute, join(source.parent, name), { replace: false });
       return { from: path, to };
-    }, signal);
+    }, signal).finally(() => this.notifyWritten(workspaceId));
   }
 }

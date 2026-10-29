@@ -31,9 +31,12 @@ const logFields: [oid: string, parents: string, author: string, time: string, su
 ];
 const branchRefPrefix = "refs/heads/";
 
-export async function commitOid(repo: Repo, oid: string, signal: AbortSignal) {
+export function parseCommitOid(oid: string) {
   if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(oid))
     throw new AppError("invalid_argument", "A full commit OID is required");
+  return oid;
+}
+export async function resolveCommitOid(repo: Repo, oid: string, signal: AbortSignal) {
   const actual = commandLine(
     (await gitRead(repo.rootPath, ["rev-parse", "--verify", `${oid}^{commit}`], signal)).bytes,
   );
@@ -41,7 +44,7 @@ export async function commitOid(repo: Repo, oid: string, signal: AbortSignal) {
   return actual;
 }
 export async function commitMessage(repo: Repo, oid: string, signal: AbortSignal) {
-  const commit = await commitOid(repo, oid, signal);
+  const commit = await resolveCommitOid(repo, parseCommitOid(oid), signal);
   const output = await gitRead(
     repo.rootPath,
     [
@@ -69,7 +72,7 @@ export async function history(
 ): Promise<GitHistory> {
   anchor ??= (await headIdentity(repo.rootPath, signal)).oid ?? undefined;
   if (!anchor) return { commits: [] };
-  const anchorOid = await commitOid(repo, anchor, signal);
+  const anchorOid = await resolveCommitOid(repo, parseCommitOid(anchor), signal);
   const commits: Commit[] = [];
   let fields: string[] = [];
   let count = 0;
@@ -127,7 +130,7 @@ async function comparison(
   selectedParent: string | undefined,
   signal: AbortSignal,
 ) {
-  const commit = await commitOid(repo, oid, signal);
+  const commit = await resolveCommitOid(repo, parseCommitOid(oid), signal);
   const value = commandLine(
     (
       await gitRead(

@@ -47,7 +47,7 @@ afterEach(async () => {
   vi.useRealTimers();
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
-async function setup(changed?: (workspaceId: string) => void) {
+async function setup(changed: (workspaceId: string) => void = vi.fn()) {
   const data = await mkdtemp("/var/tmp/kiteline-file-operations-");
   cleanups.push(() => rm(data, { recursive: true, force: true }));
   const root = join(data, "workspace");
@@ -67,7 +67,7 @@ async function setup(changed?: (workspaceId: string) => void) {
     root,
     data,
     temporary,
-    files: new Files(metadata, directories),
+    files: new Files(metadata, directories, changed),
     binary: new BinaryFiles(config, metadata, temporary),
     text: new TextFiles(config, metadata, temporary),
     operations,
@@ -167,6 +167,7 @@ test("file channel sizes use the write owner's byte limit before creating tempor
       socket.close(1000);
       await expect.poll(() => channels.count).toBe(0);
       expect(await readdir(f.root)).toEqual([]);
+      expect(notifyWritten).not.toHaveBeenCalled();
     }
   }
 });

@@ -117,34 +117,29 @@ export function expectedHead(value: unknown): HeadIdentity {
 }
 export async function syncRemote(
   repo: Repo,
-  kind: "fetch" | "pull" | "push",
-  params: { remote?: string; expectedHead?: HeadIdentity },
+  request:
+    | { kind: "fetch"; remote?: string }
+    | { kind: "pull" | "push"; expectedHead: HeadIdentity },
   signal: AbortSignal,
 ) {
-  if (kind !== "fetch") {
+  const { kind } = request;
+  if (request.kind !== "fetch") {
     const current = await headIdentity(repo.rootPath, signal);
     if (
-      !params.expectedHead ||
-      current.symbolicRef !== params.expectedHead.symbolicRef ||
-      current.oid !== params.expectedHead.oid
+      current.symbolicRef !== request.expectedHead.symbolicRef ||
+      current.oid !== request.expectedHead.oid
     )
       throw new AppError(
         "conflict",
         "Current branch or HEAD has changed; refresh before synchronizing",
       );
   }
-  if (
-    params.remote &&
-    !(await remotes(repo, signal)).remotes.some((entry) => entry.name === params.remote)
-  )
+  const remote = request.kind === "fetch" ? request.remote : undefined;
+  if (remote && !(await remotes(repo, signal)).remotes.some((entry) => entry.name === remote))
     throw new AppError("conflict", "Remote has changed; refresh");
   return gitWrite(
     repo.rootPath,
-    [
-      kind,
-      ...(kind === "push" ? ["--porcelain"] : []),
-      ...(kind === "fetch" && params.remote ? ["--", params.remote] : []),
-    ],
+    [kind, ...(kind === "push" ? ["--porcelain"] : []), ...(remote ? ["--", remote] : [])],
     signal,
     {
       ...(kind === "pull" ? { env: { GIT_EDITOR: "true", GIT_SEQUENCE_EDITOR: "false" } } : {}),
