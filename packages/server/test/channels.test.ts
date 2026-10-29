@@ -7,19 +7,15 @@ import { getDefaultHighWaterMark, setDefaultHighWaterMark } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, expect, test } from "vitest";
 import { WebSocket } from "ws";
-import { serverLimits } from "../src/limits.js";
-import { apiFixture, restoreServerLimits, webPath } from "./fixture.js";
+import type { ChannelPolicy } from "../src/channels.js";
+import { apiFixture, rejectedUpgrade, webPath } from "./fixture.js";
 
 const cleanups: (() => Promise<unknown> | void)[] = [];
 afterEach(async () => {
-  try {
-    for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
-  } finally {
-    restoreServerLimits();
-  }
+  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
-async function fixture() {
-  const base = await apiFixture();
+async function fixture(policy?: Partial<ChannelPolicy>) {
+  const base = await apiFixture(policy);
   cleanups.push(base.close);
   const { device, store, app, origin } = base;
   async function events(cookie: string) {
@@ -50,13 +46,10 @@ async function fixture() {
       size,
       createOnly: true,
     });
-    const socket = new WebSocket(
-      origin.replace("http:", "ws:") +
-        `/api/agent/channels/${pending.id}?connectionId=${connection.connectionId}`,
-      { headers: { authorization: `Bearer ${peer.deviceToken}` } },
-    );
-    cleanups.push(() => socket.terminate());
-    await once(socket, "open");
+    const sourceClosed = new Promise<void>((resolve) => {
+      app.server.once("upgrade", (_request, socket) => socket.once("close", resolve));
+    });
+    const socket = await base.dataChannel(peer.deviceToken, pending.id, connection.connectionId);
     socket.send(
       JSON.stringify({
         type: "ready",
@@ -71,6 +64,8 @@ async function fixture() {
     await pending.ready;
     return {
       socket,
+      peer,
+      sourceClosed,
       id: pending.id,
       url: origin + webPath(`/api/channels/${pending.id}/content`),
       headers: { origin, cookie: `kiteline_session_http=${login.token}` },
@@ -91,8 +86,7 @@ test.each(["file.read", "file.write"] as const)(
 );
 
 test("channel envelope budget is checked before reserving a channel", async () => {
-  const f = await fixture();
-  Object.assign(serverLimits, { channelsPerDevice: 1 });
+  const f = await fixture({ channelsPerDevice: 1 });
   const peer = await f.device();
   const login = f.store.createLogin(60_000);
   const cookie = `kiteline_session_http=${login.token}`;
@@ -122,8 +116,7 @@ test("channel envelope budget is checked before reserving a channel", async () =
 });
 
 test("public channel purposes are strings and cannot open internal download or proxy channels", async () => {
-  const f = await fixture();
-  Object.assign(serverLimits, { channelsPerDevice: 1 });
+  const f = await fixture({ channelsPerDevice: 1 });
   const login = f.store.createLogin(60_000);
   const cookie = `kiteline_session_http=${login.token}`;
   const events = await f.events(cookie);
@@ -165,12 +158,13 @@ test("public channel purposes are strings and cannot open internal download or p
   await observed;
   expect(events.messages.filter((event) => event.type === "channel.failed")).toHaveLength(1);
 
+  const extra = { agentOnly: { value: [1, "raw"] } };
   const pending = f.call(
     `/api/devices/${peer.deviceId}/channels`,
     "POST",
     {
       kind: "file.read",
-      params,
+      params: { ...params, ...extra },
     },
     cookie,
   );
@@ -178,6 +172,7 @@ test("public channel purposes are strings and cannot open internal download or p
     .poll(() => peer.messages.some((message) => message.type === "channel.open"))
     .toBe(true);
   const opening = peer.messages.find((message) => message.type === "channel.open")!;
+  expect(opening.params).toEqual({ ...params, ...extra });
   const invalidWhileBusy = await open(peer.deviceId, ["text"]);
   expect(await invalidWhileBusy.json()).toMatchObject({ error: { code: "unsupported" } });
   const busy = await open(peer.deviceId, "text");
@@ -187,6 +182,93 @@ test("public channel purposes are strings and cannot open internal download or p
   expect(await cancelled.json()).toEqual({ found: true });
   await (await pending).arrayBuffer();
 });
+
+test.each([
+  {
+    kind: "file.write",
+    purpose: "save",
+    size: 0,
+    contentType: "text/plain; charset=utf-8",
+    error: "invalid_argument",
+  },
+  {
+    kind: "file.read",
+    purpose: "image",
+    size: 1,
+    contentType: "text/plain; charset=utf-8",
+    error: "unsupported",
+  },
+  {
+    kind: "file.read",
+    purpose: "open",
+    size: 1,
+    contentType: "text/plain; charset=utf-8",
+    error: undefined,
+  },
+])(
+  "ready metadata uses the checked $kind/$purpose request",
+  async ({ kind, purpose, size, contentType, error }) => {
+    const f = await fixture();
+    const peer = await f.device();
+    const login = f.store.createLogin(60_000);
+    const connection = f.app.connections.online(peer.deviceId)!;
+    const pending = f.app.channels.create(peer.deviceId, login, kind, {
+      workspaceId: "workspace",
+      path: "file",
+      purpose,
+      size: 1,
+    });
+    const socket = await f.dataChannel(peer.deviceToken, pending.id, connection.connectionId);
+    const result = error
+      ? expect(pending.ready).rejects.toMatchObject({ code: error })
+      : expect(pending.ready).resolves.toMatchObject({ meta: { size, contentType } });
+    socket.send(
+      JSON.stringify({
+        type: "ready",
+        meta: { size, contentType, filename: "file", targetPath: "file" },
+      }),
+    );
+    await result;
+  },
+);
+
+test.each([
+  {
+    action: "source close",
+    expectedError: { code: "offline", message: "Device data connection closed" },
+  },
+  {
+    action: "error frame",
+    expectedError: { code: "invalid_argument", message: "Channel has not been paired" },
+  },
+])(
+  "a ready read lost to $action reports its phase and leaves no content endpoint",
+  async ({ action, expectedError }) => {
+    const f = await fixture();
+    const channel = await f.fileChannel("file.read", 4);
+    const events = await f.events(channel.headers.cookie);
+    if (action === "source close") channel.socket.close(1000);
+    else
+      channel.socket.send(
+        JSON.stringify({ type: "error", code: "io_error", message: "Agent diagnostic" }),
+      );
+    await expect
+      .poll(() => events.messages.find((event) => event.channelId === channel.id))
+      .toEqual({
+        type: "channel.failed",
+        channelId: channel.id,
+        deviceId: channel.peer.deviceId,
+        workspaceId: "workspace",
+        path: "file",
+        purpose: "text",
+        outcome: "failed",
+        error: expectedError,
+      });
+    const response = await fetch(channel.url, { headers: channel.headers });
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ error: { code: "not_found" } });
+  },
+);
 
 test.each([
   { kind: "file", code: "unsupported", status: 400 },
@@ -219,13 +301,11 @@ test.each([
       .poll(() => peer.messages.some((message) => message.type === "channel.open"))
       .toBe(true);
     const opening = peer.messages.find((message) => message.type === "channel.open")!;
-    const socket = new WebSocket(
-      f.origin.replace("http:", "ws:") +
-        `/api/agent/channels/${String(opening.channelId)}?connectionId=${String(opening.connectionId)}`,
-      { headers: { authorization: `Bearer ${peer.deviceToken}` } },
+    const socket = await f.dataChannel(
+      peer.deviceToken,
+      String(opening.channelId),
+      String(opening.connectionId),
     );
-    cleanups.push(() => socket.terminate());
-    await once(socket, "open");
     socket.send(JSON.stringify({ type: "error", code, message: "Could not prepare file" }));
     const response = await pending;
     expect(response.status).toBe(status);
@@ -266,14 +346,8 @@ test("channel preparation and transfer preserve empty and long diagnostics witho
         () => undefined,
         (error: unknown) => error,
       );
-      const socket = new WebSocket(
-        f.origin.replace("http:", "ws:") +
-          `/api/agent/channels/${pending.id}?connectionId=${connection.connectionId}`,
-        { headers: { authorization: `Bearer ${peer.deviceToken}` } },
-      );
-      socket.on("error", () => {});
+      const socket = await f.dataChannel(peer.deviceToken, pending.id, connection.connectionId);
       try {
-        await once(socket, "open");
         let request: Promise<Response> | undefined;
         if (stage === "transfer") {
           socket.send(
@@ -330,7 +404,6 @@ test.each(["bulk", "queued"])(
         held = response;
         response.cork();
       });
-    const closed = once(channel.socket, "close");
     channel.socket.once("message", () => {
       for (let offset = 0; offset < bytes.length; offset += 8192)
         channel.socket.send(bytes.subarray(offset, offset + 8192));
@@ -344,54 +417,254 @@ test.each(["bulk", "queued"])(
     void pending.catch(() => {});
     try {
       if (mode === "queued") {
-        expect((await closed)[0]).toBe(1000);
-        // Keep HTTP backpressure until the source close has reached the relay.
-        await delay(20);
+        // Keep HTTP backpressure until the relay's original data socket has closed.
+        await channel.sourceClosed;
       }
     } finally {
       held?.uncork();
     }
     const response = await pending;
     expect(response.statusCode).toBe(200);
-    response.pause();
-    await delay(50);
     const chunks: Buffer[] = [];
     for await (const chunk of response) chunks.push(chunk as Buffer);
     expect(Buffer.concat(chunks).equals(bytes)).toBe(true);
+    await channel.sourceClosed;
+    const cancelled = await f.call(
+      `/api/channels/${channel.id}`,
+      "DELETE",
+      undefined,
+      channel.headers.cookie,
+    );
+    expect(await cancelled.json()).toEqual({ found: false });
+    const pong = once(channel.peer.socket, "pong");
+    channel.peer.socket.ping();
+    await pong;
+    expect(
+      channel.peer.messages.some(
+        (message) => message.type === "channel.cancel" && message.channelId === channel.id,
+      ),
+    ).toBe(false);
+  },
+);
+
+test.each([
+  { sentBytes: 0, action: "close", expectedStatus: 503, expectedError: "offline" },
+  { sentBytes: 2, action: "close", expectedStatus: 200, expectedError: "offline" },
+  { sentBytes: 2, action: "error", expectedStatus: 200, expectedError: "io_error" },
+])(
+  "a read source $action after $sentBytes of 4 bytes does not report success",
+  async ({ sentBytes, action, expectedStatus, expectedError }) => {
+    const f = await fixture();
+    const channel = await f.fileChannel("file.read", 4);
+    const events = await f.events(channel.headers.cookie);
+    const started = once(channel.socket, "message");
+    const pending = new Promise<import("node:http").IncomingMessage>((resolve, reject) => {
+      const req = request(channel.url, { headers: channel.headers }, resolve);
+      req.once("error", reject);
+      req.end();
+    });
+    expect(JSON.parse((await started)[0].toString())).toEqual({ type: "start" });
+    if (sentBytes > 0) channel.socket.send(Buffer.from("ab"));
+    if (action === "close") channel.socket.close(1000);
+    else {
+      await pending;
+      channel.socket.send(
+        JSON.stringify({ type: "error", code: "io_error", message: "Read failed" }),
+      );
+    }
+    const response = await pending;
+    const chunks: Buffer[] = [];
+    response.on("data", (chunk: Buffer) => chunks.push(chunk));
+    response.on("error", () => {});
+    await new Promise<void>((resolve) => response.once("close", resolve));
+    const bytes = Buffer.concat(chunks);
+    expect(response.statusCode).toBe(expectedStatus);
+    if (sentBytes === 0) {
+      expect(JSON.parse(bytes.toString())).toMatchObject({ error: { code: expectedError } });
+      expect(response.complete).toBe(true);
+    } else {
+      expect(response.headers["content-length"]).toBe("4");
+      expect(response.complete).toBe(false);
+      expect(bytes.toString()).toBe("ab");
+    }
+    await expect
+      .poll(() => events.messages.find((event) => event.channelId === channel.id))
+      .toMatchObject({ type: "channel.failed", error: { code: expectedError } });
+    expect(f.app.connections.devices()[0]!.status).toBe("online");
+  },
+);
+
+test("an empty download automatically starts and releases its channel after the HTTP response", async () => {
+  const f = await fixture();
+  const peer = await f.device();
+  const login = f.store.createLogin(60_000);
+  const cookie = `kiteline_session_http=${login.token}`;
+  const pending = f.call(
+    `/api/devices/${peer.deviceId}/download?workspaceId=workspace&path=empty`,
+    "GET",
+    undefined,
+    cookie,
+  );
+  await expect
+    .poll(() => peer.messages.some((message) => message.type === "channel.open"))
+    .toBe(true);
+  const opening = peer.messages.find((message) => message.type === "channel.open")!;
+  const socket = await f.dataChannel(
+    peer.deviceToken,
+    String(opening.channelId),
+    String(opening.connectionId),
+  );
+  const started = once(socket, "message");
+  const closed = once(socket, "close");
+  socket.send(
+    JSON.stringify({
+      type: "ready",
+      meta: {
+        size: 0,
+        filename: "empty.txt",
+        targetPath: "empty",
+        contentType: "text/plain; charset=utf-8",
+      },
+    }),
+  );
+  expect(JSON.parse((await started)[0].toString())).toEqual({ type: "start" });
+  const response = await pending;
+  expect(response.status).toBe(200);
+  expect(response.headers.get("content-length")).toBe("0");
+  expect(response.headers.get("content-type")).toBe("application/octet-stream");
+  expect(response.headers.get("content-disposition")).toBe(
+    "attachment; filename=\"download\"; filename*=UTF-8''empty.txt",
+  );
+  expect((await response.arrayBuffer()).byteLength).toBe(0);
+  expect((await closed)[0]).toBe(1000);
+  const cancelled = await f.call(
+    `/api/channels/${String(opening.channelId)}`,
+    "DELETE",
+    undefined,
+    cookie,
+  );
+  expect(await cancelled.json()).toEqual({ found: false });
+  const pong = once(peer.socket, "pong");
+  peer.socket.ping();
+  await pong;
+  expect(peer.messages.some((message) => message.type === "channel.cancel")).toBe(false);
+});
+
+test.each([
+  { action: "source close", afterEnd: false, outcome: "failed", code: "offline" },
+  { action: "DELETE", afterEnd: false, outcome: "failed", code: "cancelled" },
+  { action: "DELETE", afterEnd: true, outcome: "unknown", code: "cancelled" },
+])(
+  "write $action afterEnd=$afterEnd preserves $outcome/$code",
+  async ({ action, afterEnd, outcome, code }) => {
+    const f = await fixture();
+    const channel = await f.fileChannel("file.write", 4);
+    const controls: string[] = [];
+    const chunks: Buffer[] = [];
+    const boundary = new Promise<void>((resolve) => {
+      channel.socket.on("message", (data, binary) => {
+        if (binary) {
+          chunks.push(Buffer.from(data as Buffer));
+          if (!afterEnd) resolve();
+        } else {
+          const frame = JSON.parse(data.toString()) as { type: string };
+          controls.push(frame.type);
+          if (afterEnd && frame.type === "end") resolve();
+        }
+      });
+    });
+    const req = request(channel.url, {
+      method: "PUT",
+      headers: { ...channel.headers, "content-length": "4" },
+    });
+    const pending = new Promise<import("node:http").IncomingMessage>((resolve, reject) => {
+      req.once("response", resolve);
+      req.once("error", reject);
+    });
+    try {
+      if (afterEnd) req.end("text");
+      else req.write("te");
+      await boundary;
+      expect(Buffer.concat(chunks).toString()).toBe(afterEnd ? "text" : "te");
+      if (action === "source close") channel.socket.close(1000);
+      else {
+        const cancelled = await f.call(
+          `/api/channels/${channel.id}`,
+          "DELETE",
+          undefined,
+          channel.headers.cookie,
+        );
+        expect(await cancelled.json()).toEqual({ found: true });
+      }
+      const response = await pending;
+      const parts: Buffer[] = [];
+      for await (const part of response) parts.push(part as Buffer);
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(Buffer.concat(parts).toString())).toMatchObject({
+        id: channel.id,
+        outcome,
+        error: { code },
+      });
+      expect(controls).toEqual(afterEnd ? ["start", "end"] : ["start"]);
+    } finally {
+      req.destroy();
+    }
   },
 );
 
 test("write results validate errors, preserve partial details and report lost publication results as unknown", async () => {
   const f = await fixture();
+  const partial = {
+    outcome: "partial",
+    error: { code: "conflict", message: "", details: { changed: ["file"] } },
+    result: { completed: 1 },
+  };
+  const diagnostic = {
+    outcome: "unknown",
+    error: {
+      code: "io_error",
+      message: "diagnostic\n".repeat(1000) + "\0",
+      details: { pending: true },
+    },
+    result: { target: "file" },
+  };
+  const invalid = {
+    outcome: "unknown",
+    error: expect.objectContaining({ code: "invalid_argument" }),
+  };
   const replies = [
-    { outcome: "unknown", error: null },
-    { outcome: "partial", error: { code: "io_error", message: null } },
-    { outcome: "failed", error: { code: "", message: "diagnostic" } },
-    { outcome: ["unknown"], error: { code: "io_error", message: "diagnostic" } },
+    { name: "missing-error", reply: { outcome: "unknown", error: null }, expected: invalid },
     {
-      outcome: "partial",
-      error: { code: "conflict", message: "", details: { changed: ["file"] } },
-      result: { completed: 1 },
+      name: "invalid-message",
+      reply: { outcome: "partial", error: { code: "io_error", message: null } },
+      expected: invalid,
     },
     {
-      outcome: "unknown",
-      error: {
-        code: "io_error",
-        message: "diagnostic\n".repeat(1000) + "\0",
-        details: { pending: true },
-      },
-      result: { target: "file" },
+      name: "empty-code",
+      reply: { outcome: "failed", error: { code: "", message: "diagnostic" } },
+      expected: invalid,
     },
-    undefined,
+    {
+      name: "invalid-outcome",
+      reply: { outcome: ["unknown"], error: { code: "io_error", message: "diagnostic" } },
+      expected: invalid,
+    },
+    { name: "partial", reply: partial, expected: partial },
+    { name: "diagnostic", reply: diagnostic, expected: diagnostic },
+    {
+      name: "lost-result",
+      reply: undefined,
+      expected: { outcome: "unknown", error: expect.objectContaining({ code: "offline" }) },
+    },
   ];
-  for (const [index, reply] of replies.entries()) {
+  for (const { name, reply, expected } of replies) {
     const channel = await f.fileChannel("file.write", 4);
     const chunks: Buffer[] = [];
-    const stored = join(f.config.dataDir, `published-${index}`);
+    const stored = join(f.config.dataDir, `published-${name}`);
     channel.socket.on("message", (data, binary) => {
       if (binary) chunks.push(Buffer.from(data as Buffer));
       else if (JSON.parse(data.toString()).type === "end") {
-        if (reply)
+        if (reply !== undefined)
           channel.socket.send(
             JSON.stringify({ type: "result", reply: { id: channel.id, ...reply } }),
           );
@@ -405,92 +678,172 @@ test("write results validate errors, preserve partial details and report lost pu
     });
     expect(response.status).toBe(200);
     const result = await response.json();
-    if (index < 4)
-      expect(result).toMatchObject({
-        id: channel.id,
-        outcome: "unknown",
-        error: { code: "invalid_argument" },
-      });
-    else if (reply) expect(result).toEqual({ id: channel.id, ...reply });
-    else {
-      expect(result).toMatchObject({
-        id: channel.id,
-        outcome: "unknown",
-        error: { code: "offline" },
-      });
+    expect(result).toEqual({ id: channel.id, ...expected });
+    if (reply === undefined) {
       expect(await readFile(stored, "utf8")).toBe("text");
     }
     expect(Buffer.concat(chunks).toString()).toBe("text");
   }
 });
 
-test("terminal channel has separate pairing deadlines, stays with its login, and forwards one final outcome", async () => {
-  const f = await fixture();
-  Object.assign(limits, { interactionTimeout: 800 });
-  Object.assign(serverLimits, { channelsPerDevice: 1 });
-  const peer = await f.device();
-  const login = f.store.createLogin(60000);
-  const other = f.store.createLogin(60000);
-  const cookie = `kiteline_session_http=${login.token}`;
-  const pending = f.call(
-    `/api/devices/${peer.deviceId}/channels`,
-    "POST",
-    {
-      kind: "terminal.attach",
-      params: { workspaceId: "work", sessionId: "session" },
-    },
-    cookie,
-  );
-  await expect.poll(() => peer.messages.some((m) => m.type === "channel.open")).toBe(true);
-  const opening = peer.messages.find((m) => m.type === "channel.open")!;
-  const endpoint = f.origin.replace("http:", "ws:");
-  const agent = new WebSocket(
-    `${endpoint}/api/agent/channels/${String(opening.channelId)}?connectionId=${String(opening.connectionId)}`,
-    { headers: { authorization: `Bearer ${peer.deviceToken}` } },
-  );
-  agent.on("error", () => {});
-  await once(agent, "open");
-  await delay(450);
-  agent.send(
-    JSON.stringify({
-      type: "ready",
-      meta: {
-        terminalInputBytes: 262144,
+test.each(["preparing", "ready"])(
+  "the %s pairing deadline releases the shared channel slot",
+  async (stage) => {
+    const f = await fixture({ pairingTimeoutMs: 300, channelsPerDevice: 1 });
+    const peer = await f.device();
+    const login = f.store.createLogin(60_000);
+    const cookie = `kiteline_session_http=${login.token}`;
+    const events = await f.events(cookie);
+    const input = {
+      kind: "file.read",
+      params: { workspaceId: "work", path: "file", purpose: "text" },
+    };
+    const pending = f.call(`/api/devices/${peer.deviceId}/channels`, "POST", input, cookie);
+    await expect
+      .poll(() => peer.messages.some((message) => message.type === "channel.open"))
+      .toBe(true);
+    const opening = peer.messages.find((message) => message.type === "channel.open")!;
+    if (stage === "ready") {
+      const socket = await f.dataChannel(
+        peer.deviceToken,
+        String(opening.channelId),
+        String(opening.connectionId),
+      );
+      socket.send(
+        JSON.stringify({
+          type: "ready",
+          meta: {
+            size: 0,
+            filename: "file",
+            targetPath: "file",
+            contentType: "text/plain; charset=utf-8",
+          },
+        }),
+      );
+    }
+    const response = await pending;
+    expect(response.status).toBe(stage === "ready" ? 200 : 504);
+    await response.arrayBuffer();
+    await expect
+      .poll(() => events.messages.find((event) => event.channelId === opening.channelId))
+      .toMatchObject({ type: "channel.failed", error: { code: "timeout" } });
+    const next = f.call(`/api/devices/${peer.deviceId}/channels`, "POST", input, cookie);
+    await expect
+      .poll(() => peer.messages.filter((message) => message.type === "channel.open").length)
+      .toBe(2);
+    const nextOpening = peer.messages.filter((message) => message.type === "channel.open")[1]!;
+    const cancelled = await f.call(
+      `/api/channels/${nextOpening.channelId}`,
+      "DELETE",
+      undefined,
+      cookie,
+    );
+    expect(await cancelled.json()).toEqual({ found: true });
+    await (await next).arrayBuffer();
+  },
+);
+
+test.each([
+  { type: "ended", exitCode: 17 },
+  { type: "error", code: "io_error", message: "Terminal failed" },
+])(
+  "terminal channel has separate deadlines, stays with its login, and forwards one final $type",
+  async (final) => {
+    const f = await fixture({ pairingTimeoutMs: 800, channelsPerDevice: 1 });
+    const peer = await f.device();
+    const otherDevice = await f.device("Other");
+    const login = f.store.createLogin(60000);
+    const other = f.store.createLogin(60000);
+    const cookie = `kiteline_session_http=${login.token}`;
+    const pending = f.call(
+      `/api/devices/${peer.deviceId}/channels`,
+      "POST",
+      {
+        kind: "terminal.attach",
+        params: { workspaceId: "work", sessionId: "session" },
       },
-    }),
-  );
-  const created = (await (await pending).json()) as { channelId: string };
-  expect(
-    await (
-      await f.call(
-        `/api/channels/${created.channelId}`,
-        "DELETE",
-        undefined,
-        `kiteline_session_http=${other.token}`,
-      )
-    ).json(),
-  ).toEqual({ found: false });
-  const refused = new WebSocket(endpoint + webPath(`/api/channels/${created.channelId}/terminal`), {
-    headers: { cookie: `kiteline_session_http=${other.token}`, origin: f.origin },
-  });
-  const rejected = await new Promise<number>((resolve, reject) => {
-    refused.on("error", reject);
-    refused.on("unexpected-response", (_request, response) => {
-      response.resume();
-      resolve(response.statusCode!);
-      refused.terminate();
+      cookie,
+    );
+    await expect.poll(() => peer.messages.some((m) => m.type === "channel.open")).toBe(true);
+    const opening = peer.messages.find((m) => m.type === "channel.open")!;
+    const endpoint = f.origin.replace("http:", "ws:");
+    const dataUrl = `${endpoint}/api/agent/channels/${String(opening.channelId)}?connectionId=${String(opening.connectionId)}`;
+    const wrongDevice = await rejectedUpgrade(dataUrl, {
+      authorization: `Bearer ${otherDevice.deviceToken}`,
     });
-  });
-  expect(rejected).toBe(404);
-  await delay(420);
-  const browser = new WebSocket(endpoint + webPath(`/api/channels/${created.channelId}/terminal`), {
-    headers: { cookie, origin: f.origin },
-  });
-  const frames: unknown[] = [];
-  browser.on("message", (data) => frames.push(JSON.parse(data.toString()) as unknown));
-  await once(browser, "open");
-  agent.send(JSON.stringify({ type: "ended", exitCode: 17 }));
-  agent.close(1000);
-  await once(browser, "close");
-  expect(frames).toEqual([{ type: "ended", exitCode: 17 }]);
-});
+    expect(wrongDevice.status).toBe(403);
+    const beforeReady = await rejectedUpgrade(
+      endpoint + webPath(`/api/channels/${opening.channelId}/terminal`),
+      {
+        cookie,
+        origin: f.origin,
+      },
+    );
+    expect(beforeReady.status).toBe(409);
+    const agent = await f.dataChannel(
+      peer.deviceToken,
+      String(opening.channelId),
+      String(opening.connectionId),
+    );
+    const duplicateAgent = await rejectedUpgrade(dataUrl, {
+      authorization: `Bearer ${peer.deviceToken}`,
+    });
+    expect(duplicateAgent.status).toBe(403);
+    await delay(450);
+    agent.send(
+      JSON.stringify({
+        type: "ready",
+        meta: {
+          terminalInputBytes: 262144,
+        },
+      }),
+    );
+    const created = (await (await pending).json()) as { channelId: string };
+    expect(
+      await (
+        await f.call(
+          `/api/channels/${created.channelId}`,
+          "DELETE",
+          undefined,
+          `kiteline_session_http=${other.token}`,
+        )
+      ).json(),
+    ).toEqual({ found: false });
+    const rejected = await rejectedUpgrade(
+      endpoint + webPath(`/api/channels/${created.channelId}/terminal`),
+      { cookie: `kiteline_session_http=${other.token}`, origin: f.origin },
+    );
+    expect(rejected.status).toBe(404);
+    await delay(420);
+    const browser = new WebSocket(
+      endpoint + webPath(`/api/channels/${created.channelId}/terminal`),
+      {
+        headers: { cookie, origin: f.origin },
+      },
+    );
+    const frames: unknown[] = [];
+    browser.on("message", (data, binary) => {
+      if (!binary) frames.push(JSON.parse(data.toString()) as unknown);
+    });
+    const started = once(agent, "message");
+    await once(browser, "open");
+    expect(JSON.parse((await started)[0].toString())).toEqual({ type: "start" });
+    const duplicate = await rejectedUpgrade(
+      endpoint + webPath(`/api/channels/${created.channelId}/terminal`),
+      { cookie, origin: f.origin },
+    );
+    expect(duplicate.status).toBe(409);
+    const input = once(agent, "message");
+    browser.send(JSON.stringify({ type: "input", data: "typed" }));
+    expect(JSON.parse((await input)[0].toString())).toEqual({ type: "input", data: "typed" });
+    const output = once(browser, "message");
+    agent.send(Buffer.from("screen"));
+    const [bytes, binary] = await output;
+    expect(binary).toBe(true);
+    expect(bytes).toEqual(Buffer.from("screen"));
+    agent.send(JSON.stringify(final));
+    agent.close(1000);
+    await once(browser, "close");
+    expect(frames).toEqual([final]);
+  },
+);

@@ -1,5 +1,3 @@
-import { serverLimits } from "../src/limits.js";
-import { limits } from "@kiteline/shared/protocol";
 import { afterEach, expect, test } from "vitest";
 import {
   createServer,
@@ -7,6 +5,7 @@ import {
   type IncomingMessage,
   type RequestListener,
   type Server,
+  type ServerResponse,
 } from "node:http";
 import { createServer as secureServer } from "node:https";
 import { getCACertificates, setDefaultCACertificates } from "node:tls";
@@ -18,17 +17,13 @@ import { promisify } from "node:util";
 import { join } from "node:path";
 import { connect, type AddressInfo, type Socket } from "node:net";
 import { WebSocket, WebSocketServer } from "ws";
-import { restoreServerLimits, serverFixture } from "./fixture.js";
+import { apiFixture, serverFixture } from "./fixture.js";
 import { Agent } from "../../agent/src/agent.js";
 import { defaultAgentLimits, privateDirectory } from "../../agent/src/config.js";
 
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
-  try {
-    for (const close of cleanup.splice(0).reverse()) await close();
-  } finally {
-    restoreServerLimits();
-  }
+  for (const close of cleanup.splice(0).reverse()) await close();
 });
 async function listen(server: Server, host = "127.0.0.1", port = 0) {
   server.listen(port, host);
@@ -36,9 +31,17 @@ async function listen(server: Server, host = "127.0.0.1", port = 0) {
   return (server.address() as AddressInfo).port;
 }
 async function fixture(handler: RequestListener, channels = 128) {
-  Object.assign(serverLimits, { channelsPerDevice: channels });
-  Object.assign(limits, { interactionTimeout: 1000 });
-  const { dataDir: root, app: kiteline, store, config, port, close } = await serverFixture(true);
+  const {
+    dataDir: root,
+    app: kiteline,
+    store,
+    config,
+    port,
+    close,
+  } = await serverFixture({
+    trustProxyProto: true,
+    channelPolicy: { channelsPerDevice: channels, pairingTimeoutMs: 1000 },
+  });
   const keyFile = join(root, "key.pem"),
     certFile = join(root, "cert.pem");
   await promisify(execFile)("openssl", [
@@ -496,6 +499,75 @@ test("real WebSocket messages exceed transport blocks and upgrade rejection is d
   });
   expect(result).toEqual({ status: 403, text: "hello" });
 }, 15_000);
+
+test.each(["content-length", "chunked"])(
+  "a complete %s response survives data channel failure before downstream finish",
+  async (framing) => {
+    const f = await apiFixture();
+    cleanup.push(f.close);
+    const peer = await f.device();
+    const login = f.store.createLogin(60_000);
+    const cookie = `kiteline_session_http=${login.token}`;
+    let downstream!: ServerResponse;
+    const paused = new Promise<IncomingMessage>((resolve) => {
+      f.app.server.prependOnceListener("request", (_request, response) => {
+        downstream = response;
+        response.once("pipe", (source: IncomingMessage) => {
+          // Readable.pipe resumes after emitting pipe, so hold the body after it returns.
+          queueMicrotask(() => {
+            source.pause();
+            resolve(source);
+          });
+        });
+      });
+    });
+    const pending = f.call(`/proxy/${peer.deviceId}/5173/`, "GET", undefined, cookie);
+    await expect
+      .poll(() => peer.messages.some((message) => message.type === "channel.open"))
+      .toBe(true);
+    const opening = peer.messages.find((message) => message.type === "channel.open")!;
+    const socket = await f.dataChannel(
+      peer.deviceToken,
+      String(opening.channelId),
+      String(opening.connectionId),
+    );
+    const started = once(socket, "message");
+    socket.send(JSON.stringify({ type: "ready", meta: {} }));
+    expect(JSON.parse((await started)[0].toString())).toEqual({ type: "start" });
+    socket.send(
+      Buffer.from(
+        "HTTP/1.1 200 OK\r\n" +
+          (framing === "content-length" ? "Content-Length: 4" : "Transfer-Encoding: chunked") +
+          "\r\n\r\n",
+      ),
+    );
+    const incoming = await paused;
+    const response = await pending;
+    expect(response.status).toBe(200);
+    socket.send(Buffer.from(framing === "content-length" ? "body" : "4\r\nbody\r\n0\r\n\r\n"));
+    await expect.poll(() => incoming.complete).toBe(true);
+    expect(downstream.headersSent).toBe(true);
+    expect(downstream.writableFinished).toBe(false);
+    socket.close(1011, "source failed after the complete response");
+    await expect
+      .poll(() =>
+        peer.messages.some(
+          (message) => message.type === "channel.cancel" && message.channelId === opening.channelId,
+        ),
+      )
+      .toBe(true);
+    expect(downstream.writableFinished).toBe(false);
+    incoming.resume();
+    expect(await response.text()).toBe("body");
+    const cancelled = await f.call(
+      `/api/channels/${String(opening.channelId)}`,
+      "DELETE",
+      undefined,
+      cookie,
+    );
+    expect(await cancelled.json()).toEqual({ found: false });
+  },
+);
 
 test("quiet SSE occupies the shared budget and logout closes only its original login", async () => {
   let open = 0;

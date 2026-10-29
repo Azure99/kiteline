@@ -11,7 +11,6 @@ import {
   type TerminalMeta,
   type FileMeta,
   type ChannelReady,
-  type ChannelKind,
   type FileReadPurpose,
   type FileWritePurpose,
   type ServerControlMessage,
@@ -25,26 +24,108 @@ import type { AgentConnection, Connections } from "./connections.js";
 import { FileTransfer } from "./file-transfer.js";
 import { parseReplyError } from "./agent-messages.js";
 
-interface Channel {
+type TerminalRequest = {
+  kind: "terminal.attach";
+  params: Record<string, unknown> & { workspaceId: string };
+};
+type FileReadRequest = {
+  kind: "file.read";
+  params: Record<string, unknown> & {
+    workspaceId: string;
+    path: string;
+    purpose: FileReadPurpose;
+  };
+};
+type FileWriteRequest = {
+  kind: "file.write";
+  params: Record<string, unknown> & {
+    workspaceId: string;
+    path: string;
+    purpose: FileWritePurpose;
+    size: number;
+  };
+};
+type ChannelRequest =
+  | TerminalRequest
+  | FileReadRequest
+  | FileWriteRequest
+  | { kind: "http.proxy"; params: { port: number } };
+
+function parsePublicRequest(
+  kind: string,
+  params: Record<string, unknown>,
+): TerminalRequest | FileReadRequest | FileWriteRequest {
+  if (kind !== "terminal.attach" && kind !== "file.read" && kind !== "file.write")
+    throw new AppError("unsupported", "Unsupported data channel");
+  const workspaceId = string(params.workspaceId);
+  if (kind === "terminal.attach") return { kind, params: { ...params, workspaceId } };
+  const path = string(params.path);
+  const purpose = params.purpose;
+  if (kind === "file.read") {
+    if (purpose !== "open" && purpose !== "text" && purpose !== "image")
+      throw new AppError("unsupported", "Unsupported file purpose");
+    return { kind, params: { ...params, workspaceId, path, purpose } };
+  }
+  if (purpose !== "save" && purpose !== "upload")
+    throw new AppError("unsupported", "Unsupported file purpose");
+  const size = integer(params.size, "size", 0, Number.MAX_SAFE_INTEGER);
+  return { kind, params: { ...params, workspaceId, path, purpose, size } };
+}
+
+function parseReady(text: string): Record<string, unknown> {
+  const message = record(JSON.parse(text));
+  if (message.type === "error") throw parseReplyError(message);
+  if (message.type !== "ready")
+    throw new AppError("invalid_argument", "Expected a channel ready message");
+  return record(message.meta);
+}
+
+export interface ChannelPolicy {
+  channelsPerDevice: number;
+  pairingTimeoutMs: number;
+}
+
+interface ChannelEntry {
   id: string;
   loginId: string;
   connection: AgentConnection;
   timer: NodeJS.Timeout;
-  kind: ChannelKind;
-  params: Record<string, unknown>;
   agent?: WebSocket;
-  browser?: WebSocket;
-  meta?: TerminalMeta | FileMeta;
-  file?: FileTransfer;
-  http?: { stream?: Duplex; failed: (error: unknown) => void };
-  download?: { request: IncomingMessage; response: ServerResponse };
-  terminalFinished?: boolean;
   resolve: () => void;
   reject: (error: unknown) => void;
 }
+interface TerminalChannel extends ChannelEntry {
+  kind: "terminal.attach";
+  browser?: WebSocket;
+  meta?: TerminalMeta;
+  terminalFinished?: boolean;
+}
+type FileChannel = ChannelEntry &
+  (FileReadRequest | FileWriteRequest) & {
+    meta?: FileMeta;
+    transfer?: FileTransfer;
+    download?: { request: IncomingMessage; response: ServerResponse };
+  };
+interface HttpChannel extends ChannelEntry {
+  kind: "http.proxy";
+  stream?: Duplex;
+  failed: (error: unknown) => void;
+}
+type Channel = TerminalChannel | FileChannel | HttpChannel;
+
 export class Channels {
   private entries = new Map<string, Channel>();
-  constructor(private connections: Connections) {}
+  private readonly policy: ChannelPolicy;
+  constructor(
+    private connections: Connections,
+    policy: Partial<ChannelPolicy> = {},
+  ) {
+    this.policy = {
+      channelsPerDevice: serverLimits.channelsPerDevice,
+      pairingTimeoutMs: limits.interactionTimeout,
+      ...policy,
+    };
+  }
   cancelLogin(loginId: string, error: AppError) {
     for (const item of this.entries.values())
       if (item.loginId === loginId) this.cancel(item.id, error);
@@ -53,64 +134,49 @@ export class Channels {
     for (const item of this.entries.values())
       if (item.connection === connection) this.cancel(item.id, error);
   }
-  create(
-    deviceId: string,
-    login: Login,
-    kind: string,
-    params: Record<string, unknown>,
-    download?: { request: IncomingMessage; response: ServerResponse },
-  ) {
-    if (kind !== "terminal.attach" && kind !== "file.read" && kind !== "file.write")
-      throw new AppError("unsupported", "Unsupported data channel");
-    string(params.workspaceId);
-    if (kind !== "terminal.attach") {
-      string(params.path);
-      const purposes: readonly string[] =
-        kind === "file.read"
-          ? ([
-              "open",
-              "text",
-              "image",
-              ...(download ? ["download" as const] : []),
-            ] satisfies FileReadPurpose[])
-          : (["save", "upload"] satisfies FileWritePurpose[]);
-      if (typeof params.purpose !== "string" || !purposes.includes(params.purpose))
-        throw new AppError("unsupported", "Unsupported file purpose");
-      if (kind === "file.write") integer(params.size, "size", 0, Number.MAX_SAFE_INTEGER);
-    }
-    const pending = this.reserve(deviceId, login, kind, params);
-    if (download) {
-      pending.item.download = download;
-      download.response.on("close", () => {
-        if (!download.response.writableFinished)
-          this.cancel(pending.id, new AppError("cancelled", "Download cancelled"));
-      });
-    }
+  create(deviceId: string, login: Login, kind: string, params: Record<string, unknown>) {
+    const request = parsePublicRequest(kind, params);
+    const { entry, message, ready } = this.prepare(deviceId, login, request);
+    const item: TerminalChannel | FileChannel =
+      request.kind === "terminal.attach"
+        ? { ...entry, kind: request.kind }
+        : { ...entry, ...request };
+    this.register(item, message);
     return {
-      id: pending.id,
-      ready: pending.ready.then(
+      id: item.id,
+      ready: ready.then(
         (): ChannelReady => ({
-          channelId: pending.id,
-          meta: pending.item.meta!,
+          channelId: item.id,
+          meta: item.meta!,
         }),
       ),
     };
   }
-  createHttp(deviceId: string, login: Login, port: number, failed: (error: unknown) => void) {
-    const pending = this.reserve(deviceId, login, "http.proxy", { port }, { failed });
-    return { id: pending.id, ready: pending.ready.then(() => pending.item.http!.stream!) };
-  }
-  private reserve(
+  createDownload(
     deviceId: string,
     login: Login,
-    kind: Channel["kind"],
-    params: Record<string, unknown>,
-    http?: Channel["http"],
+    target: { workspaceId: string; path: string },
+    download: { request: IncomingMessage; response: ServerResponse },
   ) {
+    const request: FileReadRequest = {
+      kind: "file.read",
+      params: { ...target, purpose: "download" },
+    };
+    const { entry, message, ready } = this.prepare(deviceId, login, request);
+    const item: FileChannel = { ...entry, ...request, download };
+    this.register(item, message);
+    download.response.on("close", () => {
+      if (!download.response.writableFinished)
+        this.cancel(item.id, new AppError("cancelled", "Download cancelled"));
+    });
+    return ready;
+  }
+  private prepare(deviceId: string, login: Login, request: ChannelRequest) {
     const id = randomUUID();
     const connection = this.connections.online(deviceId);
     const unavailable = (error: AppError): never => {
-      if (kind === "file.read") this.notifyFileFailure(id, login.id, deviceId, params, error);
+      if (request.kind === "file.read")
+        this.notifyFileFailure(id, login.id, deviceId, request.params, error);
       throw error;
     };
     if (!connection) return unavailable(this.connections.unavailableError(deviceId));
@@ -118,37 +184,37 @@ export class Channels {
       type: "channel.open",
       channelId: id,
       connectionId: connection.connectionId,
-      kind,
-      params,
+      ...request,
     } satisfies ServerControlMessage;
     if (Buffer.byteLength(JSON.stringify(message)) > limits.controlMessageBytes)
       return unavailable(new AppError("limit_exceeded", "Channel request exceeds the size limit"));
     if (
       [...this.entries.values()].filter((item) => item.connection === connection).length >=
-      serverLimits.channelsPerDevice
+      this.policy.channelsPerDevice
     )
       return unavailable(new AppError("busy", "Device channel limit reached"));
-    let item: Channel;
-    const ready = new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(
-        () => this.cancel(id, new AppError("timeout", "Channel pairing timed out")),
-        limits.interactionTimeout,
-      );
-      item = {
-        id,
-        connection,
-        loginId: login.id,
-        kind,
-        params,
-        timer,
-        resolve,
-        reject,
-        http,
-      };
-      this.entries.set(id, item);
+    let resolve!: () => void;
+    let reject!: (error: unknown) => void;
+    const ready = new Promise<void>((onReady, onError) => {
+      resolve = onReady;
+      reject = onError;
     });
-    this.connections.send(connection.socket, message);
-    return { id, ready, item: item! };
+    const entry: ChannelEntry = {
+      id,
+      connection,
+      loginId: login.id,
+      timer: setTimeout(
+        () => this.cancel(id, new AppError("timeout", "Channel pairing timed out")),
+        this.policy.pairingTimeoutMs,
+      ),
+      resolve,
+      reject,
+    };
+    return { entry, message, ready };
+  }
+  private register(item: Channel, message: ServerControlMessage) {
+    this.entries.set(item.id, item);
+    this.connections.send(item.connection.socket, message);
   }
   checkAgent(id: string, deviceId: string, connectionId: string) {
     const item = this.entries.get(id);
@@ -160,18 +226,30 @@ export class Channels {
       this.connections.online(deviceId) !== item.connection
     )
       throw new AppError("forbidden", "Data channel is no longer valid");
-    return item.kind;
+    return { kind: item.kind, accept: (socket: WebSocket) => this.acceptAgent(item, socket) };
   }
-  acceptAgent(id: string, socket: WebSocket) {
-    const item = this.entries.get(id)!;
+  private acceptAgent(item: Channel, socket: WebSocket) {
     item.agent = socket;
-    if (item.kind === "terminal.attach") heartbeat(socket);
-    else
-      socket.on("error", () => this.cancel(id, new AppError("offline", "Data connection failed")));
-    const receive = (raw: Buffer, binary: boolean) => {
+    switch (item.kind) {
+      case "terminal.attach":
+        this.acceptTerminalAgent(item, socket);
+        break;
+      case "file.read":
+      case "file.write":
+        this.acceptFileAgent(item, socket);
+        break;
+      case "http.proxy":
+        this.acceptHttpAgent(item, socket);
+        break;
+    }
+  }
+
+  private acceptTerminalAgent(item: TerminalChannel, socket: WebSocket) {
+    const { id } = item;
+    heartbeat(socket);
+    socket.on("message", (raw, binary) => {
       try {
         if (this.entries.get(id) !== item) return;
-        if (item.file) return;
         if (item.browser) {
           if (!binary) {
             const frame = record(JSON.parse(raw.toString()));
@@ -182,63 +260,20 @@ export class Channels {
         }
         if (binary || item.meta)
           throw new AppError("invalid_argument", "Channel has not been paired");
-        const message = record(JSON.parse(raw.toString()));
-        if (message.type === "error") throw parseReplyError(message);
-        if (message.type !== "ready")
-          throw new AppError("invalid_argument", "Expected a channel ready message");
-        if (item.http) {
-          record(message.meta);
-          clearTimeout(item.timer);
-          socket.off("message", receive);
-          item.http.stream = httpStream(socket, (error) => this.cancel(id, error));
-          socket.send(JSON.stringify({ type: "start" }));
-          item.resolve();
-          return;
-        }
-        item.meta = record(message.meta) as unknown as TerminalMeta | FileMeta;
-        if (item.kind !== "terminal.attach") {
-          const meta = item.meta as FileMeta;
-          integer(meta.size, "size", 0, Number.MAX_SAFE_INTEGER);
-          const path = string(meta.targetPath, "file target path");
-          if (path.startsWith("/") || path.split("/").includes(".."))
-            throw new AppError("invalid_argument", "A relative file target path is required");
-          if (item.kind === "file.write" && meta.size !== item.params.size)
-            throw new AppError("invalid_argument", "Declared file lengths do not match");
-          if (
-            (item.params.purpose === "image" || item.params.purpose === "open") &&
-            ![
-              "image/png",
-              "image/jpeg",
-              "image/webp",
-              "image/gif",
-              ...(item.params.purpose === "open" ? ["text/plain; charset=utf-8"] : []),
-            ].includes(meta.contentType)
-          )
-            throw new AppError("unsupported", "Unsupported file content type");
-        }
+        item.meta = parseReady(raw.toString()) as unknown as TerminalMeta;
         clearTimeout(item.timer);
-        if (item.download)
-          this.content(id, item.loginId, item.download.request, item.download.response);
-        else
-          item.timer = setTimeout(
-            () => this.cancel(id, new AppError("timeout", "Timed out waiting for browser pairing")),
-            limits.interactionTimeout,
-          );
+        item.timer = setTimeout(
+          () => this.cancel(id, new AppError("timeout", "Timed out waiting for browser pairing")),
+          this.policy.pairingTimeoutMs,
+        );
         item.resolve();
       } catch (error) {
         this.cancel(id, error);
       }
-    };
-    socket.on("message", receive);
-    socket.on("close", () => {
-      if (item.http?.stream) return;
-      if (item.file) {
-        void item.file.sourceClosed().then(() => {
-          if (this.entries.get(id) === item && !item.file!.sourceComplete)
-            this.cancel(id, new AppError("offline", "Device data connection closed"));
-        });
-      } else this.cancel(id, new AppError("offline", "Device data connection closed"));
     });
+    socket.on("close", () =>
+      this.cancel(id, new AppError("offline", "Device data connection closed")),
+    );
   }
   checkBrowser(id: string, loginId: string) {
     const item = this.entries.get(id);
@@ -251,6 +286,83 @@ export class Channels {
       item.agent?.readyState !== WebSocket.OPEN
     )
       throw new AppError("conflict", "Data channel cannot be joined");
+    const agent = item.agent;
+    return { accept: (socket: WebSocket) => this.acceptBrowser(item, agent, socket) };
+  }
+  private acceptBrowser(item: TerminalChannel, agent: WebSocket, socket: WebSocket) {
+    const { id } = item;
+    item.browser = socket;
+    clearTimeout(item.timer);
+    heartbeat(socket);
+    socket.on("message", (raw, binary) => {
+      try {
+        if (this.entries.get(id) === item)
+          sendFrame(agent, binary ? Buffer.from(raw as Buffer) : raw.toString(), binary);
+      } catch (error) {
+        this.cancel(id, error);
+      }
+    });
+    socket.on("close", () => this.cancel(id, new AppError("cancelled", "Display closed")));
+    try {
+      sendFrame(agent, JSON.stringify({ type: "start" }));
+    } catch (error) {
+      this.cancel(id, error);
+    }
+  }
+  private cancelTerminal(item: TerminalChannel, error: unknown) {
+    this.sendCancel(item);
+    if (item.browser?.readyState === WebSocket.OPEN) {
+      if (!item.terminalFinished)
+        item.browser.send(JSON.stringify({ type: "error", ...asError(error) }));
+      item.browser.close(1000);
+    }
+    item.agent?.close(1000);
+  }
+
+  private acceptFileAgent(item: FileChannel, socket: WebSocket) {
+    const { id } = item;
+    socket.on("error", () => this.cancel(id, new AppError("offline", "Data connection failed")));
+    socket.on("message", (raw, binary) => {
+      try {
+        if (this.entries.get(id) !== item || item.transfer) return;
+        if (binary || item.meta)
+          throw new AppError("invalid_argument", "Channel has not been paired");
+        const meta = parseReady(raw.toString()) as unknown as FileMeta;
+        integer(meta.size, "size", 0, Number.MAX_SAFE_INTEGER);
+        const path = string(meta.targetPath, "file target path");
+        if (path.startsWith("/") || path.split("/").includes(".."))
+          throw new AppError("invalid_argument", "A relative file target path is required");
+        if (item.kind === "file.write" && meta.size !== item.params.size)
+          throw new AppError("invalid_argument", "Declared file lengths do not match");
+        if (
+          (item.params.purpose === "image" || item.params.purpose === "open") &&
+          ![
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/gif",
+            ...(item.params.purpose === "open" ? ["text/plain; charset=utf-8"] : []),
+          ].includes(meta.contentType)
+        )
+          throw new AppError("unsupported", "Unsupported file content type");
+        item.meta = meta;
+        clearTimeout(item.timer);
+        if (item.download)
+          this.content(id, item.loginId, item.download.request, item.download.response);
+        else
+          item.timer = setTimeout(
+            () => this.cancel(id, new AppError("timeout", "Timed out waiting for browser pairing")),
+            this.policy.pairingTimeoutMs,
+          );
+        item.resolve();
+      } catch (error) {
+        this.cancel(id, error);
+      }
+    });
+    socket.on("close", () => {
+      if (item.transfer) void item.transfer.sourceClosed();
+      else this.cancel(id, new AppError("offline", "Device data connection closed"));
+    });
   }
   content(id: string, loginId: string, request: IncomingMessage, response: ServerResponse) {
     const item = this.entries.get(id);
@@ -258,7 +370,7 @@ export class Channels {
       throw new AppError("not_found", "File channel not found");
     if (
       (item.kind !== "file.read" && item.kind !== "file.write") ||
-      item.file ||
+      item.transfer ||
       !item.meta ||
       item.agent?.readyState !== WebSocket.OPEN
     )
@@ -266,98 +378,131 @@ export class Channels {
     if (request.method !== (item.kind === "file.read" ? "GET" : "PUT"))
       throw new AppError("invalid_argument", "File request method mismatch");
     clearTimeout(item.timer);
-    item.file = new FileTransfer({
+    item.transfer = new FileTransfer({
       kind: item.kind,
-      meta: item.meta as FileMeta,
+      meta: item.meta,
       socket: item.agent,
       request,
       response,
       fail: (error) => this.cancel(id, error),
-      release: () => this.release(id),
+      release: () => this.releaseFile(id),
       id,
-      purpose: String(item.params.purpose) as FileReadPurpose | FileWritePurpose,
+      purpose: item.params.purpose,
     });
-    void item.file.start();
+    // start can fail immediately; cancellation must already own the transfer.
+    void item.transfer.start();
   }
-  private release(id: string) {
+  private releaseFile(id: string) {
     const item = this.entries.get(id);
-    if (!item) return;
-    this.entries.delete(id);
-    clearTimeout(item.timer);
-    item.file?.stop();
+    if (!item || (item.kind !== "file.read" && item.kind !== "file.write")) return;
+    this.remove(item);
+    item.transfer?.finish();
     item.agent?.resume();
     item.agent?.close(1000);
   }
-  finishHttp(id: string) {
-    const item = this.entries.get(id);
-    if (!item?.http) return;
-    this.release(id);
-    item.http.stream?.destroy();
-  }
-  acceptBrowser(id: string, socket: WebSocket) {
-    const item = this.entries.get(id)!;
-    item.browser = socket;
-    clearTimeout(item.timer);
-    heartbeat(socket);
-    socket.on("message", (raw, binary) => {
-      try {
-        if (this.entries.get(id) === item)
-          sendFrame(item.agent!, binary ? Buffer.from(raw as Buffer) : raw.toString(), binary);
-      } catch (error) {
-        this.cancel(id, error);
-      }
-    });
-    socket.on("close", () => this.cancel(id, new AppError("cancelled", "Display closed")));
-    try {
-      sendFrame(item.agent!, JSON.stringify({ type: "start" }));
-    } catch (error) {
-      this.cancel(id, error);
-    }
-  }
-  cancel(id: string, error: unknown, loginId?: string) {
-    const item = this.entries.get(id);
-    if (!item || (loginId !== undefined && item.loginId !== loginId)) return false;
-    this.entries.delete(id);
-    clearTimeout(item.timer);
-    item.reject(error);
-    item.http?.failed(error);
-    item.http?.stream?.destroy();
+  private cancelFile(item: FileChannel, error: unknown) {
     if (item.kind === "file.read")
-      this.notifyFileFailure(id, item.loginId, item.connection.id, item.params, error);
-    item.file?.stop(error);
-    this.connections.send(item.connection.socket, {
-      type: "channel.cancel",
-      channelId: id,
-    } satisfies ServerControlMessage);
-    if (item.browser?.readyState === WebSocket.OPEN) {
-      if (!item.terminalFinished)
-        item.browser.send(JSON.stringify({ type: "error", ...asError(error) }));
-      item.browser.close(1000);
-    }
-    if (item.kind === "terminal.attach") item.agent?.close(1000);
-    else item.agent?.terminate();
-    return true;
-  }
-  close() {
-    for (const id of this.entries.keys())
-      this.cancel(id, new AppError("offline", "Server is shutting down"));
+      this.notifyFileFailure(item.id, item.loginId, item.connection.id, item.params, error);
+    item.transfer?.abort(error);
+    this.sendCancel(item);
+    item.agent?.terminate();
   }
   private notifyFileFailure(
     id: string,
     loginId: string,
     deviceId: string,
-    params: Record<string, unknown>,
+    params: FileReadRequest["params"],
     error: unknown,
   ) {
     this.connections.notify(loginId, {
       type: "channel.failed",
       channelId: id,
       deviceId,
-      workspaceId: params.workspaceId as string,
-      path: params.path as string,
-      purpose: params.purpose as FileReadPurpose,
+      workspaceId: params.workspaceId,
+      path: params.path,
+      purpose: params.purpose,
       error: asError(error),
       outcome: "failed",
     });
+  }
+
+  createHttp(deviceId: string, login: Login, port: number, failed: (error: unknown) => void) {
+    const { entry, message, ready } = this.prepare(deviceId, login, {
+      kind: "http.proxy",
+      params: { port },
+    });
+    const item: HttpChannel = { ...entry, kind: "http.proxy", failed };
+    this.register(item, message);
+    return { id: item.id, ready: ready.then(() => item.stream!) };
+  }
+  private acceptHttpAgent(item: HttpChannel, socket: WebSocket) {
+    const { id } = item;
+    socket.on("error", () => this.cancel(id, new AppError("offline", "Data connection failed")));
+    const receive = (raw: Buffer, binary: boolean) => {
+      try {
+        if (this.entries.get(id) !== item) return;
+        if (binary) throw new AppError("invalid_argument", "Channel has not been paired");
+        parseReady(raw.toString());
+        clearTimeout(item.timer);
+        socket.off("message", receive);
+        item.stream = httpStream(socket, (error) => this.cancel(id, error));
+        socket.send(JSON.stringify({ type: "start" }));
+        item.resolve();
+      } catch (error) {
+        this.cancel(id, error);
+      }
+    };
+    socket.on("message", receive);
+    socket.on("close", () => {
+      if (!item.stream) this.cancel(id, new AppError("offline", "Device data connection closed"));
+    });
+  }
+  finishHttp(id: string) {
+    const item = this.entries.get(id);
+    if (item?.kind !== "http.proxy") return;
+    this.remove(item);
+    item.agent?.resume();
+    item.agent?.close(1000);
+    item.stream?.destroy();
+  }
+  private cancelHttp(item: HttpChannel, error: unknown) {
+    item.failed(error);
+    item.stream?.destroy();
+    this.sendCancel(item);
+    item.agent?.terminate();
+  }
+
+  cancel(id: string, error: unknown, loginId?: string) {
+    const item = this.entries.get(id);
+    if (!item || (loginId !== undefined && item.loginId !== loginId)) return false;
+    this.remove(item);
+    item.reject(error);
+    switch (item.kind) {
+      case "terminal.attach":
+        this.cancelTerminal(item, error);
+        break;
+      case "file.read":
+      case "file.write":
+        this.cancelFile(item, error);
+        break;
+      case "http.proxy":
+        this.cancelHttp(item, error);
+        break;
+    }
+    return true;
+  }
+  private remove(item: Channel) {
+    this.entries.delete(item.id);
+    clearTimeout(item.timer);
+  }
+  private sendCancel(item: Channel) {
+    this.connections.send(item.connection.socket, {
+      type: "channel.cancel",
+      channelId: item.id,
+    } satisfies ServerControlMessage);
+  }
+  close() {
+    for (const id of this.entries.keys())
+      this.cancel(id, new AppError("offline", "Server is shutting down"));
   }
 }

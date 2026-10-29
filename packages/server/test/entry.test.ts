@@ -15,7 +15,7 @@ afterEach(async () => {
 });
 
 async function fixture(trustProxyProto: boolean) {
-  const { dataDir: root, store, app, port, close } = await serverFixture(trustProxyProto);
+  const { dataDir: root, store, app, port, close } = await serverFixture({ trustProxyProto });
   cleanup.push(close);
   function call(
     path: string,

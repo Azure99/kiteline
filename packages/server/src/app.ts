@@ -27,6 +27,7 @@ import {
   loginCookie,
 } from "./http.js";
 import { Connections } from "./connections.js";
+import type { ChannelPolicy } from "./channels.js";
 import { HttpProxy, isProxyPath } from "./http-proxy.js";
 import {
   installationCommands,
@@ -34,8 +35,12 @@ import {
   upgradeCommand,
 } from "./agent-installation.js";
 
-export function createKitelineServer(config: ServerConfig, store: Store) {
-  const connections = new Connections(store);
+export function createKitelineServer(
+  config: ServerConfig,
+  store: Store,
+  channelPolicy?: Partial<ChannelPolicy>,
+) {
+  const connections = new Connections(store, channelPolicy);
   const channels = connections.channels;
   const proxy = new HttpProxy(config, store, connections, channels);
   const bindingLimiter = new AttemptLimiter();
@@ -189,18 +194,15 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
         requireDevice(login, id);
         const suffix = device[2];
         if (suffix === "/download" && method === "GET") {
-          const pending = channels.create(
+          await channels.createDownload(
             id,
             login,
-            "file.read",
             {
               workspaceId: string(url.searchParams.get("workspaceId")),
               path: string(url.searchParams.get("path")),
-              purpose: "download",
             },
             { request, response },
           );
-          await pending.ready;
           return;
         }
         if (suffix === "/channels" && method === "POST") {
@@ -329,19 +331,22 @@ export function createKitelineServer(config: ServerConfig, store: Store) {
       if (agentChannel) {
         const device = requireAgent(store, request);
         const id = decodePath(agentChannel[1]!);
-        const kind = channels.checkAgent(
+        const join = channels.checkAgent(
           id,
           device.id,
           string(url.searchParams.get("connectionId")),
         );
-        (kind === "http.proxy" ? httpSockets : sockets).handleUpgrade(request, socket, head, (ws) =>
-          channels.acceptAgent(id, ws),
+        (join.kind === "http.proxy" ? httpSockets : sockets).handleUpgrade(
+          request,
+          socket,
+          head,
+          join.accept,
         );
       } else if (browserChannel) {
         const login = browserLogin();
         const id = decodePath(browserChannel[1]!);
-        channels.checkBrowser(id, login.id);
-        sockets.handleUpgrade(request, socket, head, (ws) => channels.acceptBrowser(id, ws));
+        const join = channels.checkBrowser(id, login.id);
+        sockets.handleUpgrade(request, socket, head, join.accept);
       } else if (url.pathname === "/api/agent/control") {
         const device = requireAgent(store, request);
         connections.observeAndRequireAgentVersion(device.id, url.searchParams.get("appVersion"));

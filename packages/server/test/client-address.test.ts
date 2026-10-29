@@ -11,7 +11,7 @@ afterEach(async () => {
 
 async function fixture(trusted?: string, hostname = "127.0.0.1") {
   vi.stubEnv("KITELINE_TRUSTED_PROXIES", trusted);
-  const f = await serverFixture(false, hostname);
+  const f = await serverFixture({ hostname });
   cleanups.push(f.close);
   f.config.trustedProxies = serverConfig().trustedProxies;
   function post({

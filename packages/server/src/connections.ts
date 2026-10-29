@@ -34,7 +34,7 @@ import {
   parseWorkspaceEvent,
 } from "./agent-messages.js";
 import { projectTaskSnapshot } from "./task-summary.js";
-import { Channels } from "./channels.js";
+import { Channels, type ChannelPolicy } from "./channels.js";
 
 const helloDeadlineMs = 30_000;
 const watchTargetLimit = 128;
@@ -65,7 +65,7 @@ interface Browser {
 type Report = Extract<BrowserEvent, { type: "terminal.notice" }>;
 
 export class Connections {
-  readonly channels = new Channels(this);
+  readonly channels: Channels;
   private readonly reports = new Map<string, Report>();
   private readonly agents = new Map<string, OnlineAgentConnection>();
   private readonly handshakes = new Set<AgentConnection>();
@@ -74,7 +74,11 @@ export class Connections {
   private readonly pending = new Map<string, Pending>();
   private readonly expiry: NodeJS.Timeout;
 
-  constructor(private store: Store) {
+  constructor(
+    private store: Store,
+    channelPolicy?: Partial<ChannelPolicy>,
+  ) {
+    this.channels = new Channels(this, channelPolicy);
     this.expiry = setInterval(() => {
       for (const { id } of this.store.expiredLogins()) {
         // Expiry already invalidated the login; deleting its row only clears persisted state.

@@ -12,6 +12,7 @@ import {
   apiFixture,
   agentEnvironment as environment,
   hello,
+  rejectedUpgrade,
   webPath,
 } from "./fixture.js";
 
@@ -541,13 +542,7 @@ test("replacement broadcasts offline then online and isolates ready channels and
 
   const fileParams = { workspaceId: "work", path: "file", purpose: "text" };
   const oldChannel = f.app.channels.create(peer.deviceId, login, "file.read", fileParams);
-  const oldData = new WebSocket(
-    f.origin.replace("http:", "ws:") +
-      `/api/agent/channels/${oldChannel.id}?connectionId=${oldConnection.connectionId}`,
-    { headers: { authorization: `Bearer ${peer.deviceToken}` } },
-  );
-  cleanups.push(() => oldData.terminate());
-  await once(oldData, "open");
+  const oldData = await f.dataChannel(peer.deviceToken, oldChannel.id, oldConnection.connectionId);
   const fileReady = {
     type: "ready",
     meta: {
@@ -623,35 +618,16 @@ test("replacement broadcasts offline then online and isolates ready channels and
   expect(reason.toString()).toBe("connection_replaced");
 
   const newChannel = f.app.channels.create(peer.deviceId, login, "file.read", fileParams);
-  const staleData = new WebSocket(
+  const rejected = await rejectedUpgrade(
     f.origin.replace("http:", "ws:") +
       `/api/agent/channels/${newChannel.id}?connectionId=${oldConnection.connectionId}`,
-    { headers: { authorization: `Bearer ${peer.deviceToken}` } },
+    { authorization: `Bearer ${peer.deviceToken}` },
   );
-  staleData.on("error", () => {});
-  const rejected = await new Promise<{ status: number; body: string }>((resolve) => {
-    staleData.once("unexpected-response", (_request, response) => {
-      let body = "";
-      response.on("data", (part) => {
-        body += String(part);
-      });
-      response.once("end", () => {
-        resolve({ status: response.statusCode!, body });
-        staleData.terminate();
-      });
-    });
-  });
   expect(rejected.status).toBe(403);
   expect(JSON.parse(rejected.body)).toMatchObject({ error: { code: "forbidden" } });
   const newConnection = f.app.connections.online(peer.deviceId)!;
   expect(newConnection.connectionId).not.toBe(oldConnection.connectionId);
-  const newData = new WebSocket(
-    f.origin.replace("http:", "ws:") +
-      `/api/agent/channels/${newChannel.id}?connectionId=${newConnection.connectionId}`,
-    { headers: { authorization: `Bearer ${peer.deviceToken}` } },
-  );
-  cleanups.push(() => newData.terminate());
-  await once(newData, "open");
+  const newData = await f.dataChannel(peer.deviceToken, newChannel.id, newConnection.connectionId);
   newData.send(JSON.stringify(fileReady));
   await newChannel.ready;
 });

@@ -265,7 +265,7 @@ Agent 根据 `rpcTraits.deadline` 选择 `rpcTimeout`、`searchTimeout` 或 `git
 - `file.write`：`purpose` 为 `save`、`upload`，由 `POST …/channels` 创建，浏览器用 `PUT /api/channels/:channelId/content` 发送。
 - `http.proxy`：由 `/proxy/`、`/absproxy/` 请求在内部创建；agent 处理代码为 `packages/agent/src/http/channels.ts`。
 
-公开的 `POST …/channels` 只接受前三种。参数见 `packages/shared/src/protocol/index.ts` 的 `ChannelParams`，`meta` 见同文件的 `TerminalMeta` 和 `FileMeta`；接收端仍按各自职责校验输入。
+公开的 `POST …/channels` 只接受前三种。文件 purpose 必须是字符串：读取接受 `open`、`text`、`image`，写入接受 `save`、`upload`；`download` 只由下载入口创建。不支持的 kind 或 purpose 在检查设备在线状态和通道配额前以 `unsupported` 拒绝。参数见 `packages/shared/src/protocol/index.ts` 的 `ChannelParams`，`meta` 见同文件的 `TerminalMeta` 和 `FileMeta`；接收端仍按各自职责校验输入。
 
 ### 建立
 
@@ -279,7 +279,7 @@ Agent 根据 `rpcTraits.deadline` 选择 `rpcTimeout`、`searchTimeout` 或 `git
 
 文本帧是 JSON 控制消息，二进制帧是不超过 `dataChunkBytes` 的数据块。每个方向只有一个发送者，按顺序发送。
 
-- **`file.read`**：agent 发送二进制数据块，总长度等于 `meta.size`，没有表示成功的帧。agent 留住最后一块，直到读取完成且检查全部通过才发出；失败时改发 `error` 并关闭。server 收到恰好 `meta.size` 字节时结束 HTTP 响应，字节不足的断流按读取失败处理。细节见[上传与下载](files.md#上传与下载)。
+- **`file.read`**：agent 发送二进制数据块，总长度等于 `meta.size`，没有表示成功的帧。agent 留住最后一块，直到读取完成且检查全部通过才发出；失败时改发 `error` 并关闭。server 收到恰好 `meta.size` 字节时结束 HTTP 响应；数据连接自然关闭时，先排空已收到的帧再判断长度是否不足，字节不足按读取失败处理。细节见[上传与下载](files.md#上传与下载)。
 - **`file.write`**：server 把 PUT 请求体分块转发，请求体长度等于声明大小后发送 `end`。agent 校验并发布文件，发送 `result`，server 把这个 `Reply` 作为 PUT 的响应返回。
 - **`terminal.attach`**：agent 校验目标后发送通道就绪帧 `ready`，收到 `start` 后开始输出。省略 `mode` 或 `mode:"web"` 使用 recorder 恢复，帧和输入类型为 `TerminalFrame`、`BrowserTerminalInput`；恢复完成前不允许输入。`mode:"tty"` 带本机 `cols/rows/term`，启动普通 tmux client 的 PTY；双向二进制帧为原始字节，JSON 仅使用 `TtyInput`、`TtyFrame`，没有 Web 恢复帧或粘贴归一化。类型位于 `packages/shared/src/protocol/ipc.ts`，行为见[附着与恢复](terminal.md#附着与恢复)。
 - **`http.proxy`**：`ready` 的 `meta` 为空对象。`start` 之后通道只传二进制帧，收到文本帧按失败处理；连接以 1000 或无关闭码关闭表示正常结束，其他关闭码表示失败。见[请求转发](http-access.md#请求转发)。
@@ -296,7 +296,7 @@ Agent 根据 `rpcTraits.deadline` 选择 `rpcTimeout`、`searchTimeout` 或 `git
 - 登录结束时，server 取消该登录的全部通道（`unauthenticated`）；控制连接断开或被替换时，取消属于它的通道（`offline`）。
 - 取消时，server 向 agent 发送 `channel.cancel` 并关闭两侧连接；终端的浏览器一侧尚未收到 `ended` 或 `error` 时，先收到一条 `error` 帧。agent 收到 `channel.cancel` 后停止仍在进行的准备，迟到的连接和文件句柄直接关闭。
 - `file.read` 失败（包括设备离线、通道已满）时，server 向发起的登录发送 `channel.failed`。
-- 正常完成后，server 在 HTTP 响应结束时释放通道，并以 1000 关闭 agent 一侧。
+- 文件和普通 HTTP 请求正常完成时，server 在下游响应 finish 后释放通道，并以 1000 关闭 agent 一侧；收到完整内容与下游完成是不同的时点。HTTP 完整响应和升级的结束条件见[连接寿命](http-access.md#连接寿命)。
 
 ## 本机 IPC
 

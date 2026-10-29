@@ -28,12 +28,9 @@ interface FileTransferOptions {
 }
 
 export class FileTransfer {
-  readonly controller = new AbortController();
-  readComplete = false;
+  private readonly controller = new AbortController();
+  private readComplete = false;
   private resultReceived = false;
-  get sourceComplete() {
-    return this.readComplete || this.resultReceived;
-  }
   private received = 0;
   private ended = false;
   private timer: NodeJS.Timeout;
@@ -65,7 +62,6 @@ export class FileTransfer {
       await sendFileFrame(socket, JSON.stringify({ type: "start" }), signal);
       if (kind === "file.read") {
         if (!meta.size) {
-          this.readComplete = true;
           this.headers();
           response.end();
         }
@@ -136,12 +132,18 @@ export class FileTransfer {
     if (!response.write(data)) await once(response, "drain", { signal: this.controller.signal });
     if (this.readComplete) response.end();
   }
-  stop(error?: unknown) {
-    const { kind, id, request, response } = this.options;
-    this.controller.abort(error ?? new AppError("cancelled", "File request completed"));
+  private stop(reason: unknown) {
+    this.controller.abort(reason);
     clearTimeout(this.timer);
     void this.frames.close();
-    if (error && !response.writableFinished && !response.destroyed) {
+  }
+  finish() {
+    this.stop(new AppError("cancelled", "File request completed"));
+  }
+  abort(error: unknown) {
+    const { kind, id, request, response } = this.options;
+    this.stop(error);
+    if (!response.writableFinished && !response.destroyed) {
       if (kind === "file.write" && !this.resultReceived)
         json(response, 200, {
           id,
@@ -150,7 +152,7 @@ export class FileTransfer {
         });
       else failure(response, error);
     }
-    if (error && !request.complete) {
+    if (!request.complete) {
       if (response.writableFinished || response.destroyed) request.destroy();
       else {
         const destroy = () => request.destroy();
@@ -159,7 +161,9 @@ export class FileTransfer {
       }
     }
   }
-  sourceClosed() {
-    return this.frames.drain();
+  async sourceClosed() {
+    await this.frames.drain();
+    if (!this.controller.signal.aborted && !this.readComplete && !this.resultReceived)
+      this.options.fail(new AppError("offline", "Device data connection closed"));
   }
 }
