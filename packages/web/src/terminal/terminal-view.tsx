@@ -22,7 +22,7 @@ import {
   TextSelect,
   X,
 } from "lucide-react";
-import { TerminalDisplay, type DisplayState } from "./display";
+import { TerminalScreens, type TerminalScreenSnapshot } from "./screens";
 import { IconButton } from "../components/icon-button";
 import { Button } from "../components/ui/button";
 import { api, ApiError, rpc } from "../lib/api";
@@ -35,7 +35,7 @@ import { showFile } from "../files/navigation";
 import { useMobile } from "../lib/use-mobile";
 import { cn } from "../lib/utils";
 import { terminalKeyboard } from "./keyboard-input";
-import { releasedModifiers, type Modifiers } from "./auxiliary-input";
+import { releasedModifiers } from "./auxiliary-input";
 import { TerminalSearch } from "./terminal-search";
 import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
 import { ContextMenuContent } from "../components/ui/context-menu";
@@ -92,9 +92,14 @@ export function TerminalView({
   const compatible = useWebCompatible();
 
   const element = useRef<HTMLDivElement>(null);
-  const display = useRef<TerminalDisplay>(undefined);
-  const [title, setTitle] = useState("");
-  const [terminal, setTerminal] = useState<Terminal>();
+  const screens = useRef<TerminalScreens>(undefined);
+  const [snapshot, setSnapshot] = useState<TerminalScreenSnapshot>({
+    title: "",
+    reading: false,
+    modifiers: releasedModifiers,
+    state: { status: "connecting" },
+  });
+  const { terminal, title, reading, modifiers, state } = snapshot;
   useEffect(() => {
     if (!terminal) return;
     const canvas = element.current!;
@@ -111,16 +116,12 @@ export function TerminalView({
     );
     return () => provider.dispose();
   }, [terminal, deviceId, workspaceId, workspacePath, t]);
-  const [reading, setReading] = useState(false);
-  const restoring = useRef(false);
-  const restoreDisplay = useRef<(scope: "retained" | "screen") => void>(() => {});
-  const [state, setState] = useState<DisplayState>({ status: "connecting" });
+  const preflight = useRef(false);
   const code = state.error instanceof ApiError ? state.error.code : undefined;
   const screenRetry =
     state.status === "error" && ["limit_exceeded", "timeout", "busy"].includes(code ?? "");
   const missing = !!state.missing || (state.status === "error" && code === "not_found");
   const [notice, setNotice] = useState<unknown>();
-  const [modifiers, setModifiers] = useState<Modifiers>(releasedModifiers);
   const [expanded, setExpanded] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [contextSelection, setContextSelection] = useState("");
@@ -147,7 +148,7 @@ export function TerminalView({
     if (mobile) contextMenu.current?.close();
   }, [mobile]);
   useEffect(() => {
-    if (!mobile) display.current?.releaseModifiers();
+    if (!mobile) screens.current?.display?.releaseModifiers();
   }, [mobile]);
   useEffect(
     () =>
@@ -168,31 +169,33 @@ export function TerminalView({
     return () => operations.current.abort();
   }, []);
   function redisplay(scope: "retained" | "screen" = "retained") {
-    if (!webCompatible() || restoring.current) return;
-    restoring.current = true;
-    const restore = restoreDisplay.current;
+    const current = screens.current;
+    if (!webCompatible() || preflight.current || !current || current.connecting) return;
+    preflight.current = true;
     const signal = operations.current.signal;
     void api("/api/session", { signal })
       .then(() => {
-        if (signal.aborted || restoreDisplay.current !== restore) return;
-        if (!webCompatible() || display.current?.state.status === "ready") {
-          restoring.current = false;
+        if (
+          signal.aborted ||
+          screens.current !== current ||
+          !webCompatible() ||
+          current.display?.state.status === "ready"
+        )
           return;
-        }
         setNotice("");
-        setState({ status: "connecting" });
-        restore(scope);
+        current.restore(scope);
       })
       .catch((error: unknown) => {
-        if (signal.aborted || restoreDisplay.current !== restore) return;
-        restoring.current = false;
-        setNotice(error);
+        if (!signal.aborted && screens.current === current) setNotice(error);
+      })
+      .finally(() => {
+        preflight.current = false;
       });
   }
   useImperativeHandle(ref, () => ({
     redraw: () => setRedrawDialog(true),
-    fontSize: (delta) => display.current?.changeFontSize(delta),
-    focus: () => display.current?.focus(),
+    fontSize: (delta) => screens.current?.display?.changeFontSize(delta),
+    focus: () => screens.current?.display?.focus(),
     search: () => {
       if (!terminal) return;
       setSearchOpen(true);
@@ -201,7 +204,7 @@ export function TerminalView({
   }));
   async function recover() {
     const signal = operations.current.signal;
-    const initiatingDisplay = display.current;
+    const display = screens.current?.display;
     setRecovering(true);
     try {
       let session = await rpc(deviceId, "sessions.recover", { workspaceId, sessionId }, signal);
@@ -212,12 +215,12 @@ export function TerminalView({
         if (!current) throw new Error("The original task has ended");
         session = current;
       }
-      if (signal.aborted || display.current !== initiatingDisplay) return;
+      if (signal.aborted || screens.current?.display !== display) return;
       if (session.webStatus !== "available")
         throw new Error(session.webReason ?? "Terminal recovery failed");
       redisplay();
     } catch (error) {
-      if (!signal.aborted && display.current === initiatingDisplay) setNotice(error);
+      if (!signal.aborted && screens.current?.display === display) setNotice(error);
     } finally {
       if (!signal.aborted) setRecovering(false);
     }
@@ -236,130 +239,22 @@ export function TerminalView({
     }
   }
   useEffect(() => {
-    type Screen = {
-      display: TerminalDisplay;
-      host: HTMLDivElement;
-      terminal?: Terminal;
-      title: string;
-      reading: boolean;
-      modifiers: Modifiers;
-      suspended: boolean;
-    };
-    let current: Screen | undefined;
-    let candidate: Screen | undefined;
-    function remove(screen: Screen) {
-      screen.display.dispose();
-      screen.host.remove();
-    }
-    function publish(screen: Screen, next: DisplayState) {
-      display.current = screen.display;
-      setTerminal(screen.terminal);
-      setTitle(screen.title);
-      setReading(screen.reading);
-      setModifiers(screen.modifiers);
-      setState(next);
-    }
-    function createScreen(scope: "retained" | "screen", pending: boolean): Screen {
-      const host = document.createElement("div");
-      host.className = "terminal-canvas absolute inset-0";
-      if (pending) {
-        host.style.visibility = "hidden";
-        host.style.pointerEvents = "none";
-        host.setAttribute("aria-hidden", "true");
-      }
-      element.current!.append(host);
-      const screen = {
-        host,
-        title: "",
-        reading: false,
-        modifiers: releasedModifiers,
-        suspended: false,
-      } as Screen;
-      screen.display = new TerminalDisplay(
-        host,
-        deviceId,
-        workspaceId,
-        sessionId,
-        (next) => {
-          if (screen === candidate) {
-            if (next.status === "ready") {
-              const old = current;
-              candidate = undefined;
-              current = screen;
-              host.style.visibility = "";
-              host.style.pointerEvents = "";
-              host.removeAttribute("aria-hidden");
-              screen.terminal?.textarea?.setAttribute("tabindex", "0");
-              restoring.current = false;
-              publish(screen, next);
-              if (old) remove(old);
-            } else if (next.status === "error" || next.status === "ended") {
-              candidate = undefined;
-              restoring.current = false;
-              remove(screen);
-              const missing = next.error instanceof ApiError && next.error.code === "not_found";
-              if (missing) current?.display.sessionMissing();
-              setState(missing ? { status: "ended", missing: true } : next);
-            }
-          } else if (screen === current && (!screen.suspended || next.missing)) {
-            if (next.status !== "connecting") restoring.current = false;
-            setState(next);
-          }
-        },
-        scope,
-        {
-          opened: (value) => {
-            screen.terminal = value;
-            if (pending) value.textarea?.setAttribute("tabindex", "-1");
-            if (screen === current) setTerminal(value);
-          },
-          title: (value) => {
-            screen.title = value;
-            if (screen === current) setTitle(value);
-          },
-          reading: (value) => {
-            screen.reading = value;
-            if (screen === current) setReading(value);
-          },
-          modifiers: (value) => {
-            screen.modifiers = value;
-            if (screen === current) setModifiers(value);
-          },
-        },
-      );
-      return screen;
-    }
-    current = createScreen("retained", false);
-    display.current = current.display;
-    restoreDisplay.current = (scope) => {
-      if (current && !current.terminal) {
-        remove(current);
-        current = createScreen(scope, false);
-        display.current = current.display;
-        return;
-      }
-      if (current && !current.suspended) {
-        current.display.retainScreen();
-        current.suspended = true;
-      }
-      candidate = createScreen(scope, true);
-    };
+    const current = new TerminalScreens(
+      element.current!,
+      { deviceId, workspaceId, sessionId },
+      setSnapshot,
+    );
+    screens.current = current;
     return () => {
-      restoreDisplay.current = () => {};
-      restoring.current = false;
-      if (candidate) remove(candidate);
-      if (current) remove(current);
-      display.current = undefined;
-      setTitle("");
-      setTerminal(undefined);
-      setReading(false);
+      screens.current = undefined;
+      current.dispose();
     };
   }, [deviceId, workspaceId, sessionId]);
   useLayoutEffect(() => {
-    if (state.status === "ready") display.current?.resize();
+    if (state.status === "ready") screens.current?.display?.syncViewportAndInput();
   }, [terminal, state.status]);
   useEffect(() => {
-    if (sessionMissing && state.status === "error") display.current?.sessionMissing();
+    if (sessionMissing && state.status === "error") screens.current?.display?.sessionMissing();
   }, [sessionMissing, state.status]);
   useEffect(() => {
     Terminal.strings.promptLabel = t(($) => $.terminal.inputLabel);
@@ -377,7 +272,7 @@ export function TerminalView({
     };
   }, [terminal, mobile]);
   async function paste() {
-    const current = display.current;
+    const current = screens.current?.display;
     try {
       if (!mobile) current?.focus();
       current?.paste(await navigator.clipboard.readText());
@@ -395,8 +290,8 @@ export function TerminalView({
   }
   const auxiliary = useCallback(
     (value: string) => {
-      display.current?.key(value);
-      if (!mobile) display.current?.focus();
+      screens.current?.display?.key(value);
+      if (!mobile) screens.current?.display?.focus();
     },
     [mobile],
   );
@@ -635,7 +530,7 @@ export function TerminalView({
               onPointerDown={(event) => {
                 if (event.pointerType === "mouse") event.preventDefault();
               }}
-              onClick={() => display.current?.scrollToBottom()}
+              onClick={() => screens.current?.display?.scrollToBottom()}
             >
               <ArrowDown />
             </IconButton>
@@ -698,7 +593,7 @@ export function TerminalView({
               className="aux-key"
               aria-pressed={modifiers[key]}
               disabled={state.status !== "ready"}
-              onClick={() => display.current?.toggleModifier(key)}
+              onClick={() => screens.current?.display?.toggleModifier(key)}
             >
               {key.slice(0, -3).toUpperCase()}
             </button>

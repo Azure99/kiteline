@@ -22,6 +22,7 @@ import { isKeyboardOpen } from "../lib/viewport";
 import { KeyboardViewport } from "./keyboard-viewport";
 import { AuxiliaryInput, type Modifiers } from "./auxiliary-input";
 
+const maxReceivedDimension = 10_000;
 const fontSizeKey = "kiteline.terminal-font-size";
 const clampFontSize = (value: number) => Math.max(10, Math.min(24, value));
 const encoder = new TextEncoder();
@@ -36,6 +37,23 @@ export interface DisplayState {
   historyLimited?: boolean;
   historyGap?: boolean;
 }
+export interface TerminalTarget {
+  deviceId: string;
+  workspaceId: string;
+  sessionId: string;
+}
+interface DisplayOptions {
+  host: HTMLElement;
+  target: TerminalTarget;
+  history?: "retained" | "screen";
+  events: {
+    state: (state: DisplayState) => void;
+    opened?: (terminal: Terminal) => void;
+    title?: (title: string) => void;
+    reading?: (value: boolean) => void;
+    modifiers?: (value: Modifiers) => void;
+  };
+}
 export class TerminalDisplay {
   terminal?: Terminal;
   private fitAddon = new FitAddon();
@@ -46,8 +64,7 @@ export class TerminalDisplay {
   private observer: ResizeObserver;
   private queue: Promise<unknown> = Promise.resolve();
   private parsed: Promise<void> = Promise.resolve();
-  private receivedEnd = false;
-  private connectionLost = false;
+  private receiveStopped = false;
   private ready = false;
   private disposed = false;
   private snapshotRemaining = 0;
@@ -58,38 +75,26 @@ export class TerminalDisplay {
   private auxiliary?: AuxiliaryInput;
   private cleanups: (() => void)[] = [];
   state: DisplayState = { status: "connecting" };
-  constructor(
-    private element: HTMLElement,
-    private deviceId: string,
-    private workspaceId: string,
-    private sessionId: string,
-    private onState: (state: DisplayState) => void,
-    history: "retained" | "screen" = "retained",
-    private interaction?: {
-      opened: (terminal: Terminal) => void;
-      title: (title: string) => void;
-      reading: (value: boolean) => void;
-      modifiers: (value: Modifiers) => void;
-    },
-  ) {
-    this.observer = new ResizeObserver(() => this.resize());
-    this.observer.observe(element);
+  constructor(private options: DisplayOptions) {
+    const { host, history = "retained" } = options;
+    this.observer = new ResizeObserver(() => this.syncViewportAndInput());
+    this.observer.observe(host);
     window.addEventListener("kiteline:viewport", this.viewportChanged);
-    element.addEventListener("paste", this.onPaste, true);
+    host.addEventListener("paste", this.onPaste, true);
     void this.connect(history);
   }
   private change(state: DisplayState) {
     this.state = state;
-    if (!this.disposed) this.onState(state);
+    if (!this.disposed) this.options.events.state(state);
   }
   private async connect(history: "retained" | "screen") {
     try {
       const channel = await openChannel(
-        this.deviceId,
+        this.options.target.deviceId,
         "terminal.attach",
         {
-          workspaceId: this.workspaceId,
-          sessionId: this.sessionId,
+          workspaceId: this.options.target.workspaceId,
+          sessionId: this.options.target.sessionId,
           history,
         },
         this.abort.signal,
@@ -109,7 +114,7 @@ export class TerminalDisplay {
       this.socket = socket;
       socket.binaryType = "arraybuffer";
       socket.onmessage = (event: MessageEvent<ArrayBuffer | string>) => {
-        if (this.disposed || this.receivedEnd || this.connectionLost) return;
+        if (this.disposed || this.receiveStopped) return;
         try {
           if (event.data instanceof ArrayBuffer) {
             const data = new Uint8Array(event.data);
@@ -124,8 +129,7 @@ export class TerminalDisplay {
             const credit = terminalOutputCost(encoder.encode(event.data).length);
             const ordered = frame.type !== "input.error" && frame.type !== "error";
             if (frame.type === "ended" || frame.type === "error") {
-              this.receivedEnd = frame.type === "ended";
-              this.connectionLost = frame.type === "error";
+              this.receiveStopped = true;
               if (this.terminal) this.terminal.options.disableStdin = true;
             }
             this.queue = this.queue
@@ -141,12 +145,11 @@ export class TerminalDisplay {
         }
       };
       socket.onerror = () => {
-        if (!this.receivedEnd && !this.connectionLost)
-          this.fail(new Error("Terminal connection failed"));
+        if (!this.receiveStopped) this.fail(new Error("Terminal connection failed"));
       };
       socket.onclose = () => {
-        if (!this.receivedEnd && !this.connectionLost && !this.disposed) {
-          this.connectionLost = true;
+        if (!this.receiveStopped && !this.disposed) {
+          this.receiveStopped = true;
           this.ready = false;
           if (this.terminal) this.terminal.options.disableStdin = true;
           this.queue = this.queue.then(async () => {
@@ -180,18 +183,18 @@ export class TerminalDisplay {
           if (terminal.hasSelection()) return;
           if (/^https?:\/\//i.test(uri))
             window.open(
-              deviceServiceLink(uri, this.deviceId)?.url ?? uri,
+              deviceServiceLink(uri, this.options.target.deviceId)?.url ?? uri,
               "_blank",
               "noopener,noreferrer",
             );
         };
         const hoverLink = (_event: MouseEvent, uri: string) => {
-          const target = deviceServiceLink(uri, this.deviceId);
-          this.element.title = target
+          const target = deviceServiceLink(uri, this.options.target.deviceId);
+          this.options.host.title = target
             ? i18n.t(($) => $.devices.openDevicePort, { port: target.port })
             : uri;
         };
-        const leaveLink = () => this.element.removeAttribute("title");
+        const leaveLink = () => this.options.host.removeAttribute("title");
         let savedFontSize = 0;
         try {
           savedFontSize = Number(localStorage.getItem(fontSizeKey));
@@ -202,8 +205,8 @@ export class TerminalDisplay {
           ...terminalOptions(
             integer(frame.historyLines, "historyLines", 0, limits.terminalHistoryLines),
           ),
-          cols: integer(frame.cols, "cols", 1, 10000),
-          rows: integer(frame.rows, "rows", 1, 10000),
+          cols: integer(frame.cols, "cols", 1, maxReceivedDimension),
+          rows: integer(frame.rows, "rows", 1, maxReceivedDimension),
           fontFamily: "'Cascadia Code', 'DejaVu Sans Mono', monospace",
           fontSize: clampFontSize(savedFontSize || (isMobile() ? 12 : 13)),
           lineHeight: 1.2,
@@ -230,9 +233,9 @@ export class TerminalDisplay {
           this.bytes(Uint8Array.from(value, (character) => character.charCodeAt(0))),
         );
         this.cleanups.push(() => binary.dispose());
-        terminal.open(this.element);
+        terminal.open(this.options.host);
         this.auxiliary = new AuxiliaryInput(terminal, (value) =>
-          this.interaction?.modifiers(value),
+          this.options.events.modifiers?.(value),
         );
         this.keyboardViewport = new KeyboardViewport(terminal, this.reportReading);
         const selectionResize = terminal.onResize(() => terminal.clearSelection());
@@ -242,12 +245,16 @@ export class TerminalDisplay {
           terminal.onWriteParsed(this.reportReading),
           terminal.buffer.onBufferChange(this.reportReading),
         ];
-        this.element.addEventListener("scroll", this.reportReading);
-        this.cleanups.push(() => this.element.removeEventListener("scroll", this.reportReading));
+        this.options.host.addEventListener("scroll", this.reportReading);
+        this.cleanups.push(() =>
+          this.options.host.removeEventListener("scroll", this.reportReading),
+        );
         this.cleanups.push(() => readingEvents.forEach((event) => event.dispose()));
-        const titleSubscription = terminal.onTitleChange((title) => this.interaction?.title(title));
+        const titleSubscription = terminal.onTitleChange((title) =>
+          this.options.events.title?.(title),
+        );
         this.cleanups.push(() => titleSubscription.dispose());
-        this.interaction?.opened(terminal);
+        this.options.events.opened?.(terminal);
         this.change({
           status: "connecting",
           historyGap: !!frame.historyGap,
@@ -257,15 +264,15 @@ export class TerminalDisplay {
       }
       case "resize":
         {
-          const cols = integer(frame.cols, "cols", 1, 10000);
-          const rows = integer(frame.rows, "rows", 1, 10000);
+          const cols = integer(frame.cols, "cols", 1, maxReceivedDimension);
+          const rows = integer(frame.rows, "rows", 1, maxReceivedDimension);
           if (cols !== this.proposed?.cols || rows !== this.proposed?.rows)
             this.proposed = undefined;
           this.terminal?.resize(cols, rows);
         }
         break;
       case "ready":
-        if (this.connectionLost || this.receivedEnd) return;
+        if (this.receiveStopped) return;
         if (!this.terminal || this.snapshotRemaining)
           throw new Error("Terminal restoration is incomplete");
         this.ready = true;
@@ -300,7 +307,7 @@ export class TerminalDisplay {
     this.keyboardViewport?.dispose();
     this.keyboardViewport = undefined;
     // A retained recovery screen may subsequently receive sessionMissing/end.
-    if (!this.element.classList.contains("terminal-readonly"))
+    if (!this.options.host.classList.contains("terminal-readonly"))
       this.cleanups.push(retainReadonlyViewport(this.terminal));
     // The read-only viewport may now scroll; show "Back to bottom" without waiting for a resize.
     this.reportReading();
@@ -313,7 +320,6 @@ export class TerminalDisplay {
   /** Keeps a disconnected display's last screen read-only once its session no longer exists. */
   sessionMissing() {
     if (this.disposed || this.state.status !== "error") return;
-    this.receivedEnd = true;
     this.end({ exitCode: null, missing: true });
   }
   private async output(bytes: Uint8Array) {
@@ -343,16 +349,17 @@ export class TerminalDisplay {
     this.socket.send(text);
   }
   private bytes(data: Uint8Array) {
-    if (!this.resize()) return;
+    const socket = this.syncViewportAndInput();
+    if (!socket) return;
     this.keyboardViewport?.followInput();
     if (
       data.length > limits.dataChunkBytes ||
-      this.socket!.bufferedAmount + data.length > limits.terminalPendingBytes
+      socket.bufferedAmount + data.length > limits.terminalPendingBytes
     ) {
       this.change({ ...this.state, notice: "inputLimit", error: undefined });
       return;
     }
-    this.socket!.send(data);
+    socket.send(data);
   }
   key(key: string) {
     this.auxiliary?.key(key);
@@ -372,11 +379,10 @@ export class TerminalDisplay {
     } catch {
       // The current terminal still uses the selected size.
     }
-    this.resize();
+    this.syncViewportAndInput();
   }
   paste(text: string) {
-    if (!this.ready || this.receivedEnd || this.terminal?.options.disableStdin || !this.meta)
-      return;
+    if (!this.ready || this.terminal?.options.disableStdin || !this.meta) return;
     this.releaseModifiers();
     const encoder = new TextEncoder();
     if (
@@ -387,7 +393,7 @@ export class TerminalDisplay {
       return;
     }
     try {
-      if (!this.resize()) return;
+      if (!this.syncViewportAndInput()) return;
       this.send({ type: "paste", text });
       this.keyboardViewport?.followInput();
       this.terminal?.scrollToBottom();
@@ -405,36 +411,37 @@ export class TerminalDisplay {
   }
   private reportReading = () => {
     const buffer = this.terminal?.buffer.active;
-    this.interaction?.reading(
+    this.options.events.reading?.(
       !!buffer &&
         ((buffer.type === "normal" && buffer.viewportY < buffer.baseY) ||
           this.keyboardViewport?.isReading() ||
-          (this.element.classList.contains("terminal-readonly") &&
-            this.element.scrollTop + this.element.clientHeight < this.element.scrollHeight - 1)),
+          (this.options.host.classList.contains("terminal-readonly") &&
+            this.options.host.scrollTop + this.options.host.clientHeight <
+              this.options.host.scrollHeight - 1)),
     );
   };
   scrollToBottom() {
     this.keyboardViewport?.followInput();
     this.terminal?.scrollToBottom();
-    if (this.element.classList.contains("terminal-readonly"))
-      this.element.scrollTop = this.element.scrollHeight;
+    if (this.options.host.classList.contains("terminal-readonly"))
+      this.options.host.scrollTop = this.options.host.scrollHeight;
     this.reportReading();
   }
-  resize() {
+  syncViewportAndInput() {
     this.reportReading();
+    const socket = this.socket;
     if (
       !this.ready ||
-      this.receivedEnd ||
-      this.connectionLost ||
+      this.receiveStopped ||
       !this.terminal ||
       this.disposed ||
-      this.socket?.readyState !== WebSocket.OPEN
+      socket?.readyState !== WebSocket.OPEN
     )
-      return false;
-    const bounds = this.element.getBoundingClientRect();
-    if (!bounds.width || !bounds.height) return false;
+      return;
+    const bounds = this.options.host.getBoundingClientRect();
+    if (!bounds.width || !bounds.height) return;
     let size = this.fitAddon.proposeDimensions();
-    if (!size) return false;
+    if (!size) return;
     const font = this.terminal.options.fontSize!;
     const keyboard = isKeyboardOpen();
     if (keyboard) {
@@ -456,18 +463,18 @@ export class TerminalDisplay {
         this.proposed = size;
       } catch (error) {
         this.fail(error);
-        return false;
+        return;
       }
     }
     this.terminal.options.disableStdin = false;
-    return true;
+    return socket;
   }
   private viewportChanged = () => {
-    this.resize();
+    this.syncViewportAndInput();
   };
   private fail(error: unknown) {
     if (this.disposed) return;
-    this.connectionLost = true;
+    this.receiveStopped = true;
     this.ready = false;
     if (this.terminal) this.terminal.options.disableStdin = true;
     this.socket?.close();
@@ -495,9 +502,9 @@ export class TerminalDisplay {
     this.auxiliary?.dispose();
     this.socket?.close();
     this.cancelChannel();
-    this.element.removeEventListener("paste", this.onPaste, true);
+    this.options.host.removeEventListener("paste", this.onPaste, true);
     for (const cleanup of this.cleanups) cleanup();
     this.terminal?.dispose();
-    this.element.replaceChildren();
+    this.options.host.replaceChildren();
   }
 }

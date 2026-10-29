@@ -28,9 +28,11 @@ test("a disconnected display whose session is gone ends without reconnecting", a
   );
   const states: DisplayState[] = [];
   const element = Object.assign(new EventTarget(), { replaceChildren() {} });
-  const display = new TerminalDisplay(element as unknown as HTMLElement, "d", "w", "s", (state) =>
-    states.push(state),
-  );
+  const display = new TerminalDisplay({
+    host: element as unknown as HTMLElement,
+    target: { deviceId: "d", workspaceId: "w", sessionId: "s" },
+    events: { state: (state) => states.push(state) },
+  });
   // Only a display that already lost its connection is affected.
   display.sessionMissing();
   expect(display.state.status).toBe("connecting");
@@ -82,9 +84,11 @@ test("a disposed display cancels a ready channel returned after response consump
   });
   const states: DisplayState[] = [];
   const element = Object.assign(new EventTarget(), { replaceChildren() {} });
-  const display = new TerminalDisplay(element as unknown as HTMLElement, "d", "w", "s", (state) =>
-    states.push(state),
-  );
+  const display = new TerminalDisplay({
+    host: element as unknown as HTMLElement,
+    target: { deviceId: "d", workspaceId: "w", sessionId: "s" },
+    events: { state: (state) => states.push(state) },
+  });
   try {
     await responseConsumed;
     display.dispose();
