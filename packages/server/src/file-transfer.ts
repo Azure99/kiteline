@@ -12,7 +12,8 @@ import {
   type FileWritePurpose,
 } from "@kiteline/shared/protocol";
 import { consumeFileFrames, sendFileFrame } from "@kiteline/shared/protocol/file-stream";
-import { checkReply, parseReplyError, failure, closeIfBodyUnread, json } from "./http.js";
+import { checkReply, parseReplyError } from "./agent-messages.js";
+import { failure, closeIfBodyUnread, json } from "./http.js";
 
 interface FileTransferOptions {
   kind: "file.read" | "file.write";

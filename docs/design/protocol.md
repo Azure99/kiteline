@@ -188,7 +188,7 @@ Web owner 在 `POST /api/credentials` 提交 `{name, deviceIds, expiresAt}`，�
 
 - `metadata.snapshot` 是完整快照，server 只接受同一连接中 `revision` 更大的快照。`tasks.snapshot` 同样按连接内递增的 `revision` 接受，每条连接的第一份直接替换；server 只保留白名单字段，见 [server 摘要](scheduled-tasks.md#server-摘要)。
 - `watch.set` 是所有浏览器正在查看的、该设备上的工作区的并集。
-- server 校验已知事件的字段，只转发白名单中的字段：`request.progress` 只发给发起请求的登录；`workspace.changed`、`sessions.changed`、`watch.status` 只发给正在查看该工作区的浏览器。`workspace.changed` 只指定工作区，统一触发该工作区的文件、Git 和仓库发现刷新。已知类型的字段不合法时，server 以 1008 `invalid_control_message` 关闭连接；hello 完成后不认识的类型被忽略，hello 之前的其他消息则关闭连接。
+- server 校验已知事件的字段，只转发白名单中的字段：`request.progress` 只发给发起请求的登录；`workspace.changed`、`sessions.changed`、`watch.status` 只发给正在查看该工作区的浏览器。`workspace.changed` 只指定工作区，统一触发该工作区的文件、Git 和仓库发现刷新。`rpc.result` 和 `request.progress` 先校验请求 ID，仅当请求属于当前控制连接时才校验并消费其余字段。需要校验的字段不合法时，server 以 1008 `invalid_control_message` 关闭连接；hello 完成后不认识的类型被忽略，hello 之前的其他消息则关闭连接。
 - agent 收到不合法的消息时同样以 1008 `invalid_control_message` 关闭连接。
 
 ### 浏览器事件

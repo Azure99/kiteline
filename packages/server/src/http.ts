@@ -1,15 +1,7 @@
 import type { IncomingMessage, OutgoingHttpHeaders, ServerResponse } from "node:http";
 import { isIP, SocketAddress, type BlockList } from "node:net";
 import type { Store, Login } from "./store.js";
-import {
-  AppError,
-  appVersion,
-  asError,
-  limits,
-  record,
-  string,
-  type Reply,
-} from "@kiteline/shared/protocol";
+import { AppError, appVersion, asError, limits } from "@kiteline/shared/protocol";
 
 function bearer(request: IncomingMessage) {
   const value = request.headers.authorization;
@@ -51,24 +43,6 @@ export function rawHead(status: number, message: string, headers: OutgoingHttpHe
     if (value !== undefined)
       for (const item of Array.isArray(value) ? value : [value]) lines.push(`${key}: ${item}`);
   return lines.join("\r\n") + "\r\n\r\n";
-}
-
-export function parseReplyError(value: unknown) {
-  const error = record(value);
-  const code = string(error.code);
-  if (typeof error.message !== "string")
-    throw new AppError("invalid_argument", "Expected a diagnostic string");
-  return new AppError(code, error.message, error.details);
-}
-
-export function checkReply(reply: Record<string, unknown>): Reply {
-  if (
-    typeof reply.outcome !== "string" ||
-    !["succeeded", "failed", "partial", "unknown"].includes(reply.outcome)
-  )
-    throw new AppError("invalid_argument", "Invalid reply");
-  if (reply.outcome !== "succeeded") parseReplyError(reply.error);
-  return reply as unknown as Reply;
 }
 
 export function requireVersion(clientVersion: string | null, component: "agent" | "web" | "cli") {

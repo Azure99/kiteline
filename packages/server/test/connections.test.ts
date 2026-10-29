@@ -137,6 +137,126 @@ test("subscribed workspace events and request progress retain their defined fiel
   await expect(pending).resolves.toMatchObject({ outcome: "succeeded" });
 });
 
+const malformedRequestMessages = [
+  {
+    name: "reply outcome",
+    message: (id: string) => ({ type: "rpc.result", reply: { id, outcome: null } }),
+  },
+  {
+    name: "reply error",
+    message: (id: string) => ({
+      type: "rpc.result",
+      reply: { id, outcome: "failed", error: { code: "io_error", message: null } },
+    }),
+  },
+  {
+    name: "progress phase",
+    message: (id: string) => ({ type: "request.progress", id, phase: null }),
+  },
+];
+
+test.each(malformedRequestMessages)(
+  "invalid $name is ignored for unknown IDs and another connection's pending request",
+  async ({ message }) => {
+    const f = await fixture();
+    const sender = await f.device("Sender");
+    const owner = await f.device("Request owner");
+    const login = f.store.createLogin(60_000);
+    const cookie = `kiteline_session_http=${login.token}`;
+    const path = `/api/devices/${owner.deviceId}/rpc`;
+    const input = { id: "owned-request", method: "files.copy", params: {} };
+    const pending = f.call(path, "POST", input, cookie);
+    await expect
+      .poll(() =>
+        owner.messages.some((value) => value.type === "rpc.request" && value.id === input.id),
+      )
+      .toBe(true);
+
+    sender.socket.send(JSON.stringify(message("unknown-request")));
+    sender.socket.send(JSON.stringify(message(input.id)));
+    const pong = once(sender.socket, "pong");
+    sender.socket.ping();
+    await pong;
+    const duplicate = await f.call(path, "POST", input, cookie);
+    expect(duplicate.status).toBe(409);
+    expect(await duplicate.json()).toMatchObject({ error: { code: "conflict" } });
+
+    const reply = { id: input.id, outcome: "succeeded", result: { completed: 1 } };
+    owner.socket.send(JSON.stringify({ type: "rpc.result", reply }));
+    expect(await (await pending).json()).toEqual(reply);
+    expect(sender.socket.readyState).toBe(WebSocket.OPEN);
+  },
+);
+
+test.each(malformedRequestMessages)(
+  "invalid $name for the current pending request closes control and returns unknown/offline",
+  async ({ message }) => {
+    const f = await fixture();
+    const peer = await f.device();
+    const login = f.store.createLogin(60_000);
+    const input = { id: "current-request", method: "files.copy", params: {} };
+    const pending = f.call(
+      `/api/devices/${peer.deviceId}/rpc`,
+      "POST",
+      input,
+      `kiteline_session_http=${login.token}`,
+    );
+    await expect
+      .poll(() =>
+        peer.messages.some((value) => value.type === "rpc.request" && value.id === input.id),
+      )
+      .toBe(true);
+    const closed = once(peer.socket, "close");
+    peer.socket.send(JSON.stringify(message(input.id)));
+    const [code, reason] = await closed;
+    expect(code).toBe(1008);
+    expect(reason.toString()).toBe("invalid_control_message");
+    expect(await (await pending).json()).toMatchObject({
+      id: input.id,
+      outcome: "unknown",
+      error: { code: "offline" },
+    });
+  },
+);
+
+test.each(["rpc.result", "request.progress"])(
+  "%s rejects an invalid ID instead of treating it as an unknown request",
+  async (type) => {
+    const f = await fixture();
+    const peer = await f.device();
+    const message =
+      type === "rpc.result"
+        ? { type, reply: { id: "", outcome: "succeeded" } }
+        : { type, id: "", phase: "running" };
+    const closed = once(peer.socket, "close");
+    peer.socket.send(JSON.stringify(message));
+    const [code, reason] = await closed;
+    expect(code).toBe(1008);
+    expect(reason.toString()).toBe("invalid_control_message");
+  },
+);
+
+test("unknown control types require hello and are ignored after it", async () => {
+  const f = await fixture();
+  const peer = await f.device();
+  const candidate = new WebSocket(f.origin.replace("http:", "ws:") + agentPath, {
+    headers: { authorization: `Bearer ${peer.deviceToken}` },
+  });
+  await once(candidate, "open");
+  const message = JSON.stringify({ type: "future.event", payload: null });
+  const closed = once(candidate, "close");
+  candidate.send(message);
+  const [code, reason] = await closed;
+  expect(code).toBe(1008);
+  expect(reason.toString()).toBe("invalid_control_message");
+
+  peer.socket.send(message);
+  const pong = once(peer.socket, "pong");
+  peer.socket.ping();
+  await pong;
+  expect(f.app.connections.devices()[0]!.status).toBe("online");
+});
+
 test("long RPC diagnostics preserve the reply and the device connection", async () => {
   const f = await fixture();
   const peer = await f.device();
@@ -250,16 +370,17 @@ test("version refusal is visible, blocks all device tools, and does not replace 
   expect(f.app.connections.devices().find((d) => d.id === healthy.deviceId)).toEqual(before);
 });
 
-test("invalid current agent capabilities cannot replace a healthy connection", async () => {
+test("invalid hello fields cannot replace a healthy connection", async () => {
   const f = await fixture();
   const peer = await f.device();
   const before = f.app.connections.devices()[0]!;
-  for (const [value, editorBytes] of [
-    [undefined, 2000],
-    [{ ...environment, os: "windows", homePath: "C:relative" }, 2000],
-    [{ ...environment, os: "macos", homePath: "relative" }, 2000],
-    [{ ...environment, os: "unknown" }, 2000],
-    [environment, 0],
+  for (const invalid of [
+    { environment: undefined },
+    { environment: { ...environment, os: "windows", homePath: "C:relative" } },
+    { environment: { ...environment, os: "macos", homePath: "relative" } },
+    { environment: { ...environment, os: "unknown" } },
+    { editorBytes: 0 },
+    { snapshot: null },
   ]) {
     const socket = new WebSocket(f.origin.replace("http:", "ws:") + agentPath, {
       headers: { authorization: `Bearer ${peer.deviceToken}` },
@@ -268,9 +389,8 @@ test("invalid current agent capabilities cannot replace a healthy connection", a
     socket.send(
       JSON.stringify({
         ...hello(),
-        environment: value,
-        editorBytes,
         snapshot: before.snapshot,
+        ...invalid,
       }),
     );
     await once(socket, "close");

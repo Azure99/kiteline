@@ -5,33 +5,39 @@ import {
   AppError,
   appVersion,
   checkMetadata,
-  checkEnvironment,
   controlCloseCodes,
-  integer,
   limits,
   record,
   reportKey,
   string,
-  type ServerControlMessage,
   type AgentControlMessage,
+  type ServerControlMessage,
   type BrowserEvent,
   type BrowserControlMessage,
-  type WorkspaceEvent,
   type Metadata,
   type Device,
   type Reply,
 } from "@kiteline/shared/protocol";
 import type { Login, Store } from "./store.js";
 import {
-  checkReply,
   permitsDevice,
   requireDevice,
   requireVersion,
   serverError,
   versionMismatch,
 } from "./http.js";
+import {
+  checkReply,
+  parseHello,
+  parseRequestProgress,
+  parseTerminalNotice,
+  parseWorkspaceEvent,
+} from "./agent-messages.js";
 import { projectTaskSnapshot } from "./task-summary.js";
 import { Channels } from "./channels.js";
+
+const helloDeadlineMs = 30_000;
+const watchTargetLimit = 128;
 
 export interface AgentConnection {
   id: string;
@@ -148,7 +154,7 @@ export class Connections {
     const helloTimeout = setTimeout(() => {
       this.handshakes.delete(connection);
       socket.close(1008, "hello_timeout");
-    }, 30_000);
+    }, helloDeadlineMs);
     socket.on("message", (data, binary) => {
       try {
         if (binary) throw new AppError("invalid_argument", "Expected JSON control frame");
@@ -158,11 +164,7 @@ export class Connections {
         const type = message.type as AgentControlMessage["type"];
         if (type === "hello") {
           if (connection.snapshot) throw new AppError("unsupported", "Invalid hello");
-          const online = Object.assign(connection, {
-            environment: checkEnvironment(message.environment),
-            editorBytes: integer(message.editorBytes, "editorBytes", 1, Number.MAX_SAFE_INTEGER),
-            snapshot: checkMetadata(message.snapshot),
-          });
+          const online = Object.assign(connection, parseHello(message));
           clearTimeout(helloTimeout);
           this.handshakes.delete(connection);
           const previous = this.agents.get(id);
@@ -227,22 +229,13 @@ export class Connections {
             break;
           }
           case "terminal.notice": {
-            const notice = record(message.notice);
-            if (
-              typeof notice.title !== "string" ||
-              typeof notice.body !== "string" ||
-              typeof notice.blocked !== "boolean"
-            )
-              throw new AppError("invalid_argument", "Invalid terminal report");
+            const notice = parseTerminalNotice(message);
             const event: BrowserEvent = {
               type: "terminal.notice",
               noticeId: randomUUID(),
               receivedAt: Date.now(),
               deviceId: id,
-              workspaceId: string(message.workspaceId),
-              sessionId: string(message.sessionId),
-              name: string(message.name, "session name", limits.nameLength),
-              notice: { title: notice.title, body: notice.body, blocked: notice.blocked },
+              ...notice,
             };
             const text = JSON.stringify(event);
             if (Buffer.byteLength(text) > limits.controlMessageBytes) {
@@ -261,22 +254,12 @@ export class Connections {
             const requestId = string(message.id);
             const pending = this.pending.get(requestId);
             if (pending?.connection === connection) {
-              const { phase, currentPath, completedItems, bytes } = message;
-              if (
-                (phase !== "queued" && phase !== "running") ||
-                (currentPath !== undefined && typeof currentPath !== "string") ||
-                (completedItems !== undefined && typeof completedItems !== "number") ||
-                (bytes !== undefined && typeof bytes !== "number")
-              )
-                throw new AppError("invalid_argument", "Invalid request progress");
+              const progress = parseRequestProgress(message);
               this.notify(pending.loginId, {
                 type: "request.progress",
                 id: requestId,
                 deviceId: id,
-                phase,
-                currentPath,
-                completedItems,
-                bytes,
+                ...progress,
               });
             }
             break;
@@ -284,28 +267,19 @@ export class Connections {
           case "workspace.changed":
           case "sessions.changed":
           case "watch.status": {
-            const workspaceId = string(message.workspaceId);
-            let event: WorkspaceEvent;
-            if (message.type === "workspace.changed") {
-              event = { type: "workspace.changed", workspaceId };
-            } else if (message.type === "sessions.changed") {
-              event = { type: "sessions.changed", workspaceId };
-            } else {
-              const { status, reason } = message;
-              if (
-                (status !== "normal" && status !== "degraded") ||
-                (reason !== undefined && typeof reason !== "string")
-              )
-                throw new AppError("invalid_argument", "Invalid workspace watch status");
-              event = { type: "watch.status", workspaceId, status, reason };
-            }
+            const event = parseWorkspaceEvent(type, message);
             for (const browser of this.browsers)
-              if (browser.targets.some((t) => t.deviceId === id && t.workspaceId === workspaceId))
+              if (
+                browser.targets.some(
+                  (t) => t.deviceId === id && t.workspaceId === event.workspaceId,
+                )
+              )
                 this.send(browser.socket, { ...event, deviceId: id });
             break;
           }
           default:
-            return void (type satisfies never);
+            void (type satisfies never);
+            return;
         }
       } catch (error) {
         serverError(error);
@@ -398,7 +372,7 @@ export class Connections {
         if (
           message.type !== "watch.set" ||
           !Array.isArray(message.targets) ||
-          message.targets.length > 128
+          message.targets.length > watchTargetLimit
         )
           throw new Error("Invalid watch");
         const previous = browser.targets;

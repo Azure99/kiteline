@@ -23,7 +23,7 @@ import { httpStream } from "@kiteline/shared/protocol/http-stream";
 import type { Login } from "./store.js";
 import type { AgentConnection, Connections } from "./connections.js";
 import { FileTransfer } from "./file-transfer.js";
-import { parseReplyError } from "./http.js";
+import { parseReplyError } from "./agent-messages.js";
 
 interface Channel {
   id: string;
