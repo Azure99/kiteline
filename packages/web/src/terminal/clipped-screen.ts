@@ -82,7 +82,7 @@ export function listenTerminalScroll(
   };
 }
 
-// A finished screen keeps its original grid. Scroll the clipped rows locally,
+// A retained read-only screen keeps its original grid. Scroll the clipped rows locally,
 // then use xterm's own viewport for older history, without resizing its buffer.
 export function retainReadonlyViewport(terminal: Terminal) {
   const container = terminal.element!.parentElement!;

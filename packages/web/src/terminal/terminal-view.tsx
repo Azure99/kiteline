@@ -170,17 +170,23 @@ export function TerminalView({
   function redisplay(scope: "retained" | "screen" = "retained") {
     if (!webCompatible() || restoring.current) return;
     restoring.current = true;
+    const restore = restoreDisplay.current;
     const signal = operations.current.signal;
     void api("/api/session", { signal })
       .then(() => {
-        if (signal.aborted || !webCompatible()) return;
+        if (signal.aborted || restoreDisplay.current !== restore) return;
+        if (!webCompatible() || display.current?.state.status === "ready") {
+          restoring.current = false;
+          return;
+        }
         setNotice("");
         setState({ status: "connecting" });
-        restoreDisplay.current(scope);
+        restore(scope);
       })
       .catch((error: unknown) => {
+        if (signal.aborted || restoreDisplay.current !== restore) return;
         restoring.current = false;
-        if (!signal.aborted) setNotice(error);
+        setNotice(error);
       });
   }
   useImperativeHandle(ref, () => ({
@@ -195,6 +201,7 @@ export function TerminalView({
   }));
   async function recover() {
     const signal = operations.current.signal;
+    const initiatingDisplay = display.current;
     setRecovering(true);
     try {
       let session = await rpc(deviceId, "sessions.recover", { workspaceId, sessionId }, signal);
@@ -205,12 +212,12 @@ export function TerminalView({
         if (!current) throw new Error("The original task has ended");
         session = current;
       }
-      if (signal.aborted) return;
+      if (signal.aborted || display.current !== initiatingDisplay) return;
       if (session.webStatus !== "available")
         throw new Error(session.webReason ?? "Terminal recovery failed");
       redisplay();
     } catch (error) {
-      if (!signal.aborted) setNotice(error);
+      if (!signal.aborted && display.current === initiatingDisplay) setNotice(error);
     } finally {
       if (!signal.aborted) setRecovering(false);
     }
@@ -285,7 +292,6 @@ export function TerminalView({
               screen.terminal?.textarea?.setAttribute("tabindex", "0");
               restoring.current = false;
               publish(screen, next);
-              screen.display.resize();
               if (old) remove(old);
             } else if (next.status === "error" || next.status === "ended") {
               candidate = undefined;
@@ -351,7 +357,7 @@ export function TerminalView({
   }, [deviceId, workspaceId, sessionId]);
   useLayoutEffect(() => {
     if (state.status === "ready") display.current?.resize();
-  }, [state.status]);
+  }, [terminal, state.status]);
   useEffect(() => {
     if (sessionMissing && state.status === "error") display.current?.sessionMissing();
   }, [sessionMissing, state.status]);

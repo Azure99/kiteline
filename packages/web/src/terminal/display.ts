@@ -302,13 +302,13 @@ export class TerminalDisplay {
     // A retained recovery screen may subsequently receive sessionMissing/end.
     if (!this.element.classList.contains("terminal-readonly"))
       this.cleanups.push(retainReadonlyViewport(this.terminal));
+    // The read-only viewport may now scroll; show "Back to bottom" without waiting for a resize.
+    this.reportReading();
   }
   private end(result: Pick<DisplayState, "exitCode" | "missing">) {
     this.ready = false;
     this.retainScreen();
     this.change({ ...this.state, status: "ended", ...result, notice: undefined, error: undefined });
-    // The read-only viewport may now scroll; show "Back to bottom" without waiting for a resize.
-    this.reportReading();
   }
   /** Keeps a disconnected display's last screen read-only once its session no longer exists. */
   sessionMissing() {
@@ -409,14 +409,15 @@ export class TerminalDisplay {
       !!buffer &&
         ((buffer.type === "normal" && buffer.viewportY < buffer.baseY) ||
           this.keyboardViewport?.isReading() ||
-          (this.receivedEnd &&
+          (this.element.classList.contains("terminal-readonly") &&
             this.element.scrollTop + this.element.clientHeight < this.element.scrollHeight - 1)),
     );
   };
   scrollToBottom() {
     this.keyboardViewport?.followInput();
     this.terminal?.scrollToBottom();
-    if (this.receivedEnd) this.element.scrollTop = this.element.scrollHeight;
+    if (this.element.classList.contains("terminal-readonly"))
+      this.element.scrollTop = this.element.scrollHeight;
     this.reportReading();
   }
   resize() {
