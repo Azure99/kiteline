@@ -444,6 +444,48 @@ test("discard blocks directories and ancestor links before changing index, unlin
     discard(repo, bytes.paths, "all", bytes.reviewToken, signal()),
   ).rejects.toMatchObject({ code: "conflict" });
 });
+test("queued writes recheck identity after acquiring the gate without registering a replacement", async () => {
+  const { root, repo, repos, workspace } = await setup();
+  const parked = await mkdtemp("/var/tmp/kiteline-git-queued-");
+  roots.push(parked);
+  const queue = new GitWriteQueue(repos);
+  let entered!: () => void;
+  let release!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const held = queue.run(workspace.id, repo.id, signal(), async () => {
+    entered();
+    await gate;
+  });
+  const operation = vi.fn(async () => {});
+  let waiting: Promise<void> | undefined;
+  try {
+    await Promise.race([started, held]);
+    waiting = queue.run(workspace.id, repo.id, signal(), operation);
+    const rejected = expect(waiting).rejects.toMatchObject({ code: "conflict" });
+    await rename(join(root, ".git"), join(parked, ".git"));
+    await gitRepoFixture(root);
+    const replacement = await repos.inspect(root, root, signal());
+    expect(replacement.id).not.toBe(repo.id);
+    release();
+    await held;
+    await rejected;
+    expect(operation).not.toHaveBeenCalled();
+    expect(repos.known.get(repo.id)).toEqual(repo);
+    await expect(repos.resolve(workspace.id, replacement.id, signal())).rejects.toMatchObject({
+      code: "not_found",
+    });
+  } finally {
+    release();
+    await Promise.allSettled([held, waiting]);
+    await repos.close();
+  }
+});
+
 test("write queue cancellation is prompt, preserves ordering and bounded output never kills writes", async () => {
   const { root, repo, repos, workspace, cli, write } = await setup();
   await write("base", "base");

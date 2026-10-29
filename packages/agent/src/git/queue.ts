@@ -32,7 +32,7 @@ export class GitWriteQueue {
     try {
       await Promise.race([previous, cancelled]);
       signal.throwIfAborted();
-      const current = await this.repos.verify(workspaceId, repo, signal);
+      const current = await this.repos.verifyAndRemember(workspaceId, repo, signal);
       progress?.({ phase: "running" });
       return await operation(current);
     } finally {

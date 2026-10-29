@@ -186,7 +186,10 @@ test("directory and repository pages share slots until their resources are relea
   const workspace = await metadata.add(root);
   const budget = new CursorBudget();
   const directories = new Directories(budget);
-  const repos = new Repositories(metadata, budget);
+  const repos = new Repositories(metadata, budget, {
+    observed: () => {},
+    complete: () => {},
+  });
   const signal = new AbortController().signal;
   const saved = { ...agentLimits };
   try {
@@ -231,7 +234,10 @@ test("repository continuation renews on acquisition and a busy reader cannot ren
   await gitRepoFixture(nested);
   const metadata = new MetadataStore(config(data), () => {});
   const workspace = await metadata.add(root);
-  const repos = new Repositories(metadata, new CursorBudget());
+  const repos = new Repositories(metadata, new CursorBudget(), {
+    observed: () => {},
+    complete: () => {},
+  });
   const saved = { ...agentLimits };
   let resume!: () => void;
   let entered!: () => void;

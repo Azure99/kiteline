@@ -136,7 +136,10 @@ test("an active discovered nested repository can move and keep file and Git noti
     testConfig(join(root, "data"), { runDir: join(root, "run") }),
     () => {},
   );
-  const repos = new Repositories(metadata, new CursorBudget());
+  const repos = new Repositories(metadata, new CursorBudget(), {
+    observed: () => {},
+    complete: () => {},
+  });
   cleanups.push(() => repos.close());
   const signal = new AbortController().signal;
   watches.set([workspace("a", project)]);
@@ -491,7 +494,10 @@ test("discovery resolves a linked .git directory for external metadata watching"
     testConfig(join(root, "data"), { runDir: join(root, "run") }),
     () => {},
   );
-  const repos = new Repositories(metadata, new CursorBudget());
+  const repos = new Repositories(metadata, new CursorBudget(), {
+    observed: () => {},
+    complete: () => {},
+  });
   cleanups.push(() => repos.close());
   const repo = await repos.inspect(project, root, new AbortController().signal);
   expect(repo.commonDir).toBe(metadataPath);
@@ -505,6 +511,48 @@ test("discovery resolves a linked .git directory for external metadata watching"
   await expect
     .poll(() => events.some((event) => event.type === "workspace.changed"), pollOptions)
     .toBe(true);
+});
+
+test("resolving a known repository restores external metadata watches after restart", async () => {
+  const { root, watches, events } = await setup();
+  const project = join(root, "project");
+  const metadataPath = join(root, "metadata");
+  await run("git", ["init", "--separate-git-dir", metadataPath, project]);
+  await mkdir(join(root, "data"));
+  const metadata = new MetadataStore(
+    testConfig(join(root, "data"), { runDir: join(root, "run") }),
+    () => {},
+  );
+  const workspace = await metadata.add(project);
+  const repos = new Repositories(metadata, new CursorBudget(), {
+    observed: (workspaceId, repo) => watches.repo(workspaceId, repo),
+    complete: (workspaceId, ids) => watches.reposComplete(workspaceId, ids),
+  });
+  cleanups.push(() => repos.close());
+  const signal = new AbortController().signal;
+  const normal = () => events.some((event) => event.status === "normal");
+  watches.set([workspace]);
+  await expect.poll(normal, pollOptions).toBe(true);
+  events.length = 0;
+  const found = await repos.discover(workspace.id, undefined, signal);
+  const repo = found.repos[0]!;
+  expect(repo.gitDir).toBe(metadataPath);
+  await expect.poll(normal, pollOptions).toBe(true);
+  await watches.close();
+
+  events.length = 0;
+  watches.set([workspace]);
+  await expect.poll(normal, pollOptions).toBe(true);
+  events.length = 0;
+  await expect(repos.resolve(workspace.id, repo.id, signal)).resolves.toEqual(repo);
+  await expect.poll(normal, pollOptions).toBe(true);
+  // Exclude startup events; the following action touches only metadata outside the workspace.
+  await new Promise((resolve) => setTimeout(resolve, 450));
+  events.length = 0;
+  await run("git", ["--git-dir", metadataPath, "symbolic-ref", "HEAD", "refs/heads/restored"]);
+  await expect
+    .poll(() => events.filter((event) => event.type === "workspace.changed"), pollOptions)
+    .toContainEqual({ type: "workspace.changed", workspaceId: workspace.id });
 });
 
 test("closing during startup permits a new subscription and immediate write notifications", async () => {
@@ -673,7 +721,10 @@ test.runIf(process.platform === "linux" || process.platform === "darwin")(
       testConfig(join(root, "data"), { runDir: join(root, "run") }),
       () => {},
     );
-    const repos = new Repositories(store, new CursorBudget());
+    const repos = new Repositories(store, new CursorBudget(), {
+      observed: () => {},
+      complete: () => {},
+    });
     cleanups.push(() => repos.close());
     const signal = new AbortController().signal;
     const repoA = await repos.inspect(a, a, signal);

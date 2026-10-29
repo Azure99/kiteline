@@ -24,6 +24,10 @@ interface Scan {
   pending?: Repo | PathError;
   found: Set<string>;
 }
+interface RepositoryEvents {
+  observed(workspaceId: string, repo: Repo): void;
+  complete(workspaceId: string, repoIds: Set<string>): void;
+}
 async function exists(path: string) {
   try {
     return await entryInfo(path);
@@ -50,13 +54,12 @@ async function identity(repo: Omit<Repo, "id" | "path" | "linked">) {
 
 export class Repositories {
   readonly known = new Map<string, Repo>();
-  onObserved?: (workspaceId: string, repo: Repo) => void;
-  onComplete?: (workspaceId: string, repoIds: Set<string>) => void;
   private owners = new Map<string, Set<string>>();
   private scans: CursorTable<Scan>;
   constructor(
     private metadata: MetadataStore,
     budget: CursorBudget,
+    private events: RepositoryEvents,
   ) {
     this.scans = new CursorTable(
       budget,
@@ -93,7 +96,6 @@ export class Repositories {
       linked: gitDir !== commonDir,
     };
     signal.throwIfAborted();
-    this.known.set(repo.id, repo);
     return repo;
   }
   async resolve(workspaceId: string, id: string, signal: AbortSignal) {
@@ -103,9 +105,9 @@ export class Repositories {
         "not_found",
         "Repository was not found or has expired; refresh repositories",
       );
-    return this.verify(workspaceId, old, signal);
+    return this.verifyAndRemember(workspaceId, old, signal);
   }
-  async verify(workspaceId: string, old: Repo, signal: AbortSignal) {
+  async verifyAndRemember(workspaceId: string, old: Repo, signal: AbortSignal) {
     const root = this.metadata.workspace(workspaceId).path;
     let current: Repo;
     try {
@@ -118,7 +120,7 @@ export class Repositories {
       throw new AppError("conflict", "Repository identity has changed; select it again");
     if (!current.available)
       throw new AppError("unsupported", "Bare repositories do not support worktree operations");
-    this.remember(workspaceId, current);
+    this.rememberObserved(workspaceId, current);
     return current;
   }
   async discover(
@@ -181,7 +183,7 @@ export class Repositories {
               const repo = await this.inspect(frame.path, root, signal);
               signal.throwIfAborted();
               scan.found.add(repo.id);
-              this.remember(workspaceId, repo);
+              this.rememberObserved(workspaceId, repo);
               if (!repo.available) {
                 scan.stack.pop();
                 if (!add(repo)) break;
@@ -264,7 +266,7 @@ export class Repositories {
       if (result.complete) {
         this.owners.set(workspaceId, scan.found);
         this.prune();
-        this.onComplete?.(workspaceId, scan.found);
+        this.events.complete(workspaceId, scan.found);
       } else result.scanCursor = id;
       keep = !result.complete;
       return result;
@@ -286,11 +288,13 @@ export class Repositories {
     this.owners.clear();
     await closing;
   }
-  private remember(workspaceId: string, repo: Repo) {
+  private rememberObserved(workspaceId: string, repo: Repo) {
+    this.known.set(repo.id, repo);
     let owned = this.owners.get(workspaceId);
     if (!owned) this.owners.set(workspaceId, (owned = new Set()));
     owned.add(repo.id);
-    this.onObserved?.(workspaceId, repo);
+    // Watches may have restarted since this repository was last observed.
+    this.events.observed(workspaceId, repo);
   }
   private prune() {
     const retained = new Set([...this.owners.values()].flatMap((ids) => [...ids]));

@@ -6,6 +6,9 @@ import { mkdtemp, mkdir, writeFile, readFile, rm, rename, chmod, symlink } from 
 import { join } from "node:path";
 import { AppError } from "@kiteline/shared/protocol";
 import { MetadataStore } from "../src/metadata.js";
+import { CursorBudget } from "../src/cursor-budget.js";
+import { Repositories } from "../src/git/repos.js";
+import { GitWriteQueue } from "../src/git/queue.js";
 import { testConfig } from "./support/config.js";
 import { gitRepoFixture, isolateGitEnvironment, workspaceFixture } from "./support/git.js";
 import { gitRead, gitWrite } from "../src/git/process.js";
@@ -80,6 +83,141 @@ done
   },
 );
 
+test("inspection does not register a repository and each accepted observation notifies", async () => {
+  const home = await mkdtemp("/var/tmp/kiteline-git-observe-");
+  roots.push(home);
+  const root = join(home, "project");
+  await mkdir(root);
+  await gitRepoFixture(root);
+  const metadata = new MetadataStore(testConfig(home), () => {});
+  const workspace = await metadata.add(root);
+  const observed = vi.fn();
+  const complete = vi.fn();
+  const repos = new Repositories(metadata, new CursorBudget(), { observed, complete });
+  try {
+    const repo = await repos.inspect(root, root, signals());
+    expect(observed).not.toHaveBeenCalled();
+    await expect(repos.resolve(workspace.id, repo.id, signals())).rejects.toMatchObject({
+      code: "not_found",
+    });
+    for (let scan = 0; scan < 2; scan++) {
+      observed.mockClear();
+      complete.mockClear();
+      await expect(repos.discover(workspace.id, undefined, signals())).resolves.toEqual({
+        repos: [repo],
+        issues: [],
+        complete: true,
+      });
+      expect(observed.mock.calls).toEqual([[workspace.id, repo]]);
+      expect(complete.mock.calls).toEqual([[workspace.id, new Set([repo.id])]]);
+    }
+    observed.mockClear();
+    await expect(repos.resolve(workspace.id, repo.id, signals())).resolves.toEqual(repo);
+    expect(observed.mock.calls).toEqual([[workspace.id, repo]]);
+  } finally {
+    await repos.close();
+  }
+});
+test("identity rejection keeps the accepted repository without registering its replacement", async () => {
+  const { home, root, workspace, repos, repo } = await setup();
+  try {
+    await rename(root, join(home, "previous"));
+    await mkdir(root);
+    await gitRepoFixture(root);
+    const replacement = await repos.inspect(root, root, signals());
+    expect(replacement.id).not.toBe(repo.id);
+    await expect(repos.resolve(workspace.id, repo.id, signals())).rejects.toMatchObject({
+      code: "conflict",
+    });
+    expect(repos.known.get(repo.id)).toEqual(repo);
+    await expect(repos.resolve(workspace.id, replacement.id, signals())).rejects.toMatchObject({
+      code: "not_found",
+    });
+    await repos.discover(workspace.id, undefined, signals());
+    await expect(repos.resolve(workspace.id, replacement.id, signals())).resolves.toEqual(
+      replacement,
+    );
+    await expect(repos.resolve(workspace.id, repo.id, signals())).rejects.toMatchObject({
+      code: "not_found",
+    });
+  } finally {
+    await repos.close();
+  }
+});
+test("bare verification cannot register a repository but discovery accepts its unavailable fact", async () => {
+  const home = await mkdtemp("/var/tmp/kiteline-git-bare-");
+  roots.push(home);
+  const root = join(home, "bare.git");
+  await run("git", ["init", "--bare", root]);
+  const metadata = new MetadataStore(testConfig(home), () => {});
+  const workspace = await metadata.add(root);
+  const observed = vi.fn();
+  const repos = new Repositories(metadata, new CursorBudget(), { observed, complete: () => {} });
+  const writes = new GitWriteQueue(repos);
+  const operation = vi.fn(async () => {});
+  try {
+    const bare = await repos.inspect(root, root, signals());
+    expect(bare.available).toBe(false);
+    await expect(repos.verifyAndRemember(workspace.id, bare, signals())).rejects.toMatchObject({
+      code: "unsupported",
+    });
+    expect(observed).not.toHaveBeenCalled();
+    await expect(repos.resolve(workspace.id, bare.id, signals())).rejects.toMatchObject({
+      code: "not_found",
+    });
+    await expect(writes.run(workspace.id, bare.id, signals(), operation)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    await expect(repos.discover(workspace.id, undefined, signals())).resolves.toEqual({
+      repos: [bare],
+      issues: [],
+      complete: true,
+    });
+    expect(observed.mock.calls).toEqual([[workspace.id, bare]]);
+    observed.mockClear();
+    await expect(repos.resolve(workspace.id, bare.id, signals())).rejects.toMatchObject({
+      code: "unsupported",
+    });
+    await expect(writes.run(workspace.id, bare.id, signals(), operation)).rejects.toMatchObject({
+      code: "unsupported",
+    });
+    expect(observed).not.toHaveBeenCalled();
+    expect(operation).not.toHaveBeenCalled();
+  } finally {
+    await repos.close();
+  }
+});
+test.each([false, true])(
+  "completed discovery releases missing repositories while retaining other owners: shared=%s",
+  async (shared) => {
+    const { home, root, workspace, metadata, repos, repo } = await setup();
+    try {
+      const outer = shared ? await metadata.add(home) : undefined;
+      if (outer) await repos.discover(outer.id, undefined, signals());
+      const scanning = outer ?? workspace;
+      const parked = await mkdtemp("/var/tmp/kiteline-git-parked-");
+      roots.push(parked);
+      await rename(join(root, ".git"), join(parked, ".git"));
+      await expect(repos.discover(scanning.id, undefined, signals())).resolves.toEqual({
+        repos: [],
+        issues: [],
+        complete: true,
+      });
+      await rename(join(parked, ".git"), join(root, ".git"));
+      // Restore the same metadata inode so a missing registration cannot hide behind I/O failure.
+      expect((await repos.inspect(root, root, signals())).id).toBe(repo.id);
+      if (outer) {
+        await expect(repos.resolve(workspace.id, repo.id, signals())).resolves.toEqual(repo);
+        await repos.retain(new Set([outer.id]));
+      }
+      await expect(repos.resolve(scanning.id, repo.id, signals())).rejects.toMatchObject({
+        code: "not_found",
+      });
+    } finally {
+      await repos.close();
+    }
+  },
+);
 test("leaving a workspace cancels its active discovery without returning a dead cursor", async () => {
   const { workspace, repos } = await setup();
   const pending = repos.discover(workspace.id, undefined, signals());

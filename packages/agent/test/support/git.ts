@@ -29,7 +29,10 @@ export async function gitRepoFixture(root: string) {
 
 export async function workspaceFixture(root: string, metadata: MetadataStore) {
   const workspace = await metadata.add(root);
-  const repos = new Repositories(metadata, new CursorBudget());
+  const repos = new Repositories(metadata, new CursorBudget(), {
+    observed: () => {},
+    complete: () => {},
+  });
   const found = await repos.discover(workspace.id, undefined, new AbortController().signal);
   return { workspace, repos, repo: found.repos[0]! };
 }

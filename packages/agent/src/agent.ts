@@ -101,10 +101,11 @@ export class Agent {
       if (this.connectionId) this.send({ type: "tasks.snapshot", ...snapshot });
     });
     this.watches = new WorkspaceWatches((event) => this.send(event));
-    this.repos = new Repositories(this.metadata, this.cursorBudget);
+    this.repos = new Repositories(this.metadata, this.cursorBudget, {
+      observed: (workspaceId, repo) => this.watches.repo(workspaceId, repo),
+      complete: (workspaceId, ids) => this.watches.reposComplete(workspaceId, ids),
+    });
     this.gitWrites = new GitWriteQueue(this.repos);
-    this.repos.onObserved = (workspaceId, repo) => this.watches.repo(workspaceId, repo);
-    this.repos.onComplete = (workspaceId, ids) => this.watches.reposComplete(workspaceId, ids);
     this.temporaryFiles = new TemporaryFiles(config.dataDir);
     this.files = new Files(this.metadata, this.directories);
     this.sessions = new Sessions(config, this.metadata, {
