@@ -631,9 +631,28 @@ test("control bounds replies without losing outcomes and ignores buffered reques
     });
     // Exercise the wire limit independently of how each tool produces its result.
     const dispatch = vi.spyOn(agent, "dispatch");
+    const smallResult = { toJSON: vi.fn(() => ({ encoding: "first" })) };
+    dispatch.mockResolvedValueOnce(smallResult);
+    peer.send(
+      JSON.stringify({
+        type: "rpc.request",
+        id: "encoded-once",
+        method: "sessions.list",
+        params: {},
+      }),
+    );
+    await expect
+      .poll(() => replies.find((reply) => reply.id === "encoded-once"))
+      .toEqual({
+        id: "encoded-once",
+        outcome: "succeeded",
+        result: { encoding: "first" },
+      });
+    expect(smallResult.toJSON).toHaveBeenCalledTimes(1);
     for (const outcome of ["failed", "partial", "unknown", "succeeded"] as const) {
       const large = "x".repeat(limits.controlMessageBytes);
-      if (outcome === "succeeded") dispatch.mockResolvedValueOnce(large);
+      const largeResult = { toJSON: vi.fn(() => large) };
+      if (outcome === "succeeded") dispatch.mockResolvedValueOnce(largeResult);
       else dispatch.mockRejectedValueOnce(new OperationError("command_failed", large, outcome));
       peer.send(
         JSON.stringify({ type: "rpc.request", id: outcome, method: "sessions.list", params: {} }),
@@ -644,6 +663,7 @@ test("control bounds replies without losing outcomes and ignores buffered reques
           outcome: outcome === "succeeded" ? "unknown" : outcome,
           error: { code: "limit_exceeded" },
         });
+      if (outcome === "succeeded") expect(largeResult.toJSON).toHaveBeenCalledTimes(1);
     }
     for (const method of ["sessions.snapshot", "sessions.wait"]) {
       const ipc = {

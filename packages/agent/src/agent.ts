@@ -87,12 +87,12 @@ export class Agent {
     private readonly identity: Identity,
   ) {
     this.metadata = new MetadataStore(config, (snapshot) =>
-      this.send({ type: "metadata.snapshot", snapshot }),
+      this.sendEvent({ type: "metadata.snapshot", snapshot }),
     );
     this.schedules = new ScheduledTasks(config, (snapshot) => {
-      if (this.connectionId) this.send({ type: "tasks.snapshot", ...snapshot });
+      if (this.connectionId) this.sendEvent({ type: "tasks.snapshot", ...snapshot });
     });
-    this.watches = new WorkspaceWatches((event) => this.send(event));
+    this.watches = new WorkspaceWatches((event) => this.sendEvent(event));
     this.repos = new Repositories(this.metadata, this.cursorBudget, {
       observed: (workspaceId, repo) => this.watches.repo(workspaceId, repo),
       complete: (workspaceId, ids) => this.watches.reposComplete(workspaceId, ids),
@@ -103,16 +103,16 @@ export class Agent {
     this.sessions = new Sessions(config, this.metadata, {
       frame: (message) => this.terminalChannels.frame(message),
       notice: (message) => {
-        try {
-          if (!this.send(message))
-            console.error(`Terminal report dropped for ${message.sessionId}: server unavailable`);
-        } catch (error) {
-          if (!(error instanceof AppError) || error.code !== "limit_exceeded") throw error;
-          console.error(`Terminal report dropped for ${message.sessionId}: ${error.message}`);
-        }
+        const status = this.send(message);
+        if (status === "unavailable")
+          console.error(`Terminal report dropped for ${message.sessionId}: server unavailable`);
+        else if (status === "too_large")
+          console.error(
+            `Terminal report dropped for ${message.sessionId}: Control message exceeds the size limit`,
+          );
       },
       changed: (workspaceId) =>
-        this.send({ type: "sessions.changed", workspaceId } satisfies AgentEvent),
+        this.sendEvent({ type: "sessions.changed", workspaceId } satisfies AgentEvent),
     });
     this.textFiles = new TextFiles(config, this.metadata, this.temporaryFiles);
     this.fileOperations = new FileOperations(
@@ -175,13 +175,16 @@ export class Agent {
     await this.local.start();
     this.connect();
   }
-  private send(message: AgentControlMessage) {
+  private send(message: AgentControlMessage): "sent" | "unavailable" | "too_large" {
     const text = JSON.stringify(message);
-    if (Buffer.byteLength(text) > limits.controlMessageBytes)
-      throw new AppError("limit_exceeded", "Control message exceeds the size limit");
-    if (!this.socket || !controlWritable(this.socket)) return false;
+    if (Buffer.byteLength(text) > limits.controlMessageBytes) return "too_large";
+    if (!this.socket || !controlWritable(this.socket)) return "unavailable";
     this.socket.send(text);
-    return true;
+    return "sent";
+  }
+  private sendEvent(message: Exclude<AgentControlMessage, { type: "rpc.result" }>) {
+    if (this.send(message) === "too_large")
+      console.error(`Control message dropped (${message.type}): size limit exceeded`);
   }
   private connect() {
     if (this.stopped) return;
@@ -206,7 +209,7 @@ export class Agent {
     let unauthorized = false;
     this.socket = socket;
     heartbeat(socket);
-    socket.on("open", () => this.send(this.metadata.hello()));
+    socket.on("open", () => this.sendEvent(this.metadata.hello()));
     socket.on("error", (error) => {
       this.connectionError = failure ??= error.message;
       console.error("Control connection:", error.message);
@@ -286,7 +289,7 @@ export class Agent {
       this.connectionId = string(message.connectionId);
       this.connectionError = undefined;
       this.delay = 1000;
-      this.send({ type: "tasks.snapshot", ...this.schedules.snapshot() });
+      this.sendEvent({ type: "tasks.snapshot", ...this.schedules.snapshot() });
     } else if (message.type === "channel.open") {
       if (message.connectionId !== this.connectionId)
         throw new AppError("conflict", "Stale control connection");
@@ -347,7 +350,7 @@ export class Agent {
           );
     void this.dispatch(method, params, controller.signal, (progress) => {
       if (this.socket === socket)
-        this.send({ type: "request.progress", id, ...progress } satisfies AgentEvent);
+        this.sendEvent({ type: "request.progress", id, ...progress } satisfies AgentEvent);
     })
       .then(
         (result) => ({ id, outcome: "succeeded", result }) as Reply,
@@ -355,10 +358,7 @@ export class Agent {
       )
       .then((reply) => {
         if (this.socket === socket && socket.readyState === WebSocket.OPEN) {
-          if (
-            Buffer.byteLength(JSON.stringify({ type: "rpc.result", reply })) >
-            limits.controlMessageBytes
-          )
+          if (this.send({ type: "rpc.result", reply }) === "too_large")
             this.send({
               type: "rpc.result",
               reply: {
@@ -370,7 +370,6 @@ export class Agent {
                 },
               },
             });
-          else this.send({ type: "rpc.result", reply });
         }
       })
       .catch((error: unknown) => console.error(asError(error).message))

@@ -225,6 +225,8 @@ server 在内存中保留每个设备/工作区/session 的最新待处理报告
 - 升级后的 socket 和 agent 的数据连接启用 TCP keepalive，间隔由 `tcpKeepAliveDelayMs` 决定。
 - 控制连接和事件连接的发送缓冲超过 `packages/shared/src/protocol/ws.ts` 的控制消息预算时，发送方以 1013 `control_backpressure` 关闭连接。
 
+Agent 的控制出口将每个信封编码一次，先检查字节预算，再检查连接可写性。RPC 仅在结果超限时构造较小的 `limit_exceeded` 回复，outcome 遵循上述结果规则。事件超限记录消息来源并丢弃，不把这一传输结果抛回领域操作；普通事件在连接不可用时静默丢弃，终端 notice 的不可用和超限继续记录 sessionId。JSON 编码和 WebSocket 发送抛出的异常会传播给调用者。
+
 ### 关闭码
 
 | 关闭码 | 原因                      | 发送方          | 对端行为                       |

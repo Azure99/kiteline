@@ -2,6 +2,9 @@ import { afterEach, expect, test, vi } from "vitest";
 import { access, mkdtemp, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { once } from "node:events";
+import type { AddressInfo } from "node:net";
+import { WebSocketServer, type WebSocket } from "ws";
 import { AppError, limits, type AgentEvent } from "@kiteline/shared/protocol";
 import { sessionFiles, tmux } from "@kiteline/shared/terminal/node";
 import * as terminalNode from "@kiteline/shared/terminal/node";
@@ -111,10 +114,12 @@ async function fixture({
   rpcTimeout = 30_000,
   observers,
   delayedEnd,
+  server = "https://localhost",
 }: {
   rpcTimeout?: number;
   observers?: SessionObservers;
   delayedEnd?: DelayedEnd;
+  server?: string;
 } = {}) {
   const dataDir = await mkdtemp(join(tmpdir(), "kiteline-term-"));
   cleanups.push(() => rm(dataDir, { recursive: true, force: true }));
@@ -130,7 +135,7 @@ async function fixture({
         shell: "/bin/bash",
         limits: { terminalSessionsPerDevice: 3, rpcTimeout },
       }),
-      { deviceId: "terminal-test", deviceToken: "local", server: "https://localhost" },
+      { deviceId: "terminal-test", deviceToken: "local", server },
     );
   } finally {
     construction.observers = undefined;
@@ -1154,6 +1159,101 @@ test("a failed tmux kill marks the session unavailable and can recover the same 
     .toBe(true);
   await agent.sessions.end({ workspaceId: workspace.id, sessionId: session.id });
   expect(agent.sessions.list().sessions).toEqual([]);
+}, 15000);
+
+test("a recorder-sized OSC report can exceed Agent control budget without losing later reports", async () => {
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  await once(server, "listening");
+  cleanups.push(async () => {
+    for (const peer of server.clients) peer.terminate();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+  const received: Extract<AgentEvent, { type: "terminal.notice" }>[] = [];
+  const connected = new Promise<WebSocket>((resolve) => {
+    server.once("connection", (peer) => {
+      peer.on("message", (data) => {
+        const message = JSON.parse(data.toString());
+        if (message.type === "terminal.notice") received.push(message);
+      });
+      resolve(peer);
+    });
+  });
+  const observedSizes: number[] = [];
+  const { agent, workspace, dataDir, signal } = await fixture({
+    server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    observers: { notice: (message) => observedSizes.push(Buffer.byteLength(message.notice.body)) },
+  });
+  await agent.start();
+  const peer = await connected;
+  const session = await agent.sessions.create(
+    { workspaceId: workspace.id, name: "Budget source" },
+    signal,
+  );
+  const notice = { title: "", body: "", blocked: false };
+  const ipc = { type: "notice", sessionId: session.id, notice };
+  notice.body = "x".repeat(
+    limits.controlMessageBytes - Buffer.byteLength(JSON.stringify(ipc) + "\n"),
+  );
+  expect(Buffer.byteLength(JSON.stringify(ipc) + "\n")).toBe(limits.controlMessageBytes);
+  expect(
+    Buffer.byteLength(
+      JSON.stringify({
+        type: "terminal.notice",
+        sessionId: session.id,
+        workspaceId: workspace.id,
+        name: session.name,
+        notice,
+      }),
+    ),
+  ).toBeGreaterThan(limits.controlMessageBytes);
+  const path = join(dataDir, "control-budget.bin");
+  await writeFile(path, `\x1b]9;${notice.body}\x07\x1b]9;after budget\x07`);
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  const print = (command: string) =>
+    agent.dispatch(
+      "sessions.send",
+      {
+        workspaceId: workspace.id,
+        sessionId: session.id,
+        input: { type: "text", text: command, enter: true },
+      },
+      signal,
+    );
+  try {
+    await print(`cat '${path}'`);
+    await expect
+      .poll(() => observedSizes, pollOptions)
+      .toEqual([notice.body.length, "after budget".length]);
+    expect(logged).toHaveBeenCalledExactlyOnceWith(
+      `Terminal report dropped for ${session.id}: Control message exceeds the size limit`,
+    );
+    await expect
+      .poll(() => received, pollOptions)
+      .toEqual([
+        {
+          type: "terminal.notice",
+          workspaceId: workspace.id,
+          sessionId: session.id,
+          name: "Budget source",
+          notice: { title: "", body: "after budget", blocked: false },
+        },
+      ]);
+    const closed = once(peer, "close");
+    peer.close(4001, "connection_replaced");
+    await closed;
+    logged.mockClear();
+    await print("printf '\\033]9;after disconnect\\007'");
+    await expect
+      .poll(() => logged.mock.calls, pollOptions)
+      .toContainEqual([`Terminal report dropped for ${session.id}: server unavailable`]);
+    expect(received).toHaveLength(1);
+    expect(agent.sessions.list().sessions[0]).toMatchObject({
+      id: session.id,
+      webStatus: "available",
+    });
+  } finally {
+    logged.mockRestore();
+  }
 }, 15000);
 
 test("unattached terminal reports retain real source identity and survive an oversized report", async () => {
