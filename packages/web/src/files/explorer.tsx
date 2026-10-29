@@ -26,6 +26,20 @@ import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "../componen
 import type { DirectoryPage } from "./use-browser";
 import { formatBytes, unavailableEntryLabel } from "./format";
 
+export interface FileExplorerActions {
+  savingWithin(path: string): boolean;
+  openFolder(path: string): void;
+  openFile(entry: Entry): void;
+  select(path: string): void;
+  rename(entry: Entry): void;
+  upload(path: string): void;
+  newDirectory(path: string): void;
+  operate(kind: "copy" | "move" | "delete", entry: Entry): void;
+  download(entry: Entry): void;
+  loadMore(path: string): void;
+  details(entry: Entry): void;
+}
+
 export function FileExplorer({
   path,
   depth = 0,
@@ -36,17 +50,7 @@ export function FileExplorer({
   mobile,
   selecting,
   disabled,
-  savingWithin,
-  onFolder,
-  onOpen,
-  onSelect,
-  onRename,
-  onUpload,
-  onNewDirectory,
-  onAction,
-  onDownload,
-  onMore,
-  onDetails,
+  actions,
 }: {
   path: string;
   depth?: number;
@@ -57,17 +61,7 @@ export function FileExplorer({
   mobile: boolean;
   selecting: boolean;
   disabled: boolean;
-  savingWithin: (path: string) => boolean;
-  onFolder: (path: string) => void;
-  onOpen: (entry: Entry) => void;
-  onSelect: (path: string) => void;
-  onRename: (entry: Entry) => void;
-  onUpload: (path: string) => void;
-  onNewDirectory: (path: string) => void;
-  onAction: (kind: "copy" | "move" | "delete", entry: Entry) => void;
-  onDownload: (entry: Entry) => void;
-  onMore: (path: string) => void;
-  onDetails: (entry: Entry) => void;
+  actions: FileExplorerActions;
 }) {
   const { t } = useTranslation();
 
@@ -80,46 +74,55 @@ export function FileExplorer({
         <p className="max-w-72 break-all px-2 py-1 text-xs text-muted-foreground">{entry.path}</p>
         {entry.kind === "directory" && (
           <>
-            <MenuItem onClick={() => onUpload(entry.path!)}>
+            <MenuItem onClick={() => actions.upload(entry.path!)}>
               <Upload />
               {t(($) => $.files.uploadFiles)}
             </MenuItem>
-            <MenuItem onClick={() => onNewDirectory(entry.path!)}>
+            <MenuItem onClick={() => actions.newDirectory(entry.path!)}>
               <FolderPlus />
               {t(($) => $.files.newDirectory)}
             </MenuItem>
           </>
         )}
-        <MenuItem onClick={() => onDetails(entry)}>
+        <MenuItem onClick={() => actions.details(entry)}>
           <Info />
           {t(($) => $.files.details)}
         </MenuItem>
         {(entry.kind === "file" || entry.kind === "symlink") && (
           <>
-            <MenuItem onClick={() => onDownload(entry)}>
+            <MenuItem onClick={() => actions.download(entry)}>
               <Download />
               {t(($) => $.common.download)}
             </MenuItem>
           </>
         )}
-        <MenuItem disabled={savingWithin(entry.path!)} onClick={() => onRename(entry)}>
+        <MenuItem
+          disabled={actions.savingWithin(entry.path!)}
+          onClick={() => actions.rename(entry)}
+        >
           <Pencil />
           {t(($) => $.common.rename)}
         </MenuItem>
-        <MenuItem onClick={() => onAction("copy", entry)}>
+        <MenuItem onClick={() => actions.operate("copy", entry)}>
           <Copy />
           {t(($) => $.common.copy)}
         </MenuItem>
-        <MenuItem disabled={savingWithin(entry.path!)} onClick={() => onAction("move", entry)}>
+        <MenuItem
+          disabled={actions.savingWithin(entry.path!)}
+          onClick={() => actions.operate("move", entry)}
+        >
           <FolderInput />
           {t(($) => $.common.move)}
         </MenuItem>
-        <MenuItem disabled={savingWithin(entry.path!)} onClick={() => onAction("delete", entry)}>
+        <MenuItem
+          disabled={actions.savingWithin(entry.path!)}
+          onClick={() => actions.operate("delete", entry)}
+        >
           <Trash2 />
           {t(($) => $.common.delete)}
         </MenuItem>
         {entry.kind === "symlink" && (
-          <MenuItem onClick={() => onFolder(entry.path!)}>
+          <MenuItem onClick={() => actions.openFolder(entry.path!)}>
             <Folder />
             {t(($) => $.files.openLinkDirectory)}
           </MenuItem>
@@ -147,7 +150,7 @@ export function FileExplorer({
                     aria-label={t(($) => $.files.selectNamed, { name: entry.name })}
                     checked={!!entry.path && selected.has(entry.path)}
                     disabled={!entry.path || disabled}
-                    onChange={() => onSelect(entry.path!)}
+                    onChange={() => actions.select(entry.path!)}
                     className="size-4 accent-primary"
                   />
                 </label>
@@ -159,7 +162,9 @@ export function FileExplorer({
                       className="flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left disabled:opacity-50 max-desk:min-h-11"
                       disabled={!entry.path || disabled}
                       title={entry.linkTarget ? `${entry.name} -> ${entry.linkTarget}` : entry.name}
-                      onClick={() => (folder ? onFolder(entry.path!) : onOpen(entry))}
+                      onClick={() =>
+                        folder ? actions.openFolder(entry.path!) : actions.openFile(entry)
+                      }
                     >
                       {!mobile &&
                         folder &&
@@ -219,17 +224,7 @@ export function FileExplorer({
                   mobile,
                   selecting,
                   disabled,
-                  savingWithin,
-                  onFolder,
-                  onOpen,
-                  onSelect,
-                  onRename,
-                  onUpload,
-                  onNewDirectory,
-                  onAction,
-                  onDownload,
-                  onMore,
-                  onDetails,
+                  actions,
                 }}
                 path={entry.path!}
                 depth={depth + 1}
@@ -258,7 +253,7 @@ export function FileExplorer({
           variant="ghost"
           className="w-full"
           disabled={page.busy || disabled}
-          onClick={() => onMore(path)}
+          onClick={() => actions.loadMore(path)}
         >
           {t(($) => $.common.more)}
         </Button>

@@ -90,7 +90,7 @@ export function resizeEditorFont(editor: EditorView, size: number) {
 export function textState(
   text: string,
   language: Compartment,
-  phrases = new Compartment(),
+  phrases: Compartment,
   languageSupport: Extension = [],
 ) {
   return EditorState.create({

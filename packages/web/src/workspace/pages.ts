@@ -13,6 +13,9 @@ export interface WorkPagesState {
   items: WorkPage[];
   active?: string;
 }
+export function filePage(path: string, draftId?: string): FilePage {
+  return { kind: "file", id: draftId ? `file:${draftId}` : `path:${path}`, path, draftId };
+}
 export const diffPageId = (repoId: string, target: DiffTarget) =>
   JSON.stringify([
     repoId,
@@ -29,7 +32,7 @@ export function openPage(state: WorkPagesState, page: WorkPage): WorkPagesState 
       (item.kind === "file" &&
         page.kind === "file" &&
         ((item.draftId && item.draftId === page.draftId) ||
-          (item.path && item.path === page.path))),
+          (item.path && item.path === page.path && (!item.draftId || !page.draftId)))),
   );
   if (existing) {
     return {

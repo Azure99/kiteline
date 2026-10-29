@@ -9,9 +9,8 @@ import type {
   FileInspection,
   FileItemResult,
   FileProgress,
-  RpcArguments,
 } from "@kiteline/shared/protocol";
-import { apiError, ApiError, cancelRequest, rpc, rpcReply } from "../lib/api";
+import { apiError, cancelRequest, rpc } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { PathField } from "./path-field";
 import {
@@ -23,9 +22,10 @@ import {
 } from "../components/ui/dialog";
 import { childPath } from "./paths";
 import { formatBytes } from "./format";
-import { FileConflictDialog } from "./conflict-dialog";
+import { FileTargetActions, FileTargetConflictDialog } from "./conflict-dialog";
 import type { WorkspaceTarget } from "../lib/navigation";
 import { useDrafts, type DraftStore } from "./drafts";
+import { blockedBySave, operateFiles } from "./actions";
 
 export interface FileAction {
   kind: "copy" | "move" | "delete";
@@ -38,7 +38,6 @@ export interface FileOperationResult extends WorkspaceTarget {
 interface Row {
   entry: Entry;
   targetPath: string;
-  collision: CopyItem["collision"];
   version?: string;
   result?: FileItemResult;
   skipped?: boolean;
@@ -71,7 +70,6 @@ export function FileOperationDialog({
     action.entries.map((entry) => ({
       entry,
       targetPath: childPath(folder, entry.name),
-      collision: "error",
     })),
   );
   const [directory, setDirectory] = useState(folder);
@@ -137,43 +135,19 @@ export function FileOperationDialog({
   }, [action, deviceId, workspaceId, folder]);
   const editable = (row: Row) => !row.skipped && (!row.result || row.result.outcome === "failed");
   const pending = rows.filter(editable);
-  const savingConflict = () =>
-    action.kind !== "copy" &&
-    pending.some(
-      (row) =>
-        store.savingWithin(deviceId, workspaceId, row.entry.path!) ||
-        (action.kind === "move" &&
-          row.collision === "replace" &&
-          store.savingWithin(deviceId, workspaceId, row.targetPath)),
-    );
+  const pendingItems: CopyItem[] = pending.map((row) => ({
+    path: row.entry.path!,
+    targetPath: row.targetPath,
+    collision: row.version !== undefined ? "replace" : "error",
+    expectedTargetVersion: row.version,
+  }));
+  const savingConflict = blockedBySave(store, { deviceId, workspaceId }, action.kind, pendingItems);
   function updateRow(row: Row, values: Partial<Row>) {
     edited.current = true;
     setRows((old) => old.map((item) => (item === row ? { ...item, ...values } : item)));
   }
   async function run() {
     if (!pending.length || busy) return;
-    if (savingConflict()) return;
-    const submitted = pending.map((row) => ({ ...row }));
-    const changes = new Map(
-      action.kind === "copy"
-        ? []
-        : submitted.map((row) => [
-            row.entry.path!,
-            store.capture(deviceId, workspaceId, row.entry.path!),
-          ]),
-    );
-    const settle = (items: FileItemResult[]) => {
-      for (const item of items) {
-        const change = changes.get(item.path);
-        if (!change) continue;
-        if (item.outcome === "succeeded") {
-          if (action.kind === "move")
-            void store.rename(deviceId, workspaceId, item.path, item.targetPath!, change);
-          else store.deleted(deviceId, workspaceId, item.path, "deletedDraft", change);
-        } else if (item.outcome === "partial" || item.outcome === "unknown")
-          void store.checkMissing(deviceId, workspaceId, item.path, change);
-      }
-    };
     const request = { id: newId(), controller: new AbortController() };
     current.current = request;
     setBusy(true);
@@ -181,61 +155,22 @@ export function FileOperationDialog({
     setError(undefined);
     setProgress({ phase: "queued" });
     try {
-      const params = {
-        workspaceId,
-        items: submitted.map((row) => ({
-          path: row.entry.path!,
-          targetPath: row.targetPath,
-          collision: row.collision,
-          expectedTargetVersion: row.version,
-        })),
-      };
-      const operation: RpcArguments<"files.copy" | "files.move" | "files.delete"> =
-        action.kind === "delete"
-          ? [
-              "files.delete",
-              { workspaceId, paths: submitted.map((row) => row.entry.path!) },
-              request.controller.signal,
-            ]
-          : action.kind === "copy"
-            ? ["files.copy", params, request.controller.signal]
-            : ["files.move", params, request.controller.signal];
-      const reply = await rpcReply(deviceId, request.id, operation);
-      const result =
-        reply.result?.items ??
-        submitted.map((row) => ({
-          path: row.entry.path!,
-          targetPath: row.targetPath,
-          outcome: reply.outcome,
-          ...(reply.outcome !== "succeeded" ? { error: reply.error } : {}),
-        }));
-      settle(result);
+      const result = await operateFiles(
+        store,
+        { deviceId, workspaceId },
+        action.kind,
+        pendingItems,
+        { id: request.id, signal: request.controller.signal },
+      );
       if (!alive.current) return;
       setRows((old) =>
         old.map((row) => {
-          const item = result.find((item) => item.path === row.entry.path);
+          const item = result.items.find((item) => item.path === row.entry.path);
           return item ? { ...row, result: item } : row;
         }),
       );
-      onResult(result);
-      if (reply.outcome !== "succeeded")
-        setError(apiError(reply.error, reply.outcome, reply.result));
-    } catch (reason) {
-      const result: FileItemResult[] = submitted.map((row) => ({
-        path: row.entry.path!,
-        targetPath: row.targetPath,
-        outcome: reason instanceof ApiError && reason.outcome !== "unknown" ? "failed" : "unknown",
-      }));
-      settle(result);
-      if (!alive.current) return;
-      setError(reason);
-      setRows((old) =>
-        old.map((row) => ({
-          ...row,
-          result: result.find((item) => item.path === row.entry.path) ?? row.result,
-        })),
-      );
-      onResult(result);
+      onResult(result.items);
+      setError(result.error);
     } finally {
       if (current.current === request) current.current = undefined;
       setBusy(false);
@@ -288,7 +223,7 @@ export function FileOperationDialog({
               {deviceName} / {workspaceName} / {folder}
             </p>
           </DialogHeader>
-          {savingConflict() && (
+          {savingConflict && (
             <p role="status" className="px-4 text-sm">
               {t(($) => $.files.saving)}
             </p>
@@ -320,7 +255,6 @@ export function FileOperationDialog({
                           ? {
                               ...row,
                               targetPath: childPath(path || ".", row.entry.name),
-                              collision: "error",
                               version: undefined,
                             }
                           : row,
@@ -347,7 +281,6 @@ export function FileOperationDialog({
                     onChange={(event) =>
                       updateRow(row, {
                         targetPath: event.target.value,
-                        collision: "error",
                         version: undefined,
                       })
                     }
@@ -383,26 +316,14 @@ export function FileOperationDialog({
                 {row.skipped && (
                   <p className="text-xs text-muted-foreground">{t(($) => $.common.skipped)}</p>
                 )}
-                {!busy && editable(row) && action.kind !== "delete" && (
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      disabled={conflictBusy}
-                      onClick={() => void inspect(row)}
-                    >
-                      {t(($) => $.files.resolveConflict)}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      disabled={conflictBusy}
-                      onClick={() => updateRow(row, { skipped: true })}
-                    >
-                      {t(($) => $.common.skip)}
-                    </Button>
-                  </div>
-                )}
-                {row.collision === "replace" && editable(row) && (
-                  <p className="text-xs text-destructive">{t(($) => $.files.replaceConfirmed)}</p>
+                {editable(row) && action.kind !== "delete" && (
+                  <FileTargetActions
+                    busy={busy}
+                    checking={conflictBusy}
+                    replaceConfirmed={row.version !== undefined}
+                    onInspect={() => void inspect(row)}
+                    onSkip={() => updateRow(row, { skipped: true })}
+                  />
                 )}
               </div>
             ))}
@@ -448,7 +369,7 @@ export function FileOperationDialog({
             {!busy && !!pending.length && (
               <Button
                 variant={action.kind === "delete" ? "destructive" : "default"}
-                disabled={conflictBusy || savingConflict()}
+                disabled={conflictBusy || savingConflict}
                 onClick={() => void run()}
               >
                 <Icon />
@@ -461,7 +382,7 @@ export function FileOperationDialog({
         </DialogContent>
       </Dialog>
       {conflict && (
-        <FileConflictDialog
+        <FileTargetConflictDialog
           target={conflict.row.targetPath}
           inspection={conflict.inspection}
           directory={conflict.row.entry.kind === "directory"}
@@ -469,7 +390,6 @@ export function FileOperationDialog({
           onChoose={(targetPath, version) => {
             updateRow(conflict.row, {
               targetPath,
-              collision: version ? "replace" : "error",
               version,
             });
             setConflict(undefined);

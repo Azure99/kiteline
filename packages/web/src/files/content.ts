@@ -30,19 +30,40 @@ async function readContentBytes(
   target: FileTarget,
   purpose: Extract<FileReadPurpose, "open" | "text">,
   signal: AbortSignal,
-  onChannel?: (id: string) => void,
 ) {
   const ready = await fileChannel(target, "file.read", { purpose }, signal);
-  onChannel?.(ready.channelId);
+  const controller = new AbortController();
+  let stop!: (error: unknown) => void;
+  const aborted = () => stop(new DOMException("The operation was aborted", "AbortError"));
+  const failed = (event: WindowEventMap["kiteline:event"]) => {
+    const message = event.detail;
+    if (message.type === "channel.failed" && message.channelId === ready.channelId)
+      stop(apiError(message.error, message.outcome));
+  };
   try {
-    const bytes = await request(
-      `/api/channels/${ready.channelId}/content`,
-      { signal },
-      async (response) => new Uint8Array(await response.arrayBuffer()),
-    );
+    const bytes = await new Promise<Uint8Array<ArrayBuffer>>((resolve, reject) => {
+      stop = (error) => {
+        // Settle first so the HTTP AbortError cannot replace the channel diagnostic.
+        reject(error);
+        controller.abort();
+      };
+      window.addEventListener("kiteline:event", failed);
+      signal.addEventListener("abort", aborted, { once: true });
+      if (signal.aborted) {
+        aborted();
+        return;
+      }
+      void request(
+        `/api/channels/${ready.channelId}/content`,
+        { signal: controller.signal },
+        async (response) => new Uint8Array(await response.arrayBuffer()),
+      ).then(resolve, reject);
+    });
     if (bytes.length !== ready.meta.size) throw new Error("File transfer is incomplete");
     return { bytes, meta: ready.meta };
   } finally {
+    window.removeEventListener("kiteline:event", failed);
+    signal.removeEventListener("abort", aborted);
     void release(ready.channelId);
   }
 }
@@ -54,20 +75,15 @@ function diskText(target: FileTarget, bytes: Uint8Array, meta: FileMeta): DiskTe
     raw: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes),
   };
 }
-export async function readText(
-  target: FileTarget,
-  signal: AbortSignal,
-  onChannel?: (id: string) => void,
-) {
-  const { bytes, meta } = await readContentBytes(target, "text", signal, onChannel);
+export async function readText(target: FileTarget, signal: AbortSignal) {
+  const { bytes, meta } = await readContentBytes(target, "text", signal);
   return diskText(target, bytes, meta);
 }
 export async function readContent(
   target: FileTarget,
   signal: AbortSignal,
-  onChannel: (id: string) => void,
 ): Promise<{ kind: "text"; value: DiskText } | { kind: "image"; value: DiskImage }> {
-  const { bytes, meta } = await readContentBytes(target, "open", signal, onChannel);
+  const { bytes, meta } = await readContentBytes(target, "open", signal);
   return meta.contentType.startsWith("image/")
     ? { kind: "image", value: { blob: new Blob([bytes], { type: meta.contentType }), meta } }
     : { kind: "text", value: diskText(target, bytes, meta) };

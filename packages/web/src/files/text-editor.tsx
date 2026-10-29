@@ -1,5 +1,13 @@
 import { useTranslation } from "react-i18next";
-import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
+import {
+  useEffect,
+  useEffectEvent,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type Ref,
+} from "react";
 import { EditorView } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { openSearchPanel, SearchQuery, setSearchQuery } from "@codemirror/search";
@@ -11,6 +19,12 @@ import { useTheme } from "../lib/appearance";
 import { isMobile, useMobile } from "../lib/use-mobile";
 import { editorAppearance, resizeEditorFont, syncTextTransactions } from "./editor-state";
 import { editorPhrases } from "./editor-locale";
+
+export interface TextLocation {
+  line: number;
+  range?: [number, number];
+  query?: string;
+}
 
 export interface TextEditorHandle {
   openSearch(): void;
@@ -39,7 +53,7 @@ function scrollSnapshot(editor: EditorView) {
   };
 }
 
-function scrollTarget(state: EditorState, snapshot: NonNullable<Draft["scrollSnapshot"]>) {
+function scrollTarget(state: EditorState, snapshot: NonNullable<Draft["view"]["scrollSnapshot"]>) {
   const line = state.doc.line(Math.min(snapshot.line, state.doc.lines));
   const position = line.from + Math.min(snapshot.column, line.length);
   return EditorView.scrollIntoView(position, {
@@ -55,12 +69,16 @@ export function TextEditor({
   store,
   wrap,
   onSave,
+  location,
+  onLocationApplied,
   ref,
 }: {
   draft: Draft;
   store: DraftStore;
   wrap: boolean;
   onSave: () => void;
+  location?: TextLocation;
+  onLocationApplied(location: TextLocation): void;
   ref?: Ref<TextEditorHandle>;
 }) {
   const { t, i18n } = useTranslation();
@@ -73,12 +91,15 @@ export function TextEditor({
   const sourceVersion = useRef(draft.sourceVersion);
   const save = useRef(onSave);
   save.current = onSave;
+  const locationApplied = useEffectEvent(onLocationApplied);
   useLayoutEffect(() => {
     if (!host.current || !draft.state) return;
     const editor = new EditorView({
       parent: host.current,
       state: draft.state,
-      scrollTo: draft.scrollSnapshot ? scrollTarget(draft.state, draft.scrollSnapshot) : undefined,
+      scrollTo: draft.view.scrollSnapshot
+        ? scrollTarget(draft.state, draft.view.scrollSnapshot)
+        : undefined,
       dispatchTransactions(transactions, current) {
         // Undo can bypass transaction filters; reject before updating either the document or history.
         let measured: { text: string; bytes: number } | undefined;
@@ -86,12 +107,7 @@ export function TextEditor({
           if (!tr.docChanged) continue;
           const text = tr.newDoc.toString();
           measured = { text, bytes: encodeText(text, draft.format).length };
-          const error = store.limitError(draft, measured.bytes);
-          if (error) {
-            draft.notice = error;
-            store.changed();
-            return;
-          }
+          if (!store.acceptEdit(draft, measured.bytes)) return;
         }
         current.update(transactions);
         store.update(draft, current.state, measured);
@@ -108,7 +124,7 @@ export function TextEditor({
     };
     editor.dom.addEventListener("keydown", keydown);
     return () => {
-      draft.scrollSnapshot = scrollSnapshot(editor);
+      draft.view.scrollSnapshot = scrollSnapshot(editor);
       editor.destroy();
       view.current = undefined;
     };
@@ -162,9 +178,8 @@ export function TextEditor({
   }, [draft, i18n.resolvedLanguage]);
   useLayoutEffect(() => {
     const editor = view.current;
-    if (editor && draft.location) {
-      const { line: number, range, query } = draft.location;
-      draft.location = undefined;
+    if (editor && location) {
+      const { line: number, range, query } = location;
       const line = editor.state.doc.line(Math.max(1, Math.min(number, editor.state.doc.lines)));
       const anchor = line.from + Math.min(range?.[0] ?? 0, line.length);
       const head = line.from + Math.min(range?.[1] ?? 0, line.length);
@@ -182,14 +197,15 @@ export function TextEditor({
             }),
           ),
         });
-        return;
+      } else {
+        editor.dispatch({
+          selection: { anchor, head },
+          effects: EditorView.scrollIntoView(anchor, { y: "center" }),
+        });
       }
-      editor.dispatch({
-        selection: { anchor, head },
-        effects: EditorView.scrollIntoView(anchor, { y: "center" }),
-      });
+      locationApplied(location);
     }
-  });
+  }, [location]);
   useEffect(() => {
     let active = true;
     const editor = view.current;

@@ -12,7 +12,7 @@ import {
 } from "../components/ui/dialog";
 import { childPath, parentPath } from "./paths";
 
-export function FileConflictDialog({
+export function FileTargetConflictDialog({
   target,
   inspection,
   directory = false,
@@ -84,5 +84,38 @@ export function FileConflictDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+export function FileTargetActions({
+  busy,
+  checking,
+  replaceConfirmed,
+  onInspect,
+  onSkip,
+}: {
+  busy: boolean;
+  checking: boolean;
+  replaceConfirmed: boolean;
+  onInspect: () => void;
+  onSkip: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      {!busy && (
+        <div className="flex gap-2">
+          <Button variant="outline" disabled={checking} onClick={onInspect}>
+            {t(($) => $.files.resolveConflict)}
+          </Button>
+          <Button variant="ghost" disabled={checking} onClick={onSkip}>
+            {t(($) => $.common.skip)}
+          </Button>
+        </div>
+      )}
+      {replaceConfirmed && (
+        <p className="text-xs text-destructive">{t(($) => $.files.replaceConfirmed)}</p>
+      )}
+    </>
   );
 }

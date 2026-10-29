@@ -5,7 +5,7 @@ import {
   updateWorkspaceQuery,
   type NavigationOptions,
 } from "../lib/navigation";
-import { isDirty, type Draft, type DraftStore } from "./drafts";
+import type { Draft } from "./drafts";
 import { parentPath } from "./paths";
 import type { FileTarget } from "./content";
 
@@ -50,18 +50,4 @@ export function syncDraftPath(draft: Draft) {
       },
       { replace: true },
     );
-}
-export function closeDraft(store: DraftStore, draft: Draft) {
-  const route = currentRoute();
-  if (
-    isWorkspaceRoute(route, draft) &&
-    store.find({ ...draft, path: route.query.file ?? "" }, route.query.draft) === draft
-  ) {
-    updateWorkspaceQuery(draft, { file: undefined, draft: undefined }, { replace: true });
-  }
-  store.close(draft);
-}
-export function requestCloseDraft(store: DraftStore, draft: Draft) {
-  if (isDirty(draft)) store.setClosing(draft.id);
-  else closeDraft(store, draft);
 }

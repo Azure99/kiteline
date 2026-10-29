@@ -1,7 +1,6 @@
 import { flushSync } from "react-dom";
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { ErrorNotice } from "../components/error-notice";
-import type { AgentEnvironment } from "@kiteline/shared/protocol";
 import { useTranslation } from "react-i18next";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import {
@@ -24,13 +23,6 @@ import {
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "../components/ui/dialog";
 import { IconButton } from "../components/icon-button";
 import { deferredView } from "../components/deferred-view";
 import { ApiError } from "../lib/api";
@@ -38,7 +30,7 @@ import { navigateWorkspace } from "../lib/navigation";
 import { parentPath } from "./paths";
 import { useCopyFeedback } from "../lib/use-copy-feedback";
 import {
-  draftError,
+  draftProblem,
   isDirty,
   useDrafts,
   useDraftVersion,
@@ -49,10 +41,11 @@ import { DraftTabs } from "./draft-tabs";
 import { draftLabel } from "./draft-label";
 import { codeLineReference } from "./code-line-reference";
 import { SaveDraftDialog } from "./save-draft-dialog";
-import { TextEditor, type TextEditorHandle } from "./text-editor";
+import { TextEditor, type TextEditorHandle, type TextLocation } from "./text-editor";
+import type { MarkdownPreviewHandle } from "./markdown-preview";
 import { formatBytes } from "./format";
-import { downloadFile, type DiskText } from "./content";
-import { DiskReader } from "./disk-reader";
+import { downloadFile } from "./content";
+import { useDraftDiskCheck } from "./use-disk-check";
 import type { useTerminalFocus } from "../terminal/use-terminal-focus";
 
 const MarkdownPreview = deferredView(async () => ({
@@ -62,20 +55,22 @@ const MarkdownPreview = deferredView(async () => ({
 export function DraftView({
   store,
   draft,
-  targetOS,
   unavailable,
   focusMode,
   editorVisible = true,
   htmlPreviewVisible = true,
   showTabs = true,
+  location,
+  onLocationApplied,
 }: {
   focusMode?: ReturnType<typeof useTerminalFocus>;
   editorVisible?: boolean;
   htmlPreviewVisible?: boolean;
   showTabs?: boolean;
+  location?: TextLocation;
+  onLocationApplied?(location: TextLocation): void;
   store: DraftStore;
   draft: Draft;
-  targetOS?: AgentEnvironment["os"];
   unavailable?: string;
 }) {
   const { t } = useTranslation();
@@ -87,7 +82,8 @@ export function DraftView({
   // Editing updates this draft without notifying the entire open-files list.
   useDraftVersion(store, draft);
   const busy = draft.operation?.kind;
-  const canCheckDisk = !!(draft.path || draft.unknownSave);
+  const problem = draftProblem(draft);
+  const diskCheck = useDraftDiskCheck({ store, draft, unavailable });
   const previewType = /\.html?$/i.test(draft.path)
     ? "html"
     : /\.(md|markdown)$/i.test(draft.path)
@@ -96,7 +92,7 @@ export function DraftView({
   const [htmlPreview, setHtmlPreview] = useState(false);
   if (htmlPreview && previewType !== "html") setHtmlPreview(false);
   const preview =
-    previewType === "markdown" && draft.markdownPreview
+    previewType === "markdown" && draft.view.markdownPreview
       ? "markdown"
       : previewType === "html" && htmlPreview
         ? "html"
@@ -104,115 +100,40 @@ export function DraftView({
   const setPreview = useCallback(
     (value?: "markdown" | "html") => {
       if (previewType === "markdown") {
-        draft.markdownPreview = value === "markdown";
+        draft.view.markdownPreview = value === "markdown";
         store.changed(draft, false);
       } else setHtmlPreview(value === "html");
     },
     [draft, previewType, store],
   );
-  const previewElement = useRef<HTMLElement>(null);
-  const rememberPreviewPosition = useCallback(() => {
-    const article = previewElement.current;
-    if (preview === "markdown" && article) {
-      const viewport = article.getBoundingClientRect();
-      if (!viewport.width || !viewport.height) return;
-      let nearest: HTMLElement | undefined;
-      let distance = Infinity;
-      for (const block of article.querySelectorAll<HTMLElement>("[data-source-line]")) {
-        const bounds = block.getBoundingClientRect();
-        const gap = Math.abs(bounds.top - viewport.top);
-        if (bounds.bottom > viewport.top && bounds.top < viewport.bottom && gap < distance) {
-          nearest = block;
-          distance = gap;
-        }
-      }
-      if (nearest) {
-        const line = Number(nearest.dataset.sourceLine);
-        draft.markdownPosition = {
-          line,
-          offset: nearest.getBoundingClientRect().top - viewport.top,
-        };
-        return line;
-      }
-    }
-  }, [draft, preview]);
+  const markdown = useRef<MarkdownPreviewHandle>(null);
+  const [sourceLocation, setSourceLocation] = useState<TextLocation>();
+  const editorLocation = location ?? sourceLocation;
   function togglePreview() {
-    const line = rememberPreviewPosition();
-    if (line) draft.location = { line };
+    const line = preview === "markdown" ? markdown.current?.rememberPosition() : undefined;
+    if (line) setSourceLocation({ line });
     setPreview(preview ? undefined : previewType);
   }
   useLayoutEffect(() => {
-    if (preview && draft.location) {
-      rememberPreviewPosition();
+    if (preview && editorLocation) {
+      markdown.current?.rememberPosition();
       setPreview(undefined);
     }
-  }, [preview, draft.location, rememberPreviewPosition, setPreview]);
-  useLayoutEffect(() => () => void rememberPreviewPosition(), [rememberPreviewPosition]);
-  const [diskDialog, setDiskDialog] = useState<{
-    disk?: DiskText;
-    reading: boolean;
-    error?: unknown;
-  }>();
-  const diskGeneration = useRef(0);
-  useLayoutEffect(
-    () => () => {
-      diskGeneration.current++;
-    },
-    [],
-  );
+  }, [preview, editorLocation, setPreview]);
   const [saveAs, setSaveAs] = useState(false);
   const { copied, error: copyError, copy, reset: resetCopy } = useCopyFeedback();
   const tabs = all.filter(
     (item) => item.deviceId === draft.deviceId && item.workspaceId === draft.workspaceId,
   );
-  async function save() {
+  function save() {
     if (!store.canSave(draft)) return;
     if (!draft.path) {
       setSaveAs(true);
       return;
     }
-    const generation = diskGeneration.current;
-    const saved = await store.save(draft, draft.path, draft.revision, targetOS);
-    if (generation !== diskGeneration.current || !store.has(draft)) return;
-    if (saved) closeDisk();
-    else if (draft.error instanceof ApiError && draft.error.code === "conflict") await check(true);
-  }
-  function closeDisk() {
-    diskGeneration.current++;
-    setDiskDialog(undefined);
-  }
-  async function check(conflict = false) {
-    const generation = ++diskGeneration.current;
-    const reading = diskDialog?.reading ?? !conflict;
-    const unknown = draft.unknownSave;
-    if (conflict || diskDialog) setDiskDialog({ reading });
-    const current = await store.check(draft);
-    if (generation !== diskGeneration.current || !store.has(draft)) return;
-    if (current && unknown && !draft.unknownSave) {
-      closeDisk();
-      return;
-    }
-    if (
-      current &&
-      (conflict || draft.unknownSave !== undefined || current.meta.revision !== draft.revision)
-    )
-      setDiskDialog({ disk: current, reading });
-    else if (!current && (conflict || diskDialog))
-      setDiskDialog({ reading, error: draft.error ?? draft.observationError });
-    else closeDisk();
-  }
-  async function overwrite() {
-    const dialog = diskDialog;
-    if (!dialog?.disk) return;
-    const disk = dialog.disk;
-    const generation = diskGeneration.current;
-    const saved = await store.save(draft, disk.target.path, disk.meta.revision, targetOS);
-    if (generation !== diskGeneration.current || !store.has(draft)) return;
-    if (saved) closeDisk();
-    else setDiskDialog({ ...dialog, error: draft.error });
+    void diskCheck.save();
   }
   const downloadDisabled = !!unavailable || !draft.path;
-  const checkDisabled = !!busy || !!unavailable || !canCheckDisk;
   const saveAsDisabled = !draft.state || !!busy || !!unavailable;
   const download = () => downloadFile(draft);
   const openSaveAs = () => setSaveAs(true);
@@ -274,7 +195,7 @@ export function DraftView({
           <IconButton
             label={t(($) => $.files.saveFile)}
             disabled={!store.canSave(draft) || !!unavailable}
-            onClick={() => void save()}
+            onClick={save}
           >
             <Save />
           </IconButton>
@@ -335,7 +256,7 @@ export function DraftView({
                 {t(($) => $.files.downloadFile)}
               </MenuItem>
               <div className="my-1 border-t border-border" />
-              <MenuItem disabled={checkDisabled} onClick={() => void check()}>
+              <MenuItem disabled={diskCheck.disabled} onClick={() => void diskCheck.check()}>
                 <RefreshCw />
                 {t(($) => $.files.checkDisk)}
               </MenuItem>
@@ -362,7 +283,7 @@ export function DraftView({
         store.overLimit(draft) ||
         draft.notice ||
         draft.diskChanged ||
-        draftError(draft) ||
+        problem ||
         copyError ||
         draft.format.mixedLineEndings) && (
         <div className="shrink-0 space-y-1 border-b border-border px-3 py-2 text-xs">
@@ -375,9 +296,9 @@ export function DraftView({
           )}
           {draft.notice && <p role="status">{t(($) => $.files[draft.notice!])}</p>}
           {draft.diskChanged && <p role="status">{t(($) => $.files.diskChanged)}</p>}
-          {draftError(draft) && (
+          {!!problem && (
             <div role="alert" className="break-words text-destructive">
-              <ErrorNotice error={draft.error ?? draft.observationError} />
+              <ErrorNotice error={problem} />
             </div>
           )}
           {copyError && (
@@ -395,14 +316,14 @@ export function DraftView({
             </div>
           )}
           {!!(
-            canCheckDisk &&
+            diskCheck.available &&
             draft.error instanceof ApiError &&
             (draft.error.code === "conflict" || draft.error.outcome === "unknown")
           ) && (
             <Button
               variant="outline"
-              disabled={!!busy || !!unavailable}
-              onClick={() => void check()}
+              disabled={diskCheck.disabled}
+              onClick={() => void diskCheck.check()}
             >
               {t(($) => $.files.checkDisk)}
             </Button>
@@ -422,10 +343,9 @@ export function DraftView({
         <MarkdownPreview
           target={draft}
           text={draft.state.doc.toString()}
-          containerRef={previewElement}
-          position={draft.markdownPosition}
-          visible={editorVisible && !draft.location}
-          onScroll={rememberPreviewPosition}
+          ref={markdown}
+          view={draft.view}
+          visible={editorVisible && !editorLocation}
         />
       ) : draft.state ? (
         editorVisible && (
@@ -433,9 +353,14 @@ export function DraftView({
             ref={editor}
             key={draft.id}
             {...{ draft, store }}
+            location={editorLocation}
+            onLocationApplied={(applied) => {
+              setSourceLocation((current) => (current === applied ? undefined : current));
+              if (location === applied) onLocationApplied?.(applied);
+            }}
             wrap={previewType === "markdown"}
             onSave={() => {
-              if (!unavailable) void save();
+              if (!unavailable) save();
             }}
           />
         )
@@ -476,82 +401,11 @@ export function DraftView({
           </span>
         )}
       </div>
-      <Dialog
-        open={!!diskDialog}
-        onOpenChange={(open) => {
-          if (!open) closeDisk();
-        }}
-      >
-        {diskDialog && (
-          <DialogContent className={diskDialog.reading ? "max-w-[960px]" : undefined}>
-            <DialogHeader>
-              <DialogTitle>{t(($) => $.files.diskChanged)}</DialogTitle>
-            </DialogHeader>
-            <div className="flex min-h-0 flex-col gap-3 overflow-auto p-4">
-              <p className="break-all text-xs">{diskDialog.disk?.target.path ?? draft.path}</p>
-              {draft.error instanceof ApiError && draft.error.code === "conflict" && (
-                <p className="text-sm">{t(($) => $.files.saveConflict)}</p>
-              )}
-              {busy === "checking" && <p role="status">{t(($) => $.files.checking)}</p>}
-              {diskDialog.reading && diskDialog.disk && <DiskReader disk={diskDialog.disk} />}
-              {!!diskDialog.error && (
-                <div role="alert" className="text-sm text-destructive">
-                  <ErrorNotice error={diskDialog.error} />
-                </div>
-              )}
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={closeDisk}>
-                {t(($) => $.common.cancel)}
-              </Button>
-              {!!diskDialog.error && (
-                <Button variant="outline" disabled={checkDisabled} onClick={() => void check(true)}>
-                  {t(($) => $.files.checkDisk)}
-                </Button>
-              )}
-              {!diskDialog.reading && (
-                <Button
-                  variant="outline"
-                  disabled={!diskDialog.disk}
-                  onClick={() => setDiskDialog({ ...diskDialog, reading: true })}
-                >
-                  {t(($) => $.files.viewDisk)}
-                </Button>
-              )}
-              {diskDialog.reading && diskDialog.disk && (
-                <Button
-                  variant="outline"
-                  disabled={!!busy}
-                  onClick={() => {
-                    if (isDirty(draft) && !window.confirm(t(($) => $.files.discardLoad))) return;
-                    try {
-                      store.adopt(draft, diskDialog.disk!);
-                      closeDisk();
-                    } catch (reason) {
-                      setDiskDialog({ ...diskDialog, error: reason });
-                    }
-                  }}
-                >
-                  {t(($) => $.files.loadDisk)}
-                </Button>
-              )}
-              <Button
-                disabled={
-                  !diskDialog.disk || !!diskDialog.error || !store.canSave(draft) || !!unavailable
-                }
-                onClick={() => void overwrite()}
-              >
-                {t(($) => $.files.overwriteVersion)}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        )}
-      </Dialog>
+      {diskCheck.dialog}
       {saveAs && (
         <SaveDraftDialog
           store={store}
           draft={draft}
-          targetOS={targetOS}
           onClose={() => setSaveAs(false)}
           onSaved={() => setSaveAs(false)}
         />

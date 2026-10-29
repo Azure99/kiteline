@@ -9,6 +9,8 @@ export interface DirectoryPage {
   busy: boolean;
   error?: unknown;
 }
+export type DirectoryReadMode = "refresh" | "append" | "background";
+
 export function useFileBrowser(deviceId: string, workspaceId: string, active: boolean) {
   const [pages, setPages] = useState<Record<string, DirectoryPage>>({});
   const pagesRef = useRef(pages);
@@ -18,9 +20,9 @@ export function useFileBrowser(deviceId: string, workspaceId: string, active: bo
   const enabled = useRef(active);
   enabled.current = active;
   const load = useCallback(
-    async (path: string, more = false, background = false): Promise<FileListing | undefined> => {
+    async (path: string, mode: DirectoryReadMode): Promise<FileListing | undefined> => {
       if (!enabled.current) return;
-      if (background && requests.current.has(path)) {
+      if (mode === "background" && requests.current.has(path)) {
         queued.current.add(path);
         return;
       }
@@ -35,14 +37,15 @@ export function useFileBrowser(deviceId: string, workspaceId: string, active: bo
       };
       setPages(pagesRef.current);
       try {
-        if (!more) await releaseCursor(deviceId, "directory", previous?.entries.nextCursor);
+        if (mode !== "append")
+          await releaseCursor(deviceId, "directory", previous?.entries.nextCursor);
         let result = await cursorRpc(
           deviceId,
           "files.list",
           {
             workspaceId,
             path,
-            cursor: more ? previous?.entries.nextCursor : undefined,
+            cursor: mode === "append" ? previous?.entries.nextCursor : undefined,
           },
           controller.signal,
         );
@@ -52,7 +55,7 @@ export function useFileBrowser(deviceId: string, workspaceId: string, active: bo
         }
         const refreshed = [...result.entries.items];
         while (
-          !more &&
+          mode !== "append" &&
           refreshed.length < (previous?.entries.items.length ?? 0) &&
           result.entries.nextCursor
         ) {
@@ -73,7 +76,9 @@ export function useFileBrowser(deviceId: string, workspaceId: string, active: bo
           refreshed.push(...result.entries.items);
         }
         const items =
-          more && previous ? [...previous.entries.items, ...result.entries.items] : refreshed;
+          mode === "append" && previous
+            ? [...previous.entries.items, ...result.entries.items]
+            : refreshed;
         items.sort(compareEntries);
         const listing = { ...result, entries: { ...result.entries, items } };
         if (result.path !== path) {
@@ -97,7 +102,7 @@ export function useFileBrowser(deviceId: string, workspaceId: string, active: bo
         if (!controller.signal.aborted) {
           const page = pagesRef.current[path]!;
           if (
-            more &&
+            mode === "append" &&
             previous?.entries.nextCursor &&
             error instanceof ApiError &&
             error.code === "conflict"
@@ -113,7 +118,7 @@ export function useFileBrowser(deviceId: string, workspaceId: string, active: bo
               },
             };
             setPages(pagesRef.current);
-            return load(path);
+            return load(path, "refresh");
           }
           pagesRef.current = { ...pagesRef.current, [path]: { ...page, busy: false, error } };
           setPages(pagesRef.current);
@@ -122,7 +127,7 @@ export function useFileBrowser(deviceId: string, workspaceId: string, active: bo
         if (requests.current.get(path) === controller) {
           requests.current.delete(path);
           if (queued.current.delete(path) && enabled.current && !document.hidden)
-            void load(path, false, true);
+            void load(path, "background");
         }
       }
     },

@@ -3,11 +3,9 @@ import { useTranslation } from "react-i18next";
 import { Download, RefreshCw } from "lucide-react";
 import { ErrorNotice } from "../components/error-notice";
 import { IconButton } from "../components/icon-button";
-import { apiError, type ApiError } from "../lib/api";
-import { currentRoute, isWorkspaceRoute, updateWorkspaceQuery } from "../lib/navigation";
-import { parentPath } from "./paths";
+import { currentRoute, isWorkspaceRoute } from "../lib/navigation";
 import { downloadFile, readContent, type DiskImage, type FileTarget } from "./content";
-import type { DraftStore } from "./drafts";
+import type { Draft, DraftStore } from "./drafts";
 import { ImagePreview } from "./image-preview";
 
 export function FileContent({
@@ -19,7 +17,7 @@ export function FileContent({
   target: FileTarget & { deviceName: string; workspaceName: string };
   store: DraftStore;
   active: boolean;
-  onResolvePath: (path: string) => void;
+  onResolvePath(requested: string, actual: string, draft?: Draft): void;
 }) {
   const { t } = useTranslation();
   const [image, setImage] = useState<DiskImage>();
@@ -33,20 +31,9 @@ export function FileContent({
     const controller = new AbortController();
     const target = { deviceId, workspaceId, path, deviceName, workspaceName };
     if (store.find(target)) return;
-    let channelId: string | undefined, failure: ApiError | undefined;
-    const failed = (event: WindowEventMap["kiteline:event"]) => {
-      const message = event.detail;
-      if (message.type === "channel.failed" && message.channelId === channelId) {
-        failure = apiError(message.error, "failed");
-        setError(failure);
-      }
-    };
-    window.addEventListener("kiteline:event", failed);
     setBusy(true);
     setError(undefined);
-    void readContent(target, controller.signal, (id) => {
-      channelId = id;
-    })
+    void readContent(target, controller.signal)
       .then((content) => {
         if (controller.signal.aborted) return;
         const route = currentRoute();
@@ -54,31 +41,20 @@ export function FileContent({
         if (content.kind === "text") {
           const actual = { ...target, path: content.value.target.path };
           const draft = store.open(actual, content.value);
-          if (actual.path !== path) resolvePath(actual.path);
-          updateWorkspaceQuery(target, { file: draft.path, draft: draft.id }, { replace: true });
+          resolvePath(path, actual.path, draft);
         } else {
           setImage(content.value);
           const actual = content.value.meta.targetPath!;
-          if (actual !== path) {
-            resolvePath(actual);
-            updateWorkspaceQuery(
-              target,
-              { file: actual, folder: parentPath(actual) },
-              { replace: true },
-            );
-          }
+          resolvePath(path, actual);
         }
       })
       .catch((reason: unknown) => {
-        if (!controller.signal.aborted) setError(failure ?? reason);
+        if (!controller.signal.aborted) setError(reason);
       })
       .finally(() => {
         if (!controller.signal.aborted) setBusy(false);
       });
-    return () => {
-      controller.abort();
-      window.removeEventListener("kiteline:event", failed);
-    };
+    return () => controller.abort();
   }, [deviceId, workspaceId, path, deviceName, workspaceName, active, attempt, store]);
   const reload = () => setAttempt((value) => value + 1);
   return (

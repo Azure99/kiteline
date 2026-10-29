@@ -4,13 +4,15 @@ import {
   isValidElement,
   useEffect,
   useEffectEvent,
+  useImperativeHandle,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   type AnchorHTMLAttributes,
   type HTMLAttributes,
   type ReactNode,
-  type RefObject,
+  type Ref,
 } from "react";
 import Markdown, { type Components, type ExtraProps } from "react-markdown";
 import { useTranslation } from "react-i18next";
@@ -23,6 +25,7 @@ import { readContent, type FileTarget } from "./content";
 import { showFile } from "./navigation";
 import { parentPath } from "./paths";
 import { workspacePath } from "../lib/navigation";
+import type { Draft } from "./drafts";
 
 const MermaidDiagram = deferredView(async () => ({
   default: (await import("./mermaid-diagram")).MermaidDiagram,
@@ -97,11 +100,7 @@ function LocalImage({
     let objectUrl: string | undefined;
     void enqueue(async () => {
       if (controller.signal.aborted) return;
-      const content = await readContent(
-        { deviceId, workspaceId, path },
-        controller.signal,
-        () => {},
-      );
+      const content = await readContent({ deviceId, workspaceId, path }, controller.signal);
       if (controller.signal.aborted) return;
       if (content.kind !== "image") throw new Error(i18n.t(($) => $.files.unsupportedPreviewImage));
       objectUrl = URL.createObjectURL(content.value.blob);
@@ -134,25 +133,54 @@ function SourceBlock({ node, ...props }: HTMLAttributes<HTMLElement> & ExtraProp
     "data-source-line": node!.position?.start.line,
   });
 }
+export interface MarkdownPreviewHandle {
+  rememberPosition(): number | undefined;
+}
 export function MarkdownPreview({
   target: { deviceId, workspaceId, path },
   text,
-  containerRef,
-  position,
+  view,
   visible,
-  onScroll,
+  ref,
 }: {
   target: FileTarget;
   text: string;
-  containerRef: RefObject<HTMLElement | null>;
-  position?: { line: number; offset: number };
+  view: Draft["view"];
   visible: boolean;
-  onScroll(): void;
+  ref?: Ref<MarkdownPreviewHandle>;
 }) {
   const { t } = useTranslation();
+  const articleRef = useRef<HTMLElement>(null);
+  function rememberPosition() {
+    const article = articleRef.current;
+    if (!article) return;
+    const viewport = article.getBoundingClientRect();
+    if (!viewport.width || !viewport.height) return;
+    let nearest: HTMLElement | undefined;
+    let distance = Infinity;
+    for (const block of article.querySelectorAll<HTMLElement>("[data-source-line]")) {
+      const bounds = block.getBoundingClientRect();
+      const gap = Math.abs(bounds.top - viewport.top);
+      if (bounds.bottom > viewport.top && bounds.top < viewport.bottom && gap < distance) {
+        nearest = block;
+        distance = gap;
+      }
+    }
+    if (nearest) {
+      const line = Number(nearest.dataset.sourceLine);
+      view.markdownPosition = {
+        line,
+        offset: nearest.getBoundingClientRect().top - viewport.top,
+      };
+      return line;
+    }
+  }
+  useImperativeHandle(ref, () => ({ rememberPosition }));
+  const rememberCurrentPosition = useEffectEvent(rememberPosition);
   const restorePosition = useEffectEvent(() => {
+    const position = view.markdownPosition;
     if (!position) return;
-    const article = containerRef.current!;
+    const article = articleRef.current!;
     let nearest: HTMLElement | undefined;
     let distance = Infinity;
     for (const block of article.querySelectorAll<HTMLElement>("[data-source-line]")) {
@@ -168,7 +196,9 @@ export function MarkdownPreview({
     }
   });
   useLayoutEffect(() => {
-    if (visible) restorePosition();
+    if (!visible) return;
+    restorePosition();
+    return () => void rememberCurrentPosition();
   }, [visible]);
   const components = useMemo<Components>(() => {
     const target = { deviceId, workspaceId, path };
@@ -234,10 +264,10 @@ export function MarkdownPreview({
   }, [deviceId, workspaceId, path, t]);
   return (
     <article
-      ref={containerRef}
+      ref={articleRef}
       className="markdown-preview scroll-area min-h-0 flex-1 overflow-auto p-5"
       aria-label={t(($) => $.files.markdownPreview)}
-      onScroll={onScroll}
+      onScroll={rememberPosition}
     >
       <Markdown
         remarkPlugins={[remarkGfm]}

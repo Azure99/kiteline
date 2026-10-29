@@ -3,7 +3,8 @@ import { useLayoutEffect, useRef } from "react";
 import { Circle, X } from "lucide-react";
 import { IconButton } from "../components/icon-button";
 import { isDirty, type Draft, type DraftStore } from "./drafts";
-import { requestCloseDraft, showDraft } from "./navigation";
+import { showDraft } from "./navigation";
+import { requestCloseDraft } from "./close-draft";
 import { draftLabel } from "./draft-label";
 
 export function DraftTabs({

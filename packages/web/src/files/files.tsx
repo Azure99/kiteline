@@ -1,50 +1,18 @@
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
-import {
-  ArrowUp,
-  FilePlus2,
-  FolderPlus,
-  ListChecks,
-  MoreHorizontal,
-  RefreshCw,
-  Copy,
-  FolderInput,
-  Trash2,
-  Upload,
-  Download,
-  Search,
-} from "lucide-react";
-import type { Device, Entry, Workspace } from "@kiteline/shared/protocol";
-import { IconButton } from "../components/icon-button";
-import { ErrorNotice } from "../components/error-notice";
-import { rpc } from "../lib/api";
-import { ToolHeader, ToolSidebar } from "../components/tool-layout";
-import { Button } from "../components/ui/button";
-import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
+import type { Device, Workspace } from "@kiteline/shared/protocol";
+import { currentRoute, isWorkspaceRoute, updateWorkspaceQuery, useRoute } from "../lib/navigation";
 import { useMobile } from "../lib/use-mobile";
-import {
-  currentRoute,
-  isWorkspaceRoute,
-  updateWorkspaceQuery,
-  useRoute,
-  type WorkspaceQuery,
-  type NavigationOptions,
-} from "../lib/navigation";
-import { FileExplorer } from "./explorer";
-import { FileDetails } from "./file-details";
-import { FileNameDialog, type NameAction } from "./name-dialog";
-import { isWithin, movedPath, parentPath } from "./paths";
-import { useFileBrowser } from "./use-browser";
+import type { useTerminalFocus } from "../terminal/use-terminal-focus";
+import type { FilePage } from "../workspace/pages";
 import { DraftView } from "./draft-view";
 import { useDrafts, type Draft, type DraftStore } from "./drafts";
-import { showDraft, showFile } from "./navigation";
-import type { FileAction } from "./operation-dialog";
+import { FileBrowser } from "./file-browser";
 import { FileContent } from "./file-content";
-import { downloadFile } from "./content";
-import { FileSearch } from "./file-search";
-import { useWorkspaceRefresh } from "../lib/use-workspace-refresh";
-import type { FilePage } from "../workspace/pages";
-import type { useTerminalFocus } from "../terminal/use-terminal-focus";
+import { showFile } from "./navigation";
+import type { FileAction } from "./operation-dialog";
+import { parentPath } from "./paths";
+import type { TextLocation } from "./text-editor";
 
 export function Files({
   device,
@@ -66,586 +34,147 @@ export function Files({
   contentVisible: boolean;
   page?: FilePage;
   onOpenContent(): void;
-  onResolvePath(from: string, to: string): void;
+  onResolvePath(pageId: string, from: string, to: string): void;
   store: DraftStore;
-  onUpload: (files: File[], folder: string) => void;
-  onOperation: (action: FileAction, folder: string) => void;
+  onUpload(files: File[], folder: string): void;
+  onOperation(action: FileAction, folder: string): void;
 }) {
-  const { t, i18n } = useTranslation();
-
-  const visible = browsing || contentVisible;
-  const route = useRoute();
+  const { t } = useTranslation();
   const mobile = useMobile();
-  const folder = route.query.folder ?? ".";
-  const reveal = route.query.reveal;
-  const rootTree = !mobile && !reveal;
-  const folderLabel = folder === "." ? workspace.name : folder;
-  const [revealError, setRevealError] = useState<unknown>();
-  const [expanded, setExpanded] = useState(new Set(["."]));
-  const [selected, setSelected] = useState(new Set<string>());
-  const [selecting, setSelecting] = useState(false);
-  const [action, setAction] = useState<NameAction>();
-  const [details, setDetails] = useState<Entry>();
-  const [directoryDrop, setDirectoryDrop] = useState(false);
-  const [notice, setNotice] = useState<"renamed" | "created">();
-  const fileInput = useRef<HTMLInputElement>(null);
-  const uploadFolder = useRef(folder);
-  const searchRegion = useRef<HTMLElement>(null);
-  const list = useRef<HTMLElement>(null);
-  const previousFolder = useRef(folder);
-  const enabled = device.status === "online";
-  const { pages, load, forget } = useFileBrowser(device.id, workspace.id, visible && enabled);
-  useEffect(() => {
-    const previous = previousFolder.current;
-    if (previous === folder) return;
-    const returning = mobile && parentPath(previous) === folder;
-    const page = pages[folder];
-    if (returning && (!page || page.busy)) return;
-    previousFolder.current = folder;
-    if (!returning) return;
-    // The parent URL cannot identify the child just left; use its existing full path once.
-    const row = Array.from(
-      list.current?.querySelectorAll<HTMLElement>("[data-entry-path]") ?? [],
-    ).find((element) => element.dataset.entryPath === previous);
-    row?.scrollIntoView({ block: "center" });
-  }, [folder, mobile, pages]);
-  const initialRoot = browsing && enabled && !mobile && !reveal && pages["."] === undefined;
-  useEffect(() => {
-    if (initialRoot) void load(".");
-  }, [initialRoot, load]);
-  const queryFile = page?.path;
-  const queryDraft = page?.draftId;
-  const queryLine = route.query.file === queryFile ? route.query.line : undefined;
-  const [location, setLocation] = useState<{ path: string; position: Draft["location"] }>();
-  const searching = route.query.search === true;
-  const drafts = useDrafts(store).filter(
-    (item) => item.deviceId === device.id && item.workspaceId === workspace.id,
-  );
-  const draft =
-    drafts.find((item) => item.id === queryDraft) ?? drafts.find((item) => item.path === queryFile);
-  useWorkspaceRefresh(device.id, workspace.id, visible && enabled, async (signal) => {
-    await refresh(signal, true);
-    if (draft && !signal.aborted) await store.observe(draft, signal);
-  });
-  useEffect(() => {
-    if (contentVisible && queryLine !== undefined) {
-      setLocation(queryFile ? { path: queryFile, position: { line: queryLine } } : undefined);
-      updateWorkspaceQuery(
-        { deviceId: device.id, workspaceId: workspace.id },
-        { line: undefined },
-        { replace: true },
-      );
-      return;
-    }
-    if (location && route.query.file !== location.path) {
-      setLocation(undefined);
-      return;
-    }
-    if (!contentVisible || !draft) return;
-    if (location?.path === draft.path) {
-      draft.location = location.position;
-      store.changed();
-      setLocation(undefined);
-    }
-  }, [
-    contentVisible,
-    draft,
-    queryFile,
-    queryLine,
-    route.query.file,
-    location,
-    store,
-    device.id,
-    workspace.id,
-  ]);
-  useEffect(() => {
-    if (!visible || !enabled || folder === ".") return;
-    const deviceTarget = { deviceId: device.id, workspaceId: workspace.id };
-    let active = true;
-    void load(folder).then((listing) => {
-      if (!active || !listing || listing.path === folder) return;
-      setExpanded((old) => new Set([...old].map((path) => movedPath(path, folder, listing.path))));
-      const current = currentRoute();
-      if (
-        current.tool === "files" &&
-        isWorkspaceRoute(current, deviceTarget) &&
-        current.query.folder === folder
-      )
-        updateWorkspaceQuery(deviceTarget, { folder: listing.path }, { replace: true });
-    });
-    return () => {
-      active = false;
-    };
-  }, [visible, enabled, folder, load, device.id, workspace.id]);
-  useEffect(() => {
-    setRevealError(undefined);
-    if (!visible || !enabled || !reveal || device.environment?.os !== "macos") return;
-    const controller = new AbortController();
-    const target = { deviceId: device.id, workspaceId: workspace.id };
-    void rpc(
-      device.id,
-      "files.inspect",
-      { workspaceId: workspace.id, path: reveal },
-      controller.signal,
-    )
-      .then(({ entry }) => {
-        const current = currentRoute();
-        if (
-          controller.signal.aborted ||
-          !entry.path ||
-          entry.path === reveal ||
-          !isWorkspaceRoute(current, target) ||
-          current.tool !== "files" ||
-          current.query.reveal !== reveal
-        )
-          return;
-        updateWorkspaceQuery(
-          target,
-          { reveal: entry.path, folder: parentPath(entry.path) },
-          { replace: true },
-        );
-      })
-      .catch((error: unknown) => {
-        if (!controller.signal.aborted) setRevealError(error);
-      });
-    return () => controller.abort();
-  }, [visible, enabled, reveal, device.id, device.environment?.os, workspace.id]);
-  useEffect(() => {
-    const written = (event: WindowEventMap["kiteline:file-written"]) => {
-      const target = event.detail;
-      if (target.deviceId === device.id && target.workspaceId === workspace.id)
-        void load(parentPath(target.path));
-    };
-    window.addEventListener("kiteline:file-written", written);
-    return () => {
-      window.removeEventListener("kiteline:file-written", written);
-    };
-  }, [device.id, workspace.id, load]);
+  const route = useRoute();
+  const drafts = useDrafts(store);
   const target = { deviceId: device.id, workspaceId: workspace.id };
-  function updateQuery(query: WorkspaceQuery, options: NavigationOptions = {}) {
-    updateWorkspaceQuery(target, query, options);
-  }
-  function enter(path: string) {
-    setSelected(new Set());
-    updateQuery({
-      folder: path,
+  const draft = page && store.find({ ...target, path: page.path }, page.draftId);
+  const enabled = device.status === "online";
+  const [pending, setPending] = useState<{
+    pageId?: string;
+    path: string;
+    position: TextLocation;
+  }>();
+  const queryLine =
+    route.query.file === page?.path && route.query.draft === page?.draftId
+      ? route.query.line
+      : undefined;
+  const routeLocation = useMemo(
+    () => (page?.id && queryLine !== undefined ? { line: queryLine } : undefined),
+    [page?.id, queryLine],
+  );
+  const position =
+    routeLocation ??
+    (pending?.pageId === page?.id && pending?.path === page?.path ? pending?.position : undefined);
+  useEffect(() => {
+    setPending((current) => {
+      if (!current) return current;
+      if (route.query.file !== current.path || route.query.line !== undefined) return undefined;
+      if (current.pageId !== undefined) return current.pageId === page?.id ? current : undefined;
+      if (page?.path === current.path && route.query.draft === page.draftId && contentVisible)
+        return { ...current, pageId: page.id };
+      return current;
     });
-    setExpanded((old) => {
-      const next = new Set(old);
-      if (next.has(path) && !mobile && path !== ".") next.delete(path);
-      else next.add(path);
-      return next;
-    });
-    if (folder === path || path === ".") void load(path);
-  }
-  function chooseUpload(path: string) {
-    uploadFolder.current = path;
-    fileInput.current?.click();
-  }
-  function open(entry: Entry) {
-    setNotice(undefined);
-    setLocation(undefined);
-    onOpenContent();
-    showFile({ ...target, path: entry.path! });
-  }
-  function download(path: string) {
-    downloadFile({ deviceId: device.id, workspaceId: workspace.id, path });
-  }
-  async function refresh(signal?: AbortSignal, background = false) {
-    for (const path of new Set(mobile ? [folder] : [folder, ...expanded])) {
-      if (signal?.aborted) return;
-      if (path === "." && initialRoot) continue;
-      await load(path, false, background);
+  }, [contentVisible, page, pending, route.query.file, route.query.draft, route.query.line]);
+  useEffect(() => {
+    if (!contentVisible || !page || !draft) return;
+    const target = { deviceId: device.id, workspaceId: workspace.id };
+    const current = currentRoute();
+    if (
+      current.tool === "files" &&
+      isWorkspaceRoute(current, target) &&
+      current.query.file === page.path &&
+      !current.query.draft
+    )
+      updateWorkspaceQuery(target, { file: draft.path, draft: draft.id }, { replace: true });
+  }, [contentVisible, page, draft, device.id, workspace.id]);
+  function resolvePath(requested: string, actual: string, loadedDraft?: Draft) {
+    if (!page || page.path !== requested) return;
+    if (actual !== requested) {
+      onResolvePath(page.id, requested, actual);
+      setPending((current) =>
+        current?.pageId === page.id && current.path === requested
+          ? { ...current, path: actual }
+          : current,
+      );
     }
-  }
-  function moveViewPaths(moves: { from: string; to: string }[]) {
-    if (!moves.length) return;
-    const nextPath = (path: string) =>
-      moves.reduce((next, move) => movedPath(next, move.from, move.to), path);
-    for (const { from } of moves) forget(from);
-    const query = currentRoute().query;
-    updateQuery(
+    const current = currentRoute();
+    if (
+      current.tool !== "files" ||
+      !isWorkspaceRoute(current, target) ||
+      current.query.file !== requested ||
+      current.query.draft !== page.draftId
+    )
+      return;
+    updateWorkspaceQuery(
+      target,
       {
-        folder: nextPath(query.folder ?? "."),
-        file: query.file ? nextPath(query.file) : undefined,
-        reveal: query.reveal ? nextPath(query.reveal) : undefined,
+        file: actual,
+        draft: loadedDraft?.id,
+        ...(actual !== requested ? { folder: parentPath(actual) } : {}),
       },
       { replace: true },
     );
-    const next = new Set([...expanded].map(nextPath));
-    setExpanded(next);
-    for (const path of next) if (!expanded.has(path)) void load(path);
   }
-  const operated = useEffectEvent((event: WindowEventMap["kiteline:files-operated"]) => {
-    const { deviceId, workspaceId, kind, items } = event.detail;
-    const route = currentRoute();
-    if (deviceId !== device.id || workspaceId !== workspace.id || !isWorkspaceRoute(route, target))
-      return;
-    const completed = items.filter((item) => item.outcome === "succeeded");
-    if (kind === "move")
-      moveViewPaths(completed.map((item) => ({ from: item.path, to: item.targetPath! })));
-    if (kind === "delete") {
-      let folder = route.query.folder ?? ".";
-      for (const item of completed) {
-        forget(item.path);
-        if (isWithin(folder, item.path)) folder = parentPath(item.path);
-      }
-      updateQuery({ folder }, { replace: true });
-    }
-    const affected = new Set<string>();
-    for (const item of items) {
-      affected.add(parentPath(item.path));
-      if (item.targetPath) affected.add(parentPath(item.targetPath));
-      if (kind !== "copy" && item.outcome !== "succeeded")
-        for (const path of mobile ? [folder] : expanded)
-          if (isWithin(path, item.path)) affected.add(path);
-    }
-    for (const path of affected) void load(path);
-    setSelected(new Set());
-  });
-  useEffect(() => {
-    window.addEventListener("kiteline:files-operated", operated);
-    return () => window.removeEventListener("kiteline:files-operated", operated);
-  }, []);
-  const entries = new Map(
-    Object.values(pages)
-      .flatMap((page) => page.listing?.entries.items ?? [])
-      .map((entry) => [entry.path, entry]),
-  );
-  const downloadable = [...selected].filter((path) => {
-    const entry = entries.get(path);
-    return entry?.kind === "file" || entry?.kind === "symlink";
-  });
-  function selectedAction(kind: FileAction["kind"]) {
-    const paths = [...selected].filter(
-      (path) =>
-        ![...selected].some(
-          (other) =>
-            other !== path && entries.get(other)?.kind === "directory" && isWithin(path, other),
-        ),
-    );
-    const chosen = paths.flatMap((path) => (entries.get(path) ? [entries.get(path)!] : []));
-    if (chosen.length) onOperation({ kind, entries: chosen }, folder);
-  }
-  const savingWithin = (path: string) => store.savingWithin(device.id, workspace.id, path);
   return (
-    <div
-      className={contentVisible ? "flex min-h-0 flex-1 flex-col" : "hidden"}
-      onDragOverCapture={(event) => {
-        if (!event.dataTransfer.types.includes("Files")) return;
-        event.preventDefault();
-        event.stopPropagation();
-        event.dataTransfer.dropEffect = enabled ? "copy" : "none";
+    <FileBrowser
+      {...{ device, workspace, browsing, contentVisible, store, onUpload, onOperation }}
+      currentFile={page?.path}
+      onOpenContent={onOpenContent}
+      onOpenFile={(path, position, keepSearch) => {
+        if (position) setPending({ path, position });
+        onOpenContent();
+        showFile({ ...target, path }, undefined, keepSearch);
       }}
-      onDropCapture={(event) => {
-        if (!event.dataTransfer.types.includes("Files")) return;
-        event.preventDefault();
-        event.stopPropagation();
-        if (!enabled) return;
-        if (
-          Array.from(event.dataTransfer.items).some((item) => item.webkitGetAsEntry()?.isDirectory)
-        ) {
-          setDirectoryDrop(true);
-          return;
-        }
-        setDirectoryDrop(false);
-        const files = Array.from(event.dataTransfer.files);
-        if (files.length) onUpload(files, folder);
+      observeContent={async (signal) => {
+        const draft = page && store.find({ ...target, path: page.path }, page.draftId);
+        if (draft) await store.observe(draft, signal);
       }}
     >
-      <ToolSidebar visible={searching}>
-        <FileSearch
-          ref={searchRegion}
-          deviceId={device.id}
-          workspaceId={workspace.id}
-          workspaceName={workspace.name}
-          active={browsing && searching}
-          disabled={!enabled}
-          onBack={() => updateQuery({ search: undefined })}
-          onOpen={(match, query) => {
-            setLocation(
-              match.line
-                ? {
-                    path: match.path,
-                    position: { line: match.line, range: match.ranges?.[0], query },
-                  }
-                : undefined,
-            );
-            onOpenContent();
-            showFile({ ...target, path: match.path }, undefined, true);
-          }}
-        />
-      </ToolSidebar>
-      <ToolHeader>
-        <div
-          className={
-            searching
-              ? "hidden"
-              : "flex min-h-10 shrink-0 items-center gap-1 border-b border-border px-2"
-          }
-        >
-          <IconButton
-            label={t(($) => $.files.parentDirectory)}
-            disabled={folder === "."}
-            onClick={() => enter(parentPath(folder))}
-          >
-            <ArrowUp />
-          </IconButton>
-          <span
-            className="min-w-0 flex-1 truncate text-xs"
-            title={pages[folder]?.listing?.resolvedPath}
-          >
-            {folderLabel}
-          </span>
-          {!mobile && (
-            <IconButton
-              label={t(($) => $.files.searchFiles)}
-              disabled={!enabled}
-              onClick={() => updateQuery({ search: true })}
-            >
-              <Search />
-            </IconButton>
-          )}
-          <IconButton
-            label={t(($) => $.files.newFile)}
-            disabled={!enabled}
-            onClick={() => {
-              onOpenContent();
-              showDraft(
-                store.open({
-                  ...target,
-                  path: "",
-                  folder,
-                  deviceName: device.name,
-                  workspaceName: workspace.name,
-                }),
-              );
+      <section
+        className="flex min-w-0 flex-1 flex-col max-desk:min-h-0 max-desk:overflow-y-auto"
+        aria-label={t(($) => $.files.fileContent)}
+      >
+        {draft ? (
+          <DraftView
+            key={draft.id}
+            {...{ store, draft }}
+            focusMode={mobile ? focusMode : undefined}
+            showTabs={false}
+            editorVisible={contentVisible}
+            htmlPreviewVisible={contentVisible && queryLine === undefined && !position}
+            location={position}
+            onLocationApplied={(applied) => {
+              setPending((current) => (current?.position === applied ? undefined : current));
+              if (applied !== routeLocation || !page) return;
+              const current = currentRoute();
+              if (
+                current.tool === "files" &&
+                isWorkspaceRoute(current, target) &&
+                current.query.file === page.path &&
+                current.query.line === queryLine
+              )
+                updateWorkspaceQuery(target, { line: undefined }, { replace: true });
             }}
-          >
-            <FilePlus2 />
-          </IconButton>
-          <input
-            ref={fileInput}
-            type="file"
-            multiple
-            className="hidden"
-            aria-label={t(($) => $.files.uploadPicker)}
-            onChange={(event) => {
-              const files = Array.from(event.target.files ?? []);
-              if (files.length) onUpload(files, uploadFolder.current);
-              event.target.value = "";
-            }}
+            unavailable={!enabled ? t(($) => $.common.deviceOffline) : undefined}
           />
-          <Menu>
-            <MenuTrigger
-              render={
-                <Button variant="ghost" size="icon" aria-label={t(($) => $.files.moreActions)} />
-              }
-            >
-              <MoreHorizontal />
-            </MenuTrigger>
-            <MenuContent finalFocus={searching ? searchRegion : undefined}>
-              {mobile && (
-                <MenuItem disabled={!enabled} onClick={() => updateQuery({ search: true })}>
-                  <Search />
-                  {t(($) => $.files.searchFiles)}
-                </MenuItem>
-              )}
-              <MenuItem disabled={!enabled} onClick={() => chooseUpload(folder)}>
-                <Upload />
-                {t(($) => $.files.uploadFiles)}
-              </MenuItem>
-              <MenuItem
-                disabled={!enabled}
-                onClick={() => setAction({ kind: "directory", parent: folder })}
-              >
-                <FolderPlus />
-                {t(($) => $.files.newDirectory)}
-              </MenuItem>
-              <MenuItem
-                onClick={() => {
-                  setSelecting((value) => !value);
-                  setSelected(new Set());
-                }}
-              >
-                <ListChecks />
-                {selecting ? t(($) => $.files.finishSelection) : t(($) => $.files.selectFiles)}
-              </MenuItem>
-              <MenuItem disabled={!enabled} onClick={() => void refresh()}>
-                <RefreshCw />
-                {t(($) => $.common.refresh)}
-              </MenuItem>
-            </MenuContent>
-          </Menu>
-        </div>
-        {!searching && reveal && (
-          <p className="border-b border-border px-3 py-2 text-xs whitespace-pre-wrap break-all">
-            {t(($) => $.files.directoryFile, { path: reveal })}
-          </p>
-        )}
-        {!searching && !!selected.size && (
-          <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border px-3">
-            <span className="mr-auto text-xs">
-              {selected.size.toLocaleString(i18n.resolvedLanguage)}
-            </span>
-            <IconButton
-              label={t(($) => $.files.downloadSelected)}
-              disabled={!enabled || !downloadable.length}
-              onClick={() => {
-                for (const path of downloadable) download(path);
-              }}
-            >
-              <Download />
-            </IconButton>
-            <IconButton
-              label={t(($) => $.files.copySelected)}
-              disabled={!enabled}
-              onClick={() => selectedAction("copy")}
-            >
-              <Copy />
-            </IconButton>
-            <IconButton
-              label={t(($) => $.files.moveSelected)}
-              disabled={!enabled || [...selected].some(savingWithin)}
-              onClick={() => selectedAction("move")}
-            >
-              <FolderInput />
-            </IconButton>
-            <IconButton
-              label={t(($) => $.common.delete)}
-              disabled={!enabled || [...selected].some(savingWithin)}
-              onClick={() => selectedAction("delete")}
-            >
-              <Trash2 />
-            </IconButton>
+        ) : page?.path && !page.draftId ? (
+          <FileContent
+            key={`${page.id}:${page.path}`}
+            onResolvePath={resolvePath}
+            target={{
+              ...target,
+              path: page.path,
+              deviceName: device.name,
+              workspaceName: workspace.name,
+            }}
+            store={store}
+            active={contentVisible && enabled}
+          />
+        ) : (
+          <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+            {!drafts.some(
+              (item) => item.deviceId === device.id && item.workspaceId === workspace.id,
+            ) && t(($) => $.files.selectFiles)}
           </div>
         )}
-        {!searching && notice && (
-          <p
-            role="status"
-            className="border-b border-border px-3 py-1 text-xs text-muted-foreground"
-          >
-            {t(($) => $.files[notice])}
-          </p>
-        )}
-        {!enabled && (
-          <p className="border-b border-border px-3 py-2 text-sm text-muted-foreground">
-            {t(($) => $.common.deviceOffline)}
-          </p>
-        )}
-        {directoryDrop && (
-          <p role="alert" className="px-3 py-2 text-sm text-destructive">
-            {t(($) => $.files.directoryDropUnsupported)}
-          </p>
-        )}
-        {!!revealError && (
-          <div role="alert" className="break-words px-3 py-2 text-sm text-destructive">
-            <ErrorNotice error={revealError} />
-          </div>
-        )}
-      </ToolHeader>
-      <div className="flex min-h-0 flex-1">
-        <ToolSidebar visible={!searching}>
-          <aside
-            ref={list}
-            key={mobile ? folder : undefined}
-            className="scroll-area min-h-0 w-full flex-1 overflow-auto bg-muted"
-            aria-label={t(($) => $.files.list)}
-          >
-            <FileExplorer
-              path={rootTree ? "." : folder}
-              {...{ pages, expanded, selected, mobile, selecting }}
-              currentFile={queryFile ?? reveal ?? undefined}
-              disabled={!enabled}
-              savingWithin={savingWithin}
-              onFolder={enter}
-              onOpen={open}
-              onSelect={(path) =>
-                setSelected((old) => {
-                  const next = new Set(old);
-                  if (next.has(path)) next.delete(path);
-                  else next.add(path);
-                  return next;
-                })
-              }
-              onRename={(entry) => setAction({ kind: "rename", entry })}
-              onUpload={chooseUpload}
-              onNewDirectory={(parent) => setAction({ kind: "directory", parent })}
-              onAction={(kind, entry) => onOperation({ kind, entries: [entry] }, folder)}
-              onDownload={(entry) => download(entry.path!)}
-              onMore={(path) => void load(path, true)}
-              onDetails={setDetails}
-            />
-          </aside>
-        </ToolSidebar>
-        <section
-          className="flex min-w-0 flex-1 flex-col max-desk:min-h-0 max-desk:overflow-y-auto"
-          aria-label={t(($) => $.files.fileContent)}
-        >
-          {draft ? (
-            <DraftView
-              focusMode={mobile ? focusMode : undefined}
-              showTabs={false}
-              key={draft.id}
-              store={store}
-              draft={draft}
-              targetOS={device.environment?.os}
-              editorVisible={contentVisible}
-              htmlPreviewVisible={
-                contentVisible && queryLine === undefined && !location && !draft.location
-              }
-              unavailable={!enabled ? t(($) => $.common.deviceOffline) : undefined}
-            />
-          ) : queryFile ? (
-            <FileContent
-              key={queryFile}
-              onResolvePath={(path) => {
-                onResolvePath(queryFile, path);
-                setLocation((current) =>
-                  current?.path === queryFile ? { ...current, path } : current,
-                );
-              }}
-              target={{
-                ...target,
-                path: queryFile,
-                deviceName: device.name,
-                workspaceName: workspace.name,
-              }}
-              store={store}
-              active={contentVisible && enabled}
-            />
-          ) : (
-            <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-              {drafts.length === 0 && t(($) => $.files.selectFiles)}
-            </div>
-          )}
-        </section>
-      </div>
-      {details && (
-        <FileDetails entry={details} root={workspace.path} onClose={() => setDetails(undefined)} />
-      )}
-      {action && (
-        <FileNameDialog
-          deviceId={device.id}
-          workspaceId={workspace.id}
-          targetOS={device.environment?.os}
-          action={action}
-          blocked={action.kind === "rename" && savingWithin(action.entry.path!)}
-          rename={(path, name) =>
-            store.renameFile({ deviceId: device.id, workspaceId: workspace.id, path }, name)
-          }
-          onClose={() => setAction(undefined)}
-          onDone={(result) => {
-            setAction(undefined);
-            setNotice(result.from ? "renamed" : "created");
-            if (result.from) {
-              moveViewPaths([{ from: result.from, to: result.to }]);
-            }
-            void load(parentPath(result.to));
-            setSelected(new Set());
-          }}
-        />
-      )}
-    </div>
+      </section>
+    </FileBrowser>
   );
 }

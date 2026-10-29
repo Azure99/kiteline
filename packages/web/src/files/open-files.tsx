@@ -1,5 +1,4 @@
 import { useTranslation } from "react-i18next";
-import type { Device } from "@kiteline/shared/protocol";
 import { useEffect, useState } from "react";
 import { ErrorNotice } from "../components/error-notice";
 import { Circle, Copy, X } from "lucide-react";
@@ -12,21 +11,20 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../components/ui/dialog";
-import { draftError, isDirty, useDrafts, type Draft, type DraftStore } from "./drafts";
+import { draftProblem, isDirty, useDrafts, type Draft, type DraftStore } from "./drafts";
 import { draftLabel } from "./draft-label";
 import { SaveDraftDialog } from "./save-draft-dialog";
-import { closeDraft, requestCloseDraft, showDraft, syncDraftPath } from "./navigation";
+import { showDraft, syncDraftPath } from "./navigation";
+import { completeDraftClose, requestCloseDraft } from "./close-draft";
 import { useRoute } from "../lib/navigation";
 import { useCopyFeedback } from "../lib/use-copy-feedback";
 
 export function OpenFiles({
   store,
-  devices,
   open,
   onOpenChange,
 }: {
   store: DraftStore;
-  devices: Device[];
   open: boolean;
   onOpenChange(open: boolean): void;
 }) {
@@ -39,6 +37,7 @@ export function OpenFiles({
 
   const drafts = useDrafts(store);
   const closing = drafts.find((item) => item.id === store.closing);
+  const closingProblem = closing && draftProblem(closing);
   const route = useRoute();
   const selected = drafts.find(
     (draft) =>
@@ -134,9 +133,9 @@ export function OpenFiles({
             </DialogHeader>
             <div className="space-y-3 overflow-auto p-4 text-sm">
               <p className="break-all">{draftLabel(closing)}</p>
-              {draftError(closing) && (
+              {!!closingProblem && (
                 <div role="alert" className="text-destructive">
-                  <ErrorNotice error={closing.error ?? closing.observationError} />
+                  <ErrorNotice error={closingProblem} />
                 </div>
               )}
             </div>
@@ -144,7 +143,7 @@ export function OpenFiles({
               <Button variant="outline" onClick={() => store.setClosing()}>
                 {t(($) => $.common.cancel)}
               </Button>
-              <Button variant="outline" onClick={() => closeDraft(store, closing)}>
+              <Button variant="outline" onClick={() => completeDraftClose(store, closing)}>
                 {t(($) => $.files.discardChanges)}
               </Button>
               <Button
@@ -154,9 +153,13 @@ export function OpenFiles({
                     setNaming(closing);
                     return;
                   }
-                  void store.save(closing).then((saved) => {
-                    if (saved && store.closing === closing.id && !isDirty(closing))
-                      closeDraft(store, closing);
+                  void store.save(closing).then((result) => {
+                    if (
+                      result.kind === "saved" &&
+                      store.closing === closing.id &&
+                      !isDirty(closing)
+                    )
+                      completeDraftClose(store, closing);
                   });
                 }}
               >
@@ -170,11 +173,10 @@ export function OpenFiles({
         <SaveDraftDialog
           store={store}
           draft={naming}
-          targetOS={devices.find((device) => device.id === naming.deviceId)?.environment?.os}
           onClose={() => setNaming(undefined)}
           onSaved={() => {
             setNaming(undefined);
-            if (store.closing === naming.id && !isDirty(naming)) closeDraft(store, naming);
+            if (store.closing === naming.id && !isDirty(naming)) completeDraftClose(store, naming);
           }}
         />
       )}

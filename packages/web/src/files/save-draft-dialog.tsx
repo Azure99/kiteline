@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import type { AgentEnvironment } from "@kiteline/shared/protocol";
 import { useTranslation } from "react-i18next";
 import { ErrorNotice } from "../components/error-notice";
 import { Button } from "../components/ui/button";
@@ -16,13 +15,11 @@ import type { Draft, DraftStore } from "./drafts";
 export function SaveDraftDialog({
   store,
   draft,
-  targetOS,
   onClose,
   onSaved,
 }: {
   store: DraftStore;
   draft: Draft;
-  targetOS?: AgentEnvironment["os"];
   onClose(): void;
   onSaved(): void;
 }) {
@@ -73,13 +70,11 @@ export function SaveDraftDialog({
             if (!store.canSave(draft)) return;
             setError(undefined);
             const submitted = ++generation.current;
-            void store.save(draft, path, null, targetOS).then((saved) => {
+            void store.save(draft, { kind: "create", path }).then((result) => {
               if (submitted !== generation.current || !store.has(draft)) return;
-              if (saved) onSaved();
-              else
-                setError(
-                  draft.error ?? draft.observationError ?? new Error("The file could not be saved"),
-                );
+              if (result.kind === "saved") onSaved();
+              else if (result.kind === "conflict" || result.kind === "failed")
+                setError(result.error);
             });
           }}
           className="flex min-h-0 flex-col"

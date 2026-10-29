@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import {
   closePage,
   diffPageId,
+  filePage,
   openPage,
   type FilePage,
   type WorkPage,
@@ -52,6 +53,25 @@ test("loading and renaming a draft preserve its tab identity", () => {
     { kind: "file", id: "file:a.txt", path: "renamed.txt", draftId: "d" },
   ]);
   expect(pages.active).toBe("file:a.txt");
+});
+
+test("a closed draft URL cannot replace a later draft's retained path page", () => {
+  let pages = openPage({ items: [] }, filePage("a.txt"));
+  pages = openPage(pages, filePage("a.txt", "closed"));
+  expect(pages.active).toBe("path:a.txt");
+  pages = closePage(pages, pages.active!);
+  pages = openPage(pages, filePage("a.txt"));
+  pages = openPage(pages, filePage("a.txt", "later"));
+  const later = pages.items[0]!;
+  expect(later).toMatchObject({ id: "path:a.txt", draftId: "later" });
+
+  const stale = filePage("a.txt", "closed");
+  pages = openPage(pages, stale);
+  expect(pages.items).toEqual([later, stale]);
+  expect(pages.active).toBe(stale.id);
+  pages = closePage(pages, stale.id);
+  expect(pages.items).toEqual([later]);
+  expect(pages.active).toBe(later.id);
 });
 
 test("diff tabs distinguish repositories, paths, comparison sides and merge parents", () => {

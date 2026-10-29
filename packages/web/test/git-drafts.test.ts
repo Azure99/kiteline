@@ -30,7 +30,9 @@ function edit(store: DraftStore, draft: Draft) {
 
 test("Git draft markers only use unsaved content from the matching device and workspace", () => {
   const store = new DraftStore();
-  store.limits(["device", "other-device"].map((id) => ({ id, editorBytes: 1024 }) as Device));
+  store.observeDevices(
+    ["device", "other-device"].map((id) => ({ id, editorBytes: 1024 }) as Device),
+  );
   const current = opened(store, "src/a.ts");
   edit(store, opened(store, "src/a.ts", { ...target, deviceId: "other-device" }));
   edit(store, opened(store, "src/a.ts", { ...target, workspaceId: "other-workspace" }));
@@ -42,7 +44,7 @@ test("Git draft markers only use unsaved content from the matching device and wo
 
 test("nested repositories match the exact workspace path rather than a directory prefix", () => {
   const store = new DraftStore();
-  store.limits([{ id: "device", editorBytes: 1024 } as Device]);
+  store.observeDevices([{ id: "device", editorBytes: 1024 } as Device]);
   edit(store, opened(store, "services/api/src/a.ts"));
   expect(hasUnsavedDraft(store.snapshot(), target, "services/api", ["src/a.ts"])).toBe(true);
   expect(hasUnsavedDraft(store.snapshot(), target, ".", ["src/a.ts"])).toBe(false);

@@ -1,26 +1,19 @@
 import { newId } from "../lib/id";
 import { useCallback, useSyncExternalStore } from "react";
 import { Compartment, type EditorState } from "@codemirror/state";
-import type {
-  AgentEnvironment,
-  KitelineError,
-  Device,
-  TextFormat,
-} from "@kiteline/shared/protocol";
+import type { AgentEnvironment, Device, TextFormat } from "@kiteline/shared/protocol";
 import { encodeText } from "@kiteline/shared/protocol/text";
-import { apiError, ApiError, errorMessage, rpc } from "../lib/api";
+import { ApiError, rpc } from "../lib/api";
 import { emit } from "../lib/events";
 import { readText, writeText, type DiskText, type FileTarget } from "./content";
 import { syncTextTransactions, textState } from "./editor-state";
 import { isWithin, movedPath } from "./paths";
 
-export type DraftNotice =
+type DraftNotice =
   | "loadingCapacity"
   | "fileCapacity"
-  | "savedOldPath"
   | "duplicateDraft"
   | "checkingMoved"
-  | "diskChangedKept"
   | "deletedDraft"
   | "missingDraft";
 
@@ -29,6 +22,18 @@ interface SaveSnapshot {
   raw: string;
   replacesSource: boolean;
 }
+
+type SaveTarget =
+  | { kind: "create"; path: string }
+  | { kind: "overwrite"; path: string; revision: string };
+
+type SaveResult = { kind: "ignored" | "saved" } | { kind: "conflict" | "failed"; error: unknown };
+
+type CheckResult =
+  | { kind: "ignored" }
+  | { kind: "read"; disk: DiskText; unconfirmedSave: boolean }
+  | { kind: "confirmed-save"; disk: DiskText }
+  | { kind: "failed"; error: unknown };
 
 // Draft and disk ownership: docs/design/files.md.
 export interface Draft extends FileTarget {
@@ -45,10 +50,11 @@ export interface Draft extends FileTarget {
   baseRaw: string;
   revision?: string;
   resolvedPath?: string;
-  scrollSnapshot?: { line: number; column: number; offsetX: number; offsetY: number };
-  markdownPreview?: boolean;
-  markdownPosition?: { line: number; offset: number };
-  location?: { line: number; range?: [number, number]; query?: string };
+  view: {
+    scrollSnapshot?: { line: number; column: number; offsetX: number; offsetY: number };
+    markdownPreview?: boolean;
+    markdownPosition?: { line: number; offset: number };
+  };
   operation?: { request: AbortController } & (
     | { kind: "loading" | "checking" }
     | { kind: "saving"; snapshot: SaveSnapshot }
@@ -61,8 +67,6 @@ export interface Draft extends FileTarget {
   diskChanged?: boolean;
   diskActivity: number; // Invalidates background reads when a foreground operation changes disk facts.
   sourceVersion: number; // Invalidates captured file changes after the draft adopts another source.
-  readChannel?: string; // Associates channel failure events with the active foreground read.
-  readError?: ApiError; // Preserves the channel diagnostic when HTTP cannot deliver the body.
 }
 
 interface CapturedDraft {
@@ -97,7 +101,7 @@ export class DraftStore {
   private listeners = new Set<() => void>();
   private draftListeners = new WeakMap<Draft, Set<() => void>>();
   private draftVersions = new WeakMap<Draft, number>();
-  private editorLimits = new Map<string, number>();
+  private devices = new Map<string, { editorBytes?: number; os?: AgentEnvironment["os"] }>();
   private closingId?: string;
   get closing() {
     return this.closingId;
@@ -177,46 +181,33 @@ export class DraftStore {
         (isWithin(draft.path, path) || isWithin(draft.operation.snapshot.target.path, path)),
     );
   }
-  fileFailed(channelId: string, error: KitelineError) {
-    const draft = this.items.find((item) => item.readChannel === channelId);
-    if (!draft) return;
-    draft.readError = apiError(error, "failed");
-    draft.error = draft.readError;
-    this.changed();
-  }
-  private async read(draft: Draft, target: FileTarget, request: AbortController) {
-    draft.readChannel = undefined;
-    draft.readError = undefined;
-    try {
-      const disk = await readText(
-        { deviceId: target.deviceId, workspaceId: target.workspaceId, path: target.path },
-        request.signal,
-        (id) => {
-          if (draft.operation?.request === request) draft.readChannel = id;
-        },
-      );
-      if (draft.operation?.request === request) draft.readChannel = undefined;
-      return disk;
-    } catch (error) {
-      throw draft.readError ?? error;
+  observeDevices(devices: Device[]) {
+    for (const device of devices) {
+      const facts = this.devices.get(device.id) ?? {};
+      if (device.editorBytes !== undefined) facts.editorBytes = device.editorBytes;
+      if (device.environment?.os !== undefined) facts.os = device.environment.os;
+      this.devices.set(device.id, facts);
     }
-  }
-  limits(devices: Device[]) {
-    for (const device of devices)
-      if (device.editorBytes !== undefined) this.editorLimits.set(device.id, device.editorBytes);
     this.changed();
   }
-  limitError(draft: Draft, size: number, previous = draft.bytes): DraftNotice | undefined {
-    const limit = this.editorLimits.get(draft.deviceId);
+  private capacityNotice(draft: Draft, size: number): DraftNotice | undefined {
+    const limit = this.devices.get(draft.deviceId)?.editorBytes;
     if (limit === undefined) return "loadingCapacity";
-    if (size > limit && size > previous) return "fileCapacity";
+    if (size > limit && size > draft.bytes) return "fileCapacity";
+  }
+  acceptEdit(draft: Draft, size: number) {
+    const notice = this.capacityNotice(draft, size);
+    if (!notice) return true;
+    draft.notice = notice;
+    this.changed();
+    return false;
   }
   canSave(draft: Draft) {
-    const limit = this.editorLimits.get(draft.deviceId);
+    const limit = this.devices.get(draft.deviceId)?.editorBytes;
     return !!draft.state && limit !== undefined && draft.bytes <= limit && !draft.operation;
   }
   overLimit(draft: Draft) {
-    const limit = this.editorLimits.get(draft.deviceId);
+    const limit = this.devices.get(draft.deviceId)?.editorBytes;
     return limit !== undefined && draft.bytes > limit;
   }
   find(target: FileTarget, id?: string) {
@@ -251,11 +242,12 @@ export class DraftStore {
       baseRaw: "",
       diskActivity: 0,
       sourceVersion: 0,
+      view: {},
     };
     this.items.push(draft);
     if (disk) {
       try {
-        this.adopt(draft, disk);
+        this.replaceSource(draft, disk);
       } catch (error) {
         draft.error = error;
         this.changed();
@@ -292,38 +284,53 @@ export class DraftStore {
         overLimit !== this.overLimit(draft),
     );
   }
-  adopt(draft: Draft, disk: DiskText, observed = false) {
+  private checkedDiskSize(draft: Draft, disk: DiskText) {
     const size = encodeText(disk.text, disk.meta as TextFormat).length;
-    const error = this.limitError(draft, size);
-    if (error) {
-      draft.notice = error;
+    const notice = this.capacityNotice(draft, size);
+    if (notice) {
+      draft.notice = notice;
       throw new ApiError("limit_exceeded", "The text exceeds the available editor capacity");
     }
-    if (!observed) draft.sourceVersion++;
+    return size;
+  }
+  private applyDiskBaseline(draft: Draft, disk: DiskText, size: number) {
     draft.path = disk.target.path;
     draft.format = disk.meta as TextFormat;
-    if (observed && draft.state) {
-      if (draft.state.doc.toString() !== disk.text)
-        draft.state = syncTextTransactions(draft.state, disk.text)[1].state;
-    } else
-      draft.state = textState(
-        disk.text,
-        draft.language,
-        draft.phrases,
-        draft.state ? draft.language.get(draft.state) : undefined,
-      );
     draft.bytes = size;
     draft.baseText = disk.text;
     draft.baseRaw = disk.raw;
     draft.revision = disk.meta.revision;
     draft.resolvedPath = disk.meta.resolvedPath;
+  }
+  replaceSource(draft: Draft, disk: DiskText) {
+    const size = this.checkedDiskSize(draft, disk);
+    draft.sourceVersion++;
+    draft.state = textState(
+      disk.text,
+      draft.language,
+      draft.phrases,
+      draft.state ? draft.language.get(draft.state) : undefined,
+    );
+    this.applyDiskBaseline(draft, disk, size);
     draft.unknownSave = undefined;
     draft.missing = false;
-    if (!observed) draft.error = undefined;
+    draft.error = undefined;
     draft.observationError = undefined;
     draft.notice = undefined;
     draft.diskChanged = false;
-    if (!observed) draft.scrollSnapshot = undefined;
+    draft.view.scrollSnapshot = undefined;
+    draft.view.markdownPosition = undefined;
+    this.changed();
+  }
+  private applyObserved(draft: Draft, disk: DiskText) {
+    const size = this.checkedDiskSize(draft, disk);
+    if (draft.state!.doc.toString() !== disk.text)
+      draft.state = syncTextTransactions(draft.state!, disk.text)[1].state;
+    this.applyDiskBaseline(draft, disk, size);
+    draft.missing = false;
+    draft.observationError = undefined;
+    draft.notice = undefined;
+    draft.diskChanged = false;
     this.changed();
   }
   async load(draft: Draft) {
@@ -335,9 +342,9 @@ export class DraftStore {
     draft.error = undefined;
     this.changed();
     try {
-      const disk = await this.read(draft, { ...draft }, request);
+      const disk = await readText({ ...draft }, request.signal);
       if (this.has(draft) && draft.operation?.request === request && draft.path === path)
-        this.adopt(draft, disk);
+        this.replaceSource(draft, disk);
     } catch (error) {
       if (this.has(draft) && draft.operation?.request === request && draft.path === path)
         draft.error = error;
@@ -345,37 +352,37 @@ export class DraftStore {
       this.finish(draft, request);
     }
   }
-  async save(
-    draft: Draft,
-    path = draft.path,
-    revision: string | null = draft.revision ?? null,
-    targetOS?: AgentEnvironment["os"],
-  ) {
-    if (!this.canSave(draft) || !this.has(draft)) return false;
+  async save(draft: Draft, target?: SaveTarget): Promise<SaveResult> {
+    if (!this.canSave(draft) || !this.has(draft)) return { kind: "ignored" };
+    target ??=
+      draft.path && draft.revision !== undefined
+        ? { kind: "overwrite", path: draft.path, revision: draft.revision }
+        : { kind: "create", path: draft.path };
+    const { path } = target;
     const text = draft.state!.doc.toString();
     const format =
-      !draft.path && targetOS === "windows" && /\.ps1$/i.test(path)
+      !draft.path && this.devices.get(draft.deviceId)?.os === "windows" && /\.ps1$/i.test(path)
         ? { ...draft.format, bom: true }
         : draft.format;
     const bytes = encodeText(text, format);
-    const capacity = this.limitError(draft, bytes.length);
+    const capacity = this.capacityNotice(draft, bytes.length);
     if (capacity) {
       draft.notice = capacity;
-      draft.error = new ApiError(
+      const error = new ApiError(
         "limit_exceeded",
         "The text exceeds the available editor capacity",
       );
+      draft.error = error;
       this.changed();
-      return false;
+      return { kind: "failed", error };
     }
     draft.diskActivity++;
     const raw = new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes);
     const request = new AbortController();
-    const sourcePath = draft.path;
     const pending: SaveSnapshot = {
       target: { deviceId: draft.deviceId, workspaceId: draft.workspaceId, path },
       raw,
-      replacesSource: path === draft.path && revision !== null,
+      replacesSource: path === draft.path && target.kind === "overwrite",
     };
     draft.operation = { kind: "saving", request, snapshot: pending };
     draft.error = undefined;
@@ -384,7 +391,7 @@ export class DraftStore {
       const saved = await writeText(
         { ...draft, path },
         bytes,
-        revision ?? undefined,
+        target.kind === "overwrite" ? target.revision : undefined,
         request.signal,
         (path) => {
           pending.target.path = path;
@@ -396,37 +403,30 @@ export class DraftStore {
         workspaceId: draft.workspaceId,
         path: savedPath,
       });
-      if (!this.has(draft) || draft.operation?.request !== request) return false;
-      if (draft.path !== sourcePath) {
-        draft.notice = "savedOldPath";
-        return false;
-      }
-      const duplicate = this.hasDuplicate(draft, savedPath);
-      if (!pending.replacesSource || draft.path !== savedPath) draft.sourceVersion++;
-      draft.path = savedPath;
-      draft.format = format;
-      draft.bytes = encodeText(draft.state!.doc.toString(), format).length;
-      draft.baseText = text;
-      draft.baseRaw = raw;
-      draft.revision = saved.revision;
-      draft.unknownSave = undefined;
-      draft.missing = false;
-      draft.diskChanged = false;
-      draft.observationError = undefined;
-      draft.notice = duplicate ? "duplicateDraft" : undefined;
-      return true;
+      if (!this.has(draft) || draft.operation?.request !== request) return { kind: "ignored" };
+      this.updateSavedBaseline(draft, {
+        path: savedPath,
+        text,
+        raw,
+        format,
+        revision: saved.revision,
+        replacesSource: pending.replacesSource,
+      });
+      return { kind: "saved" };
     } catch (error) {
-      if (this.has(draft) && draft.operation?.request === request && draft.path === sourcePath) {
-        draft.error = error;
-        if (error instanceof ApiError && error.outcome === "unknown") draft.unknownSave = pending;
-      }
-      return false;
+      if (!this.has(draft) || draft.operation?.request !== request) return { kind: "ignored" };
+      draft.error = error;
+      if (error instanceof ApiError && error.outcome === "unknown") draft.unknownSave = pending;
+      return {
+        kind: error instanceof ApiError && error.code === "conflict" ? "conflict" : "failed",
+        error,
+      };
     } finally {
       this.finish(draft, request);
     }
   }
-  async check(draft: Draft): Promise<DiskText | undefined> {
-    if (draft.operation || !this.has(draft)) return;
+  async check(draft: Draft): Promise<CheckResult> {
+    if (draft.operation || !this.has(draft)) return { kind: "ignored" };
     draft.diskActivity++;
     const path = draft.path;
     const unknown = draft.unknownSave;
@@ -434,15 +434,29 @@ export class DraftStore {
     draft.operation = { kind: "checking", request };
     this.changed();
     try {
-      const disk = await this.read(draft, unknown?.target ?? { ...draft }, request);
-      if (!this.has(draft) || draft.operation?.request !== request || draft.path !== path) return;
+      const disk = await readText(unknown?.target ?? { ...draft }, request.signal);
+      if (!this.has(draft) || draft.operation?.request !== request || draft.path !== path)
+        return { kind: "ignored" };
       if (unknown && disk.raw === unknown.raw) {
-        this.confirmSave(draft, disk, unknown);
+        this.updateSavedBaseline(draft, {
+          path: disk.target.path,
+          text: disk.text,
+          raw: disk.raw,
+          format: disk.meta as TextFormat,
+          revision: disk.meta.revision,
+          replacesSource: unknown.replacesSource,
+        });
+        draft.resolvedPath = disk.meta.resolvedPath;
+        draft.error = undefined;
+        emit("kiteline:file-written", disk.target);
+        return { kind: "confirmed-save", disk };
       }
-      return disk;
+      return { kind: "read", disk, unconfirmedSave: unknown !== undefined };
     } catch (error) {
-      if (this.has(draft) && draft.operation?.request === request && draft.path === path)
-        draft.error = error;
+      if (!this.has(draft) || draft.operation?.request !== request || draft.path !== path)
+        return { kind: "ignored" };
+      draft.error = error;
+      return { kind: "failed", error };
     } finally {
       this.finish(draft, request);
     }
@@ -461,12 +475,14 @@ export class DraftStore {
       )
         return;
       if (disk.meta.revision !== draft.revision && !isDirty(draft)) {
-        this.adopt(draft, disk, true);
+        this.applyObserved(draft, disk);
         return;
       }
       draft.diskChanged = disk.meta.revision !== draft.revision;
       draft.observationError = undefined;
       draft.missing = false;
+      if (draft.notice === "deletedDraft" || draft.notice === "missingDraft")
+        draft.notice = undefined;
       this.changed();
     } catch (error) {
       if (
@@ -481,40 +497,34 @@ export class DraftStore {
       this.changed();
     }
   }
-  async renameFile(target: FileTarget, newName: string) {
-    if (this.savingWithin(target.deviceId, target.workspaceId, target.path))
-      throw new ApiError("busy", "A file save is still in progress", "failed");
-    const change = this.capture(target.deviceId, target.workspaceId, target.path);
-    const result = await rpc(target.deviceId, "files.rename", {
-      workspaceId: target.workspaceId,
-      path: target.path,
-      newName,
-    });
-    void this.rename(target.deviceId, target.workspaceId, result.from, result.to, change);
-    return result;
-  }
-  private confirmSave(draft: Draft, disk: DiskText, snapshot: SaveSnapshot) {
-    if (!snapshot.replacesSource || draft.path !== disk.target.path) draft.sourceVersion++;
-    draft.path = disk.target.path;
-    draft.baseRaw = disk.raw;
-    draft.format = disk.meta as TextFormat;
-    draft.bytes = encodeText(draft.state!.doc.toString(), draft.format).length;
-    draft.baseText = disk.text;
-    draft.revision = disk.meta.revision;
-    draft.resolvedPath = disk.meta.resolvedPath;
+  private updateSavedBaseline(
+    draft: Draft,
+    saved: {
+      path: string;
+      text: string;
+      raw: string;
+      format: TextFormat;
+      revision: string | undefined;
+      replacesSource: boolean;
+    },
+  ) {
+    if (!saved.replacesSource || draft.path !== saved.path) draft.sourceVersion++;
+    if (draft.path !== saved.path) draft.resolvedPath = undefined;
+    draft.path = saved.path;
+    draft.format = saved.format;
+    draft.bytes = encodeText(draft.state!.doc.toString(), saved.format).length;
+    draft.baseText = saved.text;
+    draft.baseRaw = saved.raw;
+    draft.revision = saved.revision;
     draft.unknownSave = undefined;
     draft.missing = false;
     draft.diskChanged = false;
-    draft.error = undefined;
     draft.observationError = undefined;
     draft.notice = this.hasDuplicate(draft, draft.path) ? "duplicateDraft" : undefined;
-    emit("kiteline:file-written", disk.target);
   }
   private async checkMoved(draft: Draft, previous: Promise<void>) {
     const request = new AbortController();
     draft.operation = { kind: "checking", request };
-    draft.readChannel = undefined;
-    draft.readError = undefined;
     const source = { deviceId: draft.deviceId, workspaceId: draft.workspaceId, path: draft.path };
     const activity = draft.diskActivity;
     const current = () =>
@@ -532,7 +542,7 @@ export class DraftStore {
         draft.missing = false;
         draft.observationError = undefined;
         if (!draft.state) {
-          this.adopt(draft, sourceDisk);
+          this.replaceSource(draft, sourceDisk);
         } else if (sourceDisk.raw === draft.baseRaw) {
           draft.revision = sourceDisk.meta.revision;
           draft.resolvedPath = sourceDisk.meta.resolvedPath;
@@ -540,13 +550,13 @@ export class DraftStore {
           draft.notice = undefined;
         } else {
           draft.diskChanged = true;
-          draft.notice = "diskChangedKept";
+          draft.notice = undefined;
         }
       } catch (error) {
         if (!current()) return;
-        draft.observationError = error;
-        if (!draft.state) draft.error = error;
-        else draft.notice = undefined;
+        if (draft.state) draft.observationError = error;
+        else draft.error = error;
+        if (draft.state || draft.notice === "checkingMoved") draft.notice = undefined;
         if (error instanceof ApiError && error.code === "not_found") draft.missing = true;
       }
     } finally {
@@ -554,13 +564,7 @@ export class DraftStore {
       this.finish(draft, request);
     }
   }
-  async rename(
-    deviceId: string,
-    workspaceId: string,
-    from: string,
-    to: string,
-    change = this.capture(deviceId, workspaceId, from),
-  ) {
+  async rename(from: string, to: string, change: FileChange) {
     let checking = Promise.resolve();
     for (const owner of change.drafts) {
       const { draft } = owner;
@@ -589,22 +593,12 @@ export class DraftStore {
     operation?.request.abort();
     draft.operation = undefined;
   }
-  deleted(
-    deviceId: string,
-    workspaceId: string,
-    path: string,
-    notice: DraftNotice = "deletedDraft",
-    change = this.capture(deviceId, workspaceId, path),
-  ) {
-    for (const owner of change.drafts) if (this.has(owner.draft)) this.markMissing(owner, notice);
+  deleted(change: FileChange) {
+    for (const owner of change.drafts)
+      if (this.has(owner.draft)) this.markMissing(owner, "deletedDraft");
     this.changed();
   }
-  async checkMissing(
-    deviceId: string,
-    workspaceId: string,
-    path: string,
-    change = this.capture(deviceId, workspaceId, path),
-  ) {
+  async checkMissing(deviceId: string, workspaceId: string, change: FileChange) {
     for (const owner of change.drafts) {
       const { draft } = owner;
       if (!this.sourceCurrent(owner)) continue;
@@ -646,7 +640,6 @@ export function useDraftVersion(store: DraftStore, draft: Draft) {
     useCallback(() => store.draftSnapshot(draft), [store, draft]),
   );
 }
-export function draftError(draft: Draft) {
-  const error = draft.error ?? draft.observationError;
-  return error ? errorMessage(error) : undefined;
+export function draftProblem(draft: Draft) {
+  return draft.error ?? draft.observationError;
 }

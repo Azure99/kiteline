@@ -91,7 +91,7 @@ export function Workbench({
   const [gitActions] = useState(() => new GitActions());
   const [error, setError] = useState<WorkbenchError>();
   useEffect(
-    function watchDraftFailuresAndPageExit() {
+    function watchDownloadFailuresAndPageExit() {
       const unload = (event: BeforeUnloadEvent) => {
         if (drafts.snapshot().some(isDirty)) {
           event.preventDefault();
@@ -100,14 +100,15 @@ export function Workbench({
       };
       const failed = (event: WindowEventMap["kiteline:event"]) => {
         const message = event.detail;
-        if (message.type === "channel.failed") {
-          drafts.fileFailed(message.channelId, message.error);
-          if (message.purpose === "download" && message.error.code !== "cancelled")
-            setError({
-              cause: apiError(message.error),
-              downloadPath: message.path,
-            });
-        }
+        if (
+          message.type === "channel.failed" &&
+          message.purpose === "download" &&
+          message.error.code !== "cancelled"
+        )
+          setError({
+            cause: apiError(message.error),
+            downloadPath: message.path,
+          });
       };
       window.addEventListener("beforeunload", unload);
       window.addEventListener("kiteline:event", failed);
@@ -196,7 +197,7 @@ export function Workbench({
       : undefined,
   );
   useLayoutEffect(() => {
-    if (authenticated) drafts.limits(devices);
+    if (authenticated) drafts.observeDevices(devices);
   }, [drafts, devices, authenticated]);
   return session ? (
     <SignedInWorkbench
@@ -482,7 +483,6 @@ function SignedInWorkbench({
           <DraftView
             store={drafts}
             draft={orphan}
-            targetOS={devices.find((device) => device.id === orphan.deviceId)?.environment?.os}
             unavailable={
               !device
                 ? t(($) => $.shell.missingDeviceDraft)
@@ -777,7 +777,7 @@ function SignedInWorkbench({
         </main>
         <div ref={setWorkspaceTools} className="contents" />
       </div>
-      <OpenFiles store={drafts} devices={devices} open={openFiles} onOpenChange={setOpenFiles} />
+      <OpenFiles store={drafts} open={openFiles} onOpenChange={setOpenFiles} />
       {cliDialog && (
         <CliDialog
           devices={devices}

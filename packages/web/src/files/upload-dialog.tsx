@@ -13,7 +13,7 @@ import {
   DialogTitle,
 } from "../components/ui/dialog";
 import { ApiError, rpc } from "../lib/api";
-import { FileConflictDialog } from "./conflict-dialog";
+import { FileTargetActions, FileTargetConflictDialog } from "./conflict-dialog";
 import { uploadFile } from "./content";
 import { childPath } from "./paths";
 import { formatBytes } from "./format";
@@ -215,9 +215,6 @@ export function UploadDialog({
                 {row.status === "skipped" && (
                   <p className="text-xs text-muted-foreground">{t(($) => $.common.skipped)}</p>
                 )}
-                {row.version && editable(row) && (
-                  <p className="text-xs text-destructive">{t(($) => $.files.replaceConfirmed)}</p>
-                )}
                 {!!row.error && (
                   <div role="alert" className="break-words text-xs text-destructive">
                     <ErrorNotice error={row.error} />
@@ -226,19 +223,14 @@ export function UploadDialog({
                 {row.status === "unknown" && (
                   <p className="text-xs text-muted-foreground">{t(($) => $.files.checkTarget)}</p>
                 )}
-                {!busy && editable(row) && (
-                  <div className="flex gap-2">
-                    <Button variant="outline" disabled={checking} onClick={() => void inspect(row)}>
-                      {t(($) => $.files.resolveConflict)}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      disabled={checking}
-                      onClick={() => update(row.id, { status: "skipped" })}
-                    >
-                      {t(($) => $.common.skip)}
-                    </Button>
-                  </div>
+                {editable(row) && (
+                  <FileTargetActions
+                    busy={busy}
+                    checking={checking}
+                    replaceConfirmed={row.version !== undefined}
+                    onInspect={() => void inspect(row)}
+                    onSkip={() => update(row.id, { status: "skipped" })}
+                  />
                 )}
               </div>
             ))}
@@ -273,7 +265,7 @@ export function UploadDialog({
         </DialogContent>
       </Dialog>
       {conflict && open && (
-        <FileConflictDialog
+        <FileTargetConflictDialog
           target={conflict.row.path}
           inspection={conflict.inspection}
           onClose={() => setConflict(undefined)}

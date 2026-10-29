@@ -1,7 +1,8 @@
 import { useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import type { Repo } from "@kiteline/shared/protocol";
 import { useDrafts, type DraftStore } from "../files/drafts";
-import { requestCloseDraft, showDraft } from "../files/navigation";
+import { requestCloseDraft } from "../files/close-draft";
+import { showDraft } from "../files/navigation";
 import {
   currentPath,
   navigateWorkspace,
@@ -10,7 +11,14 @@ import {
   type NavigationOptions,
 } from "../lib/navigation";
 import type { DiffTarget } from "../git/diff-view";
-import { closePage, diffPageId, openPage, type WorkPage, type WorkPagesState } from "./pages";
+import {
+  closePage,
+  diffPageId,
+  filePage,
+  openPage,
+  type WorkPage,
+  type WorkPagesState,
+} from "./pages";
 import { workspaceKey, type WorkspaceRecord } from "./memory";
 
 export function useWorkPages(
@@ -50,7 +58,7 @@ export function useWorkPages(
       navigateWorkspace(target, "git", { repo: page.repoId, search: undefined }, options);
     } else updateWorkspaceQuery(target, { file: undefined, draft: undefined }, { replace: true });
   }
-  const reconcile = useEffectEvent(() => {
+  function reconcileDraftIdentities() {
     let next = state;
     for (const page of state.items) {
       if (page.kind !== "file") continue;
@@ -66,29 +74,30 @@ export function useWorkPages(
           };
       }
     }
+    return next;
+  }
+  const consumeWorkspacePages = useEffectEvent(() => {
+    let next = reconcileDraftIdentities();
+    let selectedByRoute = false;
     if (path !== previousPath.current) {
       previousPath.current = path;
       const historical = history.state?.workPage;
       if (route.tool === "files" && (route.query.file || route.query.draft)) {
+        selectedByRoute = true;
         const draft = store.find({ ...target, path: route.query.file ?? "" }, route.query.draft);
-        next = openPage(next, {
-          kind: "file",
-          id: draft ? `file:${draft.id}` : `path:${route.query.file}`,
-          path: draft?.path ?? route.query.file ?? "",
-          draftId: draft?.id,
-        });
+        next = openPage(
+          next,
+          filePage(draft?.path ?? route.query.file ?? "", draft?.id ?? route.query.draft),
+        );
       } else if (
         historical?.workspace === key &&
         next.items.some((page) => page.id === historical.id)
       ) {
+        selectedByRoute = true;
         next = { ...next, active: historical.id };
-      } else if (next.active !== state.active) {
-        navigateTo(
-          next.items.find((page) => page.id === next.active),
-          { replace: true },
-        );
       }
-    } else if (next.active !== state.active) {
+    }
+    if (!selectedByRoute && next.active !== state.active) {
       navigateTo(
         next.items.find((page) => page.id === next.active),
         { replace: true },
@@ -100,7 +109,7 @@ export function useWorkPages(
     history.replaceState({ ...history.state, workPage: { workspace: key, id: next.active } }, "");
   });
   useLayoutEffect(() => {
-    reconcile();
+    consumeWorkspacePages();
   }, [state, drafts, path]);
   function select(page: WorkPage) {
     setState({ ...state, active: page.id });
@@ -132,11 +141,13 @@ export function useWorkPages(
     );
     navigateWorkspace(target, "git", { repo: repo.id, search: undefined });
   }
-  function resolvePath(from: string, to: string) {
+  function resolvePath(pageId: string, from: string, to: string) {
     setState((old) => ({
       ...old,
       items: old.items.map((item) =>
-        item.kind === "file" && item.path === from ? { ...item, path: to } : item,
+        item.kind === "file" && item.id === pageId && item.path === from
+          ? { ...item, path: to }
+          : item,
       ),
     }));
   }
