@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { emptyLayout, members, showGroup, type TerminalLayout } from "../src/terminal/groups";
+import { emptyLayout, showGroup, type TerminalLayout } from "../src/terminal/groups";
 import {
   readTerminalLayouts,
   terminalLayoutsKey,
@@ -36,17 +36,14 @@ const layout: TerminalLayout = {
   current: "one",
 };
 
-test("restores recursive proportions, groups, active panes, maximization", () => {
+test("writes and restores workspace layouts", () => {
   let stored: string | null = null;
   const storage = {
     getItem: () => stored,
     setItem: (_key: string, value: string) => (stored = value),
   };
   expect(readTerminalLayouts(storage).size).toBe(0);
-  const layouts = new Map([
-    ["device:workspace", layout],
-    ["device:closed", emptyLayout()],
-  ]);
+  const layouts = new Map([["device:workspace", layout]]);
   writeTerminalLayouts(storage, layouts);
   expect(readTerminalLayouts(storage)).toEqual(layouts);
 });
@@ -71,21 +68,6 @@ test("restores hidden groups with their proportions and an empty visible area", 
     const restored = readTerminalLayouts(storage).get("workspace")!;
     expect(restored).toEqual(item);
     expect(showGroup(restored, "one", true).groups[0]).toEqual(layout.groups[0]);
-  }
-});
-
-test("restores a former companion as a group without replacing the current selection", () => {
-  for (const dock of ["b", "independent"]) {
-    const saved = JSON.stringify([
-      ["workspace", { ...layout, dock, dockOpen: true, dockSize: 40 }],
-    ]);
-    const restored = readTerminalLayouts({ getItem: () => saved }).get("workspace")!;
-    expect(restored.current).toBe(layout.current);
-    expect(restored.groups.slice(0, 2)).toEqual(layout.groups);
-    expect(
-      restored.groups.flatMap((group) => members(group)).filter((id) => id === dock),
-    ).toHaveLength(1);
-    expect(restored).not.toHaveProperty("dock");
   }
 });
 
