@@ -633,7 +633,7 @@ test("recovery restores the same task and pending Shell input, then redraw and e
       "-p",
       "-t",
       identity.paneId!,
-      "#{pane_pid} #{pane_width} #{pane_height}",
+      "#{pane_id} #{window_id} #{pane_pid} #{pane_width} #{pane_height}",
     ]);
   await tmux(identity.socket, ["send-keys", "-l", "printf '%s' RECOVERED > recovered.txt"]);
   await tmux(identity.socket, [

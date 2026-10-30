@@ -33,10 +33,11 @@ interface ControlEvents {
   fault: (error: Error) => void;
 }
 function decodeOutput(value: Buffer) {
+  const backslashByte = 0x5c;
   const result = Buffer.allocUnsafe(value.length);
   let length = 0;
   for (let index = 0; index < value.length; index++) {
-    if (value[index] === 92) {
+    if (value[index] === backslashByte) {
       const digits = value.subarray(index + 1, index + 4).toString("ascii");
       if (!/^[0-7]{3}$/.test(digits)) throw new Error("Invalid tmux output escape");
       result[length++] = Number.parseInt(digits, 8);
@@ -142,7 +143,7 @@ export class Control {
           "flow-control",
           "-P",
           "-F",
-          "#{pane_id} #{window_id} #{pane_width} #{pane_height}",
+          "#{pane_id} #{window_id}",
           "-s",
           tmuxSession,
           "-x",
@@ -227,10 +228,8 @@ export class Control {
     const output = await started;
     const identity = creating
       ? output
-      : await this.command(
-          `display-message -p -t ${tmuxSession} '#{pane_id} #{window_id} #{pane_width} #{pane_height}'`,
-        );
-    const match = /^(%\d+) (@\d+) (\d+) (\d+)$/.exec(identity[0] ?? "");
+      : await this.command(`display-message -p -t ${tmuxSession} '#{pane_id} #{window_id}'`);
+    const match = /^(%\d+) (@\d+)$/.exec(identity[0] ?? "");
     if (!match) throw new Error("tmux did not return the terminal identity");
     this.identity = {
       socket: o.socket,
@@ -256,26 +255,33 @@ export class Control {
     const fields = format[0]?.split(" ").map(Number);
     if (!fields || fields.length !== 7 || fields.some((value) => !Number.isSafeInteger(value)))
       throw new AppError("io_error", "Could not read the existing terminal screen");
-    const [cols, rows, alternate, x, y, cursor, applicationCursor] = fields as [
-      number,
-      number,
-      number,
-      number,
-      number,
-      number,
-      number,
-    ];
+    const [cols, rows, alternate, cursorX, cursorY, cursorVisible, applicationCursor] = fields;
     const lines = await this.command(`capture-pane -p -e -t ${pane}`);
-    const data =
-      "\x1bc" +
-      (alternate ? "\x1b[?1049h" : "") +
-      "\x1b[?7l" +
-      lines
-        .slice(0, rows)
-        .map((line, index) => `\x1b[${index + 1};1H${line}\x1b[0m`)
-        .join("") +
-      `\x1b[?7h\x1b[${y + 1};${x + 1}H\x1b[?25${cursor ? "h" : "l"}\x1b[?1${applicationCursor ? "h" : "l"}`;
-    return { cols, rows, data };
+    const resetTerminal = "\x1bc";
+    const restoreBuffer = alternate ? "\x1b[?1049h" : "";
+    const disableWrapping = "\x1b[?7l";
+    // Position each row directly, including the last row, so recovery cannot scroll it away.
+    const restoreRows = lines
+      .slice(0, rows)
+      .map((line, index) => `\x1b[${index + 1};1H${line}\x1b[0m`)
+      .join("");
+    const enableWrapping = "\x1b[?7h";
+    const restoreCursor = `\x1b[${cursorY! + 1};${cursorX! + 1}H`;
+    const restoreCursorVisibility = `\x1b[?25${cursorVisible ? "h" : "l"}`;
+    const restoreCursorKeys = `\x1b[?1${applicationCursor ? "h" : "l"}`;
+    return {
+      cols: cols!,
+      rows: rows!,
+      data:
+        resetTerminal +
+        restoreBuffer +
+        disableWrapping +
+        restoreRows +
+        enableWrapping +
+        restoreCursor +
+        restoreCursorVisibility +
+        restoreCursorKeys,
+    };
   }
   private expect() {
     return new Promise<string[]>((resolve, reject) => {
@@ -337,10 +343,11 @@ export class Control {
       }
       return;
     }
-    if (text.startsWith("%begin ")) {
+    const beginPrefix = "%begin ";
+    if (text.startsWith(beginPrefix)) {
       const pending = this.pending.shift();
       if (!pending) throw new Error("tmux command stream lost its request boundary");
-      this.block = { guard: text.slice(7), lines: [], bytes: 0, pending };
+      this.block = { guard: text.slice(beginPrefix.length), lines: [], bytes: 0, pending };
       return;
     }
     const output = /^%output (%\d+) /.exec(text);
@@ -351,14 +358,18 @@ export class Control {
       return;
     }
     if (text.startsWith("%layout-change ")) {
-      const layout = /^%layout-change (@\d+) [^,]+,(\d+)x(\d+),0,0,(\d+) /.exec(text);
+      const layout =
+        /^%layout-change (?<windowId>@\d+) [^,]+,(?<cols>\d+)x(?<rows>\d+),0,0,(?<paneNumber>\d+) /.exec(
+          text,
+        )?.groups;
       if (
         !layout ||
         (this.identity &&
-          (layout[1] !== this.identity.windowId || `%${layout[4]}` !== this.identity.paneId))
+          (layout.windowId !== this.identity.windowId ||
+            `%${layout.paneNumber}` !== this.identity.paneId))
       )
         throw new Error("Managed terminal layout changed");
-      this.events.resize(Number(layout[2]), Number(layout[3]));
+      this.events.resize(Number(layout.cols), Number(layout.rows));
       return;
     }
     if (text.startsWith("%subscription-changed life ")) {
