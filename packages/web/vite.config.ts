@@ -1,27 +1,13 @@
 import { defineConfig } from "vite";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { editorResetCompat } from "./postcss/editor-reset-compat.js";
+import { xtermAlias, xtermTransform } from "./xterm-config.js";
 
 const serverProxy = { target: "http://127.0.0.1:8080", ws: true };
-// xterm uses legacy parameter decorators in both builds and dev prebundling.
-const xtermTransform = { decorator: { legacy: true } };
 export default defineConfig({
-  resolve: {
-    alias: [
-      {
-        find: /^@xterm\/xterm$/,
-        replacement: fileURLToPath(
-          new URL(
-            "src/browser/public/Terminal.ts",
-            import.meta.resolve("@xterm/xterm/package.json"),
-          ),
-        ),
-      },
-    ],
-  },
+  resolve: { alias: xtermAlias },
   oxc: xtermTransform,
   optimizeDeps: { rolldownOptions: { transform: xtermTransform } },
   plugins: [

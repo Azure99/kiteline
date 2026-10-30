@@ -1,18 +1,9 @@
-import { createRequire } from "node:module";
 import { defineConfig } from "vitest/config";
-
-const webRequire = createRequire(new URL("./packages/web/package.json", import.meta.url));
+import { xtermAlias, xtermTransform } from "./packages/web/xterm-config.js";
 
 export default defineConfig({
-  resolve: {
-    alias: [
-      {
-        find: /^@xterm\/xterm$/,
-        replacement: webRequire.resolve("@xterm/xterm/src/browser/public/Terminal.ts"),
-      },
-    ],
-  },
-  oxc: { decorator: { legacy: true } },
+  resolve: { alias: xtermAlias },
+  oxc: xtermTransform,
   test: {
     include: [
       "packages/{server,agent,terminal-recorder,web,cli}/test/**/*.test.ts",

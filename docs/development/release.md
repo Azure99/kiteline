@@ -222,7 +222,7 @@ Linux agent 和 CLI 使用同一固定的静态 Node 输入，server 使用官�
 ### 第三方许可
 
 - 包根 `LICENSE` 是项目许可；`runtime/LICENSE` 是 Node 许可；生产依赖在 `node_modules` 中保留自己的许可文件，`proxy-agent-negotiate` 的许可另在 `shared/licenses/proxy-agent-negotiate.txt`。
-- server 的 `web/dist/licenses/` 包含 `dependencies.md`、`project.txt`、`tailwindcss.txt`、`vite.txt` 和 `xterm-css.txt`。
+- server 的 `web/dist/licenses/` 保存工作台许可，生成规则见[工作台构建配置](../../packages/web/vite.config.ts)。
 - agent 的 `dist/native/licenses/` 保留原生组件许可：Linux 为 libevent、ncurses、tmux、musl 和 rg；macOS 为 libevent、tmux、flock 和 rg；Windows 为 tmux、rg、mingw-w64、bash、readline、coreutils、util-linux、gettext、libiconv、libevent、ncurses 和 msys2-runtime。
 - Windows 的 `dist/native/sources/` 还包含 bash、coreutils、util-linux、gettext、libiconv、readline 和 msys2-runtime 的 MSYS2 源码包，含构建配方和补丁。
 
@@ -272,13 +272,13 @@ runtime DLL 从固定源码包的 Cygwin tag 及有序 MSYS2 补丁重建，再�
 
 ### macOS 组件
 
-最低系统版本以 `release/agent-macos.json` 的 `deploymentTarget` 为准。改变支持范围时同步更新两个 README、[接入设备](../guide/devices.md#支持的系统与准备)及其[英文版](../guide/devices.en.md#supported-systems-and-prerequisites)、[平台实现](../design/platforms.md#macos)，并验证受影响的平台。
+最低系统版本以 `release/agent-macos.json` 的 `deploymentTarget` 为准。改变支持范围时同步更新[接入设备](../guide/devices.md#支持的系统与准备)及其[英文版](../guide/devices.en.md#supported-systems-and-prerequisites)、[平台实现](../design/platforms.md#macos)，并验证受影响的平台。
 
 ### xterm.js
 
 固定版本见 [`packages/web/package.json`](../../packages/web/package.json)、[`packages/terminal-recorder/package.json`](../../packages/terminal-recorder/package.json) 和 [`packages/shared/package.json`](../../packages/shared/package.json)。当前浏览器与 headless 版本来自同一上游源码提交，升级须联合核对两端和 addons。私有成员访问以 [`TerminalCore` 和 `core()`](../../packages/shared/src/terminal/index.ts) 为检查入口，另须核对 [`auxiliary-input.ts`](../../packages/web/src/terminal/auxiliary-input.ts) 使用的私有键盘编码。
 
-工作台直接编译 xterm 的 TypeScript 入口。现有补丁由 [`pnpm-workspace.yaml`](../../pnpm-workspace.yaml) 的 `patchedDependencies` 指向 `packages/web/patches/`：`DomRenderer.ts` 和 `WidthCache.ts` 按设备像素比测量字形，修复 Windows 页面缩放后的中文选区错位；`DomRenderer.ts` 还在清空选区时更新模型并重绘旧行，移除文字残留的选区背景；`Viewport.ts` 修复调整尺寸时的滚动位置跳动；`CompositionHelper.ts` 在新的组合输入开始前发送待处理的尾部独立文本，修复 Android 候选词之间漏发空格；`Event.ts` 的非空断言适配项目的 `noUncheckedIndexedAccess`，不改变 DPR 行为。
+工作台直接编译 xterm 的 TypeScript 入口，构建和测试共用[源码 alias 与 legacy 参数装饰器配置](../../packages/web/xterm-config.ts)。现有补丁由 [`pnpm-workspace.yaml`](../../pnpm-workspace.yaml) 的 `patchedDependencies` 指向 `packages/web/patches/`；网页适配的依赖与目的见[终端](../design/terminal.md)，尺寸变化时的画面保留见[尺寸](../design/terminal.md#尺寸)。
 
 维护当前版本的补丁时，在仓库根目录执行：
 
