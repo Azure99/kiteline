@@ -538,7 +538,6 @@ export const zhCN = {
     historyGapLimited: "历史存在缺口；已减少较早历史",
     inputLabel: "终端输入",
     enterFocus: "专注终端",
-    exitFocus: "退出专注",
     enterFullscreen: "进入全屏",
     exitFullscreen: "退出全屏",
     fullscreenFailed: "无法进入全屏",

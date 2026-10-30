@@ -68,15 +68,9 @@ export function useTerminalFocus(context: string | undefined, workspaceScope: st
       setError(undefined);
     }
   }
-  const next: "enterFocus" | "enterFullscreen" | "exitFocus" = fullscreen
-    ? "exitFocus"
-    : active
-      ? "enterFullscreen"
-      : "enterFocus";
   return {
     active,
     fullscreen,
-    next,
     toggle,
     exit,
     toggleFullscreen,

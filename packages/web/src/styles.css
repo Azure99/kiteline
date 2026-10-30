@@ -35,6 +35,8 @@
   --muted-foreground: var(--color-muted-foreground);
   --terminal: #20242b;
   --terminal-foreground: #d6dce5;
+  --terminal-chrome: #39414c;
+  --terminal-chrome-foreground: #e2e8f0;
   --code-selection: #d8e6f8;
   --code-active: #f1f4f840;
   --search-match: var(--color-search-match);
@@ -449,7 +451,7 @@ body {
 }
 .terminal-notice {
   background: #313944;
-  color: #e2e8f0;
+  color: var(--terminal-chrome-foreground);
 }
 .terminal-notice[data-compact="true"] {
   height: 32px;
@@ -477,7 +479,7 @@ body {
   }
 }
 .terminal-aux {
-  border-color: #39414c;
+  border-color: var(--terminal-chrome);
 }
 .terminal-group {
   border-color: var(--border);
@@ -523,7 +525,7 @@ body {
 .terminal-divider::after {
   content: "";
   position: absolute;
-  background: #39414c;
+  background: var(--terminal-chrome);
   pointer-events: none;
 }
 .terminal-divider[aria-orientation="vertical"]::after {

@@ -11,19 +11,18 @@ import {
   FileOutput,
   FolderOpen,
   Fullscreen,
-  Minimize,
   Minimize2,
   MoreHorizontal,
   Quote,
   RefreshCw,
   Save,
-  Scan,
   Search,
   X,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../components/ui/menu";
 import { IconButton } from "../components/icon-button";
+import { FocusCycleButton } from "../components/focus-cycle-button";
 import { deferredView } from "../components/deferred-view";
 import { ApiError } from "../lib/api";
 import { navigateWorkspace } from "../lib/navigation";
@@ -175,22 +174,12 @@ export function DraftView({
             </IconButton>
           )}
           {focusMode && (
-            <IconButton
-              label={
-                focusMode.next === "enterFocus"
-                  ? t(($) => $.files.enterFocus)
-                  : t(($) => $.terminal[focusMode.next])
-              }
+            <FocusCycleButton
+              active={focusMode.active}
+              fullscreen={focusMode.fullscreen}
+              enterFocusLabel={t(($) => $.files.enterFocus)}
               onClick={focusMode.toggle}
-            >
-              {focusMode.next === "exitFocus" ? (
-                <Minimize />
-              ) : focusMode.next === "enterFullscreen" ? (
-                <Fullscreen />
-              ) : (
-                <Scan />
-              )}
-            </IconButton>
+            />
           )}
           <IconButton
             label={t(($) => $.files.saveFile)}

@@ -10,6 +10,10 @@ import { copyText } from "../lib/clipboard";
 import { terminalFileTarget } from "./file-links";
 import { showFile } from "../files/navigation";
 
+const handleSize = 44;
+const menuButtonWidth = 44;
+const menuHorizontalPadding = 12;
+
 export function TouchControls({
   terminal,
   deviceId,
@@ -36,7 +40,8 @@ export function TouchControls({
   const layer = useRef<HTMLDivElement>(null);
   const service = handles ? deviceServiceLink(terminal.getSelection(), deviceId) : undefined;
   const file = handles ? terminalFileTarget(terminal.getSelection(), workspacePath) : undefined;
-  const halfWidth = (2 + Number(!!service) + Number(!!file) + Number(!!onPaste)) * 22 + 6;
+  const menuButtonCount = 2 + Number(!!service) + Number(!!file) + Number(!!onPaste);
+  const menuHalfWidth = (menuButtonCount * menuButtonWidth + menuHorizontalPadding) / 2;
   const tapped = useEffectEvent(onTap);
   useEffect(() => {
     const current = new TouchSelection(terminal, setHandles, tapped);
@@ -108,7 +113,10 @@ export function TouchControls({
                   }
                   className="terminal-selection-handle pointer-events-auto"
                   style={{
-                    left: Math.max(0, Math.min(window.innerWidth - 44, point.x - 22)),
+                    left: Math.max(
+                      0,
+                      Math.min(window.innerWidth - handleSize, point.x - handleSize / 2),
+                    ),
                     top: point.y - 4,
                   }}
                   onPointerDown={(event) => {
@@ -125,7 +133,10 @@ export function TouchControls({
           <div
             className="terminal-selection-menu pointer-events-auto flex rounded border border-border bg-background text-foreground shadow-md"
             style={{
-              left: Math.max(halfWidth, Math.min(window.innerWidth - halfWidth, handles.menu.x)),
+              left: Math.max(
+                menuHalfWidth,
+                Math.min(window.innerWidth - menuHalfWidth, handles.menu.x),
+              ),
               top: handles.menu.y,
             }}
             onPointerDown={(event) => event.preventDefault()}

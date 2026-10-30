@@ -1,80 +1,156 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { adaptTouchGestures } from "../src/terminal/touch-selection";
 
-test("only a single, stationary body tap requests input", () => {
+function point(identifier = 1, clientX = 10) {
+  return { identifier, clientX, clientY: 10 };
+}
+
+function touch(
+  document: EventTarget,
+  type: string,
+  time: number,
+  touches: ReturnType<typeof point>[],
+  changed = point(),
+) {
+  const event = new Event(type, { cancelable: true });
+  Object.defineProperties(event, {
+    touches: { value: touches },
+    changedTouches: { value: [changed] },
+    timeStamp: { value: time },
+  });
+  document.dispatchEvent(event);
+}
+
+function createGestures() {
   const document = new EventTarget();
   const container = Object.assign(new EventTarget(), { ownerDocument: document });
-  let inBody = true;
-  let selecting = false;
-  let taps = 0;
-  const screen = { contains: () => inBody };
+  const state = { inBody: true, selecting: false };
+  const onTap = vi.fn();
+  const screen = { contains: () => state.inBody };
   const adapter = adaptTouchGestures(
     container as HTMLElement,
     screen as unknown as HTMLElement,
-    () => selecting,
-    () => taps++,
+    () => state.selecting,
+    onTap,
   );
-  const point = (identifier = 1, clientX = 10) => ({ identifier, clientX, clientY: 10 });
-  const touch = (
-    type: string,
-    time: number,
-    touches: ReturnType<typeof point>[],
-    changed = point(),
-  ) => {
-    const event = new Event(type, { cancelable: true });
-    Object.defineProperties(event, {
-      touches: { value: touches },
-      changedTouches: { value: [changed] },
-      timeStamp: { value: time },
-    });
-    document.dispatchEvent(event);
-  };
-  const start = () => touch("touchstart", 0, [point()]);
-  const end = (time = 100) => touch("touchend", time, []);
-  start();
-  end();
-  expect(taps).toBe(1);
+  return { document, container, state, onTap, adapter };
+}
 
-  start();
-  touch("touchmove", 10, [point(1, 12)]);
-  touch("touchmove", 20, [point()]);
-  end();
-  start();
-  container.dispatchEvent(new Event("-xterm-gesturechange"));
-  end();
-  start();
-  end(550);
-  start();
-  touch("touchcancel", 50, []);
-  end();
-  selecting = true;
-  start();
-  selecting = false;
-  end();
-  start();
-  selecting = true;
-  end();
-  selecting = false;
-  start();
-  inBody = false;
-  touch("touchstart", 20, [point(), point(2)], point(2));
-  touch("touchend", 30, [point()], point(2));
-  inBody = true;
-  end();
-  inBody = false;
-  start();
-  end();
-  inBody = true;
-  expect(taps).toBe(1);
+test("a single stationary body tap requests input", () => {
+  const { document, onTap } = createGestures();
 
-  const tap = new Event("-xterm-gesturetap", { cancelable: true });
-  container.dispatchEvent(tap);
-  expect(tap.defaultPrevented).toBe(true);
-  start();
-  end();
-  expect(taps).toBe(2);
+  touch(document, "touchstart", 0, [point()]);
+  touch(document, "touchend", 100, []);
+
+  expect(onTap).toHaveBeenCalledOnce();
+});
+
+test("moving and returning to the start does not request input", () => {
+  const { document, onTap } = createGestures();
+
+  touch(document, "touchstart", 0, [point()]);
+  touch(document, "touchmove", 10, [point(1, 12)]);
+  touch(document, "touchmove", 20, [point()]);
+  touch(document, "touchend", 100, []);
+
+  expect(onTap).not.toHaveBeenCalled();
+});
+
+test("an xterm scrolling gesture cancels the body tap", () => {
+  const { document, container, onTap } = createGestures();
+
+  touch(document, "touchstart", 0, [point()]);
+  const gesture = new Event("-xterm-gesturechange", { cancelable: true });
+  container.dispatchEvent(gesture);
+  touch(document, "touchend", 100, []);
+
+  expect(gesture.defaultPrevented).toBe(false);
+  expect(onTap).not.toHaveBeenCalled();
+});
+
+test("holding the body does not request input", () => {
+  const { document, onTap } = createGestures();
+
+  touch(document, "touchstart", 0, [point()]);
+  touch(document, "touchend", 550, []);
+
+  expect(onTap).not.toHaveBeenCalled();
+});
+
+test("a cancelled touch does not request input on a later touchend", () => {
+  const { document, onTap } = createGestures();
+
+  touch(document, "touchstart", 0, [point()]);
+  touch(document, "touchcancel", 50, []);
+  touch(document, "touchend", 100, []);
+
+  expect(onTap).not.toHaveBeenCalled();
+});
+
+test("a tap that starts during selection stays blocked after selection ends", () => {
+  const { document, container, state, onTap } = createGestures();
+  state.selecting = true;
+
+  touch(document, "touchstart", 0, [point()]);
+  state.selecting = false;
+  touch(document, "touchend", 100, []);
+  const gesture = new Event("-xterm-gesturecontextmenu", { cancelable: true });
+  container.dispatchEvent(gesture);
+
+  expect(gesture.defaultPrevented).toBe(true);
+  expect(onTap).not.toHaveBeenCalled();
+});
+
+test("selection beginning before release cancels the body tap", () => {
+  const { document, state, onTap } = createGestures();
+
+  touch(document, "touchstart", 0, [point()]);
+  state.selecting = true;
+  touch(document, "touchend", 100, []);
+
+  expect(onTap).not.toHaveBeenCalled();
+});
+
+test("a second finger outside the body invalidates the original body tap", () => {
+  const { document, state, onTap } = createGestures();
+
+  touch(document, "touchstart", 0, [point()]);
+  state.inBody = false;
+  touch(document, "touchstart", 20, [point(), point(2)], point(2));
+  touch(document, "touchend", 30, [point()], point(2));
+  state.inBody = true;
+  touch(document, "touchend", 100, []);
+
+  expect(onTap).not.toHaveBeenCalled();
+});
+
+test("a tap outside the body does not request input", () => {
+  const { document, state, onTap } = createGestures();
+  state.inBody = false;
+
+  touch(document, "touchstart", 0, [point()]);
+  touch(document, "touchend", 100, []);
+
+  expect(onTap).not.toHaveBeenCalled();
+});
+
+test("xterm's tap is prevented while a later body tap still requests input", () => {
+  const { document, container, onTap } = createGestures();
+  const gesture = new Event("-xterm-gesturetap", { cancelable: true });
+
+  container.dispatchEvent(gesture);
+  touch(document, "touchstart", 0, [point()]);
+  touch(document, "touchend", 100, []);
+
+  expect(gesture.defaultPrevented).toBe(true);
+  expect(onTap).toHaveBeenCalledOnce();
+});
+
+test("dispose stops body taps from requesting input", () => {
+  const { document, onTap, adapter } = createGestures();
   adapter.dispose();
-  start();
-  end();
-  expect(taps).toBe(2);
+
+  touch(document, "touchstart", 0, [point()]);
+  touch(document, "touchend", 100, []);
+  expect(onTap).not.toHaveBeenCalled();
 });

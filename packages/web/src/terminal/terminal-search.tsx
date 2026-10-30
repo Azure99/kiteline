@@ -23,9 +23,9 @@ export function TerminalSearch({
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [found, setFound] = useState<boolean>();
-  const search = useRef<(text: string, previous?: boolean, incremental?: boolean) => void>(
-    () => {},
-  );
+  const search = useRef<
+    (text: string, options?: { previous?: boolean; incremental?: boolean }) => void
+  >(() => {});
   useLayoutEffect(() => inputRef.current?.focus(), [inputRef]);
   useEffect(() => {
     setFound(undefined);
@@ -41,7 +41,7 @@ export function TerminalSearch({
       if (ownsSelection && terminal!.element?.isConnected) terminal!.clearSelection();
       ownsSelection = false;
     }
-    search.current = (text, previous, incremental) => {
+    search.current = (text, { previous, incremental } = {}) => {
       if (!text) {
         clearSelection();
         setFound(undefined);
@@ -98,7 +98,7 @@ export function TerminalSearch({
         spellCheck={false}
         onChange={(event) => {
           setQuery(event.target.value);
-          search.current(event.target.value, false, true);
+          search.current(event.target.value, { incremental: true });
         }}
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing) return;
@@ -107,7 +107,7 @@ export function TerminalSearch({
             onClose();
           } else if (event.key === "Enter") {
             event.preventDefault();
-            search.current(query, event.shiftKey);
+            search.current(query, { previous: event.shiftKey });
           }
         }}
       />
@@ -119,7 +119,7 @@ export function TerminalSearch({
           label={t(($) => $.terminal.searchPrevious)}
           disabled={!terminal || !query}
           onPointerDown={(event) => event.preventDefault()}
-          onClick={() => search.current(query, true)}
+          onClick={() => search.current(query, { previous: true })}
         >
           <ArrowUp />
         </IconButton>

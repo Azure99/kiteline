@@ -5,6 +5,8 @@ import type { TerminalActions, TerminalCapabilities } from "./terminal-view";
 import { TerminalView } from "./lazy-terminal-view";
 import { members, type TerminalGroup, type TerminalNode } from "./groups";
 
+const dividerSize = 4;
+
 interface PaneEvents {
   actions(id: string, value: TerminalActions | null): void;
   capabilities(id: string, value: TerminalCapabilities | undefined): void;
@@ -215,7 +217,7 @@ function minimumSize(node: TerminalNode): { width: number; height: number } {
     ratio: node.sizes[child.id]! / total,
   }));
   const splitMinimum = (axis: "width" | "height") => {
-    const separators = 4 * (children.length - 1);
+    const separators = dividerSize * (children.length - 1);
     // Saved zero shares continue to use the existing panel constraints.
     if (node.children.some((child) => node.sizes[child.id] === 0)) {
       return children.reduce((total, child) => total + child.minimum[axis], separators);
@@ -280,7 +282,7 @@ function TerminalPane({
         sessionMissing={missing}
         onClose={() => events.close(id)}
         searchHost={searchHost}
-        searchActive={active && !hidden}
+        paneActive={active && !hidden}
       />
     </div>
   );

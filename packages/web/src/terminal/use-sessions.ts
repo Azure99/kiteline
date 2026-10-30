@@ -2,10 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Device, Session } from "@kiteline/shared/protocol";
 import { ApiError, rpc } from "../lib/api";
 
+const sessionRefreshInterval = 15_000;
+
 export function useSessions(device: Device, workspaceId: string) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState<unknown>();
+  const [mutationError, setMutationError] = useState<unknown>();
   const [listError, setListError] = useState<unknown>();
   const [listErrorDismissed, setListErrorDismissed] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -51,7 +53,7 @@ export function useSessions(device: Device, workspaceId: string) {
         void refresh();
     };
     window.addEventListener("kiteline:event", changed);
-    const timer = setInterval(() => void refresh(), 15000);
+    const timer = setInterval(() => void refresh(), sessionRefreshInterval);
     return () => {
       alive.current = false;
       // Invalidate the current request generation, not a captured resource.
@@ -63,7 +65,7 @@ export function useSessions(device: Device, workspaceId: string) {
   }, [refresh, device.id, workspaceId]);
   async function create(shortcutId?: string) {
     setBusy(true);
-    setError(undefined);
+    setMutationError(undefined);
     try {
       const session = await rpc(device.id, "sessions.create", { workspaceId, shortcutId });
       if (alive.current) {
@@ -74,7 +76,7 @@ export function useSessions(device: Device, workspaceId: string) {
       }
     } catch (error) {
       if (alive.current) {
-        setError(error);
+        setMutationError(error);
         const knownId =
           error instanceof ApiError &&
           error.result &&
@@ -91,7 +93,7 @@ export function useSessions(device: Device, workspaceId: string) {
   }
   async function change(kind: "rename" | "end", sessionId: string, name: string) {
     setBusy(true);
-    setError(undefined);
+    setMutationError(undefined);
     try {
       if (kind === "rename")
         await rpc(device.id, "sessions.rename", { workspaceId, sessionId, name });
@@ -101,7 +103,7 @@ export function useSessions(device: Device, workspaceId: string) {
         return true;
       }
     } catch (error) {
-      setError(error);
+      setMutationError(error);
     } finally {
       setBusy(false);
     }
@@ -110,20 +112,20 @@ export function useSessions(device: Device, workspaceId: string) {
   return {
     sessions,
     loaded,
-    error: error || (!listErrorDismissed && listError),
     listError,
+    listNotice: listErrorDismissed ? undefined : listError,
     refreshing,
     busy,
-    mutationError: error,
-    clearMutationError: () => setError(undefined),
+    mutationError,
+    clearMutationError: () => setMutationError(undefined),
     refresh: () => {
       setListErrorDismissed(false);
       return refresh();
     },
     create,
     change,
-    clearError: () => {
-      setError(undefined);
+    dismissNotice: () => {
+      setMutationError(undefined);
       if (listError) setListErrorDismissed(true);
     },
   };

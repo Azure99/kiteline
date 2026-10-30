@@ -8,9 +8,10 @@ import {
   useState,
   type ReactElement,
 } from "react";
-import { X, Fullscreen, Minimize, Scan } from "lucide-react";
+import { X } from "lucide-react";
 import type { Device, Workspace } from "@kiteline/shared/protocol";
 import { IconButton } from "../components/icon-button";
+import { FocusCycleButton } from "../components/focus-cycle-button";
 import { Button } from "../components/ui/button";
 import { useWatchStatus } from "../lib/use-workspace-refresh";
 import { WatchStatus } from "../components/watch-status";
@@ -113,6 +114,8 @@ export function TerminalArea({
   const [opened, setOpened] = useState(() => new Set<string>());
   const [settings, setSettings] = useState(false);
   const [action, setAction] = useState<SessionAction>();
+  const sessionError = remote.mutationError || remote.listNotice;
+  const sessionErrorVisible = remote.mutationError ? !action : visible;
   const group = currentGroup(layout);
   const selected = mobile ? mobileSession : group?.active;
   const sessions = remote.sessions;
@@ -137,6 +140,8 @@ export function TerminalArea({
   if (!visible || targetPending) visibleIds = [];
   else if (mobile) visibleIds = selected ? [selected] : [];
   else visibleIds = members.filter((id) => !group?.maximized || id === selected);
+  const searchOpen =
+    !!selected && visibleIds.includes(selected) && !!capabilities[selected]?.searchOpen;
   useLayoutEffect(() => {
     setOpened((old) =>
       visibleIds.every((id) => old.has(id)) ? old : new Set([...old, ...visibleIds]),
@@ -264,7 +269,8 @@ export function TerminalArea({
       if (
         previous?.ready === value?.ready &&
         previous?.hasTerminal === value?.hasTerminal &&
-        previous?.title === value?.title
+        previous?.title === value?.title &&
+        previous?.searchOpen === value?.searchOpen
       )
         return old;
       const next = { ...old };
@@ -463,26 +469,24 @@ export function TerminalArea({
       {!watchDismissed && (
         <WatchStatus reason={watchReason} onDismiss={() => setWatchDismissed(true)} />
       )}
-      {!!remote.error &&
-        (!action || remote.error !== remote.mutationError) &&
-        (visible || remote.error !== remote.listError) && (
-          <div
-            role="alert"
-            className="workbench-notice flex shrink-0 items-start gap-2 bg-danger-soft px-3 py-2 text-sm text-destructive"
-          >
-            <div className="min-w-0 flex-1 break-words">
-              <ErrorNotice error={remote.error} />
-            </div>
-            <IconButton label={t(($) => $.common.dismiss)} onClick={remote.clearError}>
-              <X />
-            </IconButton>
+      {!!sessionError && sessionErrorVisible && (
+        <div
+          role="alert"
+          className="workbench-notice flex shrink-0 items-start gap-2 bg-danger-soft px-3 py-2 text-sm text-destructive"
+        >
+          <div className="min-w-0 flex-1 break-words">
+            <ErrorNotice error={sessionError} />
           </div>
-        )}
+          <IconButton label={t(($) => $.common.dismiss)} onClick={remote.dismissNotice}>
+            <X />
+          </IconButton>
+        </div>
+      )}
       <div className={visible ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
         <div className="flex shrink-0 items-start">
           <div ref={setMainSearchHost} className="relative min-w-0 flex-1">
             <div
-              data-search-controls
+              hidden={searchOpen}
               className="terminal-toolbar flex min-h-10 shrink-0 items-center gap-1 border-b border-border bg-muted px-2 max-desk:gap-0 max-desk:px-1"
             >
               {picker(mobile ? "current" : "icon")}
@@ -504,20 +508,13 @@ export function TerminalArea({
                 />
               </span>
               {newButtons()}
-              <IconButton
-                label={t(($) =>
-                  focusMode.fullscreen
-                    ? $.terminal.exitFullscreen
-                    : focusMode.active
-                      ? $.terminal.enterFullscreen
-                      : $.terminal.enterFocus,
-                )}
-                aria-pressed={focusMode.active}
+              <FocusCycleButton
+                active={focusMode.active}
+                fullscreen={focusMode.fullscreen}
+                enterFocusLabel={t(($) => $.terminal.enterFocus)}
                 onPointerDown={(event) => event.preventDefault()}
                 onClick={focusMode.toggle}
-              >
-                {focusMode.fullscreen ? <Minimize /> : focusMode.active ? <Fullscreen /> : <Scan />}
-              </IconButton>
+              />
               <TerminalMenu
                 id={targetPending ? undefined : selected}
                 targetName={!targetPending && selected ? name(selected) : undefined}

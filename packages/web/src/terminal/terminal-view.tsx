@@ -9,23 +9,11 @@ import {
   useState,
   type Ref,
 } from "react";
-import {
-  ArrowDown,
-  ArrowLeft,
-  ArrowRight,
-  ArrowUp,
-  ChevronDown,
-  ChevronUp,
-  ClipboardPaste,
-  Copy,
-  RefreshCw,
-  TextSelect,
-  X,
-} from "lucide-react";
+import { ArrowDown, ClipboardPaste, Copy, RefreshCw, TextSelect } from "lucide-react";
 import { TerminalScreens, type TerminalScreenSnapshot } from "./screens";
 import { IconButton } from "../components/icon-button";
 import { Button } from "../components/ui/button";
-import { api, ApiError, rpc } from "../lib/api";
+import { api, rpc } from "../lib/api";
 import { useWebCompatible, webCompatible } from "../lib/release";
 import { Terminal } from "@xterm/xterm";
 import { ErrorNotice } from "../components/error-notice";
@@ -37,6 +25,8 @@ import { cn } from "../lib/utils";
 import { terminalKeyboard } from "./keyboard-input";
 import { releasedModifiers } from "./auxiliary-input";
 import { TerminalSearch } from "./terminal-search";
+import { TerminalAuxKeys } from "./terminal-aux-keys";
+import { TerminalNotice } from "./terminal-notice";
 import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
 import { ContextMenuContent } from "../components/ui/context-menu";
 import { MenuItem } from "../components/ui/menu";
@@ -59,6 +49,7 @@ export interface TerminalCapabilities {
   title?: string;
   ready: boolean;
   hasTerminal: boolean;
+  searchOpen: boolean;
 }
 export function TerminalView({
   deviceId,
@@ -72,7 +63,7 @@ export function TerminalView({
   onCapabilities,
   onClose,
   searchHost,
-  searchActive,
+  paneActive,
 }: {
   deviceId: string;
   deviceName: string;
@@ -83,10 +74,10 @@ export function TerminalView({
   /** A successful session list no longer contains this session. */
   sessionMissing: boolean;
   ref?: Ref<TerminalActions>;
-  onCapabilities?(id: string, value: TerminalCapabilities | undefined): void;
+  onCapabilities(id: string, value: TerminalCapabilities | undefined): void;
   onClose(): void;
   searchHost: HTMLDivElement | null;
-  searchActive: boolean;
+  paneActive: boolean;
 }) {
   const { t } = useTranslation();
   const compatible = useWebCompatible();
@@ -117,12 +108,7 @@ export function TerminalView({
     return () => provider.dispose();
   }, [terminal, deviceId, workspaceId, workspacePath, t]);
   const preflight = useRef(false);
-  const code = state.error instanceof ApiError ? state.error.code : undefined;
-  const screenRetry =
-    state.status === "error" && ["limit_exceeded", "timeout", "busy"].includes(code ?? "");
-  const missing = !!state.missing || (state.status === "error" && code === "not_found");
   const [notice, setNotice] = useState<unknown>();
-  const [expanded, setExpanded] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [contextSelection, setContextSelection] = useState("");
   const [copyNotice, setCopyNotice] = useState<object>();
@@ -133,14 +119,6 @@ export function TerminalView({
   }, [copyNotice]);
   const contextMenu = useRef<ContextMenuPrimitive.Root.Actions>(null);
   const searchInput = useRef<HTMLInputElement>(null);
-  useLayoutEffect(() => {
-    if (!searchOpen || !searchActive || !searchHost) return;
-    const controls = searchHost.querySelector<HTMLElement>("[data-search-controls]")!;
-    controls.style.display = "none";
-    return () => {
-      controls.style.display = "";
-    };
-  }, [searchOpen, searchActive, searchHost]);
   const mobile = useMobile();
   const canPaste = state.status === "ready" && typeof navigator.clipboard?.readText === "function";
   const input = useRef<() => void>(() => {});
@@ -152,14 +130,15 @@ export function TerminalView({
   }, [mobile]);
   useEffect(
     () =>
-      onCapabilities?.(sessionId, {
+      onCapabilities(sessionId, {
         ready: state.status === "ready",
         hasTerminal: !!terminal,
         title,
+        searchOpen,
       }),
-    [onCapabilities, sessionId, state.status, terminal, title],
+    [onCapabilities, sessionId, state.status, terminal, title, searchOpen],
   );
-  useEffect(() => () => onCapabilities?.(sessionId, undefined), [onCapabilities, sessionId]);
+  useEffect(() => () => onCapabilities(sessionId, undefined), [onCapabilities, sessionId]);
   const [recovering, setRecovering] = useState(false);
   const [redrawDialog, setRedrawDialog] = useState(false);
   const [redrawing, setRedrawing] = useState(false);
@@ -295,166 +274,21 @@ export function TerminalView({
     },
     [mobile],
   );
-  const arrowRoot = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const root = arrowRoot.current!;
-    let timer = 0;
-    let held: { id: number; button: HTMLElement; key: string } | undefined;
-    const stop = () => {
-      clearTimeout(timer);
-      held = undefined;
-    };
-    const repeat = () => {
-      if (!held) return;
-      auxiliary(held.key);
-      timer = window.setTimeout(repeat, 80);
-    };
-    const down = (event: PointerEvent) => {
-      const button = (event.target as Element).closest<HTMLElement>("[data-repeat-arrow]");
-      if (
-        !button ||
-        event.pointerType !== "touch" ||
-        !event.isPrimary ||
-        held ||
-        !searchActive ||
-        state.status !== "ready"
-      )
-        return;
-      event.preventDefault();
-      held = { id: event.pointerId, button, key: button.dataset.repeatArrow! };
-      auxiliary(held.key);
-      if (mobile) navigator.vibrate?.(10);
-      timer = window.setTimeout(repeat, 400);
-    };
-    const move = (event: PointerEvent) => {
-      if (!held || held.id !== event.pointerId) return;
-      const box = held.button.getBoundingClientRect();
-      if (
-        event.clientX < box.left ||
-        event.clientX >= box.right ||
-        event.clientY < box.top ||
-        event.clientY >= box.bottom
-      )
-        stop();
-    };
-    const end = (event: PointerEvent) => {
-      if (held?.id === event.pointerId) stop();
-    };
-    // Cancel the gesture's click even if its terminal is replaced before release.
-    const preventArrowDefault = (event: Event) => {
-      if ((event.target as Element).closest("[data-repeat-arrow]")) event.preventDefault();
-    };
-    const visibility = () => {
-      if (document.hidden) stop();
-    };
-    root.addEventListener("pointerdown", down);
-    root.addEventListener("pointermove", move);
-    root.addEventListener("pointerup", end);
-    root.addEventListener("pointercancel", end);
-    root.addEventListener("lostpointercapture", end);
-    root.addEventListener("touchstart", preventArrowDefault, { passive: false });
-    root.addEventListener("contextmenu", preventArrowDefault);
-    window.addEventListener("blur", stop);
-    document.addEventListener("visibilitychange", visibility);
-    return () => {
-      stop();
-      root.removeEventListener("pointerdown", down);
-      root.removeEventListener("pointermove", move);
-      root.removeEventListener("pointerup", end);
-      root.removeEventListener("pointercancel", end);
-      root.removeEventListener("lostpointercapture", end);
-      root.removeEventListener("touchstart", preventArrowDefault);
-      root.removeEventListener("contextmenu", preventArrowDefault);
-      window.removeEventListener("blur", stop);
-      document.removeEventListener("visibilitychange", visibility);
-    };
-  }, [auxiliary, mobile, searchActive, state.status, terminal, expanded]);
   return (
     <section
       className="terminal-surface flex min-h-0 flex-1 flex-col"
       aria-label={t(($) => $.terminal.display)}
     >
-      {!!(
-        state.status !== "ready" ||
-        state.error ||
-        state.notice ||
-        state.historyGap ||
-        state.historyLimited ||
-        notice
-      ) && (
-        <div
-          className="terminal-notice flex flex-wrap items-start gap-2 px-3 py-1 text-xs"
-          data-two-actions={screenRetry}
-          data-compact={
-            !notice &&
-            !missing &&
-            !state.error &&
-            !state.notice &&
-            (state.status === "ended" || state.status === "connecting")
-          }
-          role="status"
-        >
-          <div className="min-w-0 flex-1 break-words">
-            {missing && !notice ? (
-              t(($) => $.terminal.endedMissing)
-            ) : notice || state.error ? (
-              <ErrorNotice error={notice || state.error} />
-            ) : state.notice ? (
-              t(($) => $.terminal[state.notice!])
-            ) : state.status === "ended" ? (
-              state.exitCode == null ? (
-                t(($) => $.terminal.ended)
-              ) : (
-                t(($) => $.terminal.endedCode, { code: state.exitCode })
-              )
-            ) : state.status === "connecting" ? (
-              t(($) => $.common.connecting)
-            ) : state.historyGap && state.historyLimited ? (
-              t(($) => $.terminal.historyGapLimited)
-            ) : state.historyGap ? (
-              t(($) => $.terminal.historyGap)
-            ) : state.historyLimited ? (
-              t(($) => $.terminal.historyLimited)
-            ) : null}
-          </div>
-          {state.status === "error" && !missing && (
-            <>
-              <Button
-                variant="ghost"
-                disabled={recovering || !compatible}
-                onClick={() => (code === "recording_unavailable" ? void recover() : redisplay())}
-              >
-                <RefreshCw />
-                {recovering
-                  ? t(($) => $.terminal.recovering)
-                  : code === "recording_unavailable"
-                    ? t(($) => $.terminal.recover)
-                    : t(($) => $.terminal.reconnect)}
-              </Button>
-              {screenRetry && (
-                <Button
-                  variant="ghost"
-                  onClick={() => redisplay("screen")}
-                  title={t(($) => $.terminal.screenOnlyHint)}
-                >
-                  {t(($) => $.terminal.screenOnly)}
-                </Button>
-              )}
-            </>
-          )}
-          {missing && (
-            <Button variant="ghost" onClick={onClose}>
-              <X />
-              {t(($) => $.terminal.closeDisplay)}
-            </Button>
-          )}
-          {!!notice && (
-            <IconButton label={t(($) => $.common.dismiss)} onClick={() => setNotice("")}>
-              <X />
-            </IconButton>
-          )}
-        </div>
-      )}
+      <TerminalNotice
+        state={state}
+        notice={notice}
+        recovering={recovering}
+        compatible={compatible}
+        onRecover={recover}
+        onRestore={redisplay}
+        onClose={onClose}
+        onDismiss={() => setNotice("")}
+      />
       <div
         className={cn(
           "terminal-viewport relative flex min-h-0 flex-1",
@@ -492,7 +326,7 @@ export function TerminalView({
             <TerminalSearch
               terminal={terminal}
               targetName={sessionName}
-              active={searchActive}
+              active={paneActive}
               inputRef={searchInput}
               onClose={() => {
                 setSearchOpen(false);
@@ -518,13 +352,13 @@ export function TerminalView({
         {copyNotice && (
           <span
             role="status"
-            className="pointer-events-none absolute bottom-3 left-3 rounded bg-[#39414c] px-2 py-1 text-xs text-[#e2e8f0] shadow"
+            className="pointer-events-none absolute bottom-3 left-3 rounded bg-[var(--terminal-chrome)] px-2 py-1 text-xs text-[var(--terminal-chrome-foreground)] shadow"
           >
             {t(($) => $.common.copied)}
           </span>
         )}
         {reading && (
-          <div className="absolute bottom-3 right-4 rounded bg-[#39414c] shadow">
+          <div className="absolute bottom-3 right-4 rounded bg-[var(--terminal-chrome)] shadow">
             <IconButton
               label={t(($) => $.terminal.bottom)}
               onPointerDown={(event) => {
@@ -537,95 +371,16 @@ export function TerminalView({
           </div>
         )}
       </div>
-      <div
-        ref={arrowRoot}
-        hidden={searchOpen && searchActive}
-        className="terminal-aux shrink-0 border-t"
-        onPointerDown={(event) => event.preventDefault()}
-        onClick={(event) => {
-          if (
-            mobile &&
-            event.target instanceof Element &&
-            event.target.closest("button:not(:disabled)")
-          )
-            navigator.vibrate?.(10);
-        }}
-      >
-        {expanded && (
-          <div className="terminal-aux-row">
-            {[
-              ["Tab", "TAB"],
-              ["/", "/"],
-              ["@", "@"],
-              ["PageUp", "PGUP"],
-              ["ArrowUp", ""],
-              ["PageDown", "PGDN"],
-              ["Escape", "ESC"],
-            ].map(([key, label]) =>
-              key === "ArrowUp" ? (
-                <IconButton
-                  key={key}
-                  className="aux-key touch-none"
-                  data-repeat-arrow={key}
-                  label={t(($) => $.terminal.up)}
-                  disabled={state.status !== "ready"}
-                  onClick={() => auxiliary(key!)}
-                >
-                  <ArrowUp />
-                </IconButton>
-              ) : (
-                <button
-                  key={key}
-                  className="aux-key"
-                  disabled={state.status !== "ready"}
-                  onClick={() => auxiliary(key!)}
-                >
-                  {label}
-                </button>
-              ),
-            )}
-          </div>
-        )}
-        <div className="terminal-aux-row">
-          {(["shiftKey", "ctrlKey", "altKey"] as const).map((key) => (
-            <button
-              key={key}
-              className="aux-key"
-              aria-pressed={modifiers[key]}
-              disabled={state.status !== "ready"}
-              onClick={() => screens.current?.display?.toggleModifier(key)}
-            >
-              {key.slice(0, -3).toUpperCase()}
-            </button>
-          ))}
-          {[
-            { icon: ArrowLeft, value: "ArrowLeft", label: t(($) => $.terminal.left) },
-            { icon: ArrowDown, value: "ArrowDown", label: t(($) => $.terminal.down) },
-            { icon: ArrowRight, value: "ArrowRight", label: t(($) => $.terminal.right) },
-          ].map(({ icon: Glyph, value, label }) => {
-            return (
-              <IconButton
-                key={value}
-                className="aux-key touch-none"
-                data-repeat-arrow={value}
-                label={label}
-                disabled={state.status !== "ready"}
-                onClick={() => auxiliary(value)}
-              >
-                <Glyph />
-              </IconButton>
-            );
-          })}
-          <IconButton
-            className="aux-key"
-            label={expanded ? t(($) => $.terminal.collapseKeys) : t(($) => $.terminal.expandKeys)}
-            aria-expanded={expanded}
-            onClick={() => setExpanded((value) => !value)}
-          >
-            {expanded ? <ChevronDown /> : <ChevronUp />}
-          </IconButton>
-        </div>
-      </div>
+      <TerminalAuxKeys
+        terminal={terminal}
+        paneActive={paneActive}
+        hidden={searchOpen && paneActive}
+        available={state.status === "ready"}
+        mobile={mobile}
+        modifiers={modifiers}
+        onKey={auxiliary}
+        onToggleModifier={(key) => screens.current?.display?.toggleModifier(key)}
+      />
       <Dialog
         open={redrawDialog}
         onOpenChange={(open) => {
