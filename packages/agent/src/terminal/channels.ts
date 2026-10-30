@@ -19,20 +19,145 @@ import type { AgentConfig, Identity } from "../config.js";
 import type { Sessions } from "./sessions.js";
 import { connectChannel } from "../network.js";
 import { TtyBridge } from "./tty.js";
+import type { Recorder } from "./recorder.js";
 
 interface Channel {
   id: string;
   sessionId: string;
   socket: WebSocket;
   started: boolean;
-  backend?:
-    | { mode: "web" }
-    | {
-        mode: "tty";
-        options: { cols: number; rows: number; term: string };
-        bridge?: Promise<TtyBridge>;
-      };
+  backend?: WebBackend | TtyBackend;
 }
+
+type StartTarget = ReturnType<Sessions["channelStartTarget"]>;
+type TerminalInput = Buffer | BrowserTerminalInput;
+interface ChannelActions {
+  fail(error: unknown): void;
+  cancel(): void;
+}
+
+class WebBackend {
+  constructor(
+    private channel: Channel,
+    private recorder: Recorder,
+    private history: "retained" | "screen",
+    private actions: ChannelActions,
+  ) {}
+
+  start(target: StartTarget) {
+    if (target.webStatus !== "available")
+      throw new AppError("recording_unavailable", "Terminal recording is unavailable");
+    const { id, sessionId } = this.channel;
+    void this.recorder
+      .request({
+        type: "attach",
+        sessionId,
+        attachmentId: id,
+        history: this.history,
+        historyGap: target.historyGap,
+      })
+      .catch(this.actions.fail);
+  }
+
+  input(input: TerminalInput) {
+    this.recorder.send({
+      sessionId: this.channel.sessionId,
+      attachmentId: this.channel.id,
+      ...(Buffer.isBuffer(input) ? { type: "input", dataBase64: input.toString("base64") } : input),
+    });
+  }
+
+  inputFailed(error: unknown) {
+    try {
+      sendFrame(
+        this.channel.socket,
+        JSON.stringify({ type: "input.error", ...asError(error), outcome: "failed" }),
+      );
+    } catch {
+      this.actions.cancel();
+    }
+  }
+
+  frame(message: Extract<RecorderMessage, { type: "bytes" | "frame" }>) {
+    try {
+      if (message.type === "bytes") {
+        sendFrame(this.channel.socket, Buffer.from(message.dataBase64, "base64"));
+      } else {
+        sendFrame(this.channel.socket, JSON.stringify(message.frame));
+        if (message.frame.type === "ended" || message.frame.type === "error") this.actions.cancel();
+      }
+    } catch (error) {
+      this.actions.fail(error);
+    }
+  }
+
+  close() {
+    try {
+      this.recorder.detach(this.channel.sessionId, this.channel.id);
+    } catch {
+      /* Recorder failure already closes its displays. */
+    }
+  }
+}
+
+class TtyBackend {
+  private bridge?: Promise<TtyBridge>;
+
+  constructor(
+    private channel: Channel,
+    private options: { cols: number; rows: number; term: string },
+    private actions: ChannelActions & { isCurrent(): boolean },
+  ) {}
+
+  start(target: StartTarget) {
+    const { socket } = this.channel;
+    socket.pause();
+    this.bridge = TtyBridge.start(
+      target.socket,
+      this.options,
+      (data) => sendFrame(socket, data),
+      () => {
+        try {
+          sendFrame(socket, JSON.stringify({ type: "ended", exitCode: 0 } satisfies TtyFrame));
+        } catch (error) {
+          this.actions.fail(error);
+        } finally {
+          this.actions.cancel();
+        }
+      },
+      this.actions.fail,
+    );
+    void this.bridge.then(
+      () => socket.resume(),
+      (error: unknown) => {
+        socket.resume();
+        this.actions.fail(error);
+      },
+    );
+  }
+
+  input(input: TerminalInput) {
+    void this.bridge!.then((bridge) => {
+      if (!this.actions.isCurrent()) return;
+      try {
+        if (Buffer.isBuffer(input)) bridge.input(input);
+        else if (input.type === "resize") bridge.resize(input.cols, input.rows);
+        else if (input.type === "consumed") bridge.acknowledge(input.bytes);
+        else throw new AppError("invalid_argument", "Invalid TTY input");
+      } catch (error) {
+        this.actions.fail(error);
+      }
+    }, this.actions.fail);
+  }
+
+  close() {
+    return this.bridge?.then(
+      (bridge) => bridge.stop(),
+      () => {}, // spawnJob already cleans up a failed startup.
+    );
+  }
+}
+
 export class TerminalChannels {
   private entries = new Map<string, Channel>();
   private closing = new Set<Promise<void>>();
@@ -63,29 +188,31 @@ export class TerminalChannels {
           sessionId: string(params.sessionId),
           workspaceId: string(params.workspaceId),
         });
+        const actions: ChannelActions = {
+          fail: (error) => this.fail(id, error),
+          cancel: () => this.cancel(id),
+        };
         if (params.mode === "tty") {
           if (params.history !== undefined)
             throw new AppError("invalid_argument", "TTY attach does not accept history");
-          channel.backend = {
-            mode: "tty",
-            options: {
+          channel.backend = new TtyBackend(
+            channel,
+            {
               cols: parseTerminalCols(params.cols),
               rows: parseTerminalRows(params.rows),
               term: string(params.term, "term"),
             },
-          };
+            { ...actions, isCurrent: () => this.entries.get(id) === channel },
+          );
         } else {
           if (params.mode !== undefined && params.mode !== "web")
             throw new AppError("invalid_argument", "Invalid terminal mode");
-          if (
-            params.history !== undefined &&
-            params.history !== "retained" &&
-            params.history !== "screen"
-          )
+          const history = params.history === undefined ? "retained" : params.history;
+          if (history !== "retained" && history !== "screen")
             throw new AppError("invalid_argument", "Invalid history range");
           if (status.webStatus !== "available")
             throw new AppError("recording_unavailable", "Terminal recording is unavailable");
-          channel.backend = { mode: "web" };
+          channel.backend = new WebBackend(channel, this.sessions.recorder, history, actions);
         }
         sendFrame(
           socket,
@@ -108,51 +235,11 @@ export class TerminalChannels {
           if (message?.type !== "start")
             throw new AppError("invalid_argument", "Channel has not started");
           const target = this.sessions.channelStartTarget(channel.sessionId);
-          if (channel.backend?.mode === "tty") {
-            channel.started = true;
-            socket.pause();
-            channel.backend.bridge = TtyBridge.start(
-              target.socket,
-              channel.backend.options,
-              (data) => sendFrame(socket, data),
-              () => {
-                try {
-                  sendFrame(
-                    socket,
-                    JSON.stringify({ type: "ended", exitCode: 0 } satisfies TtyFrame),
-                  );
-                } catch (error) {
-                  this.fail(id, error);
-                } finally {
-                  this.cancel(id);
-                }
-              },
-              (error) => this.fail(id, error),
-            );
-            void channel.backend.bridge.then(
-              () => socket.resume(),
-              (error: unknown) => {
-                socket.resume();
-                this.fail(id, error);
-              },
-            );
-            return;
-          }
-          if (target.webStatus !== "available")
-            throw new AppError("recording_unavailable", "Terminal recording is unavailable");
+          channel.backend!.start(target);
           channel.started = true;
-          void this.sessions.recorder
-            .request({
-              type: "attach",
-              sessionId: channel.sessionId,
-              attachmentId: id,
-              history: params.history === "screen" ? "screen" : "retained",
-              historyGap: target.historyGap,
-            })
-            .catch((error: unknown) => this.fail(id, error));
           return;
         }
-        let input: Buffer | BrowserTerminalInput;
+        let input: TerminalInput;
         if (binary) {
           if ((raw as Buffer).length > limits.dataChunkBytes)
             throw new AppError("limit_exceeded", "Input frame is too large");
@@ -173,42 +260,13 @@ export class TerminalChannels {
             bytes: integer(message.bytes, "bytes", 0, Number.MAX_SAFE_INTEGER),
           };
         else throw new AppError("invalid_argument", "Invalid terminal input");
-        if (channel.backend?.mode === "tty") {
-          void channel.backend.bridge!.then(
-            (bridge) => {
-              if (this.entries.get(id) !== channel) return;
-              try {
-                if (Buffer.isBuffer(input)) bridge.input(input);
-                else if (input.type === "resize") bridge.resize(input.cols, input.rows);
-                else if (input.type === "consumed") bridge.acknowledge(input.bytes);
-                else throw new AppError("invalid_argument", "Invalid TTY input");
-              } catch (error) {
-                this.fail(id, error);
-              }
-            },
-            (error: unknown) => this.fail(id, error),
-          );
-        } else
-          this.sessions.recorder.send({
-            sessionId: channel.sessionId,
-            attachmentId: id,
-            ...(Buffer.isBuffer(input)
-              ? { type: "input", dataBase64: input.toString("base64") }
-              : input),
-          });
+        channel.backend!.input(input);
       } catch (error) {
-        if (!channel.started || channel.backend?.mode === "tty") {
+        if (!channel.started || !(channel.backend instanceof WebBackend)) {
           this.fail(id, error);
           return;
         }
-        try {
-          sendFrame(
-            socket,
-            JSON.stringify({ type: "input.error", ...asError(error), outcome: "failed" }),
-          );
-        } catch {
-          this.cancel(id);
-        }
+        channel.backend.inputFailed(error);
       }
     });
     socket.on("error", () => this.cancel(id));
@@ -217,28 +275,15 @@ export class TerminalChannels {
   frame(message: RecorderMessage) {
     if (message.type === "fault") {
       for (const item of this.entries.values())
-        if (item.backend?.mode === "web" && item.sessionId === message.sessionId)
+        if (item.backend instanceof WebBackend && item.sessionId === message.sessionId)
           this.fail(item.id, new AppError(message.error.code, message.error.message));
       return;
     }
     if (message.type !== "bytes" && message.type !== "frame") return;
     const channel = this.entries.get(message.attachmentId);
-    if (channel?.backend?.mode !== "web" || channel.sessionId !== message.sessionId) return;
-    try {
-      sendFrame(
-        channel.socket,
-        message.type === "bytes"
-          ? Buffer.from(message.dataBase64, "base64")
-          : JSON.stringify(message.frame),
-      );
-      if (
-        message.type === "frame" &&
-        (message.frame.type === "ended" || message.frame.type === "error")
-      )
-        this.cancel(channel.id);
-    } catch (error) {
-      this.fail(channel.id, error);
-    }
+    if (!(channel?.backend instanceof WebBackend) || channel.sessionId !== message.sessionId)
+      return;
+    channel.backend.frame(message);
   }
   private fail(id: string, error: unknown) {
     const channel = this.entries.get(id);
@@ -250,23 +295,12 @@ export class TerminalChannels {
     const channel = this.entries.get(id);
     if (!channel) return;
     this.entries.delete(id);
-    if (channel.backend?.mode === "tty") {
-      const stopped = channel.backend.bridge?.then(
-        (bridge) => bridge.stop(),
-        () => {}, // spawnJob already cleans up a failed startup.
-      );
-      if (stopped) {
-        this.closing.add(stopped);
-        void stopped
-          .catch((error: unknown) => console.error("Terminal client cleanup failed:", error))
-          .finally(() => this.closing.delete(stopped));
-      }
-    } else if (channel.backend?.mode === "web") {
-      try {
-        this.sessions.recorder.detach(channel.sessionId, id);
-      } catch {
-        /* Recorder failure already closes its displays. */
-      }
+    const stopped = channel.backend?.close();
+    if (stopped) {
+      this.closing.add(stopped);
+      void stopped
+        .catch((error: unknown) => console.error("Terminal client cleanup failed:", error))
+        .finally(() => this.closing.delete(stopped));
     }
     channel.socket.close(1000);
   }

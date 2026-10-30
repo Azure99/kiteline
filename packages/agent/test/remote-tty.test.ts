@@ -1,14 +1,14 @@
 import { once } from "node:events";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { WebSocket } from "ws";
 import { limits, type ChannelReady } from "@kiteline/shared/protocol";
 import { versionedPath } from "@kiteline/shared/protocol/client";
 import { terminalOutputCost, type RecorderCall } from "@kiteline/shared/protocol/ipc";
 import { tmux } from "@kiteline/shared/terminal/node";
 import { client } from "../../cli/src/client.js";
-import { serverFixture } from "../../server/test/fixture.js";
+import { rejectedUpgrade, serverFixture } from "../../server/test/fixture.js";
 import { Agent } from "../src/agent.js";
 import { TtyBridge } from "../src/terminal/tty.js";
 import { testConfig } from "./support/config.js";
@@ -41,6 +41,13 @@ async function fixture() {
   const credentials = { server: server.origin, token: credential.token };
   const api = client(credentials);
   const params = { workspaceId: workspace.id, sessionId: session.id };
+  const headers = { origin: server.origin, authorization: `Bearer ${credential.token}` };
+  function channelUrl(ready: ChannelReady) {
+    return (
+      server.origin.replace("http:", "ws:") +
+      versionedPath(`/api/channels/${ready.channelId}/terminal`)
+    );
+  }
   function prepare(mode: "tty" | "web", extra: Record<string, unknown> = {}) {
     return api.post<ChannelReady>(
       `/api/devices/${identity.deviceId}/channels`,
@@ -53,11 +60,7 @@ async function fixture() {
     );
   }
   async function connect(mode: "tty" | "web", ready: ChannelReady) {
-    const socket = new WebSocket(
-      server.origin.replace("http:", "ws:") +
-        versionedPath(`/api/channels/${ready.channelId}/terminal`),
-      { headers: { origin: server.origin, authorization: `Bearer ${credential.token}` } },
-    );
+    const socket = new WebSocket(channelUrl(ready), { headers });
     cleanups.push(() => socket.terminate());
     let output = "";
     let consumed = 0;
@@ -69,14 +72,12 @@ async function fixture() {
       if (binary) output += data.toString();
       else frames.push(frame!);
       order.push(binary ? "bytes" : String(frame!.type));
-      const credit =
-        mode === "tty"
-          ? binary
-            ? Buffer.byteLength(data as Buffer)
-            : 0
-          : frame?.type === "error" || frame?.type === "input.error"
-            ? 0
-            : terminalOutputCost(Buffer.byteLength(data as Buffer));
+      let credit = 0;
+      if (mode === "tty") {
+        if (binary) credit = Buffer.byteLength(data as Buffer);
+      } else if (frame?.type !== "error" && frame?.type !== "input.error") {
+        credit = terminalOutputCost(Buffer.byteLength(data as Buffer));
+      }
       if (credit && socket.readyState === WebSocket.OPEN) {
         consumed += credit;
         if (acknowledge) socket.send(JSON.stringify({ type: "consumed", bytes: consumed }));
@@ -113,16 +114,38 @@ async function fixture() {
     open,
     prepare,
     connect,
+    rejectedJoin: (ready: ChannelReady) => rejectedUpgrade(channelUrl(ready), headers),
     tmuxSocket: join(root, "run", session.id, "tmux.sock"),
   };
+}
+
+function holdTtyStart() {
+  const start = TtyBridge.start;
+  let release!: () => void;
+  const delivery = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let created: TtyBridge | undefined;
+  const held = vi.spyOn(TtyBridge, "start").mockImplementation(async (...args) => {
+    const bridge = await start(...args);
+    created = bridge;
+    await delivery;
+    return bridge;
+  });
+  return { created: () => created, release, restore: () => held.mockRestore() };
 }
 
 test("TTY uses CLI credentials, shares the existing pane with Web, and detaches independently", async () => {
   const f = await fixture();
   const pane = () => tmux(f.tmuxSocket, ["display-message", "-p", "#{pane_pid} #{pane_dead}"]);
   const before = await pane();
-  const web = await f.open("web");
+  const web = await f.open("web", { mode: undefined });
   await expect.poll(() => web.frames.some((frame) => frame.type === "ready"), polling).toBe(true);
+  web.socket.send(JSON.stringify({ type: "resize", cols: 0, rows: 24 }));
+  await expect
+    .poll(() => web.frames, polling)
+    .toContainEqual(expect.objectContaining({ type: "input.error", code: "invalid_argument" }));
+  expect(web.socket.readyState).toBe(WebSocket.OPEN);
   const tty = await f.open("tty");
   tty.socket.send(Buffer.from("printf '中文\\n' > shared.txt\r"));
   await expect.poll(tty.output, polling).toContain("\x1b");
@@ -155,12 +178,18 @@ test("TTY uses CLI credentials, shares the existing pane with Web, and detaches 
   expect(await pane()).toBe(before);
 }, 15000);
 
-test("TTY rejects invalid targets and ACKs, but keeps working when recording is unavailable", async () => {
+test("recorder failure closes an attached Web display while TTY keeps the same pane", async () => {
   const f = await fixture();
-  await expect(f.open("tty", { workspaceId: "other" })).rejects.toMatchObject({
+  const pane = () =>
+    tmux(f.tmuxSocket, ["display-message", "-p", "#{pane_id} #{pane_pid} #{pane_dead}"]);
+  const before = await pane();
+  await expect(f.open("tty", { workspaceId: "other", rows: 0 })).rejects.toMatchObject({
     code: "not_found",
   });
   await expect(f.open("tty", { rows: 0 })).rejects.toMatchObject({ code: "invalid_argument" });
+  const web = await f.open("web");
+  await expect.poll(() => web.frames.some((frame) => frame.type === "ready"), polling).toBe(true);
+  const reservedWeb = await f.prepare("web");
   const tty = await f.open("tty");
   await expect.poll(tty.output, polling).toContain("\x1b");
   process.kill(f.agent.sessions.recorder.pid!, "SIGKILL");
@@ -170,10 +199,18 @@ test("TTY rejects invalid targets and ACKs, but keeps working when recording is 
       polling,
     )
     .toBe("unavailable");
+  await web.closed;
+  expect(web.frames).toContainEqual(
+    expect.objectContaining({ type: "error", code: "recording_unavailable" }),
+  );
+  expect(tty.socket.readyState).toBe(WebSocket.OPEN);
   tty.socket.send(Buffer.from("printf retained > retained.txt\r"));
   await expect
     .poll(() => readFile(join(f.root, "retained.txt"), "utf8").catch(() => ""), polling)
     .toBe("retained");
+  expect(await pane()).toBe(before);
+  expect(await f.api.cancelChannel(reservedWeb.channelId)).toEqual({ found: false });
+  expect((await f.rejectedJoin(reservedWeb)).status).toBe(404);
   await expect(f.open("web")).rejects.toMatchObject({ code: "recording_unavailable" });
   await expect(f.open("web", { mode: "invalid" })).rejects.toMatchObject({
     code: "invalid_argument",
@@ -193,15 +230,97 @@ test("TTY rejects invalid targets and ACKs, but keeps working when recording is 
   expect(tty.frames).toContainEqual({ type: "ended", exitCode: 0 });
 }, 15000);
 
-test("Web start rechecks a session removed after channel ready", async () => {
+test.each(["web", "tty"] as const)(
+  "%s start rechecks a session removed after channel ready",
+  async (mode) => {
+    const f = await fixture();
+    const ready = await f.prepare(mode);
+    await f.agent.sessions.end({ workspaceId: f.params.workspaceId, sessionId: f.session.id });
+    expect(f.agent.sessions.list().sessions).toEqual([]);
+    const display = await f.connect(mode, ready);
+    await display.closed;
+    expect(display.frames).toContainEqual(
+      expect.objectContaining({ type: "error", code: "not_found" }),
+    );
+    expect(display.frames.some((frame) => frame.type === "restore.begin")).toBe(false);
+    expect(display.output()).toBe("");
+  },
+  15000,
+);
+
+test("cancelling a TTY before bridge delivery stops its client while the pane and Web continue", async () => {
   const f = await fixture();
-  const ready = await f.prepare("web");
-  await f.agent.sessions.end({ workspaceId: f.params.workspaceId, sessionId: f.session.id });
-  expect(f.agent.sessions.list().sessions).toEqual([]);
-  const web = await f.connect("web", ready);
-  await web.closed;
-  expect(web.frames).toContainEqual(expect.objectContaining({ type: "error", code: "not_found" }));
-  expect(web.frames.some((frame) => frame.type === "restore.begin")).toBe(false);
+  const pane = () =>
+    tmux(f.tmuxSocket, ["display-message", "-p", "#{pane_id} #{pane_pid} #{pane_dead}"]);
+  const before = await pane();
+  const web = await f.open("web");
+  await expect.poll(() => web.frames.some((frame) => frame.type === "ready"), polling).toBe(true);
+  const held = holdTtyStart();
+  try {
+    const ready = await f.prepare("tty");
+    const tty = await f.connect("tty", ready);
+    await expect.poll(held.created, polling).toBeDefined();
+    const clients = () => tmux(f.tmuxSocket, ["list-clients", "-F", "#{client_control_mode}"]);
+    await expect.poll(async () => (await clients()).split("\n"), polling).toContain("0");
+    tty.socket.terminate();
+    await tty.closed;
+    await f.api.cancelChannel(ready.channelId);
+    // This RPC follows channel.cancel on the same control connection.
+    await f.api.rpc(f.identity.deviceId, "sessions.list", { workspaceId: f.params.workspaceId });
+    held.release();
+    await expect.poll(clients, polling).toBe("1\n");
+    expect(await pane()).toBe(before);
+    web.socket.send(Buffer.from("printf 'AFTER-CANCEL\\n'\r"));
+    await expect.poll(web.output, polling).toContain("AFTER-CANCEL\r\n");
+  } finally {
+    held.release();
+    held.restore();
+  }
+}, 15000);
+
+test("Agent shutdown waits for a withheld TTY bridge and its real cleanup", async () => {
+  const f = await fixture();
+  const held = holdTtyStart();
+  try {
+    const tty = await f.open("tty");
+    await expect.poll(held.created, polling).toBeDefined();
+    const clients = () =>
+      tmux(f.tmuxSocket, ["list-clients", "-F", "#{?client_control_mode,,#{client_pid}}"]);
+    await expect.poll(async () => (await clients()).trim(), polling).not.toBe("");
+    const clientPid = Number((await clients()).trim());
+    const bridge = held.created()!;
+    const stop = bridge.stop.bind(bridge);
+    let bridgeStopped = false;
+    const stopped = vi.spyOn(bridge, "stop").mockImplementation(async () => {
+      await stop();
+      bridgeStopped = true;
+    });
+    let agentClosed = false;
+    const closing = f.agent.close().then(() => {
+      agentClosed = true;
+    });
+    void closing.catch(() => {});
+    try {
+      await tty.closed;
+      await expect.poll(() => f.agent.sessions.list().sessions, polling).toEqual([]);
+      expect(agentClosed).toBe(false);
+      expect(bridgeStopped).toBe(false);
+      held.release();
+      await closing;
+      expect(bridgeStopped).toBe(true);
+      expect(() => process.kill(clientPid, 0)).toThrow(/ESRCH/);
+    } finally {
+      held.release();
+      try {
+        await closing;
+      } finally {
+        stopped.mockRestore();
+      }
+    }
+  } finally {
+    held.release();
+    held.restore();
+  }
 }, 15000);
 
 test("ending blocks terminal RPCs while Web open and start can still attach to the existing pane", async () => {
