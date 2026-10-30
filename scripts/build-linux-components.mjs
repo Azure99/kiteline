@@ -1,6 +1,5 @@
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   digest,
   fetchPinned,
@@ -25,7 +24,7 @@ const sourceFiles = [
   "native/tmux/tmux.terminfo",
 ];
 
-export function buildLinuxComponents(destination, architecture = "amd64") {
+export function buildLinuxComponents(destination, architecture) {
   const release = json(join(root, "release/inputs.json"));
   const nodeArchitecture = release.nodeArchives[architecture]?.architecture;
   if (!nodeArchitecture) throw new Error(`Unsupported Linux agent architecture: ${architecture}`);
@@ -154,16 +153,8 @@ export function buildLinuxComponents(destination, architecture = "amd64") {
         2,
       ) + "\n",
     );
-    mkdirSync(resolve(destination, ".."), { recursive: true });
-    const pending = mkdtempSync(`${destination}.pending-`);
-    try {
-      run("cp", ["-a", `${output}/.`, pending]);
-      rmSync(destination, { force: true, recursive: true });
-      renameSync(pending, destination);
-    } finally {
-      rmSync(pending, { force: true, recursive: true });
-    }
-    console.log(`Linux agent components: ${destination}`);
+    mkdirSync(destination);
+    run("cp", ["-a", `${output}/.`, destination]);
   } catch (error) {
     failed = true;
     throw error;
@@ -182,13 +173,4 @@ export function buildLinuxComponents(destination, architecture = "amd64") {
       for (const error of cleanupErrors) console.error("Linux build cleanup failed:", error);
   }
   if (cleanupErrors.length) throw new AggregateError(cleanupErrors, "Linux build cleanup failed");
-}
-
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [architecture = "amd64", extra] = process.argv.slice(2);
-  if (extra) throw new Error("Usage: node scripts/build-linux-components.mjs [amd64|arm64]");
-  buildLinuxComponents(
-    resolve(process.env.KITELINE_LINUX_OUTPUT ?? join(root, `dist/agent-linux-${architecture}`)),
-    architecture,
-  );
 }

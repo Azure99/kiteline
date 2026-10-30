@@ -77,7 +77,7 @@ function inputs(architecture) {
     ),
   };
 }
-export function prepareMacosInputs(directory, architecture) {
+function prepareMacosInputs(directory, architecture) {
   prepareInputs(directory, root, sourceFiles, inputs(architecture));
 }
 
@@ -104,7 +104,7 @@ function macho(file, architecture) {
   return { minimum, libraries };
 }
 
-export function buildMacosComponents(directory, destination, architecture) {
+function buildMacosComponents(directory, destination, architecture) {
   const expected = inputs(architecture);
   const nodeArchitecture = release.nodeArchives[architecture].architecture;
   if (process.platform !== "darwin" || process.arch !== nodeArchitecture)
@@ -207,10 +207,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   const [mode, architecture, input, output, extra] = process.argv.slice(2);
   if (!input || extra || (mode === "build" ? !output : output))
     throw new Error(
-      "Usage: node scripts/build-macos-components.mjs prepare amd64|arm64 INPUTS | build amd64|arm64 INPUTS OUTPUT | verify amd64|arm64 OUTPUT",
+      "Usage: node scripts/build-macos-components.mjs prepare amd64|arm64 INPUTS | build amd64|arm64 INPUTS OUTPUT",
     );
   if (mode === "prepare") prepareMacosInputs(resolve(input), architecture);
   else if (mode === "build") buildMacosComponents(resolve(input), resolve(output), architecture);
-  else if (mode === "verify") verifyMacosComponents(resolve(input), architecture);
   else throw new Error(`Unknown macOS component build: ${mode}`);
 }

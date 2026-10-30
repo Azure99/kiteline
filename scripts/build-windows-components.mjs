@@ -74,11 +74,11 @@ function verifyInputs(directory) {
   return verifyPreparedInputs(directory, inputs(), "Windows");
 }
 
-export function prepareWindowsInputs(directory) {
+function prepareWindowsInputs(directory) {
   prepareInputs(directory, root, inputSourceFiles, inputs());
 }
 
-export function buildWindowsMsys(directory, destination) {
+function buildWindowsMsys(directory, destination) {
   if (process.platform !== "win32" || process.arch !== "x64")
     throw new Error("MSYS components require a Windows x64 build host");
   const expected = verifyInputs(directory);
@@ -159,7 +159,7 @@ export function buildWindowsMsys(directory, destination) {
   });
 }
 
-export function buildWindowsAddon(directory, destination) {
+function buildWindowsAddon(directory, destination) {
   if (process.platform !== "linux" || process.arch !== "x64")
     throw new Error("The fixed Windows addon builder requires Linux x64 and Docker");
   const expected = verifyInputs(directory);
@@ -230,7 +230,7 @@ export function verifyWindowsComponents(directory) {
   return identity;
 }
 
-export function assembleWindowsComponents(directory, msysDirectory, addonDirectory, destination) {
+function assembleWindowsComponents(directory, msysDirectory, addonDirectory, destination) {
   const expected = verifyInputs(directory);
   verifiedBuild(msysDirectory, expected);
   verifiedBuild(addonDirectory, expected);
@@ -328,11 +328,11 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   if (
     !first ||
     extra ||
-    (mode === "prepare" || mode === "verify" ? second : !second) ||
+    (mode === "prepare" ? second : !second) ||
     (mode === "assemble" ? !third || !fourth : third)
   )
     throw new Error(
-      "Usage: node scripts/build-windows-components.mjs prepare INPUTS | tmux|addon INPUTS OUTPUT | assemble INPUTS TMUX ADDON OUTPUT | verify OUTPUT",
+      "Usage: node scripts/build-windows-components.mjs prepare INPUTS | tmux|addon INPUTS OUTPUT | assemble INPUTS TMUX ADDON OUTPUT",
     );
   if (mode === "prepare") {
     const [inputsDirectory] = positionals;
@@ -351,8 +351,5 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       resolve(addonDirectory),
       resolve(componentsDirectory),
     );
-  } else if (mode === "verify") {
-    const [componentsDirectory] = positionals;
-    verifyWindowsComponents(resolve(componentsDirectory));
   } else throw new Error(`Unknown Windows component build: ${mode}`);
 }
