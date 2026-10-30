@@ -46,8 +46,9 @@ export function GitFeedback({
 }) {
   const { t } = useTranslation();
 
-  const value = useGitActivity(actions, target);
-  const result = (value.error instanceof ApiError ? value.error.result : value.result) as
+  const { request, completion } = useGitActivity(actions, target);
+  const error = request?.cancelError ?? completion?.error;
+  const result = (error instanceof ApiError ? error.result : completion?.result) as
     | {
         changedPaths?: string[];
         stdout?: string;
@@ -66,23 +67,19 @@ export function GitFeedback({
     "git.branch.delete": t(($) => $.git.deleteBranch),
     "git.continue": t(($) => $.git.continue),
     "git.abort": t(($) => $.git.abort),
-    "git.fetch": "Fetch",
-    "git.pull": "Pull",
-    "git.push": "Push",
+    "git.fetch": t(($) => $.git.fetch),
+    "git.pull": t(($) => $.git.pull),
+    "git.push": t(($) => $.git.push),
   };
-  if (!value.request && !value.error && !value.completed) return null;
+  if (!request && !completion) return null;
   if (
-    !value.request &&
-    !value.error &&
-    (value.completed === "git.stage" || value.completed === "git.unstage")
+    !request &&
+    completion?.outcome === "succeeded" &&
+    (completion.method === "git.stage" || completion.method === "git.unstage")
   )
     return null;
-  const method = value.request?.method ?? value.lastMethod;
-  const outcome = value.completed
-    ? "succeeded"
-    : value.error instanceof ApiError
-      ? value.error.outcome
-      : undefined;
+  const method = request?.method ?? completion?.method;
+  const outcome = completion?.outcome;
   const outcomeLabels = {
     succeeded: t(($) => $.files.succeeded),
     failed: t(($) => $.files.failed),
@@ -93,47 +90,45 @@ export function GitFeedback({
     ...new Set([result?.stdout, result?.stderr].filter((part): part is string => !!part)),
   ];
   // Git process errors copy stderr.trim() into message; display the original stderr once.
-  if (
-    value.error?.message &&
-    !parts.includes(value.error.message) &&
-    value.error.message !== result?.stderr?.trim()
-  )
-    parts.unshift(value.error.message);
+  if (error?.message && !parts.includes(error.message) && error.message !== result?.stderr?.trim())
+    parts.unshift(error.message);
   const diagnostic = parts.join("\n");
+  let heading: string;
+  if (request) {
+    heading = t(($) => (request.phase === "queued" ? $.git.actionQueued : $.git.actionRunning), {
+      action: actionNames[request.method],
+    });
+  } else {
+    heading = [method && actionNames[method], outcome && outcomeLabels[outcome]]
+      .filter(Boolean)
+      .join(" · ");
+  }
   return (
     <div className="max-h-40 shrink-0 overflow-auto border-b border-border px-3 py-2 text-xs">
       <div className="flex flex-wrap items-center gap-2">
         <div
-          role={value.error ? "alert" : "status"}
-          className={`min-w-0 flex-1 break-words ${value.error ? "text-destructive" : "text-muted-foreground"}`}
+          role={error ? "alert" : "status"}
+          className={`min-w-0 flex-1 break-words ${error ? "text-destructive" : "text-muted-foreground"}`}
         >
-          {value.request
-            ? t(
-                ($) =>
-                  value.request!.phase === "queued" ? $.git.actionQueued : $.git.actionRunning,
-                { action: actionNames[value.request.method] },
-              )
-            : [method && actionNames[method], outcome && outcomeLabels[outcome]]
-                .filter(Boolean)
-                .join(" · ")}
+          {heading}
         </div>
-        {value.request && (
+        {request && (
           <Button
             variant="ghost"
-            disabled={value.request.cancelling}
+            disabled={request.cancelling}
             onClick={() => void actions.cancel(target)}
           >
-            {value.request.cancelling
+            {request.cancelling
               ? t(($) => $.common.cancelling)
               : t(($) => $.common.cancelOperation)}
           </Button>
         )}
-        {!!value.error && (
+        {!!error && (
           <Button variant="ghost" onClick={onTerminal}>
             {t(($) => $.common.terminal)}
           </Button>
         )}
-        {!value.request && (
+        {!request && (
           <IconButton label={t(($) => $.common.close)} onClick={() => actions.dismiss(target)}>
             <X />
           </IconButton>
@@ -146,15 +141,15 @@ export function GitFeedback({
       )}
       {diagnostic && <pre className="mt-1 break-words whitespace-pre-wrap">{diagnostic}</pre>}
       {result?.truncated && <p>{t(($) => $.git.outputTruncated)}</p>}
-      {value.error instanceof ApiError && value.error.details !== undefined && (
+      {error instanceof ApiError && error.details !== undefined && (
         <details className="mt-1">
           <summary className="cursor-pointer py-1">{t(($) => $.common.details)}</summary>
           <pre className="break-words whitespace-pre-wrap">
             {JSON.stringify(
               {
-                code: value.error.code,
-                outcome: value.error.outcome,
-                details: value.error.details,
+                code: error.code,
+                outcome: error.outcome,
+                details: error.details,
               },
               null,
               2,
@@ -177,7 +172,7 @@ export function GitFeedback({
         </div>
       )}
       <GitPathDetails
-        error={value.error}
+        error={error}
         renderBlocked={(path) => (
           <button
             key={path}

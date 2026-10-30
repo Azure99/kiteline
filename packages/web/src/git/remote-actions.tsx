@@ -105,7 +105,7 @@ export function RemoteActions({
               onClick={() => void actions.run(target, "git.fetch", { remote: entry.name })}
               title={entry.fetchUrls.join("\n")}
             >
-              Fetch · {entry.name}
+              {t(($) => $.git.fetch)} · {entry.name}
             </MenuItem>
           ))}
           <MenuItem onClick={() => void load()}>

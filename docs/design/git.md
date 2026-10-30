@@ -114,7 +114,8 @@
 - 写命令没能启动（没有进程）时结果为失败。进程启动后以非零退出码结束、被取消、超时或输出异常时，结果都是结果未确认（`unknown`），因为 Git 可能已部分生效；push 被拒绝、hook 拒绝提交、`index.lock` 已存在都属于这一类。
 - 以下情况结果为 `partial`：stage、unstage、discard 已完成部分步骤后失败（结果带 `changedPaths`）；continue 或 abort 失败但 HEAD 或操作 token 已变化；创建分支成功而随后的切换失败。
 - 写命令成功、但随后读取 HEAD 失败时，结果为结果未确认，并带上已知事实（如 `committed: true`）。不自动重放的通用规则见[结果语义](protocol.md#结果语义)。
-- 浏览器按仓库保留最近实际方法，以协议 outcome 显示操作归属和结果；成功 stage/unstage 静默。完成反馈可关闭，关闭不修改消息、选择或刷新 revision；pending 不可关闭，仍可取消。写成功与后续状态读取失败分别显示。
+- 浏览器按仓库保留在途请求与最终结局，调用者直接使用本次返回的结局。取消请求失败只在原请求上显示错误并允许再次取消，原写请求继续占用，最终写结果替换取消反馈；没有 outcome 的 HTTP 错误不补造结果。成功 stage/unstage 静默。完成反馈可关闭，关闭不修改消息、选择或刷新 revision；pending 不可关闭，仍可取消。写成功与后续状态读取失败分别显示。
+- 提交说明按仓库保留版本，只有成功提交时版本仍与发起时相同才清空；组件卸载不影响本次结算。
 - 多行诊断直接显示，只有相同 stdout/stderr 及复制自 stderr.trim() 的 error.message 合并；其他消息、details、路径、截断事实及实际 commitOid 保留。
 - 反馈和操作栏的终端入口共用 RepoView 局部目标对话，显示并复制真实 repo.rootPath；打开时由 Workspace 明确选择终端模式，继续使用原有会话、目录和输入内容。
 

@@ -31,19 +31,20 @@ export function BranchDialog({
   const [switchTo, setSwitchTo] = useState(true);
   const [attempted, setAttempted] = useState(false);
   const activity = useGitActivity(actions, target);
+  const error = activity.request?.cancelError ?? activity.completion?.error;
   async function create() {
     if (!name.trim() || activity.request) return;
     setAttempted(true);
-    await actions.run(target, "git.branch.create", {
+    const completion = await actions.run(target, "git.branch.create", {
       name: name.trim(),
       startOid,
       switch: switchTo,
     });
-    const failure = actions.get(target).error;
+    if (!completion) return;
     if (
-      failure instanceof ApiError &&
-      failure.outcome === "failed" &&
-      failure.code === "invalid_argument"
+      completion.outcome === "failed" &&
+      completion.error instanceof ApiError &&
+      completion.error.code === "invalid_argument"
     ) {
       return;
     }
@@ -89,9 +90,9 @@ export function BranchDialog({
               />
               {t(($) => $.git.switchAfterCreate)}
             </label>
-            {attempted && activity.error && (
+            {attempted && error && (
               <div role="alert" className="break-words text-sm text-destructive">
-                <ErrorNotice error={activity.error} />
+                <ErrorNotice error={error} />
               </div>
             )}
           </div>

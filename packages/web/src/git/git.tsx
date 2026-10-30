@@ -44,7 +44,8 @@ import {
 } from "../lib/navigation";
 import { childPath, parentPath } from "../files/paths";
 import { type GitActions, useGitActivity } from "./actions";
-import { confirmDiskVersion, DiscardDialog } from "./change-actions";
+import { DiscardDialog } from "./change-actions";
+import { createChangeActions } from "./selection-actions";
 import { GitFeedback } from "./feedback";
 import { CommitBox } from "./commit-box";
 import { BranchDialog } from "./branch-dialog";
@@ -335,21 +336,14 @@ function RepoView({
   const [terminalOpen, setTerminalOpen] = useState(false);
   const drafts = useDrafts(store);
   const disabled = !ready || !!activity.request;
-  async function indexAction(paths: string[], kind: "stage" | "unstage") {
-    if (kind === "stage" && !confirmDiskVersion(store, actionTarget, repo.path, paths)) return;
-    const params = { paths: [...new Set(paths)] };
-    const consumed = selected.filter(
-      (item) =>
-        paths.includes(item.path) &&
-        (kind === "unstage" ? item.side === "staged" : item.side !== "staged"),
-    );
-    const result = await actions.run(
-      actionTarget,
-      kind === "stage" ? "git.stage" : "git.unstage",
-      params,
-    );
-    if (result) state.consume(consumed);
-  }
+  const changeActions = createChangeActions({
+    actions,
+    target: actionTarget,
+    store,
+    repoPath: repo.path,
+    selected,
+    consume: state.consume,
+  });
   function refreshView(view: GitView) {
     void state.load({ mode: "refresh" });
     if (view === "history") setHistoryRefresh((value) => value + 1);
@@ -528,7 +522,7 @@ function RepoView({
                           hasUnsavedDraft(drafts, actionTarget, repo.path, [path])
                         }
                         onSelect={select}
-                        onIndex={indexAction}
+                        onIndex={changeActions.index}
                         onDiscard={(paths, scope) => setDiscarding({ paths, scope })}
                         onFile={onFile}
                         onTarget={selectTarget}
@@ -628,20 +622,7 @@ function RepoView({
           target={actionTarget}
           {...discarding}
           onDiscard={(review) => {
-            const scope = discarding.scope;
-            const consumed = selected.filter(
-              (item) =>
-                review.paths.includes(item.path) && (scope === "all" || item.side === "worktree"),
-            );
-            void actions
-              .run(actionTarget, "git.discard", {
-                paths: review.paths,
-                scope,
-                reviewToken: review.reviewToken,
-              })
-              .then((result) => {
-                if (result) state.consume(consumed);
-              });
+            void changeActions.discard(review, discarding.scope);
           }}
           onLocate={onLocate}
           onClose={() => setDiscarding(undefined)}

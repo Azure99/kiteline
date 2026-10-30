@@ -4,6 +4,7 @@ import type {
   FileProgress,
   GitWriteArguments,
   GitWriteMethod,
+  Outcome,
   RpcArguments,
   RpcResult,
 } from "@kiteline/shared/protocol";
@@ -14,6 +15,20 @@ export interface GitTarget {
   workspaceId: string;
   repoId: string;
 }
+export type GitCompletion =
+  | {
+      method: GitWriteMethod;
+      outcome: "succeeded";
+      result: RpcResult<GitWriteMethod>;
+      error?: never;
+    }
+  | {
+      method: GitWriteMethod;
+      outcome: Exclude<Outcome, "succeeded"> | undefined;
+      error: Error;
+      result?: never;
+    };
+
 export interface GitActivity {
   message: string;
   messageVersion: number;
@@ -22,11 +37,9 @@ export interface GitActivity {
     method: GitWriteMethod;
     phase: FileProgress["phase"];
     cancelling: boolean;
+    cancelError?: Error;
   };
-  error?: ApiError | Error;
-  completed?: GitWriteMethod;
-  lastMethod?: GitWriteMethod;
-  result?: unknown;
+  completion?: GitCompletion;
   revision: number;
 }
 const key = (target: GitTarget) => `${target.deviceId}:${target.workspaceId}:${target.repoId}`;
@@ -78,10 +91,10 @@ export class GitActions {
     value.messageVersion++;
     this.notifyMessage(target);
   }
-  async run<A extends GitWriteArguments>(
+  async run(
     target: GitTarget,
-    ...[method, params]: A
-  ): Promise<RpcResult<A[0]> | undefined> {
+    ...[method, params]: GitWriteArguments
+  ): Promise<GitCompletion | undefined> {
     const value = this.get(target);
     if (value.request) return;
     const request = {
@@ -92,10 +105,7 @@ export class GitActions {
     };
     const messageVersion = value.messageVersion;
     value.request = request;
-    value.lastMethod = method;
-    value.error = undefined;
-    value.completed = undefined;
-    value.result = undefined;
+    value.completion = undefined;
     this.notify();
     const progress = (event: WindowEventMap["kiteline:event"]) => {
       const message = event.detail;
@@ -109,49 +119,57 @@ export class GitActions {
       }
     };
     window.addEventListener("kiteline:event", progress);
+    let completion: GitCompletion;
     try {
       const reply = await rpcReply(target.deviceId, request.id, [
         method,
         { ...params, workspaceId: target.workspaceId, repoId: target.repoId },
       ] as RpcArguments<GitWriteMethod>);
       if (reply.outcome !== "succeeded") throw apiError(reply.error, reply.outcome, reply.result);
-      value.error = undefined;
-      value.result = reply.result;
-      if (method === "git.commit" && messageVersion === value.messageVersion) {
-        value.message = "";
-        value.messageVersion++;
-        this.notifyMessage(target);
-      }
-      value.completed = method;
-      return reply.result as RpcResult<A[0]>;
-    } catch (error) {
-      value.error = error instanceof Error ? error : new Error(String(error));
+      completion = { method, outcome: "succeeded", result: reply.result };
+    } catch (reason) {
+      const error = reason instanceof Error ? reason : new Error(String(reason));
+      completion = {
+        method,
+        outcome: error instanceof ApiError ? error.outcome : undefined,
+        error,
+      } as GitCompletion;
     } finally {
       window.removeEventListener("kiteline:event", progress);
-      value.request = undefined;
-      value.revision++;
-      this.notify();
     }
+    value.request = undefined;
+    value.completion = completion;
+    value.revision++;
+    if (
+      completion.outcome === "succeeded" &&
+      method === "git.commit" &&
+      messageVersion === value.messageVersion
+    ) {
+      value.message = "";
+      value.messageVersion++;
+      this.notifyMessage(target);
+    }
+    this.notify();
+    return completion;
   }
   dismiss(target: GitTarget) {
     const value = this.get(target);
     if (value.request) return;
-    value.error = undefined;
-    value.completed = undefined;
-    value.result = undefined;
+    value.completion = undefined;
     this.notify();
   }
   async cancel(target: GitTarget) {
-    const value = this.get(target),
-      request = value.request;
+    const value = this.get(target);
+    const request = value.request;
     if (!request || request.cancelling) return;
     request.cancelling = true;
+    request.cancelError = undefined;
     this.notify();
     try {
       await cancelRequest(target.deviceId, request.id);
     } catch (error) {
       if (value.request !== request) return;
-      value.error = error instanceof Error ? error : new Error(String(error));
+      request.cancelError = error instanceof Error ? error : new Error(String(error));
       request.cancelling = false;
       this.notify();
     }

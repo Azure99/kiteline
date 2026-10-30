@@ -37,35 +37,28 @@ export function CommitBox({
 
   const message = useGitMessage(actions, target);
   const [open, setOpen] = useState(false);
-  const available =
-    !offline &&
-    !writing &&
-    !reading &&
-    !!status?.stagedCount &&
-    !status.hasConflicts &&
-    !!status.indexToken;
-  const reason = offline
-    ? t(($) => $.common.deviceOffline)
-    : writing
-      ? t(($) => $.git.commitWriting)
-      : reading
-        ? t(($) => $.git.commitReading)
-        : !status
-          ? t(($) => $.git.commitNoStatus)
-          : status.hasConflicts
-            ? t(($) => $.git.commitConflicts)
-            : !status.indexToken
-              ? t(($) => $.git.commitNoIndex)
-              : !status.stagedCount
-                ? t(($) => $.git.commitNoStaged)
-                : !message.trim()
-                  ? t(($) => $.git.commitNoMessage)
-                  : undefined;
+  let blockedReason: string | undefined;
+  if (offline) {
+    blockedReason = t(($) => $.common.deviceOffline);
+  } else if (writing) {
+    blockedReason = t(($) => $.git.commitWriting);
+  } else if (reading) {
+    blockedReason = t(($) => $.git.commitReading);
+  } else if (!status) {
+    blockedReason = t(($) => $.git.commitNoStatus);
+  } else if (status.hasConflicts) {
+    blockedReason = t(($) => $.git.commitConflicts);
+  } else if (!status.stagedCount) {
+    blockedReason = t(($) => $.git.commitNoStaged);
+  }
+  const available = blockedReason === undefined;
+  const reason = blockedReason ?? (!message.trim() ? t(($) => $.git.commitNoMessage) : undefined);
   const submit = () => {
-    if (!available || !message.trim() || !status?.indexToken) return;
+    if (!status || reason !== undefined) return;
     void actions.run(target, "git.commit", {
       message,
-      indexToken: status.indexToken,
+      // Status includes an index token whenever conflicts do not block committing.
+      indexToken: status.indexToken!,
     });
     setOpen(false);
   };
@@ -80,7 +73,7 @@ export function CommitBox({
     />
   );
   const button = (
-    <Button disabled={!available || !message.trim()} onClick={submit}>
+    <Button disabled={reason !== undefined} onClick={submit}>
       <Check />
       {t(($) => $.git.commit)}
     </Button>

@@ -1,5 +1,13 @@
-import { expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { GitActions } from "../src/git/actions";
+
+beforeEach(() => {
+  vi.stubGlobal("window", new EventTarget());
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 test("message subscriptions stay with their repository and do not refresh operation consumers", () => {
   const actions = new GitActions();
@@ -25,62 +33,60 @@ test("message subscriptions stay with their repository and do not refresh operat
 });
 
 test("an unconfirmed Git write keeps its request identity, message and diagnostics", async () => {
-  vi.stubGlobal("window", new EventTarget());
   let finish!: (response: Response) => void;
   const fetch = vi.spyOn(globalThis, "fetch").mockReturnValue(
     new Promise((resolve) => {
       finish = resolve;
     }),
   );
-  try {
-    const actions = new GitActions();
-    const target = { deviceId: "device", workspaceId: "work", repoId: "repo" };
-    actions.message(target, "keep this message");
-    const pending = actions.run(target, "git.commit", {
-      message: "keep this message",
-      indexToken: "index",
-    });
-    const id = actions.get(target).request!.id;
-    actions.dismiss(target);
-    expect(actions.get(target).request?.id).toBe(id);
-    expect(actions.get(target).lastMethod).toBe("git.commit");
-    expect(JSON.parse(fetch.mock.calls[0]![1]!.body as string)).toMatchObject({
-      id,
-      method: "git.commit",
-      params: { workspaceId: "work", repoId: "repo", message: "keep this message" },
-    });
-    const error = { code: "io_error", message: "confirmation lost", details: { phase: "commit" } };
-    finish(Response.json({ id, outcome: "unknown", error, result: { head: "observed" } }));
-    expect(await pending).toBeUndefined();
-    expect(actions.get(target)).toMatchObject({
-      message: "keep this message",
-      request: undefined,
-      error: { ...error, outcome: "unknown", result: { head: "observed" } },
-      lastMethod: "git.commit",
-    });
-    actions.dismiss(target);
-    expect(actions.get(target)).toMatchObject({
-      message: "keep this message",
-      error: undefined,
-      result: undefined,
-      revision: 1,
-    });
-  } finally {
-    fetch.mockRestore();
-    vi.unstubAllGlobals();
-  }
+  const actions = new GitActions();
+  const target = { deviceId: "device", workspaceId: "work", repoId: "repo" };
+  actions.message(target, "keep this message");
+  const pending = actions.run(target, "git.commit", {
+    message: "keep this message",
+    indexToken: "index",
+  });
+  const id = actions.get(target).request!.id;
+  actions.dismiss(target);
+  expect(actions.get(target).request?.id).toBe(id);
+  expect(actions.get(target).request?.method).toBe("git.commit");
+  expect(await actions.run(target, "git.stage", { paths: ["other"] })).toBeUndefined();
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(JSON.parse(fetch.mock.calls[0]![1]!.body as string)).toMatchObject({
+    id,
+    method: "git.commit",
+    params: { workspaceId: "work", repoId: "repo", message: "keep this message" },
+  });
+  const error = { code: "io_error", message: "confirmation lost", details: { phase: "commit" } };
+  finish(Response.json({ id, outcome: "unknown", error, result: { head: "observed" } }));
+  const completion = await pending;
+  expect(completion).toMatchObject({
+    method: "git.commit",
+    outcome: "unknown",
+    error: { ...error, outcome: "unknown", result: { head: "observed" } },
+  });
+  expect(actions.get(target)).toMatchObject({
+    message: "keep this message",
+    request: undefined,
+    completion,
+  });
+  actions.dismiss(target);
+  expect(actions.get(target)).toMatchObject({
+    message: "keep this message",
+    completion: undefined,
+    revision: 1,
+  });
 });
 
 test.each(["failed", "partial"])(
-  "%s replies keep their diagnostics without returning a success result to consume selections",
+  "%s replies return their own outcome and retain the original diagnostics",
   async (outcome) => {
-    vi.stubGlobal("window", new EventTarget());
     const diagnostics = {
       stdout: "first\nsecond",
       stderr: "problem\n",
       changedPaths: outcome === "partial" ? ["file"] : [],
     };
-    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => {
       const { id } = JSON.parse(options!.body as string);
       return Response.json({
         id,
@@ -89,26 +95,149 @@ test.each(["failed", "partial"])(
         result: diagnostics,
       });
     });
-    try {
-      const actions = new GitActions();
-      const target = { deviceId: "d", workspaceId: "w", repoId: "repo" };
-      const result = await actions.run(target, "git.stage", { paths: ["file"] });
-      expect(result).toBeUndefined();
-      expect(actions.get(target)).toMatchObject({
-        lastMethod: "git.stage",
-        completed: undefined,
-        error: { outcome, result: diagnostics, details: { phase: "stage" } },
-      });
-    } finally {
-      fetch.mockRestore();
-      vi.unstubAllGlobals();
+    const actions = new GitActions();
+    const target = { deviceId: "d", workspaceId: "w", repoId: "repo" };
+    const completion = await actions.run(target, "git.stage", { paths: ["file"] });
+    expect(completion).toMatchObject({
+      method: "git.stage",
+      outcome,
+      error: { outcome, result: diagnostics, details: { phase: "stage" } },
+    });
+    expect(actions.get(target)).toMatchObject({
+      request: undefined,
+      completion,
+      revision: 1,
+    });
+  },
+);
+
+test("an HTTP error returns this write's error without inventing an outcome", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    Response.json(
+      { error: { code: "invalid_argument", message: "Invalid branch name" } },
+      { status: 400 },
+    ),
+  );
+  const actions = new GitActions();
+  const target = { deviceId: "d", workspaceId: "w", repoId: "repo" };
+  const completion = await actions.run(target, "git.branch.create", {
+    name: "bad",
+    switch: true,
+  });
+  expect(completion).toMatchObject({
+    method: "git.branch.create",
+    outcome: undefined,
+    error: { code: "invalid_argument", message: "Invalid branch name", outcome: undefined },
+  });
+  expect(actions.get(target)).toMatchObject({ request: undefined, completion, revision: 1 });
+});
+
+test.each(["succeeded", "failed"] as const)(
+  "a failed cancellation can be retried while the original write finishes as %s",
+  async (outcome) => {
+    let finish!: (response: Response) => void;
+    const fetch = vi.spyOn(globalThis, "fetch").mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    fetch.mockResolvedValueOnce(
+      Response.json(
+        { error: { code: "io_error", message: "Cancellation failed" } },
+        { status: 500 },
+      ),
+    );
+    fetch.mockResolvedValueOnce(Response.json({ found: true }));
+    const actions = new GitActions();
+    const target = { deviceId: "d", workspaceId: "w", repoId: "repo" };
+    const pending = actions.run(target, "git.stage", { paths: ["file"] });
+    const id = actions.get(target).request!.id;
+    await actions.cancel(target);
+    expect(actions.get(target)).toMatchObject({
+      request: {
+        id,
+        cancelling: false,
+        cancelError: { message: "Cancellation failed", outcome: undefined },
+      },
+      completion: undefined,
+      revision: 0,
+    });
+    const retry = actions.cancel(target);
+    expect(actions.get(target).request?.cancelError).toBeUndefined();
+    await retry;
+    expect(fetch.mock.calls[2]![1]?.method).toBe("DELETE");
+    expect(actions.get(target).request).toMatchObject({ id, cancelling: true });
+    const error = { code: "io_error", message: "Final write failure" };
+    finish(Response.json({ id, outcome, result: { changedPaths: ["file"] }, error }));
+    const completion = await pending;
+    expect(completion?.outcome).toBe(outcome);
+    expect(actions.get(target)).toMatchObject({ request: undefined, completion, revision: 1 });
+    if (completion?.outcome === "succeeded") {
+      expect(completion.result).toEqual({ changedPaths: ["file"] });
+      expect(completion.error).toBeUndefined();
+    } else {
+      expect(completion?.error).toMatchObject({ message: "Final write failure", outcome });
+    }
+  },
+);
+
+test.each([false, true])(
+  "a late cancellation error cannot change the completed or next write (next started: %s)",
+  async (startNext) => {
+    let finish!: (response: Response) => void;
+    let finishCancel!: (response: Response) => void;
+    let finishNext!: (response: Response) => void;
+    vi.spyOn(globalThis, "fetch")
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          finishCancel = resolve;
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          finishNext = resolve;
+        }),
+      );
+    const actions = new GitActions();
+    const target = { deviceId: "d", workspaceId: "w", repoId: "repo" };
+    const pending = actions.run(target, "git.stage", { paths: ["first"] });
+    const id = actions.get(target).request!.id;
+    const cancelling = actions.cancel(target);
+    finish(Response.json({ id, outcome: "succeeded", result: { changedPaths: ["first"] } }));
+    const completed = await pending;
+    let next: ReturnType<typeof actions.run> | undefined;
+    if (startNext) next = actions.run(target, "git.stage", { paths: ["second"] });
+    finishCancel(
+      Response.json({ error: { code: "io_error", message: "Late cancellation" } }, { status: 500 }),
+    );
+    await cancelling;
+    if (next) {
+      const request = actions.get(target).request!;
+      expect(request).toMatchObject({ cancelling: false });
+      expect(request.id).not.toBe(id);
+      expect(request.cancelError).toBeUndefined();
+      expect(actions.get(target).completion).toBeUndefined();
+      finishNext(
+        Response.json({
+          id: request.id,
+          outcome: "succeeded",
+          result: { changedPaths: ["second"] },
+        }),
+      );
+      expect((await next)?.outcome).toBe("succeeded");
+    } else {
+      expect(actions.get(target)).toMatchObject({ request: undefined, completion: completed });
     }
   },
 );
 
 test("dismissing completed feedback preserves the message, refresh revision and another repository", async () => {
-  vi.stubGlobal("window", new EventTarget());
-  const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => {
     const { id } = JSON.parse(options!.body as string);
     return Response.json({
       id,
@@ -116,69 +245,62 @@ test("dismissing completed feedback preserves the message, refresh revision and 
       result: { stdout: "fetched\n", stderr: "", truncated: false },
     });
   });
-  try {
-    const actions = new GitActions();
-    const first = { deviceId: "d", workspaceId: "w", repoId: "one" };
-    const second = { ...first, repoId: "two" };
-    actions.message(first, "first draft");
-    actions.message(second, "second draft");
-    await actions.run(first, "git.fetch", {});
-    await actions.run(second, "git.fetch", {});
-    const revision = actions.get(first).revision;
-    actions.dismiss(first);
-    expect(actions.get(first)).toMatchObject({
-      message: "first draft",
-      lastMethod: "git.fetch",
-      completed: undefined,
-      result: undefined,
-      error: undefined,
-      revision,
-    });
-    expect(actions.get(second)).toMatchObject({
-      message: "second draft",
-      completed: "git.fetch",
+  const actions = new GitActions();
+  const first = { deviceId: "d", workspaceId: "w", repoId: "one" };
+  const second = { ...first, repoId: "two" };
+  actions.message(first, "first draft");
+  actions.message(second, "second draft");
+  await actions.run(first, "git.fetch", {});
+  await actions.run(second, "git.fetch", {});
+  const revision = actions.get(first).revision;
+  actions.dismiss(first);
+  expect(actions.get(first)).toMatchObject({
+    message: "first draft",
+    completion: undefined,
+    revision,
+  });
+  expect(actions.get(second)).toMatchObject({
+    message: "second draft",
+    completion: {
+      method: "git.fetch",
+      outcome: "succeeded",
       result: { stdout: "fetched\n" },
-    });
-  } finally {
-    fetch.mockRestore();
-    vi.unstubAllGlobals();
-  }
+    },
+  });
 });
 
 test.each([false, true])(
   "a successful commit clears only the submitted message version (edited: %s)",
   async (edited) => {
-    vi.stubGlobal("window", new EventTarget());
     let finish!: (response: Response) => void;
-    const fetch = vi.spyOn(globalThis, "fetch").mockReturnValue(
+    vi.spyOn(globalThis, "fetch").mockReturnValue(
       new Promise((resolve) => {
         finish = resolve;
       }),
     );
-    try {
-      const actions = new GitActions();
-      const first = { deviceId: "d", workspaceId: "w", repoId: "one" };
-      const second = { ...first, repoId: "two" };
-      actions.message(first, "submitted");
-      const pending = actions.run(first, "git.commit", {
-        message: "submitted",
-        indexToken: "index",
-      });
-      const id = actions.get(first).request!.id;
-      actions.message(second, "another repository");
-      if (edited) actions.message(first, "next commit");
-      finish(Response.json({ id, outcome: "succeeded", result: { commitOid: "a".repeat(40) } }));
-      expect(await pending).toEqual({ commitOid: "a".repeat(40) });
-      expect(actions.get(first).message).toBe(edited ? "next commit" : "");
-      expect(actions.get(second)).toMatchObject({
-        message: "another repository",
-        revision: 0,
-      });
-      expect(actions.get(second).request).toBeUndefined();
-      expect(actions.get(second).completed).toBeUndefined();
-    } finally {
-      fetch.mockRestore();
-      vi.unstubAllGlobals();
-    }
+    const actions = new GitActions();
+    const first = { deviceId: "d", workspaceId: "w", repoId: "one" };
+    const second = { ...first, repoId: "two" };
+    actions.message(first, "submitted");
+    const pending = actions.run(first, "git.commit", {
+      message: "submitted",
+      indexToken: "index",
+    });
+    const id = actions.get(first).request!.id;
+    actions.message(second, "another repository");
+    if (edited) actions.message(first, "next commit");
+    finish(Response.json({ id, outcome: "succeeded", result: { commitOid: "a".repeat(40) } }));
+    expect(await pending).toEqual({
+      method: "git.commit",
+      outcome: "succeeded",
+      result: { commitOid: "a".repeat(40) },
+    });
+    expect(actions.get(first).message).toBe(edited ? "next commit" : "");
+    expect(actions.get(second)).toMatchObject({
+      message: "another repository",
+      revision: 0,
+    });
+    expect(actions.get(second).request).toBeUndefined();
+    expect(actions.get(second).completion).toBeUndefined();
   },
 );

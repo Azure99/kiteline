@@ -38,8 +38,7 @@ test.each([
     const actions = new GitActions();
     const value = actions.get(target);
     const stderr = "first diagnostic\nsecond diagnostic\n";
-    value.lastMethod = "git.stage";
-    value.error = new ApiError(
+    const error = new ApiError(
       "io_error",
       stderr.trim(),
       outcome,
@@ -51,6 +50,7 @@ test.each([
         changedPaths: outcome === "partial" ? ["changed.txt"] : [],
       },
     );
+    value.completion = { method: "git.stage", outcome, error };
     const markup = feedback(actions);
     expect(markup).toContain(`Stage · ${label}`);
     expect(markup).toContain("standard output\n");
@@ -71,8 +71,11 @@ test("Git feedback leaves an absent outcome unlabeled", async () => {
   await setLanguagePreference("en");
   const actions = new GitActions();
   const value = actions.get(target);
-  value.lastMethod = "git.fetch";
-  value.error = new ApiError("offline", "Device is offline");
+  value.completion = {
+    method: "git.fetch",
+    outcome: undefined,
+    error: new ApiError("offline", "Device is offline"),
+  };
   const markup = feedback(actions);
   expect(markup).toContain("Fetch");
   expect(markup).toContain("Device is offline");
@@ -83,11 +86,14 @@ test("Git feedback merges identical streams while retaining a distinct error mes
   await setLanguagePreference("en");
   const actions = new GitActions();
   const value = actions.get(target);
-  value.lastMethod = "git.fetch";
-  value.error = new ApiError("io_error", "connection interrupted", "unknown", undefined, {
-    stdout: "same output\nnext line\n",
-    stderr: "same output\nnext line\n",
-  });
+  value.completion = {
+    method: "git.fetch",
+    outcome: "unknown",
+    error: new ApiError("io_error", "connection interrupted", "unknown", undefined, {
+      stdout: "same output\nnext line\n",
+      stderr: "same output\nnext line\n",
+    }),
+  };
   const markup = feedback(actions);
   expect(markup).toContain("connection interrupted\nsame output\nnext line\n");
   expect(markup.match(/same output/g)).toHaveLength(1);
@@ -102,10 +108,16 @@ test("pending feedback offers cancellation without dismissal and successful inde
   expect(markup).toContain("Fetch · queued");
   expect(markup).toContain("Cancel operation");
   expect(markup).not.toContain('aria-label="Close"');
+  value.request.cancelError = new ApiError("io_error", "Cancellation failed");
+  const cancellation = feedback(actions);
+  expect(cancellation).toContain("Fetch · queued");
+  expect(cancellation).toContain("Cancellation failed");
+  expect(cancellation).toContain("Cancel operation");
+  expect(cancellation).not.toContain('aria-label="Close"');
+  expect(cancellation).not.toContain("Not completed");
   value.request = undefined;
   for (const method of ["git.stage", "git.unstage"] as const) {
-    value.completed = method;
-    value.lastMethod = method;
+    value.completion = { method, outcome: "succeeded", result: { changedPaths: ["file"] } };
     expect(feedback(actions)).toBe("");
   }
 });
@@ -114,17 +126,39 @@ test("successful feedback names Fetch and shows the actual commit OID for a comm
   await setLanguagePreference("en");
   const actions = new GitActions();
   const value = actions.get(target);
-  value.completed = value.lastMethod = "git.fetch";
-  value.result = { stdout: "Fetched refs\n", stderr: "", truncated: false };
+  value.completion = {
+    method: "git.fetch",
+    outcome: "succeeded",
+    result: { stdout: "Fetched refs\n", stderr: "", truncated: false },
+  };
   expect(feedback(actions)).toContain("Fetch · Completed");
   expect(feedback(actions)).toContain("Fetched refs\n");
   const oid = "0123456789abcdef0123456789abcdef01234567";
-  value.completed = value.lastMethod = "git.commit";
-  value.result = { commitOid: oid };
+  value.completion = { method: "git.commit", outcome: "succeeded", result: { commitOid: oid } };
   const markup = feedback(actions);
   expect(markup).toContain(`title="${oid}"`);
   expect(markup).toContain("Commit: 01234567");
 });
+
+test.each(["en", "zh-CN"] as const)(
+  "remote action feedback uses the existing Git terms in %s",
+  async (language) => {
+    await setLanguagePreference(language);
+    const actions = new GitActions();
+    for (const [method, label] of [
+      ["git.fetch", "Fetch"],
+      ["git.pull", "Pull"],
+      ["git.push", "Push"],
+    ] as const) {
+      actions.get(target).completion = {
+        method,
+        outcome: "succeeded",
+        result: { stdout: "", stderr: "", truncated: false },
+      };
+      expect(feedback(actions)).toContain(`${label} ·`);
+    }
+  },
+);
 
 test.each([
   [
