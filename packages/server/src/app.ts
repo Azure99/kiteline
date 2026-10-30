@@ -17,6 +17,7 @@ import {
   json,
   requireOrigin,
   rawHead,
+  endRawResponse,
   requestOrigin,
   requireVersion,
   serverError,
@@ -34,11 +35,11 @@ export function createKitelineServer(
 ) {
   const connections = new Connections(store, channelPolicy);
   const channels = connections.channels;
-  const proxy = new HttpProxy(config, store, connections, channels);
+  const proxy = new HttpProxy(config, store, channels);
   const bindingLimiter = new AttemptLimiter();
   const serveApi = createApiHandler(config, store, connections);
   async function route(request: IncomingMessage, response: ServerResponse) {
-    if (isProxyPath(request.url ?? "")) return proxy.handle(request, response);
+    if (isProxyPath(request.url ?? "")) return proxy.serve(request, response);
     const entryOrigin = requestOrigin(request, config.trustProxyProto);
     const url = new URL(request.url ?? "/", entryOrigin);
     const path = url.pathname;
@@ -111,16 +112,16 @@ export function createKitelineServer(
   server.requestTimeout = 0;
   const sockets = new WebSocketServer({ noServer: true, maxPayload: limits.controlMessageBytes });
   const httpSockets = new WebSocketServer({ noServer: true, maxPayload: limits.dataChunkBytes });
-  server.on("connect", (request, socket, head) => {
+  server.on("connect", (request, socket) => {
     socket.on("error", () => socket.destroy());
-    void proxy.handle(request, socket, head);
+    proxy.rejectConnect(request, socket);
   });
   server.on("upgrade", (request, socket, head) => {
     socket.on("error", () => socket.destroy());
     request.socket.setKeepAlive(true, limits.tcpKeepAliveDelayMs);
     try {
       if (isProxyPath(request.url ?? "")) {
-        void proxy.handle(request, socket, head);
+        void proxy.upgrade(request, socket, head);
         return;
       }
       const entryOrigin = requestOrigin(request, config.trustProxyProto);
@@ -161,19 +162,19 @@ export function createKitelineServer(
       } else if (url.pathname === "/api/events") {
         const login = browserLogin();
         sockets.handleUpgrade(request, socket, head, (ws) => connections.acceptBrowser(ws, login));
-      } else socket.end(rawHead(404, "Not Found", { Connection: "close" }), () => socket.destroy());
+      } else endRawResponse(socket, rawHead(404, "Not Found", { Connection: "close" }));
     } catch (cause) {
       const error = serverError(cause);
       const status = errorStatus(error);
       const payload = JSON.stringify({ error: asError(error) });
-      socket.end(
+      endRawResponse(
+        socket,
         rawHead(status, STATUS_CODES[status]!, {
           "Content-Type": "application/json",
           "Cache-Control": "no-store",
           "Content-Length": Buffer.byteLength(payload),
           Connection: "close",
         }) + payload,
-        () => socket.destroy(),
       );
     }
   });

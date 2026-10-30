@@ -25,7 +25,7 @@ export function requestHeaders(
   headers: IncomingHttpHeaders,
   entryOrigin: string,
   upgrade: boolean,
-  cliCredential = false,
+  cliCredential: boolean,
 ) {
   const result = endToEnd(headers);
   if (cliCredential) delete result.authorization;

@@ -235,6 +235,12 @@ export class Store {
       ...(row.snapshot ? { snapshot: JSON.parse(row.snapshot) as Metadata } : {}),
     }));
   }
+  deviceName(id: string): string | undefined {
+    const row = this.db.prepare("SELECT name FROM devices WHERE id=?").get(id) as
+      | { name: string }
+      | undefined;
+    return row?.name;
+  }
   renameDevice(id: string, name: string) {
     if (!this.db.prepare("UPDATE devices SET name=? WHERE id=?").run(name, id).changes)
       throw new AppError("not_found", "Device not found");

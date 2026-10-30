@@ -16,6 +16,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
 import { connect, type AddressInfo, type Socket } from "node:net";
+import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer } from "ws";
 import { apiFixture, serverFixture } from "./fixture.js";
 import { Agent } from "../../agent/src/agent.js";
@@ -424,6 +425,80 @@ test.each(["reject", "upgrade"])(
     }
   },
 );
+
+test("raw upgrades preserve both handshake heads before subsequent stream bytes", async () => {
+  const f = await fixture((_req, res) => res.end("HTTP"));
+  const browserHead = Buffer.from("\x81\x85\0\0\0\0first", "latin1");
+  const browserTail = Buffer.from("\x81\x84\0\0\0\0next", "latin1");
+  const upstreamHead = Buffer.from("\x81\x05hello", "latin1");
+  const upstreamTail = Buffer.from("\x81\x05world", "latin1");
+  const browserReceived: Buffer[] = [];
+  const upstreamReceived: Buffer[] = [];
+  let observedBrowserHead: Buffer | undefined;
+  let serviceSocket: Duplex | undefined;
+  f.kiteline.server.on("upgrade", (req, _socket, head) => {
+    if (req.url?.startsWith(f.prefix)) observedBrowserHead = head;
+  });
+  const connected = new Promise<Duplex>((resolve) => {
+    f.upstream.once("upgrade", (_req, socket, head) => {
+      serviceSocket = socket;
+      upstreamReceived.push(head);
+      socket.on("data", (part: Buffer) => upstreamReceived.push(part));
+      resolve(socket);
+    });
+  });
+  const browser = connect({ host: "127.0.0.1", port: f.port });
+  browser.on("data", (part: Buffer) => browserReceived.push(part));
+  cleanup.push(async () => {
+    browser.destroy();
+    serviceSocket?.destroy();
+  });
+  await once(browser, "connect");
+  browser.write(
+    Buffer.concat([
+      Buffer.from(
+        [
+          `GET ${f.prefix}/ HTTP/1.1`,
+          ...Object.entries(f.browserHeaders).map(([key, value]) => `${key}: ${value}`),
+          "Connection: Upgrade",
+          "Upgrade: websocket",
+          "Sec-WebSocket-Version: 13",
+          "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+          "",
+          "",
+        ].join("\r\n"),
+      ),
+      browserHead,
+    ]),
+  );
+  const upstream = await connected;
+  expect(observedBrowserHead).toEqual(browserHead);
+  // Queue later browser bytes before the proxy receives the upstream handshake.
+  browser.write(browserTail);
+  upstream.write(
+    Buffer.concat([
+      Buffer.from(
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+          "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n",
+      ),
+      upstreamHead,
+    ]),
+  );
+  function browserBody() {
+    const received = Buffer.concat(browserReceived);
+    const boundary = received.indexOf("\r\n\r\n");
+    return boundary === -1 ? undefined : received.subarray(boundary + 4);
+  }
+  await expect.poll(browserBody).toEqual(upstreamHead);
+  expect(Buffer.concat(browserReceived).toString("latin1")).toMatch(
+    /^HTTP\/1\.1 101 Switching Protocols\r\n/,
+  );
+  upstream.write(upstreamTail);
+  await expect.poll(browserBody).toEqual(Buffer.concat([upstreamHead, upstreamTail]));
+  await expect
+    .poll(() => Buffer.concat(upstreamReceived))
+    .toEqual(Buffer.concat([browserHead, browserTail]));
+});
 
 test("upstream can reject a request before the client sends its body", async () => {
   const f = await fixture((_req, res) => res.writeHead(413).end("body rejected"));

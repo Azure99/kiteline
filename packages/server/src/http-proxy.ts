@@ -1,15 +1,14 @@
 import {
   request as httpRequest,
-  ServerResponse,
   STATUS_CODES,
   type ClientRequest,
   type IncomingMessage,
+  type ServerResponse,
 } from "node:http";
 import type { Duplex } from "node:stream";
 import { AppError, asError, integer } from "@kiteline/shared/protocol";
 import type { ServerConfig } from "./config.js";
 import type { Store, Login } from "./store.js";
-import type { Connections } from "./connections.js";
 import type { Channels } from "./channels.js";
 import {
   requireLogin,
@@ -18,6 +17,7 @@ import {
   closeIfBodyUnread,
   requireOrigin,
   rawHead,
+  endRawResponse,
   requestOrigin,
 } from "./http.js";
 import { requestHeaders, responseHeaders } from "./proxy-headers.js";
@@ -30,6 +30,9 @@ interface Target {
   strip: boolean;
   redirect?: string;
 }
+type Downstream =
+  | { kind: "http"; destination: ServerResponse }
+  | { kind: "upgrade"; destination: Duplex; browserHead: Buffer };
 export const isProxyPath = (path: string) => /^\/(?:proxy|absproxy)(?:[/?]|$)/.test(path);
 function proxyTarget(raw: string): Target {
   const match = /^(\/(proxy|absproxy)\/([^/?]+)\/(\d{1,5}))((?:[/?].*)?)$/.exec(raw);
@@ -66,13 +69,14 @@ function write(stream: Duplex, bytes: string | Buffer) {
 }
 function failure(
   request: IncomingMessage,
-  destination: ServerResponse | Duplex,
+  downstream: Downstream | { kind: "connect"; destination: Duplex },
   error: unknown,
   target?: Target,
   deviceName?: string,
 ) {
+  const { destination } = downstream;
   if (destination.destroyed) return;
-  if (destination instanceof ServerResponse && destination.headersSent)
+  if (downstream.kind === "http" && downstream.destination.headersSent)
     return destination.destroy();
   const detail = asError(error);
   const statuses: Record<string, number> = {
@@ -87,8 +91,8 @@ function failure(
     timeout: 504,
   };
   const status = Object.hasOwn(statuses, detail.code) ? statuses[detail.code]! : 502;
-  if (status === 401 && navigation(request) && destination instanceof ServerResponse) {
-    destination
+  if (status === 401 && navigation(request) && downstream.kind === "http") {
+    downstream.destination
       .writeHead(302, {
         location: `/login?returnTo=${encodeURIComponent(request.url ?? "/")}`,
         "cache-control": "no-store",
@@ -128,10 +132,11 @@ a,button{display:inline-flex;align-items:center;min-height:44px;padding:0 12px;b
     "cache-control": "no-store",
     connection: "close",
   };
-  if (destination instanceof ServerResponse) destination.writeHead(status, headers).end(content);
+  if (downstream.kind === "http") downstream.destination.writeHead(status, headers).end(content);
   else
-    destination.end(rawHead(status, STATUS_CODES[status]!, headers) + content, () =>
-      destination.destroy(),
+    endRawResponse(
+      downstream.destination,
+      rawHead(status, STATUS_CODES[status]!, headers) + content,
     );
 }
 
@@ -139,90 +144,101 @@ export class HttpProxy {
   constructor(
     private config: ServerConfig,
     private store: Store,
-    private connections: Connections,
     private channels: Channels,
   ) {}
-  async handle(request: IncomingMessage, destination: ServerResponse | Duplex, head?: Buffer) {
+  serve(request: IncomingMessage, response: ServerResponse) {
+    return this.handle(request, { kind: "http", destination: response });
+  }
+  upgrade(request: IncomingMessage, socket: Duplex, browserHead: Buffer) {
+    return this.handle(request, { kind: "upgrade", destination: socket, browserHead });
+  }
+  rejectConnect(request: IncomingMessage, socket: Duplex) {
+    failure(
+      request,
+      { kind: "connect", destination: socket },
+      new AppError("unsupported", "CONNECT is not supported"),
+    );
+  }
+  private async handle(request: IncomingMessage, downstream: Downstream) {
     let target: Target | undefined;
     let deviceName: string | undefined;
     try {
-      if (request.method === "CONNECT")
-        throw new AppError("unsupported", "CONNECT is not supported");
       target = proxyTarget(request.url ?? "");
       const entryOrigin = requestOrigin(request, this.config.trustProxyProto);
       const login = requireLogin(this.store, request, entryOrigin);
       requireDevice(login, target.deviceId);
-      if (head !== undefined || !["GET", "HEAD"].includes(request.method ?? "GET"))
+      if (downstream.kind === "upgrade" || !["GET", "HEAD"].includes(request.method ?? "GET"))
         requireOrigin(request, entryOrigin);
-      const device = this.connections.devices().find((value) => value.id === target!.deviceId);
-      if (!device) throw new AppError("not_found", "Device not found");
-      deviceName = device.name;
+      deviceName = this.store.deviceName(target.deviceId);
+      if (deviceName === undefined) throw new AppError("not_found", "Device not found");
       if (target.redirect) {
-        if (destination instanceof ServerResponse) {
-          closeIfBodyUnread(destination);
-          destination.writeHead(308, { location: target.redirect }).end();
+        if (downstream.kind === "http") {
+          closeIfBodyUnread(downstream.destination);
+          downstream.destination.writeHead(308, { location: target.redirect }).end();
         } else
-          destination.end(
+          endRawResponse(
+            downstream.destination,
             rawHead(308, "Permanent Redirect", {
               location: target.redirect,
               "content-length": 0,
               connection: "close",
             }),
-            () => destination.destroy(),
           );
         return;
       }
-      if (head !== undefined && request.headers.upgrade?.toLowerCase() !== "websocket")
+      if (downstream.kind === "upgrade" && request.headers.upgrade?.toLowerCase() !== "websocket")
         throw new AppError("unsupported", "Only WebSocket upgrades are supported");
-      await this.forward(request, destination, target, device.name, login, entryOrigin, head);
+      await this.forward(request, downstream, target, deviceName, login, entryOrigin);
     } catch (error) {
-      failure(request, destination, error, target, deviceName);
+      failure(request, downstream, error, target, deviceName);
     }
   }
   private async forward(
     request: IncomingMessage,
-    destination: ServerResponse | Duplex,
+    downstream: Downstream,
     target: Target,
     deviceName: string,
     login: Login,
     entryOrigin: string,
-    head?: Buffer,
   ) {
-    const response = destination instanceof ServerResponse ? destination : undefined;
-    const browser = destination instanceof ServerResponse ? undefined : destination;
-    let upstream: ClientRequest | undefined = undefined;
-    let incoming: IncomingMessage | undefined;
-    let peer: Duplex | undefined;
-    let finished = false,
-      upgraded = false,
-      sentHead = false;
+    const { destination } = downstream;
+    let upstreamRequest: ClientRequest | undefined = undefined;
+    let upstreamResponse: IncomingMessage | undefined;
+    let upstreamSocket: Duplex | undefined;
+    let resourcesEnded = false;
+    let rawHeadStarted = false;
     let channelId: string | undefined = undefined;
     const finish = (error?: unknown) => {
-      if (finished) return;
-      finished = true;
+      if (resourcesEnded) return;
+      resourcesEnded = true;
       request.unpipe();
-      upstream?.destroy();
-      peer?.destroy();
+      upstreamRequest?.destroy();
+      upstreamSocket?.destroy();
       if (channelId) {
         if (error) this.channels.cancel(channelId, error);
         else this.channels.finishHttp(channelId);
       }
     };
     const fail = (error: unknown) => {
-      if (finished || (!upgraded && incoming?.complete && (response?.headersSent || sentHead)))
+      if (
+        resourcesEnded ||
+        (!upstreamSocket &&
+          upstreamResponse?.complete &&
+          (downstream.kind === "http" ? downstream.destination.headersSent : rawHeadStarted))
+      )
         return;
-      if (sentHead && !response) destination.destroy();
-      else failure(request, destination, error, target, deviceName);
+      if (rawHeadStarted) destination.destroy();
+      else failure(request, downstream, error, target, deviceName);
       finish(error);
     };
     destination.on("error", fail);
     destination.on("close", () => {
-      if (response?.writableFinished) finish();
+      if (downstream.kind === "http" && downstream.destination.writableFinished) finish();
       else finish(new AppError("cancelled", "HTTP connection closed"));
     });
     destination.on("finish", () => {
       finish();
-      browser?.destroy();
+      if (downstream.kind === "upgrade") downstream.destination.destroy();
     });
     request.on("aborted", () => fail(new AppError("cancelled", "Request cancelled")));
     request.on("error", fail);
@@ -235,8 +251,8 @@ export class HttpProxy {
       fail(error);
       return;
     }
-    if (finished) return tunnel.destroy();
-    upstream = httpRequest({
+    if (resourcesEnded) return tunnel.destroy();
+    upstreamRequest = httpRequest({
       createConnection: () => tunnel,
       hostname: "localhost",
       port: target.port,
@@ -245,31 +261,35 @@ export class HttpProxy {
       headers: requestHeaders(
         request.headers,
         entryOrigin,
-        head !== undefined,
+        downstream.kind === "upgrade",
         login.kind === "cli",
       ),
     });
-    upstream.on("error", fail);
-    upstream.on("response", (result) => {
+    upstreamRequest.on("error", fail);
+    upstreamRequest.on("response", (result) => {
       try {
         if (result.statusCode! < 100)
           throw new AppError("io_error", "Local service returned an invalid HTTP status");
-        incoming = result;
+        upstreamResponse = result;
         result.on("error", fail);
         result.on("close", () => {
           if (!result.complete)
             fail(new AppError("io_error", "Local response ended before completion"));
         });
         const headers = responseHeaders(result.headers, target.prefix, target.strip);
-        if (response) {
+        if (downstream.kind === "http") {
+          const response = downstream.destination;
           closeIfBodyUnread(response);
           response.writeHead(result.statusCode!, result.statusMessage, headers);
           response.flushHeaders();
           result.pipe(response);
         } else {
           headers.connection = "close";
-          sentHead = true;
-          void write(browser!, rawHead(result.statusCode!, result.statusMessage ?? "", headers))
+          rawHeadStarted = true;
+          void write(
+            downstream.destination,
+            rawHead(result.statusCode!, result.statusMessage ?? "", headers),
+          )
             .then(() => result.pipe(destination))
             .catch(fail);
         }
@@ -277,37 +297,37 @@ export class HttpProxy {
         fail(error);
       }
     });
-    upstream.on("upgrade", (result, socket, upstreamHead) => {
-      if (response || result.headers.upgrade?.toLowerCase() !== "websocket") {
+    upstreamRequest.on("upgrade", (result, socket, upstreamHead) => {
+      if (downstream.kind !== "upgrade" || result.headers.upgrade?.toLowerCase() !== "websocket") {
         socket.destroy();
         return fail(new AppError("io_error", "Invalid upstream upgrade response"));
       }
-      peer = socket;
+      upstreamSocket = socket;
+      const browser = downstream.destination;
       socket.pause();
-      browser!.pause();
+      browser.pause();
       socket.on("error", fail);
       socket.on("close", () => finish());
-      upgraded = true;
-      sentHead = true;
+      rawHeadStarted = true;
       void (async () => {
         await write(
-          browser!,
+          browser,
           rawHead(
             101,
             result.statusMessage ?? "Switching Protocols",
             responseHeaders(result.headers, target.prefix, target.strip, true),
           ),
         );
-        if (upstreamHead.length) await write(browser!, upstreamHead);
-        if (head!.length) await write(socket, head!);
-        if (finished) return;
-        browser!.pipe(socket).pipe(browser!);
+        if (upstreamHead.length) await write(browser, upstreamHead);
+        if (downstream.browserHead.length) await write(socket, downstream.browserHead);
+        if (resourcesEnded) return;
+        browser.pipe(socket).pipe(browser);
       })().catch(fail);
     });
-    if (head !== undefined) upstream.end();
+    if (downstream.kind === "upgrade") upstreamRequest.end();
     else {
-      upstream.flushHeaders();
-      request.pipe(upstream);
+      upstreamRequest.flushHeaders();
+      request.pipe(upstreamRequest);
     }
   }
 }

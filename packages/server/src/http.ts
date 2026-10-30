@@ -1,5 +1,6 @@
 import type { IncomingMessage, OutgoingHttpHeaders, ServerResponse } from "node:http";
 import { isIP, SocketAddress, type BlockList } from "node:net";
+import type { Duplex } from "node:stream";
 import type { Store, Login } from "./store.js";
 import { AppError, appVersion, asError, limits } from "@kiteline/shared/protocol";
 
@@ -43,6 +44,9 @@ export function rawHead(status: number, message: string, headers: OutgoingHttpHe
     if (value !== undefined)
       for (const item of Array.isArray(value) ? value : [value]) lines.push(`${key}: ${item}`);
   return lines.join("\r\n") + "\r\n\r\n";
+}
+export function endRawResponse(socket: Duplex, response: string) {
+  socket.end(response, () => socket.destroy());
 }
 
 export function requireVersion(clientVersion: string | null, component: "agent" | "web" | "cli") {

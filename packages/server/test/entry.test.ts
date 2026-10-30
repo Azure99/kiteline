@@ -52,12 +52,14 @@ test("raw upgrade and CONNECT rejections drain responses and release half-open p
   const login = f.store.createLogin(60_000);
   const device = f.store.bind(f.store.newBinding().code, "Raw connection test");
   const redirect = `/proxy/${device.deviceId}/5173`;
-  for (const [path, status] of [
+  for (const [path, status, upgrade = "websocket"] of [
     ["/nope", 404],
     ["/api/events", 426],
     ["/proxy/missing/5173/", 404],
     ["CONNECT", 501],
     [redirect, 308],
+    [redirect + "/", 501, "h2c"],
+    [redirect, 308, "h2c"],
   ] as const) {
     const socket = connect({ host: "127.0.0.1", port: f.port, allowHalfOpen: true });
     cleanup.push(async () => {
@@ -70,7 +72,7 @@ test("raw upgrade and CONNECT rejections drain responses and release half-open p
     socket.write(
       path === "CONNECT"
         ? "CONNECT example.test:443 HTTP/1.1\r\nHost: example.test:443\r\n\r\n"
-        : `GET ${path} HTTP/1.1\r\nHost: 127.0.0.1:${f.port}\r\nOrigin: http://127.0.0.1:${f.port}\r\nCookie: kiteline_session_http=${login.token}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n`,
+        : `GET ${path} HTTP/1.1\r\nHost: 127.0.0.1:${f.port}\r\nOrigin: http://127.0.0.1:${f.port}\r\nCookie: kiteline_session_http=${login.token}\r\nConnection: Upgrade\r\nUpgrade: ${upgrade}\r\n\r\n`,
     );
     await ended;
     const response = Buffer.concat(chunks).toString();
