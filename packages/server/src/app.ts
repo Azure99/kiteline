@@ -1,19 +1,15 @@
-import { serverLimits } from "./limits.js";
 import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import { WebSocketServer } from "ws";
 import { AppError, appVersion, asError, limits, record, string } from "@kiteline/shared/protocol";
 import type { ServerConfig } from "./config.js";
-import { Store, password, type Login } from "./store.js";
+import type { Store } from "./store.js";
 import {
   AttemptLimiter,
-  clientAddress,
   requireAgent,
   body,
   requireLogin,
-  requireOwner,
-  requireDevice,
   decodePath,
   errorStatus,
   failure,
@@ -24,16 +20,12 @@ import {
   requestOrigin,
   requireVersion,
   serverError,
-  loginCookie,
 } from "./http.js";
 import { Connections } from "./connections.js";
 import type { ChannelPolicy } from "./channels.js";
 import { HttpProxy, isProxyPath } from "./http-proxy.js";
-import {
-  installationCommands,
-  serveAgentInstallation,
-  upgradeCommand,
-} from "./agent-installation.js";
+import { serveAgentInstallation } from "./agent-installation.js";
+import { createApiHandler } from "./api.js";
 
 export function createKitelineServer(
   config: ServerConfig,
@@ -44,19 +36,7 @@ export function createKitelineServer(
   const channels = connections.channels;
   const proxy = new HttpProxy(config, store, connections, channels);
   const bindingLimiter = new AttemptLimiter();
-  const authenticationLimiter = new AttemptLimiter();
-  async function loginBody(request: IncomingMessage, entryOrigin: string, login: Login) {
-    const input = record(await body(request));
-    // Reading the body can outlive the login that admitted the request.
-    if (requireLogin(store, request, entryOrigin).id !== login.id)
-      throw new AppError("unauthenticated", "Login session ended");
-    return input;
-  }
-  function newLogin(response: ServerResponse, entryOrigin: string) {
-    const login = store.createLogin(serverLimits.loginLifetime);
-    response.setHeader("set-cookie", loginCookie(entryOrigin, login.token, login.expiresAt));
-    json(response, 200, { expiresAt: login.expiresAt });
-  }
+  const serveApi = createApiHandler(config, store, connections);
   async function route(request: IncomingMessage, response: ServerResponse) {
     if (isProxyPath(request.url ?? "")) return proxy.handle(request, response);
     const entryOrigin = requestOrigin(request, config.trustProxyProto);
@@ -77,182 +57,7 @@ export function createKitelineServer(
       );
       return json(response, 200, result);
     }
-    if (path.startsWith("/api/")) {
-      if (!["GET", "HEAD"].includes(method)) requireOrigin(request, entryOrigin);
-      if (path === "/api/bootstrap" && method === "GET")
-        return json(response, 200, { initialized: store.initialized() });
-      if ((path === "/api/setup" || path === "/api/login") && method === "POST") {
-        authenticationLimiter.check(clientAddress(request, config.trustedProxies));
-        const input = record(await body(request));
-        const value = password(input.password);
-        if (path === "/api/setup")
-          await store.setup(string(input.setupToken, "setup token", 256), value);
-        else if (!(await store.verifyPassword(value)))
-          throw new AppError("unauthenticated", "Incorrect password");
-        return newLogin(response, entryOrigin);
-      }
-      const login = requireLogin(store, request, entryOrigin);
-      if (path === "/api/session" && method === "GET")
-        return json(response, 200, {
-          expiresAt: login.expiresAt,
-          ...(login.kind === "owner"
-            ? {}
-            : {
-                kind: "cli",
-                id: login.id,
-                name: login.name,
-                deviceIds: login.deviceIds,
-              }),
-        });
-      if (path === "/api/logout" && method === "POST") {
-        connections.logout(login.id);
-        if (login.kind === "owner")
-          response.setHeader("set-cookie", loginCookie(entryOrigin, "", ""));
-        return json(response, 200, {});
-      }
-      if (path === "/api/devices" && method === "GET")
-        return json(response, 200, { devices: connections.devices(login) });
-      if (path === "/api/agent/upgrade-command" && method === "GET") {
-        requireOwner(login);
-        return json(response, 200, upgradeCommand(entryOrigin));
-      }
-      requireVersion(url.searchParams.get("appVersion"), login.kind === "owner" ? "web" : "cli");
-      if (path === "/api/credentials") {
-        requireOwner(login);
-        if (method === "GET") return json(response, 200, { credentials: store.credentials() });
-        if (method === "POST") {
-          const input = await loginBody(request, entryOrigin, login);
-          const name = string(input.name, "credential name", limits.nameLength);
-          if (!Array.isArray(input.deviceIds) || !input.deviceIds.length)
-            throw new AppError("invalid_argument", "Select at least one device");
-          const deviceIds = [...new Set(input.deviceIds.map((id) => string(id, "device ID", 128)))];
-          const expiresAt = input.expiresAt;
-          if (
-            expiresAt !== null &&
-            (typeof expiresAt !== "string" ||
-              !Number.isFinite(Date.parse(expiresAt)) ||
-              Date.parse(expiresAt) <= Date.now() ||
-              Date.parse(expiresAt) >= Date.UTC(10000, 0, 1))
-          )
-            throw new AppError(
-              "invalid_argument",
-              "Choose a future expiry before year 10000, or explicit null for no expiry",
-            );
-          return json(
-            response,
-            200,
-            store.createCredential(
-              name,
-              deviceIds,
-              expiresAt === null ? null : new Date(expiresAt).toISOString(),
-            ),
-          );
-        }
-      }
-      const credential = /^\/api\/credentials\/([^/]+)$/.exec(path);
-      if (credential && method === "DELETE") {
-        requireOwner(login);
-        const id = decodePath(credential[1]!);
-        const revoked = connections.revokeCredential(id);
-        return json(response, 200, { revoked });
-      }
-      if (path === "/api/tasks" && method === "GET") {
-        const deviceId = url.searchParams.get("deviceId") ?? undefined;
-        if (deviceId) requireDevice(login, deviceId);
-        return json(response, 200, {
-          devices: connections.taskSummaries(login, deviceId),
-        });
-      }
-      if (path === "/api/bindings" && method === "POST") {
-        requireOwner(login);
-        const binding = store.newBinding();
-        return json(response, 200, {
-          ...binding,
-          commands: installationCommands(entryOrigin, binding.code),
-        });
-      }
-      const binding = /^\/api\/bindings\/([^/]+)$/.exec(path);
-      if (binding && method === "GET") {
-        requireOwner(login);
-        return json(response, 200, store.binding(decodePath(binding[1]!)));
-      }
-      const device = /^\/api\/devices\/([^/]+)(.*)$/.exec(path);
-      const channel = /^\/api\/channels\/([^/]+)$/.exec(path);
-      const content = /^\/api\/channels\/([^/]+)\/content$/.exec(path);
-      if (content && (method === "GET" || method === "PUT"))
-        return channels.content(decodePath(content[1]!), login.id, request, response);
-      if (channel && method === "DELETE")
-        return json(response, 200, {
-          found: channels.cancel(
-            decodePath(channel[1]!),
-            new AppError("cancelled", "Channel cancelled"),
-            login.id,
-          ),
-        });
-      if (device) {
-        const id = decodePath(device[1]!);
-        requireDevice(login, id);
-        const suffix = device[2];
-        if (suffix === "/download" && method === "GET") {
-          await channels.createDownload(
-            id,
-            login,
-            {
-              workspaceId: string(url.searchParams.get("workspaceId")),
-              path: string(url.searchParams.get("path")),
-            },
-            { request, response },
-          );
-          return;
-        }
-        if (suffix === "/channels" && method === "POST") {
-          const input = await loginBody(request, entryOrigin, login);
-          const pending = channels.create(id, login, string(input.kind), record(input.params));
-          response.on("close", () => {
-            if (!response.writableFinished)
-              channels.cancel(pending.id, new AppError("cancelled", "Request closed"));
-          });
-          return json(response, 200, await pending.ready);
-        }
-        if (!suffix && method === "PATCH") {
-          requireOwner(login);
-          const input = await loginBody(request, entryOrigin, login);
-          connections.renameDevice(id, string(input.name, "device name", limits.nameLength));
-          return json(response, 200, {});
-        }
-        if (!suffix && method === "DELETE") {
-          requireOwner(login);
-          connections.deleteDevice(id);
-          return json(response, 200, {});
-        }
-        if (suffix === "/notices/activate" && method === "POST") {
-          const input = await loginBody(request, entryOrigin, login);
-          connections.activateReport(id, string(input.workspaceId), string(input.sessionId));
-          return json(response, 200, {});
-        }
-        if (suffix === "/rpc" && method === "POST") {
-          const input = await loginBody(request, entryOrigin, login);
-          const requestId = string(input.id, "request id", 128);
-          const pending = connections.rpc(
-            id,
-            login,
-            requestId,
-            string(input.method, "method", 128),
-            record(input.params),
-          );
-          response.on("close", () => {
-            if (!response.writableFinished) connections.cancel(id, requestId, login.id);
-          });
-          return json(response, 200, await pending);
-        }
-        const cancel = /^\/requests\/([^/]+)$/.exec(suffix ?? "");
-        if (cancel && method === "DELETE")
-          return json(response, 200, {
-            found: connections.cancel(id, decodePath(cancel[1]!), login.id),
-          });
-      }
-      throw new AppError("not_found", "API endpoint not found");
-    }
+    if (path.startsWith("/api/")) return serveApi(request, response, url, entryOrigin);
     if (method !== "GET" && method !== "HEAD") {
       closeIfBodyUnread(response);
       response.writeHead(405, { allow: "GET, HEAD" }).end();

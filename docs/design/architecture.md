@@ -107,7 +107,7 @@ agent 的 JSON 状态文件以原子替换写入，不调用 fsync；文件损�
 
 | 流程                   | 入口文件                                                                                                                                                     | 行为契约                                                                           |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
-| RPC                    | `packages/web/src/lib/api.ts`、`packages/server/src/app.ts`、`packages/agent/src/agent.ts`                                                                   | [RPC](protocol.md#rpc)、[结果语义](protocol.md#结果语义)                           |
+| RPC                    | `packages/web/src/lib/api.ts`、`packages/server/src/api.ts`、`packages/server/src/connections.ts`、`packages/agent/src/agent.ts`                             | [RPC](protocol.md#rpc)、[结果语义](protocol.md#结果语义)                           |
 | 数据通道与文件下载     | `packages/server/src/channels.ts`、`packages/server/src/file-transfer.ts`、`packages/agent/src/files/channels.ts`、`packages/agent/src/terminal/channels.ts` | [数据通道](protocol.md#数据通道)、[网页附着](terminal.md#网页附着)                 |
 | 开发服务代理           | `packages/server/src/http-proxy.ts`、`packages/agent/src/http/channels.ts`                                                                                   | [请求转发](http-access.md#请求转发)                                                |
 | 本机终端与定时任务命令 | `packages/agent/src/cli/terminal.ts`、`packages/agent/src/cli/tasks.ts`、`packages/agent/src/local.ts`                                                       | [本机 IPC](protocol.md#本机-ipc)、[任务命令行](../guide/scheduled-tasks.md#命令行) |
@@ -205,7 +205,9 @@ Git 方法由 [`git/rpc.ts`](../../packages/agent/src/git/rpc.ts) 解释参数�
 
 ### 添加 HTTP 路由
 
-在 `packages/server/src/app.ts` 中按 [HTTP 接口](protocol.md#http-接口)的检查列选择位置，核对登录、Origin、版本和读完请求体后的认证时点。路径不在 `/api/` 下时，还须考虑 `packages/web/vite.config.ts` 的开发代理前缀。
+普通 API 在 `packages/server/src/api.ts` 中按 method/path 声明身份、版本和正文策略，并在同处实现 handler。统一准入边界执行 Origin、登录、版本、设备范围和 owner 检查；受认证 JSON 在读完正文后复验同一登录，再解释业务字段。匹配结果也为未知方法或后缀保留相应的家族级前置检查。公开接口合同见 [HTTP 接口](protocol.md#http-接口)。
+
+安装资源、Agent 绑定、静态文件及 WebSocket/proxy 入口由 `packages/server/src/app.ts` 分流，保留各自的准入与传输顺序。路径不在 `/api/` 下时，还须考虑 `packages/web/vite.config.ts` 的开发代理前缀。
 
 ### 添加限额或配置项
 

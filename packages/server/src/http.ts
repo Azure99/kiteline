@@ -82,10 +82,12 @@ export function json(response: ServerResponse, status: number, value: unknown) {
   });
   response.end(JSON.stringify(value));
 }
+const jsonBodyDeadlineMs = 30_000;
+
 export async function body(request: IncomingMessage): Promise<unknown> {
   const timer = setTimeout(
     () => request.destroy(new AppError("timeout", "JSON body reception timed out")),
-    30_000,
+    jsonBodyDeadlineMs,
   ).unref();
   try {
     let size = 0;
@@ -182,22 +184,27 @@ export function failure(response: ServerResponse, cause: unknown) {
   if (response.headersSent) response.destroy();
   else json(response, errorStatus(error), { error: asError(error) });
 }
+const attemptWindowMs = 60_000;
+const attemptsPerSource = 10;
+const attemptsAcrossSources = 30;
+const rememberedAttemptSources = 1024;
+
 export class AttemptLimiter {
   private sources = new Map<string, { count: number; until: number }>();
   private count = 0;
   private until = 0;
   check(source: string) {
     const now = Date.now();
-    const windowEnd = now + 60_000;
+    const windowEnd = now + attemptWindowMs;
     if (now >= this.until) {
       this.count = 0;
       this.until = windowEnd;
     }
     const previous = this.sources.get(source);
     const current = previous && previous.until > now ? previous : { count: 0, until: windowEnd };
-    if (this.count >= 30 || current.count >= 10)
+    if (this.count >= attemptsAcrossSources || current.count >= attemptsPerSource)
       throw new AppError("busy", "Too many attempts; try again later");
-    if (this.sources.size >= 1024 && !this.sources.has(source))
+    if (this.sources.size >= rememberedAttemptSources && !this.sources.has(source))
       this.sources.delete(this.sources.keys().next().value!);
     this.count++;
     current.count++;

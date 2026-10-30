@@ -81,6 +81,119 @@ async function fixture() {
   return { ...base, owner, ownerHeaders, call, credential, events, refusedSocket };
 }
 
+test("API admission preserves Origin, identity, version and family error precedence", async () => {
+  const f = await fixture();
+  const selected = f.store.bind(f.store.newBinding().code, "Selected device");
+  const outside = f.store.bind(f.store.newBinding().code, "Outside scope");
+  const credential = await f.credential("Selected device only", [selected.deviceId]);
+  const cli = bearer(credential.token);
+  const cases: {
+    method: string;
+    path: string;
+    headers: Record<string, string>;
+    status: number;
+    code: string;
+  }[] = [
+    {
+      method: "POST",
+      path: "/api/unknown?appVersion=old",
+      headers: {},
+      status: 403,
+      code: "forbidden",
+    },
+    {
+      method: "GET",
+      path: "/api/devices/%/unknown?appVersion=old",
+      headers: {},
+      status: 401,
+      code: "unauthenticated",
+    },
+    {
+      method: "GET",
+      path: "/api/devices/%/unknown?appVersion=old",
+      headers: f.ownerHeaders,
+      status: 426,
+      code: "version_mismatch",
+    },
+    {
+      method: "PUT",
+      path: webPath("/api/credentials"),
+      headers: { origin: f.origin, ...cli },
+      status: 403,
+      code: "forbidden",
+    },
+    {
+      method: "GET",
+      path: webPath(`/api/devices/${outside.deviceId}/unknown`),
+      headers: cli,
+      status: 403,
+      code: "forbidden",
+    },
+    {
+      method: "DELETE",
+      path: webPath("/api/credentials/%"),
+      headers: { origin: f.origin, ...cli },
+      status: 403,
+      code: "forbidden",
+    },
+    {
+      method: "GET",
+      path: webPath("/api/bindings/%"),
+      headers: cli,
+      status: 403,
+      code: "forbidden",
+    },
+    {
+      method: "GET",
+      path: webPath("/api/devices/%/unknown"),
+      headers: cli,
+      status: 400,
+      code: "invalid_argument",
+    },
+    {
+      method: "PATCH",
+      path: webPath("/api/devices/%"),
+      headers: { origin: f.origin, ...cli },
+      status: 400,
+      code: "invalid_argument",
+    },
+    {
+      method: "GET",
+      path: webPath("/api/credentials/%"),
+      headers: cli,
+      status: 404,
+      code: "not_found",
+    },
+    {
+      method: "DELETE",
+      path: webPath("/api/bindings/%"),
+      headers: { origin: f.origin, ...cli },
+      status: 404,
+      code: "not_found",
+    },
+    {
+      method: "GET",
+      path: webPath("/api/unknown"),
+      headers: f.ownerHeaders,
+      status: 404,
+      code: "not_found",
+    },
+    {
+      method: "POST",
+      path: "/api/session?appVersion=old",
+      headers: { origin: f.origin, ...f.ownerHeaders },
+      status: 426,
+      code: "version_mismatch",
+    },
+  ];
+  for (const { method, path, headers, status, code } of cases) {
+    const response = await fetch(f.origin + path, { method, headers });
+    expect(response.status, `${method} ${path}`).toBe(status);
+    expect(await response.json(), `${method} ${path}`).toMatchObject({ error: { code } });
+    expect(response.headers.get("x-kiteline-version")).toBe(appVersion);
+  }
+});
+
 test("legacy owner sessions migrate and a credential with no expiry survives reopening SQLite", async () => {
   const dataDir = await mkdtemp("/var/tmp/kiteline-credentials-migration-");
   cleanups.push(() => rm(dataDir, { recursive: true, force: true }));

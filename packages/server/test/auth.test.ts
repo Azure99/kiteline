@@ -21,10 +21,14 @@ test("normal setup, login and binding accept JSON and retain the device across l
   });
   expect(setup.status).toBe(200);
   const cookie = setup.headers.get("set-cookie")!.split(";")[0]!;
-  const binding = await f.call("/api/bindings", "POST", {}, cookie);
+  const binding = await f.call("/api/bindings", "POST", undefined, cookie);
   expect(binding.status).toBe(200);
   const { code, bindingId } = await binding.json();
-  const bound = await f.call("/api/agent/bind", "POST", { code, name: "Test device" });
+  const bound = await fetch(f.origin + "/api/agent/bind", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ code, name: "Test device" }),
+  });
   expect(bound.status).toBe(200);
   const identity = await bound.json();
   expect(f.store.binding(bindingId).deviceId).toBe(identity.deviceId);
