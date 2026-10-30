@@ -26,6 +26,7 @@ import {
   expectedRelease,
   packageNames,
   releaseMatches,
+  serverArchitectures,
   sourceCommit as readSourceCommit,
   staticNodeInput,
 } from "./release-artifacts.mjs";
@@ -64,7 +65,7 @@ if (
   positionals.length !== 2 ||
   !["server", "agent", "cli"].includes(kind) ||
   (portable && !allAgentTargets.includes(target)) ||
-  !Object.hasOwn(release.nodeArchives, arch ?? "") ||
+  (kind === "server" && !serverArchitectures.includes(arch)) ||
   (values["agent-target"] !== undefined && kind !== "server") ||
   agentTargets.some((target) => !allAgentTargets.includes(target)) ||
   new Set(agentTargets).size !== agentTargets.length ||

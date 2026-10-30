@@ -15,13 +15,12 @@ RUN dpkg-deb --extract /var/tmp/ca-certificates.deb /var/tmp/ca-bootstrap \
 ENV LANG=C.UTF-8 TMPDIR=/var/tmp
 
 FROM base AS server
-ARG TARGETARCH
-ARG VERSION
+ARG ARCHIVE
 RUN --mount=type=bind,source=dist/releases,target=/var/tmp/release \
     cd /var/tmp/release \
-    && sha256sum --check kiteline-server-${VERSION}-linux-${TARGETARCH}.tar.gz.sha256 \
+    && sha256sum --check "${ARCHIVE}.sha256" \
     && mkdir /opt/kiteline-server \
-    && tar -xzf kiteline-server-${VERSION}-linux-${TARGETARCH}.tar.gz --no-same-owner --strip-components=1 -C /opt/kiteline-server \
+    && tar -xzf "${ARCHIVE}" --no-same-owner --strip-components=1 -C /opt/kiteline-server \
     && userdel ubuntu && groupadd --gid 1000 kiteline \
     && useradd --uid 1000 --gid kiteline --create-home kiteline \
     && mkdir -p /var/lib/kiteline && chown kiteline:kiteline /var/lib/kiteline \

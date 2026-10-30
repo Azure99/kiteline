@@ -119,12 +119,25 @@ test("a reset during a raw rejection leaves the server available", async () => {
 test("installer resources stream GET/HEAD, reject other methods and never fall back to the SPA", async () => {
   const f = await fixture(false);
   const origin = `http://127.0.0.1:${f.port}`;
+  const linuxAmd64 = `kiteline-agent-${appVersion}-linux-amd64.tar.gz`;
   const linux = `kiteline-agent-${appVersion}-linux-arm64.tar.gz`;
   const windows = `kiteline-agent-${appVersion}-windows-amd64.zip`;
   const macos = `kiteline-agent-${appVersion}-macos-amd64.tar.gz`;
   const macosArm = `kiteline-agent-${appVersion}-macos-arm64.tar.gz`;
+  const unsupportedWindows = `kiteline-agent-${appVersion}-windows-arm64.zip`;
   for (const [path, file, type] of [
+    [`/downloads/agent/${appVersion}/${linuxAmd64}`, linuxAmd64, "application/gzip"],
+    [
+      `/downloads/agent/${appVersion}/${linuxAmd64}.sha256`,
+      `${linuxAmd64}.sha256`,
+      "text/plain; charset=utf-8",
+    ],
     [`/downloads/agent/${appVersion}/${linux}`, linux, "application/gzip"],
+    [
+      `/downloads/agent/${appVersion}/${linux}.sha256`,
+      `${linux}.sha256`,
+      "text/plain; charset=utf-8",
+    ],
     [`/downloads/agent/${appVersion}/${windows}`, windows, "application/zip"],
     [
       `/downloads/agent/${appVersion}/${windows}.sha256`,
@@ -182,10 +195,11 @@ test("installer resources stream GET/HEAD, reject other methods and never fall b
     expect(await head.text()).toBe("");
     expect((await fetch(origin + path, { method: "POST" })).status).toBe(405);
   }
+  await writeFile(join(f.downloadsDir, unsupportedWindows), "not a published agent target");
   for (const path of [
     "/downloads/agent/unknown/missing",
     `/downloads/agent/old/${windows}`,
-    `/downloads/agent/${appVersion}/kiteline-agent-${appVersion}-windows-arm64.zip`,
+    `/downloads/agent/${appVersion}/${unsupportedWindows}`,
     `/downloads/agent/${appVersion}/${windows}/extra`,
     `/downloads/agent/old/${macos}`,
     `/downloads/agent/${appVersion}/${macos}/extra`,

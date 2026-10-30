@@ -5,6 +5,8 @@ import {
   expectedRelease,
   packageNames,
   releaseMatches,
+  serverArchitectures,
+  serverImageName,
   sourceCommit as readSourceCommit,
 } from "./release-artifacts.mjs";
 import { run } from "./release-inputs.mjs";
@@ -15,8 +17,7 @@ const { version } = JSON.parse(
   readFileSync(resolve(root, "packages/shared/src/version.json"), "utf8"),
 );
 const arch = process.argv[2];
-if (!Object.hasOwn(release.nodeArchives, arch ?? ""))
-  throw new Error("Usage: pnpm images amd64|arm64");
+if (!serverArchitectures.includes(arch)) throw new Error("Usage: pnpm images amd64|arm64");
 const target = `linux-${arch}`;
 const { name, archive } = packageNames("server", version, target);
 const sourceCommit = readSourceCommit(root);
@@ -58,9 +59,7 @@ try {
       "--build-arg",
       `CA_CERTIFICATES_SHA256=${release.caCertificates.sha256}`,
       "--build-arg",
-      `VERSION=${version}`,
-      "--build-arg",
-      `TARGETARCH=${arch}`,
+      `ARCHIVE=${archive}`,
       "--build-arg",
       "HTTP_PROXY",
       "--build-arg",
@@ -77,11 +76,7 @@ try {
   );
   if (readSourceCommit(root) !== sourceCommit)
     throw new Error("Source changed during the image build; rerun the build");
-  run("docker", [
-    "tag",
-    readFileSync(imageFile, "utf8").trim(),
-    `kiteline-server:${version}-${arch}`,
-  ]);
+  run("docker", ["tag", readFileSync(imageFile, "utf8").trim(), serverImageName(version, arch)]);
 } finally {
   rmSync(temporary, { recursive: true, force: true });
 }

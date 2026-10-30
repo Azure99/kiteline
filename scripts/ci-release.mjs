@@ -2,7 +2,15 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { agentTargets, packageNames, sourceCommit } from "./release-artifacts.mjs";
+import {
+  agentTargets,
+  candidateCompose,
+  packageNames,
+  serverArchitectures,
+  serverImageArchive,
+  serverImageName,
+  sourceCommit,
+} from "./release-artifacts.mjs";
 import { digest, json, run } from "./release-inputs.mjs";
 
 const [mode, extra] = process.argv.slice(2);
@@ -84,12 +92,16 @@ function remoteImage(reference, allowMissing = false) {
   return JSON.parse(result.stdout);
 }
 function platforms(index) {
-  assert.equal(index.manifests?.length, 2, "Expected a two-platform image index");
+  assert.equal(
+    index.manifests?.length,
+    serverArchitectures.length,
+    "Expected a two-platform image index",
+  );
   const result = {};
   for (const entry of index.manifests) {
     assert.equal(entry.platform.os, "linux", "Image index must contain Linux images");
     const arch = entry.platform.architecture;
-    assert.ok(["amd64", "arm64"].includes(arch), `Unexpected image architecture: ${arch}`);
+    assert.ok(serverArchitectures.includes(arch), `Unexpected image architecture: ${arch}`);
     assert.equal(result[arch], undefined, `Duplicate image architecture: ${arch}`);
     result[arch] = entry.digest;
   }
@@ -102,8 +114,7 @@ function packageFiles(directory) {
       ["agent", target],
       ["cli", target],
     ]),
-    ["server", "linux-amd64"],
-    ["server", "linux-arm64"],
+    ...serverArchitectures.map((arch) => ["server", `linux-${arch}`]),
   ].map(([kind, target]) => join(directory, packageNames(kind, version, target).archive));
 }
 function checksum(file) {
@@ -111,13 +122,13 @@ function checksum(file) {
 }
 function loadImages() {
   const images = {};
-  for (const arch of ["amd64", "arm64"]) {
+  for (const arch of serverArchitectures) {
     run("docker", [
       "load",
       "--input",
-      join(root, "dist/releases", `kiteline-server-${version}-${arch}.tar`),
+      join(root, "dist/releases", serverImageArchive(version, arch)),
     ]);
-    const local = `kiteline-server:${version}-${arch}`;
+    const local = serverImageName(version, arch);
     images[arch] = JSON.parse(capture("docker", ["image", "inspect", local]))[0].Id;
   }
   return images;
@@ -197,17 +208,15 @@ function commitLog() {
 }
 
 function candidate(temporary) {
+  const composeText = candidateCompose(
+    readFileSync(join(root, "deploy/compose.yaml"), "utf8"),
+    version,
+  );
   let release = findRelease();
   assert.ok(!release || release.draft, `Release ${tag} is already published; cannot rebuild it`);
   const packages = packageFiles(join(root, "dist/releases"));
   const compose = join(temporary, "compose.yaml");
-  writeFileSync(
-    compose,
-    readFileSync(join(root, "deploy/compose.yaml"), "utf8").replace(
-      /\$\{KITELINE_VERSION:\?[^}]*\}/,
-      `\${KITELINE_VERSION:-${version}}`,
-    ),
-  );
+  writeFileSync(compose, composeText);
   const sums = join(temporary, "SHA256SUMS");
   writeFileSync(sums, [...packages, compose].map(checksum).sort().join(""));
   const images = loadImages();

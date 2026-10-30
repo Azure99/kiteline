@@ -8,6 +8,7 @@
     "licenses"
   ],
   "exports": {
+    "./artifacts": "./dist/artifacts.js",
     "./template": "./dist/template.js",
     "./protocol": "./dist/protocol/index.js",
     "./protocol/navigation": "./dist/protocol/navigation.js",

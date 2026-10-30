@@ -1,19 +1,16 @@
-export const cliTargets = [
-  "linux-amd64",
-  "linux-arm64",
-  "macos-amd64",
-  "macos-arm64",
-  "windows-amd64",
-] as const;
+import { agentTargets, packageNames } from "@kiteline/shared/artifacts";
+import { powershellQuote, shellQuote } from "@kiteline/shared/template";
+
+export const cliTargets = agentTargets;
 export type CliTarget = (typeof cliTargets)[number];
 export type CliShell = "unix" | "powershell";
 
-export function cliEntry(shell: CliShell) {
+function cliEntry(shell: CliShell) {
   return shell === "powershell" ? "kiteline.ps1" : "kiteline";
 }
 
-export function quoteArgument(value: string, shell: CliShell) {
-  return `'${value.replaceAll("'", shell === "powershell" ? "''" : "'\\''")}'`;
+function quoteArgument(value: string, shell: CliShell) {
+  return (shell === "powershell" ? powershellQuote : shellQuote)(value);
 }
 
 export function loginCommand(origin: string, shell: CliShell) {
@@ -30,8 +27,8 @@ export function attachCommand(
 }
 
 export function cliDownload(version: string, target: CliTarget) {
-  const extension = target === "windows-amd64" ? "zip" : "tar.gz";
-  return `https://github.com/Azure99/kiteline/releases/download/v${version}/kiteline-cli-${version}-${target}.${extension}`;
+  const { archive } = packageNames("cli", version, target);
+  return `https://github.com/Azure99/kiteline/releases/download/v${version}/${archive}`;
 }
 
 export function cliGuide(version: string, target: CliTarget, language: string) {

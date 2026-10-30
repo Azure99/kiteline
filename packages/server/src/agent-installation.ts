@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
+import { agentTargets, packageNames } from "@kiteline/shared/artifacts";
 import { resourceDirectory } from "@kiteline/shared/node/paths";
 import { powershellQuote, renderValues, shellQuote } from "@kiteline/shared/template";
 import { AppError, appVersion } from "@kiteline/shared/protocol";
@@ -16,6 +17,14 @@ const upgradeTemplate = readFileSync(resolve(resourceDirectory, "installer/upgra
 const windowsTemplate = readFileSync(
   resolve(resourceDirectory, "installer/windows-entry.in.ps1"),
   "utf8",
+);
+const agentDownloads = new Map<string, string>(
+  agentTargets.flatMap((target) => {
+    const { archive } = packageNames("agent", appVersion, target);
+    return [archive, `${archive}.sha256`].map(
+      (filename) => [`/downloads/agent/${appVersion}/${filename}`, filename] as const,
+    );
+  }),
 );
 const windowsLauncher =
   "(Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'kiteline-agent/kiteline-agent.ps1')";
@@ -132,17 +141,9 @@ export async function serveAgentInstallation(
     response.end(request.method === "HEAD" ? undefined : script);
     return true;
   }
-  let filename = ["/install.sh", "/install.ps1"].includes(path) ? path.slice(1) : undefined;
-  for (const platform of ["linux", "macos"])
-    for (const arch of ["amd64", "arm64"])
-      for (const suffix of [".tar.gz", ".tar.gz.sha256"]) {
-        const name = `kiteline-agent-${appVersion}-${platform}-${arch}${suffix}`;
-        if (path === `/downloads/agent/${appVersion}/${name}`) filename = name;
-      }
-  for (const suffix of [".zip", ".zip.sha256"]) {
-    const name = `kiteline-agent-${appVersion}-windows-amd64${suffix}`;
-    if (path === `/downloads/agent/${appVersion}/${name}`) filename = name;
-  }
+  const filename = ["/install.sh", "/install.ps1"].includes(path)
+    ? path.slice(1)
+    : agentDownloads.get(path);
   if (!filename) throw new AppError("not_found", "Installation resource not found");
   const file = await open(resolve(directory, filename), "r").catch(
     (error: NodeJS.ErrnoException) => {

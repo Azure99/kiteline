@@ -7,6 +7,7 @@ import {
   expectedRelease,
   packageNames,
   releaseMatches,
+  serverArchitectures,
   sourceCommit,
   staticNodeInput,
 } from "./release-artifacts.mjs";
@@ -25,8 +26,11 @@ const directory = realpathSync(directoryPath);
 const inputs = json(join(source, "release/inputs.json"));
 const { version } = json(join(source, "packages/shared/src/version.json"));
 const [platform, arch] = target.split("-");
-assert.ok(["linux", "macos", "windows"].includes(platform) && inputs.nodeArchives[arch]);
-assert.ok(kind === "server" ? platform === "linux" : agentTargets.includes(target));
+assert.ok(
+  kind === "server"
+    ? platform === "linux" && serverArchitectures.includes(arch)
+    : agentTargets.includes(target),
+);
 const { name, archive: filename } = packageNames(kind, version, target);
 assert.equal(basename(directory), name);
 assert.equal(basename(archive), filename);

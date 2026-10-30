@@ -231,7 +231,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
-          $version = node -p 'require("./packages/shared/src/version.json").version'
+          $version = (Get-Content -Raw packages/shared/src/version.json | ConvertFrom-Json).version
           $name = "kiteline-agent-$version-windows-amd64"
           $archive = "dist/releases/$name.zip"
           $root = Join-Path $env:RUNNER_TEMP 'kiteline-ci'
@@ -297,33 +297,40 @@ jobs:
           sudo apt-get install -y --no-install-recommends libarchive-tools
           corepack enable pnpm
           pnpm install --frozen-lockfile
-          echo "VERSION=$(node -p 'require("./packages/shared/src/version.json").version')" >> "$GITHUB_ENV"
+          version=$(node -p 'require("./packages/shared/src/version.json").version')
+          server="kiteline-server-$version-linux-$ARCH"
+          agent="kiteline-agent-$version-linux-amd64"
+          {
+            echo "SERVER_NAME=$server"
+            echo "SERVER_ARCHIVE=$server.tar.gz"
+            echo "SERVER_IMAGE=kiteline-server:$version-$ARCH"
+            echo "SERVER_IMAGE_ARCHIVE=kiteline-server-$version-$ARCH.tar"
+            echo "AGENT_NAME=$agent"
+            echo "AGENT_ARCHIVE=$agent.tar.gz"
+          } >> "$GITHUB_ENV"
       - name: Build and verify the server package
         run: |
           set -euo pipefail
           pnpm package server "$ARCH"
-          name="kiteline-server-$VERSION-linux-$ARCH"
-          tar -xf "dist/releases/$name.tar.gz" -C /var/tmp/kiteline-ci
-          package="/var/tmp/kiteline-ci/$name"
-          node scripts/verify-package.mjs server "linux-$ARCH" "dist/releases/$name.tar.gz" "$package"
+          tar -xf "dist/releases/$SERVER_ARCHIVE" -C /var/tmp/kiteline-ci
+          package="/var/tmp/kiteline-ci/$SERVER_NAME"
+          node scripts/verify-package.mjs server "linux-$ARCH" "dist/releases/$SERVER_ARCHIVE" "$package"
           terminal=()
           if [[ "$ARCH" == amd64 ]]; then
-            agent="kiteline-agent-$VERSION-linux-amd64"
-            tar -xf "dist/releases/$agent.tar.gz" -C /var/tmp/kiteline-ci
-            terminal=(--agent="/var/tmp/kiteline-ci/$agent")
+            tar -xf "dist/releases/$AGENT_ARCHIVE" -C /var/tmp/kiteline-ci
+            terminal=(--agent="/var/tmp/kiteline-ci/$AGENT_NAME")
           fi
           node scripts/verify-server.mjs "$package" /var/tmp/kiteline-ci/server-check "${terminal[@]}"
       - name: Build and verify the actual image
         run: |
           set -euo pipefail
           pnpm images "$ARCH"
-          node scripts/verify-server.mjs "/var/tmp/kiteline-ci/kiteline-server-$VERSION-linux-$ARCH" /var/tmp/kiteline-ci/image-check --image="kiteline-server:$VERSION-$ARCH"
+          node scripts/verify-server.mjs "/var/tmp/kiteline-ci/$SERVER_NAME" /var/tmp/kiteline-ci/image-check --image="$SERVER_IMAGE"
       - name: Export verified image for transfer
         if: inputs.image-artifacts
         run: |
           set -euo pipefail
-          name="kiteline-server-$VERSION-$ARCH.tar"
-          docker save --output "dist/releases/$name" "kiteline-server:$VERSION-$ARCH"
+          docker save --output "dist/releases/$SERVER_IMAGE_ARCHIVE" "$SERVER_IMAGE"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: delivery-server-${{ matrix.arch }}
