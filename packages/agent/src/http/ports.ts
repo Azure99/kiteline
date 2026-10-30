@@ -6,19 +6,27 @@ import { promisify } from "node:util";
 import { AppError, type ListeningPorts } from "@kiteline/shared/protocol";
 import { windowsNative } from "@kiteline/shared/windows/native";
 
-export function listeningPort(line: string, ipv6: boolean): number | undefined {
+export function listeningPort(line: string, family: "ipv4" | "ipv6"): number | undefined {
+  const ipv6 = family === "ipv6";
   const fields = line.trim().split(/\s+/);
   if (!/^\d+:$/.test(fields[0] ?? "") || fields.length < 4)
     throw new AppError("io_error", "Cannot parse the device listening port");
-  const local = /^([0-9A-F]+):([0-9A-F]{4})$/i.exec(fields[1]!);
-  if (!local || local[1]!.length !== (ipv6 ? 32 : 8) || !/^[0-9A-F]{2}$/i.test(fields[3]!))
+  const localAddress = /^([0-9A-F]+):([0-9A-F]{4})$/i.exec(fields[1]!);
+  const tcpState = fields[3]!;
+  if (
+    !localAddress ||
+    localAddress[1]!.length !== (ipv6 ? 32 : 8) ||
+    !/^[0-9A-F]{2}$/i.test(tcpState)
+  )
     throw new AppError("io_error", "Cannot parse the device listening address");
-  if (fields[3]!.toUpperCase() !== "0A") return;
-  const addresses = ipv6
-    ? ["00000000000000000000000000000000", "00000000000000000000000001000000"]
-    : ["00000000", "0100007F"];
-  if (addresses.includes(local[1]!.toUpperCase())) {
-    const port = Number.parseInt(local[2]!, 16);
+  const listenState = "0A";
+  if (tcpState.toUpperCase() !== listenState) return;
+  const [, addressHex, portHex] = localAddress;
+  const wildcardAddress = ipv6 ? "00000000000000000000000000000000" : "00000000";
+  const loopbackAddress = ipv6 ? "00000000000000000000000001000000" : "0100007F";
+  const address = addressHex!.toUpperCase();
+  if (address === wildcardAddress || address === loopbackAddress) {
+    const port = Number.parseInt(portHex!, 16);
     if (port) return port;
   }
 }
@@ -27,12 +35,14 @@ export function macosListeningPort(line: string): number | undefined {
   if (!line.trim() || /^Active Internet connections|^Proto\s/.test(line)) return;
   const fields = /^tcp(?:4|6|46)\s+\d+\s+\d+\s+(\S+)\s+\S+\s+(\S+)\s*$/.exec(line);
   if (!fields) throw new AppError("io_error", "Cannot parse the device listening port");
-  if (fields[2] !== "LISTEN") return;
-  const address = /^(.*)\.(\d+)$/.exec(fields[1]!);
-  const port = Number(address?.[2]);
+  const [, localAddress, tcpState] = fields;
+  if (tcpState !== "LISTEN") return;
+  const address = /^(.*)\.(\d+)$/.exec(localAddress!);
+  const [, host, portText] = address ?? [];
+  const port = Number(portText);
   if (!address || !Number.isInteger(port) || port < 1 || port > 65535)
     throw new AppError("io_error", "Cannot parse the device listening address");
-  if (["*", "127.0.0.1", "::1"].includes(address[1]!)) return port;
+  if (["*", "127.0.0.1", "::1"].includes(host!)) return port;
 }
 
 export async function listeningPorts(signal: AbortSignal): Promise<ListeningPorts> {
@@ -69,9 +79,11 @@ export async function listeningPorts(signal: AbortSignal): Promise<ListeningPort
     };
   }
   let truncated = false;
-  for (const ipv6 of [false, true]) {
+  for (const family of ["ipv4", "ipv6"] as const) {
     signal.throwIfAborted();
-    const stream = createReadStream(ipv6 ? "/proc/net/tcp6" : "/proc/net/tcp", { signal });
+    const stream = createReadStream(family === "ipv6" ? "/proc/net/tcp6" : "/proc/net/tcp", {
+      signal,
+    });
     const lines = createInterface({ input: stream, crlfDelay: Infinity });
     let error: NodeJS.ErrnoException | undefined;
     stream.on("error", (reason) => {
@@ -87,7 +99,7 @@ export async function listeningPorts(signal: AbortSignal): Promise<ListeningPort
           continue;
         }
         if (!line.trim()) continue;
-        const port = listeningPort(line, ipv6);
+        const port = listeningPort(line, family);
         if (port !== undefined && !ports.has(port)) {
           if (ports.size === agentLimits.listPageEntries) {
             truncated = true;
@@ -100,7 +112,7 @@ export async function listeningPorts(signal: AbortSignal): Promise<ListeningPort
       if (error) throw error;
     } catch (reason) {
       signal.throwIfAborted();
-      if (!(ipv6 && (reason as NodeJS.ErrnoException).code === "ENOENT")) throw reason;
+      if (!(family === "ipv6" && (reason as NodeJS.ErrnoException).code === "ENOENT")) throw reason;
     } finally {
       lines.close();
       stream.destroy();

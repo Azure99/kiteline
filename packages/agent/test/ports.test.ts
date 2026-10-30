@@ -9,12 +9,12 @@ import { listeningPort, listeningPorts, macosListeningPort } from "../src/http/p
 
 test("only loopback and wildcard TCP LISTEN addresses become suggestions", () => {
   const row = (address: string, state = "0A") => `  0: ${address}:14B3 00000000:0000 ${state} `;
-  expect(listeningPort(row("0100007F"), false)).toBe(5299);
-  expect(listeningPort(row("00000000"), false)).toBe(5299);
-  expect(listeningPort(row("0200007F"), false)).toBeUndefined();
-  expect(listeningPort(row("0100007F", "01"), false)).toBeUndefined();
-  expect(listeningPort(row("00000000000000000000000001000000"), true)).toBe(5299);
-  expect(() => listeningPort("unexpected data", false)).toThrow("Cannot parse");
+  expect(listeningPort(row("0100007F"), "ipv4")).toBe(5299);
+  expect(listeningPort(row("00000000"), "ipv4")).toBe(5299);
+  expect(listeningPort(row("0200007F"), "ipv4")).toBeUndefined();
+  expect(listeningPort(row("0100007F", "01"), "ipv4")).toBeUndefined();
+  expect(listeningPort(row("00000000000000000000000001000000"), "ipv6")).toBe(5299);
+  expect(() => listeningPort("unexpected data", "ipv4")).toThrow("Cannot parse");
 });
 test("macOS netstat suggestions retain only loopback and wildcard TCP listeners", () => {
   const row = (address: string, state = "LISTEN") => `tcp4 0 0 ${address} *.* ${state}`;

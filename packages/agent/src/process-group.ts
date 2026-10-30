@@ -11,33 +11,40 @@ async function groupRunning(pid: number) {
     if (process.platform !== "darwin" || (error as NodeJS.ErrnoException).code !== "EPERM")
       throw error;
   }
-  if (process.platform === "darwin") {
-    const { stdout, stderr } = await promisify(execFile)(
-      "/bin/ps",
-      ["-ax", "-o", "pgid=", "-o", "stat="],
-      {
-        env: { ...process.env, LC_ALL: "C" },
-        timeout: 2000,
-        killSignal: "SIGKILL",
-        maxBuffer: 4 * 1024 * 1024,
-      },
-    );
-    if (stderr.trim() || !stdout.trim()) throw new Error("Cannot read the process group snapshot");
-    let running = false;
-    for (const line of stdout.trim().split("\n")) {
-      const fields = /^\s*(\d+)\s+([A-Z])\S*\s*$/.exec(line);
-      if (!fields) throw new Error("Cannot parse the process group snapshot");
-      if (Number(fields[1]) === pid && fields[2] !== "Z") running = true;
-    }
-    return running;
+  return process.platform === "darwin" ? darwinGroupRunning(pid) : linuxGroupRunning(pid);
+}
+
+async function darwinGroupRunning(pid: number) {
+  const { stdout, stderr } = await promisify(execFile)(
+    "/bin/ps",
+    ["-ax", "-o", "pgid=", "-o", "stat="],
+    {
+      env: { ...process.env, LC_ALL: "C" },
+      timeout: 2000,
+      killSignal: "SIGKILL",
+      maxBuffer: 4 * 1024 * 1024,
+    },
+  );
+  if (stderr.trim() || !stdout.trim()) throw new Error("Cannot read the process group snapshot");
+  let running = false;
+  for (const line of stdout.trim().split("\n")) {
+    const fields = /^\s*(\d+)\s+([A-Z])\S*\s*$/.exec(line);
+    if (!fields) throw new Error("Cannot parse the process group snapshot");
+    const [, processGroup, state] = fields;
+    if (Number(processGroup) === pid && state !== "Z") running = true;
   }
+  return running;
+}
+
+async function linuxGroupRunning(pid: number) {
   // Linux keeps exited descendants as zombies until their parent reaps them.
   for (const name of await readdir("/proc")) {
     if (!/^\d+$/.test(name)) continue;
     try {
       const value = await readFile(`/proc/${name}/stat`, "utf8");
-      const fields = value.slice(value.lastIndexOf(")") + 2).split(" ");
-      if (Number(fields[2]) === pid && fields[0] !== "Z" && fields[0] !== "X") return true;
+      // state, ppid, and pgrp follow the final parenthesis of comm.
+      const [state, , processGroup] = value.slice(value.lastIndexOf(")") + 2).split(" ");
+      if (Number(processGroup) === pid && state !== "Z" && state !== "X") return true;
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== "ENOENT" && code !== "ESRCH") throw error;
