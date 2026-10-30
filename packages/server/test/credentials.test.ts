@@ -81,7 +81,7 @@ async function fixture() {
   return { ...base, owner, ownerHeaders, call, credential, events, refusedSocket };
 }
 
-test("API admission preserves Origin, identity, version and family error precedence", async () => {
+test("API admission preserves Origin, identity, version and matched-route error precedence", async () => {
   const f = await fixture();
   const selected = f.store.bind(f.store.newBinding().code, "Selected device");
   const outside = f.store.bind(f.store.newBinding().code, "Outside scope");
@@ -119,15 +119,15 @@ test("API admission preserves Origin, identity, version and family error precede
       method: "PUT",
       path: webPath("/api/credentials"),
       headers: { origin: f.origin, ...cli },
-      status: 403,
-      code: "forbidden",
+      status: 404,
+      code: "not_found",
     },
     {
       method: "GET",
       path: webPath(`/api/devices/${outside.deviceId}/unknown`),
       headers: cli,
-      status: 403,
-      code: "forbidden",
+      status: 404,
+      code: "not_found",
     },
     {
       method: "DELETE",
@@ -147,8 +147,8 @@ test("API admission preserves Origin, identity, version and family error precede
       method: "GET",
       path: webPath("/api/devices/%/unknown"),
       headers: cli,
-      status: 400,
-      code: "invalid_argument",
+      status: 404,
+      code: "not_found",
     },
     {
       method: "PATCH",

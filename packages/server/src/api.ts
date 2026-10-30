@@ -46,10 +46,6 @@ type ApiRoute =
     }
   | AuthenticatedRoute;
 
-function notFound(): never {
-  throw new AppError("not_found", "API endpoint not found");
-}
-
 export function createApiHandler(config: ServerConfig, store: Store, connections: Connections) {
   const channels = connections.channels;
   const authenticationLimiter = new AttemptLimiter();
@@ -168,7 +164,6 @@ export function createApiHandler(config: ServerConfig, store: Store, connections
             );
           },
         };
-      return { identity: "owner", version: "required", body: "none", handle: notFound };
     }
     const credential = /^\/api\/credentials\/([^/]+)$/.exec(path);
     if (credential && method === "DELETE")
@@ -353,15 +348,15 @@ export function createApiHandler(config: ServerConfig, store: Store, connections
               found: connections.cancel(deviceId, decodePath(cancel[1]!), login.id),
             }),
         };
-      return {
-        identity: "login",
-        version: "required",
-        rawDeviceId,
-        body: "none",
-        handle: notFound,
-      };
     }
-    return { identity: "login", version: "required", body: "none", handle: notFound };
+    return {
+      identity: "login",
+      version: "required",
+      body: "none",
+      handle: () => {
+        throw new AppError("not_found", "API endpoint not found");
+      },
+    };
   }
 
   return async function serveApi(

@@ -205,7 +205,7 @@ Git 方法由 [`git/rpc.ts`](../../packages/agent/src/git/rpc.ts) 解释参数�
 
 ### 添加 HTTP 路由
 
-普通 API 在 `packages/server/src/api.ts` 中按 method/path 声明身份、版本和正文策略，并在同处实现 handler。统一准入边界执行 Origin、登录、版本、设备范围和 owner 检查；受认证 JSON 在读完正文后复验同一登录，再解释业务字段。匹配结果也为未知方法或后缀保留相应的家族级前置检查。公开接口合同见 [HTTP 接口](protocol.md#http-接口)。
+普通 API 在 `packages/server/src/api.ts` 中按 method/path 声明身份、版本和正文策略，并在同处实现 handler。统一准入边界执行 Origin、登录、版本，以及匹配路由要求的设备范围和 owner 检查；受认证 JSON 在读完正文后复验同一登录，再解释业务字段。公开接口合同见 [HTTP 接口](protocol.md#http-接口)。
 
 安装资源、Agent 绑定、静态文件及 WebSocket/proxy 入口由 `packages/server/src/app.ts` 分流，保留各自的准入与传输顺序。路径不在 `/api/` 下时，还须考虑 `packages/web/vite.config.ts` 的开发代理前缀。
 
