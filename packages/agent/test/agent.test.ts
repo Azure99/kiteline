@@ -207,6 +207,88 @@ test.each([401, 426])(
   },
 );
 
+test.each([
+  {
+    name: "HTML uses the status hint",
+    body: "<html>Proxy refused the connection</html>",
+    diagnostic: "Check the device binding and credentials.",
+    version: "r12c-original",
+  },
+  {
+    name: "invalid version details preserve the parsed message and previous version",
+    body: JSON.stringify({
+      error: { code: "version_mismatch", message: "Matching version required", details: {} },
+    }),
+    diagnostic: "Matching version required",
+    version: "r12c-original",
+  },
+  {
+    name: "a parseable bounded prefix survives the discarded overflow chunk",
+    body:
+      JSON.stringify({
+        error: {
+          code: "version_mismatch",
+          message: "Bounded diagnostic",
+          details: { serverVersion: "r12c-prefix" },
+        },
+      }).padEnd(limits.controlMessageBytes, " ") + "invalid suffix",
+    diagnostic: "Bounded diagnostic",
+    version: "r12c-prefix",
+  },
+])("control rejection: $name", async ({ body, diagnostic, version }) => {
+  const root = await mkdtemp("/var/tmp/kiteline-rejection-body-");
+  const server = createHttpServer();
+  const sockets = new WebSocketServer({ noServer: true });
+  let reject = false;
+  server.on("upgrade", (request, socket, head) => {
+    if (reject)
+      socket.end(
+        `HTTP/1.1 401 Rejected\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`,
+      );
+    else sockets.handleUpgrade(request, socket, head, (peer) => sockets.emit("connection", peer));
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const agent = new Agent(testConfig(root), {
+    deviceId: "rejection-body",
+    deviceToken: "rejection-body",
+    server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+  });
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const connected = once(sockets, "connection");
+    for (const path of [agent.config.dataDir, agent.config.runDir]) await privateDirectory(path);
+    await agent.start();
+    const [peer] = (await connected) as [WebSocket];
+    let welcomed = false;
+    peer.on("message", (data) => {
+      if (JSON.parse(data.toString()).type === "tasks.snapshot") welcomed = true;
+    });
+    peer.send(
+      JSON.stringify({ type: "welcome", connectionId: "body", serverVersion: "r12c-original" }),
+    );
+    await expect.poll(() => welcomed).toBe(true);
+    reject = true;
+    peer.close();
+    await expect
+      .poll(() => logged.mock.calls.some((args) => args[1] === `HTTP 401. ${diagnostic}`), {
+        timeout: 4000,
+      })
+      .toBe(true);
+    const report = await localRequest<DoctorReport>(agent.config, "doctor");
+    const detail = report.items.find((item) => item.name === "server")?.detail;
+    expect(detail).toContain(`HTTP 401. ${diagnostic}`);
+    expect(detail).toContain(`last server version=${version}`);
+  } finally {
+    await agent.close();
+    logged.mockRestore();
+    for (const peer of sockets.clients) peer.terminate();
+    await new Promise<void>((resolve) => sockets.close(() => resolve()));
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("control reconnects after handshake rejection, retains valid watches and scopes remote session end", async () => {
   const root = await mkdtemp("/var/tmp/kiteline-agent-control-");
   let agent: Agent | undefined;
@@ -432,6 +514,18 @@ test("copy, move and delete outlive the RPC timeout and still cancel while publi
     deviceToken: "test",
     server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
   });
+  let workspaceId: string;
+  const signals = new Map<string, AbortSignal>();
+  const signalFor = (kind: string, inputs: unknown) => signals.get(JSON.stringify([kind, inputs]));
+  const run = FileOperations.prototype.run;
+  const observed = vi.spyOn(FileOperations.prototype, "run").mockImplementation(function (
+    this: FileOperations,
+    ...args
+  ) {
+    const [kind, id, inputs, signal] = args;
+    if (id === workspaceId) signals.set(JSON.stringify([kind, inputs]), signal);
+    return run.apply(this, args);
+  });
   let release: (() => void) | undefined;
   let held: Promise<void> | undefined;
   const hold = async () => {
@@ -449,6 +543,7 @@ test("copy, move and delete outlive the RPC timeout and still cancel while publi
     await mkdir(join(root, "workspace"));
     await writeFile(join(root, "workspace/source"), "actual copy");
     const workspace = await agent.metadata.add(join(root, "workspace"));
+    workspaceId = workspace.id;
     const connected = once(sockets, "connection");
     for (const path of [agent.config.dataDir, agent.config.runDir]) await privateDirectory(path);
     await agent.start();
@@ -495,10 +590,15 @@ test("copy, move and delete outlive the RPC timeout and still cancel while publi
           params: { workspaceId: workspace.id, ...operation.params },
         }),
       );
-      await expect.poll(() => agent.requests.has(id)).toBe(true);
+      const signal = () =>
+        signalFor(
+          operation.method.slice("files.".length),
+          operation.params.items ?? operation.params.paths,
+        );
+      await expect.poll(signal).toBeDefined();
       await new Promise((resolve) => setTimeout(resolve, 200));
       expect(replies.some((reply) => reply.id === id)).toBe(false);
-      expect(agent.requests.get(id)!.signal.aborted).toBe(false);
+      expect(signal()!.aborted).toBe(false);
       release!();
       await held;
       await expect
@@ -516,19 +616,22 @@ test("copy, move and delete outlive the RPC timeout and still cancel while publi
 
     await hold();
     copy("cancelled");
-    await expect.poll(() => agent.requests.has("cancelled")).toBe(true);
+    const copySignal = (targetPath: string) =>
+      signalFor("copy", [{ path: "source", targetPath, collision: "error" }]);
+    await expect.poll(() => copySignal("cancelled")).toBeDefined();
     peer.send(JSON.stringify({ type: "rpc.cancel", id: "cancelled" }));
     await expect
       .poll(() => replies.find((reply) => reply.id === "cancelled"))
       .toMatchObject({ outcome: "failed", error: { code: "cancelled" } });
+    expect(copySignal("cancelled")!.aborted).toBe(true);
     await expect(readFile(join(root, "workspace/cancelled"))).rejects.toMatchObject({
       code: "ENOENT",
     });
 
     copy("disconnected");
-    await expect.poll(() => agent.requests.has("disconnected")).toBe(true);
+    await expect.poll(() => copySignal("disconnected")).toBeDefined();
     peer.close();
-    await expect.poll(() => agent.requests.has("disconnected")).toBe(false);
+    await expect.poll(() => copySignal("disconnected")!.aborted).toBe(true);
     release!();
     await held;
     await expect(readFile(join(root, "workspace/disconnected"))).rejects.toMatchObject({
@@ -538,6 +641,7 @@ test("copy, move and delete outlive the RPC timeout and still cancel while publi
     release?.();
     await held;
     await agent.close();
+    observed.mockRestore();
     for (const peer of sockets.clients) peer.terminate();
     await new Promise<void>((resolve) => sockets.close(() => resolve()));
     await new Promise<void>((resolve) => server.close(() => resolve()));

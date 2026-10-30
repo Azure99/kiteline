@@ -1,4 +1,5 @@
 import { WebSocket } from "ws";
+import type { IncomingMessage } from "node:http";
 import { controlWritable, heartbeat } from "@kiteline/shared/protocol/ws";
 import {
   AppError,
@@ -52,6 +53,41 @@ const localSessionMethods = new Set<string>([
   "sessions.list",
   "sessions.create",
 ] satisfies readonly RpcMethod[]);
+const reconnectBaseDelayMs = 1000;
+const reconnectMaxDelayMs = 30000;
+const reconnectJitterMs = 300;
+
+async function readRejection(response: IncomingMessage) {
+  let diagnostic = "Check the server URL and reverse proxy.";
+  if (response.statusCode === 426)
+    diagnostic = "Install the agent version provided by this server.";
+  else if (response.statusCode === 401) diagnostic = "Check the device binding and credentials.";
+  let serverVersion: string | undefined;
+  try {
+    const parts: Buffer[] = [];
+    let size = 0;
+    for await (const chunk of response) {
+      size += chunk.length;
+      if (size > limits.controlMessageBytes) break;
+      parts.push(Buffer.from(chunk));
+    }
+    const error = record(record(JSON.parse(Buffer.concat(parts).toString())).error);
+    diagnostic = string(error.message);
+    if (error.code === "version_mismatch")
+      serverVersion = string(record(error.details).serverVersion);
+  } catch {
+    // A reverse proxy may return an HTML error instead of the server diagnostic.
+  }
+  return { diagnostic, serverVersion };
+}
+
+async function finishCleanup(actions: (() => unknown)[], message: string) {
+  const results = await Promise.allSettled(actions.map(async (action) => action()));
+  const errors = results
+    .filter((result) => result.status === "rejected")
+    .map((result) => result.reason as unknown);
+  if (errors.length) throw new AggregateError(errors, message);
+}
 
 export class Agent {
   readonly metadata: MetadataStore;
@@ -70,7 +106,7 @@ export class Agent {
   private readonly terminalChannels: TerminalChannels;
   private readonly fileChannels: FileChannels;
   private readonly httpChannels: HttpChannels;
-  readonly requests = new Map<string, AbortController>();
+  private readonly requests = new Map<string, AbortController>();
   private readonly inflight = new Set<Promise<unknown>>();
   socket?: WebSocket;
   private connectionId?: string;
@@ -80,7 +116,7 @@ export class Agent {
   private stopped = false;
   private starting?: Promise<void>;
   private closing?: Promise<void>;
-  private delay = 1000;
+  private delay = reconnectBaseDelayMs;
   private readonly notifyWritten = (workspaceId: string) => this.watches.notifyWritten(workspaceId);
   constructor(
     readonly config: AgentConfig,
@@ -216,34 +252,12 @@ export class Agent {
     });
     socket.on("unexpected-response", (_request, response) => {
       unauthorized = response.statusCode === 401;
-      const hint =
-        response.statusCode === 426
-          ? "Install the agent version provided by this server."
-          : response.statusCode === 401
-            ? "Check the device binding and credentials."
-            : "Check the server URL and reverse proxy.";
-      void (async () => {
-        let diagnostic = hint;
-        try {
-          const parts: Buffer[] = [];
-          let size = 0;
-          for await (const chunk of response) {
-            size += chunk.length;
-            if (size > limits.controlMessageBytes) break;
-            parts.push(Buffer.from(chunk));
-          }
-          const error = record(record(JSON.parse(Buffer.concat(parts).toString())).error);
-          diagnostic = string(error.message);
-          if (error.code === "version_mismatch")
-            this.serverVersion = string(record(error.details).serverVersion);
-        } catch {
-          // A reverse proxy may return an HTML error instead of the server diagnostic.
-        } finally {
-          this.connectionError = failure = `HTTP ${response.statusCode}. ${diagnostic}`;
-          console.error("Control connection:", this.connectionError);
-          socket.terminate();
-        }
-      })();
+      void readRejection(response).then(({ diagnostic, serverVersion }) => {
+        if (serverVersion !== undefined) this.serverVersion = serverVersion;
+        this.connectionError = failure = `HTTP ${response.statusCode}. ${diagnostic}`;
+        console.error("Control connection:", this.connectionError);
+        socket.terminate();
+      });
     });
     socket.on("message", (raw, binary) => {
       if (socket.readyState !== WebSocket.OPEN) return;
@@ -263,15 +277,9 @@ export class Agent {
       this.connectionId = undefined;
       for (const controller of this.requests.values())
         controller.abort(new AppError("cancelled", "Control connection interrupted"));
-      void this.watches.close();
-      void this.repos.close();
-      void this.terminalChannels
-        .close()
-        .catch((error: unknown) => console.error("Terminal channel cleanup failed:", error));
-      void this.fileChannels.close();
-      this.httpChannels.close();
-      void this.directories.close();
       if (this.stopped) return;
+      void this.closeConnectionChannels().catch((error: unknown) => console.error(error));
+      void this.releaseConnectionCaches().catch((error: unknown) => console.error(error));
       if (
         unauthorized ||
         code === controlCloseCodes.connectionReplaced ||
@@ -288,7 +296,7 @@ export class Agent {
       this.serverVersion = string(message.serverVersion);
       this.connectionId = string(message.connectionId);
       this.connectionError = undefined;
-      this.delay = 1000;
+      this.delay = reconnectBaseDelayMs;
       this.sendEvent({ type: "tasks.snapshot", ...this.schedules.snapshot() });
     } else if (message.type === "channel.open") {
       if (message.connectionId !== this.connectionId)
@@ -379,8 +387,11 @@ export class Agent {
       });
   }
   private scheduleReconnect() {
-    this.reconnect = setTimeout(() => this.connect(), this.delay + Math.random() * 300);
-    this.delay = Math.min(30_000, this.delay * 2);
+    this.reconnect = setTimeout(
+      () => this.connect(),
+      this.delay + Math.random() * reconnectJitterMs,
+    );
+    this.delay = Math.min(reconnectMaxDelayMs, this.delay * 2);
   }
   dispatch(
     method: string,
@@ -510,6 +521,22 @@ export class Agent {
     this.socket?.terminate();
     return (this.closing = this.finishClose());
   }
+  private closeConnectionChannels() {
+    return finishCleanup(
+      [
+        () => this.terminalChannels.close(),
+        () => this.httpChannels.close(),
+        () => this.fileChannels.close(),
+      ],
+      "Connection channel cleanup failed",
+    );
+  }
+  private releaseConnectionCaches() {
+    return finishCleanup(
+      [() => this.directories.close(), () => this.repos.close(), () => this.watches.close()],
+      "Connection cache cleanup failed",
+    );
+  }
   private async finishClose() {
     await this.starting?.catch(() => {});
     const errors: unknown[] = [];
@@ -522,20 +549,14 @@ export class Agent {
     };
     await Promise.all([
       finish(() => this.sessions.close()),
-      finish(() => this.terminalChannels.close()),
-      finish(() => this.httpChannels.close()),
+      finish(() => this.closeConnectionChannels()),
       finish(() => this.local.close()),
       finish(() => this.schedules.close()),
-      finish(() => this.fileChannels.close()),
       finish(() => this.fileOperations.close()),
       Promise.allSettled([...this.inflight]),
     ]);
     await finish(() => this.temporaryFiles.close());
-    await Promise.all([
-      finish(() => this.directories.close()),
-      finish(() => this.repos.close()),
-      finish(() => this.watches.close()),
-    ]);
+    await finish(() => this.releaseConnectionCaches());
     if (errors.length) throw new AggregateError(errors, "Agent cleanup failed");
   }
 }

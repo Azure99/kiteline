@@ -10,6 +10,11 @@ import { privateDirectory } from "../src/config.js";
 import { testConfig } from "./support/config.js";
 import { ScheduledTasks } from "../src/tasks/index.js";
 import { TemporaryFiles } from "../src/files/temporary.js";
+import { Directories } from "../src/files/directories.js";
+import { Repositories } from "../src/git/repos.js";
+import { TerminalChannels } from "../src/terminal/channels.js";
+import { FileChannels } from "../src/files/channels.js";
+import { HttpChannels } from "../src/http/channels.js";
 import {
   AppError,
   appVersion,
@@ -120,6 +125,12 @@ test("agent shutdown waits for cancelled bulk cleanup and its completion notific
     server: "https://localhost",
   });
   const changed = vi.spyOn(agent.watches, "notifyWritten").mockImplementation(() => {});
+  const temporaryClose = vi.spyOn(TemporaryFiles.prototype, "close");
+  const cacheClose = [
+    vi.spyOn(Directories.prototype, "close"),
+    vi.spyOn(Repositories.prototype, "close"),
+    vi.spyOn(agent.watches, "close"),
+  ];
   const controller = new AbortController();
   let resume!: () => void;
   const gate = new Promise<void>((resolve) => {
@@ -168,8 +179,12 @@ test("agent shutdown waits for cancelled bulk cleanup and its completion notific
     });
     await Promise.resolve();
     expect(closed).toBe(false);
+    expect(temporaryClose).not.toHaveBeenCalled();
+    for (const close of cacheClose) expect(close).not.toHaveBeenCalled();
     resume();
     await closing;
+    expect(temporaryClose).toHaveBeenCalledOnce();
+    for (const close of cacheClose) expect(close).toHaveBeenCalledOnce();
     expect(changed).toHaveBeenCalledExactlyOnceWith(workspace.id);
     expect((error as OperationError).result).toEqual(snapshot);
     await expect(access(join(root, "pending"))).rejects.toMatchObject({ code: "ENOENT" });
@@ -178,7 +193,224 @@ test("agent shutdown waits for cancelled bulk cleanup and its completion notific
     await agent.close();
     held.mockRestore();
     changed.mockRestore();
+    temporaryClose.mockRestore();
+    for (const close of cacheClose) close.mockRestore();
     await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("shutdown settles every cleanup phase and owns cleanup after socket termination", async () => {
+  const root = await mkdtemp("/var/tmp/kiteline-cleanup-phases-");
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  await once(server, "listening");
+  const agent = new Agent(testConfig(root), {
+    deviceId: "cleanup-phases",
+    deviceToken: "cleanup-phases",
+    server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+  });
+  let releaseChannels!: () => void;
+  const channelsHeld = new Promise<void>((resolve) => {
+    releaseChannels = resolve;
+  });
+  let releaseCaches!: () => void;
+  const cachesHeld = new Promise<void>((resolve) => {
+    releaseCaches = resolve;
+  });
+  const terminalFailure = new Error("Terminal cleanup fixture failure");
+  const httpFailure = new Error("HTTP cleanup fixture failure");
+  const directoryFailure = new Error("Directory cleanup fixture failure");
+  const terminalClose = TerminalChannels.prototype.close;
+  const terminal = vi.spyOn(TerminalChannels.prototype, "close").mockImplementation(async function (
+    this: TerminalChannels,
+  ) {
+    await terminalClose.call(this);
+    throw terminalFailure;
+  });
+  const httpClose = HttpChannels.prototype.close;
+  const http = vi.spyOn(HttpChannels.prototype, "close").mockImplementation(function (
+    this: HttpChannels,
+  ) {
+    httpClose.call(this);
+    throw httpFailure;
+  });
+  const fileClose = FileChannels.prototype.close;
+  const files = vi.spyOn(FileChannels.prototype, "close").mockImplementation(async function (
+    this: FileChannels,
+  ) {
+    await channelsHeld;
+    await fileClose.call(this);
+  });
+  const directoryClose = Directories.prototype.close;
+  const directories = vi.spyOn(Directories.prototype, "close").mockImplementation(async function (
+    this: Directories,
+  ) {
+    await directoryClose.call(this);
+    throw directoryFailure;
+  });
+  const repoClose = Repositories.prototype.close;
+  const repos = vi.spyOn(Repositories.prototype, "close").mockImplementation(async function (
+    this: Repositories,
+  ) {
+    await cachesHeld;
+    await repoClose.call(this);
+  });
+  const watches = vi.spyOn(agent.watches, "close");
+  const temporary = vi.spyOn(TemporaryFiles.prototype, "close");
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const connected = once(server, "connection");
+    for (const path of [agent.config.dataDir, agent.config.runDir]) await privateDirectory(path);
+    await agent.start();
+    const [peer] = (await connected) as [WebSocket];
+    await once(peer, "message");
+    const socketClosed = once(peer, "close");
+    let finished = false;
+    const closing = agent.close().catch((error: unknown) => {
+      finished = true;
+      return error;
+    });
+    await socketClosed;
+    await expect.poll(() => files.mock.calls.length).toBe(1);
+    expect(terminal).toHaveBeenCalledOnce();
+    expect(http).toHaveBeenCalledOnce();
+    expect(temporary).not.toHaveBeenCalled();
+    expect(directories).not.toHaveBeenCalled();
+    expect(repos).not.toHaveBeenCalled();
+    expect(watches).not.toHaveBeenCalled();
+    expect(finished).toBe(false);
+
+    releaseChannels();
+    await expect.poll(() => repos.mock.calls.length).toBe(1);
+    expect(temporary).toHaveBeenCalledOnce();
+    expect(directories).toHaveBeenCalledOnce();
+    expect(watches).toHaveBeenCalledOnce();
+    expect(finished).toBe(false);
+    releaseCaches();
+    const failure = await closing;
+    expect(failure).toBeInstanceOf(AggregateError);
+    const causes = (error: unknown): unknown[] =>
+      error instanceof AggregateError ? error.errors.flatMap(causes) : [error];
+    const errors = causes(failure);
+    expect(errors).toHaveLength(3);
+    expect(errors).toEqual(
+      expect.arrayContaining([terminalFailure, httpFailure, directoryFailure]),
+    );
+    for (const close of [terminal, http, files, temporary, directories, repos, watches])
+      expect(close).toHaveBeenCalledOnce();
+    expect(logged).not.toHaveBeenCalled();
+  } finally {
+    releaseChannels();
+    releaseCaches();
+    await agent.close().catch(() => {});
+    for (const spy of [terminal, http, files, temporary, directories, repos, watches, logged])
+      spy.mockRestore();
+    for (const peer of server.clients) peer.terminate();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("control disconnect reports cleanup failures without stopping local owners", async () => {
+  const root = await mkdtemp("/var/tmp/kiteline-disconnect-cleanup-");
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  await once(server, "listening");
+  const agent = new Agent(testConfig(root), {
+    deviceId: "disconnect-cleanup",
+    deviceToken: "disconnect-cleanup",
+    server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+  });
+  const failure = new Error("Disconnected HTTP cleanup fixture failure");
+  const httpClose = HttpChannels.prototype.close;
+  const http = vi.spyOn(HttpChannels.prototype, "close").mockImplementationOnce(function (
+    this: HttpChannels,
+  ) {
+    httpClose.call(this);
+    throw failure;
+  });
+  const files = vi.spyOn(FileChannels.prototype, "close");
+  const cacheFailure = new Error("Disconnected directory cleanup fixture failure");
+  const directoryClose = Directories.prototype.close;
+  const directories = vi
+    .spyOn(Directories.prototype, "close")
+    .mockImplementationOnce(async function (this: Directories) {
+      await directoryClose.call(this);
+      throw cacheFailure;
+    });
+  const sessionClose = vi.spyOn(agent.sessions, "close");
+  const taskClose = vi.spyOn(agent.schedules, "close");
+  const temporary = vi.spyOn(TemporaryFiles.prototype, "close");
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const add = agent.metadata.add.bind(agent.metadata);
+  const observed = vi.spyOn(agent.metadata, "add").mockImplementationOnce(async (...args) => {
+    await held;
+    return add(...args);
+  });
+  try {
+    const connected = once(server, "connection");
+    for (const path of [agent.config.dataDir, agent.config.runDir]) await privateDirectory(path);
+    await agent.start();
+    const [peer] = (await connected) as [WebSocket];
+    const operation = agent.dispatch(
+      "workspaces.add",
+      { absolutePath: root },
+      new AbortController().signal,
+    );
+    const reconnected = once(server, "connection");
+    peer.close();
+    await expect.poll(() => files.mock.calls.length).toBe(1);
+    await expect.poll(() => directories.mock.calls.length).toBe(1);
+    await expect
+      .poll(() =>
+        logged.mock.calls.some(
+          ([error]) => error instanceof AggregateError && error.errors.includes(failure),
+        ),
+      )
+      .toBe(true);
+    await expect
+      .poll(() =>
+        logged.mock.calls.some(
+          ([error]) => error instanceof AggregateError && error.errors.includes(cacheFailure),
+        ),
+      )
+      .toBe(true);
+    expect(sessionClose).not.toHaveBeenCalled();
+    expect(taskClose).not.toHaveBeenCalled();
+    expect(temporary).not.toHaveBeenCalled();
+    expect(await localRequest(agent.config, "sessions.list")).toEqual({ sessions: [] });
+    await localRequest(agent.config, "tasks.create", {
+      taskId: "after-disconnect",
+      input: {
+        name: "After disconnect",
+        command: "true",
+        cwd: root,
+        timezone: "UTC",
+        schedule: { kind: "cron", expression: "0 0 1 1 *" },
+      },
+    });
+    await reconnected;
+    release();
+    await expect(operation).resolves.toMatchObject({ path: root });
+  } finally {
+    release();
+    await agent.close();
+    for (const spy of [
+      http,
+      files,
+      directories,
+      sessionClose,
+      taskClose,
+      temporary,
+      logged,
+      observed,
+    ])
+      spy.mockRestore();
+    for (const peer of server.clients) peer.terminate();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(root, { recursive: true, force: true });
   }
 });
 
