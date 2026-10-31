@@ -184,7 +184,15 @@ export async function status(
   );
   for (const entry of entries)
     if (isUntracked(entry) && entry.path !== undefined) {
-      const info = await lstat(join(repo.rootPath, entry.path));
+      let info;
+      try {
+        info = await lstat(join(repo.rootPath, entry.path));
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT" && code !== "ENOTDIR") throw error;
+        entry.types.worktree = "absent";
+        continue;
+      }
       entry.types.worktree = info.isFile()
         ? "file"
         : info.isSymbolicLink()

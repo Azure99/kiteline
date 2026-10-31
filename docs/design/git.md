@@ -36,7 +36,7 @@
 
 - `git.status` 每次都完整读取机器格式的 Git status 并流式解析到结束（`packages/agent/src/git/status.ts`）：统计全仓库的 `totalCount`、`stagedCount` 和 `hasConflicts`，只保留从 `offset` 开始的一页（最多 `listPageEntries` 项，且不超过结果上限）。rename 的两个路径、同时有暂存和工作树变化的条目都只算一项。
 - 每个条目包含 index 和工作树两侧的状态与类型（类型由 porcelain 的 mode 得出）、冲突各 stage 的类型和子模块状态，字段见 `packages/shared/src/protocol/index.ts`。
-- 未跟踪项的类型只对当前页的合法路径用 `lstat` 取得；`lstat` 失败时整页读取失败。
+- 未跟踪项的类型只对当前页的合法路径用 `lstat` 取得；路径在 Git 列出后已不存在（`ENOENT` 或 `ENOTDIR`）时，类型记为 `absent`；其他 `lstat` 失败仍使整页读取失败。
 - 路径不是合法 UTF-8 的条目返回 `pathError`（`\xNN` 转义的诊断名），不返回 `path`，不能被选中，也不能跳转到文件工具；它仍参与计数、冲突判断和 token。rename 或 copy 任一端无效时整条无效。合法的 U+FFFD 字符是普通路径。
 - 结果还包括 HEAD 身份（`symbolicRef` 和 `oid`；未提交过时 `oid` 为 null，detached 时 `symbolicRef` 为 null）、upstream、ahead 和 behind，以及[进行中的操作](#冲突与进行中的操作)。
 - 结果预算按完整的最终 JSON 计算，超出时裁剪页尾；`nextOffset` 始终指向实际返回条目之后，`truncated` 由是否存在 `nextOffset` 决定。offset 前和页满后的条目仍检查单项上限，超限时整页失败。

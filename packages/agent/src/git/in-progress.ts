@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { constants } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -31,14 +32,22 @@ async function readMarkerDigest(gitDir: string, name: string, signal: AbortSigna
   const metadata = await readStateInfo(gitDir, name, signal);
   if (!metadata) return;
   if (!metadata.isFile()) throw new AppError("io_error", `${name} is not a regular state file`);
-  const file = await open(join(gitDir, name), "r");
-  const stream = file.createReadStream({ signal });
-  const digest = createHash("sha256");
+  const file = await open(
+    join(gitDir, name),
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  );
   try {
-    for await (const chunk of stream) digest.update(chunk as Buffer);
-    return digest.digest("hex");
+    if (!(await file.stat()).isFile())
+      throw new AppError("io_error", `${name} is not a regular state file`);
+    const stream = file.createReadStream({ signal });
+    const digest = createHash("sha256");
+    try {
+      for await (const chunk of stream) digest.update(chunk as Buffer);
+      return digest.digest("hex");
+    } finally {
+      stream.destroy();
+    }
   } finally {
-    stream.destroy();
     await file.close();
   }
 }
@@ -48,8 +57,10 @@ async function readSteps(gitDir: string, name: string, comment: string, signal: 
   const commands = new Set<string>();
   if (!metadata) return commands;
   if (!metadata.isFile()) throw new AppError("io_error", `${name} is not a regular step file`);
-  const file = await open(join(gitDir, name), "r");
-  const stream = file.createReadStream({ signal });
+  const file = await open(
+    join(gitDir, name),
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  );
   let pending: Buffer = Buffer.alloc(0);
   function line(bytes: Buffer) {
     const value = bytes
@@ -61,28 +72,34 @@ async function readSteps(gitDir: string, name: string, comment: string, signal: 
     commands.add(["pick", "p", "revert"].includes(word) ? word : "other");
   }
   try {
-    for await (const chunk of stream) {
-      signal.throwIfAborted();
-      const bytes = chunk as Buffer;
-      let start = 0;
-      while (start < bytes.length) {
-        const end = bytes.indexOf(10, start);
-        const part = bytes.subarray(start, end < 0 ? bytes.length : end);
-        if (pending.length + part.length > 64 * 1024)
-          throw new AppError(
-            "limit_exceeded",
-            `${name} contains a line exceeding the state read size limit`,
-          );
-        pending = pending.length ? Buffer.concat([pending, part]) : part;
-        if (end < 0) break;
-        line(pending);
-        pending = Buffer.alloc(0);
-        start = end + 1;
+    if (!(await file.stat()).isFile())
+      throw new AppError("io_error", `${name} is not a regular step file`);
+    const stream = file.createReadStream({ signal });
+    try {
+      for await (const chunk of stream) {
+        signal.throwIfAborted();
+        const bytes = chunk as Buffer;
+        let start = 0;
+        while (start < bytes.length) {
+          const end = bytes.indexOf(10, start);
+          const part = bytes.subarray(start, end < 0 ? bytes.length : end);
+          if (pending.length + part.length > 64 * 1024)
+            throw new AppError(
+              "limit_exceeded",
+              `${name} contains a line exceeding the state read size limit`,
+            );
+          pending = pending.length ? Buffer.concat([pending, part]) : part;
+          if (end < 0) break;
+          line(pending);
+          pending = Buffer.alloc(0);
+          start = end + 1;
+        }
       }
+      if (pending.length) line(pending);
+    } finally {
+      stream.destroy();
     }
-    if (pending.length) line(pending);
   } finally {
-    stream.destroy();
     await file.close();
   }
   return commands;

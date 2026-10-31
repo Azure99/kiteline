@@ -937,3 +937,51 @@ test("staging and discarding a real gitlink conflict remain unsupported", async 
     await repos.close();
   }
 });
+
+test.each(["missing", "parent-file"])(
+  "status retains a listed untracked item that becomes %s without changing its list token",
+  async (replacement) => {
+    const { root, repo, repos, cli } = await setup();
+    await cli("commit", "--allow-empty", "-m", "base");
+    await mkdir(join(root, "parent"));
+    await writeFile(join(root, "parent/vanish"), "temporary");
+    const before = await status(repo, 0, undefined, signals());
+    const actualGit = (await run("/bin/sh", ["-c", "command -v git"])).stdout.trim();
+    const bin = join(root, ".git/bin");
+    await mkdir(bin);
+    await writeFile(join(root, ".git/armed"), "armed");
+    await writeFile(
+      join(bin, "git"),
+      `#!/bin/sh
+'${actualGit.replaceAll("'", "'\\''")}' "$@"
+result=$?
+case " $* " in
+  *" status "*)
+    if [ -f .git/armed ]; then
+      rm .git/armed
+      ${replacement === "missing" ? "rm parent/vanish" : "mv parent parent.saved; printf file > parent"}
+    fi
+    ;;
+esac
+exit "$result"
+`,
+    );
+    await chmod(join(bin, "git"), 0o755);
+    vi.stubEnv("PATH", bin + ":" + process.env.PATH);
+    try {
+      const after = await status(repo, 0, undefined, signals());
+      expect(after.entries).toMatchObject([
+        { path: "parent/vanish", types: { worktree: "absent" } },
+      ]);
+      expect(after.listToken).toBe(before.listToken);
+      expect(after.totalCount).toBe(1);
+      expect(after.nextOffset).toBeUndefined();
+      await expect(stagePaths(repo, ["parent/vanish"], signals())).rejects.toMatchObject({
+        code: "conflict",
+      });
+      expect((await cli("ls-files", "-z")).stdout).toBe("");
+    } finally {
+      await repos.close();
+    }
+  },
+);

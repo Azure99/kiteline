@@ -338,9 +338,16 @@ async function readDiscardDisk(
   }
   const mode = String(info.mode);
   if (info.isFile()) {
-    const handle = await open(join(repo.rootPath, path), constants.O_RDONLY | constants.O_NOFOLLOW);
+    const handle = await open(
+      join(repo.rootPath, path),
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
     const content = createHash("sha256");
     try {
+      if (!(await handle.stat()).isFile()) {
+        blocked.add(path);
+        return;
+      }
       for await (const data of handle.createReadStream()) {
         signal.throwIfAborted();
         content.update(data);
