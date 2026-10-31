@@ -5,7 +5,7 @@ import { request } from "node:http";
 import { BlockList, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { WebSocket } from "ws";
 import {
   appVersion,
@@ -672,4 +672,30 @@ test("a streamed owner request cannot fall back to its CLI Bearer after owner lo
   expect(await response).toBe(401);
   expect(f.store.credentials()).toEqual([cli.credential]);
   expect((await f.call("/api/session", "GET", undefined, bearer(cli.token))).status).toBe(200);
+});
+
+test("expiry closes all expired credentials while deletion fails and clears them after recovery", async () => {
+  const f = await fixture();
+  const peer = f.store.bind(f.store.newBinding().code, "Device");
+  f.store.db.exec(`CREATE TRIGGER fail_expiry BEFORE DELETE ON sessions
+    BEGIN SELECT RAISE(ABORT, 'fixture expiry failure'); END`);
+  const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+  cleanups.push(() => errors.mockRestore());
+  const expiresAt = new Date(Date.now() + 1500).toISOString();
+  const first = await f.credential("First", [peer.deviceId], expiresAt);
+  const second = await f.credential("Second", [peer.deviceId], expiresAt);
+  const firstEvents = await f.events(bearer(first.token));
+  const secondEvents = await f.events(bearer(second.token));
+  const owner = await f.events(f.ownerHeaders);
+  const closed = [firstEvents, secondEvents].map(({ socket }) => once(socket, "close"));
+  for (const closing of closed) expect((await closing)[0]).toBe(controlCloseCodes.accessRevoked);
+  expect((await f.call("/api/session", "GET", undefined, bearer(first.token))).status).toBe(401);
+  expect((await f.call("/api/session")).status).toBe(200);
+  expect(owner.socket.readyState).toBe(WebSocket.OPEN);
+  expect(f.store.credentials().map((credential) => credential.name)).toEqual(["Second", "First"]);
+  expect(errors.mock.calls.some((call) => String(call[1]).includes("fixture expiry failure"))).toBe(
+    true,
+  );
+  f.store.db.exec("DROP TRIGGER fail_expiry");
+  await expect.poll(() => f.store.credentials(), { timeout: 2500 }).toEqual([]);
 });

@@ -80,10 +80,13 @@ export class Connections {
   ) {
     this.channels = new Channels(this, channelPolicy);
     this.expiry = setInterval(() => {
-      for (const { id } of this.store.expiredLogins()) {
-        // Expiry already invalidated the login; deleting its row only clears persisted state.
-        this.closeLogin(id);
-        this.store.logout(id);
+      try {
+        const expired = this.store.expiredLogins();
+        // Expiry already invalidated these logins; deletion only clears persisted state.
+        for (const { id } of expired) this.closeLogin(id);
+        for (const { id } of expired) this.store.logout(id);
+      } catch (error) {
+        serverError(error);
       }
     }, 1000);
     this.expiry.unref();
