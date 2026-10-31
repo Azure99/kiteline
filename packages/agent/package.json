@@ -9,7 +9,7 @@
   "dependencies": {
     "@kiteline/shared": "workspace:*",
     "chokidar": "6.0.0",
-    "croner": "10.0.1",
+    "croner": "11.0.0",
     "image-size": "2.0.4",
     "proper-lockfile": "4.1.2",
     "stream-json": "3.6.0",

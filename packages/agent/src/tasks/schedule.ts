@@ -63,14 +63,46 @@ export function checkSchedule(value: unknown): TaskSchedule {
   throw new AppError("invalid_argument", "Unknown schedule kind");
 }
 
+function wallClock(timezone: string) {
+  const format = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric",
+  });
+  // Local fields of an instant, read as UTC milliseconds.
+  return (ms: number) => {
+    const field: Partial<Record<Intl.DateTimeFormatPartTypes, number>> = {};
+    for (const { type, value } of format.formatToParts(ms)) field[type] = Number(value);
+    const { year, month, day, hour, minute, second } = field;
+    return Date.UTC(year!, month! - 1, day!, hour!, minute!, second!);
+  };
+}
+
+// When clocks go back, a repeated wall time also occurs one offset change earlier.
+function firstInstant(candidate: Date, wall: (ms: number) => number) {
+  const ms = candidate.getTime();
+  const offset = (at: number) => wall(at) - at;
+  const earlier = ms - (offset(ms - 86_400_000) - offset(ms));
+  return earlier < ms && wall(earlier) === wall(ms) ? new Date(earlier) : candidate;
+}
 export function nextOccurrence(schedule: TaskSchedule, timezone: string, after: Date): Date | null {
   if (schedule.kind === "once") return new Date(schedule.at) > after ? new Date(schedule.at) : null;
   try {
     const cron = new Cron(schedule.expression, { timezone, mode: "5-part", domAndDow: false });
-    let candidate = cron.nextRun(after);
-    // Croner moves missing DST wall times forward; those are not occurrences of our schedule.
-    while (candidate && !cron.match(candidate)) candidate = cron.nextRun(candidate);
-    return candidate;
+    const wall = wallClock(timezone);
+    // Croner can choose either pass of a repeated wall time. Use its first occurrence,
+    // reject shifted gap times, and require a result strictly after the reference.
+    for (let candidate = cron.nextRun(after); candidate; candidate = cron.nextRun(candidate)) {
+      if (!cron.match(candidate)) continue;
+      const first = firstInstant(candidate, wall);
+      if (first > after) return first;
+    }
+    return null;
   } catch (error) {
     throw new AppError(
       "invalid_argument",

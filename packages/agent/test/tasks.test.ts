@@ -33,7 +33,12 @@ import { privateDirectory } from "../src/config.js";
 import { taskLimits } from "../src/limits.js";
 import { testConfig } from "./support/config.js";
 import { ScheduledTasks } from "../src/tasks/index.js";
-import { checkSchedule, checkTimezone, nextOccurrence } from "../src/tasks/schedule.js";
+import {
+  checkSchedule,
+  checkTimezone,
+  nextOccurrence,
+  previewSchedule,
+} from "../src/tasks/schedule.js";
 import { scheduleMethods, scheduleRpc, type ScheduleMethod } from "../src/tasks/rpc.js";
 import { LocalServer } from "../src/local.js";
 import { Agent } from "../src/agent.js";
@@ -2623,3 +2628,154 @@ test("CLI preserves local error results and details with schedule-specific exit 
     await f.close();
   }
 });
+
+test.each([
+  ["America/New_York", "30 1 * * *", "2027-11-07T05:29:59.999Z", "2027-11-07T05:30:00.000Z"],
+  ["America/New_York", "30 1 * * *", "2027-11-07T05:30:00.000Z", "2027-11-08T06:30:00.000Z"],
+  ["America/New_York", "30 1 * * *", "2027-11-07T06:15:00.000Z", "2027-11-08T06:30:00.000Z"],
+  ["America/New_York", "30 1,13 * * *", "2027-11-07T06:15:00.000Z", "2027-11-07T18:30:00.000Z"],
+  ["Australia/Lord_Howe", "30 1 * * *", "2027-04-03T14:29:59.999Z", "2027-04-03T14:30:00.000Z"],
+  ["Australia/Lord_Howe", "30 1 * * *", "2027-04-03T14:59:52.000Z", "2027-04-04T15:00:00.000Z"],
+  ["Antarctica/Troll", "30 1 * * *", "2027-10-30T23:29:59.999Z", "2027-10-30T23:30:00.000Z"],
+  ["Australia/Lord_Howe", "10,30 2 * * *", "2027-10-02T14:00:00.000Z", "2027-10-02T15:30:00.000Z"],
+  ["Pacific/Chatham", "0,50 3 * * *", "2027-09-25T12:00:00.000Z", "2027-09-25T14:05:00.000Z"],
+])(
+  "next occurrence respects first repeated minutes and real gap-adjacent minutes (%s %s %s)",
+  (timezone, expression, after, expected) => {
+    expect(
+      nextOccurrence({ kind: "cron", expression }, timezone, new Date(after))?.toISOString(),
+    ).toBe(expected);
+  },
+);
+
+test("preview, save, edit and restart agree on a real minute after a DST gap", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2027-10-02T14:00:00Z"));
+  const f = await fixture();
+  let restored: ScheduledTasks | undefined;
+  try {
+    const fields = {
+      ...input(f.root),
+      timezone: "Australia/Lord_Howe",
+      schedule: { kind: "cron", expression: "10,30 2 * * *" },
+    };
+    const expected = "2027-10-02T15:30:00.000Z";
+    expect(previewSchedule(fields.schedule, fields.timezone).nextRunAts[0]).toBe(expected);
+    const task = await f.tasks.create("gap", fields, signal);
+    expect(task.nextRunAt).toBe(expected);
+    expect(
+      (await f.tasks.update(task.id, task.revision, { name: "Renamed" }, signal)).nextRunAt,
+    ).toBe(expected);
+    await f.tasks.close();
+    restored = new ScheduledTasks(f.config, () => {});
+    await restored.load();
+    expect(restored.get(task.id).nextRunAt).toBe(expected);
+    expect(restored.listRuns(task.id).total).toBe(0);
+  } finally {
+    vi.useRealTimers();
+    await restored?.close();
+    await f.close();
+  }
+});
+
+// Move only wall time for sleep; fake timer/performance clocks retain their previous values.
+const sleepClocks = [
+  "Date",
+  "setTimeout",
+  "clearTimeout",
+  "setInterval",
+  "clearInterval",
+  "performance",
+] as const;
+
+test.each(["once", "cron"] as const)(
+  "a %s deadline armed before sleep still runs when future at wake",
+  async (kind) => {
+    vi.useFakeTimers({ toFake: [...sleepClocks] });
+    vi.setSystemTime(new Date("2027-01-04T21:00:00Z"));
+    const f = await fixture();
+    const at = "2027-01-05T09:00:00.000Z";
+    try {
+      await f.tasks.create(
+        "future",
+        {
+          ...input(f.root, "printf ran > future.marker"),
+          schedule: kind === "once" ? { kind, at } : { kind, expression: "0 9 * * *" },
+        },
+        signal,
+      );
+      await vi.advanceTimersByTimeAsync(1000);
+      vi.setSystemTime(new Date("2027-01-05T08:59:30Z"));
+      await vi.advanceTimersByTimeAsync(31_000);
+      await expect.poll(() => f.tasks.listRuns("future").total).toBe(1);
+      const run = f.tasks.listRuns("future").items[0]!;
+      expect(run).toMatchObject({ trigger: "scheduled", scheduledAt: at });
+      expect(run.state).not.toBe("skipped");
+      expect(Date.parse(run.acceptedAt) - Date.parse(at)).toBeGreaterThanOrEqual(0);
+      expect(Date.parse(run.acceptedAt) - Date.parse(at)).toBeLessThanOrEqual(1000);
+      expect(f.tasks.get("future").nextRunAt).toBe(
+        kind === "once" ? null : "2027-01-06T09:00:00.000Z",
+      );
+    } finally {
+      vi.useRealTimers();
+      await f.close();
+    }
+  },
+);
+
+test("a deadline passed during sleep is missed without running its command", async () => {
+  vi.useFakeTimers({ toFake: [...sleepClocks] });
+  const f = await fixture();
+  const at = new Date(Date.now() + 60_000).toISOString();
+  try {
+    await f.tasks.create(
+      "passed",
+      { ...input(f.root, "printf ran > missed.marker"), schedule: { kind: "once", at } },
+      signal,
+    );
+    await vi.advanceTimersByTimeAsync(1000);
+    vi.setSystemTime(Date.now() + 600_000);
+    await vi.advanceTimersByTimeAsync(1100);
+    await expect.poll(() => f.tasks.get("passed").onceStatus).toBe("missed");
+    expect(f.tasks.listRuns("passed").items).toMatchObject([
+      { state: "skipped", reasonCode: "missed", scheduledAt: at },
+    ]);
+    await expect(readFile(join(f.root, "missed.marker"))).rejects.toMatchObject({ code: "ENOENT" });
+  } finally {
+    vi.useRealTimers();
+    await f.close();
+  }
+});
+
+test.each(["delete", "pause"] as const)(
+  "later tasks still execute after %s of the earliest task",
+  async (action) => {
+    const f = await fixture();
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      const first = new Date(Date.now() + 500).toISOString();
+      const later = new Date(Date.now() + 1500).toISOString();
+      await f.tasks.create(
+        "first",
+        { ...input(f.root), schedule: { kind: "once", at: first } },
+        signal,
+      );
+      await f.tasks.create(
+        "later",
+        { ...input(f.root, "printf ran > later.marker"), schedule: { kind: "once", at: later } },
+        signal,
+      );
+      if (action === "delete") await f.tasks.delete("first", undefined, signal);
+      else await f.tasks.setPaused("first", true, signal);
+      await vi.advanceTimersByTimeAsync(1500);
+      await expect.poll(() => f.tasks.listRuns("later").items[0]?.state).toBe("succeeded");
+      expect(f.tasks.listRuns("later").items).toMatchObject([
+        { trigger: "scheduled", scheduledAt: later },
+      ]);
+      expect(await readFile(join(f.root, "later.marker"), "utf8")).toBe("ran");
+    } finally {
+      vi.useRealTimers();
+      await f.close();
+    }
+  },
+);

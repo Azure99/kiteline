@@ -38,7 +38,7 @@ A one-time schedule runs at most once. Its status progresses from “Pending” 
 
 Cron expressions are interpreted in the task's schedule time zone. Use an IANA name such as `Asia/Shanghai`; fixed offsets such as `+08:00` are rejected. If omitted, the device's time zone at save time is stored with the task. It does not subsequently follow changes to the browser or device time zone. This setting determines only when a run starts; the command's `TZ` environment variable still comes from the agent.
 
-During daylight-saving transitions, nonexistent local times are skipped, and repeated local times run only once.
+During daylight-saving transitions, nonexistent local times are skipped, and repeated local times run only once, at their first occurrence.
 
 ### Missed runs
 
@@ -94,7 +94,7 @@ Records are stored under `tasks/` in the agent data directory (see [File locatio
 
 If the agent ends unexpectedly (killed process, crash or power loss), active runs have no trustworthy final result. At its next startup, the agent:
 
-1. Marks those runs “Unknown”, with “Previous result is unconfirmed”;
+1. Marks those runs “Unknown”, with “Previous result is unconfirmed”; “Marked unknown” in the details records when the run was marked, not when its old process ended;
 2. Pauses their tasks and marks them as needing review;
 3. Rejects scheduled runs and “Run now” for each task until review is complete. The previous run continues to occupy a device run slot.
 

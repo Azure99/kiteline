@@ -28,6 +28,8 @@
 | `skipped`   | 定时触发时没有启动命令                                              | `missed`、`overlap` 或 `capacity` |
 | `unknown`   | agent 启动时发现上次未结束的运行，无法知道它的结果                  | `unconfirmed`                     |
 
+`unknown` 的 `endedAt` 是 agent 将运行标为未知的时间，不能据此判断进程何时结束。
+
 定义与运行相互独立：接纳之后修改任务，不影响这次运行的 `parameters`。失败的运行不自动重试，以后的定时照常进行。
 
 ### ID
@@ -41,11 +43,11 @@ ID 直接用作文件名，因此唯一性按 ASCII 大小写不敏感判断：�
 周期计划由 Croner 计算，依赖版本见 `packages/agent/package.json`。语法校验与发生点计算在 `packages/agent/src/tasks/schedule.ts`，用户输入规则见[计划规则](../guide/scheduled-tasks.md#计划规则)。日期与星期同时指定时按逻辑或匹配，预览与实际调度必须使用相同规则。
 
 - **时区和单次时刻。** `timezone` 用 `Intl` 校验，创建时保存，之后不随设备或浏览器的时区变化；`at` 保存为 UTC。两者的输入规则见[计划规则](../guide/scheduled-tasks.md#计划规则)。创建时单次时刻必须在未来；周期计划没有未来发生点时同样拒绝。
-- **计算下一次。** `nextOccurrence()` 从 `max(当前时间, lastScheduledAt)` 之后开始找。Croner 会把夏令时跳过的不存在时刻顺延，agent 用 `cron.match()` 再核对一次，因此不存在的时刻被跳过，重复的时刻只执行一次。`lastScheduledAt` 记录最近处理过的计划时刻并持久保存，系统时钟回拨后不会再次接纳已处理的时刻。预览（`tasks.preview`）、创建校验和实际定时使用同一个函数。
-- **定时器。** 每个任务独立设置定时器；回调接纳前确认任务仍存在、修订和下次时刻未变且 agent 未在停止。过时的回调不能启动命令，早于计划时刻触发时重新等待。
+- **计算下一次。** `nextOccurrence()` 返回严格晚于 `max(当前时间, lastScheduledAt)` 的第一个发生点。夏令时跳过的不存在时刻被跳过；回拨造成的重复时刻只在第一次出现时执行一次，参考点已在第二次出现的时段内时，该重复时刻视为已经过去。`lastScheduledAt` 记录最近处理过的计划时刻并持久保存，系统时钟回拨后不会再次接纳已处理的时刻。预览（`tasks.preview`）、创建校验和实际定时使用同一个函数。
+- **定时器。** 从现有任务记录选择最早的 `nextRunAt`，使用一个最多等待一秒的定时器检查墙钟截止时刻，避免 Linux 睡眠期间停止的定时器时钟延误醒后仍在未来的计划。回调接纳前确认任务仍存在、修订和下次时刻未变且 agent 未在停止。过时的回调不能启动命令，早于计划时刻触发时重新等待。
 - **不补跑。** 回调接纳时，当前时间晚于计划时刻超过 `taskLimits.lateToleranceMs`（`packages/agent/src/limits.ts`，数值见[限额](../guide/reference.md#限额)）时，记录一条 `skipped`/`missed` 运行，然后计算下一次。agent 启动或任务恢复时从当前时间向后计算，停机期间错过的周期时刻不逐条记录。
 - **单次计划状态。** 定时触发后 `onceStatus` 变为 `consumed`，因重叠或名额不足而跳过时也是如此；因超时而跳过时变为 `missed`。单次时刻在暂停期间或 agent 停机期间过去时，agent 在下一次加载、修改、暂停、恢复或确认核查时把它标为 `missed`，并补记一条 `skipped`/`missed` 运行。手动运行不改变 `onceStatus`。修改计划（或修改周期计划的时区）会清除 `lastScheduledAt`，单次计划回到 `pending`。
-- **暂停。** 暂停只取消定时器，不影响正在进行的运行，也不阻止手动运行。
+- **暂停。** 暂停的任务不参与定时选择，不影响正在进行的运行，也不阻止手动运行。
 
 ## 接纳与并发
 
@@ -74,7 +76,7 @@ ID 直接用作文件名，因此唯一性按 ASCII 大小写不敏感判断：�
 
 **停止。** `runs.stop` 把运行状态设为 `stopping` 并保存后返回，不等待进程结束。Linux 和 macOS 向进程组发送 SIGTERM，经过 `taskLimits.stopGraceMs` 仍未结束时发送 SIGKILL。Windows 直接终止整个 Job。进程集合结束后运行记为 `stopped`/`requested_stop`。任务没有默认的运行时长上限，输出超过上限也不会终止命令。
 
-**agent 停止。** agent 正常停止时先拒绝新的写操作（返回 `cancelled`），取消全部定时器，再用同样的方式停止所有正在执行的运行（记为 `stopped`/`agent_stop`），等待它们结束并保存结果。
+**agent 停止。** agent 正常停止时先拒绝新的写操作（返回 `cancelled`），取消定时器，再用同样的方式停止所有正在执行的运行（记为 `stopped`/`agent_stop`），等待它们结束并保存结果。
 
 ## 持久化与恢复
 

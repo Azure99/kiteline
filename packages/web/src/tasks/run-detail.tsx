@@ -186,7 +186,8 @@ export function RunDetail({
               )}
               {run.endedAt && (
                 <p>
-                  {t(($) => $.schedules.ended)}: {taskTime(run.endedAt, i18n.resolvedLanguage)}
+                  {t(($) => $.schedules[run.state === "unknown" ? "markedUnknown" : "ended"])}:{" "}
+                  {taskTime(run.endedAt, i18n.resolvedLanguage)}
                 </p>
               )}
               {run.reasonCode && <p>{t(($) => $.schedules[`reason_${run.reasonCode!}`])}</p>}

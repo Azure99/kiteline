@@ -18,6 +18,8 @@ export const agentLimits = {
 } as const;
 
 export const taskLimits = {
+  // Recheck the chosen wall-clock deadline after system sleep.
+  timerCheckMs: 1000,
   outputReadBytes: 32 * 1024,
   diagnosticBytes: 2048,
   pageEntries: 50,

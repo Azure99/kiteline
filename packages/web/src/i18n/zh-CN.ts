@@ -115,6 +115,7 @@ export const zhCN = {
     started: "开始时间",
     accepted: "接纳时间",
     ended: "结束时间",
+    markedUnknown: "标为未知的时间",
     exit: "退出码：{{code}}",
     signal: "信号：{{signal}}",
     truncated: "本次运行仅保留了部分输出。",

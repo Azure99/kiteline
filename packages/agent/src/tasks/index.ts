@@ -1,4 +1,4 @@
-import { agentLimits, taskLimits } from "../limits.js";
+import { taskLimits } from "../limits.js";
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -41,7 +41,7 @@ export class ScheduledTasks {
   private readonly directory: string;
   private readonly outputs: TaskOutputs;
   private readonly records = new Map<string, TaskRecord>();
-  private readonly timers = new Map<string, NodeJS.Timeout>();
+  private timer?: NodeJS.Timeout;
   private readonly executions = new Map<
     string,
     { process: TaskProcess; finished: Promise<void> }
@@ -216,7 +216,7 @@ export class ScheduledTasks {
       if (!retained.has(id)) this.outputs.markResidual(id);
     }
     await this.outputs.removeResiduals();
-    for (const record of this.records.values()) this.armTimer(record);
+    this.armTimer();
   }
 
   status() {
@@ -297,7 +297,7 @@ export class ScheduledTasks {
       this.updateNextRunTime(record);
       signal.throwIfAborted();
       await this.persistCandidateThenPublish(record);
-      this.armTimer(record);
+      this.armTimer();
       return this.get(id);
     }, signal);
   }
@@ -364,7 +364,7 @@ export class ScheduledTasks {
     signal?.throwIfAborted();
     await this.persistCandidateThenPublish(record);
     await this.attemptRetention(() => this.pruneHistory(record.task.id));
-    this.armTimer(record);
+    this.armTimer();
     return this.get(record.task.id);
   }
 
@@ -384,9 +384,8 @@ export class ScheduledTasks {
       await rm(this.statePath(id));
       this.pending.delete(id);
       this.retentionErrors.delete(id);
-      clearTimeout(this.timers.get(id));
-      this.timers.delete(id);
       this.records.delete(id);
+      this.armTimer();
       this.notify();
       try {
         for (const run of record.runs) this.outputs.markResidual(run.id);
@@ -409,21 +408,27 @@ export class ScheduledTasks {
         : null;
   }
 
-  private armTimer(record: TaskRecord) {
-    const { id, revision, nextRunAt } = record.task;
-    clearTimeout(this.timers.get(id));
-    this.timers.delete(id);
-    if (this.closing || !nextRunAt) return;
-    const milliseconds = Math.max(0, Date.parse(nextRunAt) - Date.now());
-    const timer = setTimeout(
+  private armTimer() {
+    clearTimeout(this.timer);
+    this.timer = undefined;
+    if (this.closing) return;
+    let next: { id: string; revision: number; at: string } | undefined;
+    for (const { task } of this.records.values()) {
+      if (task.nextRunAt && (!next || task.nextRunAt < next.at)) {
+        next = { id: task.id, revision: task.revision, at: task.nextRunAt };
+      }
+    }
+    if (!next) return;
+    const { id, revision, at } = next;
+    const milliseconds = Math.max(0, Date.parse(at) - Date.now());
+    this.timer = setTimeout(
       () => {
-        void this.serial(() => this.handleScheduledOccurrence(id, revision, nextRunAt)).catch(
+        void this.serial(() => this.handleScheduledOccurrence(id, revision, at)).catch(
           (error: unknown) => console.error("Scheduled task:", asError(error).message),
         );
       },
-      Math.min(milliseconds, agentLimits.maxTimerDelay),
+      Math.min(milliseconds, taskLimits.timerCheckMs),
     );
-    this.timers.set(id, timer);
   }
 
   private async handleScheduledOccurrence(id: string, revision: number, scheduledAt: string) {
@@ -436,7 +441,7 @@ export class ScheduledTasks {
     )
       return;
     if (Date.now() < Date.parse(scheduledAt)) {
-      this.armTimer(latest);
+      this.armTimer();
       return;
     }
     try {
@@ -449,7 +454,7 @@ export class ScheduledTasks {
       this.recordMissedOnce(current);
       this.updateNextRunTime(current);
       await this.persistFactsAndPublish(current);
-      this.armTimer(current);
+      this.armTimer();
     }
   }
 
@@ -539,7 +544,7 @@ export class ScheduledTasks {
       record.runs.push(run);
       this.updateNextRunTime(record);
       await this.persistFactsAndPublish(record);
-      this.armTimer(record);
+      this.armTimer();
       await this.attemptRetention(() => this.pruneHistory(id));
       return;
     }
@@ -549,7 +554,7 @@ export class ScheduledTasks {
     prepared.runs.push(run);
     this.updateNextRunTime(prepared);
     await this.persistCandidateThenPublish(prepared);
-    this.armTimer(prepared);
+    this.armTimer();
     await this.spawnAndPersistStartFacts(run);
   }
 
@@ -706,8 +711,8 @@ export class ScheduledTasks {
 
   beginClose() {
     this.closing = true;
-    for (const timer of this.timers.values()) clearTimeout(timer);
-    this.timers.clear();
+    clearTimeout(this.timer);
+    this.timer = undefined;
   }
   async close() {
     this.beginClose();

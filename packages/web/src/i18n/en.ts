@@ -120,6 +120,7 @@ export const en = {
     started: "Started",
     accepted: "Accepted",
     ended: "Ended",
+    markedUnknown: "Marked unknown",
     exit: "Exit code: {{code}}",
     signal: "Signal: {{signal}}",
     truncated: "The run retains only part of its output.",
