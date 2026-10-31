@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import {
   chmodSync,
   cpSync,
@@ -28,10 +27,18 @@ import {
   releaseMatches,
   serverArchitectures,
   sourceCommit as readSourceCommit,
-  staticNodeInput,
 } from "./release-artifacts.mjs";
-import { digest, fetchPinned, run as execute } from "./release-inputs.mjs";
-import { windowsRuntimeFiles, windowsComponentPath } from "./windows-components.ts";
+import {
+  capture as captureOutput,
+  componentPackagePath,
+  digest,
+  fetchPinned,
+  nodeInput,
+  releaseCache,
+  run as execute,
+  staticNodeInput,
+} from "./release-inputs.mjs";
+import { windowsRuntimeFiles } from "./windows-components.ts";
 import { agentLauncher, windowsAgentLaunchers, windowsCliLauncher } from "./agent-launcher.ts";
 import { terminalReset } from "../packages/cli/src/terminal-reset.ts";
 
@@ -39,135 +46,44 @@ const root = resolve(import.meta.dirname, "..");
 const release = JSON.parse(readFileSync(join(root, "release/inputs.json"), "utf8"));
 assert.equal(
   JSON.parse(readFileSync(join(root, "package.json"), "utf8")).engines.node,
-  release.node,
-  "package.json engines.node and release/inputs.json node must pin the same version",
+  release.node.version,
+  "package.json engines.node and release/inputs.json node.version must pin the same version",
 );
-const { positionals, values } = parseArgs({
-  allowPositionals: true,
-  options: {
-    "agent-target": { type: "string" },
-    "windows-components": { type: "string" },
-    "macos-components": { type: "string" },
-  },
-});
-const [kind, target] = positionals;
-const [platform, arch] = kind === "server" ? ["linux", target] : (target ?? "").split("-");
-const portable = kind === "agent" || kind === "cli";
-const windows = platform === "windows";
-const linuxPortable = portable && platform === "linux";
-const windowsAgent = kind === "agent" && platform === "windows";
-const macosAgent = kind === "agent" && platform === "macos";
-const linuxAgent = kind === "agent" && platform === "linux";
-const windowsComponents = values["windows-components"];
-const macosComponents = values["macos-components"];
-const agentTargets = values["agent-target"]?.split(",") ?? allAgentTargets;
-if (
-  positionals.length !== 2 ||
-  !["server", "agent", "cli"].includes(kind) ||
-  (portable && !allAgentTargets.includes(target)) ||
-  (kind === "server" && !serverArchitectures.includes(arch)) ||
-  (values["agent-target"] !== undefined && kind !== "server") ||
-  agentTargets.some((target) => !allAgentTargets.includes(target)) ||
-  new Set(agentTargets).size !== agentTargets.length ||
-  (windowsAgent ? !windowsComponents : windowsComponents !== undefined) ||
-  (macosAgent ? !macosComponents : macosComponents !== undefined)
-)
-  throw new Error(
-    "Usage: pnpm package server amd64|arm64 [--agent-target=linux-amd64,linux-arm64,windows-amd64,macos-amd64,macos-arm64] | agent linux-amd64|linux-arm64 | agent windows-amd64 --windows-components=PATH | agent macos-amd64|macos-arm64 --macos-components=PATH | cli linux-amd64|linux-arm64|windows-amd64|macos-amd64|macos-arm64",
-  );
-const node = release.nodeArchives[arch];
-const projects = ["shared", kind, ...(kind === "agent" ? ["cli", "terminal-recorder"] : [])];
 const { version } = JSON.parse(
   readFileSync(join(root, "packages/shared/src/version.json"), "utf8"),
 );
 const output = join(root, "dist/releases");
-const cache = "/var/tmp/kiteline-release-cache";
-const temporary = realpathSync(mkdtempSync("/var/tmp/kiteline-package-"));
+
 function run(command, args, options = {}) {
   return execute(command, args, { cwd: root, ...options });
 }
-function text(command, args) {
-  return run(command, args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).trim();
+function capture(command, args) {
+  return captureOutput(command, args, { cwd: root });
 }
-async function agentArchives(sourceCommit) {
-  const agents = [];
-  for (const target of agentTargets) {
-    const { name, archive: filename } = packageNames("agent", version, target);
-    const archive = join(output, filename);
-    const checksum = archive + ".sha256";
-    if (!existsSync(archive) || !existsSync(checksum))
-      throw new Error(`Build agent ${target} first`);
-    if (readFileSync(checksum, "utf8") !== `${digest(archive)}  ${basename(archive)}\n`)
-      throw new Error(`Agent archive checksum mismatch: ${target}`);
-    const entries = text("bsdtar", ["-tf", archive]).split("\n");
-    if (entries.some((entry) => entry !== name && !entry.startsWith(name + "/")))
-      throw new Error(`Unexpected agent archive roots: ${target}`);
-    const manifest = JSON.parse(text("bsdtar", ["-xOf", archive, name + "/release.json"]));
-    if (!releaseMatches(manifest, expectedRelease(release, version, "agent", target, sourceCommit)))
-      throw new Error(
-        `Agent ${target} must match this source/version/platform/architecture; rebuild it`,
-      );
-    agents.push({ archive, checksum });
-  }
-  return agents;
+
+function compileProjects(projects) {
+  for (const name of projects)
+    rmSync(join(root, "packages", name, "dist"), { recursive: true, force: true });
+  run("pnpm", ["exec", "tsc", "-b", ...projects.map((name) => `packages/${name}`)]);
 }
-function deploy(name, target) {
-  if (name === "cli") {
-    // CLI only depends on the shared package deployed beside it.
-    cpSync(join(root, "packages/cli/dist"), join(target, "dist"), { recursive: true });
-    cpSync(join(root, "packages/cli/package.json"), join(target, "package.json"));
-  } else {
-    run("pnpm", [
-      "--filter",
-      `@kiteline/${name}`,
-      "deploy",
-      "--prod",
-      "--config.inject-workspace-packages=true",
-      `--config.node-linker=${windows ? "hoisted" : "isolated"}`,
-      target,
-    ]);
-  }
-  if (name === "shared") {
-    const manifest = join(target, "package.json");
-    const metadata = JSON.parse(readFileSync(manifest, "utf8"));
-    // Source resources sit above packages; release resources share the component parent.
-    metadata.kitelineResourceRoot = "..";
-    writeFileSync(manifest, JSON.stringify(metadata, null, 2) + "\n");
-  } else {
-    const link = join(target, "node_modules/@kiteline/shared");
-    const injected =
-      windows || name === "cli" ? undefined : resolve(realpathSync(link), "../../..");
-    rmSync(link, { recursive: true, force: true });
-    if (windows) {
-      mkdirSync(link, { recursive: true });
-      const { exports } = JSON.parse(
-        readFileSync(join(root, "packages/shared/package.json"), "utf8"),
-      );
-      const forwarding = {};
-      for (const [index, [key, source]] of Object.entries(exports).entries()) {
-        const name = `export-${index}.js`;
-        writeFileSync(join(link, name), `export * from "../../../../shared/${source.slice(2)}";\n`);
-        forwarding[key] = `./${name}`;
-      }
-      writeFileSync(
-        join(link, "package.json"),
-        JSON.stringify({
-          name: "@kiteline/shared",
-          license: "Apache-2.0",
-          type: "module",
-          exports: forwarding,
-        }) + "\n",
-      );
-    } else {
-      mkdirSync(join(target, "node_modules/@kiteline"), { recursive: true });
-      symlinkSync("../../../shared", link);
-      if (injected) rmSync(injected, { recursive: true, force: true });
-    }
-    const manifest = join(target, "package.json");
-    const metadata = JSON.parse(readFileSync(manifest, "utf8"));
-    metadata.dependencies["@kiteline/shared"] = "file:../shared";
-    writeFileSync(manifest, JSON.stringify(metadata, null, 2) + "\n");
-  }
+
+function createPackageDirectory(name, scratch) {
+  const directory = join(scratch, name);
+  mkdirSync(directory);
+  cpSync(join(root, "LICENSE"), join(directory, "LICENSE"));
+  return directory;
+}
+
+function deployProductionPackage(name, directory, platform) {
+  run("pnpm", [
+    "--filter",
+    `@kiteline/${name}`,
+    "deploy",
+    "--prod",
+    "--config.inject-workspace-packages=true",
+    `--config.node-linker=${platform === "windows" ? "hoisted" : "isolated"}`,
+    directory,
+  ]);
   for (const path of [
     "pnpm-lock.yaml",
     "pnpm-workspace.yaml",
@@ -177,298 +93,492 @@ function deploy(name, target) {
     "node_modules/.pnpm-workspace-state-v1.json",
     "node_modules/.bin",
   ])
-    rmSync(join(target, path), { recursive: true, force: true });
-}
-function checksums(directory) {
-  const entries = [];
-  const expectedELFs = new Set(
-    linuxPortable
-      ? [
-          "runtime/bin/node",
-          ...(kind === "agent"
-            ? [
-                "dist/native/bin/tmux",
-                "dist/native/bin/rename-noreplace",
-                "dist/native/bin/rg",
-                "dist/native/bin/pty-bridge",
-              ]
-            : []),
-        ]
-      : [],
-  );
-  function walk(path) {
-    if (!windows) chmodSync(path, 0o755);
-    for (const name of readdirSync(path).sort()) {
-      const file = join(path, name);
-      const stat = lstatSync(file);
-      if (stat.isDirectory()) walk(file);
-      else if (stat.isFile()) {
-        const name = relative(directory, file);
-        const executable = !!(stat.mode & 0o111) || executablePathPattern.test(name);
-        if (!windows) {
-          // pnpm can hard-link both store entries and local workspace dependencies.
-          if (stat.nlink > 1) {
-            const copy = join(temporary, "permission-file");
-            cpSync(file, copy);
-            renameSync(copy, file);
-          }
-          chmodSync(file, executable ? 0o755 : 0o644);
-        }
-        const bytes = readFileSync(file);
-        if (linuxPortable) {
-          if (name.endsWith(".node"))
-            throw new Error(`Dynamic Node addon is not supported: ${name}`);
-          if (bytes.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) {
-            if (!expectedELFs.delete(name)) throw new Error(`Unexpected portable ELF: ${name}`);
-            if (!executable) throw new Error(`Portable ELF is not executable: ${name}`);
-            if (
-              /INTERP/.test(text("readelf", ["-l", file])) ||
-              /NEEDED/.test(text("readelf", ["-d", file]))
-            )
-              throw new Error(`Dynamic dependency in static portable package: ${name}`);
-          }
-        }
-        entries.push(`${createHash("sha256").update(bytes).digest("hex")}  ${name}`);
-      } else if (windows) throw new Error(`Windows packages cannot contain links: ${file}`);
-      else if (portable && stat.isSymbolicLink()) {
-        const target = realpathSync(file);
-        if (target !== directory && !target.startsWith(directory + "/"))
-          throw new Error(`Portable symlink escapes package: ${file}`);
-      }
-    }
-  }
-  walk(directory);
-  if (expectedELFs.size) throw new Error(`Missing portable ELF: ${[...expectedELFs].join(", ")}`);
-  writeFileSync(join(directory, "SHA256SUMS"), entries.join("\n") + "\n");
-  if (!windows) chmodSync(join(directory, "SHA256SUMS"), 0o644);
+    rmSync(join(directory, path), { recursive: true, force: true });
 }
 
-function cliRuntime() {
+function setSharedResourceRoot(directory) {
+  const manifest = join(directory, "package.json");
+  const metadata = JSON.parse(readFileSync(manifest, "utf8"));
+  // Source resources sit above packages; release resources share the component parent.
+  metadata.kitelineResourceRoot = "..";
+  writeFileSync(manifest, JSON.stringify(metadata, null, 2) + "\n");
+}
+
+function connectSharedPackage(directory, platform, { deployed }) {
+  const link = join(directory, "node_modules/@kiteline/shared");
+  // Isolated pnpm deploy owns an injected package directory; copied CLI has no dependency tree.
+  const injectedDirectory =
+    deployed && platform !== "windows" ? resolve(realpathSync(link), "../../..") : undefined;
+  rmSync(link, { recursive: true, force: true });
+  if (platform === "windows") {
+    mkdirSync(link, { recursive: true });
+    const { exports } = JSON.parse(
+      readFileSync(join(root, "packages/shared/package.json"), "utf8"),
+    );
+    const forwarding = {};
+    for (const [index, [key, source]] of Object.entries(exports).entries()) {
+      const name = `export-${index}.js`;
+      writeFileSync(join(link, name), `export * from "../../../../shared/${source.slice(2)}";\n`);
+      forwarding[key] = `./${name}`;
+    }
+    writeFileSync(
+      join(link, "package.json"),
+      JSON.stringify({
+        name: "@kiteline/shared",
+        license: "Apache-2.0",
+        type: "module",
+        exports: forwarding,
+      }) + "\n",
+    );
+  } else {
+    mkdirSync(join(directory, "node_modules/@kiteline"), { recursive: true });
+    symlinkSync("../../../shared", link);
+    if (injectedDirectory) rmSync(injectedDirectory, { recursive: true, force: true });
+  }
+  const manifest = join(directory, "package.json");
+  const metadata = JSON.parse(readFileSync(manifest, "utf8"));
+  metadata.dependencies["@kiteline/shared"] = "file:../shared";
+  writeFileSync(manifest, JSON.stringify(metadata, null, 2) + "\n");
+}
+
+function prepareAgentComponents(target, scratch) {
+  if (target.platform === "linux") {
+    const componentsDirectory = join(scratch, "linux");
+    buildLinuxComponents(componentsDirectory, target.architecture);
+    return {
+      runtimeDirectory: join(componentsDirectory, "runtime"),
+      nativeDirectory: join(componentsDirectory, "native"),
+      releaseSource: {},
+    };
+  }
+  const componentsDirectory = resolve(target.componentsDirectory);
+  if (target.platform === "windows") {
+    const identity = verifyWindowsComponents(componentsDirectory);
+    return {
+      runtimeDirectory: join(componentsDirectory, "runtime"),
+      nativeDirectory: join(componentsDirectory, "native"),
+      commandDirectory: join(componentsDirectory, "command"),
+      releaseSource: { nodeArchive: identity.inputs.downloads["node.zip"].sha256 },
+    };
+  }
+  const identity = verifyMacosComponents(componentsDirectory, target.architecture);
+  return {
+    runtimeDirectory: join(componentsDirectory, "runtime"),
+    nativeDirectory: join(componentsDirectory, "native"),
+    releaseSource: { nodeArchive: identity.inputs.downloads["node.tar.xz"].sha256 },
+  };
+}
+
+function prepareCliRuntime(platform, architecture, scratch) {
   if (platform === "linux") {
     const recipe = JSON.parse(readFileSync(join(root, "release/node-static.json"), "utf8"));
-    const input = staticNodeInput(release.node, recipe, arch);
-    const archive = join(cache, "static-sources", input.sha256);
+    const input = staticNodeInput(release.node.version, recipe, architecture);
+    const archive = join(releaseCache, "static-sources", input.sha256);
     fetchPinned(input, archive);
-    run("tar", ["-xzf", archive, "-C", temporary]);
-    return { path: join(temporary, "runtime"), sha256: input.sha256 };
+    run("tar", ["-xzf", archive, "-C", scratch]);
+    return {
+      runtimeDirectory: join(scratch, "runtime"),
+      releaseSource: { nodeArchive: input.sha256 },
+    };
   }
-  const recipe = JSON.parse(readFileSync(join(root, `release/agent-${platform}.json`), "utf8"));
-  const prefix = `node-v${release.node}-${windows ? "win" : "darwin"}-${node.architecture}`;
-  const filename = `${prefix}.${windows ? "zip" : "tar.xz"}`;
-  const input = {
-    url: `https://nodejs.org/dist/v${release.node}/${filename}`,
-    sha256: windows ? recipe.nodeArchiveSha256 : recipe.architectures[arch].nodeArchiveSha256,
-  };
-  const archive = join(cache, filename);
-  fetchPinned(input, archive);
+  const { download, archiveName, archiveRoot } = nodeInput(
+    release.node,
+    `${platform}-${architecture}`,
+  );
+  const archive = join(releaseCache, archiveName);
+  fetchPinned(download, archive);
+  const executable = platform === "windows" ? "node.exe" : "bin/node";
   run("bsdtar", [
     "-xf",
     archive,
     "-C",
-    temporary,
-    `${prefix}/${windows ? "node.exe" : "bin/node"}`,
-    `${prefix}/LICENSE`,
+    scratch,
+    `${archiveRoot}/${executable}`,
+    `${archiveRoot}/LICENSE`,
   ]);
-  const path = join(temporary, "runtime");
-  mkdirSync(join(path, "bin"), { recursive: true });
+  const runtimeDirectory = join(scratch, "runtime");
+  mkdirSync(join(runtimeDirectory, "bin"), { recursive: true });
   cpSync(
-    join(temporary, prefix, windows ? "node.exe" : "bin/node"),
-    join(path, "bin", windows ? "node.exe" : "node"),
+    join(scratch, archiveRoot, executable),
+    join(runtimeDirectory, "bin", platform === "windows" ? "node.exe" : "node"),
   );
-  cpSync(join(temporary, prefix, "LICENSE"), join(path, "LICENSE"));
-  return { path, sha256: input.sha256 };
+  cpSync(join(scratch, archiveRoot, "LICENSE"), join(runtimeDirectory, "LICENSE"));
+  return { runtimeDirectory, releaseSource: { nodeArchive: download.sha256 } };
 }
-try {
-  const sourceCommit = readSourceCommit(root);
-  for (const name of projects)
-    rmSync(join(root, "packages", name, "dist"), { recursive: true, force: true });
-  run("pnpm", ["exec", "tsc", "-b", ...projects.map((name) => `packages/${name}`)]);
-  if (kind === "server") run("pnpm", ["--filter", "@kiteline/web", "build"]);
-  const agents = kind === "server" ? await agentArchives(sourceCommit) : [];
-  mkdirSync(cache, { recursive: true });
-  mkdirSync(output, { recursive: true });
-  let runtime;
-  let staticBuild;
-  let windowsBuild;
-  let macosBuild;
-  let cliNodeArchive;
-  const native = join(temporary, "native");
-  if (kind === "cli") {
-    const prepared = cliRuntime();
-    runtime = prepared.path;
-    cliNodeArchive = prepared.sha256;
-  } else if (windowsAgent) {
-    const components = resolve(windowsComponents);
-    windowsBuild = verifyWindowsComponents(components);
-    runtime = join(components, "runtime");
-    cpSync(join(components, "native"), native, { recursive: true });
-  } else if (macosAgent) {
-    const components = resolve(macosComponents);
-    macosBuild = verifyMacosComponents(components, arch);
-    runtime = join(components, "runtime");
-    cpSync(join(components, "native"), native, { recursive: true });
-  } else if (linuxAgent) {
-    const components = join(temporary, "linux");
-    buildLinuxComponents(components, arch);
-    runtime = join(components, "runtime");
-    run("cp", ["-a", join(components, "native"), native]);
-    staticBuild = JSON.parse(readFileSync(join(components, "build.json"), "utf8"));
-  } else {
-    const filename = `node-v${release.node}-linux-${node.architecture}.tar.xz`;
-    const archive = join(cache, filename);
-    fetchPinned(
-      { url: `https://nodejs.org/dist/v${release.node}/${filename}`, sha256: node.sha256 },
-      archive,
-    );
-    run("tar", ["-xJf", archive, "-C", temporary]);
-    runtime = join(temporary, filename.slice(0, -7));
+
+function prepareServerRuntime(architecture, scratch) {
+  const { download, archiveName, archiveRoot } = nodeInput(release.node, `linux-${architecture}`);
+  const archive = join(releaseCache, archiveName);
+  fetchPinned(download, archive);
+  run("tar", ["-xJf", archive, "-C", scratch]);
+  return {
+    runtimeDirectory: join(scratch, archiveRoot),
+    releaseSource: {
+      nodeArchive: download.sha256,
+      ubuntu: release.ubuntu,
+      aptSources: digest(join(root, "release/ubuntu.sources")),
+      caCertificates: release.caCertificates,
+    },
+  };
+}
+
+function readAgentArchives(agentTargets, sourceCommit) {
+  const agents = [];
+  for (const target of agentTargets) {
+    const { name, archive: filename } = packageNames("agent", version, target);
+    const archive = join(output, filename);
+    const checksum = archive + ".sha256";
+    if (!existsSync(archive) || !existsSync(checksum))
+      throw new Error(`Build agent ${target} first`);
+    if (readFileSync(checksum, "utf8") !== `${digest(archive)}  ${basename(archive)}\n`)
+      throw new Error(`Agent archive checksum mismatch: ${target}`);
+    const entries = capture("bsdtar", ["-tf", archive]).split("\n");
+    if (entries.some((entry) => entry !== name && !entry.startsWith(name + "/")))
+      throw new Error(`Unexpected agent archive roots: ${target}`);
+    const manifest = JSON.parse(capture("bsdtar", ["-xOf", archive, name + "/release.json"]));
+    if (!releaseMatches(manifest, expectedRelease(release, version, "agent", target, sourceCommit)))
+      throw new Error(
+        `Agent ${target} must match this source/version/platform/architecture; rebuild it`,
+      );
+    agents.push({ archive, checksum });
   }
-  if (kind === "agent") {
-    const recorder = JSON.parse(
-      readFileSync(join(root, "packages/terminal-recorder/package.json"), "utf8"),
-    ).dependencies;
-    const web = JSON.parse(
-      readFileSync(join(root, "packages/web/package.json"), "utf8"),
-    ).dependencies;
-    const shared = JSON.parse(
-      readFileSync(join(root, "packages/shared/package.json"), "utf8"),
-    ).dependencies;
-    const { terminalProfile } = await import("../packages/shared/dist/protocol/index.js");
-    const identityPath = join(native, "identity.json");
-    writeFileSync(
-      identityPath,
-      JSON.stringify(
-        {
-          ...JSON.parse(readFileSync(identityPath, "utf8")),
-          headless: recorder["@xterm/headless"],
-          xterm: web["@xterm/xterm"],
-          serialize: recorder["@xterm/addon-serialize"],
-          unicode11: shared["@xterm/addon-unicode11"],
-          profile: terminalProfile,
-        },
-        null,
-        2,
-      ) + "\n",
-    );
+  return agents;
+}
+
+function writeReleaseManifest(
+  directory,
+  kind,
+  platform,
+  architecture,
+  sourceCommit,
+  releaseSource,
+) {
+  writeFileSync(
+    join(directory, "release.json"),
+    JSON.stringify(
+      {
+        ...expectedRelease(release, version, kind, `${platform}-${architecture}`, sourceCommit),
+        sourceDirty: false,
+        lockfile: digest(join(root, "pnpm-lock.yaml")),
+        ...releaseSource,
+      },
+      null,
+      2,
+    ) + "\n",
+  );
+}
+
+function* readPackageEntries(directory) {
+  for (const name of readdirSync(directory).sort()) {
+    const file = join(directory, name);
+    const stat = lstatSync(file);
+    yield { file, stat };
+    if (stat.isDirectory()) yield* readPackageEntries(file);
   }
-  const { name, archive: filename } = packageNames(kind, version, `${platform}-${arch}`);
-  const destination = join(temporary, name);
-  mkdirSync(destination);
-  cpSync(join(root, "LICENSE"), join(destination, "LICENSE"));
-  for (const name of projects) deploy(name, join(destination, name));
-  if (kind === "agent") {
-    cpSync(native, join(destination, "dist/native"), { recursive: true });
-    mkdirSync(join(destination, "deploy"));
-    const manager = windowsAgent ? "xml" : macosAgent ? "plist" : "service";
-    const examples = windowsAgent ? "winsw" : macosAgent ? "launchd" : "systemd";
-    cpSync(
-      join(root, `deploy/${examples}/kiteline-agent.${manager}`),
-      join(destination, `deploy/kiteline-agent.${manager}`),
-    );
-  } else if (kind === "server") {
-    cpSync(join(root, "packages/web/dist"), join(destination, "web/dist"), { recursive: true });
-    mkdirSync(join(destination, "installer"));
-    for (const name of ["connect.in.sh", "upgrade.in.sh", "windows-entry.in.ps1"])
-      cpSync(join(root, "installer", name), join(destination, "installer", name));
-    const downloads = join(destination, "downloads");
-    mkdirSync(downloads);
-    for (const { archive, checksum } of agents)
-      for (const file of [archive, checksum]) cpSync(file, join(downloads, basename(file)));
-    cpSync(join(root, "installer/install.sh"), join(downloads, "install.sh"));
-    cpSync(join(root, "installer/install.ps1"), join(downloads, "install.ps1"));
+}
+
+function normalizePosixPermissions(directory, scratch) {
+  chmodSync(directory, 0o755);
+  for (const { file, stat } of readPackageEntries(directory)) {
+    if (stat.isDirectory()) chmodSync(file, 0o755);
+    else if (stat.isFile()) {
+      const executable =
+        !!(stat.mode & 0o111) || executablePathPattern.test(relative(directory, file));
+      // pnpm can hard-link both store entries and local workspace dependencies.
+      if (stat.nlink > 1) {
+        const copy = join(scratch, "permission-file");
+        cpSync(file, copy);
+        renameSync(copy, file);
+      }
+      chmodSync(file, executable ? 0o755 : 0o644);
+    }
   }
-  if (windows || platform === "macos")
-    cpSync(runtime, join(destination, "runtime"), { recursive: true });
-  else if (linuxPortable) run("cp", ["-a", runtime, join(destination, "runtime")]);
+}
+
+function verifyWindowsEntries(directory) {
+  for (const { file, stat } of readPackageEntries(directory))
+    if (!stat.isDirectory() && !stat.isFile())
+      throw new Error(`Windows packages cannot contain links: ${file}`);
+}
+
+function verifyPortableSymlinks(directory) {
+  for (const { file, stat } of readPackageEntries(directory)) {
+    if (!stat.isSymbolicLink()) continue;
+    const target = realpathSync(file);
+    if (target !== directory && !target.startsWith(directory + "/"))
+      throw new Error(`Portable symlink escapes package: ${file}`);
+  }
+}
+
+function verifyStaticLinuxPackage(directory, expectedFiles) {
+  const expectedELFs = new Set(expectedFiles);
+  for (const { file, stat } of readPackageEntries(directory)) {
+    if (!stat.isFile()) continue;
+    const name = relative(directory, file);
+    if (name.endsWith(".node")) throw new Error(`Dynamic Node addon is not supported: ${name}`);
+    const bytes = readFileSync(file);
+    if (!bytes.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) continue;
+    if (!expectedELFs.delete(name)) throw new Error(`Unexpected portable ELF: ${name}`);
+    if (!(stat.mode & 0o111)) throw new Error(`Portable ELF is not executable: ${name}`);
+    if (
+      /INTERP/.test(capture("readelf", ["-l", file])) ||
+      /NEEDED/.test(capture("readelf", ["-d", file]))
+    )
+      throw new Error(`Dynamic dependency in static portable package: ${name}`);
+  }
+  if (expectedELFs.size) throw new Error(`Missing portable ELF: ${[...expectedELFs].join(", ")}`);
+}
+
+function writePackageChecksums(directory, platform) {
+  const entries = [];
+  for (const { file, stat } of readPackageEntries(directory))
+    if (stat.isFile()) entries.push(`${digest(file)}  ${relative(directory, file)}`);
+  writeFileSync(join(directory, "SHA256SUMS"), entries.join("\n") + "\n");
+  if (platform !== "windows") chmodSync(join(directory, "SHA256SUMS"), 0o644);
+}
+
+function archiveAndPublish(name, filename, platform, sourceCommit, scratch) {
+  const staged = join(scratch, filename);
+  if (platform === "windows") run("zip", ["-q", "-r", staged, name], { cwd: scratch });
+  else run("tar", ["-czf", staged, "-C", scratch, name]);
+  if (readSourceCommit(root) !== sourceCommit)
+    throw new Error("Source changed during packaging; rerun the build");
+  const archive = join(output, filename);
+  const pending = `${archive}.${process.pid}.pending`;
+  try {
+    // Publish beside the destination so rename also works across cache filesystems.
+    cpSync(staged, pending);
+    writeFileSync(`${pending}.sha256`, `${digest(staged)}  ${filename}\n`);
+    renameSync(pending, archive);
+    renameSync(`${pending}.sha256`, `${archive}.sha256`);
+  } finally {
+    rmSync(pending, { force: true });
+    rmSync(`${pending}.sha256`, { force: true });
+  }
+  console.log(`Release: ${archive}`);
+}
+
+function finishPortablePackage(kind, target, directory, sourceCommit, releaseSource, scratch) {
+  const { platform, architecture } = target;
+  writeReleaseManifest(directory, kind, platform, architecture, sourceCommit, releaseSource);
+  if (platform === "windows") verifyWindowsEntries(directory);
   else {
-    mkdirSync(join(destination, "runtime/bin"), { recursive: true });
-    cpSync(join(runtime, "bin/node"), join(destination, "runtime/bin/node"));
-    cpSync(join(runtime, "LICENSE"), join(destination, "runtime/LICENSE"));
+    normalizePosixPermissions(directory, scratch);
+    verifyPortableSymlinks(directory);
+    if (platform === "linux") {
+      const executables = ["runtime/bin/node"];
+      if (kind === "agent")
+        executables.push(
+          "dist/native/bin/tmux",
+          "dist/native/bin/rename-noreplace",
+          "dist/native/bin/rg",
+          "dist/native/bin/pty-bridge",
+        );
+      verifyStaticLinuxPackage(directory, executables);
+    }
   }
-  mkdirSync(join(destination, "bin"));
-  const launcher = join(destination, "bin", `kiteline-${kind}${windows ? ".ps1" : ""}`);
-  if (windowsAgent) {
-    const { windowsInstallationLayout } = await import("../packages/agent/dist/install/layout.js");
+  writePackageChecksums(directory, platform);
+  const { name, archive } = packageNames(kind, version, `${platform}-${architecture}`);
+  archiveAndPublish(name, archive, platform, sourceCommit, scratch);
+}
+
+async function packageAgent(target, sourceCommit, scratch) {
+  const { platform, architecture } = target;
+  compileProjects(["shared", "agent", "cli", "terminal-recorder"]);
+  const prepared = prepareAgentComponents(target, scratch);
+  const { name } = packageNames("agent", version, `${platform}-${architecture}`);
+  const directory = createPackageDirectory(name, scratch);
+  deployProductionPackage("shared", join(directory, "shared"), platform);
+  setSharedResourceRoot(join(directory, "shared"));
+  deployProductionPackage("agent", join(directory, "agent"), platform);
+  connectSharedPackage(join(directory, "agent"), platform, { deployed: true });
+  cpSync(join(root, "packages/cli/dist"), join(directory, "cli/dist"), { recursive: true });
+  cpSync(join(root, "packages/cli/package.json"), join(directory, "cli/package.json"));
+  connectSharedPackage(join(directory, "cli"), platform, { deployed: false });
+  deployProductionPackage("terminal-recorder", join(directory, "terminal-recorder"), platform);
+  connectSharedPackage(join(directory, "terminal-recorder"), platform, { deployed: true });
+  if (platform === "linux")
+    run("cp", ["-a", prepared.runtimeDirectory, join(directory, "runtime")]);
+  else cpSync(prepared.runtimeDirectory, join(directory, "runtime"), { recursive: true });
+  cpSync(prepared.nativeDirectory, join(directory, "dist/native"), { recursive: true });
+
+  mkdirSync(join(directory, "deploy"));
+  mkdirSync(join(directory, "bin"));
+  const { unixInstallationLayout, windowsInstallationLayout } = await import(
+    "../packages/agent/dist/install/layout.js"
+  );
+  if (platform === "windows") {
+    cpSync(
+      join(root, "deploy/winsw/kiteline-agent.xml"),
+      join(directory, "deploy/kiteline-agent.xml"),
+    );
     const { nodeEnvironmentKeys } = await import("../packages/shared/dist/terminal/node.js");
-    cpSync(join(resolve(windowsComponents), "command"), join(destination, "command"), {
-      recursive: true,
-    });
+    cpSync(prepared.commandDirectory, join(directory, "command"), { recursive: true });
     const launchers = windowsAgentLaunchers({
-      runtimeFiles: windowsRuntimeFiles.map(windowsComponentPath),
+      runtimeFiles: windowsRuntimeFiles.map(componentPackagePath),
       nodeEnvironmentKeys,
       layout: windowsInstallationLayout,
     });
-    writeFileSync(launcher, launchers.portable);
-    writeFileSync(join(destination, "bin/kiteline-agent-installed.ps1"), launchers.installed);
-  } else if (kind === "agent") {
-    const { unixInstallationLayout } = await import("../packages/agent/dist/install/layout.js");
+    writeFileSync(join(directory, "bin/kiteline-agent.ps1"), launchers.portable);
+    writeFileSync(join(directory, "bin/kiteline-agent-installed.ps1"), launchers.installed);
+    chmodSync(join(directory, "bin/kiteline-agent.ps1"), 0o755);
+    writeFileSync(join(directory, "bin/kiteline.ps1"), windowsCliLauncher(terminalReset));
+    chmodSync(join(directory, "bin/kiteline.ps1"), 0o755);
+  } else {
+    if (platform === "macos")
+      cpSync(
+        join(root, "deploy/launchd/kiteline-agent.plist"),
+        join(directory, "deploy/kiteline-agent.plist"),
+      );
+    else
+      cpSync(
+        join(root, "deploy/systemd/kiteline-agent.service"),
+        join(directory, "deploy/kiteline-agent.service"),
+      );
     const paths = {
       directory: unixInstallationLayout.directory,
       management: unixInstallationLayout.managementFile,
       managementFd: unixInstallationLayout.managementLockFd,
       use: unixInstallationLayout.useFile,
     };
-    const platform = macosAgent ? "darwin" : "linux";
-    writeFileSync(launcher, agentLauncher(undefined, paths, platform));
+    const launcherPlatform = platform === "macos" ? "darwin" : "linux";
     writeFileSync(
-      join(destination, "bin/kiteline-agent-installed"),
-      agentLauncher(unixInstallationLayout.directory, paths, platform),
+      join(directory, "bin/kiteline-agent"),
+      agentLauncher(undefined, paths, launcherPlatform),
     );
-    chmodSync(join(destination, "bin/kiteline-agent-installed"), 0o755);
-  } else if (kind === "server") cpSync(join(root, "installer/kiteline-server"), launcher);
-  if (kind !== "cli") chmodSync(launcher, 0o755);
-  if (portable) {
-    const name = `kiteline${windows ? ".ps1" : ""}`;
-    if (windows) {
-      writeFileSync(join(destination, "bin", name), windowsCliLauncher(terminalReset));
-    } else cpSync(join(root, "installer", name), join(destination, "bin", name));
-    chmodSync(join(destination, "bin", name), 0o755);
+    writeFileSync(
+      join(directory, "bin/kiteline-agent-installed"),
+      agentLauncher(unixInstallationLayout.directory, paths, launcherPlatform),
+    );
+    cpSync(join(root, "installer/kiteline"), join(directory, "bin/kiteline"));
   }
-  writeFileSync(
-    join(destination, "release.json"),
-    JSON.stringify(
-      {
-        ...expectedRelease(release, version, kind, `${platform}-${arch}`, sourceCommit),
-        sourceDirty: false,
-        lockfile: digest(join(root, "pnpm-lock.yaml")),
-        ...(cliNodeArchive
-          ? { nodeArchive: cliNodeArchive }
-          : windowsBuild
-            ? { nodeArchive: windowsBuild.inputs.downloads["node.zip"].sha256 }
-            : macosBuild
-              ? { nodeArchive: macosBuild.inputs.downloads["node.tar.xz"].sha256 }
-              : staticBuild
-                ? { staticBuild }
-                : {
-                    nodeArchive: node.sha256,
-                    ubuntu: release.ubuntu,
-                    aptSources: digest(join(root, "release/ubuntu.sources")),
-                    caCertificates: release.caCertificates,
-                  }),
-      },
-      null,
-      2,
-    ) + "\n",
+  finishPortablePackage("agent", target, directory, sourceCommit, prepared.releaseSource, scratch);
+}
+
+function packageCli(target, sourceCommit, scratch) {
+  const { platform, architecture } = target;
+  compileProjects(["shared", "cli"]);
+  const prepared = prepareCliRuntime(platform, architecture, scratch);
+  const { name } = packageNames("cli", version, `${platform}-${architecture}`);
+  const directory = createPackageDirectory(name, scratch);
+  deployProductionPackage("shared", join(directory, "shared"), platform);
+  setSharedResourceRoot(join(directory, "shared"));
+  cpSync(join(root, "packages/cli/dist"), join(directory, "cli/dist"), { recursive: true });
+  cpSync(join(root, "packages/cli/package.json"), join(directory, "cli/package.json"));
+  connectSharedPackage(join(directory, "cli"), platform, { deployed: false });
+  if (platform === "linux")
+    run("cp", ["-a", prepared.runtimeDirectory, join(directory, "runtime")]);
+  else cpSync(prepared.runtimeDirectory, join(directory, "runtime"), { recursive: true });
+  mkdirSync(join(directory, "bin"));
+  if (platform === "windows") {
+    writeFileSync(join(directory, "bin/kiteline.ps1"), windowsCliLauncher(terminalReset));
+    chmodSync(join(directory, "bin/kiteline.ps1"), 0o755);
+  } else cpSync(join(root, "installer/kiteline"), join(directory, "bin/kiteline"));
+  finishPortablePackage("cli", target, directory, sourceCommit, prepared.releaseSource, scratch);
+}
+
+function packageServer(architecture, agentTargets, sourceCommit, scratch) {
+  compileProjects(["shared", "server"]);
+  run("pnpm", ["--filter", "@kiteline/web", "build"]);
+  const agents = readAgentArchives(agentTargets, sourceCommit);
+  const prepared = prepareServerRuntime(architecture, scratch);
+  const { name, archive: filename } = packageNames("server", version, `linux-${architecture}`);
+  const directory = createPackageDirectory(name, scratch);
+  deployProductionPackage("shared", join(directory, "shared"), "linux");
+  setSharedResourceRoot(join(directory, "shared"));
+  deployProductionPackage("server", join(directory, "server"), "linux");
+  connectSharedPackage(join(directory, "server"), "linux", { deployed: true });
+  cpSync(join(root, "packages/web/dist"), join(directory, "web/dist"), { recursive: true });
+  mkdirSync(join(directory, "installer"));
+  for (const name of ["connect.in.sh", "upgrade.in.sh", "windows-entry.in.ps1"])
+    cpSync(join(root, "installer", name), join(directory, "installer", name));
+  const downloads = join(directory, "downloads");
+  mkdirSync(downloads);
+  for (const { archive, checksum } of agents)
+    for (const file of [archive, checksum]) cpSync(file, join(downloads, basename(file)));
+  cpSync(join(root, "installer/install.sh"), join(downloads, "install.sh"));
+  cpSync(join(root, "installer/install.ps1"), join(downloads, "install.ps1"));
+  mkdirSync(join(directory, "runtime/bin"), { recursive: true });
+  cpSync(join(prepared.runtimeDirectory, "bin/node"), join(directory, "runtime/bin/node"));
+  cpSync(join(prepared.runtimeDirectory, "LICENSE"), join(directory, "runtime/LICENSE"));
+  mkdirSync(join(directory, "bin"));
+  cpSync(join(root, "installer/kiteline-server"), join(directory, "bin/kiteline-server"));
+  writeReleaseManifest(
+    directory,
+    "server",
+    "linux",
+    architecture,
+    sourceCommit,
+    prepared.releaseSource,
   );
-  checksums(destination);
-  const tarball = join(output, filename);
-  const staged = join(temporary, filename);
-  if (windows) run("zip", ["-q", "-r", staged, name], { cwd: temporary });
-  else run("tar", ["-czf", staged, "-C", temporary, name]);
-  if (readSourceCommit(root) !== sourceCommit)
-    throw new Error("Source changed during packaging; rerun the build");
-  const pending = `${tarball}.${process.pid}.pending`;
-  try {
-    // Publish beside the destination so rename also works across cache filesystems.
-    cpSync(staged, pending);
-    writeFileSync(`${pending}.sha256`, `${digest(staged)}  ${filename}\n`);
-    renameSync(pending, tarball);
-    renameSync(`${pending}.sha256`, `${tarball}.sha256`);
-  } finally {
-    rmSync(pending, { force: true });
-    rmSync(`${pending}.sha256`, { force: true });
+  normalizePosixPermissions(directory, scratch);
+  writePackageChecksums(directory, "linux");
+  archiveAndPublish(name, filename, "linux", sourceCommit, scratch);
+}
+
+function readPackageRequest() {
+  const { positionals, values } = parseArgs({
+    allowPositionals: true,
+    options: {
+      "agent-target": { type: "string" },
+      "windows-components": { type: "string" },
+      "macos-components": { type: "string" },
+    },
+  });
+  const usage =
+    "Usage: pnpm package server amd64|arm64 [--agent-target=linux-amd64,linux-arm64,windows-amd64,macos-amd64,macos-arm64] | agent linux-amd64|linux-arm64 | agent windows-amd64 --windows-components=PATH | agent macos-amd64|macos-arm64 --macos-components=PATH | cli linux-amd64|linux-arm64|windows-amd64|macos-amd64|macos-arm64";
+  if (positionals.length !== 2) throw new Error(usage);
+  const [kind, target] = positionals;
+  const windowsComponents = values["windows-components"];
+  const macosComponents = values["macos-components"];
+
+  if (kind === "server") {
+    const agentTargets = values["agent-target"]?.split(",") ?? allAgentTargets;
+    if (
+      !serverArchitectures.includes(target) ||
+      windowsComponents !== undefined ||
+      macosComponents !== undefined ||
+      agentTargets.some((target) => !allAgentTargets.includes(target)) ||
+      new Set(agentTargets).size !== agentTargets.length
+    )
+      throw new Error(usage);
+    return { kind, architecture: target, agentTargets };
   }
-  console.log(`Release: ${tarball}`);
+
+  if (kind === "cli") {
+    if (!allAgentTargets.includes(target) || Object.keys(values).length) throw new Error(usage);
+    const [platform, architecture] = target.split("-");
+    return { kind, target: { platform, architecture } };
+  }
+
+  if (kind === "agent") {
+    if (!allAgentTargets.includes(target) || values["agent-target"] !== undefined)
+      throw new Error(usage);
+    const [platform, architecture] = target.split("-");
+    if (platform === "linux") {
+      if (windowsComponents !== undefined || macosComponents !== undefined) throw new Error(usage);
+      return { kind, target: { platform, architecture } };
+    }
+    if (platform === "windows") {
+      if (!windowsComponents || macosComponents !== undefined) throw new Error(usage);
+      return { kind, target: { platform, architecture, componentsDirectory: windowsComponents } };
+    }
+    if (!macosComponents || windowsComponents !== undefined) throw new Error(usage);
+    return { kind, target: { platform, architecture, componentsDirectory: macosComponents } };
+  }
+
+  throw new Error(usage);
+}
+
+const request = readPackageRequest();
+const scratch = realpathSync(mkdtempSync("/var/tmp/kiteline-package-"));
+try {
+  const sourceCommit = readSourceCommit(root);
+  mkdirSync(releaseCache, { recursive: true });
+  mkdirSync(output, { recursive: true });
+  if (request.kind === "agent") await packageAgent(request.target, sourceCommit, scratch);
+  else if (request.kind === "cli") packageCli(request.target, sourceCommit, scratch);
+  else packageServer(request.architecture, request.agentTargets, sourceCommit, scratch);
 } finally {
-  rmSync(temporary, { recursive: true, force: true });
+  rmSync(scratch, { recursive: true, force: true });
 }

@@ -8,8 +8,9 @@ export LDFLAGS='-Wl,--no-insert-timestamp'
 unset BASH_ENV ENV CDPATH
 inputs=$(cygpath -u "$1")
 output=$(cygpath -u "$2")
-mkdir -p "$output/source" "$output/terminfo"
-cd "$output/source"
+scratch=$(cygpath -u "$4")
+mkdir -p "$scratch/source" "$output/terminfo"
+cd "$scratch/source"
 tar -xf "$inputs/tmux.tar.gz" --strip-components=1
 while IFS= read -r file || [ -n "$file" ]; do
   patch -p1 -i "$inputs/native/tmux/$file"
@@ -22,4 +23,4 @@ gcc $CFLAGS $LDFLAGS "$inputs/native/terminal/pty-bridge.c" -lutil -o "$output/p
 cp COPYING "$output/tmux-LICENSE"
 tic -x -o "$output/terminfo" "$inputs/native/tmux/tmux.terminfo"
 ./tmux.exe -V
-bash "$inputs/scripts/build-windows-runtime.sh" "$1" "$2" "$3"
+bash "$inputs/scripts/build-windows-runtime.sh" "$1" "$2" "$3" "$4"

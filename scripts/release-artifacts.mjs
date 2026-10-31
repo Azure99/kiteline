@@ -1,4 +1,4 @@
-import { run } from "./release-inputs.mjs";
+import { capture, nodeInput } from "./release-inputs.mjs";
 
 export {
   agentTargets,
@@ -25,30 +25,22 @@ export function candidateCompose(template, version) {
   return template.replace(token, () => `\${KITELINE_VERSION:-${version}}`);
 }
 
-export function staticNodeInput(version, recipe, architecture) {
-  const name = `node-v${version}-r${recipe.recipeRevision}`;
-  return {
-    url: `https://github.com/Azure99/node-static-builds/releases/download/${name}/${name}-linux-${architecture}.tar.gz`,
-    sha256: recipe.archives[architecture].sha256,
-  };
-}
-
 export function expectedRelease(inputs, version, kind, target, sourceCommit) {
-  const [platform, arch] = target.split("-");
+  const [platform] = target.split("-");
   return {
     kind,
     platform,
     version,
-    architecture: inputs.nodeArchives[arch].architecture,
-    node: inputs.node,
+    architecture: nodeInput(inputs.node, target).architecture,
+    node: inputs.node.version,
     sourceCommit,
   };
 }
 
 export function sourceCommit(root) {
-  const options = { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] };
-  const commit = run("git", ["rev-parse", "HEAD"], options).trim();
-  if (run("git", ["status", "--porcelain"], options).trim())
+  const options = { cwd: root };
+  const commit = capture("git", ["rev-parse", "HEAD"], options);
+  if (capture("git", ["status", "--porcelain"], options))
     throw new Error("Release builds require a clean Git worktree and index");
   return commit;
 }

@@ -9,9 +9,16 @@ import {
   releaseMatches,
   serverArchitectures,
   sourceCommit,
-  staticNodeInput,
 } from "./release-artifacts.mjs";
-import { digest, json } from "./release-inputs.mjs";
+import {
+  componentPackagePath,
+  digest,
+  json,
+  nodeInput,
+  ripgrepLicenseFiles,
+  staticNodeInput,
+} from "./release-inputs.mjs";
+import { linuxInputs } from "./build-linux-components.mjs";
 import { windowsCliLauncher } from "./agent-launcher.ts";
 import { terminalReset } from "../packages/cli/src/terminal-reset.ts";
 
@@ -84,18 +91,52 @@ same(
 );
 assert.ok(readFileSync(join(directory, "runtime/LICENSE"), "utf8").trim());
 
-const node = readFileSync(
-  join(directory, "runtime/bin", platform === "windows" ? "node.exe" : "node"),
-);
+const nodePath = join(directory, "runtime/bin", platform === "windows" ? "node.exe" : "node");
+const node = readFileSync(nodePath);
 if (platform === "linux") {
-  assert.equal(node.subarray(0, 4).toString("hex"), "7f454c46");
-  assert.equal(node.readUInt16LE(18), arch === "amd64" ? 62 : 183);
+  const elfMagic = "7f454c46";
+  const elfMachineOffset = 18;
+  const elfMachine = { amd64: 62, arm64: 183 };
+  assert.equal(
+    node.subarray(0, 4).toString("hex"),
+    elfMagic,
+    `${nodePath}: ELF magic must match ${target}`,
+  );
+  assert.equal(
+    node.readUInt16LE(elfMachineOffset),
+    elfMachine[arch],
+    `${nodePath}: ELF e_machine must match ${target}`,
+  );
 } else if (platform === "windows") {
-  assert.equal(node.subarray(0, 2).toString(), "MZ");
-  assert.equal(node.readUInt16LE(node.readUInt32LE(0x3c) + 4), 0x8664);
+  const dosMagic = "MZ";
+  const dosPeHeaderPointerOffset = 0x3c;
+  const peMachineOffsetFromHeader = 4;
+  const peMachineAmd64 = 0x8664;
+  assert.equal(
+    node.subarray(0, 2).toString(),
+    dosMagic,
+    `${nodePath}: DOS MZ magic must match ${target}`,
+  );
+  const peHeaderOffset = node.readUInt32LE(dosPeHeaderPointerOffset);
+  assert.equal(
+    node.readUInt16LE(peHeaderOffset + peMachineOffsetFromHeader),
+    peMachineAmd64,
+    `${nodePath}: PE Machine must match ${target}`,
+  );
 } else {
-  assert.equal(node.readUInt32LE(0), 0xfeedfacf);
-  assert.equal(node.readUInt32LE(4), arch === "amd64" ? 0x01000007 : 0x0100000c);
+  const machOMagic64LittleEndian = 0xfeedfacf;
+  const machOCpuTypeOffset = 4;
+  const machOCpuType = { amd64: 0x01000007, arm64: 0x0100000c };
+  assert.equal(
+    node.readUInt32LE(0),
+    machOMagic64LittleEndian,
+    `${nodePath}: Mach-O 64-bit little-endian magic must match ${target}`,
+  );
+  assert.equal(
+    node.readUInt32LE(machOCpuTypeOffset),
+    machOCpuType[arch],
+    `${nodePath}: Mach-O cpuType must match ${target}`,
+  );
 }
 
 if (kind !== "server") {
@@ -123,57 +164,32 @@ if (kind === "cli") {
   if (platform === "linux") {
     assert.equal(
       release.nodeArchive,
-      staticNodeInput(inputs.node, json(join(source, "release/node-static.json")), arch).sha256,
+      staticNodeInput(inputs.node.version, json(join(source, "release/node-static.json")), arch)
+        .sha256,
     );
     const build = json(join(directory, "runtime/build.json"));
-    assert.equal(build.nodeVersion, inputs.node);
+    assert.equal(build.nodeVersion, inputs.node.version);
     assert.equal(build.architecture, arch);
     assert.ok(actual.has("runtime/licenses/musl-COPYRIGHT"));
   } else {
-    const recipe = json(join(source, `release/agent-${platform}.json`));
-    assert.equal(
-      release.nodeArchive,
-      platform === "windows"
-        ? recipe.nodeArchiveSha256
-        : recipe.architectures[arch].nodeArchiveSha256,
-    );
+    assert.equal(release.nodeArchive, nodeInput(inputs.node, target).download.sha256);
   }
 }
 
 if (kind === "agent") {
   const identity = json(join(directory, "dist/native/identity.json"));
-  assert.equal(identity.node, `v${inputs.node}`);
-  assert.equal(identity.architecture, inputs.nodeArchives[arch].architecture);
+  assert.equal(identity.node, `v${inputs.node.version}`);
+  assert.equal(identity.architecture, nodeInput(inputs.node, target).architecture);
   assert.equal(identity.tmux, inputs.tmux.version);
   assert.equal(identity.ripgrep.version, inputs.ripgrep.version);
-  const rg = `dist/native/bin/rg${platform === "windows" ? ".exe" : ""}`;
-  if (platform !== "windows") assert.equal(actual.get(rg), identity.ripgrep.binarySha256, rg);
   if (platform === "linux") {
     assert.equal(identity.linkage, "static-musl");
-    const pinned = staticNodeInput(
-      inputs.node,
-      json(join(source, "release/node-static.json")),
-      arch,
-    );
-    assert.deepEqual(release.staticBuild.node, pinned);
-    // The Docker export precedes the identity and rg additions made by the builder.
-    for (const [file, hash] of checksumEntries(release.staticBuild.files)) {
-      const path = file.replace(/^\.\//, "").replace(/^native\//, "dist/native/");
-      assert.equal(actual.get(path), hash, path);
-    }
-    assert.equal(actual.get("dist/native/bin/tmux"), identity.tmuxBinary);
-    assert.equal(actual.get("dist/native/bin/rename-noreplace"), identity.helperBinary);
-    assert.equal(actual.get("dist/native/bin/pty-bridge"), identity.ptyBridgeBinary);
-    assert.equal(identity.patch, digest(join(source, "native/tmux/paste.patch")));
-    assert.equal(identity.flowControlPatch, digest(join(source, "native/tmux/flow-control.patch")));
-    assert.equal(identity.helper, digest(join(source, "native/linux/rename-noreplace.c")));
-    assert.equal(identity.ptyBridge, digest(join(source, "native/terminal/pty-bridge.c")));
-  } else {
-    for (const [file, hash] of Object.entries(identity.files))
-      assert.equal(actual.get(file.replace(/^native\//, "dist/native/")), hash, file);
+    assert.deepEqual(identity.inputs, linuxInputs(arch), "Linux component inputs differ");
   }
+  for (const [file, hash] of Object.entries(identity.files))
+    assert.equal(actual.get(componentPackagePath(file)), hash, file);
   assert.ok([...actual.keys()].some((file) => file.startsWith("dist/native/licenses/")));
-  for (const file of ["COPYING", "LICENSE-MIT", "UNLICENSE"])
+  for (const file of ripgrepLicenseFiles)
     assert.ok(actual.has(`dist/native/licenses/ripgrep/${file}`), `Missing rg material: ${file}`);
   if (platform === "windows") {
     const recipe = json(join(source, "release/agent-windows.json"));

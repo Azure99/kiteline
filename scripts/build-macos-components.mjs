@@ -1,14 +1,17 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  capture,
   copy,
   digest,
   files,
   hash,
   json,
+  nodeInput,
   prepareInputs,
   ripgrepInput,
+  ripgrepLicenseFiles,
   run,
   tmuxPatchFiles,
   verifyComponentFiles,
@@ -33,18 +36,13 @@ const sourceFiles = [
   "native/tmux/tmux.terminfo",
 ];
 function downloads(architecture) {
-  const target = recipe.architectures[architecture];
-  if (!target) throw new Error(`Unsupported macOS architecture: ${architecture}`);
-  const nodeArchitecture = release.nodeArchives[architecture].architecture;
+  const target = `macos-${architecture}`;
   return {
-    "node.tar.xz": {
-      url: `https://nodejs.org/dist/v${release.node}/node-v${release.node}-darwin-${nodeArchitecture}.tar.xz`,
-      sha256: target.nodeArchiveSha256,
-    },
+    "node.tar.xz": nodeInput(release.node, target).download,
     "tmux.tar.gz": release.tmux,
     "libevent.tar.gz": release.libevent,
     "flock.tar.gz": recipe.flock,
-    "rg.tar.gz": ripgrepInput(release.ripgrep.version, target.ripgrep),
+    "rg.tar.gz": ripgrepInput(release.ripgrep, target).download,
   };
 }
 const binaries = [
@@ -53,23 +51,11 @@ const binaries = [
     (name) => `native/bin/${name}`,
   ),
 ];
-const capture = (command, args) =>
-  run(command, args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).trim();
 // macOS hashes only the shared inputs it consumes; Windows hashes the complete input file.
-function sharedInputs(value, architecture) {
-  return {
-    node: value.node,
-    nodeArchitecture: value.nodeArchives[architecture].architecture,
-    tmux: value.tmux,
-    libevent: value.libevent,
-    ripgrepVersion: value.ripgrep.version,
-  };
-}
 function inputs(architecture) {
   return {
     architecture,
     downloads: downloads(architecture),
-    shared: sharedInputs(release, architecture),
     files: Object.fromEntries(
       sourceFiles
         .filter((file) => file !== "release/inputs.json")
@@ -106,7 +92,8 @@ function macho(file, architecture) {
 
 function buildMacosComponents(directory, destination, architecture) {
   const expected = inputs(architecture);
-  const nodeArchitecture = release.nodeArchives[architecture].architecture;
+  const node = nodeInput(release.node, `macos-${architecture}`);
+  const nodeArchitecture = node.architecture;
   if (process.platform !== "darwin" || process.arch !== nodeArchitecture)
     throw new Error(
       `The macOS ${architecture} component builder requires a Darwin ${nodeArchitecture} build host`,
@@ -143,19 +130,13 @@ function buildMacosComponents(directory, destination, architecture) {
       },
     );
     run("/usr/bin/tar", ["-xf", join(directory, "node.tar.xz"), "-C", temporary]);
-    const node = join(
-      temporary,
-      basename(new URL(expected.downloads["node.tar.xz"].url).pathname, ".tar.xz"),
-    );
-    copy(join(node, "bin/node"), join(destination, "runtime/bin/node"));
-    copy(join(node, "LICENSE"), join(destination, "runtime/LICENSE"));
+    const nodeDirectory = join(temporary, node.archiveRoot);
+    copy(join(nodeDirectory, "bin/node"), join(destination, "runtime/bin/node"));
+    copy(join(nodeDirectory, "LICENSE"), join(destination, "runtime/LICENSE"));
     run("/usr/bin/tar", ["-xf", join(directory, "rg.tar.gz"), "-C", temporary]);
-    const rg = join(
-      temporary,
-      basename(new URL(expected.downloads["rg.tar.gz"].url).pathname, ".tar.gz"),
-    );
+    const rg = join(temporary, ripgrepInput(release.ripgrep, `macos-${architecture}`).archiveRoot);
     copy(join(rg, "rg"), join(destination, "native/bin/rg"));
-    for (const file of ["COPYING", "LICENSE-MIT", "UNLICENSE"])
+    for (const file of ripgrepLicenseFiles)
       copy(join(rg, file), join(destination, "native/licenses/ripgrep", file));
     const linkage = Object.fromEntries(
       binaries.map((file) => [file, macho(join(destination, file), architecture)]),
@@ -165,15 +146,11 @@ function buildMacosComponents(directory, destination, architecture) {
     writeJson(join(destination, "native/identity.json"), {
       linkage: "macos-system",
       architecture: nodeArchitecture,
-      node: `v${release.node}`,
+      node: `v${release.node.version}`,
       tmux: release.tmux.version,
       libevent: recipe.libeventVersion,
       flock: recipe.flock.version,
-      ripgrep: {
-        version: release.ripgrep.version,
-        ...expected.downloads["rg.tar.gz"],
-        binarySha256: digest(join(destination, "native/bin/rg")),
-      },
+      ripgrep: { version: release.ripgrep.version },
       toolchain,
       system: capture("/usr/bin/sw_vers", []),
       inputs: expected,
@@ -190,7 +167,7 @@ export function verifyMacosComponents(directory, architecture) {
   const identity = json(join(native, "identity.json"));
   const expected = inputs(architecture);
   if (
-    identity.architecture !== release.nodeArchives[architecture].architecture ||
+    identity.architecture !== nodeInput(release.node, `macos-${architecture}`).architecture ||
     hash(identity.inputs) !== hash(expected)
   )
     throw new Error("macOS components do not match this source; rebuild them");

@@ -16,6 +16,3 @@ export const windowsRuntimeFiles = [
     .flat()
     .map((file) => `native/msys/${file}`),
 ];
-
-export const windowsComponentPath = (file: string) =>
-  file.startsWith("native/") ? "dist/" + file : file;

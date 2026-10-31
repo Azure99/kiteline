@@ -216,7 +216,7 @@ Linux agent 和 CLI 使用同一固定的静态 Node 输入，server 使用官�
 ### 清单文件
 
 - `release.json` 记录包身份、源码提交、锁文件摘要和构建来源，供安装、升级和发布检查使用。
-- `dist/native/identity.json` 记录原生组件来源与摘要，以及组包时写入的 xterm.js 配套版本和终端 profile。
+- `dist/native/identity.json` 记录原生组件来源与完整文件摘要；组包直接保留该收据。
 - 包内 `SHA256SUMS` 用于逐文件核验；包旁的 `<包名>.sha256` 用于核验归档。
 
 ### 第三方许可
@@ -236,11 +236,11 @@ Linux agent 和 CLI 使用同一固定的静态 Node 输入，server 使用官�
 
 ### Node
 
-一起更新 `package.json` 的 `engines.node` 和匹配的 `@types/node` 主版本、`release/inputs.json` 的 `node` 与官方 Linux 归档摘要、`release/agent-windows.json` 的 Node 归档和头文件摘要，以及 `release/agent-macos.json` 两个架构的 Node 摘要。
+一起更新 `package.json` 的 `engines.node` 和匹配的 `@types/node` 主版本，以及 `release/inputs.json` 的 `node.version`、`node.archives` 五目标的归档后缀、Node architecture 和摘要、`node.headers` 的头文件摘要。
 
 Linux agent 还需先在 [Azure99/node-static-builds](https://github.com/Azure99/node-static-builds) 发布新静态组件，再更新 `release/node-static.json` 的摘要和 `recipeRevision`。
 
-`package.json` 的 `engines.node` 与 `release/inputs.json` 的 `node` 必须是同一精确版本，否则组包失败。Node 22 的官方维护期到 2027-04-30 结束，应在此之前升级到新的 LTS；升级后重新验证[代理行为](#undici-与代理)。
+`package.json` 的 `engines.node` 与 `release/inputs.json` 的 `node.version` 必须是同一精确版本，否则组包失败。Node 22 的官方维护期到 2027-04-30 结束，应在此之前升级到新的 LTS；升级后重新验证[代理行为](#undici-与代理)。
 
 ### pnpm
 
@@ -248,7 +248,7 @@ Linux agent 还需先在 [Azure99/node-static-builds](https://github.com/Azure99
 
 ### rg
 
-更新 `release/inputs.json` 的 `ripgrep.version`，配套更新同文件的 Linux 归档、`release/agent-macos.json` 两架构和 `release/agent-windows.json` 的归档摘要，然后重新运行 `pnpm native:build`。
+更新 `release/inputs.json` 的 `ripgrep.version` 和 `ripgrep.archives` 五目标的归档后缀及摘要，然后重新运行 `pnpm native:build`。
 
 ### tmux 与 libevent
 

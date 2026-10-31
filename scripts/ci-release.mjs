@@ -11,18 +11,16 @@ import {
   serverImageName,
   sourceCommit,
 } from "./release-artifacts.mjs";
-import { digest, json, run } from "./release-inputs.mjs";
+import { capture as captureOutput, digest, json, run } from "./release-inputs.mjs";
 
 const [mode, extra] = process.argv.slice(2);
 if (extra || !["plan", "candidate", "dev-image", "publish"].includes(mode))
   throw new Error("Usage: node scripts/ci-release.mjs plan|candidate|dev-image|publish");
 const root = process.cwd();
 const capture = (file, args) =>
-  run(file, args, {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "inherit"],
+  captureOutput(file, args, {
     maxBuffer: 16 * 1024 * 1024,
-  }).trim();
+  });
 const tag = process.env.CI_TAG ?? "";
 const product = mode === "publish" ? process.env.CI_SOURCE : sourceCommit(root);
 const version =

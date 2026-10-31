@@ -8,10 +8,11 @@ unset BASH_ENV ENV CDPATH CONFIG_SITE LDFLAGS
 inputs=$(cygpath -u "$1")
 output=$(cygpath -u "$2")
 upstream=$(cygpath -u "$3")
+scratch=$(cygpath -u "$4")
 # The checked source package owns its version and ordered MSYS2 patch series.
 # shellcheck disable=SC1091
 source "$upstream/PKGBUILD"
-cd "$output/runtime-source"
+cd "$scratch/runtime-source"
 for file in "${_patches[@]}"; do
   patch -p1 -i "$upstream/$file"
 done
@@ -20,9 +21,9 @@ patch -p1 -i "$inputs/native/msys/ctrl-c.patch"
 export CFLAGS="-O2 -pipe -ggdb -DCYGPORT_RELEASE_INFO=$pkgver"
 export CXXFLAGS='-O2 -pipe -ggdb'
 target=$(gcc -dumpmachine)
-mkdir "$output/runtime-build"
-cd "$output/runtime-build"
-"$output/runtime-source/configure" --prefix=/usr --sysconfdir=/etc --build="$target" \
+mkdir "$scratch/runtime-build"
+cd "$scratch/runtime-build"
+"$scratch/runtime-source/configure" --prefix=/usr --sysconfdir=/etc --build="$target" \
   --with-msys2-runtime-commit="$(cat "$upstream/msys2-runtime.commit")" \
   --disable-doc --disable-dumper --with-cross-bootstrap
 make -j2

@@ -4,13 +4,17 @@ import { fileURLToPath } from "node:url";
 import { prepareWindowsNotices } from "./prepare-windows-notices.mjs";
 import { windowsRuntimeFiles } from "./windows-components.ts";
 import {
+  capture,
   copy,
   digest,
   files,
   hash,
   json,
+  nodeHeadersInput,
+  nodeInput,
   prepareInputs,
   ripgrepInput,
+  ripgrepLicenseFiles,
   run,
   tmuxPatchFiles,
   verifyComponentFiles,
@@ -22,6 +26,8 @@ const root = resolve(import.meta.dirname, "..");
 const release = json(join(root, "release/inputs.json"));
 const recipe = json(join(root, "release/agent-windows.json"));
 const { tmux } = release;
+const node = nodeInput(release.node, "windows-amd64");
+const ripgrep = ripgrepInput(release.ripgrep, "windows-amd64");
 const msysRuntime = recipe.packages.find((pkg) => pkg.name === "msys2-runtime");
 const inputSourceFiles = [
   "release/inputs.json",
@@ -48,15 +54,9 @@ const inputSourceFiles = [
     .map((file) => `native/windows/${file}`),
 ];
 const downloads = {
-  "node.zip": {
-    url: `https://nodejs.org/dist/v${release.node}/node-v${release.node}-win-x64.zip`,
-    sha256: recipe.nodeArchiveSha256,
-  },
-  "node-headers.tar.gz": {
-    url: `https://nodejs.org/dist/v${release.node}/node-v${release.node}-headers.tar.gz`,
-    sha256: recipe.nodeHeadersSha256,
-  },
-  "rg.zip": ripgrepInput(release.ripgrep.version, recipe.ripgrep),
+  "node.zip": node.download,
+  "node-headers.tar.gz": nodeHeadersInput(release.node),
+  "rg.zip": ripgrep.download,
   "msys2-base.tar.xz": recipe.bootstrap,
   "tmux.tar.gz": tmux,
   ...Object.fromEntries(recipe.packages.map((pkg) => [`packages/${pkg.name}.tar.zst`, pkg])),
@@ -122,8 +122,8 @@ function buildWindowsMsys(directory, destination) {
       `--output=${runtimeArchive}`,
       `cygwin-${msysRuntime.version.split("-")[0]}`,
     ]);
-    mkdirSync(join(destination, "runtime-source"));
-    run(tar, ["-xf", runtimeArchive, "-C", join(destination, "runtime-source")]);
+    mkdirSync(join(temporary, "runtime-source"));
+    run(tar, ["-xf", runtimeArchive, "-C", join(temporary, "runtime-source")]);
     const environment = {
       SystemRoot: process.env.SystemRoot,
       WINDIR: process.env.SystemRoot,
@@ -144,12 +144,10 @@ function buildWindowsMsys(directory, destination) {
         directory,
         destination,
         runtimeRecipe,
+        temporary,
       ],
       { env: environment, cwd: temporary },
     );
-    rmSync(join(destination, "source"), { recursive: true });
-    rmSync(join(destination, "runtime-source"), { recursive: true });
-    rmSync(join(destination, "runtime-build"), { recursive: true });
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }
@@ -187,10 +185,7 @@ function buildWindowsAddon(directory, destination) {
     join(directory, "release/Dockerfile.windows-native"),
     join(directory, "release"),
   ]);
-  const imageId = run("docker", ["image", "inspect", "--format", "{{.Id}}", image], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "inherit"],
-  }).trim();
+  const imageId = capture("docker", ["image", "inspect", "--format", "{{.Id}}", image]);
   run("docker", [
     "run",
     "--rm",
@@ -241,23 +236,17 @@ function assembleWindowsComponents(directory, msysDirectory, addonDirectory, des
     run("unzip", [
       "-q",
       join(directory, "node.zip"),
-      `node-v${release.node}-win-x64/node.exe`,
-      `node-v${release.node}-win-x64/LICENSE`,
+      `${node.archiveRoot}/node.exe`,
+      `${node.archiveRoot}/LICENSE`,
       "-d",
       temporary,
     ]);
-    copy(
-      join(temporary, `node-v${release.node}-win-x64/node.exe`),
-      join(destination, "runtime/bin/node.exe"),
-    );
-    copy(
-      join(temporary, `node-v${release.node}-win-x64/LICENSE`),
-      join(destination, "runtime/LICENSE"),
-    );
+    copy(join(temporary, node.archiveRoot, "node.exe"), join(destination, "runtime/bin/node.exe"));
+    copy(join(temporary, node.archiveRoot, "LICENSE"), join(destination, "runtime/LICENSE"));
     run("unzip", ["-q", join(directory, "rg.zip"), "-d", temporary]);
-    const rg = join(temporary, `ripgrep-${release.ripgrep.version}-x86_64-pc-windows-msvc`);
+    const rg = join(temporary, ripgrep.archiveRoot);
     copy(join(rg, "rg.exe"), join(native, "bin/rg.exe"));
-    for (const file of ["COPYING", "LICENSE-MIT", "UNLICENSE"])
+    for (const file of ripgrepLicenseFiles)
       copy(join(rg, file), join(native, "licenses/ripgrep", file));
     for (const [pkg, paths] of Object.entries(recipe.runtimeFiles)) {
       const extracted = join(temporary, pkg);
@@ -305,15 +294,9 @@ function assembleWindowsComponents(directory, msysDirectory, addonDirectory, des
     writeJson(join(native, "identity.json"), {
       linkage: "windows-msys",
       architecture: "x64",
-      node: `v${release.node}`,
+      node: `v${release.node.version}`,
       tmux: tmux.version,
-      tmuxSource: tmux.sha256,
-      patch: expected.files["native/tmux/paste.patch"],
-      controlPatch: expected.files["native/tmux/cygwin-outfd.patch"],
-      terminfo: expected.files["native/tmux/tmux.terminfo"],
-      ripgrep: { version: release.ripgrep.version, ...expected.downloads["rg.zip"] },
-      msysRuntime: msysRuntime.version,
-      runtimePatch: expected.files["native/msys/ctrl-c.patch"],
+      ripgrep: { version: release.ripgrep.version },
       inputs: expected,
       files: componentFiles,
     });

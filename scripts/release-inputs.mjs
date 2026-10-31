@@ -23,9 +23,18 @@ export function run(command, args, options = {}) {
   return result.stdout;
 }
 
+export function capture(command, args, options = {}) {
+  return run(command, args, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "inherit"],
+    ...options,
+  }).trim();
+}
+
 export const digest = (file) => createHash("sha256").update(readFileSync(file)).digest("hex");
 export const hash = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 export const json = (file) => JSON.parse(readFileSync(file, "utf8"));
+export const componentPackagePath = (file) => (file.startsWith("native/") ? "dist/" + file : file);
 
 export function tmuxPatchFiles(root) {
   return readFileSync(join(root, "native/tmux/series"), "utf8")
@@ -34,10 +43,48 @@ export function tmuxPatchFiles(root) {
     .map((file) => `native/tmux/${file}`);
 }
 
-export function ripgrepInput(version, input) {
+export function nodeInput(node, target) {
+  const input = node.archives[target];
+  if (!input) throw new Error(`Unsupported Node target: ${target}`);
+  const archiveName = `node-v${node.version}-${input.archiveSuffix}`;
   return {
-    url: `https://github.com/BurntSushi/ripgrep/releases/download/${version}/ripgrep-${version}-${input.archiveSuffix}`,
-    sha256: input.sha256,
+    download: {
+      url: `https://nodejs.org/dist/v${node.version}/${archiveName}`,
+      sha256: input.sha256,
+    },
+    archiveName,
+    archiveRoot: archiveName.replace(/\.(?:tar\.xz|zip)$/, ""),
+    architecture: input.architecture,
+  };
+}
+
+export function nodeHeadersInput(node) {
+  return {
+    url: `https://nodejs.org/dist/v${node.version}/node-v${node.version}-headers.tar.gz`,
+    sha256: node.headers.sha256,
+  };
+}
+
+export function staticNodeInput(version, recipe, architecture) {
+  const name = `node-v${version}-r${recipe.recipeRevision}`;
+  return {
+    url: `https://github.com/Azure99/node-static-builds/releases/download/${name}/${name}-linux-${architecture}.tar.gz`,
+    sha256: recipe.archives[architecture].sha256,
+  };
+}
+
+export const ripgrepLicenseFiles = ["COPYING", "LICENSE-MIT", "UNLICENSE"];
+
+export function ripgrepInput(ripgrep, target) {
+  const input = ripgrep.archives[target];
+  if (!input) throw new Error(`Unsupported ripgrep target: ${target}`);
+  const archiveName = `ripgrep-${ripgrep.version}-${input.archiveSuffix}`;
+  return {
+    download: {
+      url: `https://github.com/BurntSushi/ripgrep/releases/download/${ripgrep.version}/${archiveName}`,
+      sha256: input.sha256,
+    },
+    archiveRoot: archiveName.replace(/\.(?:tar\.gz|zip)$/, ""),
   };
 }
 

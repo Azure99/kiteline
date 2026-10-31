@@ -10,19 +10,17 @@ WORKDIR /var/tmp/build
 FROM toolchain AS native
 ARG NODE_ARCH
 COPY libevent* ncurses* tmux.tar.gz /inputs/
-COPY scripts/ /inputs/scripts/
+COPY scripts/build-linux-native.sh /inputs/scripts/build-linux-native.sh
 COPY native/ /inputs/native/
 RUN sh /inputs/scripts/build-linux-native.sh "$NODE_ARCH" /inputs
 COPY licenses/musl-COPYRIGHT /output/native/licenses/musl-COPYRIGHT
 COPY --from=toolchain /var/tmp/build-packages.txt /output/native/build-packages.txt
-COPY native-inputs.json /output/native/inputs.json
 
 FROM toolchain AS verified
 COPY --from=native /output/ /output/
 COPY runtime/ /output/runtime/
 RUN /output/runtime/bin/node --version \
-    && /output/native/bin/tmux -V \
-    && cd /output && find runtime native -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+    && /output/native/bin/tmux -V
 
 FROM scratch
-COPY --from=verified /output/ /output/
+COPY --from=verified /output/ /

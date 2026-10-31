@@ -1,49 +1,30 @@
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import {
-  digest,
   fetchPinned,
   releaseCache,
   ripgrepInput,
-  run as execute,
+  ripgrepLicenseFiles,
+  run,
 } from "./release-inputs.mjs";
 
 const root = resolve(import.meta.dirname, "..");
-function run(command, args) {
-  return execute(command, args, {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "inherit"],
-  });
-}
 
-export function prepareRipgrep(destination, architecture) {
-  const { ripgrep, nodeArchives } = JSON.parse(
-    readFileSync(join(root, "release/inputs.json"), "utf8"),
-  );
-  const archive = ripgrep.linuxArchives[architecture];
-  if (!archive) throw new Error(`Unsupported ripgrep architecture: ${architecture}`);
-  const input = ripgrepInput(ripgrep.version, archive);
-  const cache = join(releaseCache, "ripgrep");
+export function prepareRipgrep(destination, architecture, preparedArchive) {
+  const { ripgrep } = JSON.parse(readFileSync(join(root, "release/inputs.json"), "utf8"));
+  const { download, archiveRoot } = ripgrepInput(ripgrep, `linux-${architecture}`);
+  const archive = preparedArchive ?? join(releaseCache, "ripgrep", download.sha256);
   const temporary = mkdtempSync("/var/tmp/kiteline-ripgrep-");
   try {
-    mkdirSync(cache, { recursive: true });
-    fetchPinned(input, join(cache, input.sha256));
-    run("tar", ["-xzf", join(cache, input.sha256), "-C", temporary]);
-    const source = join(temporary, basename(new URL(input.url).pathname, ".tar.gz"));
+    fetchPinned(download, archive);
+    run("tar", ["-xzf", archive, "-C", temporary]);
+    const source = join(temporary, archiveRoot);
     const binary = join(source, "rg");
     mkdirSync(join(destination, "bin"), { recursive: true });
     cpSync(binary, join(destination, "bin/rg"));
     const licenses = join(destination, "licenses/ripgrep");
     mkdirSync(licenses, { recursive: true });
-    for (const name of ["COPYING", "LICENSE-MIT", "UNLICENSE"])
-      cpSync(join(source, name), join(licenses, name));
-    return {
-      version: ripgrep.version,
-      ...input,
-      architecture: nodeArchives[architecture].architecture,
-      linkage: "static-musl",
-      binarySha256: digest(binary),
-    };
+    for (const name of ripgrepLicenseFiles) cpSync(join(source, name), join(licenses, name));
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }
