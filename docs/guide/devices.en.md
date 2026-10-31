@@ -16,6 +16,8 @@ All four Linux distributions use the same release package for a given architectu
 
 The agent runs on the device as the project user: the operating-system account you normally use and that owns your project files. Workbench terminals, file operations, Git and scheduled tasks run with this account's permissions. Installing the agent in system directories, and running `upgrade` or `uninstall` on that installation, require administrator privileges (sudo on Linux and macOS, UAC elevation on Windows). The project user can also extract the complete release package into a directory they own and [run it directly](#manual-installation), without administrator privileges or running `install`. Binding, running and other `kiteline-agent` commands must be performed by the project user.
 
+When running in the background through WinSW on Windows, the service must use the project account recorded during installation. If that account belongs to Administrators, the agent and its terminals, files, Git and scheduled tasks receive that account's full administrator permissions; the UAC filtering used for an ordinary desktop logon does not apply to a service logon. If the background agent does not need administrator permissions, choose a standard project account before installing and binding, initialize its Windows user profile and grant it access to the project directories.
+
 The package includes Node, tmux, the terminal recorder, terminfo, ripgrep and file-operation helpers. You do not need to install these, npm or a compiler. The device must provide:
 
 - Git 2.23.0 or later.

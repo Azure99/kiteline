@@ -80,7 +80,6 @@ __KITELINE_NATIVE_SOURCE__
                 if ($attributes -band [IO.FileAttributes]::Directory) { $pending.Push($path) }
                 else {
                     $key = $path.Substring($Directory.TrimEnd('\','/').Length + 1).Replace('\', '/')
-                    Assert-KitelineRelative $key
                     $files.Add($key, $path)
                 }
             }
@@ -395,6 +394,7 @@ import(url.pathToFileURL(process.argv[1]).href).catch((error) => {
             $replacement = Join-Path $temporary 'new'
             New-KitelinePrivateDirectory $replacement
             $sourceFiles = Get-KitelineTree $Root
+            foreach ($name in $sourceFiles.Keys) { Assert-KitelineRelative $name }
             foreach ($directory in [IO.Directory]::EnumerateDirectories($Root, '*', [IO.SearchOption]::AllDirectories)) {
                 $relative = $directory.Substring($Root.TrimEnd('\','/').Length + 1)
                 $null = [IO.Directory]::CreateDirectory((Join-Path $replacement $relative))
