@@ -29,7 +29,7 @@ export type GitCompletion =
       result?: never;
     };
 
-export interface GitActivity {
+interface GitActivity {
   message: string;
   messageVersion: number;
   request?: {

@@ -20,7 +20,7 @@ export function taskTextSize(name: string, command: string) {
 }
 
 export type SchedulePreset = "once" | "hourly" | "daily" | "weekly" | "cron";
-export interface ScheduleForm {
+interface ScheduleForm {
   preset: SchedulePreset;
   time: string;
   weekday: string;

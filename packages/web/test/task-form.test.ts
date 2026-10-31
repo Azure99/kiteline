@@ -10,6 +10,18 @@ import {
   taskTime,
 } from "../src/tasks/form";
 
+const cronTask: ScheduledTask = {
+  id: "task",
+  revision: 1,
+  name: "Original",
+  command: "printf old",
+  cwd: "/home/original",
+  timezone: "UTC",
+  schedule: { kind: "cron", expression: "0 9 * * *" },
+  state: "active",
+  nextRunAt: null,
+};
+
 test.each([
   ["a".repeat(256), "x".repeat(16384), 256, 16384, false, false],
   ["a".repeat(257), "x".repeat(16385), 257, 16385, true, true],
@@ -62,17 +74,6 @@ test("editing an elapsed one-time task preserves its original timestamp and cons
 });
 
 test("task changes submit changed input fields and omit unchanged or undefined values", () => {
-  const task: ScheduledTask = {
-    id: "task",
-    revision: 1,
-    name: "Original",
-    command: "printf old",
-    cwd: "/home/original",
-    timezone: "UTC",
-    schedule: { kind: "cron", expression: "0 9 * * *" },
-    state: "active",
-    nextRunAt: null,
-  };
   const changes: Partial<ScheduledTaskInput>[] = [
     { name: "Changed" },
     { command: "printf new" },
@@ -80,9 +81,10 @@ test("task changes submit changed input fields and omit unchanged or undefined v
     { timezone: "Asia/Tokyo" },
     { schedule: { kind: "cron", expression: "30 12 * * *" } },
   ];
-  for (const change of changes) expect(taskChanges(task, { ...task, ...change })).toEqual(change);
-  expect(taskChanges(task, { ...task, schedule: { ...task.schedule } })).toEqual({});
-  expect(taskChanges(task, { ...task, cwd: undefined, timezone: undefined })).toEqual({});
+  for (const change of changes)
+    expect(taskChanges(cronTask, { ...cronTask, ...change })).toEqual(change);
+  expect(taskChanges(cronTask, { ...cronTask, schedule: { ...cronTask.schedule } })).toEqual({});
+  expect(taskChanges(cronTask, { ...cronTask, cwd: undefined, timezone: undefined })).toEqual({});
 });
 
 test("an unchanged one-time input survives a browser time-zone change and preset round trip", () => {
@@ -152,17 +154,6 @@ test.each(["", "not a date", "2027-02-30T12:00"])(
 );
 
 test("schedule changes compare members independently of property order", () => {
-  const task: ScheduledTask = {
-    id: "task",
-    revision: 1,
-    name: "Original",
-    command: "printf old",
-    cwd: "/home/original",
-    timezone: "UTC",
-    schedule: { kind: "cron", expression: "0 9 * * *" },
-    state: "active",
-    nextRunAt: null,
-  };
   const cron: TaskSchedule = { kind: "cron", expression: "0 9 * * *" };
   const once: TaskSchedule = { kind: "once", at: "2030-01-01T09:00:17.123Z" };
   const cases: { before: TaskSchedule; reordered: TaskSchedule; changed: TaskSchedule }[] = [
@@ -179,13 +170,13 @@ test("schedule changes compare members independently of property order", () => {
   ];
   for (const { before, reordered, changed } of cases) {
     expect(sameSchedule(before, reordered)).toBe(true);
-    expect(taskChanges({ ...task, schedule: before }, { ...task, schedule: reordered })).toEqual(
-      {},
-    );
+    expect(
+      taskChanges({ ...cronTask, schedule: before }, { ...cronTask, schedule: reordered }),
+    ).toEqual({});
     expect(sameSchedule(before, changed)).toBe(false);
-    expect(taskChanges({ ...task, schedule: before }, { ...task, schedule: changed })).toEqual({
-      schedule: changed,
-    });
+    expect(
+      taskChanges({ ...cronTask, schedule: before }, { ...cronTask, schedule: changed }),
+    ).toEqual({ schedule: changed });
   }
   expect(sameSchedule(cron, once)).toBe(false);
   expect(sameSchedule(once, cron)).toBe(false);

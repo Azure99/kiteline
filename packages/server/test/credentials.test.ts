@@ -15,7 +15,7 @@ import {
 } from "@kiteline/shared/protocol";
 import { createKitelineServer } from "../src/app.js";
 import { Store } from "../src/store.js";
-import { agentPath, apiFixture, webPath } from "./fixture.js";
+import { agentPath, apiFixture, rejectedUpgrade, webPath } from "./fixture.js";
 
 const cleanups: (() => Promise<unknown> | void)[] = [];
 afterEach(async () => {
@@ -62,21 +62,11 @@ async function fixture() {
     return { socket, received };
   }
   async function refusedSocket(path: string, headers: Record<string, string>) {
-    const socket = new WebSocket(base.origin.replace("http:", "ws:") + path, {
-      headers: { origin: base.origin, ...headers },
+    const response = await rejectedUpgrade(base.origin.replace("http:", "ws:") + path, {
+      origin: base.origin,
+      ...headers,
     });
-    cleanups.push(() => socket.terminate());
-    socket.on("error", () => {});
-    return new Promise<number>((resolve, reject) => {
-      socket.on("open", () => reject(new Error("Unauthorized WebSocket was accepted")));
-      socket.on("unexpected-response", (_request, response) => {
-        response.resume();
-        response.on("end", () => {
-          resolve(response.statusCode!);
-          socket.terminate();
-        });
-      });
-    });
+    return response.status;
   }
   return { ...base, owner, ownerHeaders, call, credential, events, refusedSocket };
 }
@@ -538,12 +528,11 @@ test("revocation, absolute expiry and self logout close only the credential's ev
     .poll(() => peer.messages.some((message) => message.type === "channel.open"))
     .toBe(true);
   const channel = peer.messages.find((message) => message.type === "channel.open")!;
-  const agent = new WebSocket(
-    `${f.origin.replace("http:", "ws:")}/api/agent/channels/${String(channel.channelId)}?connectionId=${String(channel.connectionId)}`,
-    { headers: bearer(peer.deviceToken) },
+  const agent = await f.dataChannel(
+    peer.deviceToken,
+    String(channel.channelId),
+    String(channel.connectionId),
   );
-  cleanups.push(() => agent.terminate());
-  await once(agent, "open");
   agent.send(JSON.stringify({ type: "ready", meta: { terminalInputBytes: 262144 } }));
   expect((await opening).status).toBe(200);
   const terminalPath = webPath(`/api/channels/${String(channel.channelId)}/terminal`);

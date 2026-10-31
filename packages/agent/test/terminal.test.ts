@@ -85,6 +85,10 @@ vi.mock("node:crypto", async (original) => {
 });
 
 const originalInteractionTimeout = limits.interactionTimeout;
+const interactionTimeoutOverrides = {
+  stalled: { interactionTimeout: 200 },
+  recovery: { interactionTimeout: 3000 },
+};
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
   candidateIds.length = 0;
@@ -739,7 +743,8 @@ test("recovery restores the same task and pending Shell input, then redraw and e
 test("an unresponsive recorder cannot leave a phantom creation or block agent shutdown", async () => {
   const { agent, workspace, signal } = await fixture();
   await agent.sessions.create({ workspaceId: workspace.id }, signal);
-  Object.assign(limits, { interactionTimeout: 200 });
+  // This budget also bounds shutdown's wait before killing the stopped recorder.
+  Object.assign(limits, interactionTimeoutOverrides.stalled);
   process.kill(agent.sessions.recorder.pid!, "SIGSTOP");
   await expect(agent.sessions.create({ workspaceId: workspace.id }, signal)).rejects.toMatchObject({
     outcome: "unknown",
@@ -765,7 +770,7 @@ test("an unresponsive recorder cannot leave a phantom creation or block agent sh
 test("a failed end does not permanently block recovery of a surviving task", async () => {
   const { agent, workspace, signal } = await fixture();
   const session = await agent.sessions.create({ workspaceId: workspace.id }, signal);
-  Object.assign(limits, { interactionTimeout: 200 });
+  Object.assign(limits, interactionTimeoutOverrides.stalled);
   process.kill(agent.sessions.recorder.pid!, "SIGSTOP");
   await expect(
     agent.sessions.end({ workspaceId: workspace.id, sessionId: session.id }),
@@ -781,7 +786,7 @@ test("a failed end does not permanently block recovery of a surviving task", asy
       pollOptions,
     )
     .toBe(true);
-  Object.assign(limits, { interactionTimeout: 3000 });
+  Object.assign(limits, interactionTimeoutOverrides.recovery);
   expect(
     agent.sessions.recover({ workspaceId: workspace.id, sessionId: session.id }).webStatus,
   ).toBe("recovering");
@@ -802,7 +807,7 @@ test("a timed-out creation stays registered while missing and later recovers the
   const { agent, workspace, dataDir, signal } = await fixture();
   await agent.sessions.create({ workspaceId: workspace.id }, signal);
   const recorderPid = agent.sessions.recorder.pid!;
-  Object.assign(limits, { interactionTimeout: 200 });
+  Object.assign(limits, interactionTimeoutOverrides.stalled);
   process.kill(recorderPid, "SIGSTOP");
   let paused = true;
   const actualTmux = terminalNode.tmux;
@@ -853,7 +858,7 @@ test("a timed-out creation stays registered while missing and later recovers the
     expect(agent.sessions.list().sessions.find((item) => item.id === id)?.webStatus).toBe(
       "unavailable",
     );
-    Object.assign(limits, { interactionTimeout: 3000 });
+    Object.assign(limits, interactionTimeoutOverrides.recovery);
     agent.sessions.recover({ workspaceId: workspace.id, sessionId: id });
     await expect
       .poll(
@@ -903,7 +908,7 @@ test("an actual dead pane clears a timed-out creation before its delayed ended n
     }
   };
 
-  Object.assign(limits, { interactionTimeout: 200 });
+  Object.assign(limits, interactionTimeoutOverrides.stalled);
   process.kill(recorderPid, "SIGSTOP");
   let paused = true;
   const creation = agent.sessions.create(

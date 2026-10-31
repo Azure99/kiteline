@@ -305,24 +305,10 @@ test("version refusal is visible, blocks all device tools, and does not replace 
   await expect.poll(() => events.some((event) => event.type === "devices.changed")).toBe(true);
   events.length = 0;
   async function rejectVersion(token: string) {
-    const socket = new WebSocket(
+    const rejected = await rejectedUpgrade(
       f.origin.replace("http:", "ws:") + "/api/agent/control?appVersion=0.0.0-test",
-      { headers: { authorization: `Bearer ${token}` } },
+      { authorization: `Bearer ${token}` },
     );
-    socket.on("error", () => {});
-    const rejected = await new Promise<{ status: number; body: string }>((resolve) => {
-      socket.on("unexpected-response", (_request, response) => {
-        let body = "";
-        response.on("data", (part) => {
-          body += String(part);
-        });
-        response.on("end", () => {
-          resolve({ status: response.statusCode!, body });
-          socket.terminate();
-        });
-      });
-    });
-    await expect.poll(() => socket.readyState).toBe(WebSocket.CLOSED);
     expect(rejected.status).toBe(426);
     expect(JSON.parse(rejected.body)).toMatchObject({
       error: {

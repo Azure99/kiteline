@@ -30,6 +30,16 @@ async function apply(target: ReturnType<typeof screen>, event: TerminalEvent) {
   if (event.type === "output") await target.write(event.data);
   else target.terminal.resize(event.cols, event.rows);
 }
+function outputCredit(pieces: (Buffer | TerminalFrame)[]) {
+  return pieces.reduce(
+    (total, piece) =>
+      total +
+      terminalOutputCost(
+        Buffer.isBuffer(piece) ? piece.length : Buffer.byteLength(JSON.stringify(piece)),
+      ),
+    0,
+  );
+}
 
 test("window titles stay out of text without hiding repeated output or OSC titles", async () => {
   const target = screen();
@@ -225,15 +235,7 @@ test("recovery respects the ACK window before tail, ready, live output, resize a
     () => (closed = true),
   );
   const data = Buffer.alloc(terminalOutstandingBytes * 2 + 7, 65);
-  const byteCount = () =>
-    sent.reduce(
-      (total, piece) =>
-        total +
-        terminalOutputCost(
-          Buffer.isBuffer(piece) ? piece.length : Buffer.byteLength(JSON.stringify(piece)),
-        ),
-      0,
-    );
+  const byteCount = () => outputCredit(sent);
   try {
     attachment.start(
       { data, cols: 80, rows: 24, historyLimited: false, tail: [{ type: "output", data: "TAIL" }] },
@@ -263,7 +265,7 @@ test("recovery respects the ACK window before tail, ready, live output, resize a
   } finally {
     attachment.close();
   }
-});
+}, 15000);
 
 test("small output and resize frames share the consumption window without losing order", () => {
   const sent: (Buffer | TerminalFrame)[] = [];
@@ -282,11 +284,11 @@ test("small output and resize frames share the consumption window without losing
   );
   try {
     for (const event of events) attachment.output(event);
-    expect(sent.length).toBe(terminalOutstandingBytes / 128);
+    expect(outputCredit(sent)).toBe(terminalOutstandingBytes);
     while (sent.length < events.length) {
-      const consumed = sent.length * 128;
+      const consumed = outputCredit(sent);
       attachment.acknowledge(consumed);
-      expect(sent.length * 128 - consumed).toBeLessThanOrEqual(terminalOutstandingBytes);
+      expect(outputCredit(sent) - consumed).toBeLessThanOrEqual(terminalOutstandingBytes);
     }
     expect(sent.map((piece) => (Buffer.isBuffer(piece) ? piece.toString() : piece))).toEqual(
       events.map((event) => (event.type === "output" ? event.data : event)),

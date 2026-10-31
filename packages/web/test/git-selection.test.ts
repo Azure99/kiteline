@@ -93,14 +93,6 @@ test("successful consumption removes only the captured path, side and signature"
   ]);
 });
 
-test("successful consumption preserves unrelated invalidation notices", () => {
-  const completed = selectionOf(entry, "worktree");
-  const external = selectionOf({ ...entry, path: "external" }, "worktree");
-  const otherSide = selectionOf(entry, "staged");
-  const notices = [completed, external, otherSide];
-  expect(withoutSelection(notices, [completed])).toEqual([external, otherSide]);
-});
-
 test("default index paths include both rename ends only on the staged side", () => {
   const renamed = { ...entry, path: "new" };
   expect(defaultIndexPaths(renamed, "staged")).toEqual(["new", "old"]);

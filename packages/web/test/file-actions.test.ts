@@ -5,6 +5,7 @@ import { operateFiles } from "../src/files/actions";
 import type { DiskText } from "../src/files/content";
 import { DraftStore, isDirty } from "../src/files/drafts";
 import { ApiError } from "../src/lib/api";
+import { diskText } from "./disk-text";
 
 const transport = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn() }));
 vi.mock("../src/files/content", () => ({
@@ -20,25 +21,10 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
-function disk(path: string, text = "base", revision = "base"): DiskText {
-  return {
-    target: { ...target, path },
-    text,
-    raw: text,
-    meta: {
-      size: text.length,
-      contentType: "text/plain",
-      filename: path,
-      revision,
-      bom: false,
-      lineEnding: "lf",
-    },
-  };
-}
 function open(store: DraftStore, path: string) {
   return store.open(
     { ...target, path, deviceName: "Device", workspaceName: "Workspace" },
-    disk(path),
+    diskText({ path, text: "base", revision: "base" }),
   );
 }
 function item(path: string, targetPath = `moved/${path}`): CopyItem {
@@ -189,7 +175,7 @@ test("move fixes the submitted batch and drafts, preserving the editor before di
   expect(later.path).toBe("dir/later.txt");
   expect(undo({ state: draft.state!, dispatch: (tr) => store.update(draft, tr.state) })).toBe(true);
   expect(draft.state!.doc.toString()).toBe("base");
-  recheck.resolve(disk("moved/a.txt", "base", "moved"));
+  recheck.resolve(diskText({ path: "moved/a.txt", text: "base", revision: "moved" }));
   await vi.waitFor(() => expect(draft.operation).toBeUndefined());
   expect(draft.revision).toBe("moved");
 });
@@ -215,7 +201,9 @@ test.each(["move", "delete"] as const)(
         }),
     );
     const saving = store.save(draft, { kind: "create", path: "copy.txt" });
-    transport.read.mockResolvedValueOnce(disk("moved/a.txt", "base", "moved"));
+    transport.read.mockResolvedValueOnce(
+      diskText({ path: "moved/a.txt", text: "base", revision: "moved" }),
+    );
     reply.resolve(
       Response.json({
         id: kind,
@@ -245,7 +233,9 @@ test.each(["move", "delete"] as const)(
       "fetch",
       vi.fn(() => reply.promise),
     );
-    transport.read.mockResolvedValueOnce(disk("moved/c.txt"));
+    transport.read.mockResolvedValueOnce(
+      diskText({ path: "moved/c.txt", text: "base", revision: "base" }),
+    );
     const abort = new AbortController();
     const running = operateFiles(store, target, kind, [item("a.txt"), item("c.txt")], {
       id: kind,
@@ -332,7 +322,9 @@ test("mixed item outcomes move only successes and inspect original sources for p
         })
       : Response.json({ id: request.id, outcome: "succeeded", result: {} });
   });
-  transport.read.mockResolvedValueOnce(disk("moved/succeeded.txt"));
+  transport.read.mockResolvedValueOnce(
+    diskText({ path: "moved/succeeded.txt", text: "base", revision: "base" }),
+  );
   const result = await operateFiles(
     store,
     target,

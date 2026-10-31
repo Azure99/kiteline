@@ -20,9 +20,7 @@ export function browserLanguage(preferred: string): Language {
   return /^zh(?:-|$)/i.test(preferred) ? "zh-CN" : "en";
 }
 function detectedLanguage() {
-  return browserLanguage(
-    typeof navigator === "undefined" ? "en" : (navigator.languages[0] ?? navigator.language),
-  );
+  return browserLanguage(navigator.languages[0] ?? navigator.language);
 }
 function savedPreference(): LanguagePreference {
   try {

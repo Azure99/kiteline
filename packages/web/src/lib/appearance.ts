@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 
 export type Theme = "light" | "dark";
 export type Appearance = Theme | "system";
-export interface AppearanceStore {
+interface AppearanceStore {
   getPreference(): Appearance;
   getTheme(): Theme;
   setPreference(value: Appearance): void;

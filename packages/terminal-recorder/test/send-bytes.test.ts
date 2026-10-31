@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { expect, test, vi } from "vitest";
 import { shellWords, tmux } from "@kiteline/shared/terminal/node";
 import { terminalKeys } from "@kiteline/shared/protocol";
@@ -15,25 +16,7 @@ async function receiver({
   terminalInputBytes?: number;
 } = {}) {
   const directory = await mkdtemp("/var/tmp/kiteline-send-bytes-");
-  const fixture = directory + "/receive.cjs";
-  const mode = `\x1b[?2004${bracketedPaste ? "h" : "l"}\x1b[?1${applicationCursorKeys ? "h" : "l"}`;
-  await writeFile(
-    fixture,
-    `const { watch, writeFileSync } = require("node:fs");
-let received = Buffer.alloc(0);
-writeFileSync("received", received);
-const modes = watch(".", (_event, name) => {
-  if (name !== "application-mode") return;
-  modes.close();
-  process.stdout.write("\\x1b[?1hMODE_CHANGED");
-});
-process.stdout.write(${JSON.stringify(mode + "READY")});
-process.stdin.on("data", chunk => {
-  received = Buffer.concat([received, chunk]);
-  writeFileSync("received", received);
-});
-`,
-  );
+  const program = resolve(import.meta.dirname, "support/send-bytes-receiver.mjs");
   const session = new RecordedSession(
     {
       type: "create",
@@ -41,7 +24,14 @@ process.stdin.on("data", chunk => {
       socket: directory + "/tmux.sock",
       workspacePath: directory,
       shell: "/bin/bash",
-      command: "stty raw -echo; exec " + shellWords([process.execPath, fixture]),
+      command:
+        "stty raw -echo; exec " +
+        shellWords([
+          process.execPath,
+          program,
+          directory,
+          JSON.stringify({ bracketedPaste, applicationCursorKeys }),
+        ]),
       cols: 100,
       rows: 5,
       historyLines: 100,
@@ -135,33 +125,26 @@ test("parser pressure pauses at high water and resumes only below low water befo
   const { session } = fixture;
   const highWater = modelLimits.terminalModelHighWaterBytes;
   const lowWater = modelLimits.terminalModelLowWaterBytes;
-  const pressure: { backlog: number; paused: boolean }[] = [];
-  const setPaused = session.control.setPaused.bind(session.control);
   let release!: () => void;
   const blocked = new Promise<void>((resolve) => {
     release = resolve;
   });
-  let pause: ReturnType<typeof vi.spyOn> | undefined;
   let barrier: Promise<void> | undefined;
   try {
     await fixture.ready();
-    pause = vi.spyOn(session.control, "setPaused").mockImplementation((paused) => {
-      pressure.push({ backlog: session.model.backlog, paused });
-      setPaused(paused);
-    });
     barrier = session.model.ordered(() => blocked);
     session.model.output(Buffer.alloc(highWater - lowWater, "x"));
     // Separate parsing batches so their completion leaves exactly low water, then one byte less.
-    void session.model.ordered(() => {});
+    const atLowWater = session.model.ordered(() => session.control.paused);
     session.model.output(Buffer.from("x"));
-    void session.model.ordered(() => {});
+    const belowLowWater = session.model.ordered(() => session.control.paused);
     session.model.output(Buffer.alloc(lowWater - 1, "x"));
-    expect(pressure).toContainEqual({ backlog: highWater, paused: true });
+    expect(session.control.paused).toBe(true);
 
     release();
     await session.model.ordered(() => {});
-    expect(pressure).toContainEqual({ backlog: lowWater, paused: true });
-    expect(pressure).toContainEqual({ backlog: lowWater - 1, paused: false });
+    expect(await atLowWater).toBe(true);
+    expect(await belowLowWater).toBe(false);
     await session.input.operation({
       type: "session.send",
       input: { type: "text", text: "AFTER_PRESSURE" },
@@ -173,7 +156,6 @@ test("parser pressure pauses at high water and resumes only below low water befo
   } finally {
     release();
     await barrier;
-    pause?.mockRestore();
     session.control.setPaused(false);
     await fixture.close();
   }

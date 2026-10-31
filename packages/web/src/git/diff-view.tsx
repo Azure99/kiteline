@@ -157,7 +157,7 @@ export function DiffView({
     </section>
   );
 }
-export function Patch({ value, viewType }: { value: GitDiff; viewType: ViewType }) {
+function Patch({ value, viewType }: { value: GitDiff; viewType: ViewType }) {
   const { t } = useTranslation();
   const statusLabel = useGitStatusLabel();
 

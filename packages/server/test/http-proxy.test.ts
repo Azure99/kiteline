@@ -18,11 +18,12 @@ import { join } from "node:path";
 import { connect, type AddressInfo, type Socket } from "node:net";
 import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer } from "ws";
-import { apiFixture, serverFixture } from "./fixture.js";
+import { apiFixture, rejectedUpgrade, serverFixture } from "./fixture.js";
 import { Agent } from "../../agent/src/agent.js";
 import { defaultAgentLimits, privateDirectory } from "../../agent/src/config.js";
 
 const cleanup: (() => Promise<unknown>)[] = [];
+const pairingTimeoutMs = 1000;
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
@@ -41,7 +42,7 @@ async function fixture(handler: RequestListener, channels = 128) {
     close,
   } = await serverFixture({
     trustProxyProto: true,
-    channelPolicy: { channelsPerDevice: channels, pairingTimeoutMs: 1000 },
+    channelPolicy: { channelsPerDevice: channels, pairingTimeoutMs },
   });
   const keyFile = join(root, "key.pem"),
     certFile = join(root, "cert.pem");
@@ -559,20 +560,11 @@ test("real WebSocket messages exceed transport blocks and upgrade rejection is d
   expect((await reply)[0]).toEqual(body);
   client.close();
   await once(client, "close");
-  const rejected = new WebSocket(`ws://127.0.0.1:${f.port}${f.prefix}/reject`, {
-    headers: f.browserHeaders,
-  });
-  const result = await new Promise<{ status?: number; text: string }>((resolve, reject) => {
-    rejected.on("error", reject);
-    rejected.on("unexpected-response", (_req, res) => {
-      void (async () => {
-        const parts: Buffer[] = [];
-        for await (const part of res) parts.push(part);
-        resolve({ status: res.statusCode, text: Buffer.concat(parts).toString() });
-      })().catch(reject);
-    });
-  });
-  expect(result).toEqual({ status: 403, text: "hello" });
+  const result = await rejectedUpgrade(
+    `ws://127.0.0.1:${f.port}${f.prefix}/reject`,
+    f.browserHeaders,
+  );
+  expect(result).toEqual({ status: 403, body: "hello" });
 }, 15_000);
 
 test.each(["content-length", "chunked"])(
@@ -657,7 +649,7 @@ test("quiet SSE occupies the shared budget and logout closes only its original l
   const response = await result;
   const first = await once(response, "data");
   expect(first[0].toString()).toBe("data: first\n\n");
-  await new Promise((resolve) => setTimeout(resolve, 1200));
+  await new Promise((resolve) => setTimeout(resolve, pairingTimeoutMs + 200));
   expect(open).toBe(1);
   const other = f.store.createLogin(60_000);
   const additional = f.open(undefined, "GET", { cookie: `kiteline_session=${other.token}` });
@@ -691,7 +683,7 @@ test("a slow HTTP request body outlives channel preparation and can be cancelled
   const first = f.open(undefined, "POST");
   first.req.write("before");
   await expect.poll(() => received).toBe("before");
-  await new Promise((resolve) => setTimeout(resolve, 1200));
+  await new Promise((resolve) => setTimeout(resolve, pairingTimeoutMs + 200));
   first.req.end("after");
   const response = await first.result;
   const chunks: Buffer[] = [];

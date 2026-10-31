@@ -1,5 +1,5 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { expect, test } from "vitest";
 import { terminalOutputCost, type RecorderMessage } from "@kiteline/shared/protocol/ipc";
 import { shellWords, tmux } from "@kiteline/shared/terminal/node";
@@ -8,32 +8,13 @@ import { RecordedSession } from "../src/session.js";
 test("slow displays recover within their budget or fail without blocking the producer and other displays", async () => {
   const directory = await mkdtemp("/var/tmp/kiteline-backpressure-");
   const socket = join(directory, "tmux.sock");
-  const producer = join(directory, "producer.mjs");
-  await writeFile(
-    producer,
-    `import { existsSync, writeFileSync, writeSync } from "node:fs";
-import { setTimeout as delay } from "node:timers/promises";
-process.stdin.setRawMode(true);
-const write = (text) => {
-  const data = Buffer.from(text);
-  for (let offset = 0; offset < data.length;) offset += writeSync(1, data, offset, data.length - offset);
-};
-let input = Buffer.alloc(0);
-process.stdin.on("data", data => {
-  input = Buffer.concat([input, data]);
-  writeFileSync("input", input);
-  if (input.includes("DONE")) { write("FINAL_TAIL_23"); process.exit(23); }
-});
-for (let round = 0; round < 4; round++) {
-  while (!existsSync("go-" + round)) await delay(5);
-  for (let i = 0; i < 512; i++) {
-    write("x".repeat(4094) + "\\r\\n");
-    if (i % 8 === 0) await delay(1);
-  }
-  write("ROUND_" + round + "\\r\\n");
-}
-`,
-  );
+  const producer = resolve(import.meta.dirname, "support/backpressure-producer.mjs");
+  const scenario = {
+    rounds: 4,
+    linesPerRound: 512,
+    charactersPerLine: 4094,
+    yieldEveryLines: 8,
+  };
   const outputs = new Map(
     ["slow", "fast", "reconnected"].map((id) => [
       id,
@@ -48,7 +29,8 @@ for (let round = 0; round < 4; round++) {
       socket,
       workspacePath: directory,
       shell: "/bin/bash",
-      command: "exec " + shellWords([process.execPath, producer]),
+      command:
+        "exec " + shellWords([process.execPath, producer, directory, JSON.stringify(scenario)]),
       cols: 80,
       rows: 24,
       historyLines: 100,
@@ -78,6 +60,7 @@ for (let round = 0; round < 4; round++) {
     await session.start();
     await session.attach("slow", "retained", false);
     await session.attach("fast", "retained", false);
+    // One round exceeds the ACK window but fits the per-display backlog budget.
     stopped = true;
     await writeFile(join(directory, "go-0"), "");
     await expect.poll(() => fast.data.includes("ROUND_0"), { timeout: 10000 }).toBe(true);
@@ -92,8 +75,9 @@ for (let round = 0; round < 4; round++) {
       slow.frames.some((message) => message.type === "frame" && message.frame.type === "error"),
     ).toBe(false);
 
+    // Holding the remaining rounds without ACKs exceeds that display's backlog budget.
     stopped = true;
-    for (let round = 1; round < 4; round++) {
+    for (let round = 1; round < scenario.rounds; round++) {
       await writeFile(join(directory, "go-" + round), "");
       await expect.poll(() => fast.data.includes("ROUND_" + round), { timeout: 10000 }).toBe(true);
     }
@@ -102,7 +86,9 @@ for (let round = 0; round < 4; round++) {
     });
     const disconnectedData = slow.data;
     await session.attach("reconnected", "retained", false);
-    await expect.poll(() => outputs.get("reconnected")!.data.includes("ROUND_3")).toBe(true);
+    await expect
+      .poll(() => outputs.get("reconnected")!.data.includes("ROUND_" + (scenario.rounds - 1)))
+      .toBe(true);
     session.input.input("fast", Buffer.from("DONE"));
     for (const output of [fast, outputs.get("reconnected")!]) {
       await expect
@@ -124,7 +110,9 @@ for (let round = 0; round < 4; round++) {
       expect(output.frames.at(-1)).toMatchObject({ frame: { type: "ended", exitCode: 23 } });
       expect(output.data.endsWith("FINAL_TAIL_23")).toBe(true);
     }
-    expect(fast.data.match(/x/g)).toHaveLength(4094 * 512 * 4);
+    expect(fast.data.match(/x/g)).toHaveLength(
+      scenario.charactersPerLine * scenario.linesPerRound * scenario.rounds,
+    );
     expect(slow.data).toBe(disconnectedData);
     expect(await readFile(join(directory, "input"), "utf8")).toBe("text\x03pasteDONE");
   } finally {

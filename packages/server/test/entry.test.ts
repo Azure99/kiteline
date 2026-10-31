@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, expect, test } from "vitest";
 import { WebSocket } from "ws";
-import { agentPath, apiFixture, serverFixture, webPath } from "./fixture.js";
+import { agentPath, apiFixture, rejectedUpgrade, serverFixture, webPath } from "./fixture.js";
 
 const cleanup: (() => Promise<unknown> | void)[] = [];
 afterEach(async () => {
@@ -308,19 +308,11 @@ test("request authority and explicit proxy trust determine HTTP and Upgrade orig
     expect((await f.call(`/api/bindings?appVersion=${appVersion}`, headers, "POST")).status).toBe(
       403,
     );
-    const socket = new WebSocket(`ws://127.0.0.1:${f.port}/api/events?appVersion=${appVersion}`, {
+    const response = await rejectedUpgrade(
+      `ws://127.0.0.1:${f.port}/api/events?appVersion=${appVersion}`,
       headers,
-    });
-    socket.on("error", () => {});
-    const status = await new Promise<number>((resolve) =>
-      socket.once("unexpected-response", (_req, res) => {
-        res.resume();
-        socket.terminate();
-        resolve(res.statusCode!);
-      }),
     );
-    expect(status).toBe(403);
-    await expect.poll(() => socket.readyState).toBe(WebSocket.CLOSED);
+    expect(response.status).toBe(403);
   }
 });
 
@@ -391,17 +383,8 @@ test("WebSocket handshake distinguishes version, authentication, origin and miss
       404,
     ],
   ] as const) {
-    const socket = new WebSocket(f.origin.replace("http:", "ws:") + path, { headers });
-    socket.on("error", () => {});
-    const response = await new Promise<number>((resolve) =>
-      socket.on("unexpected-response", (_request, response) => {
-        response.resume();
-        socket.terminate();
-        resolve(response.statusCode!);
-      }),
-    );
-    expect(response).toBe(status);
-    await expect.poll(() => socket.readyState).toBe(WebSocket.CLOSED);
+    const response = await rejectedUpgrade(f.origin.replace("http:", "ws:") + path, headers);
+    expect(response.status).toBe(status);
   }
 });
 
@@ -445,17 +428,11 @@ test("stale Web releases cannot use business endpoints but can read recovery inf
       await response.arrayBuffer();
     }
     for (const path of ["/api/events", "/api/channels/c/terminal"]) {
-      const ws = new WebSocket(f.origin.replace("http:", "ws:") + path + suffix, { headers });
-      ws.on("error", () => {});
-      const status = await new Promise<number>((resolve) => {
-        ws.on("unexpected-response", (_request, response) => {
-          response.resume();
-          ws.terminate();
-          resolve(response.statusCode!);
-        });
-      });
-      expect(status).toBe(426);
-      await expect.poll(() => ws.readyState).toBe(WebSocket.CLOSED);
+      const response = await rejectedUpgrade(
+        f.origin.replace("http:", "ws:") + path + suffix,
+        headers,
+      );
+      expect(response.status).toBe(426);
     }
   }
 });

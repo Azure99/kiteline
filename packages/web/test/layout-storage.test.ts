@@ -6,6 +6,7 @@ import {
   writeTerminalLayouts,
 } from "../src/terminal/layout-storage";
 import { WorkspaceMemories, workspaceKey } from "../src/workspace/memory";
+import { filePage } from "../src/workspace/pages";
 
 const layout: TerminalLayout = {
   groups: [
@@ -149,10 +150,8 @@ describe("workspace memory", () => {
       },
       path: "/devices/device/workspaces/workspace/git?repo=root",
     };
-    record.pages = {
-      items: [{ kind: "file", id: "file:one", path: "one.txt" }],
-      active: "file:one",
-    };
+    const page = filePage("one.txt");
+    record.pages = { items: [page], active: page.id };
     record.browsing.set("root", {
       layout: {
         view: "history",
@@ -176,7 +175,7 @@ describe("workspace memory", () => {
 
     const returned = memories.forTarget(target);
     expect(returned.presentation?.path).toBe("/devices/device/workspaces/workspace/git?repo=root");
-    expect(returned.pages?.active).toBe("file:one");
+    expect(returned.pages?.active).toBe(page.id);
     expect(returned.browsing.get("root")?.history.parent).toBe("root-parent");
     expect(returned.browsing.get("nested")?.history.parent).toBe("nested-parent");
     expect(returned.terminalLayout).toBe(layout);

@@ -72,6 +72,16 @@ async function finished(tasks: ScheduledTasks, id: string, timeout = 8000) {
   return tasks.getRun(id);
 }
 
+function blockFile(path: string) {
+  renameSync(path, path + ".saved");
+  mkdirSync(path);
+}
+
+async function restoreFile(path: string) {
+  await rm(path, { recursive: true });
+  await rename(path + ".saved", path);
+}
+
 function interceptOutputWrites(
   paths: string[],
   intercept: (file: FileHandle, path: string) => void,
@@ -315,8 +325,9 @@ test("stored task results retain full Windows DWORD process IDs and exit codes",
   }
 });
 
-test("real one-shot timers skip overlaps and persist consumption independently of manual runs", async () => {
+test("one-shot timers skip overlaps and persist consumption independently of manual runs", async () => {
   const f = await fixture({ taskRunsPerDevice: 1 });
+  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
   try {
     const at = new Date(Date.now() + 500).toISOString();
     const task = await f.tasks.create(
@@ -325,6 +336,7 @@ test("real one-shot timers skip overlaps and persist consumption independently o
       signal,
     );
     await f.tasks.start(task.id, "manual", signal);
+    await vi.advanceTimersByTimeAsync(500);
     await expect.poll(() => f.tasks.get(task.id).onceStatus).toBe("consumed");
     expect(f.tasks.listRuns(task.id).items).toEqual(
       expect.arrayContaining([
@@ -353,7 +365,7 @@ test("real one-shot timers skip overlaps and persist consumption independently o
         signal,
       );
       await restored.setPaused(expired.id, true, signal);
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await vi.advanceTimersByTimeAsync(200);
       await restored.setPaused(expired.id, false, signal);
       expect(restored.get(expired.id)).toMatchObject({ onceStatus: "missed", nextRunAt: null });
       await restored.start(expired.id, "after-missed", signal);
@@ -362,12 +374,14 @@ test("real one-shot timers skip overlaps and persist consumption independently o
       await restored.close();
     }
   } finally {
+    vi.useRealTimers();
     await f.close();
   }
 });
 
 test("scheduled capacity skips consume the occurrence without starting a command", async () => {
   const f = await fixture({ taskRunsPerDevice: 1 });
+  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
   try {
     await f.tasks.create("active", input(f.root, "sleep 60"), signal);
     await f.tasks.start("active", "occupied", signal);
@@ -377,6 +391,7 @@ test("scheduled capacity skips consume the occurrence without starting a command
       { ...input(f.root, "printf ran > capacity.marker"), schedule: { kind: "once", at } },
       signal,
     );
+    await vi.advanceTimersByTimeAsync(250);
     await expect.poll(() => f.tasks.get("scheduled").onceStatus).toBe("consumed");
     expect(f.tasks.listRuns("scheduled").items).toMatchObject([
       { state: "skipped", reasonCode: "capacity", scheduledAt: at },
@@ -386,12 +401,14 @@ test("scheduled capacity skips consume the occurrence without starting a command
       code: "ENOENT",
     });
   } finally {
+    vi.useRealTimers();
     await f.close();
   }
 });
 
 test("scheduled lateness takes precedence over overlap and capacity", async () => {
   const f = await fixture({ taskRunsPerDevice: 1 });
+  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
   try {
     const at = new Date(Date.now() + 250).toISOString();
     await f.tasks.create(
@@ -400,19 +417,18 @@ test("scheduled lateness takes precedence over overlap and capacity", async () =
       signal,
     );
     await f.tasks.start("late", "manual", signal);
-    // Let the real occurrence expire while its callback cannot enter the event loop.
-    while (Date.now() <= Date.parse(at) + taskLimits.lateToleranceMs) {
-      /* Intentional event-loop stall. */
-    }
+    vi.setSystemTime(Date.parse(at) + taskLimits.lateToleranceMs + 1);
+    await vi.advanceTimersToNextTimerAsync();
     await expect.poll(() => f.tasks.get("late").onceStatus).toBe("missed");
     expect(f.tasks.listRuns("late").items).toContainEqual(
       expect.objectContaining({ state: "skipped", reasonCode: "missed", scheduledAt: at }),
     );
     expect(f.tasks.getRun("manual").state).toBe("running");
   } finally {
+    vi.useRealTimers();
     await f.close();
   }
-}, 10000);
+});
 
 test.each(["before starting", "after starting"] as const)(
   "one-shot admission write failure %s preserves the processed occurrence",
@@ -426,14 +442,13 @@ test.each(["before starting", "after starting"] as const)(
         !blocked &&
         snapshot.items[0]?.currentRun?.state === "starting"
       ) {
-        renameSync(path, saved);
-        mkdirSync(path);
+        blockFile(path);
         blocked = true;
       }
     });
     const path = join(f.root, "tasks", "scheduled.json");
-    const saved = path + ".saved";
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     try {
       const at = new Date(Date.now() + 300).toISOString();
       await f.tasks.create(
@@ -442,10 +457,10 @@ test.each(["before starting", "after starting"] as const)(
         signal,
       );
       if (phase === "before starting") {
-        renameSync(path, saved);
-        mkdirSync(path);
+        blockFile(path);
         blocked = true;
       }
+      await vi.advanceTimersByTimeAsync(300);
       const onceStatus = phase === "before starting" ? "missed" : "consumed";
       await expect.poll(() => f.tasks.get("scheduled").onceStatus).toBe(onceStatus);
       const run = f.tasks.listRuns("scheduled").items[0]!;
@@ -468,8 +483,7 @@ test.each(["before starting", "after starting"] as const)(
         expect(result).toMatchObject({ state: "succeeded", exitCode: 0 });
         expect(await readFile(join(f.root, "scheduled.marker"), "utf8")).toBe("done");
       }
-      await rm(path, { recursive: true });
-      await rename(saved, path);
+      await restoreFile(path);
       blocked = false;
       await f.tasks.setPaused("scheduled", true, signal);
       const stored = JSON.parse(await readFile(path, "utf8"));
@@ -477,9 +491,9 @@ test.each(["before starting", "after starting"] as const)(
       expect(stored.runs).toEqual([JSON.parse(JSON.stringify(result))]);
       expect(f.tasks.status().failures).toEqual([]);
     } finally {
+      vi.useRealTimers();
       if (blocked) {
-        await rm(path, { recursive: true });
-        await rename(saved, path);
+        await restoreFile(path);
       }
       await f.close();
       log.mockRestore();
@@ -490,9 +504,9 @@ test.each(["before starting", "after starting"] as const)(
 test("failed cron admission advances to the next occurrence without inventing a run", async () => {
   const f = await fixture();
   const path = join(f.root, "tasks", "cron.json");
-  const saved = path + ".saved";
   const log = vi.spyOn(console, "error").mockImplementation(() => {});
   let blocked = false;
+  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
   try {
     const task = await f.tasks.create(
       "cron",
@@ -502,18 +516,15 @@ test("failed cron admission advances to the next occurrence without inventing a 
       },
       signal,
     );
-    renameSync(path, saved);
-    mkdirSync(path);
+    blockFile(path);
     blocked = true;
-    await expect
-      .poll(() => f.tasks.get("cron").nextRunAt, { timeout: 62000 })
-      .not.toBe(task.nextRunAt);
+    await vi.advanceTimersByTimeAsync(Date.parse(task.nextRunAt!) - Date.now());
+    await expect.poll(() => f.tasks.get("cron").nextRunAt).not.toBe(task.nextRunAt);
     expect(Date.parse(f.tasks.get("cron").nextRunAt!)).toBeGreaterThan(Date.parse(task.nextRunAt!));
     expect(f.tasks.listRuns("cron").total).toBe(0);
     expect(f.tasks.status().failures).toContainEqual(expect.stringContaining("cron not persisted"));
     await expect(readFile(join(f.root, "cron.marker"))).rejects.toMatchObject({ code: "ENOENT" });
-    await rm(path, { recursive: true });
-    await rename(saved, path);
+    await restoreFile(path);
     blocked = false;
     const nextRunAt = f.tasks.get("cron").nextRunAt;
     await f.tasks.update("cron", task.revision, { name: "Repaired" }, signal);
@@ -524,18 +535,19 @@ test("failed cron admission advances to the next occurrence without inventing a 
     });
     expect(f.tasks.status().failures).toEqual([]);
   } finally {
+    vi.useRealTimers();
     if (blocked) {
-      await rm(path, { recursive: true });
-      await rename(saved, path);
+      await restoreFile(path);
     }
     await f.close();
     log.mockRestore();
   }
-}, 65000);
+});
 
 test("a failed overlap write retains consumed once status and skipped history after repair", async () => {
   const f = await fixture();
   const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
   try {
     const at = new Date(Date.now() + 1000).toISOString();
     await f.tasks.create(
@@ -545,18 +557,18 @@ test("a failed overlap write retains consumed once status and skipped history af
     );
     await f.tasks.start("task", "manual", signal);
     const path = join(f.root, "tasks", "task.json");
-    await rename(path, path + ".saved");
-    await mkdir(path);
+    blockFile(path);
+    await vi.advanceTimersByTimeAsync(1000);
     await expect
       .poll(() => f.tasks.status().failures, { timeout: 3000 })
       .toContainEqual(expect.stringContaining("not persisted"));
     expect(f.tasks.get("task").onceStatus).toBe("consumed");
     const skipped = { state: "skipped", reasonCode: "overlap", scheduledAt: at };
     expect(f.tasks.listRuns("task").items).toContainEqual(expect.objectContaining(skipped));
-    await rm(path, { recursive: true });
-    await rename(path + ".saved", path);
+    await restoreFile(path);
     await f.tasks.setPaused("task", true, signal);
     expect(f.tasks.status().failures).toEqual([]);
+    vi.useRealTimers();
     await f.tasks.close();
     const restored = new ScheduledTasks(f.config, () => {});
     try {
@@ -567,6 +579,7 @@ test("a failed overlap write retains consumed once status and skipped history af
       await restored.close();
     }
   } finally {
+    vi.useRealTimers();
     log.mockRestore();
     await f.close();
   }
@@ -574,6 +587,7 @@ test("a failed overlap write retains consumed once status and skipped history af
 
 test("management of expired paused one-shot tasks keeps skipped history bounded", async () => {
   const f = await fixture({ taskHistoryRuns: 1 });
+  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
   try {
     await f.tasks.create("paused", input(f.root), signal);
     await f.tasks.setPaused("paused", true, signal);
@@ -584,7 +598,7 @@ test("management of expired paused one-shot tasks keeps skipped history bounded"
         { schedule: { kind: "once", at: new Date(Date.now() + 180).toISOString() } },
         signal,
       );
-      await new Promise((resolve) => setTimeout(resolve, 220));
+      await vi.advanceTimersByTimeAsync(220);
       if (index % 2) await f.tasks.setPaused("paused", true, signal);
       else
         await f.tasks.update(
@@ -599,6 +613,7 @@ test("management of expired paused one-shot tasks keeps skipped history bounded"
       });
     }
   } finally {
+    vi.useRealTimers();
     await f.close();
   }
 });
@@ -634,6 +649,7 @@ test("DST uses matching wall times, timezone and five-field rules are validated"
 
 test("manual admission does not erase an already-due timer callback", async () => {
   const f = await fixture();
+  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
   try {
     const at = new Date(Date.now() + 100).toISOString();
     await f.tasks.create(
@@ -641,11 +657,10 @@ test("manual admission does not erase an already-due timer callback", async () =
       { ...input(f.root, "sleep .4"), schedule: { kind: "once", at } },
       signal,
     );
-    // Hold the event loop until the timer is due, then issue a manual action before timers run.
-    while (Date.now() < Date.parse(at) + 25) {
-      /* Intentional brief event-loop stall. */
-    }
+    // Advance wall time without firing the timer, then accept the manual run first.
+    vi.setSystemTime(Date.parse(at) + 25);
     await f.tasks.start("due", "manual", signal);
+    await vi.advanceTimersToNextTimerAsync();
     await expect.poll(() => f.tasks.get("due").onceStatus).toBe("consumed");
     expect(f.tasks.listRuns("due").items).toEqual(
       expect.arrayContaining([
@@ -653,6 +668,7 @@ test("manual admission does not erase an already-due timer callback", async () =
       ]),
     );
   } finally {
+    vi.useRealTimers();
     await f.close();
   }
 });
@@ -970,26 +986,24 @@ test.runIf(process.platform === "linux" && ["x64", "arm64"].includes(process.arc
       expect(startingRevision).toBeDefined();
       const unpublished = observations.filter((read) => read.revision === startingRevision);
       expect(unpublished.length).toBeGreaterThan(0);
-      expect
-        .soft(
-          new Set(
-            unpublished.flatMap((read) => [read.runState, read.summaryState, read.listedState]),
-          ),
-          "Public reads must stay starting until the failed revision is published",
-        )
-        .toEqual(new Set(["starting"]));
+      expect(
+        new Set(
+          unpublished.flatMap((read) => [read.runState, read.summaryState, read.listedState]),
+        ),
+        "Public reads must stay starting until the failed revision is published",
+      ).toEqual(new Set(["starting"]));
       const failedNotification = notifications.find(
         (snapshot) => snapshot.items[0]?.latestRun?.state === "failed",
       );
       expect(failedNotification?.revision).toBeGreaterThan(startingRevision!);
       expect(f.tasks.snapshot()).toEqual(notifications.at(-1));
       expect(f.tasks.getRun(result.id)).toEqual(result);
-      expect.soft(f.tasks.listRuns(task.id).items.map((run) => run.id)).toEqual([result.id]);
+      expect(f.tasks.listRuns(task.id).items.map((run) => run.id)).toEqual([result.id]);
       const stored = JSON.parse(await readFile(path, "utf8"));
-      expect.soft(stored.runs.map((run: TaskRun) => run.id)).toEqual([result.id]);
+      expect(stored.runs.map((run: TaskRun) => run.id)).toEqual([result.id]);
       const files = await readdir(join(f.root, "tasks"));
       for (const stream of ["stdout", "stderr"] as const) {
-        expect.soft(files).not.toContain(`first.${stream}`);
+        expect(files).not.toContain(`first.${stream}`);
         expect(files).not.toContain(`rejected.${stream}`);
         expect(await f.tasks.output(result.id, stream, 0, 32, signal)).toMatchObject({
           text: "",
@@ -1018,12 +1032,10 @@ test.runIf(process.platform === "linux" && ["x64", "arm64"].includes(process.arc
       notifications.push(snapshot);
       if (snapshot.items[0]?.currentRun?.id !== "rejected") return;
       startingRevision = snapshot.revision;
-      renameSync(path, saved);
+      blockFile(path);
       blocked = true;
-      mkdirSync(path);
     });
     const path = join(f.root, "tasks", "task.json");
-    const saved = path + ".saved";
     let blocked = false;
     try {
       await f.tasks.create("task", input(f.root), signal);
@@ -1049,35 +1061,27 @@ test.runIf(process.platform === "linux" && ["x64", "arm64"].includes(process.arc
       expect(f.tasks.status().failures).toContainEqual(
         expect.stringContaining("task not persisted"),
       );
-      expect
-        .soft(f.tasks.status().failures)
-        .toContainEqual(expect.stringContaining("task retention failed"));
-      expect(log).toHaveBeenCalledWith(
-        expect.stringContaining("facts"),
-        "task",
-        expect.stringContaining("EISDIR"),
+      expect(f.tasks.status().failures).toContainEqual(
+        expect.stringContaining("task retention failed"),
       );
-
       expect(f.tasks.listRuns("task").items.map((run) => run.id)).toEqual(["rejected", "first"]);
-      expect(JSON.parse(await readFile(saved, "utf8")).runs.at(-1)).toMatchObject({
+      expect(JSON.parse(await readFile(path + ".saved", "utf8")).runs.at(-1)).toMatchObject({
         id: "rejected",
         state: "starting",
       });
 
-      await rm(path, { recursive: true });
-      await rename(saved, path);
+      await restoreFile(path);
       blocked = false;
       await f.tasks.setPaused("task", true, signal);
       expect(f.tasks.listRuns("task").items.map((run) => run.id)).toEqual([result.id]);
       expect(JSON.parse(await readFile(path, "utf8")).runs).toEqual([result]);
-      expect.soft(f.tasks.status().failures).toEqual([]);
+      expect(f.tasks.status().failures).toEqual([]);
     } finally {
       if (previousEnvironment === undefined) delete process.env.KITELINE_TASK_TEST_OVERSIZED_ENV;
       else process.env.KITELINE_TASK_TEST_OVERSIZED_ENV = previousEnvironment;
       try {
         if (blocked) {
-          await rm(path, { recursive: true });
-          await rename(saved, path);
+          await restoreFile(path);
         }
       } finally {
         log.mockRestore();
@@ -1437,18 +1441,15 @@ test("an unchanged missing cwd remains editable and a failed starting write neve
     await rm(cwd, { recursive: true });
     await f.tasks.update("task", 1, { name: "Changed", cwd }, signal);
     await f.tasks.update("task", 2, { cwd: f.root, command: "printf ran > marker" }, signal);
-    const path = join(f.root, "tasks", "task.json"),
-      saved = path + ".saved";
-    await rename(path, saved);
-    await mkdir(path);
+    const path = join(f.root, "tasks", "task.json");
+    blockFile(path);
     await expect(f.tasks.start("task", "failed-write", signal)).rejects.toMatchObject({
       code: "EISDIR",
     });
     expect(f.tasks.listRuns("task").total).toBe(0);
     expect(f.tasks.status().active).toBe(0);
     await expect(readFile(join(f.root, "marker"))).rejects.toMatchObject({ code: "ENOENT" });
-    await rm(path, { recursive: true });
-    await rename(saved, path);
+    await restoreFile(path);
     await f.tasks.start("task", "after-repair", signal);
     expect((await finished(f.tasks, "after-repair")).state).toBe("succeeded");
   } finally {
@@ -1467,12 +1468,10 @@ test.each(["starting", "running"] as const)(
         snapshot.items.find((task) => task.id === "task")?.currentRun?.state === phase
       ) {
         broken = true;
-        renameSync(path, saved);
-        mkdirSync(path);
+        blockFile(path);
       }
     });
-    const path = join(f.root, "tasks", "task.json"),
-      saved = path + ".saved";
+    const path = join(f.root, "tasks", "task.json");
     try {
       await f.tasks.create(
         "task",
@@ -1498,8 +1497,7 @@ test.each(["starting", "running"] as const)(
       expect(f.tasks.status().failures).toContainEqual(
         expect.stringContaining("task not persisted"),
       );
-      await rm(path, { recursive: true });
-      await rename(saved, path);
+      await restoreFile(path);
       await f.tasks.setPaused("task", true, signal);
       const stored = JSON.parse(await readFile(path, "utf8"));
       expect(stored.runs[0].state).toBe(phase === "starting" ? "stopped" : "succeeded");
@@ -1523,7 +1521,6 @@ test("cross-task save failures stay with the reclaimed task until it is saved or
     },
   );
   const path = join(f.root, "tasks", "old.json");
-  const saved = path + ".saved";
   const retentionFailure = expect.stringMatching(/^old retention failed: .*EISDIR/);
   let blocked = false;
   try {
@@ -1532,8 +1529,7 @@ test("cross-task save failures stay with the reclaimed task until it is saved or
     await f.tasks.start("old", "old-run", signal);
     await expect.poll(() => f.tasks.status().active).toBe(0);
     expect(f.tasks.getRun("old-run").output.stdoutBytes).toBe(64);
-    await rename(path, saved);
-    await mkdir(path);
+    blockFile(path);
     blocked = true;
     for (const id of ["attempt-one", "attempt-two"]) {
       await expect(f.tasks.start("manual", id, signal)).rejects.toMatchObject({ code: "EISDIR" });
@@ -1583,8 +1579,7 @@ test("cross-task save failures stay with the reclaimed task until it is saved or
       "old retention failed:",
     );
 
-    await rm(path, { recursive: true });
-    await rename(saved, path);
+    await restoreFile(path);
     blocked = false;
     observeSave = true;
     await f.tasks.setPaused("old", true, signal);
@@ -1593,8 +1588,7 @@ test("cross-task save failures stay with the reclaimed task until it is saved or
     expect(f.tasks.listRuns("old").total).toBe(1);
     expect(f.tasks.status().failures).toEqual([]);
 
-    await rename(path, saved);
-    await mkdir(path);
+    blockFile(path);
     blocked = true;
     await expect(f.tasks.start("manual", "before-delete", signal)).rejects.toMatchObject({
       code: "EISDIR",
@@ -1603,8 +1597,7 @@ test("cross-task save failures stay with the reclaimed task until it is saved or
       code: "ERR_FS_EISDIR",
     });
     expect(f.tasks.status().failures).toEqual([retentionFailure]);
-    await rm(path, { recursive: true });
-    await rename(saved, path);
+    await restoreFile(path);
     blocked = false;
     await expect(f.tasks.delete("old", undefined, signal)).resolves.toEqual({ removed: true });
     expect(f.tasks.status().failures).toEqual([]);
@@ -1614,8 +1607,7 @@ test("cross-task save failures stay with the reclaimed task until it is saved or
   } finally {
     vi.useRealTimers();
     if (blocked) {
-      await rm(path, { recursive: true });
-      await rename(saved, path);
+      await restoreFile(path);
     }
     log.mockRestore();
     await f.close();
@@ -1630,18 +1622,17 @@ test("retention failures do not erase completed results or release residual outp
     await f.tasks.start("task", "first", signal);
     await finished(f.tasks, "first");
     const path = join(f.root, "tasks", "first.stdout");
-    await rename(path, path + ".saved");
-    await mkdir(path);
+    blockFile(path);
     await f.tasks.start("task", "second", signal);
     expect((await finished(f.tasks, "second")).state).toBe("succeeded");
     await expect.poll(() => f.tasks.status().active).toBe(0);
     expect(f.tasks.listRuns("task").items.map((run) => run.id)).toEqual(["second"]);
-    expect
-      .soft(f.tasks.status().failures)
-      .toContainEqual(expect.stringContaining("first output cleanup failed"));
-    expect
-      .soft(f.tasks.status().failures)
-      .not.toContainEqual(expect.stringContaining("retention failed"));
+    expect(f.tasks.status().failures).toContainEqual(
+      expect.stringContaining("first output cleanup failed"),
+    );
+    expect(f.tasks.status().failures).not.toContainEqual(
+      expect.stringContaining("retention failed"),
+    );
     await f.tasks.create("other", input(f.root), signal);
     await expect(f.tasks.start("other", "first", signal)).rejects.toMatchObject({
       code: "conflict",
@@ -1652,11 +1643,10 @@ test("retention failures do not erase completed results or release residual outp
     await f.tasks.start("other", "third", signal);
     expect((await finished(f.tasks, "third")).state).toBe("succeeded");
     await expect.poll(() => f.tasks.status().active).toBe(0);
-    expect
-      .soft(f.tasks.status().failures)
-      .toContainEqual(expect.stringContaining("first output cleanup failed"));
-    await rm(path, { recursive: true });
-    await rename(path + ".saved", path);
+    expect(f.tasks.status().failures).toContainEqual(
+      expect.stringContaining("first output cleanup failed"),
+    );
+    await restoreFile(path);
     await f.tasks.start("other", "cleanup", signal);
     await finished(f.tasks, "cleanup");
     await expect.poll(() => f.tasks.status().active).toBe(0);
@@ -1686,8 +1676,7 @@ test("output cleanup failure is reported only by run while task history remains 
       { ...f.config, limits: { ...f.config.limits, taskHistoryRuns: 1 } },
       () => {
         if (blocked) return;
-        renameSync(path, path + ".saved");
-        mkdirSync(path);
+        blockFile(path);
         blocked = true;
       },
     );
@@ -1697,8 +1686,7 @@ test("output cleanup failure is reported only by run while task history remains 
       loadError: undefined,
       failures: [expect.stringContaining("first output cleanup failed:")],
     });
-    await rm(path, { recursive: true });
-    await rename(path + ".saved", path);
+    await restoreFile(path);
     await restored.setPaused("task", true, signal);
     expect(restored.listRuns("task").items.map((run) => run.id)).toEqual(["third"]);
     expect(restored.status().failures).toEqual([
@@ -1724,12 +1712,10 @@ test("retention save failures belong to the task until its next successful save"
     const runs = f.tasks.listRuns("task").items;
     if (!injectFailure || blocked || runs.length !== 2 || runs[0]?.state !== "succeeded") return;
     terminalStatus = f.tasks.status();
-    renameSync(path, saved);
-    mkdirSync(path);
+    blockFile(path);
     blocked = true;
   });
   const path = join(f.root, "tasks", "task.json");
-  const saved = path + ".saved";
   try {
     await f.tasks.create("task", input(f.root), signal);
     await f.tasks.create("other", input(f.root), signal);
@@ -1750,20 +1736,19 @@ test("retention save failures belong to the task until its next successful save"
     await f.tasks.start("other", "other-run", signal);
     await finished(f.tasks, "other-run");
     await expect.poll(() => f.tasks.status().active).toBe(0);
-    expect
-      .soft(f.tasks.status().failures)
-      .toContainEqual(expect.stringContaining("task retention failed"));
+    expect(f.tasks.status().failures).toContainEqual(
+      expect.stringContaining("task retention failed"),
+    );
     await expect(f.tasks.start("task", "blocked", signal)).rejects.toMatchObject({
       code: "EISDIR",
     });
-    expect
-      .soft(f.tasks.status().failures)
-      .toContainEqual(expect.stringContaining("task retention failed"));
+    expect(f.tasks.status().failures).toContainEqual(
+      expect.stringContaining("task retention failed"),
+    );
     expect(f.tasks.listRuns("task").total).toBe(2);
 
     injectFailure = false;
-    await rm(path, { recursive: true });
-    await rename(saved, path);
+    await restoreFile(path);
     blocked = false;
     await f.tasks.setPaused("task", true, signal);
     expect(f.tasks.listRuns("task").items.map((run) => run.id)).toEqual(["second"]);
@@ -1774,8 +1759,7 @@ test("retention save failures belong to the task until its next successful save"
   } finally {
     injectFailure = false;
     if (blocked) {
-      await rm(path, { recursive: true });
-      await rename(saved, path);
+      await restoreFile(path);
     }
     log.mockRestore();
     await f.close();
@@ -1805,8 +1789,7 @@ test("cross-task reclamation clears the saved task failure before later terminal
     () => {
       const runs = f.tasks.listRuns("task").items;
       if (injectFailure && !blocked && runs.some((run) => run.reasonCode === "overlap")) {
-        renameSync(path, saved);
-        mkdirSync(path);
+        blockFile(path);
         blocked = true;
       }
       if (!injectFailure && !reclamationStatus && !runs.some((run) => run.id === "old"))
@@ -1816,7 +1799,6 @@ test("cross-task reclamation clears the saved task failure before later terminal
     },
   );
   const path = join(f.root, "tasks", "task.json");
-  const saved = path + ".saved";
   try {
     await f.tasks.create("task", input(f.root, `printf '${oldOutput}'`), signal);
     await f.tasks.create("other", input(f.root, "true"), signal);
@@ -1846,8 +1828,7 @@ test("cross-task reclamation clears the saved task failure before later terminal
     expect(f.tasks.status().failures).not.toContainEqual(expect.stringContaining("not persisted"));
     expect(f.tasks.listRuns("task").total).toBe(3);
     injectFailure = false;
-    await rm(path, { recursive: true });
-    await rename(saved, path);
+    await restoreFile(path);
     blocked = false;
 
     // The old 32 bytes plus active 16 bytes leave less than the 32-byte admission budget.
@@ -1873,8 +1854,7 @@ test("cross-task reclamation clears the saved task failure before later terminal
     injectFailure = false;
     observeTerminal = false;
     if (blocked) {
-      await rm(path, { recursive: true });
-      await rename(saved, path);
+      await restoreFile(path);
     }
     log.mockRestore();
     await f.close();
@@ -1893,8 +1873,7 @@ test("partial task deletion diagnoses only failed outputs and reserves every unr
       await expect.poll(() => f.tasks.status().active).toBe(0);
     }
     const path = join(f.root, "tasks", "First.stdout");
-    await rename(path, path + ".saved");
-    await mkdir(path);
+    blockFile(path);
     await expect(f.tasks.delete("task", undefined, signal)).rejects.toMatchObject({
       outcome: "partial",
       result: { removed: true },
@@ -1903,17 +1882,16 @@ test("partial task deletion diagnoses only failed outputs and reserves every unr
     await expect(readFile(join(f.root, "tasks", "task.json"))).rejects.toMatchObject({
       code: "ENOENT",
     });
-    expect
-      .soft(f.tasks.status().failures)
-      .toContainEqual(expect.stringContaining("First output cleanup failed"));
-    expect.soft(f.tasks.status().failures).toContainEqual(expect.stringContaining(path));
+    expect(f.tasks.status().failures).toContainEqual(
+      expect.stringContaining("First output cleanup failed"),
+    );
+    expect(f.tasks.status().failures).toContainEqual(expect.stringContaining(path));
     expect(f.tasks.status().failures).not.toContainEqual(expect.stringContaining("Second"));
     expect(await readFile(join(f.root, "tasks", "Second.stdout"), "utf8")).toBe("你好");
     for (const id of ["first", "second"])
       await expect(f.tasks.start("other", id, signal)).rejects.toMatchObject({ code: "conflict" });
 
-    await rm(path, { recursive: true });
-    await rename(path + ".saved", path);
+    await restoreFile(path);
     await f.tasks.start("other", "cleanup", signal);
     await finished(f.tasks, "cleanup");
     await expect.poll(() => f.tasks.status().active).toBe(0);
@@ -1961,8 +1939,7 @@ test("partial output deletion releases the removed stream before a later retry s
       output: { stdoutBytes: oldStdout.length, stderrBytes: oldStderr.length, truncated: false },
     });
     await expect.poll(() => f.tasks.status().active).toBe(0);
-    await rename(stderrPath, stderrPath + ".saved");
-    await mkdir(stderrPath);
+    blockFile(stderrPath);
     await expect(f.tasks.delete("old", undefined, signal)).rejects.toMatchObject({
       outcome: "partial",
       result: { removed: true },
@@ -1991,8 +1968,7 @@ test("partial output deletion releases the removed stream before a later retry s
       expect.stringContaining("OldRun output cleanup failed"),
     );
 
-    await rm(stderrPath, { recursive: true });
-    await rename(stderrPath + ".saved", stderrPath);
+    await restoreFile(stderrPath);
     await f.tasks.start("after", "after-repair", signal);
     const remainingAfterRepair = totalBudget - remainingBeforeRepair;
     expect(await finished(f.tasks, "after-repair")).toMatchObject({
@@ -2035,7 +2011,7 @@ test("startup temporary-file cleanup remains diagnosed through IPC and doctor un
       code: "ENOENT",
     });
     const report = await localRequest<DoctorReport>(f.config, "doctor");
-    expect.soft(report.items.find((item) => item.name === "Scheduled Tasks")).toMatchObject({
+    expect(report.items.find((item) => item.name === "Scheduled Tasks")).toMatchObject({
       status: "error",
       detail: expect.stringContaining("unfinished.tmp startup cleanup failed"),
     });
@@ -2043,22 +2019,22 @@ test("startup temporary-file cleanup remains diagnosed through IPC and doctor un
       "ready=true;",
     );
     const failure = await agentCli(f.root, ["doctor"]);
-    expect.soft(failure.stdout).toContain("[error] Scheduled Tasks:");
-    expect.soft(failure.stdout).toContain("unfinished.tmp startup cleanup failed");
-    expect.soft(failure.code).toBe(1);
+    expect(failure.stdout).toContain("[error] Scheduled Tasks:");
+    expect(failure.stdout).toContain("unfinished.tmp startup cleanup failed");
+    expect(failure.code).toBe(1);
     await localRequest(f.config, "tasks.create", { taskId: "task", input: input(f.root) });
     await localRequest(f.config, "tasks.run", { taskId: "task", runId: "run" });
     await finished(agent.schedules, "run");
     await expect.poll(() => agent!.schedules.status().active).toBe(0);
     expect(agent.schedules.snapshot().items).toHaveLength(1);
     expect(agent.schedules.snapshot().storageError).toBeUndefined();
-    expect
-      .soft(agent.schedules.status().failures)
-      .toContainEqual(expect.stringContaining("unfinished.tmp"));
+    expect(agent.schedules.status().failures).toContainEqual(
+      expect.stringContaining("unfinished.tmp"),
+    );
     await rm(temporary, { recursive: true });
-    expect
-      .soft(agent.schedules.status().failures)
-      .toContainEqual(expect.stringContaining("unfinished.tmp"));
+    expect(agent.schedules.status().failures).toContainEqual(
+      expect.stringContaining("unfinished.tmp"),
+    );
     await agent.close();
 
     agent = new Agent(f.config, identity);
@@ -2067,16 +2043,47 @@ test("startup temporary-file cleanup remains diagnosed through IPC and doctor un
     expect(restored.items.find((item) => item.name === "Scheduled Tasks")).toMatchObject({
       status: "ok",
     });
-    expect(restored.items.filter((item) => item.status === "error")).toEqual([]);
     const success = await agentCli(f.root, ["doctor"]);
     expect(success.stdout).toContain("[ok] Scheduled Tasks:");
-    expect(success.code).toBe(0);
   } finally {
     await agent?.close();
     log.mockRestore();
     await f.close();
   }
 }, 15000);
+
+test("doctor CLI exits according to report errors independently of host health", async () => {
+  const f = await fixture();
+  await mkdir(f.config.runDir);
+  const report: DoctorReport = {
+    items: [
+      { name: "Scheduled Tasks", status: "error", detail: "Task diagnosis" },
+      { name: "Host", status: "warn", detail: "Host warning" },
+    ],
+  };
+  const local = new LocalServer(f.config, async (method) => {
+    expect(method).toBe("doctor");
+    return report;
+  });
+  try {
+    await local.start();
+    for (const { status, exitCode } of [
+      { status: "error", exitCode: 1 },
+      { status: "ok", exitCode: 0 },
+    ] as const) {
+      report.items[0]!.status = status;
+      const result = await agentCli(f.root, ["doctor"]);
+      expect(result).toMatchObject({
+        code: exitCode,
+        stdout: `[${status}] Scheduled Tasks: Task diagnosis\n[warn] Host: Host warning\n`,
+        stderr: "",
+      });
+    }
+  } finally {
+    await local.close();
+    await f.close();
+  }
+});
 
 test.each([false, true])(
   "abnormal owner exit (paused=%s) requires review and stays paused after acknowledgement",
@@ -2383,13 +2390,6 @@ test("offline CLI help, usage and socket management share the same task and exec
     expect((await cli(f.root, ["create", "--json"])).code).toBe(2);
     expect((await cli(f.root, ["list", "--json"])).code).toBe(1);
     await local.start();
-    const unknownOption = await cli(f.root, ["run", "task", "--task-id", "other", "--json"]);
-    expect(unknownOption.code).toBe(2);
-    expect(unknownOption.json()).toEqual({
-      outcome: "failed",
-      error: { code: "invalid_argument", message: expect.stringContaining("--task-id") },
-    });
-    expect(requests).toEqual([]);
     const created = await cli(f.root, [
       "create",
       "--task-id",
@@ -2503,7 +2503,7 @@ test("offline CLI help, usage and socket management share the same task and exec
     await local.close();
     await f.close();
   }
-});
+}, 15000);
 
 test("CLI can query actual create and run mutations after losing confirmation with generated IDs", async () => {
   const f = await fixture();

@@ -53,7 +53,7 @@ export function selectionOf(entry: GitEntry & { path: string }, side: ChangeSide
     ]),
   };
 }
-export function sameHeadContext(a: HeadIdentity, b: HeadIdentity) {
+function sameHeadContext(a: HeadIdentity, b: HeadIdentity) {
   return a.symbolicRef === b.symbolicRef && (a.symbolicRef !== null || a.oid === b.oid);
 }
 export function reconcileSelection(

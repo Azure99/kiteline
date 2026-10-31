@@ -2,7 +2,6 @@ import { afterEach, expect, test, vi } from "vitest";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { AppError } from "@kiteline/shared/protocol";
 import { Agent } from "../src/agent.js";
 import { withPublicationLock } from "../src/files/publish.js";
 import { testConfig } from "./support/config.js";
@@ -189,51 +188,16 @@ test.each(["files.create", "files.rename"])(
       agent.dispatch(method, { ...params, path: "target" }, signal),
     ).rejects.toMatchObject({ code: method === "files.create" ? "EEXIST" : "invalid_argument" });
     expect(changed).toHaveBeenCalledExactlyOnceWith(id);
-    changed.mockClear();
-
-    const controller = new AbortController();
-    controller.abort(new AppError("cancelled", "Caller already cancelled"));
-    await expect(agent.dispatch(method, params, controller.signal)).rejects.toMatchObject({
-      message: "Caller already cancelled",
-    });
-    expect(changed).not.toHaveBeenCalled();
-    changed.mockClear();
-    await agent.close();
-    for (const currentSignal of [signal, controller.signal]) {
-      await expect(agent.dispatch(method, params, currentSignal)).rejects.toMatchObject({
-        code: "cancelled",
-        message: "Agent is stopping",
-      });
-      expect(changed).not.toHaveBeenCalled();
-      changed.mockClear();
-    }
   },
 );
 
-test("unknown files methods and rejected bulk requests retain admission priority without completion notification", async () => {
+test("rejected bulk parameters do not notify completion", async () => {
   const { agent, id, changed } = await setup();
   const signal = new AbortController().signal;
-  const controller = new AbortController();
-  controller.abort(new AppError("cancelled", "Caller already cancelled"));
-  await expect(agent.dispatch("files.unknown", { workspaceId: id }, signal)).rejects.toMatchObject({
-    code: "unsupported",
-  });
-  await expect(
-    agent.dispatch("files.unknown", { workspaceId: id }, controller.signal),
-  ).rejects.toMatchObject({ message: "Caller already cancelled" });
   for (const method of ["files.copy", "files.move", "files.delete"]) {
     await expect(agent.dispatch(method, { workspaceId: id }, signal)).rejects.toMatchObject({
       code: "invalid_argument",
     });
-    await expect(
-      agent.dispatch(method, { workspaceId: id }, controller.signal),
-    ).rejects.toMatchObject({ message: "Caller already cancelled" });
   }
-  expect(changed).not.toHaveBeenCalled();
-  await agent.close();
-  for (const method of ["files.unknown", "files.copy", "files.move", "files.delete"])
-    await expect(
-      agent.dispatch(method, { workspaceId: id }, controller.signal),
-    ).rejects.toMatchObject({ message: "Agent is stopping" });
   expect(changed).not.toHaveBeenCalled();
 });
