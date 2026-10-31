@@ -175,6 +175,8 @@ kiteline web url --path 'notes/design copy.md'
 
 Default output is readable text. With `--json`, stdout contains a structured reply with `outcome`, `result`, or `error.code`. Prompts and diagnostics use stderr. The CLI does not retry automatically.
 
+When a downstream consumer closes output early in a POSIX pipeline, the CLI keeps the exit code listed below; the shell determines the pipeline's status. In PowerShell, when using `Select-Object -First` or another consumer that ends the pipeline early, save the full output to a variable or file first if you need `$LASTEXITCODE`.
+
 | Exit | Meaning                                                                                                                                        |
 | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | 0    | The operation or observation succeeded.                                                                                                        |

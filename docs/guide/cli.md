@@ -175,6 +175,8 @@ kiteline web url --path 'notes/设计副本.md'
 
 默认输出供阅读；`--json` 在 stdout 输出带 `outcome`、`result` 或 `error.code` 的结构化结果。提示和诊断写到 stderr。CLI 不自动重试。
 
+POSIX 管道下游提前关闭输出时，CLI 仍使用下表的退出码；整条管道的状态由 shell 决定。PowerShell 中若要用 `Select-Object -First` 等提前结束管道，又需要 `$LASTEXITCODE`，先把完整输出保存到变量或文件。
+
 | 退出码 | 含义                                                                                          |
 | ------ | --------------------------------------------------------------------------------------------- |
 | 0      | 操作或观察成功。                                                                              |

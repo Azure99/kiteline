@@ -16,6 +16,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
+import { AppError } from "@kiteline/shared/protocol";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { parseArgs, promisify } from "node:util";
@@ -460,7 +461,8 @@ async function uninstall({
 function parseMaintenanceArguments(action: string, args: string[]) {
   if (action === "install") {
     const { values } = parseArgs({ args, options: { user: { type: "string" } } });
-    if (!values.user) throw new Error("Usage: kiteline-agent install --user PROJECT_USER");
+    if (!values.user)
+      throw new AppError("invalid_argument", "Usage: kiteline-agent install --user PROJECT_USER");
     return { action: "install" as const, user: values.user };
   }
   if (action === "upgrade") {
@@ -469,7 +471,10 @@ function parseMaintenanceArguments(action: string, args: string[]) {
       options: { archive: { type: "string" }, yes: { type: "boolean" } },
     });
     if (!values.archive)
-      throw new Error("Usage: kiteline-agent upgrade --archive RELEASE.tar.gz [--yes]");
+      throw new AppError(
+        "invalid_argument",
+        "Usage: kiteline-agent upgrade --archive RELEASE.tar.gz [--yes]",
+      );
     return { action: "upgrade" as const, archive: values.archive, yes: !!values.yes };
   }
   const { values } = parseArgs({

@@ -97,3 +97,21 @@ test("subcommands handle version arguments with their existing exit codes", asyn
   });
   expect(await readdir(root)).toEqual([]);
 });
+
+test.each([
+  ["bind", "--help"],
+  ["bind", "--bogus"],
+  ["bind"],
+  ["bind", "--server"],
+  ["bind", "--server", "foo"],
+  ["bind", "--server", "ftp://example.test"],
+  ...(process.platform === "win32"
+    ? []
+    : [["install"], ["upgrade"], ["install", "--help"], ["uninstall", "unexpected"]]),
+])("invalid subcommand arguments %s fail without a stack or state changes", async (...args) => {
+  const root = await directory();
+  const failure = await cli(root, args).catch((error: unknown) => error);
+  expect(failure).toMatchObject({ code: 1, stdout: "" });
+  expect(failure).toHaveProperty("stderr", expect.not.stringMatching(/^\s+at /m));
+  expect(await readdir(root)).toEqual([]);
+});

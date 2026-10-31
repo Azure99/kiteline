@@ -31,7 +31,13 @@ export async function bindCli(args: string[]) {
     args,
     options: { server: { type: "string" }, "if-unbound": { type: "boolean" } },
   });
-  const server = new URL(string(values.server, "server"));
+  const serverValue = string(values.server, "server");
+  let server: URL;
+  try {
+    server = new URL(serverValue);
+  } catch {
+    throw new AppError("invalid_argument", "server must be a valid HTTP or HTTPS URL");
+  }
   if (server.protocol !== "http:" && server.protocol !== "https:")
     throw new AppError("invalid_argument", "server must use HTTP or HTTPS");
   const config = await agentConfig();

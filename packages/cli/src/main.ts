@@ -17,6 +17,12 @@ import { terminal, webUrl } from "./terminal.js";
 import { files } from "./files.js";
 import { attach } from "./attach.js";
 
+for (const stream of [process.stdout, process.stderr]) {
+  stream.on("error", (error: NodeJS.ErrnoException) => {
+    if (error.code !== "EPIPE") throw error;
+  });
+}
+
 async function session(api: ReturnType<typeof client>) {
   const value = await remote(api.api<CliCredential & { kind: string }>("/api/session"));
   if (value.kind !== "cli")

@@ -1,4 +1,4 @@
-import { appVersion, asError, OperationError } from "@kiteline/shared/protocol";
+import { AppError, appVersion, asError, OperationError } from "@kiteline/shared/protocol";
 import { agentConfig, privateDirectory, readIdentity } from "./config.js";
 import { Agent } from "./agent.js";
 import { bindCli } from "./cli/bind.js";
@@ -139,6 +139,11 @@ async function main() {
   process.exitCode = 1;
 }
 main().catch((error: unknown) => {
-  console.error(error);
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  if (typeof code === "string" && code.startsWith("ERR_PARSE_ARGS_"))
+    console.error(`${(error as Error).message}\n${usage}`);
+  else if (error instanceof AppError && error.code === "invalid_argument")
+    console.error(`${error.code}: ${error.message}`);
+  else console.error(error);
   process.exitCode ||= 1;
 });

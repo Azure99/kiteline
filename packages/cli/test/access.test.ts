@@ -73,6 +73,8 @@ function cli(
     input?: string;
     keepStdinOpen?: boolean;
     tty?: boolean;
+    closedOutput?: boolean;
+    closedStderr?: boolean;
   } = {},
 ) {
   const env = { ...process.env };
@@ -107,12 +109,16 @@ function cli(
   );
   let stdout = "",
     stderr = "";
-  child.stdout.on("data", (part) => {
-    stdout += part.toString();
-  });
-  child.stderr.on("data", (part) => {
-    stderr += part.toString();
-  });
+  if (options.closedOutput) child.stdout.destroy();
+  else
+    child.stdout.on("data", (part) => {
+      stdout += part.toString();
+    });
+  if (options.closedStderr) child.stderr.destroy();
+  else
+    child.stderr.on("data", (part) => {
+      stderr += part.toString();
+    });
   if (!options.keepStdinOpen && !options.tty) child.stdin.end(options.input ?? "");
   const closed = once(child, "close");
   cleanups.push(async () => {
@@ -1088,4 +1094,63 @@ test("terminal Web URL checks the selected workspace instead of guessing another
   expect(wrong.code).toBe(1);
   expect(JSON.parse(wrong.stdout)).toMatchObject({ error: { code: "not_found" } });
   expect(server.requests).toHaveLength(2);
+});
+
+test.each([0, 1, 2, 3])(
+  "a closed stdout pipe preserves command result exit code %s",
+  async (code) => {
+    const root = await directory();
+    const server = await fixture((_request, response) => {
+      if (code === 1)
+        json(response, { error: { code: "io_error", message: "Remote failure" } }, 500);
+      else if (code === 3)
+        json(response, {
+          outcome: "unknown",
+          error: { code: "io_error", message: "Result unconfirmed" },
+        });
+      else json(response, { devices });
+    });
+    const args =
+      code === 2
+        ? ["--bogus", "--json"]
+        : code === 3
+          ? [
+              "terminal",
+              "send",
+              "--device",
+              "d",
+              "--workspace",
+              "w",
+              "--session",
+              "s",
+              "--text",
+              "x",
+              "--json",
+            ]
+          : ["targets", "--json"];
+    const reply = await cli(root, args, {
+      closedOutput: true,
+      env: { KITELINE_URL: server.url, KITELINE_TOKEN: "token" },
+    });
+    expect(reply).toMatchObject({ code, signal: null, stdout: "", stderr: "" });
+  },
+);
+
+test.each([2, 3])("a closed stderr pipe preserves text-mode exit code %s", async (code) => {
+  const root = await directory();
+  const server = await fixture((_request, response) =>
+    json(response, {
+      outcome: "unknown",
+      error: { code: "io_error", message: "Result unconfirmed" },
+    }),
+  );
+  const args =
+    code === 2
+      ? ["--bogus"]
+      : ["terminal", "send", "--device", "d", "--workspace", "w", "--session", "s", "--text", "x"];
+  const reply = await cli(root, args, {
+    closedStderr: true,
+    env: { KITELINE_URL: server.url, KITELINE_TOKEN: "token" },
+  });
+  expect(reply).toMatchObject({ code, signal: null, stdout: "", stderr: "" });
 });
