@@ -31,7 +31,7 @@ Use two-space indentation, double quotes, semicolons, and Prettier's 100-column 
 
 ## Testing Guidelines
 
-Vitest tests live in `packages/{server,agent,terminal-recorder,web,cli}/test/**/*.test.ts`; `packages/web/test/*.typecheck.ts` are checked by `pnpm typecheck`. Add focused behavior tests for changed contracts. Run `pnpm test` after native and package builds, with Git >=2.23; target files with `pnpm test packages/agent/test/git-read.test.ts`. No coverage threshold is configured. See [GitHub Actions](docs/development/release.md#github-actions) for CI coverage. Check UI changes in current Chrome and Chromium 97 at desktop/mobile sizes; verify terminal input on Android Chrome. For installer/native changes, test final [release packages](docs/development/release.md) on affected platforms.
+Vitest test locations are defined in [vitest.config.ts](vitest.config.ts); `packages/web/test/*.typecheck.ts` are checked by `pnpm typecheck`. Add focused behavior tests for changed contracts. Run `pnpm test` after native and package builds, with Git >=2.23; target files with `pnpm test packages/agent/test/git-read.test.ts`. No coverage threshold is configured. See [GitHub Actions](docs/development/release.md#github-actions) for CI coverage. Check UI changes in current Chrome and Chromium 97 at desktop/mobile sizes; verify terminal input on Android Chrome. For installer/native changes, test final [release packages](docs/development/release.md) on affected platforms.
 
 ## Commit & Pull Request Guidelines
 

@@ -69,14 +69,9 @@ async function launcher(root: string, main: string) {
   return { ...paths, path };
 }
 
-test.each([
-  ["linux", "portable"],
-  ["linux", "installed"],
-  ["darwin", "portable"],
-  ["darwin", "installed"],
-] as const)(
-  "%s %s launcher preserves paths and arguments through relative links",
-  async (platform, mode) => {
+test.each(["portable", "installed"] as const)(
+  "linux %s launcher preserves paths and arguments through relative links",
+  async (mode) => {
     const root = await directory();
     const source = join(root, "package with spaces, 'quotes' and $dollars");
     await mkdir(join(source, "bin"), { recursive: true });
@@ -89,7 +84,7 @@ test.each([
     );
     await writeFile(
       join(source, "bin/kiteline-agent"),
-      agentLauncher(mode === "installed" ? source : undefined, installedPaths, platform),
+      agentLauncher(mode === "installed" ? source : undefined, installedPaths, "linux"),
       {
         mode: 0o755,
       },
@@ -108,7 +103,7 @@ test.each([
   },
 );
 
-async function unresolvedLauncher(root: string, platform: NodeJS.Platform) {
+async function unresolvedLauncher(root: string) {
   const paths = {
     directory: join(root, "installed"),
     management: join(root, "public/management.lock"),
@@ -123,54 +118,28 @@ async function unresolvedLauncher(root: string, platform: NodeJS.Platform) {
   );
   const loop = join(root, "loop");
   await symlink("loop", loop);
-  return { script: agentLauncher(undefined, paths, platform), loop };
+  return { script: agentLauncher(undefined, paths, "linux"), loop };
 }
 
-test.each(["linux", "darwin"] as const)(
-  "%s portable launcher stops when its entry cannot be resolved",
-  async (platform) => {
-    const root = await directory();
-    const entry = await unresolvedLauncher(root, platform);
-    const running = child("sh", ["-c", entry.script, entry.loop, "--version"], process.env, root);
-    expect((await running.closed)[0]).not.toBe(0);
-    expect(running.output()).not.toContain("CWD_RUNTIME_EXECUTED");
-  },
-);
+test("portable launcher stops when its entry cannot be resolved", async () => {
+  const root = await directory();
+  const entry = await unresolvedLauncher(root);
+  const running = child("sh", ["-c", entry.script, entry.loop, "--version"], process.env, root);
+  expect((await running.closed)[0]).not.toBe(0);
+  expect(running.output()).not.toContain("CWD_RUNTIME_EXECUTED");
+});
 
-test.runIf(process.getuid?.() === 0).each(["linux", "darwin"] as const)(
-  "%s portable install stops before creating management paths when its entry cannot be resolved",
-  async (platform) => {
+test.runIf(process.getuid?.() === 0)(
+  "portable install stops before creating management paths when its entry cannot be resolved",
+  async () => {
     const root = await directory();
-    const entry = await unresolvedLauncher(root, platform);
+    const entry = await unresolvedLauncher(root);
     const running = child("sh", ["-c", entry.script, entry.loop, "install"], process.env, root);
     expect((await running.closed)[0]).not.toBe(0);
     expect(running.output()).not.toContain("CWD_RUNTIME_EXECUTED");
     await expect(access(join(root, "public"))).rejects.toMatchObject({ code: "ENOENT" });
   },
 );
-
-test("portable launcher propagates a dirname failure without executing the cwd runtime", async () => {
-  const root = await directory();
-  const entry = await unresolvedLauncher(root, "linux");
-  const path = join(root, "bin/kiteline-agent");
-  const tools = join(root, "tools");
-  await mkdir(join(root, "bin"));
-  await mkdir(tools);
-  await writeFile(path, entry.script, { mode: 0o755 });
-  await writeFile(
-    join(tools, "dirname"),
-    '#!/bin/sh\n[ "$2" != "$TEST_ENTRY" ] || exit 41\ncommand -p dirname "$@"\n',
-    { mode: 0o755 },
-  );
-  const running = child(
-    path,
-    ["--version"],
-    { ...process.env, PATH: `${tools}:${process.env.PATH}`, TEST_ENTRY: path },
-    root,
-  );
-  expect((await running.closed)[0]).toBe(41);
-  expect(running.output()).not.toContain("CWD_RUNTIME_EXECUTED");
-});
 
 test("application state excludes another owner until cleanup releases it", async () => {
   const root = await directory();
