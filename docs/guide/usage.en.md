@@ -201,7 +201,7 @@ Drafts are kept only in the current page's memory:
 
 Save submits a named file directly. Only when that save encounters a disk version conflict does it read the current disk content and offer to overwrite that version, view the disk content, or cancel. Cancel keeps the draft. Viewing expands the full text in the same dialog, with Find, selection and copy; you can also load the disk version and discard the draft. Copy the text to an external tool for complex comparisons.
 
-Overwrite applies only to the version read in the dialog. If that version changes again, the overwrite is rejected; check again before deciding. Overwrite is unavailable if the read fails.
+Overwrite applies only to the version read in the dialog. If that version changes again, the overwrite is rejected; check again before deciding. Overwrite is unavailable if the read fails. If the conflict dialog shows that the original file no longer exists, choose “Save as” and enter a new path.
 
 If a save result is unconfirmed, for example after losing connection during saving, use "Check disk content" to read the original target. An exact byte match with the last submitted content confirms the save and keeps any input made after submission. Otherwise, the draft remains unsaved, and the workbench does not resend automatically. Background refresh does not confirm that save.
 

@@ -1,4 +1,5 @@
 import type { DiffTarget } from "../git/diff-view";
+import { newId } from "../lib/id";
 
 export type FilePage = { kind: "file"; id: string; path: string; draftId?: string };
 export type DiffPage = {
@@ -13,8 +14,10 @@ export interface WorkPagesState {
   items: WorkPage[];
   active?: string;
 }
+// A page opened by path gets an opaque identity: Save as, rename and move change its path, and
+// reopening the former path must create a separate page.
 export function filePage(path: string, draftId?: string): FilePage {
-  return { kind: "file", id: draftId ? `file:${draftId}` : `path:${path}`, path, draftId };
+  return { kind: "file", id: `file:${draftId ?? newId()}`, path, draftId };
 }
 export const diffPageId = (repoId: string, target: DiffTarget) =>
   JSON.stringify([

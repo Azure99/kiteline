@@ -56,14 +56,16 @@ test("loading and renaming a draft preserve its tab identity", () => {
 });
 
 test("a closed draft URL cannot replace a later draft's retained path page", () => {
-  let pages = openPage({ items: [] }, filePage("a.txt"));
+  const first = filePage("a.txt");
+  let pages = openPage({ items: [] }, first);
   pages = openPage(pages, filePage("a.txt", "closed"));
-  expect(pages.active).toBe("path:a.txt");
+  expect(pages.active).toBe(first.id);
   pages = closePage(pages, pages.active!);
-  pages = openPage(pages, filePage("a.txt"));
+  const second = filePage("a.txt");
+  pages = openPage(pages, second);
   pages = openPage(pages, filePage("a.txt", "later"));
   const later = pages.items[0]!;
-  expect(later).toMatchObject({ id: "path:a.txt", draftId: "later" });
+  expect(later).toMatchObject({ id: second.id, draftId: "later" });
 
   const stale = filePage("a.txt", "closed");
   pages = openPage(pages, stale);
@@ -85,4 +87,30 @@ test("diff tabs distinguish repositories, paths, comparison sides and merge pare
     diffPageId("one", { path: "a", side: "commit", commitOid: "d", parentOid: "p1" }),
   ];
   expect(new Set(ids).size).toBe(ids.length);
+});
+
+test("reopening the former path of a retargeted draft opens a separate page", () => {
+  const opened = filePage("a.txt");
+  let pages = openPage({ items: [] }, opened);
+  pages = openPage(pages, filePage("a.txt", "d"));
+  // Save as, rename and move retarget the bound draft; the page follows its path.
+  pages = { ...pages, items: pages.items.map((page) => ({ ...page, path: "b.txt" })) };
+  pages = openPage(pages, filePage("a.txt"));
+  expect(pages.items).toMatchObject([
+    { id: opened.id, path: "b.txt", draftId: "d" },
+    { path: "a.txt", draftId: undefined },
+  ]);
+  expect(pages.active).not.toBe(opened.id);
+  pages = openPage(pages, filePage("b.txt", "d"));
+  expect(pages.items).toHaveLength(2);
+  expect(pages.active).toBe(opened.id);
+});
+
+test("repeated opening by path reuses the page without a stable path identity", () => {
+  let pages = openPage({ items: [] }, filePage("a.txt"));
+  const id = pages.active;
+  pages = openPage(pages, filePage("a.txt"));
+  pages = openPage(pages, filePage("a.txt", "d"));
+  pages = openPage(pages, filePage("a.txt", "d"));
+  expect(pages.items).toEqual([{ kind: "file", id, path: "a.txt", draftId: "d" }]);
 });

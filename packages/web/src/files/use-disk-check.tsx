@@ -24,10 +24,12 @@ export function useDraftDiskCheck({
   store,
   draft,
   unavailable,
+  onSaveAs,
 }: {
   store: DraftStore;
   draft: Draft;
   unavailable?: string;
+  onSaveAs?: () => void;
 }) {
   const { t } = useTranslation();
   const [dialog, setDialog] = useState<DiskDialog>();
@@ -128,11 +130,17 @@ export function useDraftDiskCheck({
         }}
       >
         {dialog && (
-          <DialogContent className={dialog.showDiskText ? "max-w-[960px]" : undefined}>
+          <DialogContent
+            className={
+              dialog.showDiskText
+                ? "h-[min(calc(var(--viewport-height)*0.85),760px)] max-w-[960px] max-desk:h-[calc(var(--viewport-height)*0.9)]"
+                : undefined
+            }
+          >
             <DialogHeader>
               <DialogTitle>{t(($) => $.files.diskChanged)}</DialogTitle>
             </DialogHeader>
-            <div className="flex min-h-0 flex-col gap-3 overflow-auto p-4">
+            <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-4">
               <p className="break-all text-xs">{dialog.disk?.target.path ?? draft.path}</p>
               {draft.error instanceof ApiError && draft.error.code === "conflict" && (
                 <p className="text-sm">{t(($) => $.files.saveConflict)}</p>
@@ -158,6 +166,19 @@ export function useDraftDiskCheck({
                   {t(($) => $.files.checkDisk)}
                 </Button>
               )}
+              {dialog.error instanceof ApiError &&
+                dialog.error.code === "not_found" &&
+                onSaveAs && (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      close();
+                      onSaveAs();
+                    }}
+                  >
+                    {t(($) => $.files.saveAs)}
+                  </Button>
+                )}
               {!dialog.showDiskText && (
                 <Button
                   variant="outline"

@@ -82,7 +82,15 @@ export function DraftView({
   useDraftVersion(store, draft);
   const busy = draft.operation?.kind;
   const problem = draftProblem(draft);
-  const diskCheck = useDraftDiskCheck({ store, draft, unavailable });
+  const [saveAs, setSaveAs] = useState(false);
+  const saveAsDisabled = !draft.state || !!busy || !!unavailable;
+  const openSaveAs = () => setSaveAs(true);
+  const diskCheck = useDraftDiskCheck({
+    store,
+    draft,
+    unavailable,
+    onSaveAs: saveAsDisabled ? undefined : openSaveAs,
+  });
   const previewType = /\.html?$/i.test(draft.path)
     ? "html"
     : /\.(md|markdown)$/i.test(draft.path)
@@ -119,7 +127,6 @@ export function DraftView({
       setPreview(undefined);
     }
   }, [preview, editorLocation, setPreview]);
-  const [saveAs, setSaveAs] = useState(false);
   const { copied, error: copyError, copy, reset: resetCopy } = useCopyFeedback();
   const tabs = all.filter(
     (item) => item.deviceId === draft.deviceId && item.workspaceId === draft.workspaceId,
@@ -133,9 +140,7 @@ export function DraftView({
     void diskCheck.save();
   }
   const downloadDisabled = !!unavailable || !draft.path;
-  const saveAsDisabled = !draft.state || !!busy || !!unavailable;
   const download = () => downloadFile(draft);
-  const openSaveAs = () => setSaveAs(true);
   if (!store.has(draft))
     return <div className="p-4 text-sm text-muted-foreground">{t(($) => $.files.closed)}</div>;
   return (
