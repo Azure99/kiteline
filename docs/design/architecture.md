@@ -97,12 +97,6 @@ deploy/                             Compose、systemd、launchd、WinSW 示例
 
 server 不保存文件内容、diff、终端输出、定时任务的命令和输出。这些内容在 agent 与浏览器之间经过 server 转发，只停留在内存中的固定大小队列里（见[数据通道](protocol.md#数据通道)）。
 
-server 的 Connections 固定持有 Channels，直接决定登录、控制连接和停服时的资源失效顺序及原因。Channels 保有唯一的通道登记和预算，按登录或准确的控制连接实例取消资源；登录取消只转发 RPC 取消，原请求仍等待 Reply 或控制连接断开。
-
-Channels 分别拥有终端、文件和 HTTP 通道的准备、配对与资源清理。FileTransfer 判断文件字节和结果帧是否完整，数据连接自然关闭时先排空已有帧；HttpProxy 根据 HTTP parser 和下游响应判断完成，见[连接寿命](http-access.md#连接寿命)。文件和普通 HTTP 响应都在下游 finish 时正常释放登记。
-
-agent 的 JSON 状态文件以原子替换写入，不调用 fsync；文件损坏时的处理见[目录与权限](agent-lifecycle.md#目录与权限)。
-
 ## 请求流程
 
 | 流程                   | 入口文件                                                                                                                                                     | 行为契约                                                                           |
@@ -122,7 +116,7 @@ agent 的 JSON 状态文件以原子替换写入，不调用 fsync；文件损�
 - **文件发布**：agent 内一把发布锁（`packages/agent/src/files/publish.ts`）串行执行改变目录项的步骤，传输和复制正文在锁外进行，见[保存](files.md#保存)。
 - **工作区去重**：`workspaces.add` 先解析真实路径；路径与已登记的工作区相同，或指向同一文件系统对象（设备号和 inode 都相同）时，返回已有的工作区。
 - **变化通知**：agent 只为正在被查看的工作区发送 `workspace.changed`：文件监听的变化合并后发送，agent 自己完成的写操作结束后立即发送，见[变化监听](files.md#变化监听)。
-- **每台设备的上限**：server 检查 `pendingRequestsPerDevice` 和 `channelsPerDevice`，agent 检查 `transfersPerDevice`、`terminalSessionsPerDevice`、`taskRunsPerDevice`，数值见[限额](../guide/reference.md#限额)；agent 还限制同时打开的目录和仓库发现游标（`cursorsPerDevice`，16 个，`packages/agent/src/limits.ts`）。到达上限时返回 `busy`，不排队，也不挤掉已有操作。
+- **每台设备的上限**：server 检查 `pendingRequestsPerDevice` 和 `channelsPerDevice`，agent 检查 `transfersPerDevice`、`terminalSessionsPerDevice`、`taskRunsPerDevice`，数值见[限额](../guide/reference.md#限额)；agent 还限制同时打开的目录和仓库发现游标（`cursorsPerDevice`，`packages/agent/src/limits.ts`）。到达上限时返回 `busy`，不排队，也不挤掉已有操作。
 
 ### 失败边界
 
@@ -187,9 +181,9 @@ agent 的出站代理规则见[出站代理与证书](../guide/devices.md#出站
 
 在 `packages/shared/src/protocol/rpc.ts` 定义方法、参数及成功与非成功结果类型，并为 `rpcTraits` 填写丢响应分类、总期限和成功结果超限策略。同时在本机入口确定调用权限，在领域执行处确定变化通知时点。
 
-Agent 在分派前统一检查停止、取消和方法是否已知；总准入拒绝不进入领域，也不通知工作区变化。文件方法由 [`files/rpc.ts`](../../packages/agent/src/files/rpc.ts) 解释参数。create/rename 在 Files 完成参数检查与工作区查找后执行，并在执行 promise 结束前通知；参数或工作区查找拒绝不通知。批量 copy/move/delete 由 `FileOperations` 在后台执行及清理结束后通知；save/upload 通道由 `FileChannels` 在内容已发布或发布结果未确认时通知，再交付结果。文件行为见[文件契约](files.md)。
+Agent 负责统一准入，拒绝时不进入领域，也不通知工作区变化。文件 create/rename 在参数检查与工作区查找通过后执行，并在执行 promise 结束前通知；参数或工作区查找拒绝不通知。批量 copy/move/delete 在后台执行及清理结束后通知；save/upload 通道在内容已发布或发布结果未确认时通知，再交付结果。文件行为见[文件契约](files.md)。
 
-Git 方法由 [`git/rpc.ts`](../../packages/agent/src/git/rpc.ts) 解释参数。写方法先完成全部 JS 参数检查及必要的 Git 分支名称检查，再进入 `GitWriteQueue`；这些检查失败不通知工作区变化。队列按 commonDir 串行执行写操作，获得执行权后复验仓库身份及 HEAD、index、token 等实际状态。进入队列调用后的成功、拒绝及取消都由 Git 领域在返回的 promise 结束前通知，Agent 总停等待该 promise。调用方按[结果语义](protocol.md#结果语义)处理失败及结果未确认；测试覆盖实际变化的行为。
+Git 写方法在全部 JS 参数检查及必要的 Git 分支名称检查通过后入队；这些检查失败不通知工作区变化。队列按 commonDir 串行执行写操作，获得执行权后复验仓库身份及 HEAD、index、token 等实际状态。进入队列调用后的成功、拒绝及取消都在返回的 promise 结束前通知，Agent 总停等待该 promise。调用方按[结果语义](protocol.md#结果语义)处理失败及结果未确认。
 
 ### 添加事件
 
@@ -199,7 +193,7 @@ Git 方法由 [`git/rpc.ts`](../../packages/agent/src/git/rpc.ts) 解释参数�
 
 ### 添加数据通道种类
 
-在 `packages/shared/src/protocol/index.ts` 定义种类、参数和 meta，更新 `packages/server/src/channels.ts` 的公开种类、purpose、meta 和内容类型检查。公开预约同时更新 `shared/protocol/client` 的 `openChannel` 参数与 meta 类型；取消使用 `cancelChannel`，等待和错误处理由调用方决定。
+在 `packages/shared/src/protocol/index.ts` 定义种类、参数和 meta，更新 `packages/server/src/channels.ts` 的公开种类、purpose、meta 和内容类型检查。公开预约同时更新 `shared/protocol/client` 的 `openChannel` 参数与 meta 类型；取消使用 `cancelChannel`。
 
 在 agent 中接入通道的 open 分派，确定取消、断连与关闭时的资源归属，以及是否占用文件传输额度。共用同一资源所有者的通道统一清理。
 
@@ -207,7 +201,7 @@ Git 方法由 [`git/rpc.ts`](../../packages/agent/src/git/rpc.ts) 解释参数�
 
 普通 API 在 `packages/server/src/api.ts` 中按 method/path 声明身份、版本和正文策略，并在同处实现 handler。统一准入边界执行 Origin、登录、版本，以及匹配路由要求的设备范围和 owner 检查；受认证 JSON 在读完正文后复验同一登录，再解释业务字段。公开接口合同见 [HTTP 接口](protocol.md#http-接口)。
 
-安装资源、Agent 绑定、静态文件及 WebSocket/proxy 入口由 `packages/server/src/app.ts` 分流，保留各自的准入与传输顺序。路径不在 `/api/` 下时，还须考虑 `packages/web/vite.config.ts` 的开发代理前缀。
+安装资源、Agent 绑定、静态文件及 WebSocket/proxy 入口由 `packages/server/src/app.ts` 分流。路径不在 `/api/` 下时，还须考虑 `packages/web/vite.config.ts` 的开发代理前缀。
 
 ### 添加限额或配置项
 

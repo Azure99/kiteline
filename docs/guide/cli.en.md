@@ -67,7 +67,7 @@ To upgrade the standalone CLI, verify and extract a new archive, switch to its l
 
 ### Issue a credential
 
-In the workbench's Owner menu at the top right, open **CLI setup → CLI credentials**. Enter a name, select one or more devices, and choose the number of days or **No expiry**. The token is shown only once; the server retains only its digest.
+In the workbench, open **Settings → CLI setup → CLI credentials**. Enter a name, select one or more devices, and choose the number of days or **No expiry**. The token is shown only once; the server retains only its digest.
 
 The credential can operate the selected devices with the agent OS user's permissions; a workspace is not a sandbox. It cannot manage device registrations, binding codes or other credentials. The device agent's binding code is a different credential.
 

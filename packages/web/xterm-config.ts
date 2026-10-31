@@ -9,5 +9,5 @@ export const xtermAlias = [
   },
 ];
 
-// xterm uses legacy parameter decorators in builds, dev prebundling, and tests.
+// xterm sources use legacy parameter decorators.
 export const xtermTransform = { decorator: { legacy: true } };

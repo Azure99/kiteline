@@ -157,7 +157,6 @@ export function createApiClient(host: ClientHost) {
     params: ContentParams<PublicChannelParams[K]>,
     signal?: AbortSignal,
   ) {
-    // Restore the target fields omitted from the content parameters.
     const channelParams: PublicChannelParams["file.read" | "file.write"] = {
       workspaceId: target.workspaceId,
       path: target.path,

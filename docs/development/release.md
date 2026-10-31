@@ -216,7 +216,7 @@ Linux agent 和 CLI 使用同一固定的静态 Node 输入，server 使用官�
 ### 清单文件
 
 - `release.json` 记录包身份、源码提交、锁文件摘要和构建来源，供安装、升级和发布检查使用。
-- `dist/native/identity.json` 记录原生组件来源与完整文件摘要；组包直接保留该收据。
+- `dist/native/identity.json` 记录原生组件来源与完整文件摘要。
 - 包内 `SHA256SUMS` 用于逐文件核验；包旁的 `<包名>.sha256` 用于核验归档。
 
 ### 第三方许可
@@ -279,6 +279,8 @@ runtime DLL 从固定源码包的 Cygwin tag 及有序 MSYS2 补丁重建，再�
 固定版本见 [`packages/web/package.json`](../../packages/web/package.json)、[`packages/terminal-recorder/package.json`](../../packages/terminal-recorder/package.json) 和 [`packages/shared/package.json`](../../packages/shared/package.json)。当前浏览器与 headless 版本来自同一上游源码提交，升级须联合核对两端和 addons。私有成员访问以 [`TerminalCore` 和 `core()`](../../packages/shared/src/terminal/index.ts) 为检查入口，另须核对 [`auxiliary-input.ts`](../../packages/web/src/terminal/auxiliary-input.ts) 使用的私有键盘编码。
 
 工作台直接编译 xterm 的 TypeScript 入口，构建和测试共用[源码 alias 与 legacy 参数装饰器配置](../../packages/web/xterm-config.ts)。现有补丁由 [`pnpm-workspace.yaml`](../../pnpm-workspace.yaml) 的 `patchedDependencies` 指向 `packages/web/patches/`；网页适配的依赖与目的见[终端](../design/terminal.md)，尺寸变化时的画面保留见[尺寸](../design/terminal.md#尺寸)。
+
+DOM 渲染器在选区清空时更新选区模型并重绘旧行，以清除文字上残留的选区背景；Event.ts 的非空断言用于让上游源码通过项目的 `noUncheckedIndexedAccess` 检查。
 
 维护当前版本的补丁时，在仓库根目录执行：
 

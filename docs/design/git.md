@@ -24,11 +24,10 @@
 
 ### Git 进程
 
-- 所有 Git 命令通过 `packages/agent/src/git/process.ts` 的 `gitRead` 或 `gitWrite` 用 argv 启动，不经过 Shell；操作仓库的命令以仓库根目录为工作目录。stdin 只用于传入数据，写完即关闭。Linux 和 macOS 上 Git 在独立的进程组中运行，没有控制终端。
+- 所有 Git 命令用 argv 启动，不经过 Shell；操作仓库的命令以仓库根目录为工作目录。stdin 只用于传入数据，写完即关闭。Linux 和 macOS 上 Git 在独立的进程组中运行，没有控制终端。
 - 环境继承 agent 的环境，设置 `GIT_TERMINAL_PROMPT=0`，并删除会改变仓库定位或路径匹配方式的变量（如 `GIT_DIR`、`GIT_WORK_TREE`、`GIT_INDEX_FILE`、`GIT_LITERAL_PATHSPECS`，完整列表见源码），Windows 上按不区分大小写匹配变量名。用户的 Git 配置、身份、凭据、SSH、hooks 和签名保持不变。
 - 读命令带 `--no-pager --no-optional-locks -c color.ui=false`，不顺带刷新 index，避免自己的读取触发变化事件；写命令只带 `--no-pager`。
 - 一次性读取的 stdout 超限时停止进程，默认返回 `limit_exceeded`，显式允许截断的 diff 返回前缀；写命令超限只保留前缀，继续执行。流式解析的命令逐条处理，单条记录不超过结果上限。stderr 保留前 32 KiB，截断不触发 stdout 的停止策略。
-- UTF-8、路径参数和 NUL 记录的共同格式规则位于 `packages/agent/src/git/format.ts`；具体机器记录的解释仍由读取该命令的模块负责。
 - 路径参数写成 `:(top,literal)<path>`，按字面匹配；`git diff --no-index` 的磁盘路径加 `./` 前缀。
 
 ## 状态与分页
@@ -40,7 +39,7 @@
 - 未跟踪项的类型只对当前页的合法路径用 `lstat` 取得；`lstat` 失败时整页读取失败。
 - 路径不是合法 UTF-8 的条目返回 `pathError`（`\xNN` 转义的诊断名），不返回 `path`，不能被选中，也不能跳转到文件工具；它仍参与计数、冲突判断和 token。rename 或 copy 任一端无效时整条无效。合法的 U+FFFD 字符是普通路径。
 - 结果还包括 HEAD 身份（`symbolicRef` 和 `oid`；未提交过时 `oid` 为 null，detached 时 `symbolicRef` 为 null）、upstream、ahead 和 behind，以及[进行中的操作](#冲突与进行中的操作)。
-- 初选条目后按包含 operation 等最终字段的完整 JSON 裁剪页尾；`nextOffset` 始终指向实际返回条目之后，`truncated` 由是否存在 `nextOffset` 决定。offset 前和页满后的条目仍检查单项上限，超限时整页失败。
+- 结果预算按完整的最终 JSON 计算，超出时裁剪页尾；`nextOffset` 始终指向实际返回条目之后，`truncated` 由是否存在 `nextOffset` 决定。offset 前和页满后的条目仍检查单项上限，超限时整页失败。
 
 ### token
 
@@ -60,7 +59,7 @@
 - 批量选择只在当前页内有效（`packages/web/src/git/selection.ts`）。翻页、切换仓库、`symbolicRef` 变化，或 detached 状态下 OID 变化时清空选择；同一分支的 OID 前进不清空。
 - 刷新后只保留各方面都未变的项，其余取消并以中性提示说明取消勾选的数量；新出现的条目不会被自动选中。
 - stage、unstage 和 discard 请求前捕获本次路径与区域的选择身份；只有协议成功返回后，才消费仍匹配 path、side、signature 的选择。discard 以 review 的真实路径和 scope 为准。失败、unknown、partial 或取消确认不主动消费，后续读取仍可按实际变化撤销选择。
-- 失效通知保留被撤销的身份集合，成功消费只移除本次身份，保留无关外部变化提示。写操作结束后的刷新使用后台读取，不清空已有通知；主动刷新或翻页清除旧通知。仓库组件和工作区生命周期隔离异步完成，不将旧仓结果应用到另一仓。
+- 失效通知保留被撤销的身份集合，成功消费只移除本次身份，保留无关外部变化提示。写操作结束后的刷新使用后台读取，不清空已有通知；主动刷新或翻页清除旧通知。
 
 ## Diff 与历史
 
@@ -76,7 +75,7 @@
 ### 浏览器显示
 
 - diff 布局选择只保存在当前工作区页面中，不持久化。窄窗口派生统一布局而不覆盖桌面选择；两种布局使用相同 patch，统一视图保持 patch 顺序并按实际面板宽度折行，双列在各列内折行，源文和原行号不变。
-- 每个 hunk 用 CodeMirror 的公开 `presentableDiff` 计算字符变化，双列按未变的非空白片段对齐行，并保留 Git 的原 context 行。hunk 之间不配对；重复内容可能产生局部不理想的对应。局部字符强调覆盖完整 grapheme，整行增删沿用行底色。计算在局部 worker 中进行，等待或失败时保留原 patch 显示并给出状态；输入变化或卸载时终止旧计算。
+- 每个 hunk 用 CodeMirror 的公开 `presentableDiff` 计算字符变化，双列按未变的非空白片段对齐行，并保留 Git 的原 context 行；hunk 之间不配对。局部字符强调覆盖完整 grapheme，整行增删沿用行底色。计算在局部 worker 中进行，等待或失败时保留原 patch 显示并给出状态；输入变化或卸载时终止旧计算。
 - 结构化 diff 与文件编辑器共用语言匹配和语法配色，分别按旧、新文件名懒加载语言。每个 hunk 的两侧独立解析；patch 缺少的前文可能导致局部误着色，不额外读取全文。未知语言显示原文，加载失败保留 diff 并提示原因。
 - patch 已截断、物理行数超过 `diffRenderLines`、解析失败或含无法解释的正文时，浏览器（`packages/web/src/git/diff-view.tsx`）不渲染结构化 diff，只显示原因、summary 和不超过 `diffRawBytes` 的原始 patch 前缀。
 - 没有文本 hunk 的纯 rename、mode 变化和二进制文件只显示 summary，不当作没有变化。
@@ -85,26 +84,25 @@
 ### Git 区域与浏览状态
 
 - 桌面默认同时展开变化区和下方阅读区，历史／分支共享阅读区；两区展开时默认按60:40分配空间，可拖动中间分隔条调整高度。单区展开时使用剩余空间，两区收起时只保留标题；重新展开恢复调整后的比例。手机使用变化／历史／分支单区导航，沿用同一内容组件，不显示高度分隔条。
-- 仓库浏览状态在当前页面按设备、工作区、仓库保存区域选择、展开状态和两区比例，比例不跨刷新保留。下区标题、导航与内容取自同一选择；工作区返回不另初始化下区。变化勾选保存在当前 status 组件中，跨区、收开及 resize 保留，工作区卸载后重建。
-- 每个区域的主动刷新独立：刷新变化只读 status；刷新历史另推进历史 refreshKey，按首屏规则重新读取；刷新分支另推进分支 refreshKey。工作树变化或写操作后的 status HEAD 更新仍遵守下面的历史规则，不把变化区刷新当作历史主动刷新。
-- 分支行可展开完整名称、OID 与工作树路径，桌面和手机分支导航均保留创建入口；沿用既有数据和 BranchDialog。
+- 仓库浏览状态在当前页面按设备、工作区、仓库保存区域选择、展开状态和两区比例，比例不跨刷新保留。下区标题、导航与内容取自同一选择；工作区返回不另初始化下区。变化勾选跨区、收开及 resize 保留，离开工作区后清除。
+- 每个区域的主动刷新独立：刷新变化只读 status，刷新历史按首屏规则重新读取，刷新分支只重读分支。工作树变化或写操作后的 status HEAD 更新仍遵守下面的历史规则，不把变化区刷新当作历史主动刷新。
+- 分支行可展开完整名称、OID 与工作树路径，桌面和手机分支导航均保留创建入口。
 
 ### 历史与分支
 
 - `git.history` 从固定的 `anchorOid`（首次为当前 HEAD）开始，用 `git log --no-show-signature --encoding=UTF-8 -z` 每页读取最多 `listPageEntries` 个提交（多读一个判断是否还有下一页），返回 OID、父提交、作者、时间和主题。翻页沿用同一个 anchor，不受之后新提交的影响。
-- history 的 offset 由 Git 的 `--skip` 应用，单项限额检查覆盖本次窗口内的全部提交，包括页满后多读的一项；不会为分页扫描窗口外的历史。`nextOffset` 加实际返回数量，字节限额导致的短页也沿此偏移继续。
+- history 的单项限额检查覆盖本次窗口内的全部提交，包括页满后多读的一项；不会为分页扫描窗口外的历史。`nextOffset` 加实际返回数量，字节限额导致的短页也沿此偏移继续。
 - `git.commitMessage` 按选中的完整 40 或 64 位提交 OID 读取完整消息，与 HEAD 和父提交选择无关。它经现有仓库解析和只读 Git 进程执行 `git show --no-show-signature --no-color --no-patch --encoding=UTF-8 --format=format:%B <oid> --`，保留主题、正文和换行，不追加结尾换行。原始输出及最终 `{message}` JSON 均受 `resultBytes` 限制，超限返回 `limit_exceeded`，不返回部分消息。浏览器只在选中后读取；桌面通过“完整提交消息”弹窗阅读，手机与文件列表同区滚动。消息读取失败独立显示，文件列表和 diff 继续可用。
 - 网页历史首屏在已读取的 status HEAD 改变时更新；深页保留原 anchor，Previous 回到首屏或主动刷新历史时重新读取当前 HEAD。在途请求按目标页判断：HEAD 改变不取消深页翻页；首屏成功响应未覆盖读取期间观察到的 HEAD 时才补读，失败不自动补读。列表更新不清除按提交与父提交 OID 打开的详情或 diff。
 - `git.commitFiles` 和提交 diff 只接受完整的 40 或 64 位十六进制提交 OID。根提交与空树比较；合并提交必须由浏览器指定父提交，否则返回 `invalid_argument`。
-- `git.commitFiles` 的文本增删行数与 diff 使用同一父提交，来自完整 numstat，不受 patch 截断影响。纯 rename 或 mode 变化保留真实零值，二进制不返回行数。文件项按条目数和结果字节上限分页，预算包含稍后补入的统计字段。
-- commitFiles 全量读取 raw diff 并检查单项上限，offset 前和页满后的项也不能跳过检查；完整 numstat 只为入选项保留统计，`nextOffset` 按实际返回文件数推进。
+- `git.commitFiles` 的文本增删行数与 diff 使用同一父提交，来自完整 numstat，不受 patch 截断影响。纯 rename 或 mode 变化保留真实零值，二进制不返回行数。所有文件项均检查单项上限，包括 offset 前和页满后的项；按条目数和结果字节上限分页，预算包含入选项的统计字段，`nextOffset` 按实际返回文件数推进。
 - `git.branches` 用 `git for-each-ref refs/heads/` 一次返回全部本地分支和检出它的工作树路径，不分页，超过结果上限时返回 `limit_exceeded`。
 
 ## 写操作
 
 ### 队列
 
-- 写契约由 `packages/shared/src/protocol/rpc.ts` 定义；`packages/agent/src/git/rpc.ts` 的 handler 按方法约束参数字段与结果。写请求先解析全部 JS 参数，再执行必要的 Git 分支名称检查；这些检查失败时不入队、不通知工作区变化。通过后进入 `GitWriteQueue`（`packages/agent/src/git/queue.ts`），按 `commonDir` 串行执行：同一仓库及其全部 linked worktree 的写操作一次只执行一个。轮到某个写操作时，agent 重新核验仓库身份及相关 HEAD、index、token 和磁盘状态。队列调用结束时通知工作区变化，包括仓库不可用、状态冲突及取消。
+- 写请求先解析全部 JS 参数，再执行必要的 Git 分支名称检查；这些检查失败时不入队、不通知工作区变化。通过后进入 `GitWriteQueue`（`packages/agent/src/git/queue.ts`），按 `commonDir` 串行执行：同一仓库及其全部 linked worktree 的写操作一次只执行一个。轮到某个写操作时，agent 重新核验仓库身份及相关 HEAD、index、token 和磁盘状态。队列调用结束时通知工作区变化，包括仓库不可用、状态冲突及取消。
 - 排队期间可以取消，被取消的写操作不执行。写超时 `gitWriteTimeout` 从 agent 收到请求开始计时，包括排队时间；读方法使用 `rpcTimeout`。
 - 浏览器对每个仓库同时只发出一个写请求（`packages/web/src/git/actions.ts`），取消时调用 `DELETE /api/devices/<deviceId>/requests/<requestId>`。
 - 队列只协调本 agent 的写操作。外部写入者不加锁：终端或其他程序中的 Git 可以同时修改仓库，竞争由 Git 自己的 `index.lock` 和后续检查反馈。agent 不删除 `index.lock`，也不自动重试。
@@ -114,10 +112,10 @@
 - 写命令没能启动（没有进程）时结果为失败。进程启动后以非零退出码结束、被取消、超时或输出异常时，结果都是结果未确认（`unknown`），因为 Git 可能已部分生效；push 被拒绝、hook 拒绝提交、`index.lock` 已存在都属于这一类。
 - 以下情况结果为 `partial`：stage、unstage、discard 已完成部分步骤后失败（结果带 `changedPaths`）；continue 或 abort 失败但 HEAD 或操作 token 已变化；创建分支成功而随后的切换失败。
 - 写命令成功、但随后读取 HEAD 失败时，结果为结果未确认，并带上已知事实（如 `committed: true`）。不自动重放的通用规则见[结果语义](protocol.md#结果语义)。
-- 浏览器按仓库保留在途请求与最终结局，调用者直接使用本次返回的结局。取消请求失败只在原请求上显示错误并允许再次取消，原写请求继续占用，最终写结果替换取消反馈；没有 outcome 的 HTTP 错误不补造结果。成功 stage/unstage 静默。完成反馈可关闭，关闭不修改消息、选择或刷新 revision；pending 不可关闭，仍可取消。写成功与后续状态读取失败分别显示。
-- 提交说明按仓库保留版本，只有成功提交时版本仍与发起时相同才清空；组件卸载不影响本次结算。
-- 多行诊断直接显示，只有相同 stdout/stderr 及复制自 stderr.trim() 的 error.message 合并；其他消息、details、路径、截断事实及实际 commitOid 保留。
-- 反馈和操作栏的终端入口共用 RepoView 局部目标对话，显示并复制真实 repo.rootPath；打开时由 Workspace 明确选择终端模式，继续使用原有会话、目录和输入内容。
+- 浏览器按仓库保留在途请求与最终结局。取消请求失败只在原请求上显示错误并允许再次取消，原写请求继续占用，最终写结果替换取消反馈。成功 stage/unstage 静默。完成反馈可关闭，关闭不修改消息、选择或刷新 revision；pending 不可关闭，仍可取消。写成功与后续状态读取失败分别显示。
+- 提交说明按仓库保留，只有成功提交且说明未被再次编辑时才清空；离开当前视图不影响本次结算。
+- 多行诊断直接显示；stdout、stderr 与错误消息完全相同时只显示一次，错误消息重复去除首尾空白后的 stderr 时也只显示原 stderr。其他消息、details、路径、截断事实及实际 commitOid 保留。
+- 反馈和操作栏的终端入口显示并复制真实仓库根路径；打开后选择终端模式，继续使用原有会话、目录和输入内容。
 
 ### 进程结束
 
@@ -158,7 +156,7 @@ stage、unstage、review 和 discard 的路径最多 `listPageEntries × 2` 个�
 
 ### 三份独立状态
 
-- 浏览器草稿、磁盘文件和 Git index 是三份独立的状态。stage 读取磁盘上的当前内容，不读取未保存的草稿；所选文件有未保存草稿时，浏览器先请用户确认暂存磁盘版本。commit 只提交 index。变化行标识和非历史 diff 来源提示沿 DraftStore 订阅派生，匹配同设备、工作区且 `draft.path === childPath(repoPath, path)` 的 dirty 稿。
+- 浏览器草稿、磁盘文件和 Git index 是三份独立的状态。stage 读取磁盘上的当前内容，不读取未保存的草稿；所选文件有未保存草稿时，浏览器先请用户确认暂存磁盘版本。commit 只提交 index。同一文件有未保存草稿时，变化行显示标记，非历史 diff 显示来源提示。
 - discard、pull、切换分支和 abort 修改磁盘后，当前稿沿[文件观察规则](files.md#草稿)采用 clean 正文或保留 dirty 内容；草稿不阻止这些操作。
 
 ## 同步与认证
@@ -178,7 +176,7 @@ stage、unstage、review 和 discard 的路径最多 `listPageEntries × 2` 个�
 每次 status 都从 gitDir 中的原生状态识别进行中的操作，不依赖浏览器的记录，所以在终端中开始的操作同样能被识别。识别优先级和各操作的 token 文件由 [`readOperationState`](../../packages/agent/src/git/in-progress.ts) 定义。
 
 - 无法识别或读取失败时操作为 `unknown`，不返回 token，继续和中止都不可用，界面只给出原因和终端入口。
-- 操作 token 是 repoId、HEAD 身份、原生目标 marker 内容的摘要和操作类型的 SHA-256。编辑冲突文件和 stage 不改变 token。rebase 的 todo/done 影响继续许可，不作为目标身份；仅剩 sequencer 时，todo 本身标识待执行的操作。
+- 操作 token 是 repoId、HEAD 身份、原生目标 marker 内容的摘要和操作类型的 SHA-256。编辑冲突文件和 stage 不改变 token。rebase 的 todo/done 影响继续许可，不作为目标身份；仅剩 sequencer 时，todo 的命令集合为非空纯 `pick` 则识别为 cherry-pick，为非空纯 `revert` 则识别为 revert，其余为 unknown，todo 本身作为操作的 token 身份。
 
 ### 继续与中止
 
@@ -188,20 +186,9 @@ stage、unstage、review 和 discard 的路径最多 `listPageEntries × 2` 个�
 - `git.continue` 和 `git.abort` 带确认时的 `expectedOperation`（类型和 token）。agent 在队列内重新识别并比较，不同时返回 `conflict`，不执行命令；一致时执行 `git <操作> --continue` 或 `git <操作> --abort`，并设置 `GIT_EDITOR=true` 以接受已有的提交说明，hooks 和签名照常生效。
 - 结果带执行后的 `headOid` 和 `operationAfter`。继续可能进入下一个冲突，一次成功不代表整个操作结束。
 - 冲突的解决方式是在文件工具中编辑并保存，再在 Git 中 stage 该路径，或以删除作为解决。agent 不根据文件中是否还有冲突标记自动 stage。gitlink 冲突在子仓库或终端中处理。
-- merge 的中止由 Git 执行，合并开始前未提交的修改可能无法被完整恢复。
 
 ## 自动刷新
 
 - 事件的产生和浏览器的刷新节奏见[变化监听](files.md#变化监听)。工作树和 Git 元数据的变化都会产生 `workspace.changed`，agent 自己的 Git 写操作结束时立即发送。
 - 状态视图在收到刷新时于当前 offset 重新读取（见[翻页](#翻页)），仓库发现按[首轮与后续扫描规则](#扫描)推进。
 - 自己发起的写操作结束后（无论结果如何），浏览器立即重读状态。写操作结果未确认时，刷新后显示的 HEAD、index 和 refs 就是判断依据。
-
-## 范围外
-
-- 在网页中使用 stash。
-- 按行或按 hunk 暂存，以及递归暂存整个目录。
-- 创建、删除或修复工作树；可以在终端中运行 `git worktree repair`。
-- 子模块的初始化和更新，以及裸仓库的操作。
-- 专门的合并编辑器、提交说明编辑器和 rebase todo 编辑器。
-- amend、reset、交互式 rebase、强制推送、`git branch -D` 等改写历史或强制性的操作。
-- 自动 stash。

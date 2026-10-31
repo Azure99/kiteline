@@ -12,8 +12,6 @@
 
 tmux 使用会话目录下的私有配置，不加载用户的 tmux 配置或插件，并收窄 prefix 键表。具体设置由 `packages/shared/src/terminal/node.ts` 的 `terminalPreset()` 定义。
 
-会话文件路径由同一模块的 `sessionFiles()` 生成；运行目录的 socket 长度预算与会话 ID 字节数由 `packages/agent/src/terminal/paths.ts` 管理。
-
 固定版本：tmux 版本见 [`release/inputs.json`](../../release/inputs.json)，各平台都禁用 Sixel，并应用 [`paste.patch`](../../native/tmux/paste.patch) 和 [`flow-control.patch`](../../native/tmux/flow-control.patch)。后者为 recorder 的 `flow-control` 客户端标志提供无损在线背压；普通客户端不设置该标志。xterm.js 及插件版本见 [`packages/web/package.json`](../../packages/web/package.json)、[`packages/terminal-recorder/package.json`](../../packages/terminal-recorder/package.json) 和 [`packages/shared/package.json`](../../packages/shared/package.json)。网页的 xterm.js 带有 [`packages/web/patches/`](../../packages/web/patches/) 中的补丁，让 DOM 渲染器按设备像素比测量字形宽度；维护方法见[构建与发布](../development/release.md#xtermjs)。
 
 网页和 recorder 的共同适配在 `packages/shared/src/terminal/index.ts`，两端必须同步升级。该模块的私有状态访问经过 `core()`，升级时以 `TerminalCore` 核对使用的成员。网页还依赖 `packages/web/src/terminal/` 的触控选择和画面保留适配，其中 `auxiliary-input.ts` 直接导入 xterm.js 的私有键盘编码；这些入口也要随升级复核。
@@ -70,7 +68,7 @@ recorder 由 agent 在第一次需要时启动，通过标准输入输出交换�
 
 ### 顺序与故障
 
-控制流中的 `%output`、`%layout-change` 和存活订阅按到达顺序进入同一个队列：输出写入模型，布局变化调整模型尺寸，存活变化触发结束。以下情况属于记录故障：控制客户端退出、tmux 命令超过应答期限、出现 `%pause`、`%continue`、`%extended-output` 或 `%exit`、出现意外的 pane 或布局、模型待解析的输出超过 `terminalModelPendingBytes`。记录故障时 recorder 关闭该会话的所有显示（`recording_unavailable`），agent 把会话标为记录不可用并设置 `historyGap`；tmux 中的程序不受影响。整个 recorder 退出时，它的所有会话都按此处理。退出提示优先使用 agent 已获知的故障，否则显示实际退出码或信号；recorder 的原始 stderr 诊断继续转发到 agent stderr。
+控制流中的 `%output`、`%layout-change` 和存活订阅按到达顺序进入同一个队列：输出写入模型，布局变化调整模型尺寸，存活变化触发结束。以下情况属于记录故障：控制客户端退出、tmux 命令超过应答期限、出现 `%pause`、`%continue`、`%extended-output` 或 `%exit`、出现意外的 pane 或布局、模型待解析的输出超过 `terminalModelPendingBytes`。记录故障时 recorder 关闭该会话的所有显示（`recording_unavailable`），agent 把会话标为记录不可用并设置 `historyGap`；tmux 中的程序不受影响。整个 recorder 退出时，它的所有会话都按此处理。退出提示优先使用 agent 已获知的故障，否则显示实际退出码或信号。
 
 tmux 是终端查询的唯一应答方：headless 模型的应答被丢弃，网页只转发 xterm.js 标记为用户输入的数据（`forwardUserInput`）。
 
@@ -89,7 +87,7 @@ recorder 为每个会话保存一个检查点和其后的完整尾段：
 - “历史存在缺口”（`historyGap`）：本次 agent 运行期间该会话发生过记录故障，部分输出没有进入网页历史。agent 运行期间不清除。
 - “已减少较早历史”（`historyLimited`）：本次附着的恢复副本被缩短。
 
-模型积压、检查点间隔和恢复尾段的阈值见 `packages/terminal-recorder/src/model.ts` 的 `modelLimits`；每个显示已发送但未确认的窗口见 `packages/terminal-recorder/src/attachment.ts` 的 `terminalOutstandingBytes`；跨进程共用的恢复副本、待发队列、分块和交互期限见 `packages/shared/src/protocol/limits.ts` 的 `limits`。各机制的越界后果见本页相应段落。
+模型积压、检查点间隔和恢复尾段的阈值见 `packages/terminal-recorder/src/model.ts` 的 `modelLimits`；每个显示已发送但未确认的窗口见 `packages/terminal-recorder/src/attachment.ts` 的 `terminalOutstandingBytes`；跨进程共用的恢复副本、待发队列、分块和交互期限见 `packages/shared/src/protocol/limits.ts` 的 `limits`。
 
 ## 附着与恢复
 
@@ -106,7 +104,7 @@ agent 发往该显示的帧依次为：`restore.begin`（尺寸、`historyLines`
 
 每个显示的实时待发量受 `terminalDisplayBytes` 限制，恢复期间也计入。显示停止消费不会暂停会话：待发超限时只结束该显示，由用户重连；不会跳过部分输出后继续显示。
 
-记录器自身的背压只看模型待解析量：达到高水位时暂停读取 control 输出，低于低水位时恢复（`RecordedSession.pressure()`）。`flow-control.patch` 让受管 control 客户端的堵塞阻止 tmux 继续读取真实 PTY，其他客户端不能绕过，也不触发 tmux 的五分钟积压淘汰。因此记录器处理不过来时，程序输出和同会话输入会等待，但输出不丢失、不乱序；已解析的滚屏历史按配置行数淘汰。
+记录器自身的背压只看模型待解析量：达到高水位时暂停读取 control 输出，低于低水位时恢复。`flow-control.patch` 让受管 control 客户端的堵塞阻止 tmux 继续读取真实 PTY，其他客户端不能绕过，也不触发 tmux 的五分钟积压淘汰。因此记录器处理不过来时，程序输出和同会话输入会等待，但输出不丢失、不乱序；已解析的滚屏历史按配置行数淘汰。
 
 显示在第一次打开时附着。切换或隐藏分组、手机切换会话、切换工作区正文模式只隐藏显示，隐藏的显示保持附着并继续消费输出。手机关闭仍属于桌面组的会话显示时，仅清除手机选择以保留桌面显示；其他关闭显示、离开工作区或页面销毁时释放附着。断开后网页不自动重连，显示“连接已断开”，由用户点击“重新连接”。之后成功读取的会话列表中已没有该会话时，出错的显示按已结束处理：保留画面并变为只读，不再提供“重新连接”。同一会话的多个显示各自维护视口、选区和搜索。
 
@@ -134,7 +132,7 @@ CLI 在目标检查和连接成功后才进入 raw 模式，以本机终端实�
 
 ### 远程短命令
 
-`sessions.send` 与网页输入使用同一个 recorder 队列和 tmux 注入函数。一次请求是字面文本、粘贴（可附加 Enter）或一个具名按键，不能组合任意动作。粘贴沿用 `normalizePaste` 与 tmux bracketed paste，方向键按当前应用光标键模式编码。CLI 请求不属于网页 attachment，短命令退出不会触发 detach 删除。
+`sessions.send` 与网页输入使用同一个 recorder 队列和 tmux 注入函数。一次请求是字面文本、粘贴（可附加 Enter）或一个具名按键，不能组合任意动作。粘贴使用与网页相同的规范化和 tmux bracketed paste，方向键按当前应用光标键模式编码。短命令不创建附着，退出不会触发 detach 删除。
 
 可选 `ifInput: {epoch,inputSeq}` 在队列接纳处同步比较；条件不符返回 `failed/conflict`，不接纳输入。短 CLI 和网页每次接纳输入都会递增 `inputSeq`，包括后来因期限或 detach 丢弃的输入；计数不回退。远程 `terminal attach` 的原生输入不经过这个计数。计数不意味着回显、独占或干净提示符：已经接纳但尚未回显的输入仍可与下一次输入混合。
 
@@ -153,12 +151,12 @@ CLI 在目标检查和连接成功后才进入 raw 模式，以本机终端实�
 
 - 粘贴正文由 recorder 规范化（`normalizePaste`）：CRLF 和 LF 变为 CR，ESC 换成可见的 U+241B，正文因此不会被程序当作按键，也不会提前结束括号粘贴。普通输入不做替换。
 - 粘贴带 `-p`：程序开启括号粘贴时加起止标记。`paste.patch` 让 tmux 按程序自己的模式（`wp->base.mode`）判断，远程 TTY 客户端处于复制模式时网页粘贴仍带标记。
-- 注入失败时网页收到结果未确认的 `input.error`，recorder 只删除自己的 `kiteline-web-input` 缓冲。清理仅忽略该缓冲不存在的精确错误，其他清理错误写到 agent stderr，原输入结果保持不变。输入不自动重试；网页在断开和恢复期间不缓存输入。
+- 注入失败时网页收到结果未确认的 `input.error`，recorder 只删除自己的 `kiteline-web-input` 缓冲。清理失败写到 agent stderr，不改变原输入结果。输入不自动重试；网页在断开和恢复期间不缓存输入。
 - 网页输入不经过 tmux 键表，网页中的 Ctrl-b 直接交给程序。远程 TTY 客户端使用 tmux 键表：`Ctrl-b d` 断开，`Ctrl-b Ctrl-b` 发送 Ctrl-b。
 - 手机辅助键和待用修饰键用 xterm.js 的键盘编码函数生成，读取程序当前的应用光标键模式；虚拟 Alt 按 Meta 处理。
-- 当前可见活动 pane 打开搜索时，终端区域隐藏工具栏，该 pane 隐藏辅助键；切换到其他 pane 时依据新活动 pane 的搜索状态呈现。辅助键保持挂载，搜索关闭后恢复原展开状态；长按在移出、释放、取消、失去捕获、窗口失焦、页面隐藏、pane 隐藏或失活、换屏及折叠时停止。关闭搜索时，可写终端复用现有输入激活以恢复手机键盘输入；只读终端仅恢复 xterm 焦点，保留历史导航。
+- 当前可见活动 pane 打开搜索时，终端区域隐藏工具栏，该 pane 隐藏辅助键；切换到其他 pane 时依据新活动 pane 的搜索状态呈现。辅助键保持挂载，搜索关闭后恢复原展开状态；长按在手势结束、移出或失去捕获、窗口失焦、页面或 pane 隐藏、pane 失活、换屏及折叠时停止。关闭搜索时，可写终端恢复手机键盘输入；只读终端仅恢复 xterm 焦点，保留历史导航。
 - 多个客户端同时输入时按到达顺序交错写入。
-- 输出背压期间，输入队列在取出下一项之前等待 control 恢复读取；既有容量内的输入保持 FIFO，不清空或重发。关闭显示或结束会话的取消规则保持不变。
+- 输出背压期间，输入队列在取出下一项之前等待 control 恢复读取；既有容量内的输入保持 FIFO，不清空或重发。
 
 ## 尺寸
 
@@ -166,15 +164,15 @@ CLI 在目标检查和连接成功后才进入 raw 模式，以本机终端实�
 
 - 远程 TTY 客户端按自己终端的尺寸参与。
 - 网页通过 recorder 的控制客户端参与：执行 `select-window` 和 `refresh-client -C <列>x<行>`，等控制流报告同样的实际尺寸后再处理队列中的下一项。命令和尺寸等待使用 `interactionTimeout` 的剩余期限，主动背压暂停计时，恢复后继续计时；control 关闭立即使等待失败。实际尺寸经控制流进入模型，再以 `resize` 帧发给所有显示。
-- 网页和远程 TTY 的尺寸请求限制在 `terminalMaxCols` × `terminalMaxRows`（500 × 200）以内。恢复帧的接收上限为 10000 列和 10000 行。没有网页时控制客户端保留最后的尺寸。
+- 网页和远程 TTY 的尺寸请求限制在 `terminalMaxCols` × `terminalMaxRows` 以内（`packages/shared/src/protocol/limits.ts`）。没有网页时控制客户端保留最后的尺寸。
 - 不使用 `resize-window`，它会把窗口切换为手动尺寸，客户端之后无法再调整。
-- 受管 control 输出堵塞时，远程 TTY 客户端的实际尺寸调整也延后，复用 tmux 待调整尺寸只保留最后尚未执行的目标；恢复后执行该尺寸。已经执行的尺寸及其输出、通知不被丢弃，避免暂停期间布局通知无限积压。
+- 受管 control 输出堵塞时，远程 TTY 客户端的实际尺寸调整也延后，只保留最后尚未执行的目标；恢复后执行该尺寸。已经执行的尺寸及其输出、通知不被丢弃，避免暂停期间布局通知无限积压。
 
 分屏画布按保存的子树权重和各叶片最小尺寸推导所需空间；区域变窄时保留比例并允许局部滚动。标签、选择器或显式路由选择会话时，只在画布中就近显露目标；再次选择同一报告来源也会显露目标。输出、被动焦点变化和手动滚动不发起显露。终端标签条独立对齐活动项，超宽标签优先显示名称开头，同活动项重选不重置标签条滚动。
 
-桌面与手机交接当前会话选择及明确空选择，原有组树和比例保留；返回桌面复用 `revealRequest` 显露目标，明确排列分屏也沿该入口显露 active。正文与专注由 `Workspace` 沿现有 mode/mobileMode 交接，协同布局以最近显式内容选择为准，终端输入不更新该选择。桌面标签或选择器的明确键盘激活可建立一次焦点请求，由 `TerminalArea` 等菜单关闭且目标 ready 后交焦；后续按键、指针、目标或页面变化取消该请求。
+桌面与手机交接当前会话选择及明确空选择，原有组树和比例保留；返回桌面时显露目标，明确排列分屏时显露当前活动项。正文与专注跨布局接续，协同布局以最近显式内容选择为准，终端输入不更新该选择。桌面标签或选择器的明确键盘激活会在菜单关闭且目标 ready 后交焦；后续按键、指针、目标或页面变化取消该请求。
 
-网页一侧（`display.ts` 的 `syncViewportAndInput()`）：先按会话的实际尺寸恢复画面，收到 `ready` 后按自己的可见区域发送第一次尺寸，再开放输入。隐藏或尺寸为 0 的显示不发送尺寸；滚动、选择和输出不重复提交尺寸。手机软键盘只缩短可见高度时，宽度和字号不变就保留打开键盘前的行列，终端只在本地裁切并跟随光标，不请求会话改变尺寸；宽度、旋转和字号变化会重新计算。
+网页先按会话的实际尺寸恢复画面，收到 `ready` 后按可见区域发送尺寸，再开放输入。隐藏或尺寸为 0 的显示不发送尺寸；滚动、选择和输出不重复提交尺寸。手机软键盘只缩短可见高度时，宽度和字号不变就保留打开键盘前的行列，终端只在本地裁切并跟随光标，不请求会话改变尺寸；宽度、旋转和字号变化会重新计算。
 
 网页普通缓冲区在用户阅读历史时，尺寸变化以原视口首行的首个逻辑单元格为锚点，重排后显示包含该单元格的行，不按文字匹配位置。视口不能越过当前底部；锚点内容被历史淘汰时显示最早保留内容。锚点只在本次尺寸变化期间存在，由 xterm.js 补丁中的 Buffer 和 BufferReflow 传递；Viewport 同步读取重排后的视口位置。实际行列变化时，显示清除全部选区，搜索清空结果状态并保留查询文字。
 
@@ -184,13 +182,13 @@ CLI 在目标检查和连接成功后才进入 raw 模式，以本机终端实�
 
 每个 model 新建 `epoch`，每次已解析输出或尺寸变化递增 `seq`；相同文字重绘也可能推进 seq。快照的 `position` 还包含 `tail: null | number` 和 `attrs: boolean`。调用方仅能在同一目标携带该完整位置作 `ifChanged`；选项相同且位置未变才返回 `unchanged`，仍返回当前 `{epoch,inputSeq}`。更换观察选项返回完整数据，epoch 不同返回 `reset` 全屏。没有观察缓存；`send.before` 不是条件快照位置。
 
-终端值规则集中在 `packages/shared/src/protocol/terminal-observation.ts` 的纯 parser。条件位置的 epoch 为 1..128 个 UTF-16 码元且不含 NUL；Agent 和远程 CLI 共用此规则，CLI 先解析 JSON 或 `EPOCH:SEQ` 文本。Agent 的 Sessions 先检查完整会话目标、归属、recording 可用且未 ending，再解析 snapshot/send/wait/resize 的载荷；parser 不读取会话或时钟。
+终端值规则见 `packages/shared/src/protocol/terminal-observation.ts`。条件位置的 epoch 为 1..128 个 UTF-16 码元且不含 NUL；Agent 和远程 CLI 共用此规则，CLI 先解析 JSON 或 `EPOCH:SEQ` 文本。Agent 先检查完整会话目标、归属、recording 可用且未 ending，再解析 snapshot/send/wait/resize 的载荷。
 
-send、resize、wait 在全部值解析成功后按 timeoutMs 建立一次绝对动作 deadline。编码、IPC 传递、排队和执行继续消费同一个期限；snapshot 没有动作 deadline。Agent 的 RPC 总期限和 Recorder 应答期限分别保持原有寿命。
+send、resize、wait 在全部值解析成功后按 timeoutMs 建立一次绝对动作 deadline。编码、IPC 传递、排队和执行继续消费同一个期限；snapshot 没有动作 deadline。
 
-`sessions.wait` 使用相同输出事件和有序队列。quiet 从 recorder 完成已有解析后计时，输出与 resize 重置窗口；change 比较 `after` 的 epoch/seq，能看到请求到达前已发生的变化。quiet 默认 300ms、总等待默认 1000ms，总等待始终有限，默认仅在 RPC 入口补齐。quiet、changed、timeout、reset 都返回当时完整画面；quiet 只表示近期没有输出活动，不表示业务完成。
+`sessions.wait` 使用相同输出事件和有序队列。quiet 从 recorder 完成已有解析后计时，输出与 resize 重置窗口；change 比较 `after` 的 epoch/seq，能看到请求到达前已发生的变化。quiet 默认 300ms、总等待默认 1000ms，总等待始终有限。quiet、changed、timeout、reset 都返回当时完整画面；quiet 只表示近期没有输出活动，不表示业务完成。
 
-观察结果超过 `controlMessageBytes`（1 MiB）时返回 `failed/limit_exceeded`，保留终端运行；不截屏、不自动调整尺寸。等待中的 model 关闭以 `recording_unavailable` 结束。显式 `sessions.recover` 后的新 model 使用新 epoch，能观察时直接返回 reset，不要求先返回错误再抓屏。
+观察结果超过 `controlMessageBytes` 时返回 `failed/limit_exceeded`，保留终端运行；不截屏、不自动调整尺寸。等待中的 model 关闭以 `recording_unavailable` 结束。显式 `sessions.recover` 后的新 model 使用新 epoch，能观察时直接返回 reset，不要求先返回错误再抓屏。
 
 ## 恢复动作
 
@@ -202,7 +200,7 @@ send、resize、wait 在全部值解析成功后按 timeoutMs 建立一次绝对
 | “减少历史后重试” | 错误码为 `limit_exceeded`、`timeout` 或 `busy`                                      |
 | “重绘程序”       | 终端区域菜单，确认后执行                                                            |
 
-- 重新连接：`TerminalView` 确认登录仍有效后，由 `TerminalScreens` 以 `retained` 新建附着并管理当前与候选显示。有旧终端画面时将其保留为只读，在同尺寸的隐藏容器中恢复新画面；`TerminalDisplay` 排完恢复输出并发布真实 `ready` 后，才替换并释放旧显示。等待或失败时仍可滚动、选择和复制旧画面，失败只释放候选附着；旧屏的标题、阅读和辅助键状态更新不会覆盖候选失败反馈。组件从 owner 发布的一份快照呈现当前屏幕及恢复反馈。没有旧画面时沿用单实例路径。不触及 recorder、共享历史和程序。
+- 重新连接：确认登录仍有效后，以 `retained` 新建附着。有旧终端画面时将其保留为只读，在同尺寸的隐藏容器中恢复新画面；排完恢复输出并就绪后，才替换并释放旧显示。等待或失败时仍可滚动、选择和复制旧画面，失败只释放候选附着；旧屏的标题、阅读和辅助键状态更新不会覆盖候选失败反馈。不触及 recorder、共享历史和程序。
 - 恢复终端：调用 `sessions.recover`，`recovering` 期间读取会话列表，变为可用后重新附着（见[记录故障后的恢复](#记录故障后的恢复)）。
 - 减少历史后重试：以 `screen` 重新附着，只省略本次的较早滚屏；检查点和 `historyLines` 不变，之后的附着仍取完整历史。
 - 重绘程序：调用 `sessions.redraw`，在输入队列中排队，通过临时改变尺寸让程序重画，随后恢复原尺寸。要求记录可用。程序会向所有客户端重画，其他客户端的画面和选区可能改变；请求完成只表示尺寸已恢复。

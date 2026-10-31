@@ -42,7 +42,7 @@ pnpm native:build
 
 `pnpm install --frozen-lockfile` 按锁文件安装依赖，并应用 `pnpm-workspace.yaml` 中 `patchedDependencies` 登记的补丁。`pnpm native:build` 生成源码 agent 和测试所需的 `dist/native/`；开发构建动态链接系统的 libevent 和 ncurses。
 
-修改原生源码、tmux 补丁、terminfo 或固定的 tmux/rg 输入后，重新运行 `pnpm native:build`。它每次重新编译 tmux；tmux 和 rg 归档分别缓存在 `/var/tmp/kiteline-release-cache/static-sources/` 和 `/var/tmp/kiteline-release-cache/ripgrep/`，复用前检查 SHA-256。
+修改原生源码、tmux 补丁、terminfo 或固定的 tmux/rg 输入后，重新运行 `pnpm native:build`。它每次重新编译 tmux，下载缓存见[缓存与清理](release.md#缓存与清理)。
 
 ## 本地运行
 

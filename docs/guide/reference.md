@@ -263,9 +263,11 @@ agent 数据目录中的 `agent.json`、`connection.json`、`temporary-files.jso
 | 一般设备操作时限       | 30 秒                                     | `rpcTimeout` |
 | 每台设备同时处理的请求 | 32                                        | 固定         |
 | 每台设备的数据通道     | 128，终端显示、文件传输和开发服务请求合计 | 固定         |
-| 单条请求或结果         | 1 MiB；请求超出返回 413                   | 固定         |
+| 管理 API JSON 请求体   | 1 MiB；超出返回 413                       | 固定         |
 
 一般设备操作包括文件列表与重命名、Git 读取、定时任务管理和本机命令行请求。复制、移动和删除没有总时限。
+
+RPC 请求和结果按完整 JSON 信封计算 1 MiB 预算；结果超限按[结果语义](../design/protocol.md#结果语义)返回 `limit_exceeded`。
 
 ## 文件位置
 

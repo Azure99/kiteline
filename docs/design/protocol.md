@@ -4,9 +4,9 @@
 
 ## 契约来源
 
-- `packages/shared/src/protocol/index.ts`：公共协议入口，再导出 `limits`、基础校验和终端值 parser，并定义 `appVersion`、`Reply`、各对象类型、控制消息、浏览器事件和 `ChannelKind`。
-- `packages/shared/src/protocol/validation.ts`、`limits.ts`：基础校验与 `AppError`、固定限额。`terminal-observation.ts`：终端类型和纯值 parser，由 Agent 和远程 CLI 的同义值消费共用；CLI 另行处理文本词法与命令组合。
-- `packages/shared/src/protocol/rpc.ts`：RPC 方法及参数、成功与非成功结果类型，Git 写契约 `GitWriteMethods`，逐方法策略 `rpcTraits` 和自有键判断 `isRpcMethod`。
+- `packages/shared/src/protocol/index.ts`：公共协议入口，定义 `appVersion`、`Reply`、各对象类型、控制消息、浏览器事件和 `ChannelKind`。
+- `packages/shared/src/protocol/validation.ts`、`limits.ts`：基础校验与 `AppError`、固定限额。`terminal-observation.ts`：终端类型和纯值 parser。
+- `packages/shared/src/protocol/rpc.ts`：RPC 方法及参数、成功与非成功结果类型、逐方法策略 `rpcTraits`。
 - `packages/shared/src/protocol/tasks.ts`：定时任务对象。`packages/shared/src/protocol/ipc.ts`：recorder IPC 消息和终端帧。
 - `packages/shared/src/protocol/ws.ts`、`file-stream.ts`、`http-stream.ts`、`stdio.ts`：心跳、帧发送、文件帧队列、HTTP 字节流、逐行 JSON。
 - `packages/server/src/limits.ts`、`packages/agent/src/limits.ts`、`packages/agent/src/config.ts`：其他固定限额和可调限额。
@@ -16,7 +16,7 @@ server 和 agent 中的实现位置见[仓库结构](architecture.md#仓库结�
 
 ### 版本匹配
 
-server、agent、工作台和远程 CLI 使用同一个产品版本 `appVersion`，版本必须完全相同，不同版本之间没有兼容适配。
+server、agent、工作台和远程 CLI 使用同一个产品版本 `appVersion`，版本必须完全相同。
 
 - agent 连接控制 WebSocket 时带 `?appVersion=`。版本不同时，server 返回 HTTP 426 和 `version_mismatch`，`details` 为 `{component: "agent", clientVersion, serverVersion}`。agent 记录原因并按退避间隔继续重连；server 记下观察到的 agent 版本（`Device.release`），工作台据此提示[升级 agent](../guide/devices.md#升级-agent)。最近一次观察的版本不同时，发往该设备的 RPC 和数据通道返回 `version_mismatch`，不返回 `offline`。
 - 工作台的每个 `/api/` 请求、事件连接和终端连接都带 `?appVersion=`。版本检查之后的接口在版本不同时返回 426（`component: "web"`）；登录和升级引导用到的接口不检查版本，见 [HTTP 接口](#http-接口)。
@@ -39,7 +39,7 @@ RPC、文件写入和本机 IPC 返回 `Reply`，字段定义见 `packages/share
 以下情况产生结果未确认：
 
 - 控制连接在 RPC 返回前断开或被替换：server 返回 `unknown` 和 `offline`。
-- agent 的成功结果超过 `controlMessageBytes`：agent 返回 `unknown` 和 `limit_exceeded`，不返回结果正文；`sessions.snapshot` 和 `sessions.wait` 是例外，超限时返回 `failed` 和 `limit_exceeded`。非成功结果超限时，agent 保留该结果的 `outcome`，同样返回 `limit_exceeded`。
+- 包含 agent 成功结果的完整 `rpc.result` JSON 信封超过 `controlMessageBytes`：agent 返回 `unknown` 和 `limit_exceeded`，不返回结果正文；`sessions.snapshot` 和 `sessions.wait` 是例外，超限时返回 `failed` 和 `limit_exceeded`。包含非成功结果的完整信封超限时，agent 保留该结果的 `outcome`，同样返回 `limit_exceeded`。
 - 文件写入在 server 开始发送 `end` 后、尚未收到 agent 的 `result` 时通道失败；开始发送之前失败为 `failed`。收到 `result` 时保留其中的 `Reply`。
 - recorder 请求超时或 recorder 退出。
 - HTTP RPC 没有收到可解析的响应（网络中断、反向代理返回非 JSON 错误页）时，`rpcTraits.responseLoss` 为 `unknown` 的方法记为 `io_error` 和 `unknown`。其他非 GET、非 HEAD 请求也按此处理；打开数据通道的 POST 仅预约通道，不按此处理。本机命令行还要求请求已经触发 `finish`，发送前失败保留原传输错误。
@@ -171,7 +171,8 @@ Web owner 在 `POST /api/credentials` 提交 `{name, deviceIds, expiresAt}`，�
 | `/api/channels/:channelId/terminal` | 浏览器或 CLI | Origin、登录、版本 |
 | `/proxy/…`、`/absproxy/…`           | 浏览器       | 与 HTTP 请求相同   |
 
-- 单条消息不超过 `controlMessageBytes`；`http.proxy` 的数据通道连接为 `dataChunkBytes`。
+- server 在控制连接、事件连接以及文件和终端数据连接上接收的单条消息不超过 `controlMessageBytes`；`http.proxy` 的 agent 与 server 数据连接两端接收的单条消息不超过 `dataChunkBytes`，包括 `ready`、`error`、`start` 握手文本。
+- server 向浏览器发送的 `devices.changed` 是当前登录可见的完整设备列表，可超过 `controlMessageBytes`。
 - `/api/agent/channels/:channelId` 带 `?connectionId=`：通道必须属于该设备的当前控制连接且尚未有 agent 加入，否则返回 403。
 - `/api/channels/:channelId/terminal` 要求通道是该登录的 `terminal.attach`、agent 已经就绪、尚未有浏览器加入；通道不存在返回 404，不能加入返回 409。
 - 其他路径的升级返回 404。升级被拒绝时，server 返回对应的 HTTP 状态码和 JSON `{error}`，并关闭连接。
@@ -209,23 +210,23 @@ Web owner 在 `POST /api/credentials` 提交 `{name, deviceIds, expiresAt}`，�
 
 ### 在线终端报告
 
-recorder 在现有终端解析器中接收 OSC 9 通知、`OSC 777;notify;title;body` 和程序主动发送的 OSC 7501 `state=blocked` 报告。OSC 9 的 `4`、`4;` 前缀留给进度协议；777 正文保留后续分号。7501 按 [Program Status Protocol rev 0.4](https://www.superlogical.com/rex/docs/build/program-status) 解码字段、base64 UTF-8 和尺寸限制，按较长的 ST 计接收上限；不探测、不回复、不维护程序状态记录。其他状态不会撤销已经收到的报告。
+recorder 接收 OSC 9 通知、`OSC 777;notify;title;body` 和程序主动发送的 OSC 7501 `state=blocked` 报告。OSC 9 的 `4`、`4;` 前缀留给进度协议；777 正文保留后续分号。7501 按 [Program Status Protocol rev 0.4](https://www.superlogical.com/rex/docs/build/program-status) 解码字段、base64 UTF-8 和尺寸限制，按较长的 ST 计接收上限；不探测、不回复。其他状态不会撤销已经收到的报告。
 
-报告独立于终端显示和工作区 watch。recorder 只发送解码后的展示内容与真实 session ID；agent 从会话记录补工作区和会话名称；server 从已认证的连接补设备 ID，并生成 `noticeId` 和接收时间 `receivedAt`，按设备权限分发 `terminal.notice`。不信任程序提供的 app、id 或路径作为来源。恢复 capture 不产生新报告。报告沿现有控制消息和队列预算传输，超限时丢弃并记录原因，不中断终端记录；未到达 server 的消息不补发。
+报告独立于终端显示和工作区 watch。recorder 只发送解码后的展示内容与真实 session ID；agent 从会话记录补工作区和会话名称；server 从已认证的连接补设备 ID，并生成 `noticeId` 和接收时间 `receivedAt`，检查补齐字段后的完整 `terminal.notice` 事件不超过 `controlMessageBytes`，再按设备权限分发。不信任程序提供的 app、id 或路径作为来源。恢复 capture 不产生新报告。报告超限时丢弃并记录原因，不中断终端记录；未到达 server 的消息不补发。
 
-server 在内存中保留每个设备/工作区/session 的最新待处理报告，重启后丢失。会话结束或设备断线保留历史，删除设备时移除其报告。浏览器初接或请求 `notices.sync` 时先收到 `notices.reset`，再收到有权限查看的当前报告。快照按发送回调逐条推进，每条发送前重读当前项，避免恢复已清除的旧报告；实时新增和清除仍正常发送。浏览器只投影这些事件，`notice.cleared` 只移除 ID 匹配的报告。
+server 在内存中保留每个设备/工作区/session 的最新待处理报告，重启后丢失。会话结束或设备断线保留历史，删除设备时移除其报告。浏览器初接或请求 `notices.sync` 时先收到 `notices.reset`，再收到有权限查看的当前报告。同步不会恢复已清除的旧报告，期间实时新增和清除仍正常生效。`notice.cleared` 只移除 ID 匹配的报告。
 
 展开报告入口不清除。选择来源、从文件返回、切换或重新选择终端、重新进入页面，以及页面从隐藏恢复到当前终端，都会发起一次激活。主区确认目标后发送 `POST /api/devices/:deviceId/notices/activate`，正文为 `{workspaceId, sessionId}`，不等待终端附着；目标未确认且加载取消或失败时不发送。server 在处理请求时清除该终端当前的报告，并向有权限的浏览器发送 `notice.cleared`；请求发出后、处理前到达的报告也在此边界内，处理后新增的报告保留。成功响应为 `{}`，没有待处理项时不产生清除事件。
 
-工作区的唯一终端区域只激活当前会话，分屏其他会话保留；协同模式沿用同一规则。持续停留、普通窗口 focus 和事件连接重连不会再次清除新报告。激活失败或结果未确认时显示错误，通知以 server 事件或后续同步为准。退出或登录失效只清本页投影。报告表示历史消息，不表示程序当前仍在等待。
+普通和协同模式都只激活当前会话，其他分屏会话的报告保留。持续停留、普通窗口 focus 和事件连接重连不会再次清除新报告。激活失败或结果未确认时显示错误，通知以 server 事件或后续同步为准。退出或登录失效只清本页显示，不清除 server 上的报告。报告表示历史消息，不表示程序当前仍在等待。
 
 ### 心跳与背压
 
 - 控制连接（两端）、事件连接和终端数据连接（server 的两侧和 agent 一侧）按 `heartbeatInterval` 发送 ping，超过 `heartbeatTimeout` 没有收到 pong 时强制断开。文件和开发服务的数据连接不发送 ping。
 - 升级后的 socket 和 agent 的数据连接启用 TCP keepalive，间隔由 `tcpKeepAliveDelayMs` 决定。
-- 控制连接和事件连接的发送缓冲超过 `packages/shared/src/protocol/ws.ts` 的控制消息预算时，发送方以 1013 `control_backpressure` 关闭连接。
+- server 的控制和事件消息、agent 的控制消息发送前检查当时已有的发送积压；超过 `controlMessageBytes * 2` 时，发送方以 1013 `control_backpressure` 关闭连接。
 
-Agent 的控制出口将每个信封编码一次，先检查字节预算，再检查连接可写性。RPC 仅在结果超限时构造较小的 `limit_exceeded` 回复，outcome 遵循上述结果规则。事件超限记录消息来源并丢弃，不把这一传输结果抛回领域操作；普通事件在连接不可用时静默丢弃，终端 notice 的不可用和超限继续记录 sessionId。JSON 编码和 WebSocket 发送抛出的异常会传播给调用者。
+Agent 的事件超限时记录消息来源并丢弃；普通事件在连接不可写时静默丢弃，终端报告的不可写和超限另记录 sessionId。
 
 ### 关闭码
 
@@ -245,16 +246,14 @@ Agent 的控制出口将每个信封编码一次，先检查字节预算，再�
 ## RPC
 
 1. 工作台通过 `POST /api/devices/:deviceId/rpc` 发送 RPC 请求。
-2. server 检查：设备在线（否则 `offline` 或 `version_mismatch`），`id` 不在进行中（否则 `conflict`），该连接进行中的 RPC 少于 `pendingRequestsPerDevice`（否则 `busy`），`rpc.request` 不超过 `controlMessageBytes`（否则 `limit_exceeded`）。server 不检查方法名和参数字段，也不设期限，只等待 agent 回复或连接断开。
+2. server 检查：设备在线（否则 `offline` 或 `version_mismatch`），`id` 不在进行中（否则 `conflict`），该连接进行中的 RPC 少于 `pendingRequestsPerDevice`（否则 `busy`），完整 `rpc.request` JSON 信封不超过 `controlMessageBytes`（否则 `limit_exceeded`）。server 不检查方法名和参数字段，也不设期限，只等待 agent 回复或连接断开。
 3. agent 先检查停止和取消，再对未知方法返回 `unsupported`，通过准入后执行请求。
 4. 取消：调用 `DELETE /api/devices/:deviceId/requests/:requestId`（只能取消同一登录的请求），或者原 HTTP 请求在响应前关闭，server 都会向 agent 发送 `rpc.cancel`。原请求仍以自己的 `Reply` 结束，通常为 `cancelled`。
 5. 进度：长操作通过 `request.progress` 报告排队或执行进度，只通知发起请求的登录；字段见 `FileProgress`。
 
 Agent 根据 `rpcTraits.deadline` 选择 `rpcTimeout`、`searchTimeout` 或 `gitWriteTimeout`，到期时以 `timeout` 结束；`none` 不设置 RPC 总期限。期限的数值见[限额](../guide/reference.md#限额)。方法、参数和结果类型以 `packages/shared/src/protocol/rpc.ts` 的 `RpcMethods` 为准；`files.copy`、`files.move`、`files.delete` 的非成功 `result` 可包含逐项文件结果。
 
-`rpcTraits` 的三项策略独立声明：`responseLoss` 决定没有可解析响应时的传输错误分类，`deadline` 决定 RPC 总期限，`oversizedSuccess` 决定成功结果超限后的 outcome。它们不决定领域写操作身份或是否允许 `partial`；结果不明时遵守[结果语义](#结果语义)。
-
-运行时分派入口是 `packages/agent/src/agent.ts` 的 `perform()`；定时任务、Git 和全部会话方法分别交给 `packages/agent/src/tasks/rpc.ts`、`packages/agent/src/git/rpc.ts` 与 `packages/agent/src/terminal/rpc.ts`。终端短 RPC 的位置、屏幕和输入类型在 `packages/shared/src/protocol/terminal-observation.ts`；snapshot、wait 为读取，send、resize、recover 为写入。各方法的业务规则见相应的终端、文件、Git、定时任务和开发服务访问文档。
+终端短 RPC 中，snapshot、wait 为读取，send、resize、recover 为写入。各方法的业务规则见相应的终端、文件、Git、定时任务和开发服务访问文档。
 
 ## 数据通道
 
@@ -265,11 +264,11 @@ Agent 根据 `rpcTraits.deadline` 选择 `rpcTimeout`、`searchTimeout` 或 `git
 - `file.write`：`purpose` 为 `save`、`upload`，由 `POST …/channels` 创建，浏览器用 `PUT /api/channels/:channelId/content` 发送。
 - `http.proxy`：由 `/proxy/`、`/absproxy/` 请求在内部创建；agent 处理代码为 `packages/agent/src/http/channels.ts`。
 
-公开的 `POST …/channels` 只接受前三种。文件 purpose 必须是字符串：读取接受 `open`、`text`、`image`，写入接受 `save`、`upload`；`download` 只由下载入口创建。不支持的 kind 或 purpose 在检查设备在线状态和通道配额前以 `unsupported` 拒绝。参数见 `packages/shared/src/protocol/index.ts` 的 `ChannelParams`，`meta` 见同文件的 `TerminalMeta` 和 `FileMeta`；接收端仍按各自职责校验输入。
+公开的 `POST …/channels` 只接受前三种。文件 purpose 必须是字符串：读取接受 `open`、`text`、`image`，写入接受 `save`、`upload`；`download` 只由下载入口创建。不支持的 kind 或 purpose 在检查设备在线状态和通道配额前以 `unsupported` 拒绝。参数见 `packages/shared/src/protocol/index.ts` 的 `ChannelParams`，`meta` 见同文件的 `TerminalMeta` 和 `FileMeta`。
 
 ### 建立
 
-1. server 登记通道：设备必须在线，`channel.open` 不超过 `controlMessageBytes`，该连接的通道数少于 `channelsPerDevice`（从登记时开始计数）。通道绑定发起的登录、设备和当前 `connectionId`，然后发送 `channel.open`。
+1. server 登记通道：设备必须在线，完整 `channel.open` JSON 信封不超过 `controlMessageBytes`，该连接的通道数少于 `channelsPerDevice`（从登记时开始计数）。通道绑定发起的登录、设备和当前 `connectionId`，然后发送 `channel.open`。
 2. agent 连接 `/api/agent/channels/:channelId`，准备完成后发送 `ready`，失败时发送 `error`。从登记到 `ready` 的期限为 `interactionTimeout`。
 3. server 校验 `meta`：文件通道的 `size` 为非负整数，`targetPath` 为不含 `..` 的相对路径；`file.write` 的 `size` 必须等于声明的大小；`open` 和 `image` 的内容类型只允许 `image/png`、`image/jpeg`、`image/webp`、`image/gif`，`open` 另允许 `text/plain; charset=utf-8`。
 4. 由 POST 创建的通道：server 在 POST 响应中返回通道 ID 和元数据，浏览器必须在下一个 `interactionTimeout` 内用同一登录加入一次。下载和代理请求本身就是接收方，没有这一步。
@@ -277,7 +276,7 @@ Agent 根据 `rpcTraits.deadline` 选择 `rpcTimeout`、`searchTimeout` 或 `git
 
 ### 帧
 
-文本帧是 JSON 控制消息，二进制帧是不超过 `dataChunkBytes` 的数据块。每个方向只有一个发送者，按顺序发送。
+文件和终端数据通道的完整 JSON 文本帧不超过 `controlMessageBytes`，二进制数据块不超过 `dataChunkBytes`。每个方向只有一个发送者，按顺序发送。
 
 - **`file.read`**：agent 发送二进制数据块，总长度等于 `meta.size`，没有表示成功的帧。agent 留住最后一块，直到读取完成且检查全部通过才发出；失败时改发 `error` 并关闭。server 收到恰好 `meta.size` 字节时结束 HTTP 响应；数据连接自然关闭时，先排空已收到的帧再判断长度是否不足，字节不足按读取失败处理。细节见[上传与下载](files.md#上传与下载)。
 - **`file.write`**：server 把 PUT 请求体分块转发，请求体长度等于声明大小后发送 `end`。agent 校验并发布文件，发送 `result`，server 把这个 `Reply` 作为 PUT 的响应返回。
@@ -288,7 +287,7 @@ Agent 根据 `rpcTraits.deadline` 选择 `rpcTimeout`、`searchTimeout` 或 `git
 
 - **文件**：接收端处理完一帧才读取下一帧，未处理的帧最多 `filePendingFrames` 帧、`filePendingBytes`，超过时以 `limit_exceeded` 结束；HTTP 一侧的写入背压同样传到数据通道。传输开始后，在 `fileIdleTimeout` 内没有进展时以 `timeout` 结束。
 - **终端**：Web 的二进制输出与有序 JSON 共用累计信用，浏览器完成处理后用 `consumed` 推进；TTY 的 `consumed.bytes` 是从零开始、已写入本机终端的累计二进制字节数，必须单调且不超过已发送量。Web live 待发量、TTY 未消费输出分别受 `terminalDisplayBytes` 限制，超限只结束该附着。TTY 不因等待 ACK 暂停 PTY 读取；recorder 自身的模型积压仍通过真实 PTY 背压限制。server 和 agent 每条 socket 的发送积压超过 `terminalPendingBytes` 时，以 `limit_exceeded` 关闭异常附着。计量和暂停规则见[附着与恢复](terminal.md#附着与恢复)。
-- **开发服务**：使用 WebSocket 流的背压，块大小为 `dataChunkBytes`，不设空闲期限，见[连接寿命](http-access.md#连接寿命)。
+- **开发服务**：使用 WebSocket 流的背压，按 `dataChunkBytes` 分块；内部数据块上限不限制代理业务的 HTTP 正文或完整 WebSocket 消息，见[请求转发](http-access.md#请求转发)和[WebSocket 升级](http-access.md#websocket-升级)。不设空闲期限，见[连接寿命](http-access.md#连接寿命)。
 
 ### 结束与取消
 

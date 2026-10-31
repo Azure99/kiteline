@@ -263,9 +263,11 @@ Writes include stage, unstage, discard, commit, branch operations, fetch, pull, 
 | General device-operation deadline | 30 seconds                                                                       | `rpcTimeout`  |
 | Concurrent requests per device    | 32                                                                               | Fixed         |
 | Data channels per device          | 128 total for terminal displays, file transfers and development-service requests | Fixed         |
-| One request or result             | 1 MiB; oversized requests return 413                                             | Fixed         |
+| Management API JSON request body  | 1 MiB; oversized bodies return 413                                               | Fixed         |
 
 General device operations include file listing and renaming, Git reads, scheduled-task management and local CLI requests. Copy, move and delete have no overall deadline.
+
+RPC requests and results use a 1 MiB budget for the complete JSON envelope. Oversized results return `limit_exceeded` under the [result rules](../design/protocol.md#结果语义).
 
 ## File locations
 

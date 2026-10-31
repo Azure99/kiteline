@@ -76,7 +76,7 @@ When a program sends an OSC 9 or OSC 777 notification, or an unsolicited OSC 750
 
 Opening the list does not clear reports. Selecting a source returns to its original session and reveals its pane on desktop. Returning from Files, switching or reselecting a terminal, reopening the page, and returning to a page showing that terminal activate it. When the server processes the activation request, it clears that terminal's existing report across clients; reports arriving afterward remain. When the session list confirms a source no longer exists, returning to its unavailable page while the device is online also handles its report. If the first list read fails, the report remains; read errors appear separately. Staying in the terminal does not automatically clear new reports. A terminal shown alongside work pages follows the same session selection and activation rules.
 
-Pending reports live in server memory and synchronize when a page returns or reconnects. A server restart loses them. Ended sessions retain historical reports; deleting a device removes its reports. Failed or unconfirmed activation requests show an error; synchronized reports reflect the current state. Programs that do not send these terminal events do not automatically appear in the list.
+Pending reports live in server memory and synchronize when a page returns or reconnects. A server restart loses them. Ended sessions retain historical reports; deleting a device removes its reports. Failed or unconfirmed activation requests show an error; synchronized reports reflect the current state.
 
 ### Create sessions and shortcuts
 
@@ -92,7 +92,7 @@ Desktop groups share one row of tabs; click a tab to select a session within its
 
 Explicitly selecting a session tab or picker item with the keyboard on desktop moves input focus to that session after the menu closes and its display is ready. A later key press, pointer action, target change, or leaving the page cancels the pending focus request.
 
-Terminal tabs identify the current session; panes no longer repeat a title bar. Right-click a tab or use its row's More button in the session picker to rename, move, close the display or end that session. The terminal area menu provides splits, arrangement, maximization, search, font size and settings. The remaining space on the right shows the latest title the program sent, including after a page reload or when the session is opened on another device. In narrow areas, splits retain a minimum canvas based on their saved proportions and can be scrolled. Selecting a session from its tab or the picker, or explicitly arranging splits, reveals the current pane; output does not pull the canvas back from a manual scroll.
+Terminal tabs identify the current session. Right-click a tab or use its row's More button in the session picker to rename, move, close the display or end that session. The terminal area menu provides splits, arrangement, maximization, search, font size and settings. The remaining space on the right shows the latest title the program sent, including after a page reload or when the session is opened on another device. In narrow areas, splits retain a minimum canvas based on their saved proportions and can be scrolled. Selecting a session from its tab or the picker, or explicitly arranging splits, reveals the current pane; output does not pull the canvas back from a manual scroll.
 
 ### Copy and paste
 
@@ -115,7 +115,7 @@ Supported forms are `/`-separated relative paths, POSIX absolute paths inside th
 
 On desktop and mobile, one button in the terminal control row cycles through normal, focus, fullscreen, and back to normal. Focus hides both sidebars and the device/workspace header; navigation returns in the normal layout. Changing the device, workspace, or tool exits terminal focus and fullscreen. Focus file on mobile follows the same rules.
 
-Leaving fullscreen restores the normal layout. The terminal area menu and Settings on a terminal page no longer repeat focus or fullscreen actions. Settings on other pages and the phone file menu still provide fullscreen. Independent desktop fullscreen entered from Settings on other pages ends when changing devices, changing workspaces, or leaving a workspace; it stays active when switching tools within the same workspace.
+Leaving fullscreen restores the normal layout. Settings on other pages and the phone file menu also provide fullscreen. Independent desktop fullscreen entered from Settings on other pages ends when changing devices, changing workspaces, or leaving a workspace; it stays active when switching tools within the same workspace.
 
 Terminal search covers currently loaded display content, including history, without case sensitivity. On desktop and phone, choose Search terminal from the terminal area menu to reveal the current pane and search it. The search bar shows the target session name, and its controls wrap in narrow areas. The current terminal's auxiliary keys are hidden during search and return when it closes, letting you continue typing; ended sessions still support history navigation. An actual grid size change keeps the query and clears the search result status; press Enter to search again.
 
@@ -250,8 +250,6 @@ Each result is "Completed", "Not completed" (not executed or confirmed failed, w
 
 Files follows symbolic links accessible to the project user, including links to directories outside the workspace. Opening and saving affect the target file; renaming, moving, deleting and replacing affect only the link.
 
-Files does not provide copying across workspaces; see [Out of scope (Chinese)](../design/files.md#范围外) for other capability boundaries.
-
 ## Git
 
 Git uses the device's Git installation and the project user's Git configuration, including hooks, signing and credentials. For installation requirements, see [Supported systems and prerequisites](devices.en.md#supported-systems-and-prerequisites).
@@ -333,7 +331,7 @@ Feedback names the operation and reports completion, failure, partial completion
 
 Feedback directly shows the retained multiline Git output and error diagnostics, with a notice when truncated. Expand "Details" for additional error data. A successful Fetch can still be followed by a separate status read failure. Use "Refresh Git" to check branches, commits and changes. Retry manually only after confirming that the operation did not take effect. The workbench does not retry automatically.
 
-A partially completed multi-step operation retains its known progress and diagnostics. Use a terminal for stash, line staging and other omitted functions; see [Out of scope (Chinese)](../design/git.md#范围外).
+A partially completed multi-step operation retains its known progress and diagnostics. Use a terminal for stash, line staging and similar operations.
 
 ## Access development services
 

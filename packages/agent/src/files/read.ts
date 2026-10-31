@@ -124,6 +124,7 @@ async function readFile(
         await close();
       }
     };
+    // Close before ready because the server can complete an empty response without receiving data.
     if (!size) await finish();
     return {
       meta,
