@@ -591,7 +591,7 @@ function SignedInWorkbench({
       </a>
       <div
         data-terminal-focus={terminalFocus.active ? "" : undefined}
-        className="fixed top-[var(--app-top,0px)] left-0 flex h-[var(--app-height,100vh)] w-full min-h-0 overflow-clip bg-background"
+        className="workbench-shell fixed top-[var(--app-top,0px)] left-0 flex h-[var(--app-height,100vh)] w-full min-h-0 overflow-clip bg-background"
       >
         <EdgePanel
           desktopWidth={sidebarWidth}

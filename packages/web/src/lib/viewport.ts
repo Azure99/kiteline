@@ -76,6 +76,11 @@ export function trackViewport() {
     fullscreen = nextFullscreen;
     document.documentElement.style.setProperty("--app-height", `${height}px`);
     document.documentElement.style.setProperty("--app-top", `${top}px`);
+    // Pinch shrink does not mean the shell has moved above the bottom safe area.
+    document.documentElement.style.setProperty(
+      "--app-viewport-unzoomed",
+      nextScale === 1 ? "1" : "0",
+    );
     window.dispatchEvent(new Event("kiteline:viewport"));
     if (
       height < visibleHeight &&
