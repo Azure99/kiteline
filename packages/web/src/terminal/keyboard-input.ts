@@ -7,7 +7,15 @@ export function terminalKeyboard(terminal: Terminal, mobile: boolean) {
   const policySupported = "virtualKeyboardPolicy" in textarea;
   const restore = () => {
     // A native permission window can blur the document while keeping this editor active.
-    if (mobile && policySupported && document.activeElement !== textarea)
+    if (!policySupported) return;
+    if (document.activeElement === textarea && !document.hasFocus())
+      textarea.setAttribute("virtualkeyboardpolicy", "auto");
+    else if (mobile && document.activeElement !== textarea)
+      textarea.setAttribute("virtualkeyboardpolicy", "manual");
+  };
+  const touchStart = () => {
+    // A swipe can reopen a focused editor while its keyboard policy is automatic.
+    if (policySupported && document.hasFocus())
       textarea.setAttribute("virtualkeyboardpolicy", "manual");
   };
   const selection =
@@ -22,6 +30,7 @@ export function terminalKeyboard(terminal: Terminal, mobile: boolean) {
       mobile || terminal.hasSelection() ? "manual" : "auto",
     );
   textarea.addEventListener("blur", restore);
+  terminal.element!.addEventListener("touchstart", touchStart, { capture: true, passive: true });
   return {
     activate() {
       if (terminal.options.disableStdin) return;
@@ -42,6 +51,7 @@ export function terminalKeyboard(terminal: Terminal, mobile: boolean) {
       selection?.dispose();
       restore();
       textarea.removeEventListener("blur", restore);
+      terminal.element!.removeEventListener("touchstart", touchStart, true);
     },
   };
 }

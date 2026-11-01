@@ -18,7 +18,7 @@ afterEach(() => {
 });
 
 function createKeyboard(mobile = true) {
-  const document = { activeElement: null as EventTarget | null };
+  const document = { activeElement: null as EventTarget | null, hasFocus: () => true };
   vi.stubGlobal("document", document);
   const textarea = Object.assign(new EventTarget(), {
     virtualKeyboardPolicy: "",
@@ -34,6 +34,7 @@ function createKeyboard(mobile = true) {
   let selected = false;
   let onSelectionChange: (() => void) | undefined;
   const terminal = {
+    element: new EventTarget(),
     textarea,
     options: { disableStdin: false },
     focus() {
@@ -110,5 +111,34 @@ test("disabled terminal input does not activate the keyboard", () => {
   expect(input.textarea.virtualKeyboardPolicy).toBe("manual");
   expect(input.focusPolicies).toEqual([]);
   expect(virtualKeyboard.show).not.toHaveBeenCalled();
+  input.keyboard.dispose();
+});
+
+test.each([true, false])(
+  "touch scrolling keeps editor focus without automatic keyboard activation (mobile=%s)",
+  (mobile) => {
+    const input = createKeyboard(mobile);
+    input.keyboard.activate();
+
+    input.terminal.element.dispatchEvent(new Event("touchstart"));
+
+    expect(input.document.activeElement).toBe(input.textarea);
+    expect(input.textarea.virtualKeyboardPolicy).toBe("manual");
+    input.keyboard.activate();
+    expect(input.focusPolicies).toEqual(["auto", "auto"]);
+    input.keyboard.dispose();
+  },
+);
+
+test("a native permission window restores automatic policy before document focus returns", () => {
+  const input = createKeyboard();
+  input.keyboard.activate();
+  input.terminal.element.dispatchEvent(new Event("touchstart"));
+  input.document.hasFocus = () => false;
+
+  input.textarea.dispatchEvent(new Event("blur"));
+  input.terminal.element.dispatchEvent(new Event("touchstart"));
+
+  expect(input.textarea.virtualKeyboardPolicy).toBe("auto");
   input.keyboard.dispose();
 });
