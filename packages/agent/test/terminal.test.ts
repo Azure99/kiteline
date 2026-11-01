@@ -752,18 +752,21 @@ test("an unresponsive recorder cannot leave a phantom creation or block agent sh
   expect(agent.sessions.list().sessions.some((item) => item.state === "starting")).toBe(true);
   process.kill(agent.sessions.recorder.pid!, "SIGKILL");
   await expect.poll(() => agent.sessions.list().sessions.length === 1, pollOptions).toBe(true);
+  Object.assign(limits, { interactionTimeout: originalInteractionTimeout });
   const session = await agent.sessions.create({ workspaceId: workspace.id }, signal);
+  expect(session.webStatus).toBe("available");
+  Object.assign(limits, interactionTimeoutOverrides.stalled);
   process.kill(agent.sessions.recorder.pid!, "SIGSTOP");
-  const redraw = expect(
-    agent.dispatch("sessions.redraw", { workspaceId: workspace.id, sessionId: session.id }, signal),
-  ).rejects.toMatchObject({
+  const redraw = agent
+    .dispatch("sessions.redraw", { workspaceId: workspace.id, sessionId: session.id }, signal)
+    .catch((error: unknown) => error);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  await agent.close();
+  expect(await redraw).toMatchObject({
     code: "recording_unavailable",
     message: "Terminal recorder exited with signal SIGKILL",
     outcome: "unknown",
   });
-  await new Promise<void>((resolve) => setImmediate(resolve));
-  await agent.close();
-  await redraw;
   expect(agent.sessions.list().sessions).toEqual([]);
 }, 10000);
 
