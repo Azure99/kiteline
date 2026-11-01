@@ -544,8 +544,7 @@ export const zhCN = {
     exitFullscreen: "退出全屏",
     fullscreenFailed: "无法进入全屏",
     fullscreenExitFailed: "无法退出全屏",
-    expandKeys: "展开快捷键",
-    collapseKeys: "收起快捷键",
+    showKeyboard: "显示键盘",
     tooMuchOutput: "输出过多，无法全部朗读；请按行浏览。",
   },
   files: {

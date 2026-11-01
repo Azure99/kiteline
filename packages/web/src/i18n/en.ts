@@ -558,8 +558,7 @@ export const en = {
     exitFullscreen: "Exit fullscreen",
     fullscreenFailed: "Fullscreen could not be opened",
     fullscreenExitFailed: "Fullscreen could not be closed",
-    expandKeys: "Expand terminal keys",
-    collapseKeys: "Collapse terminal keys",
+    showKeyboard: "Show keyboard",
     tooMuchOutput: "Too much output to announce. Navigate through the lines to read it.",
   },
   files: {

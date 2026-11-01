@@ -373,14 +373,17 @@ export function TerminalView({
         )}
       </div>
       <TerminalAuxKeys
-        terminal={terminal}
-        paneActive={paneActive}
         hidden={searchOpen && paneActive}
         available={state.status === "ready"}
         mobile={mobile}
         modifiers={modifiers}
         onKey={auxiliary}
         onToggleModifier={(key) => screens.current?.display?.toggleModifier(key)}
+        onShowKeyboard={() => {
+          terminal?.clearSelection();
+          screens.current?.display?.scrollToBottom();
+          input.current();
+        }}
       />
       <Dialog
         open={redrawDialog}
