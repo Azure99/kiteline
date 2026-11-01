@@ -57,6 +57,16 @@ export function TerminalSearch({
         selecting = false;
       }
     };
+    const host = terminal.element!.parentElement!;
+    let viewportHeight = host.clientHeight;
+    const viewportChanged = () => {
+      const height = host.clientHeight;
+      const shrank = height < viewportHeight;
+      viewportHeight = height;
+      if (shrank && ownsSelection && document.activeElement === inputRef.current)
+        revealTerminalSelection(terminal);
+    };
+    window.addEventListener("kiteline:viewport", viewportChanged);
     const resize = terminal.onResize(() => setFound(undefined));
     // The addon caches lines without distinguishing the active buffer.
     const buffer = terminal.buffer.onBufferChange(() => {
@@ -69,12 +79,13 @@ export function TerminalSearch({
     return () => {
       search.current = () => {};
       selection.dispose();
+      window.removeEventListener("kiteline:viewport", viewportChanged);
       resize.dispose();
       buffer.dispose();
       clearSelection();
       addon.dispose();
     };
-  }, [terminal]);
+  }, [terminal, inputRef]);
   return (
     <div
       role="search"

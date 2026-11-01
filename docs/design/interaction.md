@@ -113,7 +113,7 @@ Git 浏览选择与当前正文分开，勾选不改变正文。打开源文件�
 - **打开文件正文。** 在文件树、搜索结果或 Git 文件行按无修饰键的 Enter，打开后焦点移到工作页区域，不自动进入编辑器。Space 和指针沿用普通打开行为。
 - **操作按钮焦点。** Git 提交、远程操作和草稿保存按钮禁用时仍留在 Tab 顺序中（`focusableWhenDisabled`），以保留操作后的焦点。
 - **保持编辑焦点。** 需要保持输入的终端或编辑器按钮在 `pointerdown` 时调用 `preventDefault()`，点击不会夺走终端或编辑器的焦点，手机软键盘也不会因此收起。终端专注按钮不夺焦，文件专注按钮按普通点击取焦。
-- **软键盘与视口高度。** 工作台主体始终占满可见区域，底部操作不被软键盘遮住。`trackViewport()`（`packages/web/src/lib/viewport.ts`）根据 `visualViewport` 和 VirtualKeyboard API 写入 `--app-height` 和 `--app-top`：能用 `dvh` 时取 `100dvh`，否则取测得的像素高度（Chromium 97 没有 `dvh`）。终端的软键盘和输入规则见[终端](terminal.md#输入)。
+- **软键盘与视口高度。** `trackViewport()`（`packages/web/src/lib/viewport.ts`）根据 `visualViewport` 和 VirtualKeyboard API，为工作台与对话框写入可见像素高度 `--app-height` 和顶部偏移 `--app-top`。高度缩小时，普通输入框通过浏览器滚动显现；CodeMirror 仅在编辑器持焦时显现当前选区，终端搜索仅在仍拥有匹配选区且搜索框持焦时显现匹配。xterm 的输入和阅读位置由自身终端适配处理，见[终端](terminal.md#输入)。
 - **触控。** 窄布局加大按钮和输入框，尺寸见[尺寸](#尺寸)。
 - **终端菜单。** 桌面正文右键仅处理当前正文的复制、粘贴与全选；手机正文长按仍选字。标签右键与选择器行更多管理所指会话，区域更多处理当前显示的搜索、字体、分屏及区域设置。分屏身份由标签活动态表示，分隔条保留键盘焦点反馈。
 - **剪贴板。** 复制统一使用 `copyText()`（`packages/web/src/lib/clipboard.ts`），没有 Clipboard API 时也能在本次用户操作中复制，并恢复原焦点和选区。复制失败时调用方就地显示错误，原文保留供手动选择。终端的粘贴按钮只在 `navigator.clipboard.readText` 可用时显示，不预先请求权限。是否可用按 API 能力判断，不按访问协议判断。
@@ -148,7 +148,7 @@ Git 浏览选择与当前正文分开，勾选不改变正文。打开源文件�
 ### 尺寸
 
 - 复用 `packages/web/src/components/ui/` 的按钮、输入框和对话框尺寸。窄布局的按钮和输入框最小高度为 44 像素，终端搜索输入框为 36 像素；输入框字号为 16 像素。
-- 登录页、错误页和对话框使用 `--viewport-height`；工作台主体使用 `trackViewport()` 写入的 `--app-height` 和 `--app-top`，见[输入与焦点](#输入与焦点)。
+- 登录页和错误页使用 `--viewport-height`；工作台主体与对话框使用 `trackViewport()` 写入的 `--app-height` 和 `--app-top`，尚未开始跟踪时回退到 CSS 视口高度，见[输入与焦点](#输入与焦点)。
 
 ### 状态与焦点
 
@@ -157,4 +157,4 @@ Git 浏览选择与当前正文分开，勾选不改变正文。打开源文件�
 
 ### 动效
 
-对话框、菜单和 tooltip 使用短时透明度和小幅位移过渡。系统设置 `prefers-reduced-motion: reduce` 时，关闭这些过渡和按钮颜色过渡；工具内容区和终端容器的尺寸变化不做动画。
+对话框、菜单和 tooltip 使用短时透明度和小幅位移过渡。不支持独立 `translate` 的浏览器中，对话框只使用透明度过渡，避免响应式定位参与动画。系统设置 `prefers-reduced-motion: reduce` 时，关闭这些过渡和按钮颜色过渡；工具内容区和终端容器的尺寸变化不做动画。

@@ -8,6 +8,7 @@ import {
 } from "@codemirror/state";
 import {
   EditorView,
+  ViewPlugin,
   drawSelection,
   highlightActiveLine,
   keymap,
@@ -47,6 +48,22 @@ const restoreHorizontalScroll = EditorView.scrollHandler.of((view, range, option
     },
   });
   return false;
+});
+
+// CodeMirror remeasures a resized editor, but only explicit scroll requests reveal its selection.
+const revealAfterResize = ViewPlugin.define(() => ({ height: 0 }), {
+  provide: (plugin) =>
+    EditorView.updateListener.of((update) => {
+      if (!update.geometryChanged) return;
+      const state = update.view.plugin(plugin)!;
+      const height = update.view.scrollDOM.clientHeight;
+      const shrank = height < state.height;
+      state.height = height;
+      if (shrank && update.view.hasFocus)
+        update.view.dispatch({
+          effects: EditorView.scrollIntoView(update.state.selection.main),
+        });
+    }),
 });
 
 export const editorTheme = EditorView.theme({
@@ -98,6 +115,7 @@ export function textState(
     extensions: [
       editorTheme,
       restoreHorizontalScroll,
+      revealAfterResize,
       editorAppearance.of([]),
       lineNumbers(),
       editorHistory.of(history()),

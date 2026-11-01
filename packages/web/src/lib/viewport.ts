@@ -17,7 +17,6 @@ export const prepareKeyboard = () => {
 
 // Workbench owns these listeners; terminal displays read the same keyboard-height decision.
 export function trackViewport() {
-  const dynamicViewport = CSS.supports("height", "100dvh");
   const viewport = window.visualViewport;
   const keyboard = virtualKeyboard;
   let width = viewport?.width ?? window.innerWidth;
@@ -25,6 +24,8 @@ export function trackViewport() {
   let fullscreen = !!document.fullscreenElement;
   let fullHeight = viewport?.height ?? window.innerHeight;
   const fullHeights = new Map([[fullscreen, { width, scale, height: fullHeight }]]);
+  let visibleHeight = fullHeight;
+  let revealFrame = 0;
   const resize = () => {
     const nextWidth = viewport?.width ?? window.innerWidth;
     const nextScale = viewport?.scale ?? 1;
@@ -73,12 +74,20 @@ export function trackViewport() {
     width = nextWidth;
     scale = nextScale;
     fullscreen = nextFullscreen;
-    document.documentElement.style.setProperty(
-      "--app-height",
-      dynamicViewport && nextScale === 1 && top === 0 && !occluded ? "100dvh" : `${height}px`,
-    );
+    document.documentElement.style.setProperty("--app-height", `${height}px`);
     document.documentElement.style.setProperty("--app-top", `${top}px`);
     window.dispatchEvent(new Event("kiteline:viewport"));
+    if (
+      height < visibleHeight &&
+      (focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement) &&
+      !focused.closest(".xterm")
+    ) {
+      cancelAnimationFrame(revealFrame);
+      revealFrame = requestAnimationFrame(() => {
+        if (document.activeElement === focused) focused.scrollIntoView({ block: "nearest" });
+      });
+    }
+    visibleHeight = height;
   };
   resize();
   viewport?.addEventListener("resize", resize);
@@ -88,6 +97,7 @@ export function trackViewport() {
   document.addEventListener("focusin", resize);
   document.addEventListener("fullscreenchange", resize);
   return () => {
+    cancelAnimationFrame(revealFrame);
     viewport?.removeEventListener("resize", resize);
     viewport?.removeEventListener("scroll", resize);
     keyboard?.removeEventListener("geometrychange", resize);

@@ -175,8 +175,8 @@ body {
     var(--tw-shadow, 0 0 #0000);
 }
 .dialog-content {
-  max-height: min(calc(var(--viewport-height) * 0.85), 760px);
-  top: 50%;
+  max-height: min(calc(var(--app-height, var(--viewport-height)) * 0.85), 760px);
+  top: calc(var(--app-top, 0px) + var(--app-height, var(--viewport-height)) * 0.5);
   left: 50%;
   transform: translate(-50%, -50%);
   transition:
@@ -218,9 +218,8 @@ body {
 }
 @supports not (translate: 0 1px) {
   .dialog-content {
-    transition:
-      opacity 160ms ease-out,
-      transform 160ms ease-out;
+    /* Layout transforms must not animate across responsive breakpoints. */
+    transition: opacity 160ms ease-out;
   }
   .menu-content {
     transition:
@@ -235,14 +234,6 @@ body {
   .menu-content:is([data-starting-style], [data-ending-style]),
   .tooltip-content:is([data-starting-style], [data-ending-style]) {
     transform: translateY(-2px);
-  }
-  .dialog-content:is([data-starting-style], [data-ending-style]) {
-    transform: translate(-50%, -50%) translateY(4px);
-  }
-  @variant max-desk {
-    .dialog-content:is([data-starting-style], [data-ending-style]) {
-      transform: translateY(8px);
-    }
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -625,13 +616,13 @@ body {
 }
 @variant max-desk {
   .dialog-content {
-    top: auto;
-    bottom: 0;
+    top: calc(var(--app-top, 0px) + var(--app-height, var(--viewport-height)));
+    bottom: auto;
     left: 0;
-    transform: none;
+    transform: translateY(-100%);
     width: 100%;
     max-width: 100%;
-    max-height: calc(var(--viewport-height) * 0.9);
+    max-height: calc(var(--app-height, var(--viewport-height)) * 0.9);
     border-bottom: 0;
     border-radius: 8px 8px 0 0;
     padding-bottom: env(safe-area-inset-bottom);
