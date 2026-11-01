@@ -290,7 +290,7 @@ export const en = {
     forbidden: "This request is not allowed.",
     not_found: "The requested item is unavailable.",
     invalid_argument: "Check the supplied values.",
-    offline: "The device is offline.",
+    offline: "The connection is unavailable.",
     version_mismatch: "The versions do not match. Use the server's matching release.",
     busy: "The resource is busy.",
     timeout: "The operation timed out.",

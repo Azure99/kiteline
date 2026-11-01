@@ -68,7 +68,7 @@ agent 启动 tmux 时设置 `TERMINFO_DIRS`，依次为随包现代目录、随�
 ### 系统保护
 
 - Gatekeeper：本仓库构建的 tmux、`flock` 和文件辅助程序没有经过 Apple 公证。接入命令和升级命令使用 curl 下载，文件不带隔离属性 `com.apple.quarantine`；浏览器下载的发布包带有隔离属性，运行随包程序时 macOS 可能以无法验证开发者为由拒绝。处理方法见[手工安装](../guide/devices.md#手工安装)。
-- 隐私保护（TCC）：“桌面”“文稿”“下载”等受保护目录可能拒绝 agent 访问，文件和 Git 操作报告 `Operation not permitted`。在“终端”App 中前台运行时，系统以“终端”的名义请求授权；作为 LaunchDaemon 运行时没有授权提示，访问直接失败。
+- 隐私保护（TCC）：“桌面”“文稿”“下载”等受保护目录可能拒绝 agent 访问，文件和 Git 操作报告 `Operation not permitted`。在“终端”App 中前台运行时，系统可能以“终端”的名义请求授权；LaunchDaemon 不继承“终端”的授权。项目用户已登录桌面时，系统也可能以 `node` 的名义请求目录访问授权。
 
 ## Windows
 

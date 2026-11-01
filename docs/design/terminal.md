@@ -80,7 +80,7 @@ recorder 为每个会话保存一个检查点和其后的完整尾段：
 - 只在模型写完一批输出且解析器空闲（ground，即不在未结束的控制序列中）时生成检查点。尾段达到 `terminalCheckpointIntervalBytes` 后，在下一个空闲点生成新检查点并清空尾段。
 - 尾段超过 `terminalRecoveryTailBytes` 时丢弃检查点和尾段，之后的附着要等解析器回到空闲状态。
 - 序列化结果超过 `terminalSnapshotBytes` 时把滚屏行数减半重试，并给这份副本标记 `historyLimited`；滚屏为 0 仍超过时返回 `limit_exceeded`。缩短只影响这份副本，不改变模型中的历史。
-- 序列化在 recorder 的单个线程中同步执行，同一 recorder 的其他会话会短暂停顿。
+- 序列化在 recorder 的单个线程中同步执行，成本随保留行数、列宽和属性变化增加；大量历史或密集着色输出可能导致秒级停顿。期间同一 recorder 的网页输出、网页输入和短 CLI 输入会等待。
 
 `historyLines`（界面“新会话滚屏行数”，范围见[限额](../guide/reference.md#限额)）在创建时写入会话，同时决定 tmux 的 `history-limit`、recorder 模型和网页 xterm.js 的滚屏行数；修改设置只影响之后新建的会话。tmux 的历史服务远程 TTY 客户端，recorder 的历史服务网页，两者各自淘汰旧行。网页的两种提示：
 

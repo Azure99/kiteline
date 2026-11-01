@@ -121,7 +121,7 @@ Leaving fullscreen restores the normal layout. Settings on other pages and the p
 
 Terminal search covers currently loaded display content, including history, without case sensitivity. On desktop and phone, choose Search terminal from the terminal area menu to reveal the current pane and search it. The search bar shows the target session name, and its controls wrap in narrow areas. The current terminal's auxiliary keys are hidden during search and return when it closes, letting you continue typing; ended sessions still support history navigation. An actual grid size change keeps the query and clears the search result status; press Enter to search again.
 
-"Scrollback lines for new sessions" in "Terminal settings" controls the history retained per session (range in [Limits](reference.en.md#limits)). It affects only sessions created afterward.
+"Scrollback lines for new sessions" in "Terminal settings" controls the history retained per session (range in [Limits](reference.en.md#limits)). It affects only sessions created afterward. Increasing it makes terminal loading, reconnection, and heavy output processing slower and can pause other web terminals on the same device. If you need less history, lower it and create a new session.
 
 A session has one row/column size, determined by the client that most recently typed or resized its window. Other clients reflow to it. Opening the phone keyboard does not resize the session. An actual grid size change clears each display's selection and keeps the content you were reading in view. Near the bottom, the viewport adjusts to the available scroll range; if that content has been trimmed from history, it shows the earliest retained content.
 
@@ -158,6 +158,8 @@ The list refreshes automatically when other programs change files, and periodica
 ### Open and edit
 
 Press Enter on a file tree, search result or Git file row to open it and move focus to the Work pages region.
+
+In the editor, Tab indents; press Escape, then immediately press Tab or Shift+Tab to leave. Ctrl+M (Shift+Alt+M on macOS) toggles Tab focus mode.
 
 PNG, JPEG, GIF and WebP images are detected by content and previewed; images exceeding preview byte or pixel limits can only be downloaded. Other files open as UTF-8 text. Files containing NUL bytes, invalid UTF-8 or content exceeding editing limits (see [Limits](reference.en.md#limits)) can be downloaded but not edited.
 
@@ -198,7 +200,8 @@ Drafts are kept only in the current page's memory:
 - They survive switching files, tools, workspaces and devices. "Open files" lets you find open drafts across all devices. A dot marks unsaved drafts in file tabs and "Open files".
 - Closing a file tab with unsaved content offers Cancel, Discard changes, or Save and close. Empty unnamed drafts close directly.
 - With unsaved changes, the browser prompts before reloading, navigating away, or closing the page. Confirming that you want to leave loses the drafts. On mobile, the prompt may be skipped when you close the app or the system discards the page.
-- If a device goes offline or a device/workspace is deleted, content remains viewable and copyable, but cannot be saved to its original location.
+- While a device is offline, you can still edit, undo and copy. Save after it comes back online.
+- After a device or workspace is deleted, you can still edit, undo and copy, but cannot save, save as or download. Use “Copy text” to create a file in another workspace.
 - If a workspace shows a render error, use "Back to devices" to continue navigating. If the entire workbench shows an error page, drafts held in memory cannot be recovered.
 
 ### Save conflicts

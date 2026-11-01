@@ -85,7 +85,7 @@ kiteline-agent run
 
 ### systemd
 
-在 Linux 上以项目用户（需要能使用 sudo）执行：
+在 Linux 上由有 sudo 权限的账户执行；替其他项目用户配置时，把 `$(id -un)` 换成项目用户名：
 
 ```sh
 sudo cp /opt/kiteline-agent/deploy/kiteline-agent.service /etc/systemd/system/kiteline-agent.service
@@ -118,7 +118,7 @@ sudo systemctl start kiteline-agent
 
 ### launchd
 
-在 macOS 上以项目用户（管理员）执行。示例是一个系统级 LaunchDaemon，以项目用户运行 agent：
+在 macOS 上由管理员执行；替其他项目用户配置时，把 `$(id -un)` 换成项目用户名。示例是一个系统级 LaunchDaemon，以项目用户运行 agent：
 
 ```sh
 sudo cp /opt/kiteline-agent/deploy/kiteline-agent.plist /Library/LaunchDaemons/com.kiteline.agent.plist
@@ -135,7 +135,7 @@ plutil -lint /Library/LaunchDaemons/com.kiteline.agent.plist
 sudo launchctl bootstrap system /Library/LaunchDaemons/com.kiteline.agent.plist
 ```
 
-agent 立即启动，以后每次开机自动启动；它异常退出时 launchd 不会重新启动它。日志写在 `~/.local/share/kiteline-agent/launchd.log` 和 `launchd-error.log`。后台运行的 agent 可能被 macOS 的隐私保护拒绝访问“桌面”“文稿”“下载”等目录，项目目录请放在这些目录之外。
+agent 立即启动，以后每次开机自动启动；它异常退出时 launchd 不会重新启动它。日志写在项目用户主目录中的 `~/.local/share/kiteline-agent/launchd.log` 和 `launchd-error.log`。后台运行的 agent 可能被 macOS 的隐私保护拒绝访问“桌面”“文稿”“下载”等目录，项目目录请放在这些目录之外。
 
 停止和启动：
 
@@ -360,7 +360,7 @@ agent 访问 server 的流量（绑定请求，以及控制和数据 WebSocket �
 - Linux 和 macOS 上，小写变量优先于大写变量：残留的 `https_proxy` 会覆盖你新设置的 `HTTPS_PROXY`。Windows 的环境变量名不区分大小写。
 - 代理地址必须以 `http://` 或 `https://` 开头，其他协议（例如 `socks5://`）会报 `Agent environment proxy must use HTTP or HTTPS`。省略协议时，agent 按 server 地址的协议补全，例如 `HTTPS_PROXY=proxy.example.com:3128` 会被当作 `https://proxy.example.com:3128`，通常连接失败，所以始终写明 `http://`。
 - 代理必须允许 CONNECT 到 server 的主机和端口；server 地址是 `http://` 时也使用 CONNECT。有些代理默认只允许 CONNECT 到 443 端口，server 使用其他端口时要调整代理设置。
-- `no_proxy` 用逗号或空格分隔；`*` 表示全部直连；以 `.` 或 `*` 开头的项按后缀匹配（`.example.com` 匹配 `kiteline.example.com`）；可以带 `:端口`；不支持 CIDR 网段。
+- `no_proxy` 用逗号或空格分隔；`*` 表示全部直连；以 `.` 或 `*` 开头的项按后缀匹配（`.example.com` 匹配 `kiteline.example.com`）；可以带 `:端口`；不支持 CIDR 网段。server 地址使用 `localhost`、`127.0.0.1` 或 `[::1]` 时也按代理变量连接；需要直连时，把对应主机（IPv6 项保留方括号，例如 `[::1]`）加入 `no_proxy`，否则绑定、控制和数据连接也会经过代理。
 
 前台运行时，在执行接入命令或 `kiteline-agent run` 的同一个 Shell 中设置变量：
 

@@ -285,7 +285,7 @@ export const zhCN = {
     forbidden: "该请求未获允许。",
     not_found: "所需项目不可用。",
     invalid_argument: "请检查输入内容。",
-    offline: "设备已离线。",
+    offline: "连接不可用。",
     version_mismatch: "版本不匹配，请使用与 server 配套的版本。",
     busy: "资源正忙。",
     timeout: "操作已超时。",

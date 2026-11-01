@@ -85,7 +85,7 @@ The service environment differs from your login shell:
 
 ### systemd
 
-On Linux, run as the project user with sudo access:
+On Linux, run from an account with sudo access. When configuring another project user, replace `$(id -un)` with that username:
 
 ```sh
 sudo cp /opt/kiteline-agent/deploy/kiteline-agent.service /etc/systemd/system/kiteline-agent.service
@@ -118,7 +118,7 @@ sudo systemctl start kiteline-agent
 
 ### launchd
 
-On macOS, run as the project user, who must be an administrator. The example is a system LaunchDaemon running the agent as the project user:
+On macOS, run as an administrator. When configuring another project user, replace `$(id -un)` with that username. The example is a system LaunchDaemon running the agent as the project user:
 
 ```sh
 sudo cp /opt/kiteline-agent/deploy/kiteline-agent.plist /Library/LaunchDaemons/com.kiteline.agent.plist
@@ -135,7 +135,7 @@ plutil -lint /Library/LaunchDaemons/com.kiteline.agent.plist
 sudo launchctl bootstrap system /Library/LaunchDaemons/com.kiteline.agent.plist
 ```
 
-The agent starts immediately and at every boot. launchd does not restart it after an abnormal exit. Logs go to `~/.local/share/kiteline-agent/launchd.log` and `launchd-error.log`. macOS privacy controls may deny a background agent access to Desktop, Documents and Downloads; keep project directories outside them.
+The agent starts immediately and at every boot. launchd does not restart it after an abnormal exit. Logs go to `~/.local/share/kiteline-agent/launchd.log` and `launchd-error.log` under the project user's home directory. macOS privacy controls may deny a background agent access to Desktop, Documents and Downloads; keep project directories outside them.
 
 To stop and start:
 
@@ -360,7 +360,7 @@ Agent traffic to the server (binding requests and control/data WebSocket connect
 - On Linux and macOS, lowercase variables take precedence: a leftover `https_proxy` overrides a newly set `HTTPS_PROXY`. Windows environment variable names are case-insensitive.
 - Proxy addresses must start with `http://` or `https://`; other schemes, such as `socks5://`, produce `Agent environment proxy must use HTTP or HTTPS`. Without a scheme, the agent uses the server address's scheme. For example, `HTTPS_PROXY=proxy.example.com:3128` becomes `https://proxy.example.com:3128`, which usually fails to connect, so always write `http://` explicitly.
 - The proxy must allow CONNECT to the server's host and port, even for an `http://` server address. Some proxies allow CONNECT only to port 443 by default; adjust them for other server ports.
-- Separate `no_proxy` entries with commas or spaces. `*` bypasses the proxy for everything. Entries starting with `.` or `*` match suffixes (`.example.com` matches `kiteline.example.com`). An entry can include `:port`. CIDR networks are not supported.
+- Separate `no_proxy` entries with commas or spaces. `*` bypasses the proxy for everything. Entries starting with `.` or `*` match suffixes (`.example.com` matches `kiteline.example.com`). An entry can include `:port`. CIDR networks are not supported. Server addresses using `localhost`, `127.0.0.1` or `[::1]` also use the proxy variables. Add the corresponding host to `no_proxy`, preserving square brackets for IPv6 (for example, `[::1]`) when it must connect directly; otherwise binding and control/data connections also pass through the proxy.
 
 For foreground use, set variables in the same shell where you run the install command or `kiteline-agent run`:
 
