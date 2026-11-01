@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Columns2, FilePenLine, RefreshCw, Rows2 } from "lucide-react";
 import { DiffView, type DiffTarget } from "../git/diff-view";
 import type { Repo } from "@kiteline/shared/protocol";
+import { FileIcon } from "../components/file-icon";
 import { GitFilePath } from "../git/view-header";
 import { ErrorNotice } from "../components/error-notice";
 import type { useRepos } from "../git/use-repos";
@@ -75,7 +76,7 @@ export function DiffPageView({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-1 border-b border-border px-2 text-xs">
-        <div className="flex min-w-0 flex-1 basis-32 items-center gap-2">
+        <div className="flex min-w-0 flex-1 basis-32 items-center gap-2 max-desk:contents">
           <span
             className="max-w-[50%] overflow-x-auto whitespace-nowrap text-muted-foreground"
             tabIndex={0}
@@ -83,8 +84,22 @@ export function DiffPageView({
           >
             {page.repoPath === "." ? t(($) => $.git.workspaceRoot) : page.repoPath}
           </span>
-          <span aria-hidden="true">/</span>
-          <GitFilePath path={page.target.path} title={`${page.repoPath} / ${page.target.path}`} />
+          <span className="max-desk:hidden" aria-hidden="true">
+            /
+          </span>
+          {mobile ? (
+            <span
+              className="order-first flex min-w-0 basis-full items-start gap-2"
+              title={`${page.repoPath} / ${page.target.path}`}
+            >
+              <FileIcon path={page.target.path} />
+              <span className="max-h-20 min-w-0 flex-1 overflow-y-auto break-all" tabIndex={0}>
+                {page.target.path}
+              </span>
+            </span>
+          ) : (
+            <GitFilePath path={page.target.path} title={`${page.repoPath} / ${page.target.path}`} />
+          )}
         </div>
         <span className="shrink-0 text-muted-foreground">{source}</span>
         <div className="ml-auto flex shrink-0 items-center gap-1">

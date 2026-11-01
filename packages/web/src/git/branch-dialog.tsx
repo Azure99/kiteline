@@ -76,6 +76,9 @@ export function BranchDialog({
                 value={name}
                 disabled={!!activity.request}
                 onChange={(event) => setName(event.target.value)}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
               />
             </label>
             {startOid && (

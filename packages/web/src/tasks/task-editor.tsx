@@ -291,6 +291,9 @@ export function TaskEditor({
                   <Input
                     className="font-mono"
                     value={form.cron}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
                     required
                     onChange={(e) => setForm({ ...form, cron: e.target.value })}
                   />
@@ -332,6 +335,9 @@ export function TaskEditor({
                     <span>{t(($) => $.schedules.cwd)}</span>
                     <Input
                       value={cwd}
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
                       placeholder={t(($) => $.schedules.home)}
                       onChange={(e) => setCwd(e.target.value)}
                     />
@@ -355,6 +361,9 @@ export function TaskEditor({
                     <span>{t(($) => $.schedules.timezone)}</span>
                     <Input
                       value={timezone}
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
                       placeholder={preview?.timezone ?? t(($) => $.schedules.deviceTimezone)}
                       onChange={(e) => setTimezone(e.target.value)}
                     />

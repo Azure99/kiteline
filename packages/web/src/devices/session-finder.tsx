@@ -124,6 +124,9 @@ export function SessionFinder({
             aria-label={t(($) => $.devices.filterSessions)}
             placeholder={t(($) => $.devices.filterSessionsHint)}
             value={query}
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             onChange={(event) => setQuery(event.target.value)}
           />
           {observation && matches?.length === 0 && (

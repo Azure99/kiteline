@@ -194,10 +194,14 @@ export function DirectoryDialog({
             </IconButton>
             <Input
               aria-label={t(($) => $.devices.absolutePath)}
-              disabled={busy}
+              disabled={!environmentAvailable}
+              readOnly={reading || writing}
               value={input}
               onChange={(event) => setInput(event.target.value)}
               autoComplete="off"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
             />
             <IconButton label={t(($) => $.devices.goDirectory)} disabled={busy} type="submit">
               <ArrowRight />
@@ -233,9 +237,13 @@ export function DirectoryDialog({
             >
               <Input
                 aria-label={t(($) => $.devices.newDirectoryName)}
-                disabled={busy}
+                disabled={!environmentAvailable}
+                readOnly={reading || writing}
                 value={newName}
                 onChange={(event) => setNewName(event.target.value)}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 autoFocus
               />
               <Button type="submit" disabled={busy}>

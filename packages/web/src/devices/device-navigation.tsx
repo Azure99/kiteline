@@ -102,6 +102,9 @@ export function DeviceNavigation({
             ref={input}
             autoFocus
             value={query}
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             aria-label={t(($) => $.devices.filterWorkspaces)}
             placeholder={t(($) => $.devices.filterWorkspacesHint)}
             className="min-w-0 text-xs"

@@ -176,6 +176,8 @@ export function FileSearch({
             ref={input}
             aria-label={t(($) => $.files.searchQuery)}
             autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             value={query}
             onChange={(event) => {
               resetSearch();

@@ -73,6 +73,9 @@ export function Auth({ initialized, onLogin }: { initialized: boolean; onLogin: 
                 <span className="block">{t(($) => $.auth.setupToken)}</span>
                 <Input
                   name="setupToken"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   required
                   autoComplete="off"
                   autoFocus

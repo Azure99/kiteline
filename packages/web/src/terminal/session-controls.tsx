@@ -65,7 +65,10 @@ export function SessionPicker({
         >
           <SquareTerminal />
           <span className="flex min-w-0 flex-1 flex-col">
-            <span className="max-w-60 truncate" title={name(id)}>
+            <span
+              className="max-w-60 truncate max-desk:break-all max-desk:whitespace-normal"
+              title={name(id)}
+            >
               {name(id)}
             </span>
             {report && <ReportSummary report={report} />}

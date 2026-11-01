@@ -146,10 +146,20 @@ export function RunDetail({
       className="flex min-h-0 flex-1 flex-col"
     >
       <div className="scroll-area max-h-[45%] shrink-0 space-y-2 overflow-auto border-b border-border p-4">
+        {/* State and actions first: low-height layouts may show only the top of this scroll area. */}
         <div className="flex flex-wrap items-center gap-2">
-          <span className="min-w-0 flex-1 break-all text-xs text-muted-foreground">
-            {t(($) => $.schedules.runId)}: {runId}
-          </span>
+          <div className="flex min-w-0 flex-1 flex-wrap gap-x-3 text-sm">
+            {run && (
+              <>
+                <strong>{t(($) => $.schedules[`state_${run.state}`])}</strong>
+                <span>{t(($) => $.schedules[run.trigger])}</span>
+                {run.exitCode != null && (
+                  <span>{t(($) => $.schedules.exit, { code: run.exitCode })}</span>
+                )}
+                {run.signal && <span>{t(($) => $.schedules.signal, { signal: run.signal })}</span>}
+              </>
+            )}
+          </div>
           <IconButton
             label={t(($) => $.common.refresh)}
             disabled={!online}
@@ -164,17 +174,12 @@ export function RunDetail({
             </Button>
           )}
         </div>
+        <p className="break-all text-xs text-muted-foreground">
+          {t(($) => $.schedules.runId)}: {runId}
+        </p>
         {run && (
           <>
             <h2 className="break-words text-base font-semibold">{run.parameters.name}</h2>
-            <div className="flex flex-wrap gap-3 text-sm">
-              <strong>{t(($) => $.schedules[`state_${run.state}`])}</strong>
-              <span>{t(($) => $.schedules[run.trigger])}</span>
-              {run.exitCode != null && (
-                <span>{t(($) => $.schedules.exit, { code: run.exitCode })}</span>
-              )}
-              {run.signal && <span>{t(($) => $.schedules.signal, { signal: run.signal })}</span>}
-            </div>
             <div className="space-y-1 text-xs text-muted-foreground">
               <p>
                 {t(($) => $.schedules.accepted)}: {taskTime(run.acceptedAt, i18n.resolvedLanguage)}

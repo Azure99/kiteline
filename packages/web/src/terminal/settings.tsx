@@ -189,6 +189,9 @@ export function TerminalSettings({ device, onClose }: { device: Device; onClose:
                   <Textarea
                     className="min-h-24 px-3 py-2 font-mono max-desk:min-h-24"
                     value={editing.command ?? ""}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
                     required
                     maxLength={limits.shortcutCommandLength}
                     disabled={busy}
