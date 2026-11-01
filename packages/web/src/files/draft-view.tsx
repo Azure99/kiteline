@@ -188,6 +188,7 @@ export function DraftView({
           )}
           <IconButton
             label={t(($) => $.files.saveFile)}
+            focusableWhenDisabled
             disabled={!store.canSave(draft) || !!unavailable}
             onClick={save}
           >

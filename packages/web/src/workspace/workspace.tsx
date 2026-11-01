@@ -124,10 +124,18 @@ export function Workspace({
   const [fileHeader, setFileHeader] = useState<HTMLDivElement | null>(null);
   const [fileSidebar, setFileSidebar] = useState<HTMLDivElement | null>(null);
   const rightToggle = useRef<HTMLButtonElement>(null);
+  const workPages = useRef<HTMLElement>(null);
+  const focusWorkPages = useRef(false);
+  useLayoutEffect(() => {
+    if (mobile || !focusWorkPages.current) return;
+    focusWorkPages.current = false;
+    workPages.current!.focus({ preventScroll: true });
+  });
   const [diffView, setDiffView] = useState<"unified" | "split">("unified");
   const pages = useWorkPages(store, memory, device.id, workspace.id);
 
-  function revealWorkPages() {
+  function revealWorkPages(focusContent = false) {
+    if (focusContent) focusWorkPages.current = true;
     setMobileTools(false);
     setPresentation((previous) => {
       let mode = previous.mode;
@@ -344,7 +352,9 @@ export function Workspace({
       className="work-page-panel flex min-h-0 min-w-0 flex-col"
     >
       <section
-        className="flex min-h-0 min-w-0 flex-1 flex-col"
+        ref={workPages}
+        className="flex min-h-0 min-w-0 flex-1 flex-col outline-none"
+        tabIndex={-1}
         aria-label={t(($) => $.shell.workPages)}
       >
         <WorkPages pages={pages} hidden={focusMode.active} />
@@ -465,7 +475,11 @@ export function Workspace({
             mobile={mobile}
             open={rightToolsVisible}
             onClose={() => setMobileTools(false)}
-            returnFocus={rightToggle}
+            returnFocus={() => {
+              if (!focusWorkPages.current) return rightToggle.current;
+              focusWorkPages.current = false;
+              return workPages.current;
+            }}
             label={t(($) => $.shell.workspaceTools)}
             className="workbench-tools flex min-h-0 shrink-0 flex-col border-l border-border bg-muted"
           >
@@ -519,9 +533,10 @@ export function Workspace({
                 setMobileTools(false);
                 selectContent("terminal");
               }}
-              onDiff={(repo, diff) => {
+              onOpenContent={revealWorkPages}
+              onDiff={(repo, diff, focusContent) => {
                 pages.openDiff(repo, diff);
-                revealWorkPages();
+                revealWorkPages(focusContent);
               }}
             />
           </EdgePanel>,

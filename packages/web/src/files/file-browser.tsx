@@ -69,7 +69,12 @@ export function FileBrowser({
   contentVisible: boolean;
   currentFile?: string;
   onOpenContent(): void;
-  onOpenFile(path: string, position?: TextLocation, keepSearch?: boolean): void;
+  onOpenFile(
+    path: string,
+    position?: TextLocation,
+    keepSearch?: boolean,
+    focusContent?: boolean,
+  ): void;
   observeContent(signal: AbortSignal): Promise<void>;
   store: DraftStore;
   onUpload(files: File[], folder: string): void;
@@ -207,9 +212,9 @@ export function FileBrowser({
     uploadFolder.current = path;
     fileInput.current?.click();
   }
-  function open(entry: Entry) {
+  function open(entry: Entry, focusContent = false) {
     setNotice(undefined);
-    onOpenFile(entry.path!);
+    onOpenFile(entry.path!, undefined, undefined, focusContent);
   }
   function download(path: string) {
     downloadFile({ deviceId: device.id, workspaceId: workspace.id, path });
@@ -346,11 +351,12 @@ export function FileBrowser({
           active={browsing && searching}
           disabled={!enabled}
           onBack={() => updateQuery({ search: undefined })}
-          onOpen={(match, query) => {
+          onOpen={(match, query, focusContent) => {
             onOpenFile(
               match.path,
               match.line ? { line: match.line, range: match.ranges?.[0], query } : undefined,
               true,
+              focusContent,
             );
           }}
         />

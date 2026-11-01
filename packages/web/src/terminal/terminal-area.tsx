@@ -482,7 +482,28 @@ export function TerminalArea({
           </IconButton>
         </div>
       )}
-      <div className={visible ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+      <div
+        className={visible ? "flex min-h-0 flex-1 flex-col" : "hidden"}
+        onKeyDownCapture={(event) => {
+          if (
+            event.key !== "F6" ||
+            !event.ctrlKey ||
+            !event.shiftKey ||
+            event.altKey ||
+            event.metaKey ||
+            !(event.target instanceof HTMLTextAreaElement) ||
+            !event.target.classList.contains("xterm-helper-textarea")
+          )
+            return;
+          event.preventDefault();
+          event.stopPropagation();
+          event.currentTarget
+            .querySelector<HTMLButtonElement>(
+              '.terminal-toolbar:not([hidden]) button:not([disabled]), [role="search"]:not([hidden]) button:not([disabled])',
+            )!
+            .focus();
+        }}
+      >
         <div className="flex shrink-0 items-start">
           <div ref={setMainSearchHost} className="relative min-w-0 flex-1">
             <div

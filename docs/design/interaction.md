@@ -110,6 +110,8 @@ Git 浏览选择与当前正文分开，勾选不改变正文。打开源文件�
 - **键盘。** 只有图标的按钮使用 `IconButton`（`packages/web/src/components/icon-button.tsx`），同时提供 `aria-label` 和 tooltip。对话框、菜单和 tooltip 基于 `@base-ui/react`：对话框打开时焦点进入对话框（需要时用 `initialFocus` 指向输入框），关闭后焦点回到触发元素；没有触发元素的对话框用 `finalFocus` 指定返回位置。分屏分隔条可以获得焦点。
 - **CLI 引导。** 接续流程保留本次设备、工作区、会话和平台选择。接续中的安装步骤关闭时回原命令，接续步骤关闭才退出；全局安装入口关闭直接退出。流程关闭或登录失效时丢弃本次上下文，不移焦终端输入。
 - **进入正文。** 页首 skip 入口和侧栏导航的明确键盘选择将焦点交给 main 正文，不自动交给终端输入。路由同步和报告到达不移焦正文，终端会话的明确键盘接手由[终端约定](terminal.md)处理。skip 不写 hash 或历史。
+- **打开文件正文。** 在文件树、搜索结果或 Git 文件行按无修饰键的 Enter，打开后焦点移到工作页区域，不自动进入编辑器。Space 和指针沿用普通打开行为。
+- **操作按钮焦点。** Git 提交、远程操作和草稿保存按钮禁用时仍留在 Tab 顺序中（`focusableWhenDisabled`），以保留操作后的焦点。
 - **保持编辑焦点。** 需要保持输入的终端或编辑器按钮在 `pointerdown` 时调用 `preventDefault()`，点击不会夺走终端或编辑器的焦点，手机软键盘也不会因此收起。终端专注按钮不夺焦，文件专注按钮按普通点击取焦。
 - **软键盘与视口高度。** 工作台主体始终占满可见区域，底部操作不被软键盘遮住。`trackViewport()`（`packages/web/src/lib/viewport.ts`）根据 `visualViewport` 和 VirtualKeyboard API 写入 `--app-height` 和 `--app-top`：能用 `dvh` 时取 `100dvh`，否则取测得的像素高度（Chromium 97 没有 `dvh`）。终端的软键盘和输入规则见[终端](terminal.md#输入)。
 - **触控。** 窄布局加大按钮和输入框，尺寸见[尺寸](#尺寸)。

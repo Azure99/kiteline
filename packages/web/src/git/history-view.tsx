@@ -33,7 +33,7 @@ interface Props {
   refreshKey: number;
   headOid?: string | null;
   target?: DiffTarget;
-  onTarget(target: DiffTarget): void;
+  onTarget(target: DiffTarget, focusContent?: boolean): void;
   selection: HistorySelection;
   onBranch?: (oid: string) => void;
 }
@@ -399,6 +399,21 @@ function CommitView({
               <button
                 key={`path:${file.path}`}
                 data-history-file={file.path}
+                onKeyDown={(event) => {
+                  if (
+                    event.key !== "Enter" ||
+                    event.ctrlKey ||
+                    event.altKey ||
+                    event.metaKey ||
+                    event.shiftKey
+                  )
+                    return;
+                  event.preventDefault();
+                  onTarget(
+                    { path: file.path!, side: "commit", commitOid: commit.oid, parentOid: parent },
+                    true,
+                  );
+                }}
                 onClick={() =>
                   onTarget({
                     path: file.path,

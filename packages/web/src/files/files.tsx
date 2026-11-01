@@ -36,7 +36,7 @@ export function Files({
   browsing: boolean;
   contentVisible: boolean;
   page?: FilePage;
-  onOpenContent(): void;
+  onOpenContent(focusContent?: boolean): void;
   onResolvePath(pageId: string, from: string, to: string): void;
   store: DraftStore;
   onUpload(files: File[], folder: string): void;
@@ -121,9 +121,9 @@ export function Files({
       {...{ device, workspace, browsing, contentVisible, store, onUpload, onOperation }}
       currentFile={page?.path}
       onOpenContent={onOpenContent}
-      onOpenFile={(path, position, keepSearch) => {
+      onOpenFile={(path, position, keepSearch, focusContent) => {
         if (position) setPending({ path, position });
-        onOpenContent();
+        onOpenContent(focusContent);
         showFile({ ...target, path }, undefined, keepSearch);
       }}
       observeContent={async (signal) => {

@@ -70,6 +70,7 @@ export function GitTool({
   store,
   actions,
   onDiff,
+  onOpenContent,
   onTerminal,
   activeDiff,
   saved,
@@ -81,8 +82,9 @@ export function GitTool({
   visible: boolean;
   store: DraftStore;
   actions: GitActions;
-  onDiff(repo: Repo, target: DiffTarget): void;
+  onDiff(repo: Repo, target: DiffTarget, focusContent?: boolean): void;
   onTerminal(): void;
+  onOpenContent(focusContent?: boolean): void;
   activeDiff?: { repoId: string; target: DiffTarget };
   saved: Map<string, GitBrowseState>;
   repositories: ReturnType<typeof useRepos>;
@@ -106,8 +108,9 @@ export function GitTool({
   function chooseRepo(id: string) {
     updateWorkspaceQuery({ deviceId: device.id, workspaceId: workspace.id }, { repo: id });
   }
-  function openFile(path: string) {
+  function openFile(path: string, focusContent = false) {
     if (!repo) return;
+    onOpenContent(focusContent);
     showFile({
       deviceId: device.id,
       workspaceId: workspace.id,
@@ -288,13 +291,13 @@ function RepoView({
   visible: boolean;
   enabled: boolean;
   ready: boolean;
-  onFile: (path: string) => void;
+  onFile: (path: string, focusContent?: boolean) => void;
   onLocate: (path: string) => void;
   actions: GitActions;
   store: DraftStore;
   picker: ReactNode;
   target?: DiffTarget;
-  onDiff(repo: Repo, target: DiffTarget): void;
+  onDiff(repo: Repo, target: DiffTarget, focusContent?: boolean): void;
   onTerminal(): void;
   saved: Map<string, GitBrowseState>;
 }) {
@@ -329,7 +332,7 @@ function RepoView({
   } = useRepoLayout(browsing, mobile);
   const [historyRefresh, setHistoryRefresh] = useState(0);
   const [branchesRefresh, setBranchesRefresh] = useState(0);
-  const selectTarget = (next: DiffTarget) => onDiff(repo, next);
+  const selectTarget = (next: DiffTarget, focusContent = false) => onDiff(repo, next, focusContent);
   const { value, selected, setSelected } = state;
   const [discarding, setDiscarding] = useState<{ paths: string[]; scope: DiscardScope }>();
   const [branchStart, setBranchStart] = useState<string>();

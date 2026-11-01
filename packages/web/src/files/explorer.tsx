@@ -29,7 +29,7 @@ import { formatBytes, unavailableEntryLabel } from "./format";
 export interface FileExplorerActions {
   savingWithin(path: string): boolean;
   openFolder(path: string): void;
-  openFile(entry: Entry): void;
+  openFile(entry: Entry, focusContent?: boolean): void;
   select(path: string): void;
   rename(entry: Entry): void;
   upload(path: string): void;
@@ -165,6 +165,19 @@ export function FileExplorer({
                       onClick={() =>
                         folder ? actions.openFolder(entry.path!) : actions.openFile(entry)
                       }
+                      onKeyDown={(event) => {
+                        if (
+                          event.key !== "Enter" ||
+                          event.ctrlKey ||
+                          event.altKey ||
+                          event.metaKey ||
+                          event.shiftKey ||
+                          folder
+                        )
+                          return;
+                        event.preventDefault();
+                        actions.openFile(entry, true);
+                      }}
                     >
                       {!mobile &&
                         folder &&

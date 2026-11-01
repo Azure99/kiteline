@@ -41,8 +41,8 @@ export function ChangeSection({
   hasUnsavedDraft: (path: string) => boolean;
   onIndex: (paths: string[], method: "stage" | "unstage") => void;
   onDiscard: (paths: string[], scope: DiscardScope) => void;
-  onFile: (path: string) => void;
-  onTarget: (target: DiffTarget) => void;
+  onFile: (path: string, focusContent?: boolean) => void;
+  onTarget: (target: DiffTarget, focusContent?: boolean) => void;
 }) {
   const { t, i18n } = useTranslation();
   const statusLabel = useGitStatusLabel();
@@ -155,6 +155,23 @@ export function ChangeSection({
                 ? onFile(entry.path)
                 : onTarget({ path: entry.path, side: side === "staged" ? "staged" : "worktree" })
             }
+            onKeyDown={(event) => {
+              if (
+                event.key !== "Enter" ||
+                event.ctrlKey ||
+                event.altKey ||
+                event.metaKey ||
+                event.shiftKey
+              )
+                return;
+              event.preventDefault();
+              if (side === "conflict") onFile(entry.path!, true);
+              else
+                onTarget(
+                  { path: entry.path!, side: side === "staged" ? "staged" : "worktree" },
+                  true,
+                );
+            }}
             className="flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left text-sm max-desk:min-h-11"
           >
             <GitFilePath path={entry.path} stacked title={description ? "" : entry.path} />

@@ -130,6 +130,8 @@ CLI 在目标检查和连接成功后才进入 raw 模式，以本机终端实�
 
 ## 输入
 
+Ctrl+Shift+F6 从终端输入移焦到工具栏，搜索打开时移到搜索操作区；该组合不发送给远端。Tab、Shift+Tab、Escape 和 Ctrl+M 仍发送给终端程序。
+
 ### 远程短命令
 
 `sessions.send` 与网页输入使用同一个 recorder 队列和 tmux 注入函数。一次请求是字面文本、粘贴（可附加 Enter）或一个具名按键，不能组合任意动作。粘贴使用与网页相同的规范化和 tmux bracketed paste，方向键按当前应用光标键模式编码。短命令不创建附着，退出不会触发 detach 删除。

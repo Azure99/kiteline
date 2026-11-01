@@ -45,7 +45,7 @@ export function FileSearch({
   active: boolean;
   disabled: boolean;
   onBack: () => void;
-  onOpen: (match: SearchMatch, query: string) => void;
+  onOpen: (match: SearchMatch, query: string, focusContent?: boolean) => void;
 }) {
   const { t } = useTranslation();
   const input = useRef<HTMLInputElement>(null);
@@ -219,6 +219,18 @@ export function FileSearch({
           <button
             key={index}
             onClick={() => onOpen(match, result.query)}
+            onKeyDown={(event) => {
+              if (
+                event.key !== "Enter" ||
+                event.ctrlKey ||
+                event.altKey ||
+                event.metaKey ||
+                event.shiftKey
+              )
+                return;
+              event.preventDefault();
+              onOpen(match, result.query, true);
+            }}
             className="block w-full border-b border-border px-4 py-3 text-left hover:bg-muted"
           >
             <span className="flex items-start gap-2 text-xs">

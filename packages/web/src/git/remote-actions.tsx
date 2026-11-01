@@ -73,6 +73,7 @@ export function RemoteActions({
               aria-label={menuLabel}
               title={menuLabel}
               disabled={disabled}
+              focusableWhenDisabled
             />
           }
         >
@@ -116,10 +117,20 @@ export function RemoteActions({
       </Menu>
       {!mobile && (
         <>
-          <IconButton label={pullLabel} disabled={disabled || !head} onClick={pull}>
+          <IconButton
+            label={pullLabel}
+            disabled={disabled || !head}
+            focusableWhenDisabled
+            onClick={pull}
+          >
             <ArrowDown />
           </IconButton>
-          <IconButton label={pushLabel} disabled={disabled || !head} onClick={push}>
+          <IconButton
+            label={pushLabel}
+            disabled={disabled || !head}
+            focusableWhenDisabled
+            onClick={push}
+          >
             <ArrowUp />
           </IconButton>
         </>

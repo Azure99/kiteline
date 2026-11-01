@@ -73,7 +73,7 @@ export function CommitBox({
     />
   );
   const button = (
-    <Button disabled={reason !== undefined} onClick={submit}>
+    <Button disabled={reason !== undefined} focusableWhenDisabled onClick={submit}>
       <Check />
       {t(($) => $.git.commit)}
     </Button>
@@ -82,7 +82,12 @@ export function CommitBox({
     <Dialog open={open} onOpenChange={setOpen}>
       {mobile ? (
         <div className="shrink-0 border-t border-border p-2">
-          <Button className="w-full" disabled={!available} onClick={() => setOpen(true)}>
+          <Button
+            className="w-full"
+            disabled={!available}
+            focusableWhenDisabled
+            onClick={() => setOpen(true)}
+          >
             <Check />
             {t(($) => $.git.commit)}
           </Button>

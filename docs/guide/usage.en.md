@@ -66,6 +66,8 @@ Terminal sessions keep running when you switch tools, workspaces or devices. Lea
 
 ## Terminal
 
+Press Ctrl+Shift+F6 in terminal input to move to the toolbar (or search actions when search is open), then use Tab to navigate the workbench. This combination is not sent to the remote program; normal Tab and Escape remain terminal input.
+
 Terminal sessions run on the device. Closing the page, losing the network, signing out, restarting the server or deleting the device does not end them. A session ends when its shell or shortcut command exits, you end it, the agent shuts down normally, or the device restarts. For abnormal exit, see [Clean up leftover terminal sessions](reference.en.md#clean-up-leftover-terminal-sessions). The same session can be open in multiple browsers and local terminals at once. All clients can type directly; simultaneous input is interleaved.
 
 If the terminal remains unresponsive, close displays of the same session that you are not using, then try again.
@@ -154,6 +156,8 @@ Handle names that are not valid UTF-8, FIFOs, sockets and device nodes in a term
 The list refreshes automatically when other programs change files, and periodically while the page is visible. During refresh, the current file adopts the disk version if it has no unsaved content; otherwise, the draft stays and indicates that the disk changed. Adopting different text clears the previous undo and redo history. If the device cannot watch directory changes, "Live updates limited" appears; periodic refresh remains available.
 
 ### Open and edit
+
+Press Enter on a file tree, search result or Git file row to open it and move focus to the Work pages region.
 
 PNG, JPEG, GIF and WebP images are detected by content and previewed; images exceeding preview byte or pixel limits can only be downloaded. Other files open as UTF-8 text. Files containing NUL bytes, invalid UTF-8 or content exceeding editing limits (see [Limits](reference.en.md#limits)) can be downloaded but not edited.
 
