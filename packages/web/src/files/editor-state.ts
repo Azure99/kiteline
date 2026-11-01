@@ -90,6 +90,24 @@ export const editorTheme = EditorView.theme({
     background: "var(--background)",
     borderColor: "var(--border)",
   },
+  "@media (max-width: 959px)": {
+    ".cm-panel.cm-search": {
+      display: "flex",
+      flexWrap: "wrap",
+      alignItems: "center",
+      paddingRight: "52px",
+    },
+    ".cm-panel.cm-search .cm-textfield": {
+      fontSize: "16px",
+      flex: "1 1 100px",
+      minWidth: "0",
+    },
+    // Browsers render br as a line break, so its flex-basis cannot separate the Replace row.
+    ".cm-panel.cm-search > br": { display: "none" },
+    ".cm-panel.cm-search::after": { content: '""', flexBasis: "100%" },
+    ".cm-panel.cm-search [name=replace], .cm-panel.cm-search [name=replaceAll]": { order: "1" },
+    ".cm-panel.cm-search [name=close]": { width: "44px", height: "44px" },
+  },
   ".cm-activeLine": { background: "var(--code-active)" },
   ".cm-searchMatch": { background: "var(--search-match)" },
   ".cm-searchMatch-selected": { outline: "1px solid var(--primary)" },
