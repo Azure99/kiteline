@@ -6,12 +6,14 @@ import { IconButton } from "./icon-button";
 export function FocusCycleButton({
   active,
   fullscreen,
+  next,
   enterFocusLabel,
   onClick,
   onPointerDown,
 }: {
   active: boolean;
   fullscreen: boolean;
+  next: "enterFocus" | "enterFullscreen" | "exitFocus";
   enterFocusLabel: string;
   onClick(): void;
   onPointerDown?: PointerEventHandler<HTMLButtonElement>;
@@ -19,10 +21,10 @@ export function FocusCycleButton({
   const { t } = useTranslation();
   let label = enterFocusLabel;
   let Glyph = Scan;
-  if (fullscreen) {
-    label = t(($) => $.terminal.exitFullscreen);
+  if (next === "exitFocus") {
+    label = t(($) => (fullscreen ? $.terminal.exitFullscreen : $.terminal.exitFocus));
     Glyph = Minimize;
-  } else if (active) {
+  } else if (next === "enterFullscreen") {
     label = t(($) => $.terminal.enterFullscreen);
     Glyph = Fullscreen;
   }

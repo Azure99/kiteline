@@ -553,6 +553,7 @@ export const en = {
     historyGapLimited: "Some history is missing and older history was reduced",
     inputLabel: "Terminal input",
     enterFocus: "Focus terminal",
+    exitFocus: "Exit focus",
     enterFullscreen: "Enter fullscreen",
     exitFullscreen: "Exit fullscreen",
     fullscreenFailed: "Fullscreen could not be opened",

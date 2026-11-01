@@ -34,6 +34,15 @@ export function useTerminalFocus(context: string | undefined, workspaceScope: st
     };
   }, []);
   const active = context !== undefined && target === context;
+  const canFullscreen =
+    document.fullscreenEnabled === true &&
+    typeof document.documentElement.requestFullscreen === "function";
+  const next: "enterFocus" | "enterFullscreen" | "exitFocus" =
+    fullscreen || (active && !canFullscreen)
+      ? "exitFocus"
+      : active
+        ? "enterFullscreen"
+        : "enterFocus";
   async function toggleFullscreen() {
     if (pending.current) return;
     pending.current = true;
@@ -61,7 +70,9 @@ export function useTerminalFocus(context: string | undefined, workspaceScope: st
     }
   }
   function toggle() {
-    if (active || fullscreen) {
+    if (next === "exitFocus") {
+      exit();
+    } else if (active) {
       void toggleFullscreen();
     } else {
       setTarget(context);
@@ -71,6 +82,8 @@ export function useTerminalFocus(context: string | undefined, workspaceScope: st
   return {
     active,
     fullscreen,
+    canFullscreen,
+    next,
     toggle,
     exit,
     toggleFullscreen,

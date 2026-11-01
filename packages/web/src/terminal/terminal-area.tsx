@@ -532,6 +532,7 @@ export function TerminalArea({
               <FocusCycleButton
                 active={focusMode.active}
                 fullscreen={focusMode.fullscreen}
+                next={focusMode.next}
                 enterFocusLabel={t(($) => $.terminal.enterFocus)}
                 onPointerDown={(event) => event.preventDefault()}
                 onClick={focusMode.toggle}

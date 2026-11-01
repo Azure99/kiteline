@@ -182,6 +182,7 @@ export function DraftView({
             <FocusCycleButton
               active={focusMode.active}
               fullscreen={focusMode.fullscreen}
+              next={focusMode.next}
               enterFocusLabel={t(($) => $.files.enterFocus)}
               onClick={focusMode.toggle}
             />
@@ -259,7 +260,7 @@ export function DraftView({
                 <FileOutput />
                 {t(($) => $.files.saveAs)}
               </MenuItem>
-              {focusMode && (
+              {focusMode && (focusMode.canFullscreen || focusMode.fullscreen) && (
                 <>
                   <div className="my-1 border-t border-border" />
                   <MenuItem onClick={() => void focusMode.toggleFullscreen()}>

@@ -673,20 +673,21 @@ function SignedInWorkbench({
                 )}
               </MenuTrigger>
               <MenuContent>
-                {!(workspace && route.tool === "terminal") && (
-                  <MenuItem
-                    onClick={() => {
-                      if (mobile) setMobileNavigation(false);
-                      void terminalFocus.toggleFullscreen();
-                    }}
-                  >
-                    {t(($) =>
-                      terminalFocus.fullscreen
-                        ? $.terminal.exitFullscreen
-                        : $.terminal.enterFullscreen,
-                    )}
-                  </MenuItem>
-                )}
+                {!(workspace && route.tool === "terminal") &&
+                  (terminalFocus.canFullscreen || terminalFocus.fullscreen) && (
+                    <MenuItem
+                      onClick={() => {
+                        if (mobile) setMobileNavigation(false);
+                        void terminalFocus.toggleFullscreen();
+                      }}
+                    >
+                      {t(($) =>
+                        terminalFocus.fullscreen
+                          ? $.terminal.exitFullscreen
+                          : $.terminal.enterFullscreen,
+                      )}
+                    </MenuItem>
+                  )}
                 <MenuItem onClick={() => setCliDialog({})}>
                   <Terminal />
                   {t(($) => $.cliSetup.title)}

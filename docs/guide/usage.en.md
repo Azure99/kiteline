@@ -10,6 +10,8 @@ This guide is for owners who have connected devices and want to use the workbenc
 
 The workbench supports desktop Chrome and Android Chrome, with Chromium 97 as the minimum. When accessing it over HTTPS or `localhost`, current Chrome versions can install it as an app from the browser menu and open it in a separate window. It still needs a connection to the server and has no offline functionality.
 
+In iPhone Safari's Share menu, choose Add to Home Screen and enable Open as Web App if offered. Open the home screen icon, sign in if prompted, and select a device and workspace. This can reduce the space used by browser toolbars and still requires a server connection. The home screen window follows the same focus and fullscreen capability rules as a browser tab.
+
 ### Sign-in and language
 
 Origins with different hostnames or schemes, such as `http://192.168.1.10:8080` and `https://kiteline.example.com`, require separate sign-ins. Different ports on the same host and scheme share a login. Preferences such as language are stored separately in the browser per origin, including the port. Signing out asks you to confirm discarding unsaved files. It ends only this browser's login; terminal sessions keep running. For a forgotten password, see [Reset the setup token or password](server.en.md#reset-the-setup-token-or-password).
@@ -115,9 +117,9 @@ Supported forms are `/`-separated relative paths, POSIX absolute paths inside th
 
 ### Search and display
 
-On desktop and mobile, one button in the terminal control row cycles through normal, focus, fullscreen, and back to normal. Focus hides both sidebars and the device/workspace header; navigation returns in the normal layout. Changing the device, workspace, or tool exits terminal focus and fullscreen. Focus file on mobile follows the same rules.
+On desktop and mobile, one button in the terminal control row cycles through normal, focus, fullscreen, and back to normal. Focus hides both sidebars and the device/workspace header; navigation returns in the normal layout. Changing the device, workspace, or tool exits terminal focus and fullscreen. Focus file on mobile follows the same rules. When the browser does not support fullscreen, the button cycles through normal, focus, and back to normal.
 
-Leaving fullscreen restores the normal layout. Settings on other pages and the phone file menu also provide fullscreen. Independent desktop fullscreen entered from Settings on other pages ends when changing devices, changing workspaces, or leaving a workspace; it stays active when switching tools within the same workspace.
+Leaving fullscreen restores the normal layout. When the browser supports fullscreen, Settings on other pages and the phone file menu also provide fullscreen. Independent desktop fullscreen entered from Settings on other pages ends when changing devices, changing workspaces, or leaving a workspace; it stays active when switching tools within the same workspace.
 
 Terminal search covers currently loaded display content, including history, without case sensitivity. On desktop and phone, choose Search terminal from the terminal area menu to reveal the current pane and search it. The search bar shows the target session name, and its controls wrap in narrow areas. The current terminal's auxiliary keys are hidden during search and return when it closes, letting you continue typing; ended sessions still support history navigation. An actual grid size change keeps the query and clears the search result status; press Enter to search again.
 
