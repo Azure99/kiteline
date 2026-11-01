@@ -349,6 +349,7 @@ export function Workspace({
       >
         <WorkPages pages={pages} hidden={focusMode.active} />
         <Files
+          memory={memory}
           device={device}
           workspace={workspace}
           store={store}

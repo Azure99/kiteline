@@ -1,3 +1,4 @@
+import type { FileSearchState } from "../files/file-search";
 import type { GitBrowseState } from "../git/git";
 import type { WorkspaceTarget } from "../lib/navigation";
 import type { TerminalLayout } from "../terminal/groups";
@@ -24,6 +25,7 @@ export interface WorkspaceRecord {
   presentation?: { state: WorkspacePresentation; path: string };
   pages?: WorkPagesState;
   terminalLayout?: TerminalLayout;
+  fileSearch?: FileSearchState;
   browsing: Map<string, GitBrowseState>;
 }
 

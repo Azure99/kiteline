@@ -1,3 +1,4 @@
+import type { WorkspaceRecord } from "../workspace/memory";
 import { useTranslation } from "react-i18next";
 import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react";
 import {
@@ -45,6 +46,7 @@ import { FileSearch } from "./file-search";
 import { useWorkspaceRefresh } from "../lib/use-workspace-refresh";
 
 export function FileBrowser({
+  memory,
   device,
   workspace,
   browsing,
@@ -58,6 +60,7 @@ export function FileBrowser({
   onOperation,
   children,
 }: {
+  memory: WorkspaceRecord;
   device: Device;
   workspace: Workspace;
   browsing: boolean;
@@ -333,6 +336,7 @@ export function FileBrowser({
     >
       <ToolSidebar visible={searching}>
         <FileSearch
+          memory={memory}
           ref={searchRegion}
           deviceId={device.id}
           workspaceId={workspace.id}

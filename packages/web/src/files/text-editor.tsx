@@ -9,7 +9,7 @@ import {
   type Ref,
 } from "react";
 import { EditorView } from "@codemirror/view";
-import { EditorState } from "@codemirror/state";
+import { EditorSelection, EditorState } from "@codemirror/state";
 import { openSearchPanel, SearchQuery, setSearchQuery } from "@codemirror/search";
 import { codeLanguage } from "../lib/code-language";
 import { ErrorNotice } from "../components/error-notice";
@@ -19,6 +19,7 @@ import { useTheme } from "../lib/appearance";
 import { isMobile, useMobile } from "../lib/use-mobile";
 import { editorAppearance, resizeEditorFont, syncTextTransactions } from "./editor-state";
 import { editorPhrases } from "./editor-locale";
+import { searchPosition } from "./search-position";
 
 export interface TextLocation {
   line: number;
@@ -92,6 +93,10 @@ export function TextEditor({
   const save = useRef(onSave);
   save.current = onSave;
   const locationApplied = useEffectEvent(onLocationApplied);
+  // Search coordinates belong to the disk text the location was produced from, not to edits since.
+  const searchTarget = useEffectEvent((line: number, query: string, column?: number) =>
+    searchPosition(draft.baseRaw, line, query, column),
+  );
   useLayoutEffect(() => {
     if (!host.current || !draft.state) return;
     const editor = new EditorView({
@@ -179,11 +184,14 @@ export function TextEditor({
   useLayoutEffect(() => {
     const editor = view.current;
     if (editor && location) {
-      const { line: number, range, query } = location;
-      const line = editor.state.doc.line(Math.max(1, Math.min(number, editor.state.doc.lines)));
-      const anchor = line.from + Math.min(range?.[0] ?? 0, line.length);
-      const head = line.from + Math.min(range?.[1] ?? 0, line.length);
-      if (query !== undefined && (!range || editor.state.doc.sliceString(anchor, head) !== query)) {
+      const { line: number, query } = location;
+      const found =
+        query === undefined ? undefined : searchTarget(number, query, location.range?.[0]);
+      const { doc } = editor.state;
+      const line = doc.line(Math.max(1, Math.min(found?.line ?? number, doc.lines)));
+      const anchor = line.from + Math.min(found?.column ?? 0, line.length);
+      const head = query === undefined ? anchor : Math.min(anchor + query.length, doc.length);
+      if (query !== undefined && (!found || doc.sliceString(anchor, head) !== query)) {
         openSearchPanel(editor);
         editor.dispatch({
           effects: setSearchQuery.of(
@@ -200,7 +208,10 @@ export function TextEditor({
       } else {
         editor.dispatch({
           selection: { anchor, head },
-          effects: EditorView.scrollIntoView(anchor, { y: "center" }),
+          effects: EditorView.scrollIntoView(EditorSelection.range(anchor, head), {
+            x: "center",
+            y: "center",
+          }),
         });
       }
       locationApplied(location);

@@ -1,5 +1,14 @@
+import type { WorkspaceRecord } from "../workspace/memory";
 import { useTranslation } from "react-i18next";
-import { Fragment, useEffect, useEffectEvent, useRef, useState, type Ref } from "react";
+import {
+  Fragment,
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type Ref,
+} from "react";
 import { ArrowLeft, Search, X } from "lucide-react";
 import { FileIcon } from "../components/file-icon";
 import type { SearchMatch, SearchResult } from "@kiteline/shared/protocol";
@@ -10,7 +19,15 @@ import { rpc } from "../lib/api";
 import { isMobile } from "../lib/use-mobile";
 import { ErrorNotice } from "../components/error-notice";
 
+export interface FileSearchState {
+  mode: "name" | "content";
+  query: string;
+  includeIgnored: boolean;
+  result?: SearchResult & { query: string };
+}
+
 export function FileSearch({
+  memory,
   ref,
   deviceId,
   workspaceId,
@@ -20,6 +37,7 @@ export function FileSearch({
   onBack,
   onOpen,
 }: {
+  memory: WorkspaceRecord;
   ref?: Ref<HTMLElement>;
   deviceId: string;
   workspaceId: string;
@@ -32,10 +50,13 @@ export function FileSearch({
   const { t } = useTranslation();
   const input = useRef<HTMLInputElement>(null);
 
-  const [mode, setMode] = useState<"name" | "content">("content");
-  const [query, setQuery] = useState("");
-  const [includeIgnored, setIncludeIgnored] = useState(false);
-  const [result, setResult] = useState<SearchResult & { query: string }>();
+  const [mode, setMode] = useState<"name" | "content">(memory.fileSearch?.mode ?? "content");
+  const [query, setQuery] = useState(memory.fileSearch?.query ?? "");
+  const [includeIgnored, setIncludeIgnored] = useState(memory.fileSearch?.includeIgnored ?? false);
+  const [result, setResult] = useState<FileSearchState["result"]>(memory.fileSearch?.result);
+  useLayoutEffect(() => {
+    memory.fileSearch = { mode, query, includeIgnored, result };
+  }, [memory, mode, query, includeIgnored, result]);
   const [status, setStatus] = useState<{ kind: "cancelled" } | { kind: "error"; error: unknown }>();
   const [busy, setBusy] = useState(false);
   const focusEmpty = useEffectEvent(() => {
@@ -46,7 +67,12 @@ export function FileSearch({
     if (active) focusEmpty();
   }, [active]);
   const request = useRef<AbortController>(undefined);
-  useEffect(() => () => request.current?.abort(), []);
+  useEffect(
+    () => () => {
+      request.current?.abort();
+    },
+    [],
+  );
   function resetSearch() {
     request.current?.abort();
     request.current = undefined;
@@ -202,14 +228,7 @@ export function FileSearch({
                 {match.line ? `:${match.line}` : ""}
               </span>
             </span>
-            {match.text !== undefined && (
-              <span className="mt-2 block overflow-x-auto whitespace-pre font-mono text-xs text-muted-foreground">
-                <MatchText match={match} />
-                {match.truncated && (
-                  <span className="ml-2 font-sans">{t(($) => $.files.snippetTruncated)}</span>
-                )}
-              </span>
-            )}
+            {match.text !== undefined && <MatchText match={match} />}
           </button>
         ))}
       </div>
@@ -218,10 +237,15 @@ export function FileSearch({
 }
 
 function MatchText({ match }: { match: SearchMatch }) {
+  const { t } = useTranslation();
   const text = match.text ?? "";
-  let from = 0;
+  const firstMatch = match.ranges?.[0]?.[0] ?? 0;
+  const context = Array.from(text.slice(0, firstMatch)).slice(-12).join("");
+  const snippetStart = firstMatch - context.length;
+  let from = snippetStart;
   return (
-    <>
+    <span className="mt-2 block overflow-x-auto whitespace-pre font-mono text-xs text-muted-foreground">
+      {snippetStart > 0 && "…"}
       {match.ranges?.map(([start, end], index) => {
         const plain = text.slice(from, start);
         from = end;
@@ -233,6 +257,9 @@ function MatchText({ match }: { match: SearchMatch }) {
         );
       })}
       {text.slice(from)}
-    </>
+      {(snippetStart > 0 || match.truncated) && (
+        <span className="ml-2 font-sans">{t(($) => $.files.snippetTruncated)}</span>
+      )}
+    </span>
   );
 }

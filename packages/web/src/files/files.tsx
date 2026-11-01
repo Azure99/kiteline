@@ -1,3 +1,4 @@
+import type { WorkspaceRecord } from "../workspace/memory";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Device, Workspace } from "@kiteline/shared/protocol";
@@ -15,6 +16,7 @@ import { parentPath } from "./paths";
 import type { TextLocation } from "./text-editor";
 
 export function Files({
+  memory,
   device,
   workspace,
   browsing,
@@ -28,6 +30,7 @@ export function Files({
   focusMode,
 }: {
   focusMode?: ReturnType<typeof useTerminalFocus>;
+  memory: WorkspaceRecord;
   device: Device;
   workspace: Workspace;
   browsing: boolean;
@@ -114,6 +117,7 @@ export function Files({
   }
   return (
     <FileBrowser
+      memory={memory}
       {...{ device, workspace, browsing, contentVisible, store, onUpload, onOperation }}
       currentFile={page?.path}
       onOpenContent={onOpenContent}
