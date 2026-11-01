@@ -49,7 +49,7 @@ jobs:
           pnpm test
       - name: Check privileged installation and file operations
         run: |
-          sudo env "PATH=$PATH" "TMPDIR=$TMPDIR" pnpm test \
+          sudo env "PATH=$PATH" "TMPDIR=$TMPDIR" node node_modules/vitest/vitest.mjs run --maxWorkers=2 \
             packages/agent/test/maintenance.test.ts \
             packages/agent/test/installation.test.ts \
             packages/agent/test/file-operations.test.ts
