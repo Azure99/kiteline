@@ -303,6 +303,7 @@ export function TerminalView({
           }}
         >
           <ContextMenuPrimitive.Trigger
+            onTouchStart={(event) => event.preventBaseUIHandler()}
             render={<div ref={element} className="relative min-h-0 min-w-0 flex-1" />}
           />
           <ContextMenuContent>
