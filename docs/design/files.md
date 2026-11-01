@@ -194,6 +194,8 @@ HTML 预览直接以当前稿件构造 `srcdoc`，只授予 iframe `sandbox="all
 ### 下载
 
 - 下载地址 `/api/devices/<deviceId>/download?workspaceId=…&path=…` 是稳定的 GET 地址。浏览器用同源的 `a[download]` 交给浏览器的下载管理器，工作台不跟踪下载进度。每次 GET 重新鉴权并创建新的 `file.read` `download` 通道，不复用句柄或缓存。
+- 文件列表按间隔逐个发起批量下载，以避开 Chromium 的同页突发下载限制；仍受浏览器多文件下载权限和传输名额限制，失败不自动重试。
+- 下载错误按设备、工作区和路径保留最近一次失败，可关闭提示；侧栏导航时清空。
 - agent 打开文件时从句柄取得长度并检查 `transferBytes`，然后按偏移读取直到读满这个长度：短读继续读取，提前遇到 EOF 或 I/O 错误时失败。之后追加的内容不包含在本次下载中，读满后文件被替换或缩短不影响已读结果；期间被就地修改的文件可能混合新旧字节。
 - 响应为 `200`，`Content-Length` 是打开时的长度，带 `Cache-Control: no-store`。server 忽略 `Range`。
 

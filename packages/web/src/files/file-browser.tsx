@@ -45,6 +45,8 @@ import { downloadFile } from "./content";
 import { FileSearch } from "./file-search";
 import { useWorkspaceRefresh } from "../lib/use-workspace-refresh";
 
+const downloadSpacingMs = 250;
+
 export function FileBrowser({
   memory,
   device,
@@ -468,8 +470,13 @@ export function FileBrowser({
             <IconButton
               label={t(($) => $.files.downloadSelected)}
               disabled={!enabled || !downloadable.length}
-              onClick={() => {
-                for (const path of downloadable) download(path);
+              onClick={async () => {
+                // Blink drops excess downloads in its per-frame burst window. Await each gap
+                // so delayed timers cannot release the whole batch together.
+                for (const [index, path] of downloadable.entries()) {
+                  if (index) await new Promise((resolve) => setTimeout(resolve, downloadSpacingMs));
+                  download(path);
+                }
               }}
             >
               <Download />

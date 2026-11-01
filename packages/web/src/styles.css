@@ -449,6 +449,10 @@ body {
   flex-shrink: 0;
   overflow: auto;
 }
+.workbench-notice[data-list] {
+  height: 10rem;
+  overflow: visible;
+}
 .terminal-notice {
   background: #313944;
   color: var(--terminal-chrome-foreground);
@@ -466,6 +470,9 @@ body {
   }
   .workbench-notice {
     flex-shrink: 1;
+  }
+  .workbench-notice[data-list] {
+    height: auto;
   }
   .workbench-notice > * {
     margin-block: auto;

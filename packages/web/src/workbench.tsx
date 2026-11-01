@@ -20,7 +20,7 @@ import {
   LayoutDashboard,
   Settings,
 } from "lucide-react";
-import type { Device, Workspace as WorkspaceInfo } from "@kiteline/shared/protocol";
+import type { BrowserEvent, Device, Workspace as WorkspaceInfo } from "@kiteline/shared/protocol";
 import type { LoginSession } from "./auth";
 import { apiError, errorMessage, post } from "./lib/api";
 import { emit } from "./lib/events";
@@ -105,9 +105,20 @@ export function Workbench({
           message.purpose === "download" &&
           message.error.code !== "cancelled"
         )
-          setError({
-            cause: apiError(message.error),
-            downloadPath: message.path,
+          setError((current) => {
+            const failures =
+              current && "downloadFailures" in current ? current.downloadFailures : [];
+            return {
+              downloadFailures: [
+                ...failures.filter(
+                  (failure) =>
+                    failure.deviceId !== message.deviceId ||
+                    failure.workspaceId !== message.workspaceId ||
+                    failure.path !== message.path,
+                ),
+                message,
+              ],
+            };
           });
       };
       window.addEventListener("beforeunload", unload);
@@ -226,10 +237,9 @@ export function Workbench({
   );
 }
 
-interface WorkbenchError {
-  cause: unknown;
-  downloadPath?: string;
-}
+type WorkbenchError =
+  | { cause: unknown }
+  | { downloadFailures: Extract<BrowserEvent, { type: "channel.failed" }>[] };
 
 interface SignedInWorkbenchProps {
   route: ReturnType<typeof useRoute>;
@@ -744,16 +754,41 @@ function SignedInWorkbench({
           {!!(error || connectionError) && (
             <div
               role="alert"
+              data-list={error && "downloadFailures" in error ? "" : undefined}
               className="workbench-notice flex shrink-0 items-start gap-2 border-b border-border bg-danger-soft px-4 py-2 text-sm text-destructive"
             >
               <div className="min-w-0 flex-1 break-words">
-                {error?.downloadPath
-                  ? t(($) => $.shell.downloadFailed, {
-                      path: error.downloadPath,
-                      error: errorMessage(error.cause),
-                    })
-                  : errorMessage(error ? error.cause : connectionError)}
-                <ErrorDetails error={error ? error.cause : connectionError} />
+                {error && "downloadFailures" in error ? (
+                  <ul className="scroll-area max-h-36 space-y-1 overflow-auto">
+                    {error.downloadFailures.map((failure) => {
+                      const device = devices.find((item) => item.id === failure.deviceId);
+                      const workspace = device?.snapshot?.workspaces.find(
+                        (item) => item.id === failure.workspaceId,
+                      );
+                      const cause = apiError(failure.error);
+                      return (
+                        <li
+                          key={JSON.stringify([
+                            failure.deviceId,
+                            failure.workspaceId,
+                            failure.path,
+                          ])}
+                        >
+                          {t(($) => $.shell.downloadFailed, {
+                            path: `${device?.name ?? failure.deviceId} / ${workspace?.name ?? failure.workspaceId} / ${failure.path}`,
+                            error: errorMessage(cause),
+                          })}
+                          <ErrorDetails error={cause} />
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <>
+                    {errorMessage(error ? error.cause : connectionError)}
+                    <ErrorDetails error={error ? error.cause : connectionError} />
+                  </>
+                )}
               </div>
               {!!error && (
                 <IconButton label={t(($) => $.common.dismiss)} onClick={() => setError(undefined)}>

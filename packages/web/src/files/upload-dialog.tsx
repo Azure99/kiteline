@@ -67,6 +67,15 @@ export function UploadDialog({
     })),
   );
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!busy) return;
+    const unload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", unload);
+    return () => window.removeEventListener("beforeunload", unload);
+  }, [busy]);
   const [checking, setChecking] = useState(false);
   const [cancelled, setCancelled] = useState(false);
   const [error, setError] = useState<unknown>();

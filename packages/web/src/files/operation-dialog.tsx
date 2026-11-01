@@ -153,6 +153,7 @@ export function FileOperationDialog({
     setBusy(true);
     setCancelling(false);
     setError(undefined);
+    setRows((old) => old.map((row) => (editable(row) ? { ...row, result: undefined } : row)));
     setProgress({ phase: "queued" });
     try {
       const result = await operateFiles(

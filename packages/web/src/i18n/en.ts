@@ -701,8 +701,8 @@ export const en = {
     uploadCount_other: "Upload {{count, number}} files",
     targetNamed: "Destination for {{path}}",
     uploadTarget: "Upload destination for {{name}}",
-    completedItems_one: "Processed {{count, number}} item",
-    completedItems_other: "Processed {{count, number}} items",
+    completedItems_one: "Processed {{count, number}} item (including folders)",
+    completedItems_other: "Processed {{count, number}} items (including folders)",
     deleteSelectedMounted:
       "Permanently delete the selected items and any shared data mounted inside them? Mount points may remain.",
     imageDecodeFailed: "The image could not be decoded. You can download the original file.",
