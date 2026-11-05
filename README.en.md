@@ -5,15 +5,15 @@
 Kiteline is a self-hosted workbench for coding agents. Claude Code, Codex, and other command-line tools run with their native TUIs on your own machines. Manage multiple machines and projects from your browser, and continue the same terminal session on desktop, phone, or the remote CLI.
 
 <p align="center">
-  <a href="docs/assets/readme-desktop.png"><img src="docs/assets/readme-desktop.png" width="820" alt="Desktop: Codex, development preview server, and tests in three panes for Lantern Studio, with a workspace notification in the sidebar"></a>
+  <a href="docs/assets/readme-desktop.png"><img src="docs/assets/readme-desktop.png" width="820" alt="Desktop: Codex and project checks in vertically split terminals, Git diff and multiple work pages in the middle, an expanded Codex notification on the left, and the file tree on the right"></a>
 </p>
 
 <table align="center">
   <tr>
     <td nowrap>
-      <a href="docs/assets/readme-mobile-terminal.png"><img src="docs/assets/readme-mobile-terminal.png" width="260" alt="Continuing the same Lantern Studio Codex session on a phone, with the task title in the toolbar"></a>
-      <a href="docs/assets/readme-mobile-files.png"><img src="docs/assets/readme-mobile-files.png" width="260" alt="Mobile file manager showing file type icons and expanded workspace notifications, with devices without notifications collapsed"></a>
-      <a href="docs/assets/readme-mobile-git.png"><img src="docs/assets/readme-mobile-git.png" width="260" alt="Viewing the Git diff for gallery.test.js in Lantern Studio on a phone"></a>
+      <a href="docs/assets/readme-mobile-terminal.png"><img src="docs/assets/readme-mobile-terminal.png" width="260" alt="Continuing the same Codex session on a phone, with the mobile terminal toolbar and notification badge"></a>
+      <a href="docs/assets/readme-mobile-files.png"><img src="docs/assets/readme-mobile-files.png" width="260" alt="Native Markdown preview of the project README.md on a phone, with the notification badge"></a>
+      <a href="docs/assets/readme-mobile-git.png"><img src="docs/assets/readme-mobile-git.png" width="260" alt="The mobile Git Changes panel showing unstaged and staged changes, with the notification badge in the dimmed area on the left"></a>
     </td>
   </tr>
 </table>
