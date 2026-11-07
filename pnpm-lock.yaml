@@ -8,6 +8,7 @@ overrides:
   gitdiff-parser: 0.3.1
 
 patchedDependencies:
+  '@xterm/addon-serialize@0.15.0-beta.301': 23680a63b76564826b0b99f74a183261dcbb006a73140a806abc1e93d5703b81
   '@xterm/xterm@6.1.0-beta.304': 81d017d833e7664f1b777659d90338fa6384a105d3b703951cf9a2abe434e08a
   https-proxy-agent@9.1.0: fdfac9eda01004a9695c7008fdf63694acaf498dda4b1ff93cdd421faf637afd
 
@@ -122,7 +123,7 @@ importers:
         version: link:../shared
       '@xterm/addon-serialize':
         specifier: 0.15.0-beta.301
-        version: 0.15.0-beta.301(@xterm/xterm@6.1.0-beta.304(patch_hash=81d017d833e7664f1b777659d90338fa6384a105d3b703951cf9a2abe434e08a))
+        version: 0.15.0-beta.301(patch_hash=23680a63b76564826b0b99f74a183261dcbb006a73140a806abc1e93d5703b81)(@xterm/xterm@6.1.0-beta.304(patch_hash=81d017d833e7664f1b777659d90338fa6384a105d3b703951cf9a2abe434e08a))
       '@xterm/headless':
         specifier: 6.1.0-beta.303
         version: 6.1.0-beta.303
@@ -3627,7 +3628,7 @@ snapshots:
     dependencies:
       '@xterm/xterm': 6.1.0-beta.304(patch_hash=81d017d833e7664f1b777659d90338fa6384a105d3b703951cf9a2abe434e08a)
 
-  '@xterm/addon-serialize@0.15.0-beta.301(@xterm/xterm@6.1.0-beta.304(patch_hash=81d017d833e7664f1b777659d90338fa6384a105d3b703951cf9a2abe434e08a))':
+  '@xterm/addon-serialize@0.15.0-beta.301(patch_hash=23680a63b76564826b0b99f74a183261dcbb006a73140a806abc1e93d5703b81)(@xterm/xterm@6.1.0-beta.304(patch_hash=81d017d833e7664f1b777659d90338fa6384a105d3b703951cf9a2abe434e08a))':
     dependencies:
       '@xterm/xterm': 6.1.0-beta.304(patch_hash=81d017d833e7664f1b777659d90338fa6384a105d3b703951cf9a2abe434e08a)
 

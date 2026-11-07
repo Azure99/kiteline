@@ -329,7 +329,10 @@ export class Model {
     const active = terminal.buffer.active;
     let lineBytes = 0;
     const project = (line: IBufferLine): ScreenLine => {
-      const result: ScreenLine = { text: line.translateToString(true), wrapped: line.isWrapped };
+      const result: ScreenLine = {
+        text: line.translateToString(true, 0, terminal.cols),
+        wrapped: line.isWrapped,
+      };
       if (options.attrs) {
         const runs: NonNullable<ScreenLine["attrs"]> = [];
         let cell = active.getNullCell();

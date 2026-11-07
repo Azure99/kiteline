@@ -16,5 +16,6 @@ overrides:
   gitdiff-parser: 0.3.1
 
 patchedDependencies:
+  "@xterm/addon-serialize@0.15.0-beta.301": packages/terminal-recorder/patches/@xterm__addon-serialize@0.15.0-beta.301.patch
   "@xterm/xterm@6.1.0-beta.304": packages/web/patches/@xterm__xterm@6.1.0-beta.304.patch
   https-proxy-agent@9.1.0: packages/agent/patches/https-proxy-agent@9.1.0.patch

@@ -21,6 +21,7 @@ function screen(cols = 80, rows = 24, history = 100, adapt = true) {
   if (adapt) adaptTerminalProfile(terminal);
   return {
     terminal,
+    addon,
     text: () => addon.serialize() + mouseEncodingVT(terminal),
     write: (data: string | Uint8Array) =>
       new Promise<void>((resolve) => terminal.write(data, resolve)),
@@ -40,6 +41,103 @@ function outputCredit(pieces: (Buffer | TerminalFrame)[]) {
     0,
   );
 }
+
+function visibleGrid(terminal: InstanceType<typeof headless.Terminal>) {
+  const buffer = terminal.buffer.active;
+  return Array.from({ length: terminal.rows }, (_, y) => {
+    const line = buffer.getLine(buffer.baseY + y)!;
+    return {
+      text: line.translateToString(false, 0, terminal.cols),
+      wrapped: line.isWrapped,
+    };
+  });
+}
+
+test("resized observations exclude hidden old cells while retaining visible spaces and styles", async () => {
+  const faults: Error[] = [];
+  const model = new Model(
+    { cols: 40, rows: 4, historyLines: 100 },
+    { fault: (error) => faults.push(error), backlogChanged() {} },
+  );
+  try {
+    model.output(
+      Buffer.from(
+        "\x1b[?1049h" +
+          Array.from(
+            { length: 4 },
+            (_, y) => `\x1b[${y + 1};1H${"original".padEnd(20, ".")}OLD_TAIL_${y}`,
+          ).join(""),
+      ),
+    );
+    model.resize(12, 4);
+    model.output(
+      Buffer.from(
+        "\x1b[1;1H\x1b[31m中文A  \x1b[0m\x1b[K" +
+          "\x1b[2;1HROW2  \x1b[K\x1b[3;1Hthird\x1b[K\x1b[4;1Hlast\x1b[K",
+      ),
+    );
+    const observed = await model.observe({ attrs: true }, false);
+    if (observed.reason === "unchanged") throw new Error("The first observation must be full");
+    // Hidden content keeps xterm's trimmed length beyond cols; retain the visible grid spaces.
+    expect(observed.screen.map((line) => line.text)).toEqual([
+      "中文A" + " ".repeat(7),
+      "ROW2" + " ".repeat(8),
+      "third" + " ".repeat(7),
+      "last" + " ".repeat(8),
+    ]);
+    expect(observed.screen[0]!.attrs).toEqual([{ start: 0, end: 7, fg: { palette: 1 } }]);
+    expect(observed.screen.flatMap((line) => line.attrs ?? []).every((run) => run.end <= 12)).toBe(
+      true,
+    );
+    expect(faults).toEqual([]);
+  } finally {
+    await model.dispose();
+  }
+});
+
+test.each([
+  {
+    name: "redrawn alternate rows",
+    output: "\x1b[Hrow0 text row1\x1b[K\r\nrow2 more row3\x1b[K",
+    rows: ["row0 text ", "row1      ", "row2 more ", "row3      "],
+  },
+  {
+    name: "forced-wrap filler cleanup",
+    output: "\x1b[Habcdefghijk\x1b[K\x1b[1;6H\x1b[K",
+    rows: ["abcde     ", "k         ", "wide row t", "wide row t"],
+  },
+])("the serializer main entry restores the visible grid after $name", async ({ output, rows }) => {
+  const source = screen(20, 4);
+  const restored = screen(10, 4);
+  try {
+    await source.write(
+      "\x1b[?1049h\x1b[1;1Hwide row zero\x1b[2;1Hwide row one" +
+        "\x1b[3;1Hwide row two\x1b[4;1Hwide row three",
+    );
+    source.terminal.resize(10, 4);
+    await source.write(output);
+    const expected = visibleGrid(source.terminal);
+    expect(expected.map((line) => line.text)).toEqual(rows);
+    await restored.write(source.addon.serialize());
+    expect(visibleGrid(restored.terminal)).toEqual(expected);
+  } finally {
+    source.terminal.dispose();
+    restored.terminal.dispose();
+  }
+});
+
+test("HTML serialization limits a resized alternate line to visible columns", async () => {
+  const source = screen(20, 2);
+  try {
+    await source.write("\x1b[?1049hwide row zero");
+    source.terminal.resize(10, 2);
+    expect(
+      source.addon.serializeAsHTML().match(/<div><span>wide row z<\/span><\/div>/g),
+    ).toHaveLength(1);
+  } finally {
+    source.terminal.dispose();
+  }
+});
 
 test("window titles stay out of text without hiding repeated output or OSC titles", async () => {
   const target = screen();

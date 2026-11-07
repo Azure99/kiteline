@@ -282,6 +282,10 @@ runtime DLL 从固定源码包的 Cygwin tag 及有序 MSYS2 补丁重建，再�
 
 DOM 渲染器在选区清空时更新选区模型并重绘旧行，以清除文字上残留的选区背景；Event.ts 的非空断言用于让上游源码通过项目的 `noUncheckedIndexedAccess` 检查。
 
+浏览器选区补丁将跨行首行和中间行的读取限制在当前 `cols`，因为 alternate buffer 缩列后可能仍保留旧宽度的 cell。recorder 的 `@xterm/addon-serialize@0.15.0-beta.301` 在 `packages/terminal-recorder/patches/` 完整回移上游 [#6235](https://github.com/xtermjs/xterm.js/pull/6235)（`6c7f922aebc519ac9df3cf5c13c5c11b0eac9a84`），修复相同列界和 forced-wrap filler 的清理位移。本轮保持联合固定的 core/addon profile；联合升级到已含该修复的上游版本时，删除 serializer 补丁及其登记。
+
+serializer 在生产中加载包的 UMD 主入口 `lib/addon-serialize.js`，修改 TypeScript 补丁时须同时生成 JS 和 source map，保留 UMD 导出与 MIT 许可。当前产物用原包 map 内嵌的 addon、Types.ts 和 Color.ts 源码生成，仅给 addon 应用官方修复；TypeScript 按固定 core 的 `UnderlineStyle` const enum 内联后，由现有 Vite 依赖中的 rolldown 打包。验证以 `packages/terminal-recorder/test/model.test.ts` 的实际主入口、原网格与 `isWrapped` 比较及 HTML 断言为准。
+
 维护当前版本的补丁时，在仓库根目录执行：
 
 ```sh
