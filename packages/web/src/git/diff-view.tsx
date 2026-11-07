@@ -1,6 +1,23 @@
 import { useTranslation } from "react-i18next";
-import { Fragment, useEffect, useMemo, useState, type CSSProperties } from "react";
-import { Decoration, Diff, Hunk, parseDiff, type FileData, type ViewType } from "react-diff-view";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
+import {
+  Decoration,
+  Diff,
+  Hunk,
+  getChangeKey,
+  parseDiff,
+  type FileData,
+  type ViewType,
+} from "react-diff-view";
 import type { LanguageSupport } from "@codemirror/language";
 import { codeLanguage } from "../lib/code-language";
 import { diffTokens } from "./highlight";
@@ -14,6 +31,11 @@ import { useGitStatusLabel } from "./status-label";
 export type DiffTarget = {
   path: string;
 } & ({ side: "worktree" | "staged" } | { side: "commit"; commitOid: string; parentOid?: string });
+
+export interface DiffLineSelection {
+  patch: string;
+  line: number;
+}
 
 function comparisonUnavailable(error: unknown) {
   return (
@@ -32,6 +54,12 @@ export function DiffView({
   active = true,
   onOtherSide,
   onChanges,
+  onOpenLine,
+  openLineLabel,
+  initialScroll,
+  onScrollPosition,
+  initialLineSelection,
+  onLineSelection,
 }: {
   deviceId: string;
   workspaceId: string;
@@ -42,10 +70,38 @@ export function DiffView({
   active?: boolean;
   onOtherSide?: () => void;
   onChanges?: () => void;
+  onOpenLine?: (line: number, focusContent?: boolean) => void;
+  openLineLabel?: string;
+  initialScroll?: { top: number; left: number };
+  onScrollPosition: (position: { top: number; left: number }) => void;
+  initialLineSelection?: DiffLineSelection;
+  onLineSelection: (selection: DiffLineSelection) => void;
 }) {
   const { t } = useTranslation();
+  const scroll = useRef<HTMLDivElement>(null);
+  const pendingScroll = useRef(initialScroll);
+  const pendingFocus = useRef(initialLineSelection);
+  const restoreScroll = useCallback((patch: string) => {
+    if (!scroll.current) return;
+    if (pendingScroll.current) {
+      scroll.current.scrollTop = pendingScroll.current.top;
+      scroll.current.scrollLeft = pendingScroll.current.left;
+    }
+    pendingScroll.current = undefined;
+    if (pendingFocus.current?.patch === patch) scroll.current.focus({ preventScroll: true });
+    pendingFocus.current = undefined;
+  }, []);
 
   const [value, setValue] = useState<GitDiff>();
+  const [lineSelection, setLineSelection] = useState(initialLineSelection);
+  const selectedLine = lineSelection?.patch === value?.patch ? lineSelection?.line : undefined;
+  function chooseLine(line: number, focusContent?: boolean) {
+    if (!value) return;
+    const selection = { patch: value.patch, line };
+    setLineSelection(selection);
+    onLineSelection(selection);
+    onOpenLine?.(line, focusContent);
+  }
   const [error, setError] = useState<unknown>();
   const [busy, setBusy] = useState(false);
   const unavailable = comparisonUnavailable(error);
@@ -111,7 +167,18 @@ export function DiffView({
           )}
         </div>
       )}
-      <div className="scroll-area min-h-0 min-w-0 flex-1 overflow-auto">
+      <div
+        ref={scroll}
+        tabIndex={-1}
+        className="scroll-area min-h-0 min-w-0 flex-1 overflow-auto"
+        onScroll={(event) => {
+          if (pendingScroll.current) return;
+          onScrollPosition({
+            top: event.currentTarget.scrollTop,
+            left: event.currentTarget.scrollLeft,
+          });
+        }}
+      >
         {unavailable && (
           <div className="space-y-3 p-4 text-sm text-muted-foreground">
             <p role="status">{t(($) => $.git.changeUnavailable)}</p>
@@ -152,12 +219,35 @@ export function DiffView({
             {t(($) => $.common.reading)}
           </p>
         )}
-        {value && <Patch value={value} viewType={viewType} />}
+        {value && (
+          <Patch
+            value={value}
+            viewType={viewType}
+            onOpenLine={onOpenLine ? chooseLine : undefined}
+            openLineLabel={openLineLabel}
+            selectedLine={selectedLine}
+            onReady={restoreScroll}
+          />
+        )}
       </div>
     </section>
   );
 }
-function Patch({ value, viewType }: { value: GitDiff; viewType: ViewType }) {
+function Patch({
+  value,
+  viewType,
+  onOpenLine,
+  openLineLabel,
+  selectedLine,
+  onReady,
+}: {
+  value: GitDiff;
+  viewType: ViewType;
+  onOpenLine?: (line: number, focusContent?: boolean) => void;
+  openLineLabel?: string;
+  selectedLine?: number;
+  onReady: (patch: string) => void;
+}) {
   const { t } = useTranslation();
   const statusLabel = useGitStatusLabel();
 
@@ -195,6 +285,10 @@ function Patch({ value, viewType }: { value: GitDiff; viewType: ViewType }) {
   >();
   const matching = inline?.files === files ? inline : undefined;
   const needsInline = files?.some((file) => file.hunks.length);
+  // Inline alignment changes row heights, so restore saved scroll after that layout settles.
+  useLayoutEffect(() => {
+    if (!needsInline || matching) onReady(value.patch);
+  }, [needsInline, matching, onReady, value.patch]);
   useEffect(() => {
     if (!files?.some((file) => file.hunks.length)) return;
     let worker: Worker | undefined;
@@ -281,6 +375,11 @@ function Patch({ value, viewType }: { value: GitDiff; viewType: ViewType }) {
             viewType={viewType}
             patch={value.patch}
             inline={matching?.result?.[index]}
+            onOpenLine={
+              summary.newMode === "100644" || summary.newMode === "100755" ? onOpenLine : undefined
+            }
+            openLineLabel={openLineLabel}
+            selectedLine={selectedLine}
           />
         ))
       )}
@@ -292,11 +391,17 @@ function DiffBlock({
   viewType,
   patch,
   inline,
+  onOpenLine,
+  openLineLabel,
+  selectedLine,
 }: {
   file: FileData;
   viewType: ViewType;
   patch: string;
   inline?: InlineHunk[];
+  onOpenLine?: (line: number, focusContent?: boolean) => void;
+  openLineLabel?: string;
+  selectedLine?: number;
 }) {
   const { t } = useTranslation();
   const [support, setSupport] = useState<{
@@ -333,8 +438,22 @@ function DiffBlock({
     1,
   );
   const gutterWidth = `${String(largestLineNumber).length + 4}ch`;
+  const selectedChange =
+    selectedLine === undefined
+      ? undefined
+      : file.hunks
+          .flatMap((hunk) => hunk.changes)
+          .find(
+            (change) =>
+              change.type !== "delete" &&
+              (change.type === "normal" ? change.newLineNumber : change.lineNumber) ===
+                selectedLine,
+          );
   return (
-    <div style={{ "--kiteline-diff-gutter-width": gutterWidth } as CSSProperties}>
+    <div
+      style={{ "--kiteline-diff-gutter-width": gutterWidth } as CSSProperties}
+      className="max-desk:[&_.diff-gutter]:relative"
+    >
       {!!matching?.error && (
         <div role="status" className="px-4 py-2 text-xs text-muted-foreground">
           {t(($) => $.common.syntaxUnavailable)}: <ErrorNotice error={matching.error} />
@@ -349,20 +468,51 @@ function DiffBlock({
         hunks={file.hunks}
         tokens={tokens}
         className="kiteline-diff"
-        renderGutter={({ change, side, renderDefault }) => (
-          <span aria-hidden="true" className="select-none">
-            {renderDefault()}
-            <span className="diff-gutter-marker">
-              {side === "new" || (viewType === "split" && side === "old")
-                ? change.type === "insert"
-                  ? "+"
-                  : change.type === "delete"
-                    ? "−"
-                    : ""
-                : ""}
+        selectedChanges={selectedChange ? [getChangeKey(selectedChange)] : []}
+        renderGutter={({ change, side, renderDefault }) => {
+          const content = (
+            <span aria-hidden="true" className="select-none">
+              {renderDefault()}
+              <span className="diff-gutter-marker">
+                {side === "new" || (viewType === "split" && side === "old")
+                  ? change.type === "insert"
+                    ? "+"
+                    : change.type === "delete"
+                      ? "−"
+                      : ""
+                  : ""}
+              </span>
             </span>
-          </span>
-        )}
+          );
+          if (side !== "new" || change.type === "delete" || !onOpenLine) return content;
+          const line = change.type === "normal" ? change.newLineNumber : change.lineNumber;
+          const label = openLineLabel
+            ? `${t(($) => $.git.worktreeLine, { line })}: ${openLineLabel}`
+            : t(($) => $.git.openWorktreeLine, { line });
+          return (
+            <button
+              type="button"
+              aria-label={label}
+              title={label}
+              className="w-full cursor-pointer text-primary underline decoration-dotted underline-offset-2 hover:bg-primary-soft focus-visible:outline-2 focus-visible:outline-primary max-desk:absolute max-desk:inset-0 max-desk:flex max-desk:h-full max-desk:items-start max-desk:justify-end max-desk:pr-[1ch]"
+              onClick={() => onOpenLine(line)}
+              onKeyDown={(event) => {
+                if (
+                  event.key !== "Enter" ||
+                  event.ctrlKey ||
+                  event.altKey ||
+                  event.metaKey ||
+                  event.shiftKey
+                )
+                  return;
+                event.preventDefault();
+                onOpenLine(line, true);
+              }}
+            >
+              {content}
+            </button>
+          );
+        }}
         renderToken={(token, renderDefault, index) =>
           token.type === "empty" ? <br key={index} /> : renderDefault(token, index)
         }

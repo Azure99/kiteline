@@ -1,4 +1,4 @@
-import type { DiffTarget } from "../git/diff-view";
+import type { DiffLineSelection, DiffTarget } from "../git/diff-view";
 import { newId } from "../lib/id";
 
 export type FilePage = { kind: "file"; id: string; path: string; draftId?: string };
@@ -8,6 +8,8 @@ export type DiffPage = {
   repoId: string;
   repoPath: string;
   target: DiffTarget;
+  scroll?: { top: number; left: number };
+  lineSelection?: DiffLineSelection;
 };
 export type WorkPage = FilePage | DiffPage;
 export interface WorkPagesState {
@@ -38,9 +40,19 @@ export function openPage(state: WorkPagesState, page: WorkPage): WorkPagesState 
           (item.path && item.path === page.path && (!item.draftId || !page.draftId)))),
   );
   if (existing) {
+    const replacement =
+      existing.kind === "diff" && page.kind === "diff"
+        ? {
+            ...page,
+            scroll: page.scroll ?? existing.scroll,
+            lineSelection: page.lineSelection ?? existing.lineSelection,
+          }
+        : page;
     return {
       ...state,
-      items: state.items.map((item) => (item === existing ? { ...page, id: existing.id } : item)),
+      items: state.items.map((item) =>
+        item === existing ? { ...replacement, id: existing.id } : item,
+      ),
       active: existing.id,
     };
   }

@@ -381,6 +381,7 @@ export function Workspace({
             workspaceId={workspace.id}
             actions={actions}
             repositories={repositories}
+            onOpenContent={revealWorkPages}
             onDiff={(repo, diff) => {
               pages.openDiff(repo, diff);
               revealWorkPages();

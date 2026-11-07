@@ -80,6 +80,7 @@
 - patch 已截断、物理行数超过 `diffRenderLines`、解析失败或含无法解释的正文时，浏览器（`packages/web/src/git/diff-view.tsx`）不渲染结构化 diff，只显示原因、summary 和不超过 `diffRawBytes` 的原始 patch 前缀。
 - 没有文本 hunk 的纯 rename、mode 变化和二进制文件只显示 summary，不当作没有变化。
 - stage 或 unstage 成功后刷新比较内容，保留已打开页及其比较来源，不自动切到另一侧。
+- 只有工作树结构化 diff 中普通文本文件新侧的新增行和上下文行提供打开行号；删除行、暂存区、提交及原始 patch 不建立到当前文件的坐标关系。入口沿用文件打开与一次行定位；目标存在未保存草稿时不传行号，只打开并保留阅读位置，因为 diff 来自磁盘，不能将它的行号当作 dirty 草稿坐标。diff 工作页保留滚动位置，返回时在行内对齐布局完成后恢复；行选择只在 patch 未变时恢复。
 
 ### Git 区域与浏览状态
 

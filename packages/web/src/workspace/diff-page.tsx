@@ -29,6 +29,7 @@ export function DiffPageView({
   store,
   onDiff,
   onChanges,
+  onOpenContent,
 }: {
   page: DiffPage;
   deviceId: string;
@@ -41,6 +42,7 @@ export function DiffPageView({
   store: DraftStore;
   onDiff(repo: Repo, target: DiffTarget): void;
   onChanges(): void;
+  onOpenContent(focusContent?: boolean): void;
 }) {
   const { t } = useTranslation();
   const mobile = useMobile();
@@ -141,6 +143,7 @@ export function DiffPageView({
               ? $.git.draftComparisonStaged
               : $.git.draftComparisonWorktree,
           )}
+          {page.target.side === "worktree" && <> {t(($) => $.git.draftLineNavigation)}</>}
         </p>
       )}
       {repo?.available ? (
@@ -150,6 +153,26 @@ export function DiffPageView({
           repoId={page.repoId}
           target={page.target}
           viewType={mobile ? "unified" : view}
+          initialScroll={page.scroll}
+          initialLineSelection={page.lineSelection}
+          onLineSelection={(selection) => {
+            page.lineSelection = selection;
+          }}
+          onScrollPosition={(position) => {
+            page.scroll = position;
+          }}
+          openLineLabel={unsaved ? t(($) => $.git.openDraftFromDiff) : undefined}
+          onOpenLine={
+            page.target.side === "worktree"
+              ? (line, focusContent) => {
+                  onOpenContent(focusContent);
+                  showFile(
+                    { deviceId, workspaceId, path: childPath(page.repoPath, page.target.path) },
+                    unsaved ? undefined : line,
+                  );
+                }
+              : undefined
+          }
           onOtherSide={
             page.target.side === "commit"
               ? undefined

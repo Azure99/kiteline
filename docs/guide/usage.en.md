@@ -292,6 +292,8 @@ Diffs exceeding the limit show only part of the raw patch. Entries explain known
 
 A dot on a change row marks a related unsaved draft. Worktree comparisons read the device disk and index; staged comparisons read the index and HEAD. When a related unsaved draft exists, the diff explains this source and does not read the browser draft. A draft with an unconfirmed save may already be on disk; check it in Files.
 
+In a regular text file's worktree diff, click the new-side line number of an added or context line to open and locate it in the file; phones use the same direct action. Deleted lines, staged comparisons, historical versions and raw patches have no line-number navigation. If the target has an unsaved draft, the action only opens it and preserves its reading position because diff line numbers come from disk. Browser Back returns to the diff's reading position.
+
 ### Stage and commit
 
 - Staging reads disk files without saving browser drafts. If selected files have unsaved drafts, it first asks whether to stage the disk versions. Save first to include browser input; check any unconfirmed save result first.

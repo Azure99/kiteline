@@ -35,6 +35,22 @@ test("returning to an existing page activates it without duplicating or replacin
   expect(pages.active).toBe("file:a.txt");
 });
 
+test("reopening a comparison retains its scroll unless a new position is supplied", () => {
+  let pages = openPage({ items: [] }, { ...diff, scroll: { top: 371, left: 24 } });
+  pages = openPage(pages, { ...diff });
+  expect(pages.items).toEqual([{ ...diff, scroll: { top: 371, left: 24 } }]);
+
+  pages = openPage(pages, { ...diff, scroll: { top: 100, left: 0 } });
+  expect(pages.items).toEqual([{ ...diff, scroll: { top: 100, left: 0 } }]);
+});
+
+test("reopening a comparison retains the selected patch line for continued reading", () => {
+  const lineSelection = { patch: "patch snapshot", line: 216 };
+  let pages = openPage({ items: [] }, { ...diff, lineSelection });
+  pages = openPage(pages, { ...diff });
+  expect(pages.items).toMatchObject([{ ...diff, lineSelection }]);
+});
+
 test("closing chooses the adjacent mixed page and background close preserves selection", () => {
   const original: WorkPagesState = { items: [file("a.txt"), diff, file("b.txt")], active: "diff" };
   expect(closePage(original, "file:a.txt").active).toBe("diff");

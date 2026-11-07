@@ -730,6 +730,10 @@ export const en = {
     unsavedDraft: "Unsaved draft",
     draftComparisonWorktree:
       "This comparison reads the disk version on the device, without reading editor drafts.",
+    worktreeLine: "Worktree line {{line}}",
+    openWorktreeLine: "Open worktree file at line {{line}}",
+    openDraftFromDiff: "Open unsaved draft without line positioning",
+    draftLineNavigation: "Opening from a diff line keeps the unsaved draft's current position.",
     draftComparisonStaged:
       "This comparison reads the staged version, without reading editor drafts.",
     historyUnavailable: "Device unavailable. Previously read history is retained.",
