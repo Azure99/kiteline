@@ -51,20 +51,35 @@ const restoreHorizontalScroll = EditorView.scrollHandler.of((view, range, option
 });
 
 // CodeMirror remeasures a resized editor, but only explicit scroll requests reveal its selection.
-const revealAfterResize = ViewPlugin.define(() => ({ height: 0 }), {
-  provide: (plugin) =>
-    EditorView.updateListener.of((update) => {
-      if (!update.geometryChanged) return;
-      const state = update.view.plugin(plugin)!;
-      const height = update.view.scrollDOM.clientHeight;
-      const shrank = height < state.height;
-      state.height = height;
-      if (shrank && update.view.hasFocus)
-        update.view.dispatch({
-          effects: EditorView.scrollIntoView(update.state.selection.main),
+const revealAfterResize = ViewPlugin.define(
+  () => ({
+    height: 0,
+    frame: 0,
+    destroy() {
+      cancelAnimationFrame(this.frame);
+    },
+  }),
+  {
+    provide: (plugin) =>
+      EditorView.updateListener.of((update) => {
+        if (!update.geometryChanged) return;
+        const view = update.view;
+        const resize = view.plugin(plugin)!;
+        const height = view.scrollDOM.clientHeight;
+        const shrank = height < resize.height;
+        resize.height = height;
+        if (!shrank || !view.hasFocus || resize.frame) return;
+
+        // Cursor commands can force a measurement while holding their starting state.
+        // Let the command finish before dispatching, and reveal its current selection.
+        resize.frame = requestAnimationFrame(() => {
+          resize.frame = 0;
+          if (view.hasFocus)
+            view.dispatch({ effects: EditorView.scrollIntoView(view.state.selection.main) });
         });
-    }),
-});
+      }),
+  },
+);
 
 export const editorTheme = EditorView.theme({
   "&": { height: "100%", background: "var(--background)" },
