@@ -150,7 +150,7 @@ The session menu’s “Continue in CLI” provides a complete command for the c
 
 The right Files sidebar browses the current workspace, with paths relative to its directory; opened files appear in the central work pages. Clicking a file or Git entry opens a page that remains until you close it. Selecting an already open page does not duplicate it. “Copy device absolute path” in Details copies the path text on the device; quote it according to your shell's rules when using it in a shell command.
 
-Work-page tabs show only filenames. To distinguish files with the same name or diffs of the same file from different sources, open a tab and check its content header's path and comparison source, or view the full path and source in its context menu. On phones, the path above a text file can wrap onto multiple lines.
+Work-page tabs show only filenames. To distinguish files with the same name or diffs of the same file from different sources, open a tab and check its content header's path and comparison source, or view the full path and source in its context menu. Below 960px wide, text, Markdown and image paths share one row with their action buttons. Long paths keep their ends and may not distinguish files with the same name; use file Details or the tab menu for the full path.
 
 ### Browse
 

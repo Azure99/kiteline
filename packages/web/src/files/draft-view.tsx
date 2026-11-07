@@ -161,10 +161,10 @@ export function DraftView({
       {showTabs && <DraftTabs store={store} tabs={tabs} draft={draft} hidden={focusMode?.active} />}
       <div className="flex min-h-10 shrink-0 flex-wrap items-center justify-end border-b border-border px-1">
         <span
-          className="min-w-0 flex-1 basis-32 truncate px-2 text-xs max-sm:basis-full max-sm:whitespace-pre-wrap max-sm:break-all max-sm:pt-1"
+          className="min-w-0 flex-1 basis-32 truncate px-2 text-xs max-desk:basis-0 max-desk:text-left max-desk:[direction:rtl]"
           title={`${draft.deviceName} / ${draft.workspaceName}\n${draft.resolvedPath ?? draftLabel(draft)}`}
         >
-          {draftLabel(draft)}
+          <span dir="ltr">{draftLabel(draft)}</span>
         </span>
         <div className="ml-auto flex max-w-full flex-wrap justify-end">
           {previewType && (
