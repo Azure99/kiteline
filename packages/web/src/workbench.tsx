@@ -59,8 +59,9 @@ import { DraftStore, isDirty } from "./files/drafts";
 import { DraftView } from "./files/draft-view";
 import { OpenFiles } from "./files/open-files";
 import { UploadDialog } from "./files/upload-dialog";
-import { ComposeProvider } from "./terminal/compose";
+import { ComposeProvider, type ComposeUpload } from "./terminal/compose";
 import { ComposeDrafts } from "./terminal/compose-drafts";
+import { deviceAbsolutePath } from "./files/paths";
 import { FileOperationDialog, type FileAction } from "./files/operation-dialog";
 import { PortDialog } from "./devices/port-dialog";
 import { ReleaseNotice } from "./components/release-notice";
@@ -315,6 +316,7 @@ function SignedInWorkbench({
       folder: string;
       files: File[];
       label: string;
+      compose?: Pick<ComposeUpload, "onWritten" | "finalFocus">;
     }[]
   >([]);
   const [activeUpload, setActiveUpload] = useState<string>();
@@ -584,8 +586,24 @@ function SignedInWorkbench({
     }
     return <DeviceDetail key={device.id} device={device} actions={deviceActions} />;
   }
+  function startComposeUpload({ workspacePath, onWritten, finalFocus, ...request }: ComposeUpload) {
+    const id = newId();
+    setUploads((old) => [
+      ...old,
+      {
+        id,
+        folder: ".",
+        ...request,
+        compose: {
+          onWritten: (path) => onWritten(deviceAbsolutePath(workspacePath, path)),
+          finalFocus,
+        },
+      },
+    ]);
+    setActiveUpload(id);
+  }
   return (
-    <ComposeProvider drafts={composeDrafts}>
+    <ComposeProvider drafts={composeDrafts} upload={startComposeUpload}>
       <a
         href="#workbench-main"
         onClick={(event) => {
@@ -863,13 +881,15 @@ function SignedInWorkbench({
             setUploads((old) => old.filter((upload) => upload !== item));
             setActiveUpload(undefined);
           }}
-          onWritten={(path) =>
+          finalFocus={item.compose?.finalFocus}
+          onWritten={(path) => {
             emit("kiteline:file-written", {
               deviceId: item.deviceId,
               workspaceId: item.workspaceId,
               path,
-            })
-          }
+            });
+            item.compose?.onWritten(path);
+          }}
         />
       ))}
       {fileOperation && (

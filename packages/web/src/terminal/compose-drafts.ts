@@ -35,6 +35,15 @@ class ComposeDraft {
     this.publish({ ...this.state, text });
   }
 
+  insert(value: string) {
+    const [start, end] = this.selection;
+    const position = start + value.length;
+    this.setText(this.state.text.slice(0, start) + value + this.state.text.slice(end), [
+      position,
+      position,
+    ]);
+  }
+
   async send(enter: boolean) {
     const text = this.state.text;
     if (!text || this.state.sending) return false;

@@ -156,3 +156,35 @@ test("clearing page drafts leaves a late reply attached to the old draft", async
   expect(drafts.get(target).snapshot()).toEqual({ text: "after sign-in", sending: false });
   expect(next.selection).toEqual([5, 5]);
 });
+
+test("inserting an uploaded path replaces the source selection without changing another draft", () => {
+  const drafts = new ComposeDrafts();
+  const source = drafts.get(target);
+  source.setText("read TARGET next", [5, 11]);
+  const other = drafts.get({ ...target, workspaceId: "other", sessionId: "other" });
+  other.setText("another draft", [3, 3]);
+  const path = "/workspace/project/files/说明's file.txt";
+
+  source.insert(path);
+  expect(drafts.get(target).snapshot().text).toBe(`read ${path} next`);
+  expect(source.selection).toEqual([5 + path.length, 5 + path.length]);
+  expect(other.snapshot().text).toBe("another draft");
+  expect(other.selection).toEqual([3, 3]);
+});
+
+test("a path inserted while sending remains in the source draft after the reply", async () => {
+  const { succeed } = heldResponse();
+  const drafts = new ComposeDrafts();
+  const source = drafts.get(target);
+  source.setText("first request", [13, 13]);
+  const sent = source.send(true);
+
+  source.insert("\n/workspace/next.txt");
+  expect(source.snapshot().sending).toBe(true);
+  succeed();
+  expect(await sent).toBe(true);
+  expect(drafts.get(target).snapshot()).toMatchObject({
+    text: "first request\n/workspace/next.txt",
+    sending: false,
+  });
+});

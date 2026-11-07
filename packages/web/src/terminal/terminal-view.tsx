@@ -429,8 +429,10 @@ export function TerminalView({
         <ComposePanel
           deviceId={deviceId}
           workspaceId={workspaceId}
+          workspacePath={workspacePath}
           sessionId={sessionId}
           sessionName={sessionName}
+          label={`${deviceName} / ${sessionName} / ${workspacePath}`}
           mobile={mobile}
           available={state.status === "ready"}
           editor={composeEditor}

@@ -1,6 +1,6 @@
 import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ComponentProps } from "react";
 import { Upload } from "lucide-react";
 import type { FileInspection } from "@kiteline/shared/protocol";
 import { Button } from "../components/ui/button";
@@ -44,6 +44,7 @@ export function UploadDialog({
   onHide,
   onClose,
   onWritten,
+  finalFocus,
 }: {
   deviceId: string;
   workspaceId: string;
@@ -54,6 +55,7 @@ export function UploadDialog({
   onHide: () => void;
   onClose: () => void;
   onWritten: (path: string) => void;
+  finalFocus?: ComponentProps<typeof DialogContent>["finalFocus"];
 }) {
   const { t } = useTranslation();
 
@@ -177,7 +179,7 @@ export function UploadDialog({
           if (!open) onHide();
         }}
       >
-        <DialogContent>
+        <DialogContent finalFocus={finalFocus}>
           <DialogHeader>
             <DialogTitle>{t(($) => $.files.uploadCount, { count: rows.length })}</DialogTitle>
           </DialogHeader>

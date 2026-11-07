@@ -565,6 +565,7 @@ export const en = {
     composeSendHint: "Paste into the program and press Enter ({{key}})",
     composeInsert: "Insert",
     composeInsertHint: "Paste into the program without Enter",
+    composeUpload: "Upload file and insert its path",
     composeClose: "Close (Esc) · draft is kept",
     tooMuchOutput: "Too much output to announce. Navigate through the lines to read it.",
   },

@@ -11,3 +11,7 @@ export function parentPath(path: string) {
 export function childPath(parent: string, name: string) {
   return parent === "." ? name : `${parent}/${name}`;
 }
+export function deviceAbsolutePath(root: string, path: string) {
+  const separator = root.startsWith("/") ? "/" : "\\";
+  return root + (root.endsWith(separator) ? "" : separator) + path.split("/").join(separator);
+}

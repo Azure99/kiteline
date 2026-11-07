@@ -6,6 +6,7 @@ import { IconButton } from "../components/icon-button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { useCopyFeedback } from "../lib/use-copy-feedback";
 import { formatBytes } from "./format";
+import { deviceAbsolutePath } from "./paths";
 
 export function FileDetails({
   entry,
@@ -18,9 +19,7 @@ export function FileDetails({
 }) {
   const { t, i18n } = useTranslation();
   const { copy, copied, error } = useCopyFeedback();
-  const separator = root.startsWith("/") ? "/" : "\\";
-  const path =
-    root + (root.endsWith(separator) ? "" : separator) + entry.path!.split("/").join(separator);
+  const path = deviceAbsolutePath(root, entry.path!);
   const kind =
     entry.kind === "directory"
       ? t(($) => $.common.directory)

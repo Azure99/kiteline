@@ -551,6 +551,7 @@ export const zhCN = {
     composeSendHint: "粘贴到程序并按 Enter（{{key}}）",
     composeInsert: "插入",
     composeInsertHint: "粘贴到程序，不按 Enter",
+    composeUpload: "上传文件并插入路径",
     composeClose: "关闭（Esc）· 保留草稿",
     tooMuchOutput: "输出过多，无法全部朗读；请按行浏览。",
   },

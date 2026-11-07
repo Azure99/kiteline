@@ -116,6 +116,8 @@ On desktop, press Ctrl/⌘+Shift+Enter inside the terminal or choose Compose fro
 
 Close the editor or press Esc to keep its draft and caret position. Return to the original terminal after switching terminals, workspaces or devices to continue. Drafts live only in the current page; reloading, closing the page or signing out clears them, and they do not sync to another device. A pending send stays pending across closing, reopening and navigation, preventing another send while it is in flight; edits made during the request are kept. Failure or an unconfirmed result keeps the draft and error with the original terminal. Check the program's actual input before deciding to resend. Success means tmux handled the input, not that the program finished processing it.
 
+Choose files with the paperclip button, or paste or drop files into the draft. Uploads start at the source workspace root; change the subdirectory and file name in the existing [upload dialog](#upload-and-download). After the device confirms a successful write, its final absolute path replaces the source draft's selection or is inserted at its caret. Successful paths from the same batch are separated by newlines. Switching workspaces or terminals during upload still inserts into the original draft. Close the upload dialog to continue typing. Paths are inserted as plain text; quote them according to your shell's rules when using them in a shell command.
+
 ### Open files from terminal output
 
 On desktop, Ctrl/Cmd-click a path to open it in Files in the source workspace. On a phone, select the full path with a long press, then choose Open file from the menu. Relative paths always start at the workspace root; they do not follow shell `cd`, SSH or container directories.
