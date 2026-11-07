@@ -42,6 +42,7 @@ export interface TerminalTarget {
   workspaceId: string;
   sessionId: string;
 }
+export type ProgramCopyRequest = { text: string } | { error: unknown };
 interface DisplayOptions {
   host: HTMLElement;
   target: TerminalTarget;
@@ -52,6 +53,7 @@ interface DisplayOptions {
     title?: (title: string) => void;
     reading?: (value: boolean) => void;
     modifiers?: (value: Modifiers) => void;
+    copyRequest?: (request: ProgramCopyRequest) => void;
   };
 }
 export class TerminalDisplay {
@@ -221,6 +223,25 @@ export class TerminalDisplay {
           linkHandler: { activate: openLink, hover: hoverLink, leave: leaveLink },
         });
         this.terminal = terminal;
+        const clipboard = terminal.parser.registerOscHandler(52, (body) => {
+          // Snapshot and tail bytes replay old requests before the ordered ready frame.
+          if (!this.ready || this.disposed) return true;
+          const separator = body.indexOf(";");
+          const encoded = body.slice(separator + 1);
+          if (separator === -1 || encoded === "?") return true;
+          let request: ProgramCopyRequest;
+          try {
+            const bytes = Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0));
+            request = {
+              text: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes),
+            };
+          } catch (error) {
+            request = { error };
+          }
+          this.options.events.copyRequest?.(request);
+          return true;
+        });
+        this.cleanups.push(() => clipboard.dispose());
         initializeTerminalUnicode(terminal);
         terminal.loadAddon(this.fitAddon);
         terminal.loadAddon(new WebLinksAddon(openLink, { hover: hoverLink, leave: leaveLink }));

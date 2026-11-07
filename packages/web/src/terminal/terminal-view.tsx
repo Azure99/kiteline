@@ -9,7 +9,7 @@ import {
   useState,
   type Ref,
 } from "react";
-import { ArrowDown, ClipboardPaste, Copy, PenLine, RefreshCw, TextSelect } from "lucide-react";
+import { ArrowDown, ClipboardPaste, Copy, PenLine, RefreshCw, TextSelect, X } from "lucide-react";
 import { ComposePanel, isComposeShortcut, useComposeDraft } from "./compose";
 import { appModifier } from "../lib/app-modifier";
 import { TerminalScreens, type TerminalScreenSnapshot } from "./screens";
@@ -92,7 +92,10 @@ export function TerminalView({
     modifiers: releasedModifiers,
     state: { status: "connecting" },
   });
-  const { terminal, title, reading, modifiers, state } = snapshot;
+  const { terminal, title, reading, modifiers, state, programCopy } = snapshot;
+  const programCopyFailure =
+    programCopy?.failure ??
+    (programCopy && "error" in programCopy.request ? programCopy.request : undefined);
   useEffect(() => {
     if (!terminal) return;
     const canvas = element.current!;
@@ -392,6 +395,41 @@ export function TerminalView({
               input.current();
             }}
           />
+        )}
+        {programCopy && (
+          <div
+            role={programCopyFailure ? "alert" : "status"}
+            className="absolute top-2 right-2 z-10 flex max-w-[calc(100%_-_1rem)] items-start gap-1 rounded bg-[var(--terminal-chrome)] py-0.5 pr-0.5 pl-2 text-xs text-[var(--terminal-chrome-foreground)] shadow"
+            onPointerDown={(event) => event.preventDefault()}
+          >
+            <div className="min-w-0">
+              {"text" in programCopy.request && (
+                <button
+                  className="flex min-h-7 items-center gap-1.5 rounded px-1 outline-none hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-ring"
+                  title={programCopy.request.text.slice(0, 400)}
+                  onClick={() => void screens.current?.copyProgramText(programCopy.request)}
+                >
+                  <Copy size={14} />
+                  {t(($) => $.terminal.programCopy, {
+                    count: programCopy.request.text.split("\n").length,
+                  })}
+                </button>
+              )}
+              {programCopyFailure && (
+                <div className="max-h-40 overflow-auto break-words text-[#ffb4b9]">
+                  {t(($) => $.terminal.programCopyFailed)}:{" "}
+                  <ErrorNotice error={programCopyFailure.error} />
+                </div>
+              )}
+            </div>
+            <IconButton
+              className="size-7"
+              label={t(($) => $.common.dismiss)}
+              onClick={() => screens.current?.clearProgramCopy(programCopy.request)}
+            >
+              <X />
+            </IconButton>
+          </div>
         )}
         {copyNotice && (
           <span

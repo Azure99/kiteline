@@ -1,7 +1,18 @@
 import type { Terminal } from "@xterm/xterm";
 import { ApiError } from "../lib/api";
+import { copyText } from "../lib/clipboard";
 import { releasedModifiers, type Modifiers } from "./auxiliary-input";
-import { TerminalDisplay, type DisplayState, type TerminalTarget } from "./display";
+import {
+  TerminalDisplay,
+  type DisplayState,
+  type ProgramCopyRequest,
+  type TerminalTarget,
+} from "./display";
+
+interface ProgramCopy {
+  request: ProgramCopyRequest;
+  failure?: { error: unknown };
+}
 
 export interface TerminalScreenSnapshot {
   terminal?: Terminal;
@@ -9,6 +20,7 @@ export interface TerminalScreenSnapshot {
   reading: boolean;
   modifiers: Modifiers;
   state: DisplayState;
+  programCopy?: ProgramCopy;
 }
 
 interface Screen {
@@ -18,6 +30,7 @@ interface Screen {
   reading: boolean;
   modifiers: Modifiers;
   suspended: boolean;
+  programCopy?: ProgramCopy;
 }
 
 export class TerminalScreens {
@@ -43,6 +56,26 @@ export class TerminalScreens {
     return !!this.candidate || this.current?.display.state.status === "connecting";
   }
 
+  clearProgramCopy(request: ProgramCopyRequest) {
+    const screen = this.current;
+    if (screen?.programCopy?.request !== request) return;
+    screen.programCopy = undefined;
+    this.publish();
+  }
+
+  async copyProgramText(request: ProgramCopyRequest) {
+    if (this.current?.programCopy?.request !== request || !("text" in request)) return;
+    try {
+      await copyText(request.text);
+      this.clearProgramCopy(request);
+    } catch (error) {
+      const screen = this.current;
+      if (screen?.programCopy?.request !== request) return;
+      screen.programCopy = { request, failure: { error } };
+      this.publish();
+    }
+  }
+
   restore(history: "retained" | "screen") {
     this.feedback = { status: "connecting" };
     const previous = this.current;
@@ -66,6 +99,7 @@ export class TerminalScreens {
       reading: this.current?.reading ?? false,
       modifiers: this.current?.modifiers ?? releasedModifiers,
       state: this.feedback,
+      programCopy: this.current?.programCopy,
     });
   }
 
@@ -136,6 +170,11 @@ export class TerminalScreens {
           modifiers: (modifiers) => {
             screen.modifiers = modifiers;
             if (screen === this.current) this.publish();
+          },
+          copyRequest: (request) => {
+            if (screen !== this.current || screen.suspended) return;
+            screen.programCopy = { request };
+            this.publish();
           },
         },
       }),

@@ -553,6 +553,9 @@ export const zhCN = {
     composeInsertHint: "粘贴到程序，不按 Enter",
     composeUpload: "上传文件并插入路径",
     composeClose: "关闭（Esc）· 保留草稿",
+    programCopy_one: "复制程序内容 · {{count, number}} 行",
+    programCopy_other: "复制程序内容 · {{count, number}} 行",
+    programCopyFailed: "无法复制程序内容",
     tooMuchOutput: "输出过多，无法全部朗读；请按行浏览。",
   },
   files: {

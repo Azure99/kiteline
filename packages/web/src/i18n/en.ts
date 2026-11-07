@@ -567,6 +567,9 @@ export const en = {
     composeInsertHint: "Paste into the program without Enter",
     composeUpload: "Upload file and insert its path",
     composeClose: "Close (Esc) · draft is kept",
+    programCopy_one: "Program copy · {{count, number}} line",
+    programCopy_other: "Program copy · {{count, number}} lines",
+    programCopyFailed: "Program content could not be copied",
     tooMuchOutput: "Too much output to announce. Navigate through the lines to read it.",
   },
   files: {

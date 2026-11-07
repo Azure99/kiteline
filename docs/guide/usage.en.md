@@ -106,7 +106,9 @@ Scroll up to read retained history; new output does not pull you back to the bot
 - Desktop: drag to select text. Hold Shift while dragging if a program such as htop handles the mouse. Copy through the context menu, or Cmd-C on macOS. Paste with Ctrl-V, Ctrl-Shift-V, Cmd-V or the context menu. Ctrl-C is sent to the program.
 - Phone: tap the terminal to open the keyboard. Long-press text or blank space to open the menu and paste; adjust the selection with the handles if needed before copying. Clear an existing selection before tapping the terminal to open the keyboard. Paste appears when the browser supports reading the clipboard.
 
-Oversized pastes are not sent and show "Pasted text exceeds the input limit". Programs cannot display images or write to the clipboard through OSC 52 in the web terminal.
+Oversized pastes are not sent and show "Pasted text exceeds the input limit". The web terminal does not display images from programs.
+
+When a program requests a copy through OSC 52, “Program copy” and the line count appear at the top right of the terminal. Click it to write to your local clipboard. The program supplies this text independently of the web selection; dismissing the prompt discards the request. A failed copy keeps the text and error so you can click again. Other web displays of the same session handle their requests independently, and restored history does not prompt for old requests.
 
 The phone shows two rows of terminal keys. Tap a key to send it once; sliding across the keys does not send input. Tap SHIFT, CTRL or ALT once to apply it only to the next key, and again to cancel. The pen button at the bottom right opens local composition. In the web app, Ctrl-b goes directly to the program; it is not a tmux prefix.
 

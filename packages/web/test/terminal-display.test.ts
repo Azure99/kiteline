@@ -4,7 +4,28 @@ vi.hoisted(() => {
   // `useMobile()` reads the layout query when its module loads.
   globalThis.matchMedia = () => ({ matches: true }) as MediaQueryList;
 });
-import { TerminalDisplay, type DisplayState } from "../src/terminal/display";
+import { Terminal } from "@xterm/xterm";
+import {
+  TerminalDisplay,
+  type DisplayState,
+  type ProgramCopyRequest,
+} from "../src/terminal/display";
+
+// Keep the real xterm parser and output queue; these collaborators only render or track DOM input.
+vi.mock("../src/terminal/auxiliary-input", () => ({
+  AuxiliaryInput: class {
+    dispose() {}
+  },
+}));
+vi.mock("../src/terminal/keyboard-viewport", () => ({
+  KeyboardViewport: class {
+    isReading() {
+      return false;
+    }
+    dispose() {}
+  },
+}));
+vi.mock("../src/terminal/clipped-screen", () => ({ retainReadonlyViewport: () => () => {} }));
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -104,6 +125,125 @@ test("a disposed display cancels a ready channel returned after response consump
     expect(fetch.mock.calls.filter(([, options]) => options?.method === "DELETE")).toHaveLength(1);
   } finally {
     returnReady();
+    display.dispose();
+  }
+});
+
+async function copyDisplay() {
+  vi.stubGlobal("window", new EventTarget());
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
+  vi.stubGlobal("location", { href: "http://localhost/", protocol: "http:" });
+  vi.stubGlobal("document", { documentElement: {} });
+  vi.stubGlobal("getComputedStyle", () => ({ getPropertyValue: () => "" }));
+  vi.stubGlobal("localStorage", { getItem: () => null });
+  const clipboard = vi.fn();
+  vi.stubGlobal("navigator", { clipboard: { writeText: clipboard } });
+  vi.spyOn(Terminal.prototype, "open").mockImplementation(() => {});
+  const sockets: Socket[] = [];
+  class Socket {
+    static OPEN = 1;
+    readyState = 1;
+    bufferedAmount = 0;
+    onmessage?: (event: MessageEvent) => void;
+    sent: (string | Uint8Array)[] = [];
+    constructor() {
+      sockets.push(this);
+    }
+    send(value: string | Uint8Array) {
+      this.sent.push(value);
+    }
+    close() {}
+    frame(value: object) {
+      this.onmessage?.({ data: JSON.stringify(value) } as MessageEvent);
+    }
+    output(text: string) {
+      this.onmessage?.({ data: new TextEncoder().encode(text).buffer } as MessageEvent);
+    }
+  }
+  vi.stubGlobal("WebSocket", Socket);
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) =>
+    options?.method === "DELETE"
+      ? new Response(null, { status: 204 })
+      : Response.json({ channelId: "copy", meta: { terminalInputBytes: 4096 } }),
+  );
+  const requests: ProgramCopyRequest[] = [];
+  const host = Object.assign(new EventTarget(), {
+    replaceChildren() {},
+    classList: { contains: () => false },
+  });
+  const display = new TerminalDisplay({
+    host: host as unknown as HTMLElement,
+    target: { deviceId: "d", workspaceId: "w", sessionId: "s" },
+    events: { state() {}, copyRequest: (request) => requests.push(request) },
+  });
+  await vi.waitFor(() => expect(sockets).toHaveLength(1));
+  const socket = sockets[0]!;
+  function begin(snapshot: string) {
+    socket.frame({
+      type: "restore.begin",
+      cols: 20,
+      rows: 4,
+      historyLines: 100,
+      snapshotBytes: new TextEncoder().encode(snapshot).length,
+    });
+    if (snapshot) socket.output(snapshot);
+  }
+  return { display, socket, requests, clipboard, begin };
+}
+
+function oscCopy(text: string) {
+  return `\x1b]52;c;${Buffer.from(text).toString("base64")}\x07`;
+}
+
+test("only live OSC 52 after parsed snapshot and tail creates a local copy request", async () => {
+  const { display, socket, requests, clipboard, begin } = await copyDisplay();
+  try {
+    const snapshot = oscCopy("saved");
+    begin(snapshot);
+    const tail = oscCopy("tail");
+    socket.output(tail.slice(0, 10));
+    socket.output(tail.slice(10));
+    socket.frame({ type: "ready" });
+    socket.output(oscCopy("\ufeff中文🙂\r\nsecond line"));
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    expect(display.state.status).toBe("ready");
+    expect(requests).toEqual([{ text: "\ufeff中文🙂\r\nsecond line" }]);
+    expect(clipboard).not.toHaveBeenCalled();
+  } finally {
+    display.dispose();
+  }
+});
+
+test("live OSC 52 queries do not reply and invalid base64 or UTF-8 stays local", async () => {
+  const { display, socket, requests, clipboard, begin } = await copyDisplay();
+  try {
+    begin("");
+    socket.frame({ type: "ready" });
+    await vi.waitFor(() => expect(display.state.status).toBe("ready"));
+    const replies: string[] = [];
+    display.terminal!.onData((value) => replies.push(value));
+    socket.output("\x1b]52;c;?\x07\x1b]52;missing-separator\x07");
+    socket.output("\x1b]52;c;##\x07\x1b]52;c;/w==\x07");
+    const live = oscCopy("next");
+    socket.output(live.slice(0, 9));
+    socket.output(live.slice(9));
+    socket.output(oscCopy(""));
+    await vi.waitFor(() => expect(requests).toHaveLength(4));
+    expect(requests.slice(0, 2)).toEqual([
+      { error: expect.any(Error) },
+      { error: expect.any(Error) },
+    ]);
+    expect(requests.slice(2)).toEqual([{ text: "next" }, { text: "" }]);
+    expect(display.state.status).toBe("ready");
+    expect(replies).toEqual([]);
+    expect(clipboard).not.toHaveBeenCalled();
+  } finally {
     display.dispose();
   }
 });
