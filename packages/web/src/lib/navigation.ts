@@ -13,6 +13,13 @@ export interface WorkspaceTarget {
 }
 export interface NavigationOptions {
   replace?: boolean;
+  intent?: "open" | "view";
+}
+
+type RouteChangeEvent = PopStateEvent & { navigationIntent?: NavigationOptions["intent"] };
+
+export function navigationIntent(event: PopStateEvent) {
+  return (event as RouteChangeEvent).navigationIntent;
 }
 export interface TasksRoute {
   filter?: string;
@@ -31,10 +38,17 @@ function subscribe(listener: () => void) {
   window.addEventListener("popstate", listener);
   return () => window.removeEventListener("popstate", listener);
 }
-export function navigate(path: string, { replace = false }: NavigationOptions = {}) {
-  if (replace) history.replaceState(history.state, "", path);
-  else history.pushState(null, "", path);
-  window.dispatchEvent(new PopStateEvent("popstate"));
+export function navigate(
+  path: string,
+  { replace = false, intent = "open" }: NavigationOptions = {},
+) {
+  if (path !== currentPath()) {
+    if (replace) history.replaceState(history.state, "", path);
+    else history.pushState(null, "", path);
+  } else if (intent === "view") return;
+  const event: RouteChangeEvent = new PopStateEvent("popstate");
+  event.navigationIntent = intent;
+  window.dispatchEvent(event);
 }
 export function useRoute() {
   const path = useSyncExternalStore(subscribe, currentPath);
@@ -111,8 +125,7 @@ export function navigateWorkspace(
   changes: WorkspaceQuery = {},
   options: NavigationOptions = {},
 ) {
-  const path = workspaceDestination(target, tool, changes);
-  if (path !== currentPath()) navigate(path, options);
+  navigate(workspaceDestination(target, tool, changes), options);
 }
 export function updateWorkspaceQuery(
   target: WorkspaceTarget,
@@ -121,5 +134,5 @@ export function updateWorkspaceQuery(
 ) {
   const current = currentRoute();
   if (current.tool && isWorkspaceRoute(current, target))
-    navigateWorkspace(target, current.tool, changes, options);
+    navigateWorkspace(target, current.tool, changes, { intent: "view", ...options });
 }

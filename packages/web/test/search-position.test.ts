@@ -1,6 +1,8 @@
 import { expect, test } from "vitest";
 import { decodeText } from "@kiteline/shared/protocol/text";
-import { searchPosition } from "../src/files/search-position";
+import { Text } from "@codemirror/state";
+import { diff } from "@codemirror/merge";
+import { mapSearchPosition, searchPosition } from "../src/files/search-position";
 
 // Editor coordinates of the hit: the position in the decoded, LF-normalized text.
 function editorAt(raw: string, line: number, column: number, query: string) {
@@ -81,4 +83,55 @@ test("stale coordinates leave the decision to the editor's text check", () => {
   expect(searchPosition("one\ntwo\n", 5, "HIT")).toBeUndefined();
   expect(searchPosition("one\ntwo\n", 2, "HIT")).toBeUndefined();
   expect(searchPosition("", 1, "")).toBeUndefined();
+});
+
+test.each([
+  ["lines inserted before", "intro\nextra\nhead\n  HIT();\ntail", { line: 4, column: 2 }],
+  ["line deleted before", "  HIT();\ntail", { line: 1, column: 2 }],
+  ["text inserted at hit start", "head\n  prefix HIT();\ntail", { line: 2, column: 9 }],
+  ["text inserted at hit end", "head\n  HIT suffix();\ntail", { line: 2, column: 2 }],
+  ["new occurrence before", "HIT();\nhead\n  HIT();\ntail", { line: 3, column: 2 }],
+] as const)("unchanged disk hit maps through %s", (_, current, expected) => {
+  const base = "head\n  HIT();\ntail";
+  expect(
+    mapSearchPosition(
+      Text.of(base.split("\n")),
+      Text.of(current.split("\n")),
+      { line: 2, column: 2 },
+      "HIT",
+      diff(base, current),
+    ),
+  ).toEqual(expected);
+});
+
+test.each(["head\n  OTHER();\ntail", "head\n  HI_INSERT_T();\ntail", "head\ntail"])(
+  "a changed disk hit requests Find instead of selecting a different occurrence",
+  (current) => {
+    const base = "head\n  HIT();\ntail";
+    expect(
+      mapSearchPosition(
+        Text.of(base.split("\n")),
+        Text.of(current.split("\n")),
+        { line: 2, column: 2 },
+        "HIT",
+        diff(base, current),
+      ),
+    ).toBeUndefined();
+  },
+);
+
+test("mapping uses normalized BOM, CRLF, lone CR and UTF-16 coordinates", () => {
+  const raw = "\uFEFFhead\r\n中文\r😀HIT();\r\ntail";
+  const { text: base } = decodeText(new TextEncoder().encode(raw));
+  const found = searchPosition(raw, 2, "HIT", 5);
+  const current = Text.of(("added\n" + base).split("\n"));
+  const mapped = mapSearchPosition(
+    Text.of(base.split("\n")),
+    current,
+    found,
+    "HIT",
+    diff(base, current.toString()),
+  );
+  expect(mapped).toEqual({ line: 4, column: 2 });
+  expect(current.line(mapped!.line).text.slice(mapped!.column, mapped!.column + 3)).toBe("HIT");
 });

@@ -4,6 +4,7 @@ import {
   workspacePath,
   workspaceDestination,
   navigateWorkspace,
+  navigationIntent,
   updateWorkspaceQuery,
   tasksPath,
 } from "../src/lib/navigation";
@@ -124,7 +125,7 @@ test("file opens preserve search only when requested and reject invalid line num
   });
 });
 
-test("workspace replacements preserve page history while new destinations clear it", () => {
+test("workspace navigation preserves history and distinguishes open, view and native events", () => {
   const target = { deviceId: "d", workspaceId: "w" };
   const browser = Object.assign(new EventTarget(), {
     location: new URL("https://kiteline.test/devices/d/workspaces/w/files?file=alias.txt"),
@@ -153,14 +154,27 @@ test("workspace replacements preserve page history while new destinations clear 
   expect(navigation.replaceState).toHaveBeenCalledOnce();
   expect(navigation.pushState).not.toHaveBeenCalled();
   expect(routeChanged).toHaveBeenCalledOnce();
+  expect(navigationIntent(routeChanged.mock.calls[0]![0] as PopStateEvent)).toBe("view");
+
+  updateWorkspaceQuery(target, { file: "actual.txt" }, { replace: true });
+  expect(routeChanged).toHaveBeenCalledOnce();
 
   navigateWorkspace(target, "files", { file: "actual.txt" }, { replace: true });
   expect(navigation.replaceState).toHaveBeenCalledOnce();
-  expect(routeChanged).toHaveBeenCalledOnce();
+  expect(navigation.pushState).not.toHaveBeenCalled();
+  expect(routeChanged).toHaveBeenCalledTimes(2);
+  expect(navigationIntent(routeChanged.mock.calls[1]![0] as PopStateEvent)).toBe("open");
+
+  navigateWorkspace(target, "files", { file: "actual.txt" }, { intent: "view" });
+  expect(routeChanged).toHaveBeenCalledTimes(2);
 
   navigateWorkspace(target, "git", { repo: "repo" });
   expect(parseRoute(browser.location).tool).toBe("git");
   expect(navigation.state).toBeNull();
   expect(navigation.pushState).toHaveBeenCalledOnce();
-  expect(routeChanged).toHaveBeenCalledTimes(2);
+  expect(routeChanged).toHaveBeenCalledTimes(3);
+  expect(navigationIntent(routeChanged.mock.calls[2]![0] as PopStateEvent)).toBe("open");
+
+  browser.dispatchEvent(new Event("popstate"));
+  expect(navigationIntent(routeChanged.mock.calls[3]![0] as PopStateEvent)).toBeUndefined();
 });

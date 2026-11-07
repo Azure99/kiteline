@@ -1,3 +1,7 @@
+import type { Text } from "@codemirror/state";
+import type { Change } from "@codemirror/merge";
+
+type Position = { line: number; column: number };
 type SearchCoordinates = { byteColumn?: number; wholeWord?: boolean };
 
 // Content search results use ripgrep's coordinates: LF line numbers and UTF-16 columns in that
@@ -10,7 +14,7 @@ export function searchPosition(
   query: string,
   column?: number,
   { byteColumn, wholeWord = false }: SearchCoordinates = {},
-) {
+): Position | undefined {
   if (!query) return;
   if (raw.startsWith("\uFEFF")) raw = raw.slice(1);
   let start = 0;
@@ -40,4 +44,29 @@ export function searchPosition(
     lineStart = match.index + match[0].length;
   }
   return { line: number, column: prefix.length - lineStart };
+}
+
+// Both documents use normalized line endings. Only unchanged hits have a current position.
+export function mapSearchPosition(
+  base: Text,
+  current: Text,
+  position: Position | undefined,
+  query: string,
+  changes: readonly Change[],
+): Position | undefined {
+  if (!position || position.line > base.lines) return;
+  const line = base.line(position.line);
+  const from = line.from + position.column;
+  const to = from + query.length;
+  if (position.column > line.length || base.sliceString(from, to) !== query) return;
+
+  let offset = 0;
+  for (const change of changes) {
+    if (change.toA <= from) offset = change.toB - change.toA;
+    else if (change.fromA < to) return;
+    else break;
+  }
+  const mapped = from + offset;
+  const mappedLine = current.lineAt(mapped);
+  return { line: mappedLine.number, column: mapped - mappedLine.from };
 }

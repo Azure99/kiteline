@@ -71,14 +71,14 @@ export function DraftView({
   htmlPreviewVisible = true,
   showTabs = true,
   location,
-  onLocationApplied,
+  onLocationFinished,
 }: {
   focusMode?: ReturnType<typeof useTerminalFocus>;
   editorVisible?: boolean;
   htmlPreviewVisible?: boolean;
   showTabs?: boolean;
   location?: TextLocation;
-  onLocationApplied?(location: TextLocation): void;
+  onLocationFinished?(location: TextLocation): void;
   store: DraftStore;
   draft: Draft;
   unavailable?: string;
@@ -395,9 +395,9 @@ export function DraftView({
             key={draft.id}
             {...{ draft, store }}
             location={editorLocation}
-            onLocationApplied={(applied) => {
-              setSourceLocation((current) => (current === applied ? undefined : current));
-              if (location === applied) onLocationApplied?.(applied);
+            onLocationFinished={(finished) => {
+              setSourceLocation((current) => (current === finished ? undefined : current));
+              if (location === finished) onLocationFinished?.(finished);
             }}
             wrap={previewType === "markdown"}
             onSave={() => {

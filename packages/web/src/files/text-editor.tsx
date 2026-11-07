@@ -9,7 +9,7 @@ import {
   type Ref,
 } from "react";
 import { EditorView } from "@codemirror/view";
-import { EditorSelection, EditorState } from "@codemirror/state";
+import { EditorSelection, EditorState, Text, Transaction } from "@codemirror/state";
 import { openSearchPanel, SearchQuery, setSearchQuery } from "@codemirror/search";
 import { codeLanguage } from "../lib/code-language";
 import { ErrorNotice } from "../components/error-notice";
@@ -20,7 +20,8 @@ import { isMobile, useMobile } from "../lib/use-mobile";
 import { getFileFontSize, useFileFontSize } from "./font-size";
 import { editorAppearance, resizeEditorFont, syncTextTransactions } from "./editor-state";
 import { editorPhrases } from "./editor-locale";
-import { searchPosition } from "./search-position";
+import { mapSearchPosition, searchPosition } from "./search-position";
+import { diffText } from "./text-diff";
 
 export interface TextLocation {
   line: number;
@@ -68,13 +69,32 @@ function scrollTarget(state: EditorState, snapshot: NonNullable<Draft["view"]["s
   });
 }
 
+function revealLocation(
+  editor: EditorView,
+  position: { line: number; column: number },
+  length = 0,
+) {
+  const { doc } = editor.state;
+  const line = doc.line(Math.max(1, Math.min(position.line, doc.lines)));
+  const anchor = line.from + Math.min(position.column, line.length);
+  const head = Math.min(anchor + length, doc.length);
+  editor.scrollDOM.scrollLeft = 0;
+  editor.dispatch({
+    selection: { anchor, head },
+    effects: EditorView.scrollIntoView(EditorSelection.range(anchor, head), {
+      x: "nearest",
+      y: "center",
+    }),
+  });
+}
+
 export function TextEditor({
   draft,
   store,
   wrap,
   onSave,
   location,
-  onLocationApplied,
+  onLocationFinished,
   ref,
 }: {
   draft: Draft;
@@ -82,7 +102,7 @@ export function TextEditor({
   wrap: boolean;
   onSave: () => void;
   location?: TextLocation;
-  onLocationApplied(location: TextLocation): void;
+  onLocationFinished(location: TextLocation): void;
   ref?: Ref<TextEditorHandle>;
 }) {
   const { t, i18n } = useTranslation();
@@ -90,19 +110,24 @@ export function TextEditor({
   const dark = useTheme() === "dark";
   const fontSize = useFileFontSize(useMobile());
   const [languageError, setLanguageError] = useState<unknown>();
+  const [locationStatus, setLocationStatus] = useState<
+    { kind: "pending" } | { kind: "error"; error: unknown }
+  >();
+  const pending = useRef<{ location: TextLocation; controller: AbortController }>(undefined);
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView>(undefined);
   const sourceVersion = useRef(draft.sourceVersion);
   const save = useRef(onSave);
   save.current = onSave;
-  const locationApplied = useEffectEvent(onLocationApplied);
-  // Search coordinates belong to the disk text the location was produced from, not to edits since.
-  const searchTarget = useEffectEvent((location: TextLocation, query: string) =>
-    searchPosition(draft.baseRaw, location.line, query, location.range?.[0], {
-      wholeWord: location.wholeWord,
-      byteColumn: location.byteColumn,
-    }),
-  );
+  const locationFinished = useEffectEvent(onLocationFinished);
+  const cancelLocation = useEffectEvent(() => {
+    const request = pending.current;
+    if (!request) return;
+    pending.current = undefined;
+    request.controller.abort();
+    setLocationStatus(undefined);
+    locationFinished(request.location);
+  });
   useLayoutEffect(() => {
     if (!host.current || !draft.state) return;
     const editor = new EditorView({
@@ -122,6 +147,14 @@ export function TextEditor({
         }
         current.update(transactions);
         store.update(draft, current.state, measured);
+        if (
+          transactions.some(
+            (tr) =>
+              tr.isUserEvent("select") ||
+              (tr.docChanged && tr.annotation(Transaction.userEvent) !== undefined),
+          )
+        )
+          cancelLocation();
       },
     });
     editor.dom.style.fontSize = `${getFileFontSize(isMobile())}px`;
@@ -134,7 +167,11 @@ export function TextEditor({
       }
     };
     editor.dom.addEventListener("keydown", keydown);
+    const pointerdown = () => cancelLocation();
+    editor.contentDOM.addEventListener("pointerdown", pointerdown);
     return () => {
+      cancelLocation();
+      editor.contentDOM.removeEventListener("pointerdown", pointerdown);
       draft.view.scrollSnapshot = scrollSnapshot(editor);
       editor.destroy();
       view.current = undefined;
@@ -155,6 +192,12 @@ export function TextEditor({
   }, [fontSize]);
   useLayoutEffect(() => {
     const editor = view.current;
+    if (
+      editor &&
+      (sourceVersion.current !== draft.sourceVersion ||
+        (draft.state && editor.state.doc !== draft.state.doc))
+    )
+      cancelLocation();
     if (editor && draft.state && editor.state !== draft.state) {
       if (sourceVersion.current === draft.sourceVersion) {
         const position = scrollSnapshot(editor);
@@ -188,40 +231,78 @@ export function TextEditor({
     });
   }, [draft, i18n.resolvedLanguage]);
   useLayoutEffect(() => {
+    if (pending.current && pending.current.location !== location) cancelLocation();
     const editor = view.current;
-    if (editor && location) {
-      const { line: number, query } = location;
-      const found = query === undefined ? undefined : searchTarget(location, query);
-      const { doc } = editor.state;
-      const line = doc.line(Math.max(1, Math.min(found?.line ?? number, doc.lines)));
-      const anchor = line.from + Math.min(found?.column ?? 0, line.length);
-      const head = query === undefined ? anchor : Math.min(anchor + query.length, doc.length);
-      if (query !== undefined && (!found || doc.sliceString(anchor, head) !== query)) {
-        openSearchPanel(editor);
-        editor.dispatch({
-          effects: setSearchQuery.of(
-            new SearchQuery({
-              search: query
-                .replaceAll("\\", "\\\\")
-                .replaceAll("\n", "\\n")
-                .replaceAll("\r", "\\r")
-                .replaceAll("\t", "\\t"),
-              caseSensitive: true,
-            }),
-          ),
-        });
-      } else {
-        editor.dispatch({
-          selection: { anchor, head },
-          effects: EditorView.scrollIntoView(EditorSelection.range(anchor, head), {
-            x: "center",
-            y: "center",
-          }),
-        });
-      }
-      locationApplied(location);
+    if (editor && location && location.query === undefined) {
+      setLocationStatus(undefined);
+      revealLocation(editor, { line: location.line, column: 0 });
+      locationFinished(location);
     }
   }, [location]);
+  useEffect(() => {
+    const editor = view.current;
+    if (!editor || !location || location.query === undefined) return;
+    const query = location.query;
+    const request = { location, controller: new AbortController() };
+    const doc = editor.state.doc;
+    const version = draft.sourceVersion;
+    const baseText = draft.baseText;
+    const base = Text.of(baseText.split("\n"));
+    const parsed = searchPosition(draft.baseRaw, location.line, query, location.range?.[0], {
+      wholeWord: location.wholeWord,
+      byteColumn: location.byteColumn,
+    });
+    const found = mapSearchPosition(base, base, parsed, query, []);
+    // Parent layout effects finish the opening command's own focus handoff before this effect.
+    const focus = editor.root.activeElement;
+    pending.current = request;
+    setLocationStatus({ kind: "pending" });
+    const changes = found
+      ? diffText(baseText, doc.toString(), request.controller.signal)
+      : Promise.resolve([]);
+    void changes.then(
+      (computed) => {
+        if (pending.current !== request) return;
+        if (
+          view.current !== editor ||
+          editor.state.doc !== doc ||
+          draft.sourceVersion !== version
+        ) {
+          cancelLocation();
+          return;
+        }
+        const mapped = mapSearchPosition(base, doc, found, query, computed);
+        pending.current = undefined;
+        setLocationStatus(undefined);
+        if (mapped) revealLocation(editor, mapped, query.length);
+        else if (editor.root.activeElement === focus) {
+          openSearchPanel(editor);
+          editor.dispatch({
+            effects: setSearchQuery.of(
+              new SearchQuery({
+                search: query
+                  .replaceAll("\\", "\\\\")
+                  .replaceAll("\n", "\\n")
+                  .replaceAll("\r", "\\r")
+                  .replaceAll("\t", "\\t"),
+                caseSensitive: true,
+              }),
+            ),
+          });
+        }
+        locationFinished(location);
+      },
+      (error: unknown) => {
+        if (pending.current !== request) return;
+        pending.current = undefined;
+        setLocationStatus({ kind: "error", error });
+        locationFinished(location);
+      },
+    );
+    return () => {
+      if (pending.current === request) cancelLocation();
+    };
+  }, [location, draft]);
   useEffect(() => {
     let active = true;
     const editor = view.current;
@@ -244,6 +325,15 @@ export function TextEditor({
   }, [draft, draft.path, draft.language]);
   return (
     <>
+      {locationStatus && (
+        <div role="status" className="shrink-0 px-3 py-1 text-xs text-muted-foreground">
+          {locationStatus.kind === "pending" ? (
+            t(($) => $.common.loading)
+          ) : (
+            <ErrorNotice error={locationStatus.error} />
+          )}
+        </div>
+      )}
       {!!languageError && (
         <div role="status" className="px-4 py-2 text-xs text-muted-foreground">
           {t(($) => $.common.syntaxUnavailable)}: <ErrorNotice error={languageError} />

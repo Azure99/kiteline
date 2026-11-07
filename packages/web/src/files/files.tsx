@@ -2,7 +2,13 @@ import type { WorkspaceRecord } from "../workspace/memory";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Device, Workspace } from "@kiteline/shared/protocol";
-import { currentRoute, isWorkspaceRoute, updateWorkspaceQuery, useRoute } from "../lib/navigation";
+import {
+  currentRoute,
+  isWorkspaceRoute,
+  navigationIntent,
+  updateWorkspaceQuery,
+  useRoute,
+} from "../lib/navigation";
 import { useMobile } from "../lib/use-mobile";
 import type { useTerminalFocus } from "../terminal/use-terminal-focus";
 import type { FilePage } from "../workspace/pages";
@@ -66,6 +72,13 @@ export function Files({
     routeLocation ??
     (pending?.pageId === page?.id && pending?.path === page?.path ? pending?.position : undefined);
   useEffect(() => {
+    const opened = (event: PopStateEvent) => {
+      if (navigationIntent(event) !== "view") setPending(undefined);
+    };
+    window.addEventListener("popstate", opened);
+    return () => window.removeEventListener("popstate", opened);
+  }, []);
+  useEffect(() => {
     setPending((current) => {
       if (!current) return current;
       if (route.query.file !== current.path || route.query.line !== undefined) return undefined;
@@ -122,9 +135,10 @@ export function Files({
       currentFile={page?.path}
       onOpenContent={onOpenContent}
       onOpenFile={(path, position, keepSearch, focusContent) => {
-        if (position) setPending({ path, position });
         onOpenContent(focusContent);
+        // The open notification replaces the old request before this one is installed.
         showFile({ ...target, path }, undefined, keepSearch);
+        setPending(position ? { path, position } : undefined);
       }}
       observeContent={async (signal) => {
         const draft = page && store.find({ ...target, path: page.path }, page.draftId);
@@ -144,9 +158,9 @@ export function Files({
             editorVisible={contentVisible}
             htmlPreviewVisible={contentVisible && queryLine === undefined && !position}
             location={position}
-            onLocationApplied={(applied) => {
-              setPending((current) => (current?.position === applied ? undefined : current));
-              if (applied !== routeLocation || !page) return;
+            onLocationFinished={(finished) => {
+              setPending((current) => (current?.position === finished ? undefined : current));
+              if (finished !== routeLocation || !page) return;
               const current = currentRoute();
               if (
                 current.tool === "files" &&

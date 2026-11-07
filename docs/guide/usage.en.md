@@ -229,7 +229,9 @@ File search searches the workspace's files on disk by content or file name, with
 - `.gitignore` applies only inside Git repositories; `.ignore` and `.rgignore` always apply. Check "Include ignored files" to include files excluded by these rules.
 - Results and search duration are limited (see [Limits](reference.en.md#limits)). Reaching a limit shows "incomplete results". Results with non-UTF-8 paths are omitted and also mark the results incomplete.
 
-The current page keeps search conditions and successful results for each workspace, so you can return and continue opening them. Changing conditions or starting a new search clears the previous results; refreshing the page or signing out clears search state. If the original position no longer matches the query when you open a content result, the editor opens Find; click “next” to continue searching.
+The current page keeps search conditions and successful results for each workspace, so you can return and continue opening them. Changing conditions or starting a new search clears the previous results; refreshing the page or signing out clears search state. Opening a content result maps an unchanged disk match to its position in the current draft. If that position cannot be confirmed, the editor opens Find; click “next” to continue searching. If focus has moved elsewhere, it does not open Find or overwrite the current query.
+
+Locating a match in an unsaved draft can take time, and the text remains usable while waiting. Reopening a file, selecting or editing text, or switching files cancels the old position request. A failed comparison shows an error.
 
 ### Create and rename
 
