@@ -111,6 +111,7 @@ export function terminalPreset(options: CreateTerminal) {
     "set -g remain-on-exit on",
     "set -g mouse on",
     "set -g allow-passthrough off",
+    "set -g program-status on",
     "set -g set-clipboard external",
     "unbind-key -a -T prefix",
     "bind-key -T prefix C-b send-prefix",

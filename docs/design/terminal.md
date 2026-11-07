@@ -12,7 +12,7 @@
 
 tmux 使用会话目录下的私有配置，不加载用户的 tmux 配置或插件，并收窄 prefix 键表。具体设置由 `packages/shared/src/terminal/node.ts` 的 `terminalPreset()` 定义。
 
-固定版本：tmux 版本见 [`release/inputs.json`](../../release/inputs.json)，各平台都禁用 Sixel，并应用 [`paste.patch`](../../native/tmux/paste.patch) 和 [`flow-control.patch`](../../native/tmux/flow-control.patch)。后者为 recorder 的 `flow-control` 客户端标志提供无损在线背压；普通客户端不设置该标志。xterm.js 及插件版本见 [`packages/web/package.json`](../../packages/web/package.json)、[`packages/terminal-recorder/package.json`](../../packages/terminal-recorder/package.json) 和 [`packages/shared/package.json`](../../packages/shared/package.json)。网页的 xterm.js 带有 [`packages/web/patches/`](../../packages/web/patches/) 中的补丁，让 DOM 渲染器按设备像素比测量字形宽度；维护方法见[构建与发布](../development/release.md#xtermjs)。
+固定版本：tmux 版本见 [`release/inputs.json`](../../release/inputs.json)，各平台都禁用 Sixel，共用补丁由 [`native/tmux/series`](../../native/tmux/series) 定义。补丁让粘贴遵循 pane 模式，为 recorder 的 `flow-control` 客户端标志提供无损在线背压，并按私有 preset 回答程序状态查询；普通客户端不设置流控标志。xterm.js 及插件版本见 [`packages/web/package.json`](../../packages/web/package.json)、[`packages/terminal-recorder/package.json`](../../packages/terminal-recorder/package.json) 和 [`packages/shared/package.json`](../../packages/shared/package.json)。网页的 xterm.js 带有 [`packages/web/patches/`](../../packages/web/patches/) 中的补丁，让 DOM 渲染器按设备像素比测量字形宽度；维护方法见[构建与发布](../development/release.md#xtermjs)。
 
 网页和 recorder 的共同适配在 `packages/shared/src/terminal/index.ts`，两端必须同步升级。该模块的私有状态访问经过 `core()`，升级时以 `TerminalCore` 核对使用的成员。网页还依赖 `packages/web/src/terminal/` 的触控选择和画面保留适配，其中 `auxiliary-input.ts` 直接导入 xterm.js 的私有键盘编码；这些入口也要随升级复核。
 
@@ -206,6 +206,8 @@ send、resize、wait 在全部值解析成功后按 timeoutMs 建立一次绝对
 ## 程序报告状态
 
 recorder 持续解析程序主动发送的 OSC 7501，不依赖网页附着。shared 的 `program-status.ts` 实现 [Program Status Protocol rev 0.4](https://www.superlogical.com/rex/docs/build/program-status) 的原子报告解析与记录集合：根与 child 可并存，同 id 的新报告完整替换旧记录，clear 删除所指子树；非法 id 不回落根，未知 state 忽略，文本和尺寸超限拒绝整条报告。新记录、state 变化，或 blocked／done／error 状态下 kind／title／msg 变化视为一次新的状态出现，移到记录顺序的末尾；重复上报、working 的文本与进度和 idle 的文本更新保持原位。每终端最多 256 条，超过时淘汰当前顺序中最早的一条，因此持续更新进度但不改变状态的记录也可能先被淘汰。缺少 app 的记录在读取时继承最近祖先的 app，不改写 child。
+
+私有 tmux preset 开启默认 off 的 `program-status` 选项。tmux 解析 `OSC 7501;?` 后在同 pane 输入流中固定回复 `OSC 7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth ST`，同时支持 ST/BEL 终止符；随后 DA1 的应答仍按原顺序到达。应答不包含报告内容，不依赖网页或 recorder 附着；headless 和网页不代答，普通报告不产生应答。
 
 OSC133 A 和顶层 pane 退出删除 working/blocked，保留 idle/done/error；RIS 清空全部，DECSTR 和备用屏切换保留。普通 shell 内子进程退出依赖 producer clear 或新的 shell prompt，不轮询子进程。自然结束的状态清理排在此前输出之后、各显示的 ended 之前；随后 agent 删除会话，最终摘要不构成结束结果存档。
 

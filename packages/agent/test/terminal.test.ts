@@ -1574,3 +1574,111 @@ test("oversized program records fail only the snapshot and remain readable after
     });
   expect(agent.sessions.list().sessions[0]?.webStatus).toBe("available");
 }, 15000);
+
+test("program queries default off and answer once before DA1 with two attached viewers", async () => {
+  const ready = new Set<string>();
+  const { agent, workspace, dataDir, signal } = await fixture({
+    observers: {
+      frame: (message) => {
+        if (message.type === "frame" && message.frame.type === "ready") {
+          ready.add(message.attachmentId);
+        }
+      },
+    },
+  });
+  const program = join(dataDir, "program-status-query.mjs");
+  await writeFile(
+    program,
+    String.raw`
+      import { writeFileSync } from "node:fs";
+      const path = process.argv[2];
+      const results = [];
+      let received;
+      process.stdin.setRawMode(true);
+      process.stdin.resume();
+      process.stdin.on("data", (data) => {
+        if (received !== undefined) {
+          received += data.toString();
+          return;
+        }
+        const command = data.toString();
+        received = "";
+        const query = "\x1b]7501;?\x1b\\";
+        if (command === "s") {
+          process.stdout.write(query.slice(0, 5));
+          setTimeout(() => process.stdout.write(query.slice(5) + "\x1b[c"), 10);
+        } else if (command === "b") {
+          process.stdout.write("\x1b]7501;?\x07\x1b[c");
+        } else if (command === "r") {
+          process.stdout.write("\x1b]7501;state=working\x1b\\\x1b[c");
+        } else {
+          process.stdout.write(query + "\x1b[c");
+        }
+        setTimeout(() => {
+          results.push(received);
+          received = undefined;
+          writeFileSync(path, JSON.stringify(results));
+        }, 100);
+      });
+      writeFileSync(path + ".ready", "ready");
+      process.stdout.write("READY");
+    `,
+  );
+  const reply =
+    "\x1b]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth\x1b\\";
+  const da1 = "\x1b[?1;2c";
+
+  const defaultOutput = join(dataDir, "query-default.json");
+  const defaultSocket = join(dataDir, "default.sock");
+  await tmux(defaultSocket, [
+    "-f",
+    "/dev/null",
+    "new-session",
+    "-d",
+    "-s",
+    "query",
+    shellWords([process.execPath, program, defaultOutput]),
+  ]);
+  cleanups.push(() => tmux(defaultSocket, ["kill-server"]));
+  await expect.poll(() => readFile(defaultOutput + ".ready", "utf8"), pollOptions).toBe("ready");
+  expect((await tmux(defaultSocket, ["show-options", "-gwv", "program-status"])).trim()).toBe(
+    "off",
+  );
+  await tmux(defaultSocket, ["send-keys", "-t", "query", "q"]);
+  await expect
+    .poll(async () => JSON.parse(await readFile(defaultOutput, "utf8")), pollOptions)
+    .toEqual([da1]);
+
+  const output = join(dataDir, "query-private.json");
+  const shortcut = await agent.metadata.putShortcut({
+    name: "Status query",
+    icon: "terminal",
+    command: "exec " + shellWords([process.execPath, program, output]),
+  });
+  const session = await agent.sessions.create(
+    { workspaceId: workspace.id, shortcutId: shortcut.id },
+    signal,
+  );
+  const target = { workspaceId: workspace.id, sessionId: session.id };
+  await expect.poll(() => readFile(output + ".ready", "utf8"), pollOptions).toBe("ready");
+  const { socket } = await paneIdentity(dataDir, session.id);
+  expect((await tmux(socket, ["show-options", "-gwv", "program-status"])).trim()).toBe("on");
+  for (const attachmentId of ["query-first", "query-second"]) {
+    await agent.sessions.recorder.request({
+      type: "attach",
+      sessionId: session.id,
+      attachmentId,
+      history: "retained",
+      historyGap: false,
+    });
+  }
+  await expect.poll(() => ready.size, pollOptions).toBe(2);
+  const expected: string[] = [];
+  for (const command of ["q", "b", "s", "r"]) {
+    await agent.sessions.send({ ...target, input: { type: "text", text: command } });
+    expected.push(command === "r" ? da1 : reply + da1);
+    await expect
+      .poll(async () => JSON.parse(await readFile(output, "utf8")), pollOptions)
+      .toEqual(expected);
+  }
+}, 15000);

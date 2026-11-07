@@ -1,0 +1,35 @@
+diff --git a/input.c b/input.c
+--- a/input.c
++++ b/input.c
+@@ -2419,6 +2419,14 @@ input_exit_osc(struct input_ctx *ictx)
+ 	case 133:
+ 		input_osc_133(ictx, p);
+ 		break;
++	case 7501:
++		if (wp != NULL && strcmp(p, "?") == 0 &&
++		    options_get_number(wp->options, "program-status")) {
++			input_reply(ictx, "\033]7501;?:"
++			    "states=idle,working,done,blocked,error:"
++			    "kinds=permission,question,auth\033\\");
++		}
++		break;
+ 	default:
+ 		log_debug("%s: unknown '%u'", __func__, option);
+ 		break;
+diff --git a/options-table.c b/options-table.c
+--- a/options-table.c
++++ b/options-table.c
+@@ -879,6 +879,13 @@ const struct options_table_entry options_table[] = {
+ 		  "screen."
+ 	},
+ 
++	{ .name = "program-status",
++	  .type = OPTIONS_TABLE_FLAG,
++	  .scope = OPTIONS_TABLE_WINDOW|OPTIONS_TABLE_PANE,
++	  .default_num = 0,
++	  .text = "Whether to answer OSC 7501 program status queries."
++	},
++
+ 	{ .name = "automatic-rename",
+ 	  .type = OPTIONS_TABLE_FLAG,
+ 	  .scope = OPTIONS_TABLE_WINDOW,
