@@ -8,7 +8,14 @@ import {
   updateWorkspaceQuery,
   tasksPath,
 } from "../src/lib/navigation";
-import { showFile } from "../src/files/navigation";
+import {
+  beginFileNavigation,
+  clearFileNavigationHistory,
+  openFileLocation,
+  previewFileLocation,
+  returnToFileOrigin,
+  showFile,
+} from "../src/files/navigation";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -177,4 +184,190 @@ test("workspace navigation preserves history and distinguishes open, view and na
 
   browser.dispatchEvent(new Event("popstate"));
   expect(navigationIntent(routeChanged.mock.calls[3]![0] as PopStateEvent)).toBeUndefined();
+});
+
+function navigationBrowser(path: string, initialState: unknown) {
+  const browser = Object.assign(new EventTarget(), {
+    location: new URL(path, "https://kiteline.test"),
+  });
+  const entries = [{ path: browser.location.href, state: initialState }];
+  let index = 0;
+  function move(offset: number) {
+    const next = index + offset;
+    if (next < 0 || next >= entries.length) return;
+    index = next;
+    browser.location = new URL(entries[index]!.path);
+    browser.dispatchEvent(new Event("popstate"));
+  }
+  const history = {
+    get state() {
+      return entries[index]!.state;
+    },
+    get length() {
+      return entries.length;
+    },
+    replaceState(state: unknown, _title: string, path?: string) {
+      if (path !== undefined) browser.location = new URL(path, browser.location);
+      entries[index] = { path: browser.location.href, state: structuredClone(state) };
+    },
+    pushState(state: unknown, _title: string, path?: string) {
+      entries.splice(index + 1);
+      entries.push({ path: browser.location.href, state: null });
+      index++;
+      this.replaceState(state, _title, path);
+    },
+    back: () => move(-1),
+    forward: () => move(1),
+  };
+  vi.stubGlobal("window", browser);
+  vi.stubGlobal("history", history);
+  vi.stubGlobal("PopStateEvent", Event);
+  return { browser, history };
+}
+
+const target = { deviceId: "d", workspaceId: "w" };
+const lookup = {
+  id: "lookup",
+  origin: { path: "origin.ts", draftId: "origin-draft" },
+};
+const lookupCandidate = {
+  ...target,
+  path: "definition.ts",
+  draftId: "definition-draft",
+  entryKey: "definition-1",
+};
+
+function lookupBrowser() {
+  const path = workspacePath("d", "w", "files", {
+    file: lookup.origin.path,
+    draft: lookup.origin.draftId,
+    line: 30,
+    reveal: "src",
+  });
+  const source = { workPage: { workspace: "d:w", id: "origin-page" } };
+  const { browser, history } = navigationBrowser(path, source);
+  const intents: ReturnType<typeof navigationIntent>[] = [];
+  browser.addEventListener("popstate", (event) =>
+    intents.push(navigationIntent(event as PopStateEvent)),
+  );
+  beginFileNavigation(target, lookup);
+  return { browser, history, source, intents };
+}
+
+test.each([false, true])(
+  "one candidate history slot covers document opens (preview first: %s)",
+  (previewFirst) => {
+    const { browser, history, source, intents } = lookupBrowser();
+    expect(history.length).toBe(1);
+    expect(parseRoute(browser.location).query).toMatchObject({
+      file: lookup.origin.path,
+      draft: lookup.origin.draftId,
+      line: 30,
+      reveal: "src",
+    });
+    expect(history.state).toEqual({
+      ...source,
+      fileNavigation: { ...target, ...lookup.origin, sessionId: lookup.id, kind: "origin" },
+    });
+    expect(intents).toEqual([]);
+    expect(returnToFileOrigin(lookup.id)).toBe(false);
+    if (previewFirst) previewFileLocation(lookup.id, lookupCandidate.entryKey);
+    openFileLocation(lookupCandidate, lookup.id);
+    const next = { ...lookupCandidate, path: "use.ts", draftId: undefined, entryKey: "use-1" };
+    openFileLocation(next, lookup.id);
+    expect(history.length).toBe(2);
+    expect(parseRoute(browser.location)).toMatchObject({
+      tool: "files",
+      query: { file: next.path, draft: next.draftId, line: undefined, reveal: undefined },
+    });
+    expect(history.state).toEqual({
+      fileNavigation: { ...next, sessionId: lookup.id, kind: "document" },
+    });
+    expect(intents).toEqual(Array(previewFirst ? 3 : 2).fill("lookup"));
+    expect(returnToFileOrigin("other-lookup")).toBe(false);
+    expect(returnToFileOrigin(lookup.id)).toBe(true);
+    expect(parseRoute(browser.location).query.file).toBe(lookup.origin.path);
+    expect(history.state).toMatchObject({ ...source, fileNavigation: { kind: "origin" } });
+    history.forward();
+    expect(parseRoute(browser.location).query.file).toBe(next.path);
+    expect(history.state).toEqual({
+      fileNavigation: { ...next, sessionId: lookup.id, kind: "document" },
+    });
+    expect(intents.slice(-2)).toEqual([undefined, undefined]);
+  },
+);
+
+test("preview replaces its identity while retaining the underlying file and page", () => {
+  const { browser, history, source, intents } = lookupBrowser();
+  const originPath = browser.location.href;
+  previewFileLocation(lookup.id, "first");
+  previewFileLocation(lookup.id, "second");
+  expect(history.length).toBe(2);
+  expect(browser.location.href).toBe(originPath);
+  expect(history.state).toEqual({
+    ...source,
+    fileNavigation: {
+      ...target,
+      ...lookup.origin,
+      sessionId: lookup.id,
+      kind: "preview",
+      entryKey: "second",
+    },
+  });
+  openFileLocation(lookupCandidate, lookup.id);
+  const documentPath = browser.location.href;
+  previewFileLocation(lookup.id, "after-open");
+  expect(history.length).toBe(2);
+  expect(browser.location.href).toBe(documentPath);
+  expect(history.state).toEqual({
+    fileNavigation: {
+      ...lookupCandidate,
+      sessionId: lookup.id,
+      kind: "preview",
+      entryKey: "after-open",
+    },
+  });
+  expect(intents).toEqual(["lookup", "lookup", "lookup", "lookup"]);
+  history.back();
+  expect(history.state).toMatchObject({ fileNavigation: { kind: "origin" } });
+  history.forward();
+  expect(history.state).toMatchObject({ fileNavigation: { entryKey: "after-open" } });
+});
+
+test("a new lookup begins at the current candidate and leaves earlier identities unchanged", () => {
+  const { browser, history } = lookupBrowser();
+  openFileLocation(lookupCandidate, lookup.id);
+  const next = {
+    id: "next-lookup",
+    origin: { path: lookupCandidate.path, draftId: lookupCandidate.draftId },
+  };
+  beginFileNavigation(target, next);
+  expect(history.length).toBe(2);
+  expect(history.state).toMatchObject({
+    fileNavigation: { sessionId: next.id, kind: "origin", path: lookupCandidate.path },
+  });
+  previewFileLocation(next.id, "next-candidate");
+  expect(history.length).toBe(3);
+  expect(returnToFileOrigin(next.id)).toBe(true);
+  expect(parseRoute(browser.location).query.file).toBe(lookupCandidate.path);
+  expect(history.state).toMatchObject({ fileNavigation: { sessionId: next.id, kind: "origin" } });
+  expect(returnToFileOrigin(next.id)).toBe(false);
+  history.back();
+  expect(parseRoute(browser.location).query.file).toBe(lookup.origin.path);
+  expect(history.state).toMatchObject({ fileNavigation: { sessionId: lookup.id, kind: "origin" } });
+  expect(returnToFileOrigin(next.id)).toBe(false);
+});
+
+test("clearing lookup history removes only the current entry's reference", () => {
+  const { browser, history, source } = lookupBrowser();
+  previewFileLocation(lookup.id, "candidate");
+  const path = browser.location.href;
+  clearFileNavigationHistory();
+  expect(history.length).toBe(2);
+  expect(browser.location.href).toBe(path);
+  expect(history.state).toEqual(source);
+  history.back();
+  expect(history.state).toMatchObject({ fileNavigation: { sessionId: lookup.id, kind: "origin" } });
+  history.forward();
+  expect(history.state).toEqual(source);
 });

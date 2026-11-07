@@ -40,6 +40,10 @@ Git 浏览选择与当前正文分开，勾选不改变正文。打开源文件�
 
 导航使用具名 `{ replace, intent }` 选项；replace 保留当前 history.state 中的工作页身份，push 清除旧身份。navigate 默认表达 open，目的 URL 相同仍通知当前请求拥有者，但不重复写历史；view 只更新呈现，同 URL 可以跳过。updateWorkspaceQuery 默认 view。程序意图沿既有 popstate 通知，原生前进/后退不带程序意图；Files 用 open 和原生历史通知消费旧定位，不能只按 URL 是否变化判断新打开。`Workspace` 在同一个 layout effect 中先处理变化的路由或明确报告激活，再以函数式更新交接断点呈现；单独调整宽度不重放路由意图。同批进入手机布局时保留刚明确选择的文件正文或终端；search/reveal 与纯参数变化仍按原断点规则交接正文。手机工具抽屉归当前 `Workspace`，按 search/reveal 查询初始化和同步；两项查询均消失时收回抽屉，打开正文或选择终端也关闭抽屉。
 
+名称查阅的 history 只有一个起点和一个可替换候选槽位：起点保留原 URL 和其他 state，第一次进入候选 push，后续候选切换或预览/正文互换 replace。预览保留底层文件和工作页，正文使用目标文件 URL 并去掉原工作页身份。条目只存工作区、文件、可用草稿及 session/entry 身份，不存坐标或正文，也不证明 session 仍活动。
+
+候选切换沿既有 popstate 同步通知一次 lookup，意图不写入 history.state，普通 NavigationOptions 仍只接受 open/view。返回起点只在当前是同 session 的候选条目时发起 back；清理仅移除当前条目的查阅引用，保留 URL、其他 state 和其余历史条目。活动 session 的寿命及历史位置消费由其拥有者处理，history helper 不控制 Tracker、选区或焦点。
+
 未识别的路径显示页面不存在，并提供返回设备的入口。`/login` 不是工作台路由：开发服务代理把未登录的页面导航重定向到 `/login?returnTo=…`，登录成功后只在 `returnTo` 是同源的 `/proxy/<deviceId>/<port>…` 或 `/absproxy/<deviceId>/<port>…` 时替换当前页面并返回服务，否则仍显示页面不存在。
 
 ### 登录状态

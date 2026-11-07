@@ -16,10 +16,16 @@ export interface NavigationOptions {
   intent?: "open" | "view";
 }
 
-type RouteChangeEvent = PopStateEvent & { navigationIntent?: NavigationOptions["intent"] };
+type NavigationIntent = NonNullable<NavigationOptions["intent"]> | "lookup";
+type RouteChangeEvent = PopStateEvent & { navigationIntent?: NavigationIntent };
 
 export function navigationIntent(event: PopStateEvent) {
   return (event as RouteChangeEvent).navigationIntent;
+}
+export function notifyNavigation(intent: NavigationIntent) {
+  const event: RouteChangeEvent = new PopStateEvent("popstate");
+  event.navigationIntent = intent;
+  window.dispatchEvent(event);
 }
 export interface TasksRoute {
   filter?: string;
@@ -46,9 +52,7 @@ export function navigate(
     if (replace) history.replaceState(history.state, "", path);
     else history.pushState(null, "", path);
   } else if (intent === "view") return;
-  const event: RouteChangeEvent = new PopStateEvent("popstate");
-  event.navigationIntent = intent;
-  window.dispatchEvent(event);
+  notifyNavigation(intent);
 }
 export function useRoute() {
   const path = useSyncExternalStore(subscribe, currentPath);
