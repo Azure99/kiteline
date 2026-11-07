@@ -170,13 +170,13 @@ HTML 预览直接以当前稿件构造 `srcdoc`，只授予 iframe `sandbox="all
 
 `files.search`（`packages/agent/src/files/search.ts`）在工作区根目录运行随包的 ripgrep（程序目录下的 `dist/native/bin/rg`），不使用 `PATH` 中的 `rg`。
 
-- 名称模式用 `rg --files` 列出文件（不含目录），返回相对路径中包含查询字符串的文件，比较区分大小写。正文模式用 `--fixed-strings`，不带 `-i`。
+- 文件名模式用 `rg --files` 列出文件（不含目录），返回相对路径中包含查询字符串的文件，比较区分大小写。正文模式用 `--fixed-strings`，不带 `-i`；可选的 `wholeWord` 默认为 false，为 true 时加 `--word-regexp`。
 - 两种模式都使用 `--no-config --hidden -g !.git`，`includeIgnored` 为 true 时另加 `--no-ignore`；macOS 上与 `.git` 是同一对象的大小写变体也被排除。命令不带 `--follow`，符号链接不进入结果。忽略文件的语义（包括 Git 全局的 `core.excludesFile`）和二进制文件的处理都由 rg 决定。用户可见的规则见[使用工作台](../guide/usage.md#文件)。
 - 结果最多 `searchMatches` 条，总量约为 `resultBytes`，运行时间受 `searchTimeout` 限制。达到任一上限时 agent 停止 rg，返回已得到的结果并标记 `truncated`。用户取消返回 `cancelled`，与无匹配和超时都可区分。
-- 正文结果的行号沿用 rg 的 LF 行号；每条只返回该行开头不超过 `searchLineBytes` 的片段和最多 `searchRanges` 个高亮区间，区间是片段内的 UTF-16 索引。命中位置在片段之外时，结果仍给出真实路径和行号并标记 `truncated`。
+- 正文结果的行号沿用 rg 的 LF 行号；每条只返回该行开头不超过 `searchLineBytes` 的片段和最多 `searchRanges` 个高亮区间，区间是片段内的 UTF-16 索引。`byteColumn` 是原始行中首个命中的 UTF-8 字节偏移，即使命中超出片段也保留；超出片段的结果标记 `truncated`。
 - 路径不是合法 UTF-8 或超过 `searchPathBytes` 的结果被省略，整个结果标记 `truncated`。rg 退出码 0 和 1 都表示正常结束，其他退出码返回 `io_error`，附 stderr 不超过 `searchErrorBytes` 的前缀。
 - 浏览器按工作区保留搜索条件和成功结果，见[切换时保留的状态](interaction.md#切换时保留的状态)。修改条件或提交新查询时取消旧查询并清空结果与状态；迟到响应按请求身份丢弃。
-- 打开搜索结果走[内容识别](#内容识别)。打开正文结果时，浏览器按草稿基准正文将搜索坐标换算成编辑器坐标；命中超出返回片段时，在对应原始行内查找第一个字面匹配。当前正文在该位置不再匹配查询时，编辑器改用文件内查找。
+- 打开搜索结果走[内容识别](#内容识别)。打开正文结果时，浏览器按草稿基准原文中的 LF 行号和 UTF-16 区间或 `byteColumn` 换算编辑器坐标，沿用 rg 的首命中位置而不重复判断词边界。当前正文在该位置不再匹配查询时，编辑器改用文件内查找。
 
 ## 图片预览
 

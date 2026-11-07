@@ -130,6 +130,7 @@ export class SearchJson {
     return this.found({
       path,
       line: item.line,
+      byteColumn: item.ranges[0]?.start,
       text,
       ranges,
       truncated: item.text.truncated || item.truncated,

@@ -127,6 +127,8 @@ export interface FileInspection {
 export interface SearchMatch {
   path: string;
   line?: number;
+  // First match's zero-based UTF-8 byte offset within ripgrep's raw LF-delimited line.
+  byteColumn?: number;
   text?: string;
   ranges?: [number, number][];
   truncated?: boolean;

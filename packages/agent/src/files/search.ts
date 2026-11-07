@@ -19,12 +19,14 @@ export async function searchFiles(
   query: string,
   includeIgnored: boolean,
   signal: AbortSignal,
+  wholeWord = false,
 ): Promise<SearchResult> {
   signal.throwIfAborted();
   const args =
     mode === "name"
       ? ["--no-config", "--files", "--hidden", "-0", "-g", "!.git"]
       : ["--no-config", "--json", "--hidden", "--fixed-strings", "-g", "!.git", "-e", query];
+  if (mode === "content" && wholeWord) args.push("--word-regexp");
   if (includeIgnored) args.push("--no-ignore");
   if (process.platform === "win32") args.push("--path-separator", "/");
   args.push("--", ".");

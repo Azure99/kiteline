@@ -23,7 +23,8 @@ export interface FileSearchState {
   mode: "name" | "content";
   query: string;
   includeIgnored: boolean;
-  result?: SearchResult & { query: string };
+  wholeWord: boolean;
+  result?: SearchResult & { query: string; wholeWord: boolean };
 }
 
 export function FileSearch({
@@ -45,7 +46,7 @@ export function FileSearch({
   active: boolean;
   disabled: boolean;
   onBack: () => void;
-  onOpen: (match: SearchMatch, query: string, focusContent?: boolean) => void;
+  onOpen: (match: SearchMatch, query: string, wholeWord: boolean, focusContent?: boolean) => void;
 }) {
   const { t } = useTranslation();
   const input = useRef<HTMLInputElement>(null);
@@ -53,10 +54,11 @@ export function FileSearch({
   const [mode, setMode] = useState<"name" | "content">(memory.fileSearch?.mode ?? "content");
   const [query, setQuery] = useState(memory.fileSearch?.query ?? "");
   const [includeIgnored, setIncludeIgnored] = useState(memory.fileSearch?.includeIgnored ?? false);
+  const [wholeWord, setWholeWord] = useState(memory.fileSearch?.wholeWord ?? false);
   const [result, setResult] = useState<FileSearchState["result"]>(memory.fileSearch?.result);
   useLayoutEffect(() => {
-    memory.fileSearch = { mode, query, includeIgnored, result };
-  }, [memory, mode, query, includeIgnored, result]);
+    memory.fileSearch = { mode, query, includeIgnored, wholeWord, result };
+  }, [memory, mode, query, includeIgnored, wholeWord, result]);
   const [status, setStatus] = useState<{ kind: "cancelled" } | { kind: "error"; error: unknown }>();
   const [busy, setBusy] = useState(false);
   const focusEmpty = useEffectEvent(() => {
@@ -87,6 +89,7 @@ export function FileSearch({
     setStatus({ kind: "cancelled" });
   }
   async function search() {
+    const searchWholeWord = mode === "content" && wholeWord;
     request.current?.abort();
     const current = new AbortController();
     request.current = current;
@@ -97,10 +100,10 @@ export function FileSearch({
       const next = await rpc(
         deviceId,
         "files.search",
-        { workspaceId, mode, query, includeIgnored },
+        { workspaceId, mode, query, includeIgnored, wholeWord: searchWholeWord },
         current.signal,
       );
-      if (request.current === current) setResult({ ...next, query });
+      if (request.current === current) setResult({ ...next, query, wholeWord: searchWholeWord });
     } catch (error) {
       if (request.current === current) setStatus({ kind: "error", error });
     } finally {
@@ -170,6 +173,19 @@ export function FileSearch({
             />
             {t(($) => $.files.includeIgnored)}
           </label>
+          {mode === "content" && (
+            <label className="flex items-center gap-2 text-xs text-muted-foreground max-desk:min-h-11">
+              <input
+                type="checkbox"
+                checked={wholeWord}
+                onChange={(event) => {
+                  resetSearch();
+                  setWholeWord(event.target.checked);
+                }}
+              />
+              {t(($) => $.files.wholeWord)}
+            </label>
+          )}
         </div>
         <div className="flex gap-2">
           <Input
@@ -220,7 +236,7 @@ export function FileSearch({
         {result?.matches.map((match, index) => (
           <button
             key={index}
-            onClick={() => onOpen(match, result.query)}
+            onClick={() => onOpen(match, result.query, result.wholeWord)}
             onKeyDown={(event) => {
               if (
                 event.key !== "Enter" ||
@@ -231,7 +247,7 @@ export function FileSearch({
               )
                 return;
               event.preventDefault();
-              onOpen(match, result.query, true);
+              onOpen(match, result.query, result.wholeWord, true);
             }}
             className="block w-full border-b border-border px-4 py-3 text-left hover:bg-muted"
           >

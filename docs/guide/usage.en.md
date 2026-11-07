@@ -223,7 +223,7 @@ If a save result is unconfirmed, for example after losing connection during savi
 
 File search searches the workspace's files on disk by content or file name, with these rules:
 
-- Matches literal text, case-sensitively.
+- Matches literal text, case-sensitively. Whole word is off by default for content searches; enable it to match complete words only.
 - "File name" finds files whose relative paths, including directories, contain the query. Results contain files only.
 - Includes hidden files, excludes `.git`, and does not follow any symbolic links, whether to files or directories.
 - `.gitignore` applies only inside Git repositories; `.ignore` and `.rgignore` always apply. Check "Include ignored files" to include files excluded by these rules.

@@ -26,6 +26,8 @@ export interface TextLocation {
   line: number;
   range?: [number, number];
   query?: string;
+  wholeWord?: boolean;
+  byteColumn?: number;
 }
 
 export interface TextEditorHandle {
@@ -95,8 +97,11 @@ export function TextEditor({
   save.current = onSave;
   const locationApplied = useEffectEvent(onLocationApplied);
   // Search coordinates belong to the disk text the location was produced from, not to edits since.
-  const searchTarget = useEffectEvent((line: number, query: string, column?: number) =>
-    searchPosition(draft.baseRaw, line, query, column),
+  const searchTarget = useEffectEvent((location: TextLocation, query: string) =>
+    searchPosition(draft.baseRaw, location.line, query, location.range?.[0], {
+      wholeWord: location.wholeWord,
+      byteColumn: location.byteColumn,
+    }),
   );
   useLayoutEffect(() => {
     if (!host.current || !draft.state) return;
@@ -186,8 +191,7 @@ export function TextEditor({
     const editor = view.current;
     if (editor && location) {
       const { line: number, query } = location;
-      const found =
-        query === undefined ? undefined : searchTarget(number, query, location.range?.[0]);
+      const found = query === undefined ? undefined : searchTarget(location, query);
       const { doc } = editor.state;
       const line = doc.line(Math.max(1, Math.min(found?.line ?? number, doc.lines)));
       const anchor = line.from + Math.min(found?.column ?? 0, line.length);

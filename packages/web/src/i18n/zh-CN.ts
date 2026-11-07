@@ -584,6 +584,7 @@ export const zhCN = {
     openFiles: "打开的文件",
     unsaved: "未保存",
     findReplace: "查找 / 替换",
+    wholeWord: "全词",
     fontSize: "文件字号：{{size}} px",
     fontLarger: "增大字号",
     fontSmaller: "减小字号",

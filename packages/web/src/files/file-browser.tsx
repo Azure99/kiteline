@@ -351,10 +351,18 @@ export function FileBrowser({
           active={browsing && searching}
           disabled={!enabled}
           onBack={() => updateQuery({ search: undefined })}
-          onOpen={(match, query, focusContent) => {
+          onOpen={(match, query, wholeWord, focusContent) => {
             onOpenFile(
               match.path,
-              match.line ? { line: match.line, range: match.ranges?.[0], query } : undefined,
+              match.line
+                ? {
+                    line: match.line,
+                    range: match.ranges?.[0],
+                    query,
+                    wholeWord,
+                    byteColumn: match.byteColumn,
+                  }
+                : undefined,
               true,
               focusContent,
             );

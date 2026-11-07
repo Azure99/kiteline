@@ -30,6 +30,53 @@ test("a hit beyond the snippet uses the first occurrence in ripgrep's line", () 
   expect(searchPosition(long, 2, "HIT")).toEqual({ line: 2, column: 4000 });
 });
 
+test.each([
+  [
+    "long line",
+    `head\n${"😀".repeat(500)}fooBar foo foo\n`,
+    2,
+    "foo",
+    `${"😀".repeat(500)}fooBar `,
+    { line: 2, column: 1007 },
+  ],
+  ["Chinese", "前中文 中文 中文后", 1, "中文", "前中文 ", { line: 1, column: 4 }],
+  [
+    "combining marks",
+    "\u0301foo foo\u0301 foo",
+    1,
+    "foo",
+    "\u0301foo foo\u0301 ",
+    { line: 1, column: 10 },
+  ],
+  ["recent Unicode letter", "\u{11f04}foo foo", 1, "foo", "\u{11f04}foo ", { line: 1, column: 6 }],
+  [
+    "BOM and mixed line endings",
+    "\uFEFFhead\r\n中文\r😀fooBar foo\r\n",
+    2,
+    "foo",
+    "中文\r😀fooBar ",
+    { line: 3, column: 9 },
+  ],
+] as const)(
+  "rg's byte column locates the first whole-word hit: %s",
+  (_, raw, line, query, prefix, expected) => {
+    const byteColumn = new TextEncoder().encode(prefix).length;
+    expect(searchPosition(raw, line, query, undefined, { byteColumn, wholeWord: true })).toEqual(
+      expected,
+    );
+    expect(editorAt(raw, expected.line, expected.column, query)).toBe(query);
+  },
+);
+
+test("whole-word results without rg coordinates use the editor's find fallback", () => {
+  expect(searchPosition("fooBar foo", 1, "foo", undefined, { wholeWord: true })).toBeUndefined();
+  expect(searchPosition("fooBar foo", 1, "foo", 7, { wholeWord: true })).toEqual({
+    line: 1,
+    column: 7,
+  });
+  expect(searchPosition("foo", 1, "foo", undefined, { byteColumn: 99 })).toBeUndefined();
+});
+
 test("stale coordinates leave the decision to the editor's text check", () => {
   expect(searchPosition("one\ntwo\n", 5, "HIT")).toBeUndefined();
   expect(searchPosition("one\ntwo\n", 2, "HIT")).toBeUndefined();

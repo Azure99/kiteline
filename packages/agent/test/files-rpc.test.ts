@@ -28,6 +28,38 @@ async function setup() {
   return { root, agent, id: workspace.id, changed };
 }
 
+test("content search defaults to substrings and accepts only an optional boolean wholeWord", async () => {
+  const { root, agent, id } = await setup();
+  await writeFile(join(root, "fooBar.txt"), "fooBar foo FOO\n");
+  const params = { workspaceId: id, mode: "content", query: "foo", includeIgnored: false };
+  const signal = new AbortController().signal;
+  for (const wholeWord of [undefined, false]) {
+    expect(await agent.dispatch("files.search", { ...params, wholeWord }, signal)).toMatchObject({
+      matches: [
+        {
+          ranges: [
+            [0, 3],
+            [7, 10],
+          ],
+        },
+      ],
+    });
+  }
+  expect(
+    await agent.dispatch("files.search", { ...params, wholeWord: true }, signal),
+  ).toMatchObject({
+    matches: [{ ranges: [[7, 10]] }],
+  });
+  expect(
+    await agent.dispatch("files.search", { ...params, mode: "name", wholeWord: true }, signal),
+  ).toMatchObject({ matches: [{ path: "fooBar.txt" }] });
+  for (const wholeWord of ["true", 1, null]) {
+    await expect(
+      agent.dispatch("files.search", { ...params, wholeWord }, signal),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
+  }
+});
+
 test.each([
   { kind: "high", json: '"\\ud800"' },
   { kind: "low", json: '"\\udc00"' },

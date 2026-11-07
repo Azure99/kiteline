@@ -29,6 +29,72 @@ test("search uses bundled rg when PATH contains a different executable", async (
   expect(result.matches).toMatchObject([{ path: "file.txt", text: "needle" }]);
 });
 
+test.each([
+  ["ASCII identifiers", "fooBar foo foo_ foo1", "foo", [[7, 10]]],
+  ["Chinese", "前中文 中文 中文后", "中文", [[4, 6]]],
+  [
+    "language punctuation",
+    "$foo foo-bar foo$bar",
+    "foo",
+    [
+      [1, 4],
+      [5, 8],
+      [13, 16],
+    ],
+  ],
+  [
+    "non-word query",
+    "a$value $value $valueSuffix $$value",
+    "$value",
+    [
+      [8, 14],
+      [29, 35],
+    ],
+  ],
+  ["combining marks", "\u0301foo foo\u0301 foo", "foo", [[10, 13]]],
+  ["connector punctuation", "\u203ffoo foo\u203f foo", "foo", [[10, 13]]],
+  ["join controls", "\u200cfoo foo\u200d foo", "foo", [[10, 13]]],
+  ["astral letters and emoji", "𐐀foo foo𐐀 😀foo😀", "foo", [[14, 17]]],
+  ["recent Unicode letters", "\u{11f04}foo foo", "foo", [[6, 9]]],
+] as const)(
+  "whole-word content search uses rg's Unicode boundaries: %s",
+  async (_, text, query, ranges) => {
+    const root = await setup();
+    await writeFile(join(root, "words.txt"), `${text}\r\n`);
+    expect(await searchFiles(root, "content", query, false, signal(), true)).toMatchObject({
+      matches: [
+        {
+          path: "words.txt",
+          line: 1,
+          byteColumn: Buffer.byteLength(text.slice(0, ranges[0]![0])),
+          text,
+          ranges,
+        },
+      ],
+      truncated: false,
+    });
+  },
+);
+
+test("a whole-word hit beyond the snippet keeps rg's first byte column", async () => {
+  const root = await setup();
+  const prefix = `${"😀".repeat(agentLimits.searchLineBytes)}fooBar `;
+  await writeFile(join(root, "long.txt"), `\uFEFFhead\r\n${prefix}foo foo\r\n`);
+  const result = await searchFiles(root, "content", "foo", false, signal(), true);
+  expect(result).toMatchObject({
+    matches: [
+      {
+        path: "long.txt",
+        line: 2,
+        byteColumn: Buffer.byteLength(prefix),
+        ranges: [],
+        truncated: true,
+      },
+    ],
+    truncated: true,
+  });
+});
+
 test("content search waits for metadata before returning records in line order", async () => {
   const root = await setup();
   await writeFile(join(root, "ordered.txt"), "needle one\nneedle two\nneedle three\n");
@@ -156,7 +222,14 @@ test("content results use UTF-16 highlights, base64 bodies and bounded long-line
   await writeFile(join(root, "unicode.txt"), "前😀 -字面.* 后\n");
   const unicode = await searchFiles(root, "content", "-字面.*", false, signal());
   expect(unicode.matches).toEqual([
-    { path: "unicode.txt", line: 1, text: "前😀 -字面.* 后", ranges: [[4, 9]], truncated: false },
+    {
+      path: "unicode.txt",
+      line: 1,
+      byteColumn: 8,
+      text: "前😀 -字面.* 后",
+      ranges: [[4, 9]],
+      truncated: false,
+    },
   ]);
   await writeFile(join(root, "bytes.txt"), Buffer.from([0xff, 0x61, 0x62, 0x63, 10]));
   const bytes = await searchFiles(root, "content", "abc", false, signal());

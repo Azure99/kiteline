@@ -598,6 +598,7 @@ export const en = {
     openFiles: "Open files",
     unsaved: "Unsaved",
     findReplace: "Find / replace",
+    wholeWord: "Whole word",
     fontSize: "File font size: {{size}} px",
     fontLarger: "Increase font size",
     fontSmaller: "Decrease font size",

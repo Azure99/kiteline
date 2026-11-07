@@ -156,7 +156,12 @@ interface RpcMethods extends GitWriteMethods {
   "files.move": Contract<WorkspaceParams & { items: CopyItem[] }, FileResults, FileResults>;
   "files.delete": Contract<WorkspaceParams & { paths: string[] }, FileResults, FileResults>;
   "files.search": Contract<
-    WorkspaceParams & { mode: "name" | "content"; query: string; includeIgnored: boolean },
+    WorkspaceParams & {
+      mode: "name" | "content";
+      query: string;
+      includeIgnored: boolean;
+      wholeWord?: boolean;
+    },
     SearchResult
   >;
   "repos.discover": Contract<WorkspaceParams & { scanCursor?: string }, RepoDiscovery>;

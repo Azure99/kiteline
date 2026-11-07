@@ -32,7 +32,8 @@ export async function fileRpc(
     case "files.search": {
       if (
         (params.mode !== "name" && params.mode !== "content") ||
-        typeof params.includeIgnored !== "boolean"
+        typeof params.includeIgnored !== "boolean" ||
+        (params.wholeWord !== undefined && typeof params.wholeWord !== "boolean")
       )
         throw new AppError("invalid_argument", "Invalid search parameters");
       return (await searchFiles(
@@ -41,6 +42,7 @@ export async function fileRpc(
         string(params.query, "query"),
         params.includeIgnored,
         signal,
+        params.wholeWord === true,
       )) satisfies RpcResult<typeof method>;
     }
     case "files.copy":
