@@ -13,8 +13,11 @@ import {
   Fullscreen,
   Minimize2,
   MoreHorizontal,
+  Minus,
+  Plus,
   Quote,
   RefreshCw,
+  RotateCcw,
   Save,
   Search,
   X,
@@ -28,6 +31,14 @@ import { ApiError } from "../lib/api";
 import { navigateWorkspace } from "../lib/navigation";
 import { parentPath } from "./paths";
 import { useCopyFeedback } from "../lib/use-copy-feedback";
+import { useMobile } from "../lib/use-mobile";
+import {
+  fileFontSize,
+  maxFileFontPreference,
+  minFileFontPreference,
+  setFileFontPreference,
+  useFileFontPreference,
+} from "./font-size";
 import {
   draftProblem,
   isDirty,
@@ -73,6 +84,8 @@ export function DraftView({
   unavailable?: string;
 }) {
   const { t } = useTranslation();
+  const fontPreference = useFileFontPreference();
+  const currentFontSize = fileFontSize(useMobile(), fontPreference);
 
   const editor = useRef<TextEditorHandle>(null);
   const [searchFromMenu, setSearchFromMenu] = useState(false);
@@ -260,6 +273,38 @@ export function DraftView({
                 <FileOutput />
                 {t(($) => $.files.saveAs)}
               </MenuItem>
+              {draft.state && preview !== "html" && (
+                <>
+                  <div className="my-1 border-t border-border" />
+                  <div className="px-2 py-1 text-xs text-muted-foreground" aria-live="polite">
+                    {t(($) => $.files.fontSize, { size: currentFontSize })}
+                  </div>
+                  <MenuItem
+                    closeOnClick={false}
+                    disabled={currentFontSize >= maxFileFontPreference}
+                    onClick={() => setFileFontPreference(currentFontSize + 1)}
+                  >
+                    <Plus />
+                    {t(($) => $.files.fontLarger)}
+                  </MenuItem>
+                  <MenuItem
+                    closeOnClick={false}
+                    disabled={currentFontSize <= minFileFontPreference}
+                    onClick={() => setFileFontPreference(currentFontSize - 1)}
+                  >
+                    <Minus />
+                    {t(($) => $.files.fontSmaller)}
+                  </MenuItem>
+                  <MenuItem
+                    closeOnClick={false}
+                    disabled={fontPreference === undefined}
+                    onClick={() => setFileFontPreference(undefined)}
+                  >
+                    <RotateCcw />
+                    {t(($) => $.files.fontDefault)}
+                  </MenuItem>
+                </>
+              )}
               {focusMode && (focusMode.canFullscreen || focusMode.fullscreen) && (
                 <>
                   <div className="my-1 border-t border-border" />

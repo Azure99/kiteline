@@ -12,6 +12,7 @@ import { isMobile, useMobile } from "../lib/use-mobile";
 import { codeLanguage } from "../lib/code-language";
 import { editorTheme, resizeEditorFont } from "./editor-state";
 import { editorPhrases } from "./editor-locale";
+import { getFileFontSize, useFileFontSize } from "./font-size";
 
 export interface ReadOnlyReaderHandle {
   openSearch(): void;
@@ -30,7 +31,7 @@ export function ReadOnlyReader({
 }) {
   const { t, i18n } = useTranslation();
   const dark = useTheme() === "dark";
-  const mobile = useMobile();
+  const fontSize = useFileFontSize(useMobile());
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView>(undefined);
   const [appearance] = useState(() => new Compartment());
@@ -64,7 +65,7 @@ export function ReadOnlyReader({
         ],
       }),
     });
-    editor.dom.style.fontSize = isMobile() ? "16px" : "12px";
+    editor.dom.style.fontSize = `${getFileFontSize(isMobile())}px`;
     view.current = editor;
     return () => {
       editor.destroy();
@@ -83,8 +84,8 @@ export function ReadOnlyReader({
   );
   useLayoutEffect(() => {
     const editor = view.current;
-    if (editor) resizeEditorFont(editor, mobile ? 16 : 12);
-  }, [mobile]);
+    if (editor) resizeEditorFont(editor, fontSize);
+  }, [fontSize]);
   useLayoutEffect(() => {
     view.current?.dispatch({
       effects: [

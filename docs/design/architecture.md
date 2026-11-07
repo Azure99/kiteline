@@ -86,6 +86,7 @@ deploy/                             Compose、systemd、launchd、WinSW 示例
 | 终端中运行的程序                   | tmux server                            |                                                                                 |
 | 终端输出和屏幕模型                 | recorder 内存                          | 见[终端](terminal.md#输出记录与历史)                                            |
 | 最近工作区、终端字号、界面语言     | 浏览器 `localStorage`                  | 按 origin（含端口）分别保存                                                     |
+| 文件字号                           | 浏览器 `localStorage`                  | 见[文件字号](files.md#打开与编辑)                                               |
 | 当前设备、工作区、工具和打开的目标 | 页面 URL                               | 可刷新、收藏和前进后退                                                          |
 | 终端布局                           | 浏览器同tab sessionStorage与工作台内存 | 刷新和页面回收后恢复，退出时清除；见[交互合同](interaction.md#切换时保留的状态) |
 | 草稿、上传列表、Git 操作状态       | 浏览器页面内存                         | 刷新或关闭页面后丢失                                                            |

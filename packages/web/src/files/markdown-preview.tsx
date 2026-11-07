@@ -25,7 +25,9 @@ import { readContent, type FileTarget } from "./content";
 import { showFile } from "./navigation";
 import { parentPath } from "./paths";
 import { workspacePath } from "../lib/navigation";
+import { useMobile } from "../lib/use-mobile";
 import type { Draft } from "./drafts";
+import { useFileFontSize } from "./font-size";
 
 const MermaidDiagram = deferredView(async () => ({
   default: (await import("./mermaid-diagram")).MermaidDiagram,
@@ -150,6 +152,7 @@ export function MarkdownPreview({
   ref?: Ref<MarkdownPreviewHandle>;
 }) {
   const { t } = useTranslation();
+  const fontSize = useFileFontSize(useMobile());
   const articleRef = useRef<HTMLElement>(null);
   function rememberPosition() {
     const article = articleRef.current;
@@ -196,10 +199,12 @@ export function MarkdownPreview({
     }
   });
   useLayoutEffect(() => {
+    // Apply the font after cleanup captured the source-line anchor in the old layout.
+    articleRef.current!.style.fontSize = `${fontSize}px`;
     if (!visible) return;
     restorePosition();
     return () => void rememberCurrentPosition();
-  }, [visible]);
+  }, [visible, fontSize]);
   const components = useMemo<Components>(() => {
     const target = { deviceId, workspaceId, path };
     let pending = Promise.resolve();

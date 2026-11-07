@@ -37,6 +37,7 @@ Device names, workspaces, files and folders, Git changes and work page tabs supp
 | Content                                                     | Storage                               |
 | ----------------------------------------------------------- | ------------------------------------- |
 | Language, appearance, recent workspaces, terminal font size | Current browser                       |
+| File font size                                              | Current browser                       |
 | Terminal groups and splits                                  | Current browser tab                   |
 | Work-page tabs, content mode and shared layout              | Current page, per workspace           |
 | Unsaved changes, commit messages                            | Current page; lost on reload or close |
@@ -170,6 +171,8 @@ The file editor and Git diffs highlight syntax by filename. Diffs contain partia
 The file toolbar keeps code line references, Save, and content preview. “More file actions” contains Find / replace, Copy text, Open containing directory, Download file, Check disk content, and Save as. “Open containing directory” navigates to the current file's directory and identifies the file; save an unnamed draft first. Phones also keep direct access to Focus file.
 
 While editing source, choose “Find / replace” from the menu to search the current draft, including unsaved edits. Replacements change the draft; Save writes them to disk.
+
+Font actions in “More file actions” set an absolute size from 10–24px, shared by the text editor, Markdown and read-only text previews across wide and narrow layouts. “Restore default font size” restores 13px in wide layouts and 16px in narrow layouts (less than 960px wide). File and terminal font sizes are independent.
 
 In the file source toolbar, “Copy code line reference” copies the whole lines touched by the selection, or the cursor line when nothing is selected, with the device, workspace, relative path and line numbers. It uses the current editor text, including unsaved edits, without changing the selection or saving the file. Paste it manually into the target terminal.
 

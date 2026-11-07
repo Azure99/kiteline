@@ -17,6 +17,7 @@ import { encodeText } from "@kiteline/shared/protocol/text";
 import type { Draft, DraftStore } from "./drafts";
 import { useTheme } from "../lib/appearance";
 import { isMobile, useMobile } from "../lib/use-mobile";
+import { getFileFontSize, useFileFontSize } from "./font-size";
 import { editorAppearance, resizeEditorFont, syncTextTransactions } from "./editor-state";
 import { editorPhrases } from "./editor-locale";
 import { searchPosition } from "./search-position";
@@ -85,7 +86,7 @@ export function TextEditor({
   const { t, i18n } = useTranslation();
 
   const dark = useTheme() === "dark";
-  const mobile = useMobile();
+  const fontSize = useFileFontSize(useMobile());
   const [languageError, setLanguageError] = useState<unknown>();
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView>(undefined);
@@ -118,7 +119,7 @@ export function TextEditor({
         store.update(draft, current.state, measured);
       },
     });
-    editor.dom.style.fontSize = isMobile() ? "16px" : "13px";
+    editor.dom.style.fontSize = `${getFileFontSize(isMobile())}px`;
     view.current = editor;
     sourceVersion.current = draft.sourceVersion;
     const keydown = (event: KeyboardEvent) => {
@@ -145,8 +146,8 @@ export function TextEditor({
   );
   useLayoutEffect(() => {
     const editor = view.current;
-    if (editor) resizeEditorFont(editor, mobile ? 16 : 13);
-  }, [mobile]);
+    if (editor) resizeEditorFont(editor, fontSize);
+  }, [fontSize]);
   useLayoutEffect(() => {
     const editor = view.current;
     if (editor && draft.state && editor.state !== draft.state) {
