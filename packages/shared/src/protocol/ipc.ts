@@ -1,5 +1,6 @@
 import type { SnapshotOptions, ScreenWait, TerminalOperation } from "./terminal-observation.js";
 import type { KitelineError, Reply, TerminalNotice } from "./index.js";
+import type { ProgramStatusSummary } from "./program-status.js";
 
 export interface RecorderConfig {
   terminalInputBytes: number;
@@ -85,6 +86,7 @@ export type RecorderRequest =
   | { type: "detach"; sessionId: string; attachmentId: string };
 export type RecorderMessage =
   | { type: "reply"; reply: Reply }
+  | { type: "program.status"; sessionId: string; summary: ProgramStatusSummary }
   | { type: "notice"; sessionId: string; notice: TerminalNotice }
   | { type: "frame"; sessionId: string; attachmentId: string; frame: TerminalFrame }
   | { type: "bytes"; sessionId: string; attachmentId: string; dataBase64: string }

@@ -1,5 +1,6 @@
 import { AppError, integer, record, string } from "./validation.js";
 import { limits } from "./limits.js";
+import type { ProgramStatusRecord } from "./program-status.js";
 
 export const defaultTerminalOperationTimeoutMs = 5_000;
 export const defaultTerminalWaitTimeoutMs = 1_000;
@@ -56,6 +57,7 @@ export interface TerminalScreen {
   tail?: { buffer: "normal"; omitted: number; lines: ScreenLine[] };
   historyGap: boolean;
   synchronizedOutput: boolean;
+  programStatus: ProgramStatusRecord[];
 }
 export type SnapshotResult =
   | (TerminalScreen & { reason: "full" | "reset" })

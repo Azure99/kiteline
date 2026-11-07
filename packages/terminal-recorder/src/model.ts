@@ -11,11 +11,17 @@ import type {
   InputPosition,
   CellStyle,
   TerminalNotice,
+  ProgramStatusSummary,
 } from "@kiteline/shared/protocol";
 import { StringDecoder } from "node:string_decoder";
 import headless from "@xterm/headless";
 import serialize from "@xterm/addon-serialize";
-import { AppError, limits } from "@kiteline/shared/protocol";
+import {
+  AppError,
+  limits,
+  ProgramStatusStore,
+  parseProgramStatus,
+} from "@kiteline/shared/protocol";
 import {
   atGround,
   mouseEncodingVT,
@@ -56,9 +62,11 @@ interface ModelEvents {
   fault: (error: Error) => void;
   backlogChanged: () => void;
   notice?: (notice: TerminalNotice) => void;
+  programStatus?: (summary: ProgramStatusSummary) => void;
 }
 export class Model {
   readonly terminal: InstanceType<typeof Terminal>;
+  readonly programStatus = new ProgramStatusStore();
   private epoch = randomUUID();
   private seq = 0;
   private inputSeq = 0;
@@ -90,12 +98,37 @@ export class Model {
     this.terminal.onTitleChange((title) => {
       this.title = title;
     });
-    for (const code of [9, 777, 7501])
+    for (const code of [9, 777])
       this.terminal.parser.registerOscHandler(code, (body) => {
         const report = terminalNotice(code, body);
         if (report) this.events.notice?.(report);
         return true;
       });
+    this.terminal.parser.registerOscHandler(7501, (body) => {
+      const report = parseProgramStatus(body);
+      if (report) {
+        this.programStatus.apply(report);
+        this.events.programStatus?.(this.programStatus.summary());
+        // Historical notices remain independent of the current program records.
+        if (report.state === "blocked") {
+          this.events.notice?.({
+            title: report.title ?? "",
+            body: report.msg ?? "",
+            blocked: true,
+          });
+        }
+      }
+      return true;
+    });
+    this.terminal.parser.registerOscHandler(133, (body) => {
+      if (body === "A" || body.startsWith("A;")) this.finishProgramStatus();
+      return false;
+    });
+    this.terminal.parser.registerEscHandler({ final: "c" }, () => {
+      this.programStatus.reset();
+      this.events.programStatus?.(this.programStatus.summary());
+      return false;
+    });
     this.rotate();
   }
   get backlog() {
@@ -254,6 +287,10 @@ export class Model {
     for (const resume of this.waiting) resume();
     this.waiting.clear();
   }
+  finishProgramStatus() {
+    this.programStatus.promptOrExit();
+    this.events.programStatus?.(this.programStatus.summary());
+  }
   async attach(
     history: "retained" | "screen",
     timeout: number,
@@ -386,6 +423,7 @@ export class Model {
       screen,
       historyGap,
       synchronizedOutput: terminal.modes.synchronizedOutputMode,
+      programStatus: this.programStatus.snapshot(),
       ...(options.tail === undefined
         ? {}
         : {

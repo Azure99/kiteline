@@ -203,6 +203,14 @@ send、resize、wait 在全部值解析成功后按 timeoutMs 建立一次绝对
 
 观察结果超过 `controlMessageBytes` 时返回 `failed/limit_exceeded`，保留终端运行；不截屏、不自动调整尺寸。等待中的 model 关闭以 `recording_unavailable` 结束。显式 `sessions.recover` 后的新 model 使用新 epoch，能观察时直接返回 reset，不要求先返回错误再抓屏。
 
+## 程序报告状态
+
+recorder 持续解析程序主动发送的 OSC 7501，不依赖网页附着。shared 的 `program-status.ts` 实现 [Program Status Protocol rev 0.4](https://www.superlogical.com/rex/docs/build/program-status) 的原子报告解析与记录集合：根与 child 可并存，同 id 的新报告完整替换旧记录，clear 删除所指子树；非法 id 不回落根，未知 state 忽略，文本和尺寸超限拒绝整条报告。新记录、state 变化，或 blocked／done／error 状态下 kind／title／msg 变化视为一次新的状态出现，移到记录顺序的末尾；重复上报、working 的文本与进度和 idle 的文本更新保持原位。每终端最多 256 条，超过时淘汰当前顺序中最早的一条，因此持续更新进度但不改变状态的记录也可能先被淘汰。缺少 app 的记录在读取时继承最近祖先的 app，不改写 child。
+
+OSC133 A 和顶层 pane 退出删除 working/blocked，保留 idle/done/error；RIS 清空全部，DECSTR 和备用屏切换保留。普通 shell 内子进程退出依赖 producer clear 或新的 shell prompt，不轮询子进程。自然结束的状态清理排在此前输出之后、各显示的 ended 之前；随后 agent 删除会话，最终摘要不构成结束结果存档。
+
+每条合法 blocked 报告同时产生一次历史通知，历史清除不改变当前记录，后续其他状态也不撤销历史通知。记录故障时 agent 保留旧摘要；恢复新模型从空集合开始，capture 不生成通知，初始化完成先发空摘要再请求重画。重画可能没有新报告，不能从屏幕或旧通知推断状态恢复。list 小摘要、完整 snapshot/wait 和超限规则见[程序当前记录](protocol.md#程序当前记录)。
+
 ## 恢复动作
 
 | 动作             | 出现条件                                                                            |

@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer, type WebSocket } from "ws";
-import { AppError, limits, type AgentEvent } from "@kiteline/shared/protocol";
-import { sessionFiles, tmux } from "@kiteline/shared/terminal/node";
+import { AppError, limits, type AgentEvent, type Reply } from "@kiteline/shared/protocol";
+import { sessionFiles, tmux, shellWords } from "@kiteline/shared/terminal/node";
 import * as terminalNode from "@kiteline/shared/terminal/node";
 import {
   terminalOutputCost,
@@ -1330,4 +1330,247 @@ test("unattached terminal reports retain real source identity and survive an ove
     )
     .toBe("available");
   expect(reports).toHaveLength(2);
+}, 15000);
+
+test("program records keep small summaries, recover unknown and drain output before ended", async () => {
+  const changed: string[] = [];
+  const streams = new Map<
+    string,
+    { data: string; dataAtEnd?: string; credit: number; ready: boolean; ended: boolean }
+  >();
+  let sessionId = "";
+  const { agent, workspace, dataDir, signal } = await fixture({
+    observers: {
+      changed: (workspaceId) => changed.push(workspaceId),
+      frame: (message) => {
+        if (message.type !== "bytes" && message.type !== "frame") return;
+        const stream = streams.get(message.attachmentId);
+        if (!stream) return;
+        if (message.type === "bytes") {
+          stream.data += Buffer.from(message.dataBase64, "base64").toString();
+        } else if (message.frame.type === "ready") {
+          stream.ready = true;
+        } else if (message.frame.type === "ended") {
+          stream.ended = true;
+          stream.dataAtEnd = stream.data;
+        }
+        stream.credit += outputCredit(message);
+        agent.sessions.recorder.send({
+          type: "consumed",
+          sessionId,
+          attachmentId: message.attachmentId,
+          bytes: stream.credit,
+        });
+      },
+    },
+  });
+  const program = join(dataDir, "program-status.mjs");
+  await writeFile(
+    program,
+    String.raw`
+      process.stdin.setRawMode(true);
+      process.stdin.resume();
+      const report = (body) => process.stdout.write("\x1b]7501;" + body + "\x1b\\");
+      process.stdin.on("data", (data) => {
+        if (data.toString() === "b") {
+          report("state=idle:app=probe");
+          report("state=blocked:id=worker:kind=question");
+          report("state=done:id=finished");
+        }
+        if (data.toString() === "c") {
+          report("state=idle:app=probe:msg=" + Buffer.from("New body").toString("base64"));
+        }
+        if (data.toString() === "x") {
+          report("state=done:app=probe");
+          report("state=blocked:id=worker");
+          process.stdout.write("FINAL_TAIL\x1b]7501;state=working", () => process.exit(0));
+        }
+      });
+      process.stdout.write("READY");
+    `,
+  );
+  const shortcut = await agent.metadata.putShortcut({
+    name: "Status",
+    icon: "terminal",
+    command: "exec " + shellWords([process.execPath, program]),
+  });
+  const session = await agent.sessions.create(
+    { workspaceId: workspace.id, shortcutId: shortcut.id },
+    signal,
+  );
+  sessionId = session.id;
+  const target = { workspaceId: workspace.id, sessionId };
+  await expect
+    .poll(async () => {
+      const screen = await agent.sessions.snapshot(target);
+      return screen.reason !== "unchanged" && screen.screen.some((line) => line.text === "READY");
+    }, pollOptions)
+    .toBe(true);
+  await agent.sessions.send({ ...target, input: { type: "text", text: "b" } });
+  await expect
+    .poll(() => agent.sessions.list().sessions[0]?.programStatus, pollOptions)
+    .toEqual({ states: ["done", "blocked", "idle"], records: 3 });
+  expect(await agent.sessions.snapshot(target)).toMatchObject({
+    programStatus: [
+      { id: "", state: "idle", app: "probe" },
+      { id: "worker", state: "blocked", kind: "question" },
+      { id: "finished", state: "done" },
+    ],
+  });
+  const changesBeforeBody = changed.length;
+  await agent.sessions.send({ ...target, input: { type: "text", text: "c" } });
+  await expect
+    .poll(() => agent.sessions.snapshot(target), pollOptions)
+    .toMatchObject({
+      programStatus: expect.arrayContaining([
+        { id: "", state: "idle", app: "probe", msg: "New body" },
+      ]),
+    });
+  expect(changed).toHaveLength(changesBeforeBody);
+
+  process.kill(agent.sessions.recorder.pid!, "SIGKILL");
+  await expect
+    .poll(() => agent.sessions.list().sessions[0]?.webStatus, pollOptions)
+    .toBe("unavailable");
+  expect(agent.sessions.list().sessions[0]?.programStatus).toEqual({
+    states: ["done", "blocked", "idle"],
+    records: 3,
+  });
+  agent.sessions.recover(target);
+  await expect
+    .poll(() => agent.sessions.list().sessions[0]?.webStatus, pollOptions)
+    .toBe("available");
+  expect(agent.sessions.list().sessions[0]?.programStatus).toEqual({ states: [], records: 0 });
+  expect(await agent.sessions.snapshot(target)).toMatchObject({ programStatus: [] });
+  await agent.sessions.send({ ...target, input: { type: "text", text: "b" } });
+  await expect
+    .poll(() => agent.sessions.list().sessions[0]?.programStatus, pollOptions)
+    .toEqual({ states: ["done", "blocked", "idle"], records: 3 });
+
+  for (const attachmentId of ["first", "second"]) {
+    streams.set(attachmentId, { data: "", credit: 0, ready: false, ended: false });
+    await agent.sessions.recorder.request({
+      type: "attach",
+      sessionId,
+      attachmentId,
+      history: "retained",
+      historyGap: true,
+    });
+  }
+  await expect
+    .poll(() => [...streams.values()].every((stream) => stream.ready), pollOptions)
+    .toBe(true);
+  await agent.sessions.send({ ...target, input: { type: "text", text: "x" } });
+  await expect
+    .poll(() => [...streams.values()].every((stream) => stream.ended), pollOptions)
+    .toBe(true);
+  for (const stream of streams.values()) {
+    expect(stream.dataAtEnd).toBe(stream.data);
+    expect(stream.dataAtEnd).toContain("FINAL_TAIL");
+    expect(stream.dataAtEnd!.endsWith("\x1b]7501;state=working")).toBe(true);
+  }
+  await expect.poll(() => agent.sessions.list().sessions, pollOptions).toEqual([]);
+}, 15000);
+
+test("oversized program records fail only the snapshot and remain readable after clearing", async () => {
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  await once(server, "listening");
+  cleanups.push(async () => {
+    for (const peer of server.clients) peer.terminate();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+  const replies: Reply[] = [];
+  const connected = new Promise<WebSocket>((resolve) => {
+    server.once("connection", (peer) => {
+      peer.on("message", (data) => {
+        const message = JSON.parse(data.toString());
+        if (message.type === "rpc.result") replies.push(message.reply);
+      });
+      resolve(peer);
+    });
+  });
+  const { agent, workspace, dataDir, signal } = await fixture({
+    server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+  });
+  await agent.start();
+  const peer = await connected;
+  const program = join(dataDir, "program-status-budget.mjs");
+  await writeFile(
+    program,
+    String.raw`
+      process.stdin.setRawMode(true);
+      process.stdin.resume();
+      const report = (body) => process.stdout.write("\x1b]7501;" + body + "\x1b\\");
+      process.stdin.on("data", (data) => {
+        if (data.toString() === "b") {
+          const msg = Buffer.from("\\".repeat(2048)).toString("base64");
+          const title = Buffer.from("\\".repeat(192)).toString("base64");
+          for (let index = 0; index < 256; index++) {
+            report("state=done:id=r" + index + ":msg=" + msg + ":title=" + title);
+          }
+        }
+        if (data.toString() === "c") {
+          report("state=clear");
+          report("state=done:msg=" + Buffer.from("Small body").toString("base64"));
+        }
+      });
+      process.stdout.write("READY");
+    `,
+  );
+  const shortcut = await agent.metadata.putShortcut({
+    name: "Status budget",
+    icon: "terminal",
+    command: "exec " + shellWords([process.execPath, program]),
+  });
+  const session = await agent.sessions.create(
+    { workspaceId: workspace.id, shortcutId: shortcut.id },
+    signal,
+  );
+  const target = { workspaceId: workspace.id, sessionId: session.id };
+  await expect
+    .poll(() => agent.sessions.snapshot(target), pollOptions)
+    .toMatchObject({
+      screen: expect.arrayContaining([expect.objectContaining({ text: "READY" })]),
+    });
+  await agent.sessions.send({ ...target, input: { type: "text", text: "b" } });
+  await expect
+    .poll(() => agent.sessions.list().sessions[0]?.programStatus, pollOptions)
+    .toEqual({ states: ["done"], records: 256 });
+  peer.send(
+    JSON.stringify({
+      type: "rpc.request",
+      id: "large",
+      method: "sessions.snapshot",
+      params: target,
+    }),
+  );
+  await expect
+    .poll(() => replies.find((reply) => reply.id === "large"), pollOptions)
+    .toMatchObject({
+      outcome: "failed",
+      error: { code: "limit_exceeded" },
+    });
+  expect(agent.sessions.list().sessions[0]).toMatchObject({
+    webStatus: "available",
+    programStatus: { states: ["done"], records: 256 },
+  });
+  await agent.sessions.send({ ...target, input: { type: "text", text: "c" } });
+  await expect
+    .poll(() => agent.sessions.list().sessions[0]?.programStatus, pollOptions)
+    .toEqual({ states: ["done"], records: 1 });
+  peer.send(
+    JSON.stringify({
+      type: "rpc.request",
+      id: "small",
+      method: "sessions.snapshot",
+      params: target,
+    }),
+  );
+  await expect
+    .poll(() => replies.find((reply) => reply.id === "small"), pollOptions)
+    .toMatchObject({
+      outcome: "succeeded",
+      result: { programStatus: [{ id: "", state: "done", msg: "Small body" }] },
+    });
+  expect(agent.sessions.list().sessions[0]?.webStatus).toBe("available");
 }, 15000);

@@ -11,6 +11,7 @@ export const defaultTerminalHistoryLines = 5_000;
 export { rpcTraits, isRpcMethod } from "./rpc.js";
 export * from "./tasks.js";
 export * from "./terminal-observation.js";
+export * from "./program-status.js";
 export * from "./git-status.js";
 export type {
   RpcMethod,
@@ -51,6 +52,7 @@ export interface Session {
   webStatus: "available" | "recovering" | "unavailable";
   historyGap: boolean;
   webReason?: string;
+  programStatus?: import("./program-status.js").ProgramStatusSummary;
 }
 export interface TerminalMeta {
   terminalInputBytes: number;

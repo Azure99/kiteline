@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { expect, test } from "vitest";
+import headless from "@xterm/headless";
 import { terminalOutputCost, type RecorderMessage } from "@kiteline/shared/protocol/ipc";
 import { shellWords, tmux } from "@kiteline/shared/terminal/node";
 import { RecordedSession } from "../src/session.js";
@@ -18,7 +19,12 @@ test("slow displays recover within their budget or fail without blocking the pro
   const outputs = new Map(
     ["slow", "fast", "reconnected"].map((id) => [
       id,
-      { credit: 0, data: "", frames: [] as RecorderMessage[] },
+      {
+        credit: 0,
+        data: "",
+        dataAtEnd: undefined as string | undefined,
+        frames: [] as RecorderMessage[],
+      },
     ]),
   );
   let stopped = false;
@@ -45,6 +51,7 @@ test("slow displays recover within their budget or fail without blocking the pro
         output.credit += terminalOutputCost(bytes.length);
       } else {
         output.frames.push(message);
+        if (message.frame.type === "ended") output.dataAtEnd = output.data;
         if (message.frame.type !== "error" && message.frame.type !== "input.error")
           output.credit += terminalOutputCost(Buffer.byteLength(JSON.stringify(message.frame)));
       }
@@ -108,7 +115,19 @@ test("slow displays recover within their budget or fail without blocking the pro
         ),
       ).toEqual([]);
       expect(output.frames.at(-1)).toMatchObject({ frame: { type: "ended", exitCode: 23 } });
-      expect(output.data.endsWith("FINAL_TAIL_23")).toBe(true);
+      // All remaining output must precede ended.
+      expect(output.dataAtEnd).toBe(output.data);
+      const viewer = new headless.Terminal({ cols: 80, rows: 24, scrollback: 100 });
+      try {
+        await new Promise<void>((resolve) => viewer.write(output.dataAtEnd!, resolve));
+        const buffer = viewer.buffer.active;
+        const visible = Array.from({ length: viewer.rows }, (_, row) =>
+          buffer.getLine(buffer.baseY + row)!.translateToString(true),
+        );
+        expect(visible.filter((line) => line !== "").at(-1)).toBe("FINAL_TAIL_23");
+      } finally {
+        viewer.dispose();
+      }
     }
     expect(fast.data.match(/x/g)).toHaveLength(
       scenario.charactersPerLine * scenario.linesPerRound * scenario.rounds,

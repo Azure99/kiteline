@@ -419,6 +419,14 @@ export class Sessions {
     this.events.changed(item.session.workspaceId);
   }
   private message(message: RecorderMessage) {
+    if (message.type === "program.status") {
+      const item = this.records.get(message.sessionId);
+      if (item && JSON.stringify(item.session.programStatus) !== JSON.stringify(message.summary)) {
+        item.session.programStatus = message.summary;
+        this.events.changed(item.session.workspaceId);
+      }
+      return;
+    }
     if (message.type === "notice") {
       const item = this.records.get(message.sessionId);
       if (item)

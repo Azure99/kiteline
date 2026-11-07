@@ -23,45 +23,6 @@ test("ordinary OSC notifications preserve numeric text and semicolons, excluding
   expect(terminalNotice(777, "notify;Build")).toBeUndefined();
 });
 
-test("blocked reports decode text and apply pair ordering without keeping program state", () => {
-  expect(
-    terminalNotice(
-      7501,
-      `state=working:garbage:bad=has space:app=any-tool:id=parent/child: state = blocked :title=${base64("测试")}:msg=${base64("Approve?").replace(/=+$/, "")}`,
-    ),
-  ).toEqual({ title: "测试", body: "Approve?", blocked: true });
-  expect(terminalNotice(7501, "state=blocked")).toEqual({ title: "", body: "", blocked: true });
-  for (const body of [
-    "?",
-    "state=working",
-    "state=idle",
-    "state=clear",
-    "state=blocked:state=working",
-  ])
-    expect(terminalNotice(7501, body)).toBeUndefined();
-});
-
-test("invalid encoded text, identifiers and protocol limits reject the whole blocked report", () => {
-  for (const field of [
-    "msg=a",
-    "msg=YQ=",
-    "msg=/w==",
-    `msg=${base64("line\nbreak")}`,
-    "id=bad//path",
-    `id=${"x/".repeat(8)}x`,
-    `id=${"x".repeat(33)}`,
-    `app=${"x".repeat(33)}`,
-    `title=${base64("x".repeat(193))}`,
-    `msg=${base64("x".repeat(2049))}`,
-    `${"x".repeat(17)}=y`,
-    `unknown=${"x".repeat(4096)}`,
-  ])
-    expect(
-      terminalNotice(7501, `state=blocked:${field}:msg=${base64("later")}`),
-      field,
-    ).toBeUndefined();
-});
-
 test("headless Model receives fragmented reports without any display attachment", async () => {
   const reports: TerminalNotice[] = [],
     faults: Error[] = [];

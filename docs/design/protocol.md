@@ -210,7 +210,7 @@ Web owner 在 `POST /api/credentials` 提交 `{name, deviceIds, expiresAt}`，�
 
 ### 在线终端报告
 
-recorder 接收 OSC 9 通知、`OSC 777;notify;title;body` 和程序主动发送的 OSC 7501 `state=blocked` 报告。OSC 9 的 `4`、`4;` 前缀留给进度协议；777 正文保留后续分号。7501 按 [Program Status Protocol rev 0.4](https://www.superlogical.com/rex/docs/build/program-status) 解码字段、base64 UTF-8 和尺寸限制，按较长的 ST 计接收上限；不探测、不回复。其他状态不会撤销已经收到的报告。
+recorder 接收 OSC 9 通知、`OSC 777;notify;title;body`，并将每条合法 OSC 7501 `state=blocked` 记录投影为一次历史报告。OSC 9 的 `4`、`4;` 前缀留给进度协议；777 正文保留后续分号。7501 复用 shared 的 [Program Status Protocol rev 0.4](https://www.superlogical.com/rex/docs/build/program-status) parser，按较长的 ST 计接收上限；当前记录的替换、清除和其他状态不会撤销已经收到的历史报告。
 
 报告独立于终端显示和工作区 watch。recorder 只发送解码后的展示内容与真实 session ID；agent 从会话记录补工作区和会话名称；server 从已认证的连接补设备 ID，并生成 `noticeId` 和接收时间 `receivedAt`，检查补齐字段后的完整 `terminal.notice` 事件不超过 `controlMessageBytes`，再按设备权限分发。不信任程序提供的 app、id 或路径作为来源。恢复 capture 不产生新报告。报告超限时丢弃并记录原因，不中断终端记录；未到达 server 的消息不补发。
 
@@ -219,6 +219,12 @@ server 在内存中保留每个设备/工作区/session 的最新待处理报告
 展开报告入口不清除。选择来源、从文件返回、切换或重新选择终端、重新进入页面，以及页面从隐藏恢复到当前终端，都会发起一次激活。主区确认目标后发送 `POST /api/devices/:deviceId/notices/activate`，正文为 `{workspaceId, sessionId}`，不等待终端附着；目标未确认且加载取消或失败时不发送。server 在处理请求时清除该终端当前的报告，并向有权限的浏览器发送 `notice.cleared`；请求发出后、处理前到达的报告也在此边界内，处理后新增的报告保留。成功响应为 `{}`，没有待处理项时不产生清除事件。
 
 普通和协同模式都只激活当前会话，其他分屏会话的报告保留。持续停留、普通窗口 focus 和事件连接重连不会再次清除新报告。激活失败或结果未确认时显示错误，通知以 server 事件或后续同步为准。退出或登录失效只清本页显示，不清除 server 上的报告。报告表示历史消息，不表示程序当前仍在等待。
+
+### 程序当前记录
+
+`sessions.list` 的 `Session.programStatus` 只含按各类别最近一次出现从新到旧排列的去重 `states` 和记录总数 `records`，保留同终端同时存在的状态，不解释为 agent 数量。类别顺序或记录数变化会触发 `sessions.changed`；同类别记录之间的次序、正文或进度变化可能不改变摘要，不保证广播。缺少摘要或空记录表示没有可用报告，不能推断 idle、unsupported 或任务完成。`sessions.snapshot` 的完整结果及 `sessions.wait` 的完整 screen 带按状态出现顺序从早到晚排列的 `programStatus` 记录数组，`unchanged` 沿用原位置与输入回执，不附完整记录。出现的判定、记录字段和生命周期见[程序报告状态](terminal.md#程序报告状态)。
+
+recorder 通过可靠 IPC `program.status` 发送小摘要；agent 只在摘要变化时失效列表，正文变化仍由完整读取取得。recorder 故障保留已观察摘要并将 recording 标为 unavailable；恢复新 Model 后先发空摘要，再请求重画，没有新报告就保持未知。当前记录不持久化，也不通过网页恢复字节或结束帧生成 PSP 镜像。完整 JSON 仍受 `controlMessageBytes` 限制；超限读取明确返回 `failed/limit_exceeded`，不裁剪 records，之后缩小记录仍可读取。
 
 ### 心跳与背压
 

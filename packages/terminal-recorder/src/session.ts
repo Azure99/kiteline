@@ -41,6 +41,12 @@ export class RecordedSession {
         fault: (error) => this.fault(error),
         backlogChanged: () => this.pressure(),
         notice: (notice) => this.notice(notice),
+        programStatus: (summary) => {
+          // Current facts use the reliable lane, whose failure closes the recorder.
+          if (this.initialized && !this.failed) {
+            this.emit({ type: "program.status", sessionId: options.sessionId, summary });
+          }
+        },
       },
     );
     this.control = new Control(
@@ -90,6 +96,11 @@ export class RecordedSession {
       this.model.output(Buffer.from(snapshot.data));
       await this.model.checkpointNow();
       this.initialized = true;
+      this.emit({
+        type: "program.status",
+        sessionId: this.options.sessionId,
+        summary: this.model.programStatus.summary(),
+      });
       await this.input.redraw();
       await this.model.checkpointNow();
     }
@@ -175,6 +186,7 @@ export class RecordedSession {
   private finish(exitCode: number | null) {
     void this.model.ordered(() => {
       if (this.ended || this.failed) return;
+      this.model.finishProgramStatus();
       this.ended = true;
       void this.input.close();
       this.control.dispose();
