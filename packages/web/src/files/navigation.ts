@@ -1,7 +1,11 @@
+import { useEffect, useState } from "react";
+import { newId } from "../lib/id";
+import type { WorkspaceRecord } from "../workspace/memory";
 import {
   currentRoute,
   isWorkspaceRoute,
   navigateWorkspace,
+  navigationIntent,
   notifyNavigation,
   workspaceDestination,
   updateWorkspaceQuery,
@@ -11,6 +15,10 @@ import {
 import type { Draft } from "./drafts";
 import { parentPath } from "./paths";
 import type { FileTarget } from "./content";
+
+export function fileNavigationView(memory: WorkspaceRecord): NavigationOptions {
+  return { intent: "view", replace: !!memory.fileNavigation };
+}
 
 export function showFile(target: FileTarget, line?: number, keepSearch = false) {
   navigateWorkspace(target, "files", {
@@ -63,6 +71,24 @@ export interface HistoricalFileLocation extends FileTarget {
 }
 
 type FileNavigationDestination = FileTarget & { draftId?: string; entryKey: string };
+
+function locationRequest(restoreReading: boolean) {
+  const location = history.state?.fileNavigation as HistoricalFileLocation | undefined;
+  return location && { ...location, requestId: newId(), restoreReading };
+}
+
+export function useHistoricalFileLocation() {
+  const [location, setLocation] = useState(() => locationRequest(true));
+  useEffect(() => {
+    const listener = (event: PopStateEvent) => {
+      const intent = navigationIntent(event);
+      if (intent !== "view") setLocation(locationRequest(intent !== "lookup"));
+    };
+    window.addEventListener("popstate", listener);
+    return () => window.removeEventListener("popstate", listener);
+  }, []);
+  return location;
+}
 
 export function beginFileNavigation(
   target: WorkspaceTarget,

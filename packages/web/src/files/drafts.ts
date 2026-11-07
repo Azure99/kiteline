@@ -6,7 +6,7 @@ import { encodeText } from "@kiteline/shared/protocol/text";
 import { ApiError, rpc } from "../lib/api";
 import { emit } from "../lib/events";
 import { readText, writeText, type DiskText, type FileTarget } from "./content";
-import { syncTextTransactions, textState } from "./editor-state";
+import { syncTextTransactions, textState, type EditorScrollSnapshot } from "./editor-state";
 import { isWithin, movedPath } from "./paths";
 
 type DraftNotice =
@@ -51,7 +51,7 @@ export interface Draft extends FileTarget {
   revision?: string;
   resolvedPath?: string;
   view: {
-    scrollSnapshot?: { line: number; column: number; offsetX: number; offsetY: number };
+    scrollSnapshot?: EditorScrollSnapshot;
     markdownPreview?: boolean;
     markdownPosition?: { line: number; offset: number };
   };

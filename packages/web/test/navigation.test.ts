@@ -11,11 +11,18 @@ import {
 import {
   beginFileNavigation,
   clearFileNavigationHistory,
+  fileNavigationView,
   openFileLocation,
   previewFileLocation,
   returnToFileOrigin,
   showFile,
 } from "../src/files/navigation";
+
+import { WorkspaceMemories } from "../src/workspace/memory";
+import { DraftStore } from "../src/files/drafts";
+import { NavigationTracker } from "../src/files/navigation-tracker";
+import { inspectNavigation } from "../src/files/navigation-candidates";
+import { diskText } from "./disk-text";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -370,4 +377,56 @@ test("clearing lookup history removes only the current entry's reference", () =>
   expect(history.state).toMatchObject({ fileNavigation: { sessionId: lookup.id, kind: "origin" } });
   history.forward();
   expect(history.state).toEqual(source);
+});
+
+test("active lookup view changes keep its candidate slot until Workspace memory ends", () => {
+  const { browser, history } = lookupBrowser();
+  const store = new DraftStore();
+  store.observeDevices([
+    {
+      id: target.deviceId,
+      name: "Device",
+      status: "online",
+      lastSeenAt: null,
+      editorBytes: 1024 * 1024,
+    },
+  ]);
+  const draft = store.open(
+    { ...target, path: "origin.ts", deviceName: "Device", workspaceName: "Workspace" },
+    {
+      ...diskText({ path: "origin.ts", text: "name();", revision: "initial" }),
+      target: { ...target, path: "origin.ts" },
+    },
+  );
+  const request = {
+    initialGroup: "definitions" as const,
+    context: inspectNavigation(draft.state!, "name"),
+    origin: { path: draft.path, draftId: draft.id, line: 1, column: 0 },
+  };
+  const session = {
+    ...request,
+    id: lookup.id,
+    tracker: new NavigationTracker(store, target, request),
+  };
+  const memories = new WorkspaceMemories();
+  const memory = memories.forTarget(target);
+  memory.fileNavigation = { session };
+  beginFileNavigation(target, session);
+  openFileLocation(lookupCandidate, session.id);
+  const state = history.state;
+  const intents: ReturnType<typeof navigationIntent>[] = [];
+  browser.addEventListener("popstate", (event) =>
+    intents.push(navigationIntent(event as PopStateEvent)),
+  );
+  updateWorkspaceQuery(target, { search: true }, fileNavigationView(memory));
+  updateWorkspaceQuery(target, { folder: "src" }, fileNavigationView(memory));
+  updateWorkspaceQuery(target, { session: "terminal-2" }, fileNavigationView(memory));
+  expect(history.length).toBe(2);
+  expect(history.state).toEqual(state);
+  expect(intents).toEqual(["view", "view", "view"]);
+  expect(history.state).not.toHaveProperty("navigationIntent");
+  expect(session.tracker.snapshot()).not.toEqual([]);
+  memories.clear();
+  expect(session.tracker.snapshot()).toEqual([]);
+  expect(fileNavigationView(memory)).toEqual({ intent: "view", replace: false });
 });

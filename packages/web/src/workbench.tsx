@@ -410,7 +410,7 @@ function SignedInWorkbench({
             ?.presentation?.path
         : undefined;
     const target = saved ?? path;
-    if (target !== currentPath()) navigate(target);
+    navigate(target);
     setMobileNavigation(false);
     setError(undefined);
     if (keyboard && !(mobile && mobileNavigation))

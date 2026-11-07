@@ -224,8 +224,10 @@ By default, a source is the TCP peer address, so requests through one reverse-pr
 | Image preview                      | 20 MiB and at most 20,000,000 pixels                                | `imageBytes`, `imagePixels` |
 | Transfer timeout without progress  | 120 seconds                                                         | Fixed                       |
 | One copy, move or delete operation | 500 entries                                                         | Fixed                       |
-| Search results                     | 1,000 matches                                                       | Fixed                       |
+| Disk search results                | 1,000 entries                                                       | Fixed                       |
 | Search duration                    | 10 seconds; returns matches found before timeout                    | `searchTimeout`             |
+
+Content search counts matching lines; file-name search counts files. Name lookups display deduplicated positions.
 
 Opening text, saving, image previews, uploads and downloads all consume concurrent file-transfer slots.
 

@@ -58,8 +58,11 @@ import { ApplicationTitle } from "./application-title";
 import type { useTerminalFocus } from "./use-terminal-focus";
 import type { ReceivedReport } from "./reports";
 import type { CliAttachTarget } from "../cli/cli-dialog";
+import { fileNavigationView } from "../files/navigation";
+import type { WorkspaceRecord } from "../workspace/memory";
 
 export function TerminalArea({
+  memory,
   device,
   workspace,
   visible,
@@ -72,6 +75,7 @@ export function TerminalArea({
   onCliAttach,
   onSelectTerminal,
 }: {
+  memory: WorkspaceRecord;
   device: Device;
   workspace: Workspace;
   visible: boolean;
@@ -193,9 +197,9 @@ export function TerminalArea({
     (id: string | undefined, options?: NavigationOptions) => {
       lastRouteSession.current = id ?? null;
       const target = { deviceId: device.id, workspaceId: workspace.id };
-      updateWorkspaceQuery(target, { session: id }, options);
+      updateWorkspaceQuery(target, { session: id }, { ...fileNavigationView(memory), ...options });
     },
-    [device.id, workspace.id],
+    [device.id, workspace.id, memory],
   );
   const commitSelection = useCallback(
     (id: string | undefined, { reveal }: { reveal?: "show" | "clear" } = {}) => {

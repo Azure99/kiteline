@@ -31,7 +31,7 @@ Kiteline 的文档分为三组：使用与部署、开发与发布、架构与�
 | [架构](design/architecture.md)                | 组成、仓库结构、状态归属、请求流程、技术选择、扩展清单       |
 | [通信契约](design/protocol.md)                | 结果语义、认证、HTTP 接口、WebSocket、RPC、数据通道、IPC     |
 | [终端](design/terminal.md)                    | tmux 与 recorder、会话生命周期、历史、附着与恢复、输入与尺寸 |
-| [文件](design/files.md)                       | 列表、编辑与保存、整理操作、搜索、传输、变化监听             |
+| [文件](design/files.md)                       | 列表、编辑与保存、整理操作、搜索与名称查阅、传输、变化监听   |
 | [Git](design/git.md)                          | 仓库发现、状态与 diff、写操作、同步、冲突、刷新              |
 | [开发服务访问](design/http-access.md)         | 代理路径、请求转发、端口建议、错误响应、安全边界             |
 | [定时任务](design/scheduled-tasks.md)         | 数据模型、调度、并发、执行、持久化与恢复、留存               |

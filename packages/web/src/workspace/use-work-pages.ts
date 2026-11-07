@@ -2,7 +2,7 @@ import { useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import type { Repo } from "@kiteline/shared/protocol";
 import { useDrafts, type DraftStore } from "../files/drafts";
 import { requestCloseDraft } from "../files/close-draft";
-import { showDraft } from "../files/navigation";
+import { clearFileNavigationHistory, showDraft } from "../files/navigation";
 import {
   currentPath,
   navigateWorkspace,
@@ -44,6 +44,7 @@ export function useWorkPages(
         )
       : undefined;
   function navigateTo(page?: WorkPage, options: NavigationOptions = {}) {
+    if (options.replace && options.intent !== "view") clearFileNavigationHistory();
     if (page?.kind === "file") {
       const draft = draftFor(page);
       if (draft) showDraft(draft, options);
@@ -56,7 +57,12 @@ export function useWorkPages(
         );
     } else if (page) {
       navigateWorkspace(target, "git", { repo: page.repoId, search: undefined }, options);
-    } else updateWorkspaceQuery(target, { file: undefined, draft: undefined }, { replace: true });
+    } else
+      updateWorkspaceQuery(
+        target,
+        { file: undefined, draft: undefined },
+        { replace: true, intent: "open" },
+      );
   }
   function reconcileDraftIdentities() {
     let next = state;
@@ -111,9 +117,9 @@ export function useWorkPages(
   useLayoutEffect(() => {
     consumeWorkspacePages();
   }, [state, drafts, path]);
-  function select(page: WorkPage) {
+  function select(page: WorkPage, options: NavigationOptions = {}) {
     setState({ ...state, active: page.id });
-    navigateTo(page);
+    navigateTo(page, options);
   }
   function close(page: WorkPage) {
     const draft = draftFor(page);

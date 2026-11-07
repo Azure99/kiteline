@@ -233,6 +233,20 @@ The current page keeps search conditions and successful results for each workspa
 
 Locating a match in an unsaved draft can take time, and the text remains usable while waiting. Reopening a file, selecting or editing text, or switching files cancels the old position request. A failed comparison shows an error.
 
+### Look up by name
+
+In a file's source, place the cursor on a word or select text on one line, then choose “Find ‘name’ by name” from “More file actions.” On desktop, F12 or Ctrl+click (Cmd+click on macOS) starts at “Possible definitions”; Shift+F12 starts at “Other occurrences.” These commands show the list without opening its first item. On phones, select a word and use the same menu.
+
+Results match case-sensitive name text as complete words, without resolving which symbol each name belongs to. The two groups are mutually exclusive: “Possible definitions” prioritizes syntax marks in the current draft, then declaration line patterns; “Other occurrences” is ordered by the initiating file, nearby directories and path. Namesakes, imports, comments and documentation can appear, so check the path and context. Previewing another file does not change the lookup's sorting center. Name lookups leave the ordinary search query, Whole word and ignored-file settings unchanged.
+
+Use the two group buttons at the top to move to either group. Counts represent deduplicated positions. “Start” is counted and selectable; “Next” skips it and continues across groups. When results are incomplete, counts cover only the positions currently shown.
+
+Selecting a result opens a preview below the document on desktop or a temporary reading layer on phones. Open files use their current drafts, including unsaved edits. “Show results” returns to the list; “Open file” opens the editable document. The preview's return button or browser Back returns to the initiating position. Browsing successive candidates uses one browser history entry. From the document, continue the existing list through “Name navigation” in the file search panel; on phones, open that panel through Tools.
+
+Every F12, Shift+F12, Ctrl/Cmd+click or Find by name menu command starts a new lookup from the current selection, even for the same name. That selection becomes the new start and sorting center. An ordinary file open or search result open also ends the old lookup, including opening the same file. Switching search panels or entering a query alone does not end it. After a lookup ends or is replaced, its browser Back/Forward entries only open files, preserving each draft's current reading position.
+
+While a lookup is active, edits outside a matched range update its position. Deleting the original matched text invalidates that position. Undo restores the text without restoring the old match; start a new lookup from the current selection.
+
 ### Create and rename
 
 "New file" opens an unnamed draft. Enter its path on first save, starting in the directory shown in the file toolbar when you created the draft. "New directory" in a folder's context menu creates inside that folder. The device and Git cannot see the file until it is saved. First saves, directory creation, and renaming fail if the name exists; nothing is overwritten. Open tabs follow renamed or moved paths. The workspace root and files currently being saved cannot be renamed, moved or deleted.

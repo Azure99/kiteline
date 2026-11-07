@@ -1,4 +1,4 @@
-import type { FileSearchState } from "../files/file-search";
+import { endFileNavigation, type FileSearchMemory } from "../files/file-search-state";
 import type { GitBrowseState } from "../git/git";
 import type { WorkspaceTarget } from "../lib/navigation";
 import type { TerminalLayout } from "../terminal/groups";
@@ -21,11 +21,10 @@ export interface WorkspacePresentation {
   rightToolsWidth?: number;
 }
 
-export interface WorkspaceRecord {
+export interface WorkspaceRecord extends FileSearchMemory {
   presentation?: { state: WorkspacePresentation; path: string };
   pages?: WorkPagesState;
   terminalLayout?: TerminalLayout;
-  fileSearch?: FileSearchState;
   browsing: Map<string, GitBrowseState>;
 }
 
@@ -74,6 +73,7 @@ export class WorkspaceMemories {
   };
 
   clear() {
+    for (const record of this.records.values()) endFileNavigation(record);
     this.records.clear();
     try {
       sessionStorage.removeItem(terminalLayoutsKey);

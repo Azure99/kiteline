@@ -1,5 +1,6 @@
 import type { WorkspaceRecord } from "../workspace/memory";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { Device, Workspace } from "@kiteline/shared/protocol";
 import {
@@ -12,14 +13,21 @@ import {
 import { useMobile } from "../lib/use-mobile";
 import type { useTerminalFocus } from "../terminal/use-terminal-focus";
 import type { FilePage } from "../workspace/pages";
-import { DraftView } from "./draft-view";
+import { DraftView, type DraftViewHandle } from "./draft-view";
 import { useDrafts, type Draft, type DraftStore } from "./drafts";
 import { FileBrowser } from "./file-browser";
 import { FileContent } from "./file-content";
-import { showFile } from "./navigation";
+import {
+  fileNavigationView,
+  openFileLocation,
+  showFile,
+  useHistoricalFileLocation,
+} from "./navigation";
+import type { CodeNavigationRequest } from "./code-navigation";
 import type { FileAction } from "./operation-dialog";
 import { parentPath } from "./paths";
 import type { TextLocation } from "./text-editor";
+import type { FileSearchHandle } from "./file-search";
 
 export function Files({
   memory,
@@ -29,6 +37,7 @@ export function Files({
   contentVisible,
   page,
   onOpenContent,
+  onOpenSearch,
   onResolvePath,
   store,
   onUpload,
@@ -43,6 +52,7 @@ export function Files({
   contentVisible: boolean;
   page?: FilePage;
   onOpenContent(focusContent?: boolean): void;
+  onOpenSearch(): void;
   onResolvePath(pageId: string, from: string, to: string): void;
   store: DraftStore;
   onUpload(files: File[], folder: string): void;
@@ -55,11 +65,28 @@ export function Files({
   const target = { deviceId: device.id, workspaceId: workspace.id };
   const draft = page && store.find({ ...target, path: page.path }, page.draftId);
   const enabled = device.status === "online";
+  const search = useRef<FileSearchHandle>(null);
+  const draftView = useRef<DraftViewHandle>(null);
+  const [navigationHost, setNavigationHost] = useState<HTMLDivElement | null>(null);
+  const historical = useHistoricalFileLocation();
+  function showNavigationResults() {
+    flushSync(() => {
+      onOpenSearch();
+      updateWorkspaceQuery(target, { search: true }, { replace: true });
+    });
+  }
+  function navigateName(request: CodeNavigationRequest) {
+    setPending(undefined);
+    showNavigationResults();
+    search.current?.navigateName(request);
+  }
+
   const [pending, setPending] = useState<{
     pageId?: string;
     path: string;
     position: TextLocation;
   }>();
+  const [appliedHistoricalId, setAppliedHistoricalId] = useState<string>();
   const queryLine =
     route.query.file === page?.path && route.query.draft === page?.draftId
       ? route.query.line
@@ -68,8 +95,30 @@ export function Files({
     () => (page?.id && queryLine !== undefined ? { line: queryLine } : undefined),
     [page?.id, queryLine],
   );
+  const navigationSession = memory.fileNavigation?.session;
+  const draftReady = !!draft?.state;
+  // A location is resolved for this visit only; editing must not repeat its selection or focus.
+  const historicalPosition = useMemo(() => {
+    if (!historical || !draftReady || historical.sessionId !== navigationSession?.id) return;
+    if (historical.kind === "origin") return navigationSession.tracker.originLocation();
+    if (historical.kind === "document" && historical.entryKey)
+      return navigationSession.tracker.entryLocation(
+        historical.entryKey,
+        historical.restoreReading,
+      );
+  }, [historical, navigationSession, draftReady]);
+  const historicalLocation =
+    page?.id &&
+    historical?.deviceId === target.deviceId &&
+    historical.workspaceId === target.workspaceId &&
+    historical.path === page.path &&
+    (!historical.draftId || historical.draftId === page.draftId) &&
+    historical.requestId !== appliedHistoricalId
+      ? historicalPosition
+      : undefined;
   const position =
     routeLocation ??
+    historicalLocation ??
     (pending?.pageId === page?.id && pending?.path === page?.path ? pending?.position : undefined);
   useEffect(() => {
     const opened = (event: PopStateEvent) => {
@@ -134,11 +183,32 @@ export function Files({
       {...{ device, workspace, browsing, contentVisible, store, onUpload, onOperation }}
       currentFile={page?.path}
       onOpenContent={onOpenContent}
-      onOpenFile={(path, position, keepSearch, focusContent) => {
-        onOpenContent(focusContent);
-        // The open notification replaces the old request before this one is installed.
-        showFile({ ...target, path }, undefined, keepSearch);
-        setPending(position ? { path, position } : undefined);
+      searchActionRef={search}
+      navigationHost={navigationHost}
+      onShowNavigationResults={showNavigationResults}
+      onCloseNavigation={() => {
+        if (!mobile) draftView.current?.focus();
+      }}
+      onOpenFile={(request) => {
+        onOpenContent(request.focusContent);
+        if (request.kind === "lookup") {
+          const destinationDraft = store.find({ ...target, path: request.path }, request.draftId);
+          openFileLocation(
+            {
+              ...target,
+              path: request.path,
+              draftId: destinationDraft?.id ?? request.draftId,
+              entryKey: request.lookup.entryKey,
+            },
+            request.lookup.sessionId,
+          );
+        } else {
+          // The open notification consumes the old request before installing this position.
+          showFile({ ...target, path: request.path }, undefined, request.keepSearch);
+          setPending(
+            request.position ? { path: request.path, position: request.position } : undefined,
+          );
+        }
       }}
       observeContent={async (signal) => {
         const draft = page && store.find({ ...target, path: page.path }, page.draftId);
@@ -151,6 +221,7 @@ export function Files({
       >
         {draft ? (
           <DraftView
+            ref={draftView}
             key={draft.id}
             {...{ store, draft }}
             focusMode={mobile ? focusMode : undefined}
@@ -158,9 +229,37 @@ export function Files({
             editorVisible={contentVisible}
             htmlPreviewVisible={contentVisible && queryLine === undefined && !position}
             location={position}
-            onLocationFinished={(finished) => {
-              setPending((current) => (current?.position === finished ? undefined : current));
-              if (finished !== routeLocation || !page) return;
+            onReadingLocation={
+              historical?.kind === "document" &&
+              historical.sessionId === navigationSession?.id &&
+              historical.path === draft.path &&
+              (!historical.draftId || historical.draftId === draft.id) &&
+              historical.entryKey
+                ? (reading) => {
+                    const session = memory.fileNavigation?.session;
+                    if (session?.id === historical.sessionId)
+                      session.tracker.captureReading(historical.entryKey!, reading);
+                  }
+                : undefined
+            }
+            onNavigateName={navigateName}
+            onOpenContainingDirectory={() =>
+              updateWorkspaceQuery(
+                target,
+                {
+                  folder: parentPath(draft.path),
+                  reveal: draft.path,
+                  search: undefined,
+                  line: undefined,
+                },
+                fileNavigationView(memory),
+              )
+            }
+            onLocationFinished={(applied, focusEditor) => {
+              setPending((current) => (current?.position === applied ? undefined : current));
+              if (applied === historicalLocation) setAppliedHistoricalId(historical!.requestId);
+              if (!mobile && applied === historicalLocation) focusEditor?.();
+              if (applied !== routeLocation || !page) return;
               const current = currentRoute();
               if (
                 current.tool === "files" &&
@@ -192,6 +291,7 @@ export function Files({
             ) && t(($) => $.files.selectFiles)}
           </div>
         )}
+        <div ref={setNavigationHost} className="contents" />
       </section>
     </FileBrowser>
   );

@@ -2,7 +2,14 @@ import { flushSync } from "react-dom";
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { ErrorNotice } from "../components/error-notice";
 import { useTranslation } from "react-i18next";
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type Ref,
+} from "react";
 import {
   Code,
   Copy,
@@ -52,6 +59,7 @@ import { draftLabel } from "./draft-label";
 import { codeLineReference } from "./code-line-reference";
 import { SaveDraftDialog } from "./save-draft-dialog";
 import { TextEditor, type TextEditorHandle, type TextLocation } from "./text-editor";
+import type { CodeNavigationRequest } from "./code-navigation";
 import type { MarkdownPreviewHandle } from "./markdown-preview";
 import { formatBytes } from "./format";
 import { downloadFile } from "./content";
@@ -62,7 +70,12 @@ const MarkdownPreview = deferredView(async () => ({
   default: (await import("./markdown-preview")).MarkdownPreview,
 }));
 
+export interface DraftViewHandle {
+  focus(): void;
+}
+
 export function DraftView({
+  ref,
   store,
   draft,
   unavailable,
@@ -72,24 +85,41 @@ export function DraftView({
   showTabs = true,
   location,
   onLocationFinished,
+  onReadingLocation,
+  onNavigateName,
+  onOpenContainingDirectory,
 }: {
+  ref?: Ref<DraftViewHandle>;
   focusMode?: ReturnType<typeof useTerminalFocus>;
   editorVisible?: boolean;
   htmlPreviewVisible?: boolean;
   showTabs?: boolean;
   location?: TextLocation;
-  onLocationFinished?(location: TextLocation): void;
+  onLocationFinished?(location: TextLocation, focusEditor?: () => void): void;
+  onReadingLocation?(location: TextLocation): void;
+  onNavigateName?(request: CodeNavigationRequest): void;
+  onOpenContainingDirectory?(): void;
   store: DraftStore;
   draft: Draft;
   unavailable?: string;
 }) {
   const { t } = useTranslation();
   const fontPreference = useFileFontPreference();
-  const currentFontSize = fileFontSize(useMobile(), fontPreference);
+  const mobile = useMobile();
 
   const editor = useRef<TextEditorHandle>(null);
+  useImperativeHandle(ref, () => ({ focus: () => editor.current?.focus() }), []);
   const [searchFromMenu, setSearchFromMenu] = useState(false);
+  const [workspaceQuery, setWorkspaceQuery] = useState<string>();
   const menuActions = useRef<MenuPrimitive.Root.Actions>(null);
+  function closeMenuForSearch() {
+    // Release the menu focus lock within the touch gesture so Android can focus the target.
+    flushSync(() => setSearchFromMenu(true));
+    flushSync(() => {
+      menuActions.current?.close();
+      menuActions.current?.unmount();
+    });
+  }
   const all = useDrafts(store);
   // Editing updates this draft without notifying the entire open-files list.
   useDraftVersion(store, draft);
@@ -117,6 +147,7 @@ export function DraftView({
       : previewType === "html" && htmlPreview
         ? "html"
         : undefined;
+  const currentFontSize = fileFontSize(mobile, fontPreference);
   const setPreview = useCallback(
     (value?: "markdown" | "html") => {
       if (previewType === "markdown") {
@@ -211,7 +242,10 @@ export function DraftView({
           <Menu
             actionsRef={menuActions}
             onOpenChange={(open) => {
-              if (open) setSearchFromMenu(false);
+              if (open) {
+                setSearchFromMenu(false);
+                setWorkspaceQuery(editor.current?.navigationQuery());
+              }
             }}
           >
             <MenuTrigger
@@ -223,21 +257,35 @@ export function DraftView({
             </MenuTrigger>
             <MenuContent finalFocus={searchFromMenu ? false : undefined}>
               {editorVisible && draft.state && !preview && (
-                <MenuItem
-                  closeOnClick={false}
-                  onClick={() => {
-                    // Release the menu focus lock within the touch gesture so Android opens the IME.
-                    flushSync(() => setSearchFromMenu(true));
-                    flushSync(() => {
-                      menuActions.current?.close();
-                      menuActions.current?.unmount();
-                    });
-                    editor.current?.openSearch();
-                  }}
-                >
-                  <Search />
-                  {t(($) => $.files.findReplace)}
-                </MenuItem>
+                <>
+                  <MenuItem
+                    closeOnClick={false}
+                    onClick={() => {
+                      closeMenuForSearch();
+                      editor.current?.openSearch();
+                    }}
+                  >
+                    <Search />
+                    {t(($) => $.files.findReplace)}
+                  </MenuItem>
+                  {onNavigateName && (
+                    <MenuItem
+                      closeOnClick={false}
+                      disabled={workspaceQuery === undefined || !!unavailable}
+                      onClick={() => {
+                        closeMenuForSearch();
+                        editor.current?.navigateName("definitions");
+                      }}
+                    >
+                      <Search className="shrink-0" />
+                      <span className="min-w-0 truncate" title={workspaceQuery}>
+                        {workspaceQuery === undefined
+                          ? t(($) => $.files.noNameToFind)
+                          : t(($) => $.files.findName, { query: workspaceQuery })}
+                      </span>
+                    </MenuItem>
+                  )}
+                </>
               )}
               <MenuItem
                 disabled={!draft.state}
@@ -248,14 +296,21 @@ export function DraftView({
               </MenuItem>
               <MenuItem
                 disabled={!draft.path}
-                onClick={() =>
-                  navigateWorkspace(draft, "files", {
-                    folder: parentPath(draft.path),
-                    reveal: draft.path,
-                    search: undefined,
-                    line: undefined,
-                  })
-                }
+                onClick={() => {
+                  if (onOpenContainingDirectory) onOpenContainingDirectory();
+                  else
+                    navigateWorkspace(
+                      draft,
+                      "files",
+                      {
+                        folder: parentPath(draft.path),
+                        reveal: draft.path,
+                        search: undefined,
+                        line: undefined,
+                      },
+                      { intent: "view" },
+                    );
+                }}
               >
                 <FolderOpen />
                 {t(($) => $.files.openContainingDirectory)}
@@ -391,18 +446,20 @@ export function DraftView({
       ) : draft.state ? (
         editorVisible && (
           <TextEditor
+            onReadingLocation={onReadingLocation}
             ref={editor}
             key={draft.id}
             {...{ draft, store }}
             location={editorLocation}
-            onLocationFinished={(finished) => {
-              setSourceLocation((current) => (current === finished ? undefined : current));
-              if (location === finished) onLocationFinished?.(finished);
+            onLocationFinished={(applied, focusEditor) => {
+              setSourceLocation((current) => (current === applied ? undefined : current));
+              if (location === applied) onLocationFinished?.(applied, focusEditor);
             }}
             wrap={previewType === "markdown"}
             onSave={() => {
               if (!unavailable) save();
             }}
+            onNavigateName={unavailable ? undefined : onNavigateName}
           />
         )
       ) : (

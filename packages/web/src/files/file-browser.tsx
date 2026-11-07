@@ -1,6 +1,6 @@
 import type { WorkspaceRecord } from "../workspace/memory";
 import { useTranslation } from "react-i18next";
-import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react";
+import { useEffect, useEffectEvent, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
   ArrowUp,
   FilePlus2,
@@ -38,12 +38,17 @@ import { isWithin, movedPath, parentPath } from "./paths";
 import { useFileBrowser, type DirectoryReadMode } from "./use-browser";
 import type { DraftStore } from "./drafts";
 import { renameFile } from "./actions";
-import { showDraft } from "./navigation";
+import { fileNavigationView, showDraft } from "./navigation";
 import type { FileAction } from "./operation-dialog";
 import type { TextLocation } from "./text-editor";
 import { downloadFile } from "./content";
-import { FileSearch } from "./file-search";
+import { FileSearch, type FileSearchHandle } from "./file-search";
 import { useWorkspaceRefresh } from "../lib/use-workspace-refresh";
+
+type OpenFileRequest = { path: string; focusContent?: boolean } & (
+  | { kind: "file"; position?: TextLocation; keepSearch?: boolean }
+  | { kind: "lookup"; draftId?: string; lookup: { sessionId: string; entryKey: string } }
+);
 
 const downloadSpacingMs = 250;
 
@@ -55,6 +60,10 @@ export function FileBrowser({
   contentVisible,
   currentFile,
   onOpenContent,
+  searchActionRef,
+  navigationHost,
+  onShowNavigationResults,
+  onCloseNavigation,
   onOpenFile,
   observeContent,
   store,
@@ -69,12 +78,11 @@ export function FileBrowser({
   contentVisible: boolean;
   currentFile?: string;
   onOpenContent(): void;
-  onOpenFile(
-    path: string,
-    position?: TextLocation,
-    keepSearch?: boolean,
-    focusContent?: boolean,
-  ): void;
+  searchActionRef: RefObject<FileSearchHandle | null>;
+  navigationHost: HTMLElement | null;
+  onShowNavigationResults(): void;
+  onCloseNavigation(): void;
+  onOpenFile(request: OpenFileRequest): void;
   observeContent(signal: AbortSignal): Promise<void>;
   store: DraftStore;
   onUpload(files: File[], folder: string): void;
@@ -193,7 +201,7 @@ export function FileBrowser({
   }, [device.id, workspace.id, load]);
   const target = { deviceId: device.id, workspaceId: workspace.id };
   function updateQuery(query: WorkspaceQuery, options: NavigationOptions = {}) {
-    updateWorkspaceQuery(target, query, options);
+    updateWorkspaceQuery(target, query, { ...fileNavigationView(memory), ...options });
   }
   function enter(path: string) {
     setSelected(new Set());
@@ -214,7 +222,7 @@ export function FileBrowser({
   }
   function open(entry: Entry, focusContent = false) {
     setNotice(undefined);
-    onOpenFile(entry.path!, undefined, undefined, focusContent);
+    onOpenFile({ kind: "file", path: entry.path!, focusContent });
   }
   function download(path: string) {
     downloadFile({ deviceId: device.id, workspaceId: workspace.id, path });
@@ -345,27 +353,46 @@ export function FileBrowser({
         <FileSearch
           memory={memory}
           ref={searchRegion}
+          actionRef={searchActionRef}
+          navigationHost={navigationHost}
+          store={store}
+          onShowCandidates={onShowNavigationResults}
+          onCloseNavigation={onCloseNavigation}
+          onShowContent={onOpenContent}
           deviceId={device.id}
           workspaceId={workspace.id}
           workspaceName={workspace.name}
           active={browsing && searching}
           disabled={!enabled}
           onBack={() => updateQuery({ search: undefined })}
-          onOpen={(match, query, wholeWord, focusContent) => {
-            onOpenFile(
-              match.path,
-              match.line
-                ? {
-                    line: match.line,
-                    range: match.ranges?.[0],
-                    query,
-                    wholeWord,
-                    byteColumn: match.byteColumn,
-                  }
-                : undefined,
-              true,
-              focusContent,
-            );
+          onOpen={(request) => {
+            const { entry, focusContent } = request;
+            const { match } = entry;
+            if (request.kind === "lookup") {
+              onOpenFile({
+                kind: "lookup",
+                path: match.path,
+                draftId: entry.draftId,
+                lookup: request.lookup,
+                focusContent,
+              });
+            } else {
+              onOpenFile({
+                kind: "file",
+                path: match.path,
+                position: match.line
+                  ? {
+                      line: match.line,
+                      range: match.ranges?.[0],
+                      query: request.query,
+                      wholeWord: request.wholeWord,
+                      byteColumn: match.byteColumn,
+                    }
+                  : undefined,
+                keepSearch: true,
+                focusContent,
+              });
+            }
           }}
         />
       </ToolSidebar>
@@ -394,7 +421,10 @@ export function FileBrowser({
             <IconButton
               label={t(($) => $.files.searchFiles)}
               disabled={!enabled}
-              onClick={() => updateQuery({ search: true })}
+              onClick={() => {
+                searchActionRef.current?.showSearch();
+                updateQuery({ search: true });
+              }}
             >
               <Search />
             </IconButton>
@@ -439,7 +469,13 @@ export function FileBrowser({
             </MenuTrigger>
             <MenuContent finalFocus={searching ? searchRegion : undefined}>
               {mobile && (
-                <MenuItem disabled={!enabled} onClick={() => updateQuery({ search: true })}>
+                <MenuItem
+                  disabled={!enabled}
+                  onClick={() => {
+                    searchActionRef.current?.showSearch();
+                    updateQuery({ search: true });
+                  }}
+                >
                   <Search />
                   {t(($) => $.files.searchFiles)}
                 </MenuItem>

@@ -29,7 +29,8 @@ import { apiError } from "../lib/api";
 import { useCopyFeedback } from "../lib/use-copy-feedback";
 import { useDrafts, type DraftStore } from "../files/drafts";
 import { hasUnsavedDraft } from "./drafts";
-import { showFile } from "../files/navigation";
+import { fileNavigationView, showFile } from "../files/navigation";
+import type { WorkspaceRecord } from "../workspace/memory";
 import { type DiffTarget } from "./diff-view";
 import { selectionOf, type ChangeSide } from "./selection";
 import { useGitStatus } from "./use-status";
@@ -63,6 +64,7 @@ export interface GitBrowseState {
 }
 
 export function GitTool({
+  memory,
   device,
   workspace,
   selected,
@@ -76,6 +78,7 @@ export function GitTool({
   saved,
   repositories,
 }: {
+  memory: WorkspaceRecord;
   device: Device;
   workspace: Workspace;
   selected: boolean;
@@ -106,7 +109,11 @@ export function GitTool({
       updateWorkspaceQuery(target, { repo: activeRepoId }, { replace: true });
   }, [route.tool, requestedRepo, activeRepoId, device.id, workspace.id]);
   function chooseRepo(id: string) {
-    updateWorkspaceQuery({ deviceId: device.id, workspaceId: workspace.id }, { repo: id });
+    updateWorkspaceQuery(
+      { deviceId: device.id, workspaceId: workspace.id },
+      { repo: id },
+      fileNavigationView(memory),
+    );
   }
   function openFile(path: string, focusContent = false) {
     if (!repo) return;
@@ -120,13 +127,18 @@ export function GitTool({
   function locateFile(path: string) {
     if (!repo) return;
     const full = childPath(repo.path, path);
-    navigateWorkspace({ deviceId: device.id, workspaceId: workspace.id }, "files", {
-      folder: parentPath(full),
-      reveal: full,
-      file: undefined,
-      draft: undefined,
-      search: undefined,
-    });
+    navigateWorkspace(
+      { deviceId: device.id, workspaceId: workspace.id },
+      "files",
+      {
+        folder: parentPath(full),
+        reveal: full,
+        file: undefined,
+        draft: undefined,
+        search: undefined,
+      },
+      fileNavigationView(memory),
+    );
   }
   const repoLabel = (path: string) => (path === "." ? t(($) => $.git.workspaceRoot) : path);
   let unavailableMessage: string;

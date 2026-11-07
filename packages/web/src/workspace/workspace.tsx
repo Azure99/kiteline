@@ -27,6 +27,8 @@ import type { useTerminalFocus } from "../terminal/use-terminal-focus";
 import type { ReceivedReport } from "../terminal/reports";
 import type { CliAttachTarget } from "../cli/cli-dialog";
 import type { DraftStore } from "../files/drafts";
+import { fileNavigationView } from "../files/navigation";
+import { endFileNavigation } from "../files/file-search-state";
 import type { FileAction } from "../files/operation-dialog";
 import type { GitActions } from "../git/actions";
 import { useRepos } from "../git/use-repos";
@@ -117,6 +119,12 @@ export function Workspace({
   useLayoutEffect(() => {
     memory.presentation = { state: presentation, path };
   }, [memory, presentation, path]);
+  useLayoutEffect(
+    () => () => {
+      endFileNavigation(memory);
+    },
+    [memory],
+  );
   const saveLayout = useCallback(
     (layout: TerminalLayout) => onLayout(memory, layout),
     [memory, onLayout],
@@ -142,6 +150,16 @@ export function Workspace({
       if (!mobile && mode === "terminal") mode = "both";
       return { ...previous, mobileMode: "work", mode };
     });
+  }
+
+  function openSearch() {
+    if (focusMode.active) focusMode.exit();
+    setPresentation((previous) => ({
+      ...previous,
+      rightTool: "files",
+      rightToolsOpen: true,
+    }));
+    setMobileTools(true);
   }
 
   const previousRoute = useRef<typeof route>(undefined);
@@ -249,10 +267,10 @@ export function Workspace({
       return { ...previous, mode: next };
     });
     if (next === "work") {
-      if (pages.activePage) pages.select(pages.activePage);
-      else navigateWorkspace(target, "files");
+      if (pages.activePage) pages.select(pages.activePage, fileNavigationView(memory));
+      else navigateWorkspace(target, "files", {}, fileNavigationView(memory));
     } else {
-      navigateWorkspace(target, "terminal");
+      navigateWorkspace(target, "terminal", {}, fileNavigationView(memory));
     }
   }
   function selectDesktopMode(next: ContentMode) {
@@ -368,6 +386,7 @@ export function Workspace({
           browsing={rightToolsVisible && presentation.rightTool === "files"}
           contentVisible={workPagesVisible && pages.activePage?.kind === "file"}
           onOpenContent={revealWorkPages}
+          onOpenSearch={openSearch}
           onResolvePath={pages.resolvePath}
           onUpload={onUpload}
           onOperation={onOperation}
@@ -394,9 +413,12 @@ export function Workspace({
                 rightToolsOpen: true,
               }));
               if (mobile) setMobileTools(true);
-              navigateWorkspace(target, "git", {
-                repo: pages.activePage?.kind === "diff" ? pages.activePage.repoId : undefined,
-              });
+              navigateWorkspace(
+                target,
+                "git",
+                { repo: pages.activePage?.kind === "diff" ? pages.activePage.repoId : undefined },
+                fileNavigationView(memory),
+              );
             }}
             view={diffView}
             onView={setDiffView}
@@ -420,6 +442,7 @@ export function Workspace({
       className="terminal-panel flex min-h-0 min-w-0 flex-col"
     >
       <TerminalArea
+        memory={memory}
         {...{
           device,
           workspace,
@@ -521,6 +544,7 @@ export function Workspace({
               }
             />
             <GitTool
+              memory={memory}
               device={device}
               workspace={workspace}
               store={store}

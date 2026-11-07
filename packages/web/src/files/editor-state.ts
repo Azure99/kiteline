@@ -25,7 +25,7 @@ const editorHistory = new Compartment();
 
 // Restoring the vertical position can reveal a wider line after scrollIntoView writes scrollLeft.
 // Reapply the horizontal anchor once the restored viewport has been measured.
-const restoreHorizontalScroll = EditorView.scrollHandler.of((view, range, options) => {
+export const editorScrollRestoration = EditorView.scrollHandler.of((view, range, options) => {
   if (!range.empty || options.x !== "start" || options.y !== "start") return false;
 
   view.requestMeasure({
@@ -147,7 +147,7 @@ export function textState(
     doc: text,
     extensions: [
       editorTheme,
-      restoreHorizontalScroll,
+      editorScrollRestoration,
       revealAfterResize,
       editorAppearance.of([]),
       lineNumbers(),
@@ -174,21 +174,64 @@ export function syncTextTransactions(
     changes: { from: 0, to: state.doc.length, insert: text },
     effects: editorHistory.reconfigure([]),
   });
-  const position = (offset: number) => {
-    const previous = state.doc.lineAt(offset);
-    const current = replaced.state.doc.line(Math.min(previous.number, replaced.state.doc.lines));
-    return current.from + Math.min(offset - previous.from, current.length);
-  };
   const restored = replaced.state.update({
-    selection:
-      selection ??
-      EditorSelection.create(
-        state.selection.ranges.map((range) =>
-          EditorSelection.range(position(range.anchor), position(range.head)),
-        ),
-        state.selection.mainIndex,
-      ),
+    selection: selection ?? selectionForDocument(state, replaced.state.doc),
     effects: [editorHistory.reconfigure(history()), ...(scrollTo ? [scrollTo] : [])],
   });
   return [replaced, restored] as const;
+}
+
+export interface EditorScrollSnapshot {
+  line: number;
+  column: number;
+  offsetX: number;
+  offsetY: number;
+}
+
+export function scrollSnapshot(editor: EditorView) {
+  const viewport = editor.scrollDOM.getBoundingClientRect();
+  let left = 0;
+  let top = 0;
+  for (const provider of editor.state.facet(EditorView.scrollMargins)) {
+    const margins = provider(editor);
+    left = Math.max(left, margins?.left ?? 0);
+    top = Math.max(top, margins?.top ?? 0);
+  }
+  left += viewport.left;
+  top += viewport.top;
+  const anchor = editor.posAtCoords({ x: left + 1, y: top + 1 }, false);
+  const coordinates = editor.coordsAtPos(anchor);
+  if (!coordinates) return;
+  const line = editor.state.doc.lineAt(anchor);
+  return {
+    line: line.number,
+    column: anchor - line.from,
+    offsetX: coordinates.left - left,
+    offsetY: coordinates.top - top,
+  };
+}
+
+export function scrollTarget(doc: Text, snapshot: EditorScrollSnapshot) {
+  const line = doc.line(Math.min(snapshot.line, doc.lines));
+  const position = line.from + Math.min(snapshot.column, line.length);
+  return EditorView.scrollIntoView(position, {
+    x: "start",
+    y: "start",
+    xMargin: snapshot.offsetX,
+    yMargin: snapshot.offsetY,
+  });
+}
+
+export function selectionForDocument(state: EditorState, doc: Text) {
+  const position = (offset: number) => {
+    const previous = state.doc.lineAt(offset);
+    const current = doc.line(Math.min(previous.number, doc.lines));
+    return current.from + Math.min(offset - previous.from, current.length);
+  };
+  return EditorSelection.create(
+    state.selection.ranges.map((range) =>
+      EditorSelection.range(position(range.anchor), position(range.head)),
+    ),
+    state.selection.mainIndex,
+  );
 }
