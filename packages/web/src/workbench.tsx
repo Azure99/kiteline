@@ -59,6 +59,8 @@ import { DraftStore, isDirty } from "./files/drafts";
 import { DraftView } from "./files/draft-view";
 import { OpenFiles } from "./files/open-files";
 import { UploadDialog } from "./files/upload-dialog";
+import { ComposeProvider } from "./terminal/compose";
+import { ComposeDrafts } from "./terminal/compose-drafts";
 import { FileOperationDialog, type FileAction } from "./files/operation-dialog";
 import { PortDialog } from "./devices/port-dialog";
 import { ReleaseNotice } from "./components/release-notice";
@@ -88,6 +90,7 @@ export function Workbench({
   // These owners survive reauthentication; successful sign-out clears their contents.
   const [memories] = useState(() => new WorkspaceMemories());
   const [drafts] = useState(() => new DraftStore());
+  const [composeDrafts] = useState(() => new ComposeDrafts());
   const [gitActions] = useState(() => new GitActions());
   const [error, setError] = useState<WorkbenchError>();
   useEffect(
@@ -144,6 +147,7 @@ export function Workbench({
       await post("/api/logout");
       memories.clear();
       drafts.clear();
+      composeDrafts.clear();
       gitActions.clear();
       setSession(undefined);
     } catch (error) {
@@ -221,6 +225,7 @@ export function Workbench({
       contextTitle={contextTitle}
       recents={recents}
       drafts={drafts}
+      composeDrafts={composeDrafts}
       gitActions={gitActions}
       memories={memories}
       sidebarOpen={sidebarOpen}
@@ -251,6 +256,7 @@ interface SignedInWorkbenchProps {
   contextTitle: string;
   recents: RecentWorkspace[];
   drafts: DraftStore;
+  composeDrafts: ComposeDrafts;
   gitActions: GitActions;
   memories: WorkspaceMemories;
   sidebarOpen: boolean;
@@ -273,6 +279,7 @@ function SignedInWorkbench({
   contextTitle,
   recents,
   drafts,
+  composeDrafts,
   gitActions,
   memories,
   sidebarOpen,
@@ -578,7 +585,7 @@ function SignedInWorkbench({
     return <DeviceDetail key={device.id} device={device} actions={deviceActions} />;
   }
   return (
-    <>
+    <ComposeProvider drafts={composeDrafts}>
       <a
         href="#workbench-main"
         onClick={(event) => {
@@ -897,6 +904,6 @@ function SignedInWorkbench({
           onNavigate={(path) => choose(path, { restoreWorkspace: false })}
         />
       )}
-    </>
+    </ComposeProvider>
   );
 }

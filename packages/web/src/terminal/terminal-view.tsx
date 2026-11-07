@@ -1,4 +1,4 @@
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import { useTranslation } from "react-i18next";
 import {
   useCallback,
@@ -9,7 +9,9 @@ import {
   useState,
   type Ref,
 } from "react";
-import { ArrowDown, ClipboardPaste, Copy, RefreshCw, TextSelect } from "lucide-react";
+import { ArrowDown, ClipboardPaste, Copy, PenLine, RefreshCw, TextSelect } from "lucide-react";
+import { ComposePanel, isComposeShortcut, useComposeDraft } from "./compose";
+import { appModifier } from "../lib/app-modifier";
 import { TerminalScreens, type TerminalScreenSnapshot } from "./screens";
 import { IconButton } from "../components/icon-button";
 import { Button } from "../components/ui/button";
@@ -118,6 +120,22 @@ export function TerminalView({
     return () => window.clearTimeout(timer);
   }, [copyNotice]);
   const contextMenu = useRef<ContextMenuPrimitive.Root.Actions>(null);
+  const [composeOpen, setComposeOpen] = useState(false);
+  const composeEditor = useRef<HTMLTextAreaElement>(null);
+  const { text: composeDraft } = useComposeDraft(deviceId, workspaceId, sessionId);
+  function openCompose() {
+    flushSync(() => setComposeOpen(true));
+    composeEditor.current?.focus();
+  }
+  function composeFromMenu() {
+    // Mount the target before unmounting the modal menu so finalFocus can find it.
+    flushSync(() => setComposeOpen(true));
+    flushSync(() => {
+      contextMenu.current?.close();
+      contextMenu.current?.unmount();
+    });
+    composeEditor.current?.focus();
+  }
   const searchInput = useRef<HTMLInputElement>(null);
   const mobile = useMobile();
   const canPaste = state.status === "ready" && typeof navigator.clipboard?.readText === "function";
@@ -276,8 +294,14 @@ export function TerminalView({
   );
   return (
     <section
-      className="terminal-surface flex min-h-0 flex-1 flex-col"
+      className="terminal-surface relative flex min-h-0 flex-1 flex-col"
       aria-label={t(($) => $.terminal.display)}
+      onKeyDownCapture={(event) => {
+        if (!isComposeShortcut(event) || event.nativeEvent.isComposing) return;
+        event.preventDefault();
+        event.stopPropagation();
+        openCompose();
+      }}
     >
       <TerminalNotice
         state={state}
@@ -304,9 +328,18 @@ export function TerminalView({
         >
           <ContextMenuPrimitive.Trigger
             onTouchStart={(event) => event.preventBaseUIHandler()}
-            render={<div ref={element} className="relative min-h-0 min-w-0 flex-1" />}
+            render={
+              <div
+                ref={element}
+                className="relative min-h-0 min-w-0 flex-1"
+                onMouseDownCapture={(event) => {
+                  // The enabled desktop menu owns this gesture, including in mouse-mode programs.
+                  if (!mobile && event.button === 2) event.stopPropagation();
+                }}
+              />
+            }
           />
-          <ContextMenuContent>
+          <ContextMenuContent finalFocus={() => composeEditor.current ?? true}>
             <MenuItem disabled={!contextSelection} onClick={() => void copySelection()}>
               <Copy />
               {t(($) => $.terminal.copySelected)}
@@ -318,6 +351,16 @@ export function TerminalView({
             <MenuItem disabled={!terminal} onClick={() => terminal?.selectAll()}>
               <TextSelect />
               {t(($) => $.terminal.selectAll)}
+            </MenuItem>
+            <div className="my-1 border-t border-border" />
+            <MenuItem closeOnClick={false} onClick={composeFromMenu}>
+              <PenLine />
+              <span className="flex-1">
+                {composeDraft ? t(($) => $.terminal.composeDraft) : t(($) => $.terminal.compose)}
+              </span>
+              <kbd className="pl-4 font-sans text-xs text-muted-foreground">
+                {appModifier}+Shift+Enter
+              </kbd>
             </MenuItem>
           </ContextMenuContent>
         </ContextMenuPrimitive.Root>
@@ -379,12 +422,25 @@ export function TerminalView({
         modifiers={modifiers}
         onKey={auxiliary}
         onToggleModifier={(key) => screens.current?.display?.toggleModifier(key)}
-        onShowKeyboard={() => {
-          terminal?.clearSelection();
-          screens.current?.display?.scrollToBottom();
-          input.current();
-        }}
+        hasDraft={!!composeDraft}
+        onCompose={openCompose}
       />
+      {composeOpen && (
+        <ComposePanel
+          deviceId={deviceId}
+          workspaceId={workspaceId}
+          sessionId={sessionId}
+          sessionName={sessionName}
+          mobile={mobile}
+          available={state.status === "ready"}
+          editor={composeEditor}
+          onClose={() => {
+            setComposeOpen(false);
+            // Keep the phone keyboard closed so it does not cover the program's reply.
+            if (!mobile) screens.current?.display?.focus();
+          }}
+        />
+      )}
       <Dialog
         open={redrawDialog}
         onOpenChange={(open) => {

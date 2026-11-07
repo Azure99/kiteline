@@ -108,7 +108,13 @@ Scroll up to read retained history; new output does not pull you back to the bot
 
 Oversized pastes are not sent and show "Pasted text exceeds the input limit". Programs cannot display images or write to the clipboard through OSC 52 in the web terminal.
 
-The phone shows two rows of terminal keys. Tap a key to send it once; sliding across the keys does not send input. Tap the keyboard button at the bottom right to clear any selection, return to the input position and open the keyboard. Tap SHIFT, CTRL or ALT once to apply it only to the next key, and again to cancel. In the web app, Ctrl-b goes directly to the program; it is not a tmux prefix.
+The phone shows two rows of terminal keys. Tap a key to send it once; sliding across the keys does not send input. Tap SHIFT, CTRL or ALT once to apply it only to the next key, and again to cancel. The pen button at the bottom right opens local composition. In the web app, Ctrl-b goes directly to the program; it is not a tmux prefix.
+
+### Compose multiline input
+
+On desktop, press Ctrl/⌘+Shift+Enter inside the terminal or choose Compose from its context menu. On a phone, tap the pen button at the bottom right of the terminal keys. The editor covers the terminal, and Enter only adds a new line. Insert pastes the text into the program without Enter; Send or Ctrl/⌘+Enter pastes it and then presses Enter. The editor closes after success clears the delivered draft; the phone keyboard stays closed so you can read the reply. Edits made during the request stay open in the editor.
+
+Close the editor or press Esc to keep its draft and caret position. Return to the original terminal after switching terminals, workspaces or devices to continue. Drafts live only in the current page; reloading, closing the page or signing out clears them, and they do not sync to another device. A pending send stays pending across closing, reopening and navigation, preventing another send while it is in flight; edits made during the request are kept. Failure or an unconfirmed result keeps the draft and error with the original terminal. Check the program's actual input before deciding to resend. Success means tmux handled the input, not that the program finished processing it.
 
 ### Open files from terminal output
 

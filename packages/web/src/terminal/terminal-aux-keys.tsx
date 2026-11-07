@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Keyboard } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, PenLine } from "lucide-react";
 import { IconButton } from "../components/icon-button";
 import type { Modifiers } from "./auxiliary-input";
 
@@ -10,7 +10,8 @@ export function TerminalAuxKeys({
   modifiers,
   onKey,
   onToggleModifier,
-  onShowKeyboard,
+  hasDraft,
+  onCompose,
 }: {
   hidden: boolean;
   available: boolean;
@@ -18,7 +19,8 @@ export function TerminalAuxKeys({
   modifiers: Modifiers;
   onKey(value: string): void;
   onToggleModifier(key: keyof Modifiers): void;
-  onShowKeyboard(): void;
+  hasDraft: boolean;
+  onCompose(): void;
 }) {
   const { t } = useTranslation();
   const upperKeys = [
@@ -102,12 +104,14 @@ export function TerminalAuxKeys({
           </IconButton>
         ))}
         <IconButton
-          className="aux-key"
-          label={t(($) => $.terminal.showKeyboard)}
-          disabled={!available}
-          onClick={onShowKeyboard}
+          className="aux-key relative"
+          label={hasDraft ? t(($) => $.terminal.composeDraft) : t(($) => $.terminal.compose)}
+          onClick={onCompose}
         >
-          <Keyboard />
+          <PenLine />
+          {hasDraft && (
+            <span className="absolute top-1 right-[calc(50%-14px)] size-1.5 rounded-full bg-primary" />
+          )}
         </IconButton>
       </div>
     </div>
