@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
-import { Download, Maximize, RefreshCw, Scan, ZoomIn, ZoomOut } from "lucide-react";
+import { Download, RefreshCw, Scan, ZoomIn, ZoomOut } from "lucide-react";
 import { IconButton } from "../components/icon-button";
 import { downloadFile, type DiskImage, type FileTarget } from "./content";
 import { formatBytes } from "./format";
@@ -45,11 +45,18 @@ export function ImagePreview({
         >
           <span dir="ltr">{path}</span>
         </span>
-        <IconButton label={t(($) => $.files.fitImage)} onClick={() => setZoom("fit")}>
-          <Maximize />
-        </IconButton>
-        <IconButton label={t(($) => $.files.actualImage)} onClick={() => setZoom(1)}>
-          <Scan />
+        <IconButton
+          label={t(($) => $.files.fitImage)}
+          size="default"
+          aria-pressed={zoom === "fit"}
+          className="relative min-w-8 px-2 text-xs max-desk:min-w-11 aria-pressed:border-primary aria-pressed:bg-primary-soft aria-pressed:text-primary"
+          onClick={() => setZoom(zoom === "fit" ? 1 : "fit")}
+        >
+          {/* Preserve the previous label's layout to keep the same Fit hit area. */}
+          <span className="invisible" aria-hidden="true">
+            {t(($) => $.files.fitImageShort)}
+          </span>
+          <Scan className="absolute inset-0 m-auto" />
         </IconButton>
         <IconButton
           label={t(($) => $.files.zoomOut)}
@@ -118,7 +125,7 @@ export function ImagePreview({
       <div className="flex min-h-6 shrink-0 items-center gap-3 border-t border-border px-3 text-[11px] text-muted-foreground">
         {image.meta.width?.toLocaleString(i18n.resolvedLanguage)} ×{" "}
         {image.meta.height?.toLocaleString(i18n.resolvedLanguage)} · {formatBytes(image.meta.size)}{" "}
-        {typeof zoom === "number" && `· ${Math.round(zoom * 100)}%`}
+        {zoom === "fit" ? `· ${t(($) => $.files.fitImage)}` : `· ${Math.round(zoom * 100)}%`}
       </div>
     </>
   );

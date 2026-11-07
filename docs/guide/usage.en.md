@@ -166,6 +166,8 @@ In the editor, Tab indents; press Escape, then immediately press Tab or Shift+Ta
 
 PNG, JPEG, GIF and WebP images are detected by content and previewed; images exceeding preview byte or pixel limits can only be downloaded. Other files open as UTF-8 text. Files containing NUL bytes, invalid UTF-8 or content exceeding editing limits (see [Limits](reference.en.md#limits)) can be downloaded but not edited.
 
+The image preview's Fit to screen icon button stays selected in fit mode. Clicking it in fit mode switches to 100%; clicking it at any numeric zoom returns to fit mode.
+
 The file editor and Git diffs highlight syntax by filename. Diffs contain partial context, so multiline comments or strings can be colored incorrectly; use the source text to interpret them.
 
 The file toolbar keeps code line references, Save, and content preview. “More file actions” contains Find / replace, Copy text, Open containing directory, Download file, Check disk content, and Save as. “Open containing directory” navigates to the current file's directory and identifies the file; save an unnamed draft first. Phones also keep direct access to Focus file.
