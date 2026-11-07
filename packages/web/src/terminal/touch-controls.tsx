@@ -38,9 +38,12 @@ export function TouchControls({
   const [notice, setNotice] = useState<{ kind: "copied" } | { kind: "error"; error: unknown }>();
   const selection = useRef<TouchSelection>(undefined);
   const layer = useRef<HTMLDivElement>(null);
-  const service = handles ? deviceServiceLink(terminal.getSelection(), deviceId) : undefined;
-  const file = handles ? terminalFileTarget(terminal.getSelection(), workspacePath) : undefined;
-  const menuButtonCount = 2 + Number(!!service) + Number(!!file) + Number(!!onPaste);
+  const selected = handles ? terminal.getSelection().trim() : "";
+  const service = handles ? deviceServiceLink(selected, deviceId) : undefined;
+  const link = !service && /^https?:\/\/\S+$/i.test(selected) ? selected : undefined;
+  const file = handles ? terminalFileTarget(selected, workspacePath) : undefined;
+  const menuButtonCount =
+    2 + Number(!!service) + Number(!!link) + Number(!!file) + Number(!!onPaste);
   const menuHalfWidth = (menuButtonCount * menuButtonWidth + menuHorizontalPadding) / 2;
   const tapped = useEffectEvent(onTap);
   useEffect(() => {
@@ -163,6 +166,14 @@ export function TouchControls({
               <IconButton
                 label={t(($) => $.devices.openService, { device: deviceName, port: service.port })}
                 onClick={() => window.open(service.url, "_blank", "noopener,noreferrer")}
+              >
+                <ExternalLink />
+              </IconButton>
+            )}
+            {link && (
+              <IconButton
+                label={t(($) => $.terminal.openLink)}
+                onClick={() => window.open(link, "_blank", "noopener,noreferrer")}
               >
                 <ExternalLink />
               </IconButton>

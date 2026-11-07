@@ -556,6 +556,8 @@ export const zhCN = {
     programCopy_one: "复制程序内容 · {{count, number}} 行",
     programCopy_other: "复制程序内容 · {{count, number}} 行",
     programCopyFailed: "无法复制程序内容",
+    openLinkHint: "{{key}}+点击打开 · {{url}}",
+    openLink: "打开链接",
     tooMuchOutput: "输出过多，无法全部朗读；请按行浏览。",
   },
   files: {

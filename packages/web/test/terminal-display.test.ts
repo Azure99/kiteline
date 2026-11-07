@@ -138,7 +138,11 @@ async function copyDisplay() {
       disconnect() {}
     },
   );
-  vi.stubGlobal("location", { href: "http://localhost/", protocol: "http:" });
+  vi.stubGlobal("location", {
+    href: "http://localhost/",
+    protocol: "http:",
+    origin: "http://localhost",
+  });
   vi.stubGlobal("document", { documentElement: {} });
   vi.stubGlobal("getComputedStyle", () => ({ getPropertyValue: () => "" }));
   vi.stubGlobal("localStorage", { getItem: () => null });
@@ -243,6 +247,40 @@ test("live OSC 52 queries do not reply and invalid base64 or UTF-8 stays local",
     expect(display.state.status).toBe("ready");
     expect(replies).toEqual([]);
     expect(clipboard).not.toHaveBeenCalled();
+  } finally {
+    display.dispose();
+  }
+});
+
+test("terminal links require Ctrl or Meta and leave local selections alone", async () => {
+  const { display, socket, begin } = await copyDisplay();
+  const open = vi.fn();
+  Object.assign(window, { open });
+  try {
+    begin("");
+    socket.frame({ type: "ready" });
+    await vi.waitFor(() => expect(display.state.status).toBe("ready"));
+    const terminal = display.terminal!;
+    const activate = (event: MouseEvent, uri: string) =>
+      terminal.options.linkHandler!.activate(event, uri, {
+        start: { x: 1, y: 1 },
+        end: { x: uri.length, y: 1 },
+      });
+    const click = (ctrlKey = false, metaKey = false) => ({ ctrlKey, metaKey }) as MouseEvent;
+    activate(click(), "https://example.com/plain");
+    expect(open).not.toHaveBeenCalled();
+    activate(click(true), "https://example.com/control");
+    activate(click(false, true), "https://example.com/meta");
+    activate(click(true), "http://localhost:3000/path?q=1");
+    expect(open.mock.calls).toEqual([
+      ["https://example.com/control", "_blank", "noopener,noreferrer"],
+      ["https://example.com/meta", "_blank", "noopener,noreferrer"],
+      ["http://localhost/proxy/d/3000/path?q=1", "_blank", "noopener,noreferrer"],
+    ]);
+    vi.spyOn(terminal, "hasSelection").mockReturnValue(true);
+    activate(click(true), "https://example.com/selected");
+    expect(open).toHaveBeenCalledTimes(3);
+    expect(terminal.options.macOptionClickForcesSelection).toBe(true);
   } finally {
     display.dispose();
   }

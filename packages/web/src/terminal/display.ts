@@ -3,6 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { deviceServiceLink } from "../lib/device-service";
+import { appModifier } from "../lib/app-modifier";
 import type { BrowserTerminalInput } from "@kiteline/shared/protocol/ipc";
 import { terminalOutputCost } from "@kiteline/shared/protocol/ipc";
 import { integer, limits, record, type TerminalMeta } from "@kiteline/shared/protocol";
@@ -181,8 +182,8 @@ export class TerminalDisplay {
           limits.terminalSnapshotBytes,
         );
         const styles = getComputedStyle(document.documentElement);
-        const openLink = (_event: MouseEvent, uri: string) => {
-          if (terminal.hasSelection()) return;
+        const openLink = (event: MouseEvent, uri: string) => {
+          if (!(event.ctrlKey || event.metaKey) || terminal.hasSelection()) return;
           if (/^https?:\/\//i.test(uri))
             window.open(
               deviceServiceLink(uri, this.options.target.deviceId)?.url ?? uri,
@@ -192,9 +193,10 @@ export class TerminalDisplay {
         };
         const hoverLink = (_event: MouseEvent, uri: string) => {
           const target = deviceServiceLink(uri, this.options.target.deviceId);
-          this.options.host.title = target
-            ? i18n.t(($) => $.devices.openDevicePort, { port: target.port })
-            : uri;
+          this.options.host.title = i18n.t(($) => $.terminal.openLinkHint, {
+            key: appModifier,
+            url: target ? i18n.t(($) => $.devices.openDevicePort, { port: target.port }) : uri,
+          });
         };
         const leaveLink = () => this.options.host.removeAttribute("title");
         let savedFontSize = 0;
@@ -214,6 +216,7 @@ export class TerminalDisplay {
           lineHeight: 1.2,
           cursorBlink: true,
           disableStdin: true,
+          macOptionClickForcesSelection: true,
           theme: {
             background: styles.getPropertyValue("--terminal").trim(),
             foreground: styles.getPropertyValue("--terminal-foreground").trim(),

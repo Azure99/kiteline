@@ -103,12 +103,14 @@ Terminal tabs identify the current session. Right-click a tab or use its row's M
 
 Scroll up to read retained history; new output does not pull you back to the bottom. Each client's scrolling and selection are independent.
 
-- Desktop: drag to select text. Hold Shift while dragging if a program such as htop handles the mouse. Copy through the context menu, or Cmd-C on macOS. Paste with Ctrl-V, Ctrl-Shift-V, Cmd-V or the context menu. Ctrl-C is sent to the program.
+- Desktop: drag to select text. If a program such as htop handles the mouse, hold Shift while dragging, or Option on macOS; releasing the modifier keeps the selection. Copy through the context menu, or Cmd-C on macOS. Paste with Ctrl-V, Ctrl-Shift-V, Cmd-V or the context menu. Ctrl-C is sent to the program.
 - Phone: tap the terminal to open the keyboard. Long-press text or blank space to open the menu and paste; adjust the selection with the handles if needed before copying. Clear an existing selection before tapping the terminal to open the keyboard. Paste appears when the browser supports reading the clipboard.
 
 Oversized pastes are not sent and show "Pasted text exceeds the input limit". The web terminal does not display images from programs.
 
 When a program requests a copy through OSC 52, “Program copy” and the line count appear at the top right of the terminal. Click it to write to your local clipboard. The program supplies this text independently of the web selection; dismissing the prompt discards the request. A failed copy keeps the text and error so you can click again. Other web displays of the same session handle their requests independently, and restored history does not prompt for old requests.
+
+On desktop, Ctrl-click a URL in terminal output to open it, or Cmd-click on macOS; plain clicks operate the terminal. On a phone, select a complete HTTP(S) URL and choose “Open link” from the selection menu. Clear an existing selection before using the desktop link gesture.
 
 The phone shows two rows of terminal keys. Tap a key to send it once; sliding across the keys does not send input. Tap SHIFT, CTRL or ALT once to apply it only to the next key, and again to cancel. The pen button at the bottom right opens local composition. In the web app, Ctrl-b goes directly to the program; it is not a tmux prefix.
 
@@ -389,7 +391,7 @@ The dialog shows the actual URL used for opening and copying. "Keep prefix" also
 
 The service must listen on `127.0.0.1`, `::1`, `0.0.0.0` or `::` on the agent's machine or container. See [Run in a container](devices.en.md#run-in-a-container).
 
-In terminal output, `http:` links whose hosts are `localhost`, `127.0.0.1`, `[::1]`, `0.0.0.0` or `[::]` are converted to that device's port address. Click on desktop; on phones, long-press to select the full link and tap "Open device port", which identifies the current device name and port. Other links open their original addresses.
+In terminal output, `http:` links whose hosts are `localhost`, `127.0.0.1`, `[::1]`, `0.0.0.0` or `[::]` are converted to that device's port address. Ctrl-click on desktop, or Cmd-click on macOS; on phones, long-press to select the full link and tap "Open device port", which identifies the current device name and port. Other links open their original addresses.
 
 ### Two path modes
 

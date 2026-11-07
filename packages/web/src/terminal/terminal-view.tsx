@@ -339,6 +339,10 @@ export function TerminalView({
                   // The enabled desktop menu owns this gesture, including in mouse-mode programs.
                   if (!mobile && event.button === 2) event.stopPropagation();
                 }}
+                onMouseMoveCapture={(event) => {
+                  // Mouse reports count as input in xterm and would clear the local selection.
+                  if (event.buttons === 0 && terminal?.hasSelection()) event.stopPropagation();
+                }}
               />
             }
           />

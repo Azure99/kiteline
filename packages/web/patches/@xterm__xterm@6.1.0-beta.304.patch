@@ -483,3 +483,17 @@ diff --git a/src/browser/scrollable/touch.ts b/src/browser/scrollable/touch.ts
 +        e.preventDefault();
 +      }
        e.stopPropagation();
+diff --git a/src/browser/services/SelectionService.ts b/src/browser/services/SelectionService.ts
+--- a/src/browser/services/SelectionService.ts
++++ b/src/browser/services/SelectionService.ts
+@@ -228,3 +228,3 @@
+       // Get first row
+-      const startRowEndCol = start[1] === end[1] ? end[0] : undefined;
++      const startRowEndCol = start[1] === end[1] ? end[0] : this._bufferService.cols;
+       result.push(buffer.translateBufferLineToString(start[1], true, start[0], startRowEndCol));
+@@ -233,4 +233,4 @@
+       for (let i = start[1] + 1; i <= end[1] - 1; i++) {
+         const bufferLine = buffer.lines.get(i);
+-        const lineText = buffer.translateBufferLineToString(i, true);
++        const lineText = buffer.translateBufferLineToString(i, true, 0, this._bufferService.cols);
+         if (bufferLine?.isWrapped) {

@@ -570,6 +570,8 @@ export const en = {
     programCopy_one: "Program copy · {{count, number}} line",
     programCopy_other: "Program copy · {{count, number}} lines",
     programCopyFailed: "Program content could not be copied",
+    openLinkHint: "{{key}}+click to open · {{url}}",
+    openLink: "Open link",
     tooMuchOutput: "Too much output to announce. Navigate through the lines to read it.",
   },
   files: {
