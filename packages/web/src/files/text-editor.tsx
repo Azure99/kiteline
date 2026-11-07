@@ -27,8 +27,13 @@ export interface TextLocation {
   line: number;
   range?: [number, number];
   query?: string;
+  column?: number;
+  endColumn?: number;
   wholeWord?: boolean;
   byteColumn?: number;
+  source?: "draft" | "disk";
+  unmapped?: boolean;
+  scrollSnapshot?: Draft["view"]["scrollSnapshot"];
 }
 
 export interface TextEditorHandle {
@@ -146,7 +151,7 @@ export function TextEditor({
           if (!store.acceptEdit(draft, measured.bytes)) return;
         }
         current.update(transactions);
-        store.update(draft, current.state, measured);
+        store.update(draft, current.state, measured, transactions);
         if (
           transactions.some(
             (tr) =>

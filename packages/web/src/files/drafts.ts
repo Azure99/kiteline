@@ -1,6 +1,6 @@
 import { newId } from "../lib/id";
 import { useCallback, useSyncExternalStore } from "react";
-import { Compartment, type EditorState } from "@codemirror/state";
+import { Compartment, type EditorState, type Transaction } from "@codemirror/state";
 import type { AgentEnvironment, Device, TextFormat } from "@kiteline/shared/protocol";
 import { encodeText } from "@kiteline/shared/protocol/text";
 import { ApiError, rpc } from "../lib/api";
@@ -98,6 +98,9 @@ export function isDirty(draft: Draft) {
 
 export class DraftStore {
   private items: Draft[] = [];
+  private transactionListeners = new Set<
+    (draft: Draft, transactions?: readonly Transaction[]) => void
+  >();
   private listeners = new Set<() => void>();
   private draftListeners = new WeakMap<Draft, Set<() => void>>();
   private draftVersions = new WeakMap<Draft, number>();
@@ -116,6 +119,12 @@ export class DraftStore {
       this.listeners.delete(listener);
     };
   };
+  subscribeTransactions(listener: (draft: Draft, transactions?: readonly Transaction[]) => void) {
+    this.transactionListeners.add(listener);
+    return () => {
+      this.transactionListeners.delete(listener);
+    };
+  }
   snapshot = () => this.items;
   subscribeDraft(draft: Draft, listener: () => void) {
     let listeners = this.draftListeners.get(draft);
@@ -262,7 +271,12 @@ export class DraftStore {
     } else void this.load(draft);
     return draft;
   }
-  update(draft: Draft, state: EditorState, measured?: { text: string; bytes: number }) {
+  update(
+    draft: Draft,
+    state: EditorState,
+    measured?: { text: string; bytes: number },
+    transactions?: readonly Transaction[],
+  ) {
     if (!this.has(draft)) return;
     const changed = draft.state?.doc !== state.doc;
     const dirty = isDirty(draft),
@@ -277,6 +291,7 @@ export class DraftStore {
       baseText: draft.baseText,
       dirty: text !== draft.baseText,
     });
+    for (const listener of this.transactionListeners) listener(draft, transactions);
     this.changed(
       draft,
       dirty !== isDirty(draft) ||
