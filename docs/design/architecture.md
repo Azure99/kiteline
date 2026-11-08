@@ -36,31 +36,6 @@ flowchart LR
 
 ## 仓库结构
 
-```text
-packages/server/src/                kiteline-server：HTTP、WebSocket、转发与 SQLite
-packages/agent/src/                 kiteline-agent：设备操作、本机 IPC、安装与运行
-  cli/、install/                     命令行与安装维护
-  terminal/                         终端会话、recorder 管理与终端通道
-  files/、git/                       文件与 Git 工具
-  http/、tasks/                      开发服务访问与定时任务
-packages/agent/patches/             agent 依赖补丁
-packages/cli/src/                   kiteline：远程接入、目标选择与命令输出
-packages/terminal-recorder/src/     tmux control 客户端、屏幕模型、附着流控与输入
-packages/shared/src/                跨进程协议、终端与 Windows 平台适配
-packages/web/src/                   React 工作台与本地 UI 组件
-packages/web/postcss/               Chromium 97 的 CSS layer 适配
-packages/web/patches/               Web 依赖补丁
-packages/*/test/                    各包测试；packages/web/test/*.typecheck.ts 只做类型检查
-native/                             helper、Windows addon、tmux 补丁与 terminfo
-installer/                          安装脚本和 launcher；.in 文件是模板
-scripts/                            构建、组包、验证与本地开发脚本
-release/                            固定构建输入和 Dockerfile
-deploy/                             Compose、systemd、launchd、WinSW 示例
-.github/workflows/                  CI 与发布
-```
-
-检查命令见[源码开发](../development/setup.md#检查与测试)，构建输入见 [release/README.md](../../release/README.md)。
-
 `shared` 按入口导出。浏览器不能使用依赖 Node 的入口，具体导入限制由根目录 `eslint.config.mjs` 中针对 `packages/web/src/` 的 `no-restricted-imports` 规则维护。
 
 `shared/protocol/client` 统一 Web 和 CLI 的 HTTP/RPC 结果及错误解释；宿主提供传输、请求 ID 和界面通知。`shared/node/network` 管理代理、TLS、连接取消及响应体消费期间的资源，`shared/node/files` 提供共用的原子 JSON 写入。它们是仓库内部入口。
@@ -85,7 +60,7 @@ deploy/                             Compose、systemd、launchd、WinSW 示例
 | 终端会话列表                       | agent 内存                             | agent 重启后为空                                                                |
 | 终端中运行的程序                   | tmux server                            |                                                                                 |
 | 终端输出和屏幕模型                 | recorder 内存                          | 见[终端](terminal.md#输出记录与历史)                                            |
-| 最近工作区、终端字号、界面语言     | 浏览器 `localStorage`                  | 按 origin（含端口）分别保存                                                     |
+| 最近工作区、终端字号、语言、外观   | 浏览器 `localStorage`                  | 按 origin（含端口）分别保存                                                     |
 | 文件字号                           | 浏览器 `localStorage`                  | 见[文件字号](files.md#打开与编辑)                                               |
 | 当前设备、工作区、工具和打开的目标 | 页面 URL                               | 可刷新、收藏和前进后退                                                          |
 | 终端布局                           | 浏览器同tab sessionStorage与工作台内存 | 刷新和页面回收后恢复，退出时清除；见[交互合同](interaction.md#切换时保留的状态) |
@@ -100,12 +75,12 @@ server 不保存文件内容、diff、终端输出、定时任务的命令和输
 
 ## 请求流程
 
-| 流程                   | 入口文件                                                                                                                                                     | 行为契约                                                                           |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
-| RPC                    | `packages/web/src/lib/api.ts`、`packages/server/src/api.ts`、`packages/server/src/connections.ts`、`packages/agent/src/agent.ts`                             | [RPC](protocol.md#rpc)、[结果语义](protocol.md#结果语义)                           |
-| 数据通道与文件下载     | `packages/server/src/channels.ts`、`packages/server/src/file-transfer.ts`、`packages/agent/src/files/channels.ts`、`packages/agent/src/terminal/channels.ts` | [数据通道](protocol.md#数据通道)、[网页附着](terminal.md#网页附着)                 |
-| 开发服务代理           | `packages/server/src/http-proxy.ts`、`packages/agent/src/http/channels.ts`                                                                                   | [请求转发](http-access.md#请求转发)                                                |
-| 本机终端与定时任务命令 | `packages/agent/src/cli/terminal.ts`、`packages/agent/src/cli/tasks.ts`、`packages/agent/src/local.ts`                                                       | [本机 IPC](protocol.md#本机-ipc)、[任务命令行](../guide/scheduled-tasks.md#命令行) |
+| 流程                   | 入口文件                                                                                                                         | 行为契约                            |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| RPC                    | `packages/web/src/lib/api.ts`、`packages/server/src/api.ts`、`packages/server/src/connections.ts`、`packages/agent/src/agent.ts` | [RPC](protocol.md#rpc)              |
+| 数据通道与文件下载     | `packages/server/src/channels.ts`、`packages/agent/src/files/channels.ts`、`packages/agent/src/terminal/channels.ts`             | [数据通道](protocol.md#数据通道)    |
+| 开发服务代理           | `packages/server/src/http-proxy.ts`、`packages/agent/src/http/channels.ts`                                                       | [请求转发](http-access.md#请求转发) |
+| 本机终端与定时任务命令 | `packages/agent/src/cli/terminal.ts`、`packages/agent/src/cli/tasks.ts`、`packages/agent/src/local.ts`                           | [本机 IPC](protocol.md#本机-ipc)    |
 
 ## 协调与失败边界
 
@@ -143,19 +118,16 @@ server 不保存文件内容、diff、终端输出、定时任务的命令和输
 | 文件改名      | `rename-noreplace`、Windows addon               | Node 没有原子的不覆盖改名。Linux 和 macOS 上每次不覆盖改名要启动一个进程。                   |
 | 搜索          | 随包 ripgrep，`stream-json` 解析 `rg --json`    | 遵守忽略规则；结果逐条解析，不整份读入内存。                                                 |
 | 文件监听      | Node fs.watch、chokidar                         | 只监听正在查看的工作区，事件用于提示刷新，见[变化监听](files.md#变化监听)。                  |
-| 图片          | `image-size`                                    | 只读文件头取尺寸，不解码图片。                                                               |
 | 定时任务      | Croner，Node 子进程                             | 计划在 agent 内计算，与连接无关；agent 未运行时不触发。                                      |
-| 工作台        | React、Vite、Tailwind CSS、Base UI              | 见[前端约定](#前端约定)。                                                                    |
 | 编辑器与 diff | CodeMirror；react-diff-view、gitdiff-parser     | diff 直接显示 Git 原生 patch；gitdiff-parser 版本由 pnpm `overrides` 固定。                  |
 
-agent 的出站代理规则见[出站代理与证书](../guide/devices.md#出站代理与证书)。依赖的确切版本见各 `package.json` 和 `pnpm-lock.yaml`，随包组件（Node、tmux、ripgrep）的版本见 [release/README.md](../../release/README.md)。
+agent 的出站代理规则见[出站代理与证书](../guide/devices-advanced.md#出站代理与证书)。依赖的确切版本见各 `package.json` 和 `pnpm-lock.yaml`，随包组件（Node、tmux、ripgrep）的版本见 [release/README.md](../../release/README.md)。
 
 ## 前端约定
 
 - **样式**：主题变量和视觉规则见[视觉](interaction.md#视觉)；第三方组件的样式适配写在 `packages/web/src/styles.css`。
-- **通用组件**：复用 `packages/web/src/components/ui/`；来源和维护方式见该目录的 [README](../../packages/web/src/components/ui/README.md)。
-- **文案**：资源在 `packages/web/src/i18n/`，新增文案遵守[语言](interaction.md#语言)约定。server 和 agent 不接收语言，返回英文诊断；工作台按 `error.code` 显示本地化说明。
-- **专业组件**：xterm.js、CodeMirror 和 react-diff-view 直接使用，外面没有通用组件包装。它们的实例由各自的 React 组件创建和销毁，焦点、滚动和键盘处理由组件本身负责。
+- **文案**：server 和 agent 不接收语言，返回英文诊断；工作台按 `error.code` 显示本地化说明。
+- **专业组件**：xterm.js、CodeMirror 和 react-diff-view 直接使用，外面没有通用组件包装。
 
 布局、反馈、焦点和视觉规则见[界面交互](interaction.md)。
 
@@ -164,8 +136,7 @@ agent 的出站代理规则见[出站代理与证书](../guide/devices.md#出站
 支持的浏览器见[浏览器与界面](../guide/usage.md#浏览器与界面)。实现方式如下：
 
 - **构建目标**：`packages/web/vite.config.ts` 把 `build.target` 和 `build.cssTarget` 设为 `chrome97`，JavaScript 语法和 CSS 都转换到 Chromium 97 可用的形式。
-- **CSS layer**：Chromium 97 不支持 `@layer`，构建时 `@csstools/postcss-cascade-layers` 把 layer 展开为选择器权重。展开后，Tailwind 的 `base` 重置和应用的 `kiteline-editor-reset` 重置权重变高，会覆盖 CodeMirror 运行时注入的无 layer 样式；`packages/web/postcss/editor-reset-compat.ts` 因此让编辑器内只使用低权重的重置副本，编辑器外保留原规则。
-- **运行时补充**：`packages/web/src/lib/browser-compat.ts` 在 `main.tsx` 中最先导入，补上 Chromium 97 缺少的 `structuredClone`。`eslint.config.mjs` 对 Web 和可供浏览器使用的 shared 源码检查既定的不兼容 API，排除仅能在 Node 运行的 shared 模块，并限制 Web 导入这些模块。
+- **运行时补充**：`eslint.config.mjs` 对 Web 和可供浏览器使用的 shared 源码检查既定的不兼容 API，排除仅能在 Node 运行的 shared 模块，并限制 Web 导入这些模块。
 - **视口高度**：`packages/web/src/lib/viewport.ts` 为工作台与对话框统一提供测得的可见像素高度，不依赖浏览器是否支持 `dvh`；规则见[输入与焦点](interaction.md#输入与焦点)。
 
 以下改动后要在 Chromium 97 和当前 Chrome 中重新检查：
@@ -182,9 +153,7 @@ agent 的出站代理规则见[出站代理与证书](../guide/devices.md#出站
 
 在 `packages/shared/src/protocol/rpc.ts` 定义方法、参数及成功与非成功结果类型，并为 `rpcTraits` 填写丢响应分类、总期限和成功结果超限策略。同时在本机入口确定调用权限，在领域执行处确定变化通知时点。
 
-Agent 负责统一准入，拒绝时不进入领域，也不通知工作区变化。文件 create/rename 在参数检查与工作区查找通过后执行，并在执行 promise 结束前通知；参数或工作区查找拒绝不通知。批量 copy/move/delete 在后台执行及清理结束后通知；save/upload 通道在内容已发布或发布结果未确认时通知，再交付结果。文件行为见[文件契约](files.md)。
-
-Git 写方法在全部 JS 参数检查及必要的 Git 分支名称检查通过后入队；这些检查失败不通知工作区变化。队列按 commonDir 串行执行写操作，获得执行权后复验仓库身份及 HEAD、index、token 等实际状态。进入队列调用后的成功、拒绝及取消都在返回的 promise 结束前通知，Agent 总停等待该 promise。调用方按[结果语义](protocol.md#结果语义)处理失败及结果未确认。
+Agent 负责统一准入，拒绝时不进入领域，也不通知工作区变化。文件行为见[文件契约](files.md)。
 
 ### 添加事件
 

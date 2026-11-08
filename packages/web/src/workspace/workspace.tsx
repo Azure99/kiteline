@@ -232,6 +232,7 @@ export function Workspace({
   );
   useLayoutEffect(() => {
     let contentSelected = false;
+    // A width change alone must not replay the last route intent.
     if (previousRoute.current !== route || previousActivationRequest.current !== activationRequest)
       contentSelected = followRouteIntent();
     // The functional handoff consumes any route update queued above.

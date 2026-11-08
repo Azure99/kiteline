@@ -11,9 +11,8 @@
   - 原生发布包 `kiteline-server-<版本>-linux-<架构>.tar.gz`，从 [GitHub Releases](https://github.com/Azure99/kiteline/releases) 下载。包内带有官方 Node 运行时（依赖 glibc 的动态链接构建），目标系统是 Ubuntu 24.04。
 - server 只提供 HTTP，不处理 TLS 证书。需要 HTTPS 时在前面放一个反向代理，见 [HTTPS 与反向代理](#https-与反向代理)。
 - server 默认只在本机地址 `127.0.0.1:8080` 上接受连接。从其他机器访问的设置见[局域网访问与端口](#局域网访问与端口)。
-- 工作台不能通过 iframe 嵌入其他页面，包括同源页面。开发服务代理仍保留上游自己的嵌入策略。
 - 拥有者密码、登录会话、CLI 凭据和设备登记都保存在 server 数据目录中（默认 `/var/lib/kiteline`），同一个数据目录同时只能由一个 server 进程使用。
-- 一个 server 可以同时通过多个入口访问。入口是协议、主机名和端口的组合，例如 `http://192.168.1.10:8080` 和 `https://kiteline.example.com`。server 只能部署在入口的根路径上，不支持 `https://example.com/kiteline/` 这样的子路径。
+- server 只能部署在入口的根路径上，不支持 `https://example.com/kiteline/` 这样的子路径。
 - server 的发布包和镜像内含全部平台的 agent 发布包，设备接入和升级时不需要访问 GitHub。
 
 server 的环境变量见[参考](reference.md#server-环境变量)。
@@ -98,7 +97,7 @@ Compose 默认使用官方 GHCR 镜像，Docker 自动选择主机架构。在 `
    sudo journalctl -u kiteline-server
    ```
 
-   unit 以 `kiteline` 用户运行 `/opt/kiteline-server/bin/kiteline-server serve`，设置 `KITELINE_DATA_DIR=/var/lib/kiteline` 和 `KITELINE_LISTEN_ADDR=127.0.0.1:8080`。`/etc/kiteline-server.env` 必须存在，其中的变量覆盖 unit 里的同名设置。日志中 `Kiteline setup token: …` 一行是初始化 token。
+   `/etc/kiteline-server.env` 必须存在，其中的变量覆盖 unit 里的同名设置。日志中 `Kiteline setup token: …` 一行是初始化 token。
 
 5. 用 `curl -fsS http://127.0.0.1:8080/healthz` 确认 server 正常响应，然后打开 `http://127.0.0.1:8080`，按[初始化拥有者](#初始化拥有者)设置密码。
 
@@ -108,7 +107,7 @@ Compose 默认使用官方 GHCR 镜像，Docker 自动选择主机架构。在 `
 
 初始化 token 只在 server 第一次启动时打印一次，有效期有限（见[限额](reference.md#限额)）。重启 server 不会再次打印。token 过期或丢失时，按[重置初始化 token 与密码](#重置初始化-token-与密码)生成新 token。
 
-密码长度按 UTF-8 字节计算（一个汉字通常占 3 字节），长度范围和登录有效期见[限额](reference.md#限额)，登录作用域见[登录与语言](usage.md#登录与语言)。
+密码长度范围和登录有效期见[限额](reference.md#限额)，登录作用域见[登录与语言](usage.md#登录与语言)。
 
 server 在远程主机上、又只监听 `127.0.0.1` 时，可以先用 SSH 端口转发完成初始化：在自己的电脑上执行 `ssh -L 8080:127.0.0.1:8080 USER@SERVER_HOST`，然后打开 `http://127.0.0.1:8080`。这个地址只有你的电脑能访问；接入设备时要从设备也能访问的入口打开工作台，见[用网页命令接入](devices.md#用网页命令接入)。
 
@@ -139,9 +138,9 @@ HTTPS 由部署者自己的反向代理（nginx、Caddy 等）提供，反向代
 
 设为 `1` 后，server 也信任直接连接的客户端发来的 `X-Forwarded-Proto`，所以 server 的 HTTP 端口应只让反向代理访问（保持 `127.0.0.1` 绑定，或只在反向代理所在的网络中开放）。
 
-让初始化和登录按客户端 IP 计数时，还需在同一环境文件设置 `KITELINE_TRUSTED_PROXIES`，填入 server 实际看到的直接代理 IP 或 CIDR，多个值用逗号分隔。代理与原生 server 同机且经 IPv4 loopback 连接时可用 `127.0.0.1`；Docker 转发后的对端可能是网桥地址，应按实际网络填写，不要直接信任所有私网地址。重启 server 后生效。
+让初始化和登录按客户端 IP 计数时，还需在同一环境文件设置 `KITELINE_TRUSTED_PROXIES`，填入 server 实际看到的直接代理 IP 或 CIDR，多个值用逗号分隔。代理与原生 server 同机且经 IPv4 loopback 连接时可用 `127.0.0.1`；Docker 转发后的对端可能是网桥地址，应按实际网络填写，不要直接信任所有私网地址。宿主机上的反向代理经 `127.0.0.1` 发布端口连接时，对端是 Compose 网络的网关地址，用 `docker network inspect kiteline_default --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'` 查看；`docker compose down` 会删除这个网络，重建后要重新核对。重启 server 后生效。
 
-下面的示例会覆盖客户端传入的 `X-Real-IP`。只有直接对端受信时，server 才读取该单 IP 头；头缺失或无效会使初始化和登录返回 400。默认未配置时仍按 TCP 对端计数。[每来源和全局额度](reference.md#限额)保持不变，所有来源仍可能一起耗尽全局额度。
+下面的示例会覆盖客户端传入的 `X-Real-IP`。只有直接对端受信时，server 才读取该单 IP 头；头缺失或无效会使初始化和登录返回 400。
 
 多个代理或 CDN 串联时，先在最后一跳配置 [nginx realip](https://nginx.org/en/docs/http/ngx_http_realip_module.html) 或 [Caddy trusted proxies](https://caddyserver.com/docs/caddyfile/options#trusted-proxies)，再用可信解析结果覆盖 `X-Real-IP`；Caddy 此时使用 `{client_ip}`；对于追加式 `X-Forwarded-For` 链，使用 2.8 或更新版本并开启 `trusted_proxies_strict`，避免采用客户端伪造的最左地址。
 
@@ -260,7 +259,7 @@ sudo -u kiteline /opt/kiteline-server/bin/kiteline-server setup-token --data-dir
 sudo systemctl start kiteline-server
 ```
 
-重置密码时把中间命令里的 `setup-token` 换成 `reset-password`。初始化页的“获取新的初始化凭据”和登录页的“重置登录密码”也会显示对应的命令。
+重置密码时把中间命令里的 `setup-token` 换成 `reset-password`。
 
 ## 备份与恢复
 

@@ -4,15 +4,10 @@
 
 ## 契约来源
 
-- `packages/shared/src/protocol/index.ts`：公共协议入口，定义 `appVersion`、`Reply`、各对象类型、控制消息、浏览器事件和 `ChannelKind`。
-- `packages/shared/src/protocol/validation.ts`、`limits.ts`：基础校验与 `AppError`、固定限额。`terminal-observation.ts`：终端类型和纯值 parser。
-- `packages/shared/src/protocol/rpc.ts`：RPC 方法及参数、成功与非成功结果类型、逐方法策略 `rpcTraits`。
-- `packages/shared/src/protocol/tasks.ts`：定时任务对象。`packages/shared/src/protocol/ipc.ts`：recorder IPC 消息和终端帧。
-- `packages/shared/src/protocol/ws.ts`、`file-stream.ts`、`http-stream.ts`、`stdio.ts`：心跳、帧发送、文件帧队列、HTTP 字节流、逐行 JSON。
 - `packages/server/src/limits.ts`、`packages/agent/src/limits.ts`、`packages/agent/src/config.ts`：其他固定限额和可调限额。
 - `packages/shared/src/version.json`：产品版本号。
 
-server 和 agent 中的实现位置见[仓库结构](architecture.md#仓库结构)。JSON 字段使用 camelCase。ID 是不透明字符串。时间是 UTC 的 ISO 8601 字符串。文件路径的约定见[路径与列表](files.md#路径与列表)。
+JSON 字段使用 camelCase。ID 是不透明字符串。时间是 UTC 的 ISO 8601 字符串。文件路径的约定见[路径与列表](files.md#路径与列表)。
 
 ### 版本匹配
 
@@ -87,9 +82,9 @@ server 为每个 HTTP 请求和 WebSocket 升级确定一个入口 origin（`req
 ### 登录与 Cookie
 
 - `POST /api/setup` 用初始化 token 创建唯一的拥有者并登录；token 无效或过期返回 403，已经初始化返回 409。初始化 token 只以摘要和到期时间保存，有效期为 `setupTokenLifetime`。
-- `POST /api/login` 校验拥有者密码，密码错误返回 401。密码用 bcryptjs（cost 12）哈希，长度限制见[限额](../guide/reference.md#限额)。
+- `POST /api/login` 校验拥有者密码，密码错误返回 401。
 - 登录成功后，server 生成 32 字节随机令牌，数据库只保存它的 SHA-256 摘要和绝对到期时间（`loginLifetime`），使用期间不延长。
-- Cookie 名称按入口协议选择：HTTPS 入口用 `kiteline_session` 并加 `Secure`，HTTP 入口用 `kiteline_session_http`。两者都是 `HttpOnly; SameSite=Strict; Path=/`，不设 `Domain`（只属于当前主机），带 `Expires`。不同主机各自登录；同一主机的 HTTP 和 HTTPS 入口使用不同的 Cookie；Cookie 不区分端口，同一主机、同一协议的不同端口共享登录。浏览器 `localStorage` 中的偏好按 origin（含端口）分别保存。
+- Cookie 名称按入口协议选择：HTTPS 入口用 `kiteline_session` 并加 `Secure`，HTTP 入口用 `kiteline_session_http`。两者都是 `HttpOnly; SameSite=Strict; Path=/`，不设 `Domain`（只属于当前主机），带 `Expires`。不同主机各自登录；同一主机的 HTTP 和 HTTPS 入口使用不同的 Cookie；Cookie 不区分端口，同一主机、同一协议的不同端口共享登录。
 - server 每秒清理一次到期的登录会话，效果与退出登录相同。
 
 **退出登录**（`POST /api/logout`）只删除当前登录会话：server 以关闭码 4003 关闭该登录的事件连接，取消它的全部数据通道，对它进行中的 RPC 发送 `rpc.cancel`，并用 `Max-Age=0` 清除 Cookie。其他登录不受影响。重置密码会删除全部登录会话，见[重置初始化 token 与密码](../guide/server.md#重置初始化-token-与密码)。
@@ -117,49 +112,22 @@ Web owner 在 `POST /api/credentials` 提交 `{name, deviceIds, expiresAt}`，�
 
 ## HTTP 接口
 
-“检查”列中，“登录”指有效的 owner Cookie 或设备操作 Bearer token，“owner”仅指有效的 owner Cookie，“Origin”指上一节的 Origin 检查，“版本”指 `appVersion` 查询参数必须与 server 相同。
+`packages/server/src/app.ts` 先按路径分流：`/proxy/`、`/absproxy/` 进入开发服务代理；安装资源、`GET /healthz`（返回 `{status, version}`）和 `POST /api/agent/bind` 由它直接处理；其余 `/api/` 交给 `packages/server/src/api.ts`；其他路径是工作台静态文件。`api.ts` 的 `matchApi` 按方法和路径为每条路由声明 `identity`（`public`、`password`、`login`、`owner`）、`version`（`required`、`recovery`）和 `body`（`json`、`none`），路径带设备 ID 的路由还声明 `rawDeviceId`。各路由的检查以这些声明为准，所有路由共同遵守以下规则：
 
-| 方法   | 路径                                         | 用途                     | 检查                |
-| ------ | -------------------------------------------- | ------------------------ | ------------------- |
-| GET    | `/healthz`                                   | 返回 `{status, version}` | 无                  |
-| GET    | `/connect.sh` 等脚本                         | 接入、安装、升级脚本     | 无                  |
-| GET    | `/downloads/agent/<版本>/<文件名>`           | agent 发布包和 `.sha256` | 无                  |
-| POST   | `/api/agent/bind`                            | 用绑定码换取设备凭据     | 尝试次数            |
-| GET    | `/api/bootstrap`                             | 是否已经初始化           | 无                  |
-| POST   | `/api/setup`、`/api/login`                   | 初始化拥有者、登录       | Origin、尝试次数    |
-| GET    | `/api/session`                               | 当前登录的到期时间       | 登录                |
-| POST   | `/api/logout`                                | 退出当前登录             | 登录、Origin        |
-| GET    | `/api/devices`                               | 设备列表                 | 登录                |
-| GET    | `/api/agent/upgrade-command`                 | 各平台的 agent 升级命令  | owner               |
-| GET    | `/api/credentials`                           | 凭据摘要列表             | owner、版本         |
-| POST   | `/api/credentials`                           | 签发设备操作凭据         | owner、Origin、版本 |
-| DELETE | `/api/credentials/:id`                       | 撤销设备操作凭据         | owner、Origin、版本 |
-| GET    | `/api/tasks`                                 | 定时任务摘要             | 登录、版本          |
-| POST   | `/api/bindings`                              | 生成绑定码和接入命令     | owner、Origin、版本 |
-| GET    | `/api/bindings/:bindingId`                   | 绑定状态                 | owner、版本         |
-| PATCH  | `/api/devices/:deviceId`                     | 修改设备名称             | owner、Origin、版本 |
-| DELETE | `/api/devices/:deviceId`                     | 删除设备                 | owner、Origin、版本 |
-| POST   | `/api/devices/:deviceId/rpc`                 | 调用 RPC                 | 登录、Origin、版本  |
-| POST   | `/api/devices/:deviceId/notices/activate`    | 激活终端并清除已有报告   | 登录、Origin、版本  |
-| DELETE | `/api/devices/:deviceId/requests/:requestId` | 取消进行中的 RPC         | 登录、Origin、版本  |
-| POST   | `/api/devices/:deviceId/channels`            | 建立数据通道             | 登录、Origin、版本  |
-| GET    | `/api/devices/:deviceId/download`            | 下载文件                 | 登录、版本          |
-| GET    | `/api/channels/:channelId/content`           | 接收 `file.read` 的内容  | 登录、版本          |
-| PUT    | `/api/channels/:channelId/content`           | 发送 `file.write` 的内容 | 登录、Origin、版本  |
-| DELETE | `/api/channels/:channelId`                   | 取消数据通道             | 登录、Origin、版本  |
-| 任意   | `/proxy/…`、`/absproxy/…`                    | 开发服务代理             | 见下文              |
-| GET    | 其他路径                                     | 工作台静态文件           | 无                  |
-
-- 脚本为 `/connect.sh`、`/connect.ps1`、`/upgrade.sh`、`/upgrade.ps1`（按本次入口和当前版本生成）和 `/install.sh`、`/install.ps1`。安装资源和静态文件接受 GET 和 HEAD，其他方法返回 405 和 `Allow: GET, HEAD`。
-- `/api/tasks` 可用 `deviceId` 查询参数筛选；下载用 `workspaceId` 和 `path` 查询参数指定文件。
+- **免登录**：`GET /api/bootstrap`，`POST /api/setup` 与 `POST /api/login`（按[尝试次数限制](#尝试次数限制)计数），以及 `api.ts` 之外的 `/healthz`、`POST /api/agent/bind`、安装资源和静态文件。
+- **准入顺序**：`api.ts` 对非 GET、非 HEAD 请求先做 Origin 检查，再匹配路由；需要登录的路由先检查登录，再做版本、设备范围和 owner 检查。“登录”指有效的 owner Cookie 或设备操作 Bearer token，“owner”仅指有效的 owner Cookie。JSON 请求体读完后，server 再次确认仍是同一登录，否则返回 401。
+- **版本**：`GET /api/session`、`POST /api/logout`、`GET /api/devices`、`GET /api/agent/upgrade-command` 声明为 `recovery`，不检查版本，供登录和升级引导使用。其余需要登录的路由要求 `appVersion` 查询参数与 server 相同。
+- **设备范围**：路径带 `:deviceId` 的路由统一检查凭据是否包含该设备。`/api/channels/:channelId` 下的路由只接受发起通道的同一登录，其他登录的通道按不存在处理。只开放给 owner 的操作见[设备操作凭据](#设备操作凭据)。
+- 安装资源为脚本 `/connect.sh`、`/connect.ps1`、`/upgrade.sh`、`/upgrade.ps1`（按本次入口和当前版本生成）和 `/install.sh`、`/install.ps1`，以及 `/downloads/agent/<版本>/<文件名>` 下的 agent 发布包和 `.sha256`。安装资源和静态文件接受 GET 和 HEAD，其他方法返回 405 和 `Allow: GET, HEAD`。
+- `/api/tasks` 可用 `deviceId` 查询参数筛选，该设备同样受设备范围检查；下载用 `workspaceId` 和 `path` 查询参数指定文件。
 - 开发服务代理要求登录，非 GET、非 HEAD 请求和升级还要通过 Origin 检查，不检查版本。路径格式为 `/proxy/:deviceId/:port/…` 和 `/absproxy/:deviceId/:port/…`，见[开发服务访问](http-access.md)。
-- 通过 Origin、登录和版本检查后，其他 `/api/` 路径返回 404。
+- 未匹配的 `/api/` 方法或路径按需要登录和版本处理：未登录时返回 401，通过检查后才返回 404。
 
 **响应**：`/api/` 返回 JSON 和 `Cache-Control: no-store`，错误响应为 `{error: {code, message, details?}}`，状态码见[错误码](#错误码)。`POST …/rpc` 和 `PUT …/content` 在请求到达 agent 后总是以 HTTP 200 返回 `Reply`，非 2xx 响应表示 server 在转发前拒绝了请求。响应已经开始发送后出错时，server 断开连接，不追加 JSON。非预期的内部异常返回 500 和 `io_error`（`Internal server error`），详细信息只写入 server 日志。
 
 **请求体**：JSON 请求体不能超过 `controlMessageBytes`，否则返回 413；从开始读取起 30 秒内必须接收完毕，超时后 server 断开连接。server 在请求体读完之前结束响应时，带上 `Connection: close`。
 
-**静态文件**：`assets/` 目录用于带内容 hash 的构建资源，成功读取的非 HTML 文件带 `Cache-Control: public, max-age=31536000, immutable`；HTML 和其他静态文件带 `Cache-Control: no-cache`。所有成功静态响应带 `X-Content-Type-Options: nosniff`。工作台 HTML 与 SPA fallback 带 `Content-Security-Policy: frame-ancestors 'none'`，禁止同源及跨源嵌入；开发代理保留上游策略。不存在的路径返回 `index.html`（状态 200），`/assets/` 下不存在的文件返回 404 和 `Cache-Control: no-store`。
+**静态文件**：所有成功静态响应带 `X-Content-Type-Options: nosniff`。工作台 HTML 与 SPA fallback 带 `Content-Security-Policy: frame-ancestors 'none'`，禁止同源及跨源嵌入；开发代理保留上游策略。
 
 ## WebSocket 连接
 
@@ -210,15 +178,15 @@ Web owner 在 `POST /api/credentials` 提交 `{name, deviceIds, expiresAt}`，�
 
 ### 在线终端报告
 
-recorder 接收 OSC 9 通知、`OSC 777;notify;title;body`，并将每条合法 OSC 7501 `state=blocked` 记录投影为一次历史报告。OSC 9 的 `4`、`4;` 前缀留给进度协议；777 正文保留后续分号。7501 复用 shared 的 [Program Status Protocol rev 0.4](https://www.superlogical.com/rex/docs/build/program-status) parser，按较长的 ST 计接收上限；当前记录的替换、清除和其他状态不会撤销已经收到的历史报告。
+recorder 接收 OSC 9 通知、`OSC 777;notify;title;body`，并将每条合法 OSC 7501 `state=blocked` 记录投影为一次历史报告。当前记录的替换、清除和其他状态不会撤销已经收到的历史报告。
 
 报告独立于终端显示和工作区 watch。recorder 只发送解码后的展示内容与真实 session ID；agent 从会话记录补工作区和会话名称；server 从已认证的连接补设备 ID，并生成 `noticeId` 和接收时间 `receivedAt`，检查补齐字段后的完整 `terminal.notice` 事件不超过 `controlMessageBytes`，再按设备权限分发。不信任程序提供的 app、id 或路径作为来源。恢复 capture 不产生新报告。报告超限时丢弃并记录原因，不中断终端记录；未到达 server 的消息不补发。
 
 server 在内存中保留每个设备/工作区/session 的最新待处理报告，重启后丢失。会话结束或设备断线保留历史，删除设备时移除其报告。浏览器初接或请求 `notices.sync` 时先收到 `notices.reset`，再收到有权限查看的当前报告。同步不会恢复已清除的旧报告，期间实时新增和清除仍正常生效。`notice.cleared` 只移除 ID 匹配的报告。
 
-展开报告入口不清除。选择来源、从文件返回、切换或重新选择终端、重新进入页面，以及页面从隐藏恢复到当前终端，都会发起一次激活。主区确认目标后发送 `POST /api/devices/:deviceId/notices/activate`，正文为 `{workspaceId, sessionId}`，不等待终端附着；目标未确认且加载取消或失败时不发送。server 在处理请求时清除该终端当前的报告，并向有权限的浏览器发送 `notice.cleared`；请求发出后、处理前到达的报告也在此边界内，处理后新增的报告保留。成功响应为 `{}`，没有待处理项时不产生清除事件。
+主区确认目标后发送 `POST /api/devices/:deviceId/notices/activate`，正文为 `{workspaceId, sessionId}`，不等待终端附着；目标未确认且加载取消或失败时不发送。server 在处理请求时清除该终端当前的报告，并向有权限的浏览器发送 `notice.cleared`；请求发出后、处理前到达的报告也在此边界内，处理后新增的报告保留。成功响应为 `{}`，没有待处理项时不产生清除事件。
 
-普通和协同模式都只激活当前会话，其他分屏会话的报告保留。持续停留、普通窗口 focus 和事件连接重连不会再次清除新报告。激活失败或结果未确认时显示错误，通知以 server 事件或后续同步为准。退出或登录失效只清本页显示，不清除 server 上的报告。报告表示历史消息，不表示程序当前仍在等待。
+激活失败或结果未确认时显示错误，通知以 server 事件或后续同步为准。退出或登录失效只清本页显示，不清除 server 上的报告。报告表示历史消息，不表示程序当前仍在等待。
 
 ### 程序当前记录
 
@@ -226,15 +194,13 @@ server 在内存中保留每个设备/工作区/session 的最新待处理报告
 
 `sessions.changed` 只携带工作区身份，不广播记录正文。工作台通过既有 list 和 snapshot 按需读取，跨工作区观察不扩大文件与 Git 的 watch 并集；呈现和读取生命周期见[工作区程序状态](interaction.md#工作区程序状态)。
 
-recorder 通过可靠 IPC `program.status` 发送小摘要；agent 只在摘要变化时失效列表，正文变化仍由完整读取取得。recorder 故障保留已观察摘要并将 recording 标为 unavailable；恢复新 Model 后先发空摘要，再请求重画，没有新报告就保持未知。当前记录不持久化，也不通过网页恢复字节或结束帧生成 PSP 镜像。完整 JSON 仍受 `controlMessageBytes` 限制；超限读取明确返回 `failed/limit_exceeded`，不裁剪 records，之后缩小记录仍可读取。
+recorder 通过可靠 IPC `program.status` 发送小摘要；agent 只在摘要变化时失效列表，正文变化仍由完整读取取得。recorder 故障保留已观察摘要并将 recording 标为 unavailable。当前记录不持久化。完整 JSON 仍受 `controlMessageBytes` 限制；超限读取明确返回 `failed/limit_exceeded`，不裁剪 records，之后缩小记录仍可读取。
 
 ### 心跳与背压
 
 - 控制连接（两端）、事件连接和终端数据连接（server 的两侧和 agent 一侧）按 `heartbeatInterval` 发送 ping，超过 `heartbeatTimeout` 没有收到 pong 时强制断开。文件和开发服务的数据连接不发送 ping。
 - 升级后的 socket 和 agent 的数据连接启用 TCP keepalive，间隔由 `tcpKeepAliveDelayMs` 决定。
 - server 的控制和事件消息、agent 的控制消息发送前检查当时已有的发送积压；超过 `controlMessageBytes * 2` 时，发送方以 1013 `control_backpressure` 关闭连接。
-
-Agent 的事件超限时记录消息来源并丢弃；普通事件在连接不可写时静默丢弃，终端报告的不可写和超限另记录 sessionId。
 
 ### 关闭码
 
@@ -244,6 +210,7 @@ Agent 的事件超限时记录消息来源并丢弃；普通事件在连接不�
 | 1008   | `hello_timeout`           | server          | agent 重连                     |
 | 1008   | `invalid_control_message` | server 或 agent | agent 重连                     |
 | 1008   | `invalid_event_message`   | server          | 工作台重连                     |
+| 1011   | `snapshot_send_failed`    | server          | 工作台重连                     |
 | 1013   | `control_backpressure`    | server 或 agent | 重连                           |
 | 4001   | `connection_replaced`     | server          | agent 停止重连                 |
 | 4003   | `session_expired`         | server          | 工作台重读登录状态，回到登录页 |
@@ -322,8 +289,8 @@ Agent 根据 `rpcTraits.deadline` 选择 `rpcTimeout`、`searchTimeout` 或 `git
 
 agent 按需启动 recorder，并通过 `RecorderConfig` 传入配置；Windows 上 recorder 运行在 Job 对象中。消息类型见 `packages/shared/src/protocol/ipc.ts` 的 `RecorderRequest` 和 `RecorderMessage`，启动入口见 `packages/agent/src/terminal/recorder.ts`，终端行为见[终端](terminal.md)。
 
-- **传输。** agent 写 recorder 的 stdin，recorder 写 stdout，每行一条 JSON，每行不超过 `controlMessageBytes`（`packages/shared/src/protocol/stdio.ts`）。发送队列按附着分别计量：某个附着的积压超过 `terminalPendingBytes` 时，发往该附着的新消息被拒绝（agent 一侧返回 `limit_exceeded`），其他附着不受影响。recorder 的 stderr 即时转发到 agent stderr。
-- **请求结果。** 需要回复的请求带 `id`，recorder 用 `reply` 返回 `Reply`。agent 最多等待 `interactionTimeout`，超时按 `timeout` 和结果未确认处理；`redraw` 由 recorder 内部命令及尺寸的有效执行期限控制，不叠加包含背压等待的外层墙钟。recorder 退出时，所有等待中的请求以 `recording_unavailable` 和结果未确认结束。
+- **传输。** agent 写 recorder 的 stdin，recorder 写 stdout，每行一条 JSON，每行不超过 `controlMessageBytes`（`packages/shared/src/protocol/stdio.ts`）。发送队列按附着分别计量：某个附着的积压超过 `terminalPendingBytes` 时，发往该附着的新消息被拒绝（agent 一侧返回 `limit_exceeded`），其他附着不受影响。
+- **请求结果。** 需要回复的请求带 `id`，recorder 用 `reply` 返回 `Reply`。除 `redraw` 外，agent 最多等待 `interactionTimeout`，超时按 `timeout` 和结果未确认处理。recorder 退出时，所有等待中的请求以 `recording_unavailable` 和结果未确认结束。
 - **附着数据。** 终端帧和输出按会话、附着路由到浏览器。普通输入、粘贴、尺寸和消费确认不等待独立回复；一次粘贴始终是一条消息，不能拆成普通输入。
 - **短命令。** snapshot/wait 直接读取 recorder model；`sessions.send` 和 `sessions.resize` 进入该会话的输入队列并返回独立回复，不创建附着。超大快照仅该次请求返回 `limit_exceeded`，不会使 recording 进入故障。
 - **撤销创建。** `cancelCreate` 的成功回复表示所指向的创建不会再启动 tmux；得不到回复时，agent 停止整个 recorder。随后的查证规则见[会话生命周期](terminal.md#会话生命周期)。

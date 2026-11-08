@@ -104,6 +104,8 @@ export class ScheduledTasks {
   private async persistCandidateThenPublish(record: TaskRecord) {
     await atomicJson(this.statePath(record.task.id), record);
     this.pending.delete(record.task.id);
+    // The task file is writable again. A save does not finish retention; a later failed removal
+    // reports again.
     this.retentionErrors.delete(record.task.id);
     this.publishRecordAndNotify(record);
   }

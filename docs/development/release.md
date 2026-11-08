@@ -21,7 +21,7 @@
 - 版本号来自 [`packages/shared/src/version.json`](../../packages/shared/src/version.json)。发布包写入 `dist/releases/`，每个包旁有同名 `.sha256`。
 - agent 包提供 `kiteline-agent` 与远程 `kiteline` 两个入口，共用一份 Node；独立 CLI 包只带远程 CLI 及其 runtime。server 的 `downloads/` 仅携带五个共同 agent 包，接入和升级命令从这里下载；独立 CLI 从 Release 下载。因此先构建 agent，再组装 server，最后构建镜像。
 - `pnpm package` 和 `pnpm images` 要求工作树和暂存区干净，包括没有未跟踪文件；包与镜像必须匹配当前提交、版本、平台、架构和 Node 版本。新提交后不能复用旧提交的发布包。
-- Windows 和 macOS 的组件目录按构建输入摘要检查，输入不变时可跨提交复用。Windows 摘要包含整个 `release/inputs.json`，macOS 只包含实际消费的字段；输入变化后重建相应组件。Linux 原生组件每次组包时在 Docker 中构建，可复用 Docker 层缓存。
+- Windows 和 macOS 的组件目录按构建输入摘要检查，输入不变时可跨提交复用。输入变化后重建相应组件。Linux 原生组件每次组包时在 Docker 中构建，可复用 Docker 层缓存。
 
 ## 发布流程
 
@@ -59,7 +59,7 @@
 | 推送 `v*` tag                     | `candidate` | 完整构建后建立 Release 草稿并推送候选镜像。                              |
 | main 上手动 `publish`，填写 `tag` | `publish`   | 发布已有候选。                                                           |
 
-完整构建会校验归档和解包内容，在对应平台运行 agent 的版本检查及 `check`，并从共同 agent 包和独立 CLI 包分别运行 `kiteline --version`、`--help`（Windows 覆盖 PowerShell 5.1 和 7）。它还检查 server 与镜像的健康响应和正常退出，并在 Linux amd64 上检查绑定和终端输出。它不覆盖安装、升级、卸载、Windows 11 或最低支持系统版本。
+完整构建不覆盖安装、升级、卸载、Windows 11 或最低支持系统版本。
 
 ### Release 与镜像
 
@@ -72,9 +72,9 @@
 | `dev`                                                            | 仅在 main 仍指向构建提交时更新。       |
 | `X.Y.Z`，不带 `v`                                                | `publish`，与候选镜像具有同一 digest。 |
 
-不产生 `latest` 镜像标签。候选草稿包含 12 个包、各自的 `.sha256`、固定版本的 `compose.yaml` 和覆盖这些包与 Compose 的 `SHA256SUMS`；最后上传的 `delivery.json` 标记候选完成，记录源码、运行 ID、汇总校验文件摘要和镜像 digest。
+不产生 `latest` 镜像标签。候选草稿包含 12 个包、各自的 `.sha256`、固定版本的 `compose.yaml` 和覆盖这些包与 Compose 的 `SHA256SUMS`；最后上传的 `delivery.json` 标记候选完成。
 
-`publish` 使用 main 当前提交中的脚本，检查候选与 tag 指向同一源码、附件与校验文件一致，再把候选 digest 复制为版本标签，并公开 Release。当前脚本仅接受版本文件位于 `packages/shared/src/version.json` 的 tag。
+`publish` 使用 main 当前提交中的脚本，把候选 digest 复制为版本标签，并公开 Release。
 
 ### 权限与仓库设置
 
@@ -122,11 +122,11 @@ sudo apt-get install -y git curl xz-utils zstd zip unzip binutils libarchive-too
 
 CI 在 Windows x64 上准备输入并编译 tmux、PTY bridge 和 MSYS2 runtime，再传到 Linux x64 编译 addon、组装和打包，步骤见 [`build.yml`](../../.github/workflows/build.yml)，组件入口见 [`build-windows-components.mjs`](../../scripts/build-windows-components.mjs)。Windows 需要匹配版本的 x64 Node、PATH 中的 Git、默认位置的 7-Zip 24.06 或更新版本和系统 `tar.exe`；验证 agent 入口使用 PowerShell 7，两个包的 CLI 入口分别使用 PowerShell 5.1 和 7。
 
-Windows checkout 前执行 `git config --global core.autocrlf false`，避免换行转换改变配方摘要。需要本机排错时，按工作流运行对应步骤；`tmux` 子命令构建整组 MSYS 组件。`tmux`、`addon`、`assemble` 的输出目录必须不存在，父目录必须存在。
+Windows checkout 前执行 `git config --global core.autocrlf false`，避免换行转换改变配方摘要。需要本机排错时，按工作流运行对应步骤；`tmux` 子命令构建整组 MSYS 组件。
 
 ### 构建 macOS 组件
 
-CI 在与目标架构一致的 Mac 上完成组件构建和组包，步骤见 [`build.yml`](../../.github/workflows/build.yml)，组件入口见 [`build-macos-components.mjs`](../../scripts/build-macos-components.mjs)。Node 的架构须与目标一致，且必须安装 Command Line Tools for Xcode（`xcode-select --install`）；仅安装 Xcode 不满足脚本检查。组件输出目录必须不存在。
+CI 在与目标架构一致的 Mac 上完成组件构建和组包，步骤见 [`build.yml`](../../.github/workflows/build.yml)，组件入口见 [`build-macos-components.mjs`](../../scripts/build-macos-components.mjs)。Node 的架构须与目标一致，且必须安装 Command Line Tools for Xcode（`xcode-select --install`）；仅安装 Xcode 不满足脚本检查。
 
 ### 缓存与清理
 
@@ -163,68 +163,24 @@ Linux arm64 主机可将上述 `amd64` 改为 `arm64`。完整多平台产物请
 
 ## 验证发布包
 
-以下命令接着本机 Linux amd64 构建执行。需要同一提交的干净 checkout、匹配的锁文件、压缩包旁的 `.sha256`，以及[agent 运行条件](../guide/devices.md#支持的系统与准备)。独立 CLI 包另行构建：`pnpm package cli <目标>` 支持与 agent 相同的五个平台，不需要 `--windows-components` 或 `--macos-components`，也不先编译 agent 原生组件。
+验证需要同一提交的干净 checkout、匹配的锁文件、压缩包旁的 `.sha256`，以及[agent 运行条件](../guide/devices.md#支持的系统与准备)。独立 CLI 包另行构建：`pnpm package cli <目标>` 支持与 agent 相同的五个平台，不需要 `--windows-components` 或 `--macos-components`，也不先编译 agent 原生组件。
 
-```sh
-pnpm package cli linux-amd64
-KITELINE_VERSION=$(node -p "require('./packages/shared/src/version.json').version")
-CHECK=$(mktemp -d /var/tmp/kiteline-check-XXXXXX)
-tar -xzf "dist/releases/kiteline-agent-$KITELINE_VERSION-linux-amd64.tar.gz" -C "$CHECK"
-tar -xzf "dist/releases/kiteline-server-$KITELINE_VERSION-linux-amd64.tar.gz" -C "$CHECK"
-tar -xzf "dist/releases/kiteline-cli-$KITELINE_VERSION-linux-amd64.tar.gz" -C "$CHECK"
-node scripts/verify-package.mjs agent linux-amd64 \
-  "dist/releases/kiteline-agent-$KITELINE_VERSION-linux-amd64.tar.gz" "$CHECK/kiteline-agent-$KITELINE_VERSION-linux-amd64"
-node scripts/verify-package.mjs cli linux-amd64 \
-  "dist/releases/kiteline-cli-$KITELINE_VERSION-linux-amd64.tar.gz" "$CHECK/kiteline-cli-$KITELINE_VERSION-linux-amd64"
-"$CHECK/kiteline-agent-$KITELINE_VERSION-linux-amd64/bin/kiteline" --version
-"$CHECK/kiteline-agent-$KITELINE_VERSION-linux-amd64/bin/kiteline" --help
-"$CHECK/kiteline-cli-$KITELINE_VERSION-linux-amd64/bin/kiteline" --version
-"$CHECK/kiteline-cli-$KITELINE_VERSION-linux-amd64/bin/kiteline" --help
-"$CHECK/kiteline-agent-$KITELINE_VERSION-linux-amd64/bin/kiteline-agent" --version
-KITELINE_AGENT_HOME="$CHECK/agent-state" KITELINE_AGENT_RUN_DIR="$CHECK/agent-run" \
-  "$CHECK/kiteline-agent-$KITELINE_VERSION-linux-amd64/bin/kiteline-agent" check
-node scripts/verify-server.mjs "$CHECK/kiteline-server-$KITELINE_VERSION-linux-amd64" "$CHECK/server-run" \
-  --agent="$CHECK/kiteline-agent-$KITELINE_VERSION-linux-amd64"
-node scripts/verify-server.mjs "$CHECK/kiteline-server-$KITELINE_VERSION-linux-amd64" "$CHECK/image-run" \
-  --image="kiteline-server:$KITELINE_VERSION-amd64"
-```
+[`verify-package.mjs`](../../scripts/verify-package.mjs) 校验归档、解包内容、来源、权限和链接，不运行包中的程序。完整 server 包还要求 `dist/releases/` 中有与包内相同的五个 agent 包，CI 的 [`build.yml`](../../.github/workflows/build.yml) 包含该验证。
 
-[`verify-package.mjs`](../../scripts/verify-package.mjs) 校验归档、解包内容、来源、权限和链接，不运行包中的程序；解包目录须保留归档中的根目录名。完整 server 包还要求 `dist/releases/` 中有与包内相同的五个 agent 包，CI 的 [`build.yml`](../../.github/workflows/build.yml) 包含该验证。
-
-[`verify-server.mjs`](../../scripts/verify-server.mjs) 启动包或镜像并检查健康响应和正常退出；`--agent` 另检查绑定和终端输出。两种选项不能同时使用，运行目录必须是父目录已存在的新目录；使用镜像时也需要已解开的 server 包用于核对身份。日志保存在验证目录内，直接运行包时主机架构须与包一致。其他平台的校验和运行命令见 [`build.yml`](../../.github/workflows/build.yml)。
+[`verify-server.mjs`](../../scripts/verify-server.mjs) 启动包或镜像并检查健康响应和正常退出；`--agent` 另检查绑定和终端输出。日志保存在验证目录内，直接运行包时主机架构须与包一致。校验和运行命令见 [`build.yml`](../../.github/workflows/build.yml)。
 
 ## 产物结构
 
 ### 发布包
 
-| 路径                                              | 内容                                                                           | 所在包 |
-| ------------------------------------------------- | ------------------------------------------------------------------------------ | ------ |
-| `LICENSE`、`release.json`、`SHA256SUMS`           | 项目许可、包身份及文件摘要。                                                   | 全部   |
-| `bin/`                                            | agent、CLI 或 server 启动脚本；agent 另含安装后的启动入口，Windows 为 `.ps1`。 | 全部   |
-| `runtime/`                                        | Node 运行时及其许可。                                                          | 全部   |
-| `shared/`、`cli/`、`agent/`、`terminal-recorder/` | 编译后的 JS 与生产依赖。                                                       | agent  |
-| `shared/`、`cli/`                                 | 编译后的 CLI 与生产依赖。                                                      | CLI    |
-| `deploy/`                                         | 本平台的服务管理器示例。                                                       | agent  |
-| `dist/native/`                                    | 原生组件、来源记录和许可，Windows 另含 `sources/`。                            | agent  |
-| `shared/`、`server/`、`web/dist/`                 | server 程序、生产依赖和工作台。                                                | server |
-| `installer/`、`downloads/`                        | 接入和升级模板、agent 包及校验文件、安装脚本。                                 | server |
-
 包根目录为 `kiteline-<agent|cli|server>-<版本>-<平台>-<架构>/`。Linux 和 macOS 包的目录及可执行文件权限为 `0755`，其他文件为 `0644`。Windows ZIP 没有符号链接，解压和安装不需要 Windows 开发者模式。
-
-Linux agent 和 CLI 使用同一固定的静态 Node 输入，server 使用官方动态 Node；Windows 和 macOS 的 agent/CLI 使用各自固定的官方 Node。包内 `SHA256SUMS` 记录文件集合，agent 的 `dist/native/identity.json` 另记录原生组件；平台差异见[平台实现](../design/platforms.md)。
-
-### 清单文件
-
-- `release.json` 记录包身份、源码提交、锁文件摘要和构建来源，供安装、升级和发布检查使用。
-- `dist/native/identity.json` 记录原生组件来源与完整文件摘要。
-- 包内 `SHA256SUMS` 用于逐文件核验；包旁的 `<包名>.sha256` 用于核验归档。
 
 ### 第三方许可
 
 - 包根 `LICENSE` 是项目许可；`runtime/LICENSE` 是 Node 许可；生产依赖在 `node_modules` 中保留自己的许可文件，`proxy-agent-negotiate` 的许可另在 `shared/licenses/proxy-agent-negotiate.txt`。
 - server 的 `web/dist/licenses/` 保存工作台许可，生成规则见[工作台构建配置](../../packages/web/vite.config.ts)。
-- agent 的 `dist/native/licenses/` 保留原生组件许可：Linux 为 libevent、ncurses、tmux、musl 和 rg；macOS 为 libevent、tmux、flock 和 rg；Windows 为 tmux、rg、mingw-w64、bash、readline、coreutils、util-linux、gettext、libiconv、libevent、ncurses 和 msys2-runtime。
-- Windows 的 `dist/native/sources/` 还包含 bash、coreutils、util-linux、gettext、libiconv、readline 和 msys2-runtime 的 MSYS2 源码包，含构建配方和补丁。
+- agent 的 `dist/native/licenses/` 保留原生组件许可。
+- Windows 的 `dist/native/sources/` 还包含 MSYS2 源码包，含构建配方和补丁。
 
 ### 镜像
 
@@ -254,7 +210,7 @@ Linux agent 还需先在 [Azure99/node-static-builds](https://github.com/Azure99
 
 更新 `release/inputs.json` 的 tmux/libevent 及 `release/agent-macos.json` 的 `libeventVersion` 标签；Linux 的 libevent/ncurses Ubuntu 补丁在 `release/agent-linux.json`，Windows 的库和 DLL 集合在 `release/agent-windows.json` 的 MSYS2 包及 `runtimeFiles`。
 
-确认 [`native/tmux/series`](../../native/tmux/series) 的共用补丁和 Windows 的 [`cygwin-outfd.patch`](../../native/tmux/cygwin-outfd.patch) 仍可应用，并验证终端输入、粘贴、恢复和远程 TTY 接续。流控补丁还须验证：普通及快 control 客户端存在时的慢消费背压、超过五分钟停读后原流续传、PTY 退出尾部与退出码、暂停期间反复调整尺寸。程序状态查询补丁须验证默认 off、私有 preset on、ST/BEL 与拆写、无网页及多客户端下唯一回复先于 DA1、普通报告不回复，并从各平台最终包验证原生 TTY 输入与分离。tmux 变化后重新运行 `pnpm native:build`；开发构建使用系统 libevent，各平台最终包按 series 与补丁内容摘要校验构建身份。
+确认 [`native/tmux/series`](../../native/tmux/series) 的共用补丁和 Windows 的 [`cygwin-outfd.patch`](../../native/tmux/cygwin-outfd.patch) 仍可应用，并验证终端输入、粘贴、恢复和远程 TTY 接续。tmux 变化后重新运行 `pnpm native:build`。
 
 ### Ubuntu 镜像与快照
 
@@ -268,7 +224,7 @@ Linux agent 还需先在 [Azure99/node-static-builds](https://github.com/Azure99
 
 更新 `release/agent-windows.json` 的输入。源码包变化时，连同 `sources` 条目的地址、摘要和 `notice` 中的上游归档名、目录及许可路径一起修改；[`prepare-windows-notices.mjs`](../../scripts/prepare-windows-notices.mjs) 据此提取许可和复制源码。libevent、ncurses 和 msys2-runtime 的许可从对应安装包提取。
 
-runtime DLL 从固定源码包的 Cygwin tag 及有序 MSYS2 补丁重建，再应用 [`ctrl-c.patch`](../../native/msys/ctrl-c.patch)。该补丁避免 ConPTY 已负责发送 Ctrl+C 时仍临时附着 console，后者会在输出背压中阻塞 tmux；原始输入字节和需要额外 console event 的分支保持原样。升级后须在繁忙输出暂停/恢复期间验证 raw `0x03`、真实 SIGINT 后的同会话输入、最终输出和退出码。包内 `sources/kiteline/` 保留本地补丁与 DLL 构建脚本。
+runtime DLL 从固定源码包的 Cygwin tag 及有序 MSYS2 补丁重建，再应用 [`ctrl-c.patch`](../../native/msys/ctrl-c.patch)。该补丁避免 ConPTY 已负责发送 Ctrl+C 时仍临时附着 console，后者会在输出背压中阻塞 tmux；原始输入字节和需要额外 console event 的分支保持原样。包内 `sources/kiteline/` 保留本地补丁与 DLL 构建脚本。
 
 ### macOS 组件
 
@@ -280,11 +236,9 @@ runtime DLL 从固定源码包的 Cygwin tag 及有序 MSYS2 补丁重建，再�
 
 工作台直接编译 xterm 的 TypeScript 入口，构建和测试共用[源码 alias 与 legacy 参数装饰器配置](../../packages/web/xterm-config.ts)。现有补丁由 [`pnpm-workspace.yaml`](../../pnpm-workspace.yaml) 的 `patchedDependencies` 指向 `packages/web/patches/`；网页适配的依赖与目的见[终端](../design/terminal.md)，尺寸变化时的画面保留见[尺寸](../design/terminal.md#尺寸)。
 
-DOM 渲染器在选区清空时更新选区模型并重绘旧行，以清除文字上残留的选区背景；Event.ts 的非空断言用于让上游源码通过项目的 `noUncheckedIndexedAccess` 检查。
+联合升级到已含 [#6235](https://github.com/xtermjs/xterm.js/pull/6235) 修复的上游版本时，删除 serializer 补丁及其登记。
 
-浏览器选区补丁将跨行首行和中间行的读取限制在当前 `cols`，因为 alternate buffer 缩列后可能仍保留旧宽度的 cell。recorder 的 `@xterm/addon-serialize@0.15.0-beta.301` 在 `packages/terminal-recorder/patches/` 完整回移上游 [#6235](https://github.com/xtermjs/xterm.js/pull/6235)（`6c7f922aebc519ac9df3cf5c13c5c11b0eac9a84`），修复相同列界和 forced-wrap filler 的清理位移。本轮保持联合固定的 core/addon profile；联合升级到已含该修复的上游版本时，删除 serializer 补丁及其登记。
-
-serializer 在生产中加载包的 UMD 主入口 `lib/addon-serialize.js`，修改 TypeScript 补丁时须同时生成 JS 和 source map，保留 UMD 导出与 MIT 许可。当前产物用原包 map 内嵌的 addon、Types.ts 和 Color.ts 源码生成，仅给 addon 应用官方修复；TypeScript 按固定 core 的 `UnderlineStyle` const enum 内联后，由现有 Vite 依赖中的 rolldown 打包。验证以 `packages/terminal-recorder/test/model.test.ts` 的实际主入口、原网格与 `isWrapped` 比较及 HTML 断言为准。
+serializer 在生产中加载包的 UMD 主入口 `lib/addon-serialize.js`，修改 TypeScript 补丁时须同时生成 JS 和 source map，保留 UMD 导出与 MIT 许可。验证以 `packages/terminal-recorder/test/model.test.ts` 的实际主入口、原网格与 `isWrapped` 比较及 HTML 断言为准。
 
 维护当前版本的补丁时，在仓库根目录执行：
 
@@ -297,13 +251,13 @@ pnpm patch-commit --patches-dir packages/web/patches EDIT_DIR
 
 `pnpm patch` 默认在已有补丁之上编辑；`--ignore-existing` 从原始包开始。`patch-commit` 会重新安装依赖，一起提交补丁、`pnpm-workspace.yaml` 和锁文件。
 
-升级版本时，先更新相关依赖并删除旧版本补丁登记，再运行 `pnpm install`，避免 `ERR_PNPM_UNUSED_PATCH`；核对上游修复后按需移植补丁，删除不再使用的旧文件。生产构建和开发预优化都需要 legacy 参数装饰器转换，应分别启动完整应用验证显示、选择、恢复和输入，并在 Windows 页面缩放下检查中文拖选及复制，在 Android 上检查候选词之间的空格与删除后的继续输入。
+升级版本时，先更新相关依赖并删除旧版本补丁登记，再运行 `pnpm install`，避免 `ERR_PNPM_UNUSED_PATCH`；核对上游修复后按需移植补丁，删除不再使用的旧文件。生产构建和开发预优化都需要 legacy 参数装饰器转换，应分别启动完整应用验证显示、选择、恢复和输入。
 
 ### Undici 与代理
 
-升级 Node、`undici`、`proxy-from-env` 或 `https-proxy-agent` 后，在直连、HTTP 代理和需要认证的代理下验证绑定和连接；`undici` 的 dispatcher 须兼容 Node 内置 `fetch`。实现见 [`packages/shared/src/node/network.ts`](../../packages/shared/src/node/network.ts)，配置见[出站代理与证书](../guide/devices.md#出站代理与证书)。
+升级 Node、`undici`、`proxy-from-env` 或 `https-proxy-agent` 后，在直连、HTTP 代理和需要认证的代理下验证绑定和连接；`undici` 的 dispatcher 须兼容 Node 内置 `fetch`。实现见 [`packages/shared/src/node/network.ts`](../../packages/shared/src/node/network.ts)，配置见[出站代理与证书](../guide/devices-advanced.md#出站代理与证书)。
 
-`https-proxy-agent` 的现有补丁在 [`packages/agent/patches/`](../../packages/agent/patches/) 中，修复 CONNECT 后 TLS 丢失目标 host、导致可信 IP-only 证书被误按 localhost 校验的问题。升级时核对上游是否修复，据此迁移或删除补丁及 `pnpm-workspace.yaml` 的旧登记，保留可信 IP-only 目标的连接验证。
+`https-proxy-agent` 的现有补丁在 [`packages/agent/patches/`](../../packages/agent/patches/) 中。升级时核对上游是否修复，据此迁移或删除补丁及 `pnpm-workspace.yaml` 的旧登记，保留可信 IP-only 目标的连接验证。
 
 ### Tailwind 与 CodeMirror
 

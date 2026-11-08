@@ -220,6 +220,7 @@ export class HttpProxy {
       }
     };
     const fail = (error: unknown) => {
+      // A response already complete by Content-Length or chunked framing stays a success.
       if (
         resourcesEnded ||
         (!upstreamSocket &&

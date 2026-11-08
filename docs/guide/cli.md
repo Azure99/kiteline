@@ -25,7 +25,7 @@ export PATH="$PWD/$name/bin:$PATH"
 kiteline --version
 ```
 
-`PATH` 设置只对当前终端生效；新终端中重新设置，或使用解包目录中的完整路径。保留整个包目录，入口依赖包内的 runtime。macOS 上用浏览器下载的归档被系统隔离时，按[手工安装](devices.md#手工安装)中的方法移除隔离属性。
+`PATH` 设置只对当前终端生效；新终端中重新设置，或使用解包目录中的完整路径。保留整个包目录，入口依赖包内的 runtime。macOS 上用浏览器下载的归档被系统隔离时，按[手工安装](devices-advanced.md#手工安装)中的方法移除隔离属性。
 
 ### Windows
 
@@ -83,7 +83,7 @@ kiteline auth status
 - 第一种写法只在终端中提示粘贴 token；没有终端时立即报错。核验成功后才保存。
 - 凭据保存在 `~/.kiteline/credentials.json`，用 `KITELINE_CLI_HOME` 可以指定其他目录。Linux 和 macOS 上新建的目录为 0700、文件为 0600；Windows 沿用所在用户目录的权限。不要把凭据放进共享目录或版本库。
 - 也可以成组设置 `KITELINE_URL` 和 `KITELINE_TOKEN`，它们优先于保存的凭据；只设置其中一个会报错，不会补用文件中的另一个值。
-- CLI 使用 `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY` 和 `NODE_EXTRA_CA_CERTS`。它不跟随重定向，`--server` 要写准确的工作台地址。
+- CLI 使用 `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY`、`NO_PROXY`（及小写形式）和 `NODE_EXTRA_CA_CERTS`。它不跟随重定向，`--server` 要写准确的工作台地址。
 
 ### 退出与撤销
 
@@ -93,7 +93,7 @@ kiteline auth status
 
 ## 接续已有终端
 
-在工作台会话菜单中选择“在 CLI 中接续”，复制带完整目标 ID 的命令，在已登录此 server 的本机终端执行。尚未接入时可打开“安装与登录”；引导中的平台选择会同步接续命令的 Shell。在引导中点“返回接续”、点 X 或按 Escape，会回到原会话命令，再关闭一次才退出流程。从设置菜单直接打开的“CLI 接入”关闭即退出。也可以手工指定目标：
+在工作台会话菜单中选择“在 CLI 中接续”，复制带完整目标 ID 的命令，在已登录此 server 的本机终端执行。尚未接入时可打开“安装与登录”。也可以手工指定目标：
 
 ```sh
 kiteline terminal attach --device DEVICE_ID --workspace WORKSPACE_ID --session SESSION_ID
@@ -145,11 +145,9 @@ kiteline web url
 - `terminal wait` 在输出安静或超时后返回当前画面；安静不代表任务已经完成。
 - `terminal resize` 会改变所有客户端共享的终端尺寸。
 - CLI 不提供 Git、定时任务等命令，在终端中使用原生工具完成。
-- `kiteline web url` 返回同一终端在工作台中的链接，`web url --path PATH` 返回文件链接（不检查文件是否存在）。在工作台中点一下终端画面即可输入。
+- `kiteline web url` 返回同一终端在工作台中的链接，`web url --path PATH` 返回文件链接（不检查文件是否存在）。
 
 条件输入（`--if-input`）、增量观察（`--if-changed`）、样式区间（`--attrs`）和各项期限见 `kiteline terminal <命令> --help`，机制见[远程观察](../design/terminal.md#远程观察)。
-
-`--if-changed`、`--if-input` 和 `--after` 的 epoch 最多为 128 个 UTF-16 码元。超限在本地退出 2，不发送请求；设备返回的 `invalid_argument` 仍退出 1。
 
 ### 记录不可用时
 
@@ -175,8 +173,6 @@ kiteline web url --path 'notes/设计副本.md'
 
 默认输出供阅读；`--json` 在 stdout 输出带 `outcome`、`result` 或 `error.code` 的结构化结果。提示和诊断写到 stderr。CLI 不自动重试。
 
-POSIX 管道下游提前关闭输出时，CLI 仍使用下表的退出码；整条管道的状态由 shell 决定。PowerShell 中若要用 `Select-Object -First` 等提前结束管道，又需要 `$LASTEXITCODE`，先把完整输出保存到变量或文件。
-
 | 退出码 | 含义                                                                                          |
 | ------ | --------------------------------------------------------------------------------------------- |
 | 0      | 操作或观察成功。                                                                              |
@@ -187,4 +183,3 @@ POSIX 管道下游提前关闭输出时，CLI 仍使用下表的退出码；整�
 结果未确认时总是退出 3，例如上传中本地读取失败、写入结果不确定。本地缺少或配置了无效的默认目标退出 2；设备上查不到目标退出 1。
 
 JSON 请求最多等待 30 秒；文件传输连续 120 秒没有进展时结束。`--help` 和 `--version` 不需要连接 server。
-`--help` 和 `--version` 查询不校验选项值；未知选项或缺少选项值仍会报错。

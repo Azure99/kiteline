@@ -6,11 +6,11 @@
 
 `installer/` 中的文件按以下三种方式进入运行环境：
 
-| 类别     | 文件                                                              | 渲染者、时机与去向                                                                                                                                                                                                                                  |
-| -------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 组包模板 | `kiteline-agent.in.sh`、`kiteline-agent.in.ps1`、`launcher.in.cs` | [`scripts/agent-launcher.ts`](../../scripts/agent-launcher.ts) 在组包时生成 portable/installed 两个 agent 入口；C# 内嵌在 PowerShell 中，在入口运行时由 `Add-Type` 编译。Windows 入口使用的 Node 环境变量键取自构建后的 shared/terminal/node 模块。 |
-| 请求模板 | `connect.in.sh`、`upgrade.in.sh`、`windows-entry.in.ps1`          | [`packages/server/src/agent-installation.ts`](../../packages/server/src/agent-installation.ts) 在请求时填入版本、入口地址与模式，返回 `/connect.sh`、`/upgrade.sh`、`/connect.ps1` 或 `/upgrade.ps1`。                                              |
-| 原样分发 | `install.sh`、`install.ps1`、`kiteline-server`                    | [`scripts/package.mjs`](../../scripts/package.mjs) 将安装器复制到 server 的 downloads，供 `/install.sh`、`/install.ps1` 分发；`kiteline-server` 复制到 server 包的 `bin/kiteline-server`。                                                          |
+| 类别     | 文件                                                                              | 渲染者、时机与去向                                                                                                                                                                                                                                                        |
+| -------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 组包模板 | `kiteline-agent.in.sh`、`kiteline-agent.in.ps1`、`launcher.in.cs`、`kiteline.ps1` | [`scripts/agent-launcher.ts`](../../scripts/agent-launcher.ts) 在组包时生成 portable/installed 两个 agent 入口和 Windows 的 CLI 入口；C# 内嵌在 PowerShell 中，在入口运行时由 `Add-Type` 编译。Windows 入口使用的 Node 环境变量键取自构建后的 shared/terminal/node 模块。 |
+| 请求模板 | `connect.in.sh`、`upgrade.in.sh`、`windows-entry.in.ps1`                          | [`packages/server/src/agent-installation.ts`](../../packages/server/src/agent-installation.ts) 在请求时填入版本、入口地址与模式，返回 `/connect.sh`、`/upgrade.sh`、`/connect.ps1` 或 `/upgrade.ps1`。                                                                    |
+| 原样分发 | `install.sh`、`install.ps1`、`kiteline-server`、`kiteline`                        | [`scripts/package.mjs`](../../scripts/package.mjs) 将安装器复制到 server 的 downloads，供 `/install.sh`、`/install.ps1` 分发；`kiteline-server` 复制到 server 包的 `bin/kiteline-server`，`kiteline` 复制到 Linux 和 macOS 的 agent 包与 CLI 包的 `bin/kiteline`。        |
 
 ## Linux
 
@@ -22,18 +22,15 @@
 
 ### terminfo
 
-pane 中的 `TERM` 是 `tmux-256color`。包内有两份编译结果：
-
-- `dist/native/share/terminfo`：现代格式，颜色对数 `pairs` 为 65536。
-- `dist/native/share/terminfo-legacy`：`pairs` 为 32767，其余能力与现代格式相同，供读不了现代数值格式的旧版 ncurses 使用。
+pane 中的 `TERM` 是 `tmux-256color`。
 
 agent 启动 tmux 时设置 `TERMINFO_DIRS`，依次为随包现代目录、随包兼容目录、用户原有的 `TERMINFO_DIRS`，最后一项为空，表示系统默认目录。tmux server 和 pane 中的程序继承这个值。`TERMINFO` 和 `~/.terminfo` 的优先级不变。`check` 用 `infocmp -x tmux-256color` 在同样的设置下检查，因此需要系统提供 `infocmp`。
 
 ### 系统接口
 
 - 锁：命令入口和 agent 用系统的 `flock` 命令取得管理锁和使用锁（见[锁](agent-lifecycle.md#锁)）。
-- 不覆盖的重命名：文件的新建发布、重命名、移动和上传等不能覆盖目标的步骤调用 `rename-noreplace`，它使用 `renameat2(RENAME_NOREPLACE)`：成功退出 0，失败在 stderr 输出 errno 并退出 1，参数错误退出 2。内核或文件系统不支持这个调用时，这些文件操作失败并报告系统错误。`check` 只确认程序能启动，不能提前发现这种情况。文件语义见[文件](files.md#整理操作)。
-- 进程组：定时任务和 Git 子进程各自在独立的进程组中运行。停止时向进程组发送 SIGTERM，宽限期后发送 SIGKILL；通过 `/proc` 判断进程组是否还有存活成员，僵尸进程不计。离开原进程组的后代进程不在停止范围内。各自的停止规则见[定时任务](scheduled-tasks.md#执行与停止)和 [Git](git.md#写操作)。
+- 不覆盖的重命名：文件的新建发布、重命名、移动和上传等不能覆盖目标的步骤调用 `rename-noreplace`，它使用 `renameat2(RENAME_NOREPLACE)`。内核或文件系统不支持这个调用时，这些文件操作失败并报告系统错误。`check` 只确认程序能启动，不能提前发现这种情况。文件语义见[文件](files.md#整理操作)。
+- 进程组：定时任务和 Git 子进程各自在独立的进程组中运行。停止时向进程组发送 SIGTERM，宽限期后发送 SIGKILL。离开原进程组的后代进程不在停止范围内。各自的停止规则见[定时任务](scheduled-tasks.md#执行与停止)和 [Git](git.md#写操作)。
 - 端口建议的来源见[开发服务访问](http-access.md#端口建议)。
 
 ### 服务
@@ -46,29 +43,16 @@ agent 启动 tmux 时设置 `TERMINFO_DIRS`，依次为随包现代目录、随�
 
 发布包在对应架构的 macOS 主机上构建，部署目标取自 [`release/agent-macos.json`](../../release/agent-macos.json) 的 `deploymentTarget`。构建检查每个 Mach-O 文件的最低系统版本及直接依赖；直接依赖只能位于 `/usr/lib` 或 `/System/Library` 下，随包程序不依赖 Homebrew。
 
-- tmux 静态链接 libevent，动态链接系统的 ncurses 和 libSystem；terminfo 用系统 `tic` 编译，只有一份。`TERMINFO_DIRS` 依次包含随包目录、用户原有值和系统默认目录。
 - 随包 `flock` 来自 discoteq/flock，构建时确认使用 `flock(2)`，而不是 `fcntl` 锁。
-- `rename-noreplace` 使用 `renamex_np(RENAME_EXCL)`，退出码约定与 Linux 相同；`entry-name` 用 `getattrlist(ATTR_CMN_NAME)` 且不跟随末端符号链接，输出文件系统中保存的名称原字节。
-- 远程 TTY 附着与 Linux 共用 `forkpty` 桥源码，链接系统 libSystem；原生组件只在 agent 包中，CLI 使用随包 Node 和系统终端。
-
-### 安装与运行
-
-- 安装位置、目录配置、锁和事务与 Linux 相同（见[安装布局](agent-lifecycle.md#安装布局)）。agent 数据目录默认是 `~/.local/share/kiteline-agent`，不在 `~/Library` 下；安装同样写入 `/etc/kiteline-agent.env`。
-- 解包目录中的 `bin/kiteline-agent` 用系统的 `readlink -f` 解析自身位置，失败即退出；安装后的命令入口直接写入程序目录 `/opt/kiteline-agent`，不解析自身位置。两者和 agent 都用随包的 `flock` 加锁；维护时 Node 从副本运行，使用副本中的 `flock`。
 
 ### 文件名与进程组
 
 - APFS 默认不区分大小写。文件操作在请求边界上用 `entry-name` 逐级取得路径中每一段在磁盘上保存的名称，把请求中的路径换成磁盘上的写法，避免同一文件因大小写不同被当作两个路径；`.git` 的大小写变体按是否为同一个文件系统对象识别。细节见[文件](files.md#路径与列表)。
-- 进程组停止与 Linux 相同（SIGTERM，宽限期后 SIGKILL）。判断存活时读取 `/bin/ps -ax -o pgid= -o stat=` 的快照（2 秒期限），排除僵尸进程；`kill` 返回 EPERM 不作为结论。读取失败会记录诊断并继续等待，失败一直持续时停止也一直等待。
+- 进程组停止与 Linux 相同（SIGTERM，宽限期后 SIGKILL）。
 
 ### LaunchDaemon
 
 示例在 `<程序目录>/deploy/kiteline-agent.plist`，没有 `KeepAlive`，`ExitTimeOut` 为 45 秒。安装、升级和卸载从不加载、替换或删除 `/Library/LaunchDaemons/` 中的 plist；运行中的服务持有使用锁，维护前要先停止它。配置和停止步骤见[接入设备](../guide/devices.md#后台运行)。
-
-### 系统保护
-
-- Gatekeeper：本仓库构建的 tmux、`flock` 和文件辅助程序没有经过 Apple 公证。接入命令和升级命令使用 curl 下载，文件不带隔离属性 `com.apple.quarantine`；浏览器下载的发布包带有隔离属性，运行随包程序时 macOS 可能以无法验证开发者为由拒绝。处理方法见[手工安装](../guide/devices.md#手工安装)。
-- 隐私保护（TCC）：“桌面”“文稿”“下载”等受保护目录可能拒绝 agent 访问，文件和 Git 操作报告 `Operation not permitted`。在“终端”App 中前台运行时，系统可能以“终端”的名义请求授权；LaunchDaemon 不继承“终端”的授权。项目用户已登录桌面时，系统也可能以 `node` 的名义请求目录访问授权。
 
 ## Windows
 
@@ -76,9 +60,7 @@ agent 启动 tmux 时设置 `TERMINFO_DIRS`，依次为随包现代目录、随�
 
 agent、recorder 和 pane 的启动脚本运行在随包的原生 Windows Node 中。私有 MSYS2 运行时供 tmux 与同源 PTY 桥使用，不修改用户的 `PATH`，也不使用用户 Git 自带的 MSYS；文件与进程等系统能力由 `native/windows/` 的原生 addon 提供。ripgrep 使用随包的原生 Windows 版本。
 
-私有 MSYS2 运行时中的 tmux 应用 [`native/tmux/series`](../../native/tmux/series) 的共用补丁和 Windows 专用的 [`cygwin-outfd.patch`](../../native/tmux/cygwin-outfd.patch)，后者让 Cygwin 构建重新打开客户端终端后同时更新输出描述符，控制模式的输出依赖它。runtime DLL 从固定源码重建并应用 [`ctrl-c.patch`](../../native/msys/ctrl-c.patch)，避免 ConPTY 的 Ctrl+C 在输出背压时阻塞于不必要的 console 附着，维护要求见 [MSYS2](../development/release.md#msys2)。文件清单见 [`scripts/windows-components.ts`](../../scripts/windows-components.ts)，所属软件包的来源、版本、校验值和源码归档固定在 [`release/agent-windows.json`](../../release/agent-windows.json)；包内不带 pacman 或编译器。宿主需要原生 Git，以及系统 Windows PowerShell 5.1 Desktop 或 PowerShell 7.4 及以上 7.x 版本。
-
-原生模块提供 Job 对象中的进程管理、私有命名管道、当前用户身份与私有目录、`LockFileEx` 锁、文件属性与两种重命名，以及 TCP 监听表快照。
+私有 MSYS2 运行时中的 tmux 应用 [`native/tmux/series`](../../native/tmux/series) 的共用补丁和 Windows 专用的 [`cygwin-outfd.patch`](../../native/tmux/cygwin-outfd.patch)，后者让 Cygwin 构建重新打开客户端终端后同时更新输出描述符，控制模式的输出依赖它。runtime DLL 从固定源码重建并应用 [`ctrl-c.patch`](../../native/msys/ctrl-c.patch)，避免 ConPTY 的 Ctrl+C 在输出背压时阻塞于不必要的 console 附着，维护要求见 [MSYS2](../development/release.md#msys2)。文件清单见 [`scripts/windows-components.ts`](../../scripts/windows-components.ts)，所属软件包的来源、版本、校验值和源码归档固定在 [`release/agent-windows.json`](../../release/agent-windows.json)；包内不带 pacman 或编译器。
 
 ### 进程集合
 
@@ -94,7 +76,7 @@ agent 和 recorder 在 Windows 上启动的每个进程（tmux server 和每次 
 
 - agent 先在独立 Job 中启动空的 tmux server，工作目录为工作区目录；确认 server 可以应答后才让 recorder 创建会话。
 - recorder 用私有的 `script` 提供 PTY，在原始模式下运行 tmux control 客户端。所有 tmux 客户端都带 `-N`，不启动新的 server。
-- pane 中运行原生 Node 的 `shared/dist/terminal/pane.js`，从会话目录的 `pane.json` 读取启动信息，以参数数组和继承的标准输入输出启动配置的 PowerShell。普通终端加载用户 profile，快捷方式执行给定命令。PowerShell 退出后将 32 位退出码发布到 tmux pane；启动失败、被信号结束或发布失败时退出码为空。启动脚本忽略 Ctrl-C 和 Ctrl-Break，由 PowerShell 处理。
+- pane 中运行原生 Node 的 `shared/dist/terminal/pane.js`，从会话目录的 `pane.json` 读取启动信息，以参数数组和继承的标准输入输出启动配置的 PowerShell。PowerShell 退出后将 32 位退出码发布到 tmux pane；启动失败、被信号结束或发布失败时退出码为空。启动脚本忽略 Ctrl-C 和 Ctrl-Break，由 PowerShell 处理。
 - 远程 attach 使用与 Unix 同源的 `forkpty` 桥，在独立 Job 中运行普通 tmux client；原 server Job 不属于这次连接。
 - Windows CLI 由 `kiteline.ps1` 入口保存和恢复控制台输入模式。Node 排空输出后通过临时文件把结果交给入口并直接退出，避免退出清理被不读取输出的宿主卡住；排空超时时入口恢复控制台并以非 0 退出。宿主完全不读取输出时，入口可能一直等待，但 Node 和远端桥在期限内退出。
 - 定时任务的启动参数见 [agent 配置文件](../guide/reference.md#agent-配置文件)，进程管理见[定时任务契约](scheduled-tasks.md#执行与停止)。
@@ -118,15 +100,14 @@ agent 和 recorder 在 Windows 上启动的每个进程（tmux server 和每次 
 ### 安装与目录
 
 - Windows 安装根目录来自系统 Known Folders，不受 `ProgramFiles`、`ProgramData` 环境变量覆盖影响；数据和运行目录仍按 [agent 环境变量](../guide/reference.md#agent-环境变量)解析。
-- 程序目录和 `%ProgramData%\kiteline-agent\`（命令入口、安装记录和两个锁文件，见[文件位置](../guide/reference.md#文件位置)）的属主为 Administrators，SYSTEM 和 Administrators 完全控制，项目用户只读和执行。`%ProgramData%\kiteline-agent` 的属主不是 SYSTEM 或 Administrators，或允许其他账户写入时，维护命令拒绝执行。
-- 安装、升级和卸载需要提升权限的 PowerShell；其他命令以项目用户身份运行，agent 核对 SID。
-- 项目用户必须已有初始化的 Windows 配置文件（登录过一次）。agent 数据目录默认是该用户的 `%LOCALAPPDATA%\kiteline-agent`：为当前用户安装时直接读取；为其他用户安装时从该用户的注册表配置读取，读不到（例如该用户当前没有登录）时安装拒绝，需要用 `--data-dir`（以及可选的 `--run-dir`）指定绝对路径。会话 socket 路径按 MSYS 形式计算长度，运行目录太长时用 `--run-dir` 指定一个较短的目录。
-- 安装、状态和程序目录的路径中不能经过重解析点；ZIP 发布包必须只有一个 `kiteline-agent-<版本>-windows-amd64` 根目录，不含链接，文件名符合 Windows 规则，文件集合与 `SHA256SUMS` 完全一致。
+- `%ProgramData%\kiteline-agent` 的属主不是 SYSTEM 或 Administrators，或允许其他账户写入时，维护命令拒绝执行。
+- 会话 socket 路径按 MSYS 形式计算长度，运行目录太长时用 `--run-dir` 指定一个较短的目录。
+- 安装、状态和程序目录的路径中不能经过重解析点。
 - 维护在 `%ProgramFiles%\.kiteline-maintenance-<GUID>` 中准备新目录并设置 ACL，然后用目录移动完成替换和回退，与 Linux 的两次重命名相同（见[安装升级与卸载](agent-lifecycle.md#安装升级与卸载)）。
 
 ### 停止
 
-agent 只通过控制台的 Ctrl-C（SIGINT）和 Ctrl-Break（SIGBREAK）进入正常停止。命令入口与 Node 共用控制台，记录收到的事件，等待 Node 和它的 Job 全部结束后才释放使用锁和目录固定。`TerminateProcess`、`taskkill /F` 或服务管理器的超时强制结束都会跳过清理；由于 Job 的设置，进程集合仍会被系统结束。服务管理器（例如 WinSW）必须向 agent 发送控制台 Ctrl 事件，并留出足够的停止时间（示例 WinSW 配置为 45 秒；agent 等 recorder 退出最多 30 秒），配置见[接入设备](../guide/devices.md#后台运行)。退出码见[启动与停止](agent-lifecycle.md#启动与停止)。
+agent 只通过控制台的 Ctrl-C（SIGINT）和 Ctrl-Break（SIGBREAK）进入正常停止。`TerminateProcess`、`taskkill /F` 或服务管理器的超时强制结束都会跳过清理；由于 Job 的设置，进程集合仍会被系统结束。退出码见[启动与停止](agent-lifecycle.md#启动与停止)。
 
 ### 路径与文件
 

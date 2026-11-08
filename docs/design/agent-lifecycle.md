@@ -6,9 +6,9 @@
 
 程序目录、命令入口、安装记录、目录配置和锁文件的位置见[文件位置](../guide/reference.md#文件位置)。维护时另用两个内部目录：Linux 和 macOS 上，`install`、`upgrade`、`uninstall` 从维护副本 `/var/tmp/kiteline-agent-maintenance.XXXXXX` 运行，升级在 `/opt/.kiteline-upgrade-XXXXXX` 中暂存新程序；Windows 的维护操作使用 `%ProgramFiles%\.kiteline-maintenance-<GUID>`。
 
-安装记录在 Linux 和 macOS 上保存项目用户的 `user`、`uid`、`gid`、`home`；在 Windows 上保存 `user`、`sid`、`home`、`dataDir`、`runDir`。安装记录不保存密码和服务状态。程序目录的内容见[构建与发布](../development/release.md#产物结构)，示例服务配置在 `<程序目录>/deploy/` 下。
+安装记录不保存密码和服务状态。程序目录的内容由 [`scripts/package.mjs`](../../scripts/package.mjs) 组装，示例服务配置在 `<程序目录>/deploy/` 下。
 
-发布包里有两种入口：解包目录中的 `bin/kiteline-agent`（Windows 为 `bin/kiteline-agent.ps1`）用于检查和首次安装；安装后的命令入口来自包内的 `bin/kiteline-agent-installed`（Windows 为 `bin/kiteline-agent-installed.ps1`）。入口负责取锁和准备运行环境，绕过入口启动的进程不受使用锁保护。直接用 Node 运行 `agent/dist/main.js` 做安装变更会被拒绝（`Use the public kiteline-agent launcher`）。
+发布包里有两种入口：解包目录中的 `bin/kiteline-agent`（Windows 为 `bin/kiteline-agent.ps1`）用于检查和首次安装；安装后的命令入口来自包内的 `bin/kiteline-agent-installed`（Windows 为 `bin/kiteline-agent-installed.ps1`）。入口负责取锁和准备运行环境，绕过入口启动的进程不受使用锁保护。直接用 Node 运行 `agent/dist/main.js` 做安装变更会被拒绝。
 
 已安装的 agent 在确定目录时检查调用者：当前用户必须是安装记录中的项目用户（Linux 和 macOS 比较 uid，Windows 比较 SID），否则拒绝（`Use project user <用户> to run this command`）。程序已安装但缺少安装记录时报告安装损坏，不退回其他默认目录。
 
@@ -26,12 +26,12 @@
 实现：
 
 - Linux 和 macOS 的管理锁和使用锁用 `flock`（Linux 用系统 `flock`，macOS 用随包的 `flock`）。命令入口在加载程序目录中的 Node、JavaScript 和配置之前取得使用锁，并把文件描述符留给 Node 进程，锁一直保持到进程退出。Windows 用 `LockFileEx`，由入口的 PowerShell 进程持有，它同时以不允许删除的方式打开程序目录（目录固定），直到 Node 及其进程集合全部结束。
-- 状态锁和运行目录锁在 Linux 和 macOS 上使用 proper-lockfile：以建目录的方式加锁（`process.lock`、`agent.sock.lock`），释放时删除。进程退出时（包括以非零状态退出），proper-lockfile 同步删除自己持有的锁目录；只有进程被 SIGKILL 结束、崩溃或断电时锁目录才会留下，超过 10 秒未更新即视为过期，可被新的进程取得。Windows 分别在 `process.lock` 和 `agent.lock` 文件上使用 `LockFileEx`，释放时关闭句柄并保留文件，进程退出时由系统释放未关闭的锁。
+- 状态锁和运行目录锁在 Linux 和 macOS 上使用 proper-lockfile：以建目录的方式加锁（`process.lock`、`agent.sock.lock`），释放时删除。只有进程被 SIGKILL 结束、崩溃或断电时锁目录才会留下，超过 10 秒未更新即视为过期，可被新的进程取得。Windows 分别在 `process.lock` 和 `agent.lock` 文件上使用 `LockFileEx`，释放时关闭句柄并保留文件，进程退出时由系统释放未关闭的锁。
 - 状态锁和运行目录锁是两个不同的对象，所以运行目录可以与 agent 数据目录相同。同一运行目录配不同的数据目录也只能运行一个 agent。
 
 不变量：
 
-- 默认卸载保留协调锁，`--purge` 在清理完成后删除。锁文件可能被删除后重建，所以持锁者要确认锁住的是路径上当前的文件：Unix 入口取得使用锁和管理锁后核对文件描述符与路径的 dev/ino，拒绝旧文件上的锁。删除锁文件时仍持有锁：Unix 卸载持有排他使用锁直到删除它，管理锁最后删除，之后不再修改产品路径；Windows 持有不允许共享删除的句柄，释放后再删除，被新持有者抢先时清理明确失败，不重试。
+- 默认卸载保留协调锁，`--purge` 在清理完成后删除。锁文件可能被删除后重建，所以持锁者要确认锁住的是路径上当前的文件：Unix 上入口对使用锁、Node 对继承的管理锁核对文件描述符与路径的 dev/ino，拒绝旧文件上的锁。删除锁文件时仍持有锁：Unix 卸载持有排他使用锁直到删除它，管理锁最后删除，之后不再修改产品路径；Windows 持有不允许共享删除的句柄，释放后再删除，被新持有者抢先时清理明确失败，不重试。
 - 维护操作先取管理锁，再取使用锁，清除状态时最后取状态锁。升级和卸载只在用户确认之后、写入之前取排他使用锁，并一直持有到回退和清理完成。
 - 服务管理器配置了自动重启时，它与升级争抢使用锁：重启的 agent 先取得共享锁则升级被拒绝；升级先取得排他锁则启动被拒绝。
 
@@ -49,7 +49,7 @@
 | 其他项目用户           | 拒绝（`Current installation belongs to <用户>`）         |
 | 空文件、损坏或结构不对 | 报告错误并停止，保留原文件                               |
 
-Linux 和 macOS 的新装步骤：用 `getent`（macOS 用 `dscl`）读取账户的 uid、gid 和主目录，不使用 sudo 之后的 `HOME`；校验发布包（`release.json` 的平台和架构、`SHA256SUMS`、随包 Node 和 tmux 的版本、agent 版本）；写入 `/etc/kiteline-agent.env`（已存在时保留）；创建使用锁文件；复制程序目录并把属主设为 root；写入安装记录；最后原子替换命令入口。任一步失败时删除已写入的命令入口、安装记录和程序目录。Windows 的新装在 PowerShell 中完成同样的步骤，见[平台实现](platforms.md#windows)。
+Linux 和 macOS 的新装写入 `/etc/kiteline-agent.env`（已存在时保留）。任一步失败时删除已写入的命令入口、安装记录和程序目录。Windows 的新装由 `installer/kiteline-agent.in.ps1` 在 PowerShell 中完成。
 
 ### 升级
 
@@ -59,7 +59,6 @@ Linux 和 macOS 的新装步骤：用 `getent`（macOS 用 `dscl`）读取账户
 2. 在程序目录的上级目录中建立暂存目录，使它与程序目录位于同一文件系统，后面的重命名才是原子的。把发布包复制进去，用旁边的 `<发布包>.sha256`（第一个字段）校验，解包到 `new/` 并做与安装相同的校验。
 3. 请求确认（输入 `yes`；没有终端时必须传 `--yes`）。确认前可以随时取消。
 4. 取排他使用锁，把 `new/` 的属主设为 root，然后做两次重命名：程序目录改名为 `previous/`，`new/` 改名为程序目录；再原子替换命令入口。
-5. 删除 `previous/` 和暂存目录，释放锁。
 
 Windows 没有第 1 步的预检：从已安装入口执行时在准备期间持有共享使用锁，在确认之前设置新目录的 ACL，有使用者时在确认之后取排他锁时才失败（见[平台实现](platforms.md#windows)）。
 
@@ -67,18 +66,16 @@ Windows 没有第 1 步的预检：从已安装入口执行时在准备期间持
 
 ### 卸载
 
-卸载（`uninstall [--purge]`）在 Linux 和 macOS 上先预检锁，再确认，再取排他使用锁；Windows 与升级一样在确认之后取排他锁。`--purge` 取得数据目录的状态锁后删除整个 agent 数据和运行目录。Unix 只解析一次真实路径，锁、确认、包含检查和删除都使用这同一结果，避免期间路径被替换。状态锁释放后才移除，此后只删除已经为空的数据目录，不递归清理并发写入的新内容。删除边界和默认保留项见[卸载](../guide/devices.md#卸载)，路径来源见[目录与权限](#目录与权限)。
+卸载（`uninstall [--purge]`）在 Linux 和 macOS 上先预检锁，再确认，再取排他使用锁；Windows 与升级一样在确认之后取排他锁。`--purge` 取得数据目录的状态锁后删除整个 agent 数据和运行目录。删除边界和默认保留项见[卸载](../guide/devices.md#卸载)，路径来源见[目录与权限](#目录与权限)。
 
 ### 维护在程序目录之外执行
 
 升级和卸载要替换或删除程序目录，执行它们的代码因此不能来自这个目录。Node 按需从程序目录加载模块，如果维护进程本身从旧目录运行，换目录后可能加载到新旧混合的文件，旧目录也会一直处于使用中。
 
-- Linux 和 macOS：命令入口在取得管理锁（以及从已安装目录运行时的共享使用锁）后，把整个发布包目录复制到维护副本，释放共享使用锁，从副本启动 Node，并把管理锁的文件描述符传给它。Node 核对继承的描述符与管理锁文件是同一个文件，否则拒绝执行（`Management lock was not inherited`）。入口等待 Node 最终退出后删除副本，返回 Node 的退出码。命令入口本身是一个先完整读入再执行的 Shell 函数，维护过程中替换 `/usr/local/bin/kiteline-agent` 不影响正在运行的入口。
+- Linux 和 macOS：命令入口在取得管理锁（以及从已安装目录运行时的共享使用锁）后，把整个发布包目录复制到维护副本，释放共享使用锁，从副本启动 Node，并把管理锁的文件描述符传给它。命令入口本身是一个先完整读入再执行的 Shell 函数，维护过程中替换 `/usr/local/bin/kiteline-agent` 不影响正在运行的入口。
 - Windows：维护逻辑全部在入口的 PowerShell 进程中执行，原生代码由脚本内嵌的源码在内存中编译，不从程序目录加载维护代码；只有校验新包时用新目录中的 Node 运行一次新包的 `kiteline-agent --version`。
 
-Windows 升级按本次已完成的目录移动回退；新入口尚未发布时保留原入口的内容和文件身份，已发布后才在恢复旧程序目录后恢复旧入口。回退失败时保留备份；发布成功但删除备份或暂存目录失败时仍返回失败，并报告实际保留路径，不表示旧程序已恢复。
-
-Windows 的 `uninstall --purge` 即使提前失败也会释放管理锁；完成删除时先释放使用锁并删除其文件，最后释放并删除管理锁文件。清理错误汇入操作的失败结果，错误优先于控制台中断码。purge 可能在移除 PATH 或删除部分数据之后遇到活跃运行目录的文件锁而失败，不会自动恢复已删除的内容。
+Windows 的 `uninstall --purge` 可能在移除 PATH 或删除部分数据之后遇到活跃运行目录的文件锁而失败，不会自动恢复已删除的内容。
 
 维护进程拥有自己的输入：升级先把发布包复制进暂存目录再校验；调用升级的下载脚本等到维护命令最终退出后，才删除自己的下载目录。
 
@@ -90,21 +87,7 @@ Windows 的 `uninstall --purge` 即使提前失败也会释放管理锁；完成
 
 ## 启动与停止
 
-`run` 的启动顺序：
-
-1. 读取目录配置和 `config.json`，以私有权限创建 agent 数据目录，取得状态锁。
-2. 创建运行目录并取得运行目录锁。
-3. 读取 `connection.json`；未绑定时报错（`Device is not bound; run kiteline-agent bind`）。
-4. 加载 `agent.json`、`temporary-files.json` 和定时任务，启动本机 IPC（Linux 和 macOS 先删除旧的 `agent.sock`），然后连接 server。
-
 停止信号在任何资源产生之前就已登记：Linux 和 macOS 是 SIGINT、SIGTERM、SIGHUP，Windows 是 SIGINT（Ctrl-C）和 SIGBREAK（Ctrl-Break）。启动途中收到信号时，在下一步之前停下并清理已经建立的部分。所有信号进入同一条停止路径，重复的信号共用同一次停止。
-
-停止顺序（`Agent.close()`）：
-
-1. 拒绝新请求（`Agent is stopping`），停止定时任务的计时器，取消所有进行中的 RPC，断开控制连接。
-2. 同时关闭终端会话、终端/HTTP/文件数据通道、本机 IPC、文件整理操作，停止正在运行的定时任务（见[定时任务契约](scheduled-tasks.md#执行与停止)），并等待进行中的请求处理结束。终端会话在 Windows 上先撤销尚未完成的创建，然后停止 recorder（30 秒内未退出则强制结束），再在每个会话的私有 socket 上执行 `kill-server`。停止 recorder 与等待请求并行，因为 redraw 没有外层期限，不能先等待这类请求结束再停止 recorder。
-3. 等待启动时对临时文件登记的清理完成。
-4. 同时关闭目录游标、Git 仓库（进行中的 Git 写操作按 [Git 契约](git.md#写操作)结束）和文件监听。
 
 任何一步失败都会被收集；全部步骤结束后，如果有失败，agent 打印汇总错误并以 1 退出，退出前不主动释放运行目录锁和状态锁，避免把尚未清理完的状态交给另一个 agent。进程退出时锁随之释放（见[锁](#锁)），未能结束的 tmux server 按[资源与清理](terminal.md#资源与清理)处理。清理成功后先释放运行目录锁，再释放状态锁。
 
@@ -121,10 +104,10 @@ Windows 的 `uninstall --purge` 即使提前失败也会释放管理锁；完成
 
 `bind --server <地址>` 的处理：
 
-- 地址必须是 `http:` 或 `https:` URL，只保存其 origin。绑定码从终端提示读取，或从标准输入读取（最多 4096 个字符）。
+- 地址必须是 `http:` 或 `https:` URL，只保存其 origin。绑定码从终端提示读取，或从标准输入读取。
 - 整个命令持有状态锁，agent 正在运行时绑定会失败。
 - 带 `--if-unbound` 时，在状态锁内检查 `connection.json`；已存在则拒绝并保留原身份。网页生成的接入命令和仅绑定命令都使用这个选项。不带此选项时会覆盖原有身份。
-- 绑定请求 `POST /api/agent/bind` 经环境代理发送（见[接入设备](../guide/devices.md#出站代理与证书)），期限 30 秒。网络失败或没有收到应答时报告绑定结果未知；server 返回错误时报告该错误。
+- 绑定请求 `POST /api/agent/bind` 经环境代理发送（见[接入设备](../guide/devices-advanced.md#出站代理与证书)）。网络失败或没有收到应答时报告绑定结果未知；server 返回错误时报告该错误。
 - 成功后以原子替换写入 `connection.json`（`deviceId`、`deviceToken`、`server`，权限 `0600`）。写入失败时提示该设备已登记但凭据未保存。两种情况的处理见[重新绑定](../guide/devices.md#重新绑定)。
 
 保存的 server 地址只由 `bind` 写入。升级、在其他入口打开网页或从其他地址下载发布包都不会改写它。
@@ -137,7 +120,7 @@ agent 用设备令牌连接 `/api/agent/control`，握手期限 30 秒。重连�
 
 ### agent 数据目录和运行目录
 
-- 目录的确定顺序和 `/etc/kiteline-agent.env` 的格式见 [agent 环境变量](../guide/reference.md#agent-环境变量)。已安装时，Linux 和 macOS 的默认目录基于安装记录中项目用户的主目录，Windows 的两个目录取自安装记录。从解包目录运行时不读安装记录，默认目录基于当前用户的主目录。
+- 目录的确定顺序和 `/etc/kiteline-agent.env` 的格式见 [agent 环境变量](../guide/reference.md#agent-环境变量)。已安装时，Linux 和 macOS 的默认目录基于安装记录中项目用户的主目录，Windows 的默认目录取自安装记录。从解包目录运行时不读安装记录，默认目录基于当前用户的主目录。
 - `<运行目录>/<会话 ID>/tmux.sock` 的字节长度有上限，因此运行目录路径也有上限（见[限额](../guide/reference.md#限额)）；超出时 `run` 和 `check` 报告 `KITELINE_AGENT_RUN_DIR is too long`。
 - 维护命令（升级、清除状态）的目标目录只取自安装记录和目录配置，不取执行命令的管理员环境中的变量，也不扫描其他自定义目录。
 
@@ -154,10 +137,6 @@ agent 的 JSON 状态（`agent.json`、`connection.json`、`temporary-files.json
 读取时，`agent.json`、`connection.json`、`config.json`、定时任务记录和安装记录为空文件、损坏的 JSON 或不支持的结构时，agent 报告错误并保留原文件。`temporary-files.json` 例外：读取失败时只记录日志并按空登记处理，下一次创建临时文件时被改写（见[临时文件](files.md#保存)）。
 
 ## check 与 doctor
-
-`check` 在当前环境中检查随包组件、宿主环境和目录，全部通过时成功退出，否则列出失败项并以非零状态退出。每个外部命令最多运行 5 秒；具体项目见 `packages/agent/src/prerequisites.ts`。它会创建 agent 数据目录和运行目录，并检查运行目录长度及目录可写性。
-
-`doctor` 先通过本机 IPC 请正在运行的 agent 检查自己（在线），输出每项的 `[ok]`、`[warn]` 或 `[error]`，有 `error` 时以 1 退出。
 
 - 在线 doctor 检查运行中 agent 的随包组件和宿主环境，并报告连接、终端、任务及 Git 凭据环境；它不重复 `check` 的目录长度、创建和可写检查。具体诊断项见 `packages/agent/src/doctor.ts`。
 - 连接不到 agent 时（离线），doctor 在当前进程中检查安装、配置和随包组件，这些组件会实际运行；输出说明本机连接不可用、运行环境尚未检查，`config.json` 无效时追加错误。

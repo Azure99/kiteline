@@ -11,9 +11,8 @@ This guide explains how to deploy and maintain the server (`kiteline-server`), w
   - Native release package `kiteline-server-<version>-linux-<architecture>.tar.gz`, available from [GitHub Releases](https://github.com/Azure99/kiteline/releases). It includes the official Node runtime, a dynamically linked build requiring glibc, and targets Ubuntu 24.04.
 - The server provides HTTP only and does not manage TLS certificates. For HTTPS, place a reverse proxy in front of it; see [HTTPS and reverse proxies](#https-and-reverse-proxies).
 - By default, the server accepts connections only at `127.0.0.1:8080`. For access from other machines, see [LAN access and ports](#lan-access-and-ports).
-- The workbench cannot be embedded in an iframe, including on same-origin pages. Development-service proxies retain the upstream's own embedding policy.
 - The owner password, login sessions, CLI credentials and device registrations are stored in the server data directory (default `/var/lib/kiteline`). Only one server process can use a data directory at a time.
-- One server can be accessed through several origins. An origin combines the scheme, hostname and port, such as `http://192.168.1.10:8080` or `https://kiteline.example.com`. The server must be deployed at the origin's root path; subpaths such as `https://example.com/kiteline/` are not supported.
+- The server must be deployed at the origin's root path; subpaths such as `https://example.com/kiteline/` are not supported.
 - Server release packages and images contain agent release packages for every platform, so devices do not need access to GitHub when connecting or upgrading.
 
 For server environment variables, see [Reference](reference.en.md#server-environment-variables).
@@ -98,7 +97,7 @@ Native deployment runs the server with systemd. Run the following commands in or
    sudo journalctl -u kiteline-server
    ```
 
-   The unit runs `/opt/kiteline-server/bin/kiteline-server serve` as `kiteline`, with `KITELINE_DATA_DIR=/var/lib/kiteline` and `KITELINE_LISTEN_ADDR=127.0.0.1:8080`. `/etc/kiteline-server.env` must exist; its variables override settings with the same names in the unit. The `Kiteline setup token: …` log line contains the setup token.
+   `/etc/kiteline-server.env` must exist; its variables override settings with the same names in the unit. The `Kiteline setup token: …` log line contains the setup token.
 
 5. Check the response with `curl -fsS http://127.0.0.1:8080/healthz`, then open `http://127.0.0.1:8080` and follow [Set up the owner](#set-up-the-owner).
 
@@ -108,7 +107,7 @@ The workbench has one account, the owner. Open any origin in a browser and use t
 
 The setup token is printed only once, on the server's first startup, and expires after a limited time (see [Limits](reference.en.md#limits)). Restarting the server does not print it again. If it expires or is lost, generate another as described in [Reset the setup token or password](#reset-the-setup-token-or-password).
 
-Password length is measured in UTF-8 bytes (a Chinese character usually takes 3 bytes). See [Limits](reference.en.md#limits) for the allowed length and login lifetime, and [Sign-in and language](usage.en.md#sign-in-and-language) for login scope.
+See [Limits](reference.en.md#limits) for the allowed password length and login lifetime, and [Sign-in and language](usage.en.md#sign-in-and-language) for login scope.
 
 If the server is on a remote host and listens only on `127.0.0.1`, you can use SSH port forwarding for initial setup: run `ssh -L 8080:127.0.0.1:8080 USER@SERVER_HOST` on your computer, then open `http://127.0.0.1:8080`. This address is accessible only from your computer. When connecting devices, open the workbench through an origin those devices can also reach; see [Connect using the web command](devices.en.md#connect-using-the-web-command).
 
@@ -139,9 +138,9 @@ First configure the server to trust the protocol header from the reverse proxy:
 
 With this set to `1`, the server also trusts `X-Forwarded-Proto` sent by directly connected clients. Therefore, only the reverse proxy should be able to access the HTTP port: keep the `127.0.0.1` binding or expose it only within the proxy's network.
 
-To count setup and sign-in attempts by client IP, also set `KITELINE_TRUSTED_PROXIES` in the same environment file to the direct proxy IPs or CIDRs seen by the server, separated by commas. Use `127.0.0.1` when a proxy on the same host connects to a native server over IPv4 loopback. With Docker port forwarding, the peer may be a bridge address; use the actual network address rather than trusting all private networks. Restart the server after changing this setting.
+To count setup and sign-in attempts by client IP, also set `KITELINE_TRUSTED_PROXIES` in the same environment file to the direct proxy IPs or CIDRs seen by the server, separated by commas. Use `127.0.0.1` when a proxy on the same host connects to a native server over IPv4 loopback. With Docker port forwarding, the peer may be a bridge address; use the actual network address rather than trusting all private networks. When a reverse proxy on the host connects through the port published on `127.0.0.1`, the peer is the gateway address of the Compose network; check it with `docker network inspect kiteline_default --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'`. `docker compose down` deletes this network, so check the address again after it is recreated. Restart the server after changing this setting.
 
-The examples below overwrite the client's `X-Real-IP`. The server reads this single IP only from a trusted direct peer; a missing or invalid header makes setup and sign-in return 400. Without this setting, attempts are still counted by TCP peer. The [source and global limits](reference.en.md#limits) remain unchanged, so all sources can still exhaust the global budget together.
+The examples below overwrite the client's `X-Real-IP`. The server reads this single IP only from a trusted direct peer; a missing or invalid header makes setup and sign-in return 400.
 
 For multiple proxies or a CDN, first configure [nginx realip](https://nginx.org/en/docs/http/ngx_http_realip_module.html) or [Caddy trusted proxies](https://caddyserver.com/docs/caddyfile/options#trusted-proxies) on the final proxy, then overwrite `X-Real-IP` with the trusted result; Caddy uses `{client_ip}` in that case. For appended `X-Forwarded-For` chains, use Caddy 2.8 or later and enable `trusted_proxies_strict` to avoid selecting a client-supplied leftmost address.
 
@@ -260,7 +259,7 @@ sudo -u kiteline /opt/kiteline-server/bin/kiteline-server setup-token --data-dir
 sudo systemctl start kiteline-server
 ```
 
-To reset the password, replace `setup-token` in the middle command with `reset-password`. "Get a new setup token" on the setup page and "Reset sign-in password" on the sign-in page also display the appropriate commands.
+To reset the password, replace `setup-token` in the middle command with `reset-password`.
 
 ## Backup and restore
 

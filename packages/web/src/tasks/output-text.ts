@@ -27,6 +27,7 @@ export type StreamOutput = {
 };
 
 export function mergeOutput(previous: StreamOutput, piece: TaskOutput) {
+  // The agent restarts at offset 0 when the stored file shrank or is gone, so drop the old text.
   const reset = piece.offset !== previous.nextOffset;
   const final = piece.finished && piece.nextOffset >= piece.storedBytes;
   let output = previous;

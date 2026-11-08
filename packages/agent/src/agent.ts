@@ -547,6 +547,8 @@ export class Agent {
         errors.push(error);
       }
     };
+    // Stop sessions and their recorders alongside the inflight wait: redraw requests have no
+    // outer deadline, so waiting for them before stopping recorders could hang shutdown.
     await Promise.all([
       finish(() => this.sessions.close()),
       finish(() => this.closeConnectionChannels()),

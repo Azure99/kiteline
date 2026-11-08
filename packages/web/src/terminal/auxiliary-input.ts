@@ -112,6 +112,7 @@ export class AuxiliaryInput {
             ? event.key.toUpperCase()
             : event.key);
     }
+    // Match typed keys, including application cursor mode; isMac=false makes virtual Alt Meta.
     const result = evaluateKeyboardEvent(
       merged,
       this.terminal.modes.applicationCursorKeysMode,

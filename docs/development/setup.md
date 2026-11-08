@@ -29,7 +29,7 @@ corepack enable pnpm
 
 Node 安装在系统目录（如 `/usr/bin`、`/usr/local/bin`）时，以 root 权限执行该命令。
 
-本机 Node 版本与 `engines.node` 不同时，pnpm 只打印 `Unsupported engine` 警告并继续执行。CI 使用 `package.json` 中的 Node 版本，本机使用相同版本可以得到一致的结果。
+本机 Node 版本与 `engines.node` 不同时，pnpm 只打印 `Unsupported engine` 警告并继续执行。
 
 ## 安装依赖
 
@@ -40,7 +40,7 @@ pnpm install --frozen-lockfile
 pnpm native:build
 ```
 
-`pnpm install --frozen-lockfile` 按锁文件安装依赖，并应用 `pnpm-workspace.yaml` 中 `patchedDependencies` 登记的补丁。`pnpm native:build` 生成源码 agent 和测试所需的 `dist/native/`；开发构建动态链接系统的 libevent 和 ncurses。
+`pnpm native:build` 生成源码 agent 和测试所需的 `dist/native/`；开发构建动态链接系统的 libevent 和 ncurses。
 
 修改原生源码、tmux 补丁、terminfo 或固定的 tmux/rg 输入后，重新运行 `pnpm native:build`。它每次重新编译 tmux，下载缓存见[缓存与清理](release.md#缓存与清理)。
 
@@ -84,7 +84,7 @@ KITELINE_DATA_DIR=/var/tmp/kiteline-dev/server pnpm server setup-token
 
 ## 本地 HTTPS
 
-用 Caddy 在本机提供 `https://localhost:8443`，可以检查工作台经过 HTTPS 反向代理时的行为，例如 `X-Forwarded-Proto` 的处理、带 `Secure` 属性的 Cookie、WebSocket 和流式响应。[`scripts/dev/Caddyfile`](../../scripts/dev/Caddyfile) 把 server 的路径直接转发到 `127.0.0.1:8080`，其余请求转发到 Vite。
+用 Caddy 在本机提供 `https://localhost:8443`，可以检查工作台经过 HTTPS 反向代理时的行为。[`scripts/dev/Caddyfile`](../../scripts/dev/Caddyfile) 把 server 的路径直接转发到 `127.0.0.1:8080`，其余请求转发到 Vite。
 
 1. 启动开发环境时增加 `KITELINE_TRUST_PROXY_PROTO=1`：
 
@@ -131,7 +131,7 @@ KITELINE_DATA_DIR=/var/tmp/kiteline-dev/server pnpm server setup-token
 | `pnpm test`         | 运行自动测试                       |
 | `pnpm build`        | 编译各包并构建工作台               |
 
-完整的 `pnpm test` 需要先执行[安装依赖](#安装依赖)中的命令和 `pnpm build`，并使用 Git 2.23.0 及以上版本。
+完整的 `pnpm test` 需要先执行[安装依赖](#安装依赖)中的命令和 `pnpm build`，并使用 Git 2.23.0 及以上版本。需要 root 的安装和维护用例在普通用户下跳过；CI 另以 root 运行这些测试文件，命令见 [`build.yml`](../../.github/workflows/build.yml)。
 
 只运行部分测试时，把文件或目录传给 `pnpm test`，例如 `pnpm test packages/agent/test/git-read.test.ts`。
 

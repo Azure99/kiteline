@@ -16,7 +16,7 @@
 
 ### 运行
 
-运行记录的字段见 `packages/shared/src/protocol/tasks.ts`。`state` 在进行中为 `starting`、`running` 或 `stopping`；`exitCode` 和 `signal` 是实际值，Windows 退出码保留 DWORD 值；`parameters` 保存接纳时任务的名称、命令、`cwd`、计划、时区和 `taskRevision`；`taskId` 在加载时从所在文件推导；跳过的运行没有 `startedAt`。
+运行记录的字段见 `packages/shared/src/protocol/tasks.ts`。`state` 在进行中为 `starting`、`running` 或 `stopping`；`exitCode` 和 `signal` 是实际值，Windows 退出码保留 DWORD 值；`parameters` 保存接纳时任务的名称、命令、`cwd`、计划、时区和 `taskRevision`；跳过的运行没有 `startedAt`。
 
 结束状态的判定：
 
@@ -40,14 +40,13 @@ ID 直接用作文件名，因此唯一性按 ASCII 大小写不敏感判断：�
 
 ## 调度
 
-周期计划由 Croner 计算，依赖版本见 `packages/agent/package.json`。语法校验与发生点计算在 `packages/agent/src/tasks/schedule.ts`，用户输入规则见[计划规则](../guide/scheduled-tasks.md#计划规则)。日期与星期同时指定时按逻辑或匹配，预览与实际调度必须使用相同规则。
+周期计划由 Croner 计算，依赖版本见 `packages/agent/package.json`。语法校验与发生点计算在 `packages/agent/src/tasks/schedule.ts`，用户输入规则见[计划规则](../guide/scheduled-tasks.md#计划规则)。预览与实际调度必须使用相同规则。
 
-- **时区和单次时刻。** `timezone` 用 `Intl` 校验，创建时保存，之后不随设备或浏览器的时区变化；`at` 保存为 UTC。两者的输入规则见[计划规则](../guide/scheduled-tasks.md#计划规则)。创建时单次时刻必须在未来；周期计划没有未来发生点时同样拒绝。
-- **计算下一次。** `nextOccurrence()` 返回严格晚于 `max(当前时间, lastScheduledAt)` 的第一个发生点。夏令时跳过的不存在时刻被跳过；回拨造成的重复时刻只在第一次出现时执行一次，参考点已在第二次出现的时段内时，该重复时刻视为已经过去。`lastScheduledAt` 记录最近处理过的计划时刻并持久保存，系统时钟回拨后不会再次接纳已处理的时刻。预览（`tasks.preview`）、创建校验和实际定时使用同一个函数。
-- **定时器。** 从现有任务记录选择最早的 `nextRunAt`，使用一个最多等待一秒的定时器检查墙钟截止时刻，避免 Linux 睡眠期间停止的定时器时钟延误醒后仍在未来的计划。回调接纳前确认任务仍存在、修订和下次时刻未变且 agent 未在停止。过时的回调不能启动命令，早于计划时刻触发时重新等待。
-- **不补跑。** 回调接纳时，当前时间晚于计划时刻超过 `taskLimits.lateToleranceMs`（`packages/agent/src/limits.ts`，数值见[限额](../guide/reference.md#限额)）时，记录一条 `skipped`/`missed` 运行，然后计算下一次。agent 启动或任务恢复时从当前时间向后计算，停机期间错过的周期时刻不逐条记录。
+- **时区和单次时刻。** `timezone` 用 `Intl` 校验，创建时保存，之后不随设备或浏览器的时区变化；`at` 保存为 UTC。
+- **计算下一次。** `nextOccurrence()` 返回严格晚于 `max(当前时间, lastScheduledAt)` 的第一个发生点。`lastScheduledAt` 记录最近处理过的计划时刻并持久保存，系统时钟回拨后不会再次接纳已处理的时刻。预览（`tasks.preview`）、创建校验和实际定时使用同一个函数。
+- **定时器。** 过时的回调不能启动命令，早于计划时刻触发时重新等待。
+- **不补跑。** agent 启动或任务恢复时从当前时间向后计算，停机期间错过的周期时刻不逐条记录。
 - **单次计划状态。** 定时触发后 `onceStatus` 变为 `consumed`，因重叠或名额不足而跳过时也是如此；因超时而跳过时变为 `missed`。单次时刻在暂停期间或 agent 停机期间过去时，agent 在下一次加载、修改、暂停、恢复或确认核查时把它标为 `missed`，并补记一条 `skipped`/`missed` 运行。手动运行不改变 `onceStatus`。修改计划（或修改周期计划的时区）会清除 `lastScheduledAt`，单次计划回到 `pending`。
-- **暂停。** 暂停的任务不参与定时选择，不影响正在进行的运行，也不阻止手动运行。
 
 ## 接纳与并发
 
@@ -67,12 +66,11 @@ ID 直接用作文件名，因此唯一性按 ASCII 大小写不敏感判断：�
 
 命令由 agent 配置的 Shell 以非交互方式执行（`packages/agent/src/tasks/process.ts`），Shell 的选择和参数见 [agent 配置文件](../guide/reference.md#agent-配置文件)。标准输入为空，标准输出和标准错误分别通过管道读取，没有 PTY，也不进入 tmux 或 recorder。命令继承 agent 进程的用户、环境变量和凭据。用户需要知道的影响见[执行环境](../guide/scheduled-tasks.md#执行环境)。
 
-**进程集合。** Linux 和 macOS 上命令以新进程组启动（`detached`），进程组 ID 等于 Shell 的 PID。Windows 上 Job 的根进程是固定 Node 启动器，在私有隐藏控制台中先将输出代码页设为 UTF-8，再按原参数启动 PowerShell；这样在 Shell writer 初始化前确定编码，且不改变父进程或其他任务的控制台。输入代码页和 `$OutputEncoding` 保持 Shell 原生行为。怎样判断进程组或 Job 已空见[平台实现](platforms.md)（`packages/agent/src/process-group.ts`）。
+**进程集合。** Linux 和 macOS 上命令以新进程组启动（`detached`），进程组 ID 等于 Shell 的 PID。怎样判断进程组或 Job 已空见[平台实现](platforms.md)（`packages/agent/src/process-group.ts`）。
 
 **结束判定。** 一次运行在三个条件都满足后才结束：Shell 已退出；进程集合已空；两条输出管道已关闭。
 
 - 观察进程集合失败时，agent 记录诊断并继续等待，不把状态不明的进程集合当作已结束，运行名额一直占用。
-- 进程集合结束后，输出管道最多再等 1 秒。Linux 和 macOS 上脱离进程组的后代进程仍持有管道时，agent 关闭自己的读取端，在 `output.error` 中记录输出不完整，然后完成这次运行。
 
 **停止。** `runs.stop` 把运行状态设为 `stopping` 并保存后返回，不等待进程结束。Linux 和 macOS 向进程组发送 SIGTERM，经过 `taskLimits.stopGraceMs` 仍未结束时发送 SIGKILL。Windows 直接终止整个 Job。进程集合结束后运行记为 `stopped`/`requested_stop`。任务没有默认的运行时长上限，输出超过上限也不会终止命令。
 
@@ -92,7 +90,7 @@ JSON 按 [JSON 状态](agent-lifecycle.md#目录与权限)的规则原子写入�
 
 **启动加载。** agent 在开放任务 RPC 和设置定时器之前完成以下步骤：
 
-1. 读取全部 `*.json`。每个文件必须是普通文件，`task.id` 与文件名一致，`runs` 是数组，运行 ID 符合语法。读取全部输出文件的实际大小。
+1. 读取全部 `*.json`。读取全部输出文件的实际大小。
 2. 在保存或删除任何文件之前，规范化每个任务：输出字节数按实际文件大小重算（文件变小时标记 `truncated`）；处于 `starting`、`running` 或 `stopping` 的运行记为 `unknown`/`unconfirmed`，任务设为 `paused`，`reviewRunId` 设为这次运行的 ID；处理过期的单次计划；计算 `nextRunAt`。
 3. 保存规范化后的记录，整理历史，删除残留的 `.tmp` 文件和不属于任何记录的输出文件，然后设置定时器。
 
@@ -114,20 +112,13 @@ JSON 按 [JSON 状态](agent-lifecycle.md#目录与权限)的规则原子写入�
 留存、输出容量及并发由 agent 配置文件的 `limits` 控制，配置项与数值见[限额](../guide/reference.md#限额)。这里说明调整和回收的后果。
 
 - **按任务整理。** 运行结束、接纳新运行、修改、暂停、恢复和确认核查之后，agent 只保留该任务最新的 `taskHistoryRuns` 条已结束运行，更早的记录连同输出文件一起删除。进行中的运行和 `reviewRunId` 对应的运行不计入、不删除。
-- **输出写入。** 写入前先按两个上限预留字节，超出部分丢弃并设置 `truncated`，命令继续运行，管道继续读取。
-- **跨任务腾空间。** 启动新运行前，agent 可能按接纳时间从旧到新删除其他任务的已结束运行及其输出，只删除不在核查中的记录。目标是为新运行在单次和全设备输出上限内腾出空间；如果全部可删除的输出仍不能达到目标，则一条也不删，新运行的输出可能被截断，甚至一字节也写不进去。具体计算见 `packages/agent/src/tasks/index.ts` 的 `makeOutputRoom()`。
+- **跨任务腾空间。** 启动新运行前，agent 可能按接纳时间从旧到新删除各任务（含本任务）的已结束运行及其输出，只删除不在核查中的记录。目标是为新运行在单次和全设备输出上限内腾出空间；如果全部可删除的输出仍不能达到目标，则一条也不删，新运行的输出可能被截断，甚至一字节也写不进去。
 - **调低上限。** 新的上限只约束之后的写入，agent 不截短已有输出文件。
 - **残留输出。** 删除运行时先改写 JSON 记录，再删除输出文件。没删掉的输出文件继续计入合计用量，并继续占用它的运行 ID，直到下一次接纳前清理成功。删除任务时输出文件删除失败，结果为 `partial`，`result` 为 `{removed:true}`。
 
 **清理失败。** 查询诊断不重新读取磁盘。`kiteline-agent doctor` 中的 `ready` 只表示任务存储加载成功；加载失败或存在其他诊断时，Scheduled Tasks 项为 `error`，退出规则见 [check 与 doctor](agent-lifecycle.md#check-与-doctor)。这些清理失败不使任务 RPC 整体停用，也不改变上述未保存事实的停止政策。
 
-- **任务 JSON。** 留存记录保存失败按被回收任务报告。任务下次保存成功时，在发布记录前解除该任务的留存保存失败；成功删除任务也会解除它。保存成功不表示留存已完成，后续回收保存再次失败时会重新登记。
-- **运行输出。** 输出删除失败按运行报告，两流输出实际清理完成后才解除该运行的失败和 ID 占用。
-- **启动临时文件。** 本次启动清理 `.tmp` 文件失败时，保留路径和原因。该诊断由新 agent 实例重新加载时确认；外部修复路径不会直接改变当前实例的诊断。
-
 **读取输出。** `runs.output` 从指定偏移读取一个流，单次最多 `taskLimits.outputReadBytes`（`packages/agent/src/limits.ts`）。片段末尾不完整的 UTF-8 字符留到下一次读取。偏移超过当前文件长度，或输出文件已不存在时，从 0 开始返回，调用方应替换该流已显示的内容。响应中的 `finished` 表示输出已经停止增长，与命令是否成功无关。运行记录跨 agent 重启保留，但会按上述规则删除，`not_found` 不能证明某次运行从未发生。
-
-网页按流保留原始字节偏移，跨片处理控制序列，追加清理后的文本；复制使用同一份正文。只有输出已停止增长且已读完存储字节时才结束处理，即使末片为空，也要清除未结束的控制序列；终态但尚有未读字节时继续读取。输出重置时同时清除该流的旧正文和未结束序列。清理不改变原始偏移，不模拟终端光标或覆盖行为，CR 仍作为文本保留。
 
 ## server 摘要
 

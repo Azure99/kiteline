@@ -17,6 +17,8 @@ interface ReadOptions extends WriteOptions {
   truncate?: boolean;
   allowedCodes?: number[];
 }
+// Inherited values would redirect repository discovery or change pathspec matching, so Git
+// could act on a different repository or paths than the one the agent resolved.
 const repositoryEnvironment = new Set([
   "GIT_DIR",
   "GIT_WORK_TREE",
@@ -111,6 +113,7 @@ async function runGit(
       delete env[name];
   const command = [
     "--no-pager",
+    // Reads must not refresh the index, or our own reads would raise workspace change events.
     ...(request.kind === "read" ? ["--no-optional-locks", "-c", "color.ui=false"] : []),
     ...args,
   ];

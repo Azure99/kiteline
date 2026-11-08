@@ -309,6 +309,7 @@ export class Control {
     if (match) {
       let code: number | null;
       if (process.platform === "win32") {
+        // When publication succeeds, the wrapper writes the full DWORD status before exiting.
         try {
           code = readFileSync(sessionFiles(dirname(this.options.socket)).paneExit).readUInt32LE();
         } catch (error) {

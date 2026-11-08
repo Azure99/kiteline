@@ -188,6 +188,7 @@ export async function status(
       try {
         info = await lstat(join(repo.rootPath, entry.path));
       } catch (error) {
+        // The path may vanish after Git lists it; any other lstat failure fails the whole page.
         const code = (error as NodeJS.ErrnoException).code;
         if (code !== "ENOENT" && code !== "ENOTDIR") throw error;
         entry.types.worktree = "absent";

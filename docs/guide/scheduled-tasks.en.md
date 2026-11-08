@@ -10,11 +10,11 @@ Create tasks in “Scheduled Tasks”. The owning device cannot change after sav
 
 Common intervals are converted to Cron expressions in the schedule time zone; see [Schedule rules](#schedule-rules). Previewed run times use the browser's time zone, which may differ from the schedule time zone.
 
-The working directory must already exist on the device. It is checked when creating a task or changing that directory. If it is later deleted or moved, the run fails with “Command could not start”.
+The working directory must already exist on the device and be entered as an absolute path. It is checked when creating a task or changing that directory. If it is later deleted or moved, the run fails with “Command could not start”.
 
 ### Edit and delete
 
-Saving submits only changed fields. An active run keeps the command and working directory it started with; edits take effect on the next run.
+An active run keeps the command and working directory it started with; edits take effect on the next run.
 
 If another client changes the task after you open the form, saving fails and keeps your input. Read and check the current definition before saving again. If a connection interruption leaves the save result unclear, query the task ID provided in the form instead of submitting again.
 
@@ -66,7 +66,7 @@ Exit code 0 produces “Succeeded”. A nonzero exit produces “Failed” with 
 - **Run now.** Closing the browser or CLI does not stop the run.
 - **Concurrency.** Each task can have only one run at a time, and each device has a simultaneous-run limit (see [Limits](reference.en.md#limits)). If these conditions are not met, “Run now” reports “The resource is busy.” Scheduled runs are not queued; they are recorded as “Skipped” with “Previous run was still active” or “Device run capacity was reached”.
 - **Pause and resume.** “Pause schedule” stops future scheduled runs without affecting an active run. “Run now” remains available while paused. “Resume schedule” recalculates the next occurrence from the current time.
-- **Stop.** Stopping a run does not roll back changes already made by the command. Linux and macOS send `SIGTERM` to the entire process group, then `SIGKILL` if it has not ended after the stop grace period (see [Limits](reference.en.md#limits)). Windows immediately terminates the whole Job.
+- **Stop.** Linux and macOS send `SIGTERM` to the entire process group, then `SIGKILL` if it has not ended after the stop grace period (see [Limits](reference.en.md#limits)). Windows immediately terminates the whole Job.
 - **Normal agent shutdown.** When the agent stops through Ctrl-C, a service manager or before an upgrade, active runs stop in the same way and are recorded as “Stopped” with “Agent stopped”. Definitions and records remain, and scheduling continues when the agent starts again.
 - **No automatic retries.** Failed or skipped runs are not retried. The next scheduled occurrence proceeds normally.
 
@@ -76,11 +76,9 @@ If the result of “Run now” is unclear, first query the run ID provided on th
 
 The name, command and working directory in run details come from that run's parameter snapshot. History shows recorded exit codes and specific reasons. “Skipped” and “Command could not start” mean the command did not start; “Unknown” does not mean the command never started.
 
-Each newly opened run starts on stdout, and both tabs show the bytes actually retained for their stream. Arrow keys move tab focus; Enter or Space switches streams. Displayed and copied output is plain text with terminal control sequences removed; retained byte counts still refer to the original output. stdout and stderr are stored separately, without a shared chronological order between them.
+Displayed and copied output is plain text with terminal control sequences removed; retained byte counts still refer to the original output. stdout and stderr are stored separately, without a shared chronological order between them.
 
-New output does not pull you to the end while you scroll up or select text. Switching streams preserves each reading position; scroll to the bottom or click “Back to latest” to follow new output again. Partial output retention and output-processing errors have separate notices, with diagnostics retained for errors. Assess these separately from the command's exit result.
-
-When a device is offline, content already read in an open detail view remains readable. Newly opened task details and output cannot be read until the device is online again.
+Partial output retention and output-processing errors have separate notices, with diagnostics retained for errors. Assess these separately from the command's exit result.
 
 Output and records have retention limits; see [Limits](reference.en.md#limits) for values:
 
@@ -109,7 +107,7 @@ You can also delete a task that needs review. Its deletion confirmation includes
 
 If the agent cannot read files under `tasks/` at startup, the device's task feature shows “Scheduled task storage is unavailable on this device.” The agent log identifies the failing file in a message beginning `Scheduled task storage:`. You can also run `kiteline-agent doctor` on that device and read the Scheduled Tasks diagnosis. Terminals, files and Git remain available. Follow the diagnosis to repair or move the failing file, then restart the agent.
 
-Scheduled Tasks also reports specific failures to save retention records, delete run output, or clean up startup temporary files. These errors do not disable all task operations. A retention save failure belongs to the task being reclaimed, including when another task needs room for a new run. Repair the problem using the task, run ID, and path in the diagnosis. The task's next successful save, such as an update or pause, or successful deletion clears its retention save failure. Later admission of a new run attempts to remove residual output; successful cleanup clears that run's diagnosis and releases its ID. Startup `.tmp` cleanup failures require an agent restart to confirm recovery. Repairing or deleting files externally does not immediately clear the current diagnosis.
+Scheduled Tasks also reports specific failures to save retention records, delete run output, or clean up startup temporary files. These errors do not disable all task operations. Repair the problem using the task, run ID, and path in the diagnosis. Startup `.tmp` cleanup failures require an agent restart to confirm recovery.
 
 ## Command line
 
@@ -141,11 +139,7 @@ Task and run IDs stay unchanged throughout their records' lifetimes. Keep IDs fr
 | 2    | Argument parsing failed, or the error code is `invalid_argument` (including errors returned by the local agent).                                                  |
 | 3    | The outcome is unknown. This takes precedence over other error categories. Query the output's `taskId` or `runId` instead of immediately resending the operation. |
 
-See [kiteline-agent commands](reference.en.md#kiteline-agent-commands) for Windows invocation forms. To read the JSON list in PowerShell:
-
-```powershell
-& (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File (Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'kiteline-agent/kiteline-agent.ps1') schedule list --json | ConvertFrom-Json
-```
+See [kiteline-agent commands](reference.en.md#kiteline-agent-commands) for Windows invocation forms.
 
 ### Let an AI CLI manage tasks
 

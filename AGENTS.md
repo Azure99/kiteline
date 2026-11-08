@@ -31,7 +31,7 @@ Use two-space indentation, double quotes, semicolons, and Prettier's 100-column 
 
 ## Testing Guidelines
 
-Vitest test locations are defined in [vitest.config.ts](vitest.config.ts); `packages/web/test/*.typecheck.ts` are checked by `pnpm typecheck`. Add focused behavior tests for changed contracts. Run `pnpm test` after native and package builds, with Git >=2.23; target files with `pnpm test packages/agent/test/git-read.test.ts`. See [GitHub Actions](docs/development/release.md#github-actions) for CI coverage. Check UI changes in current Chrome and Chromium 97 at desktop/mobile sizes; verify terminal input on Android Chrome. For installer/native changes, test final [release packages](docs/development/release.md) on affected platforms.
+Vitest test locations are defined in [vitest.config.ts](vitest.config.ts); `packages/web/test/*.typecheck.ts` are checked by `pnpm typecheck`. Add focused behavior tests for changed contracts. Run `pnpm test` after `pnpm native:build` and `pnpm build`, with Git >=2.23; target files with `pnpm test packages/agent/test/git-read.test.ts`. See [GitHub Actions](docs/development/release.md#github-actions) for CI coverage. Check UI changes in current Chrome and Chromium 97 at desktop/mobile sizes; verify terminal input on Android Chrome. For installer/native changes, test final [release packages](docs/development/release.md) on affected platforms.
 
 ## Commit & Pull Request Guidelines
 
@@ -39,9 +39,13 @@ Use English Conventional Commit subjects, e.g. `fix(agent): reject unknown CLI a
 
 ## Documentation
 
-Update affected contracts and existing bilingual user guides when behavior, commands, or configuration changes.
+Most changes need no documentation change. Before adding a sentence, decide where the fact belongs; if it fits none of the places below, leave it out.
 
-- Focus design docs on contracts, invariants, and reasons that help maintainers make changes.
-- Prefer one maintained source for facts and link to it instead of copying implementation lists or values. Preserve essential context, license notices, and source attribution.
-- Write guides for actions and decisions: keep prerequisites, steps, and non-obvious consequences; omit self-evident UI narration.
-- Prefer explaining a reason near the code when it applies only to that local implementation.
+- **User guides** (`README`, `docs/guide/`) help a reader act or decide. Change them when a prerequisite, command, option, configuration value, limit, or error message changes, or when a consequence would surprise the reader: data loss, security exposure, something that cannot be undone. Do not describe what the interface already shows (control locations, keyboard and focus behavior, layout thresholds, timings) or how a feature is implemented.
+- **Design docs** (`docs/design/`) hold what a maintainer cannot learn from one file: contracts between components, which component owns each piece of state, invariants a change must preserve, and the reason for a trade-off. Do not restate what a single module does, list its functions, or copy its constants; link to the source.
+- **Code comments** hold a non-obvious reason that applies to one implementation: one or two lines, in English, next to the code. Self-explanatory code gets neither a comment nor a doc sentence.
+- **Tests** hold exact behavior. A threshold, ordering, or edge case that must not regress belongs in a test, not in prose.
+
+State each fact once and link to it; [the reference](docs/guide/reference.md) owns commands, environment variables, limits, and file locations. Say what the software does not do only when the reader would otherwise act wrongly. Keep license notices and source attribution.
+
+When a change makes existing text wrong, fix it; when it makes text unnecessary, delete it. Keep each guide aligned with its `.en.md` counterpart. The web app links to guide headings (search `docs/guide/` in `packages/web/src/`); update those links when renaming a heading or moving a section.

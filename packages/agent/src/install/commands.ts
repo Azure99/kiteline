@@ -395,6 +395,7 @@ async function uninstall({
   let { dataDir, runDir } = await installationPaths(installation);
   let externalRun = false;
   if (purge) {
+    // Resolve once: locking, confirmation, containment checks and deletion share these paths.
     const actual = new Map<string, string>();
     for (const path of new Set([dataDir, runDir])) {
       const info = await lstat(path).catch((error) => {
@@ -445,6 +446,7 @@ async function uninstall({
     await cleanup(errors, unixInstallationLayout.useFile, () => use.close());
   }
   if (!errors.length && purge) {
+    // The state lock is released by now; rmdir only, so data written since then is not deleted.
     if (use.stateLocked) await cleanup(errors, dataDir, () => rmdir(dataDir));
 
     // No product mutation may follow the removal of this management-lock pathname.

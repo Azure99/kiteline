@@ -16,6 +16,11 @@ overrides:
   gitdiff-parser: 0.3.1
 
 patchedDependencies:
+  # Backports xterm.js#6235; lib/addon-serialize.js and its map are rebuilt from the original
+  # map's embedded sources plus the fix, bundled with rolldown with UnderlineStyle inlined.
   "@xterm/addon-serialize@0.15.0-beta.301": packages/terminal-recorder/patches/@xterm__addon-serialize@0.15.0-beta.301.patch
+  # Among its fixes: repaint old rows when the selection clears, clamp selection reads to cols (alt
+  # buffer may keep wider cells after shrinking); `!` in Event.ts passes noUncheckedIndexedAccess.
   "@xterm/xterm@6.1.0-beta.304": packages/web/patches/@xterm__xterm@6.1.0-beta.304.patch
+  # Keeps `host` for TLS after CONNECT so a trusted IP-only certificate is not checked as localhost.
   https-proxy-agent@9.1.0: packages/agent/patches/https-proxy-agent@9.1.0.patch

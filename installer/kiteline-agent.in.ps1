@@ -506,6 +506,8 @@ import(url.pathToFileURL(process.argv[1]).href).catch((error) => {
             $movedNew = $false
             $movedOld = $false
             $publishedNew = $false
+            # Undo only the moves that completed; rewrite the old entry only if the new one was
+            # published, so an unpublished upgrade keeps the original entry's file identity.
             try {
                 [IO.Directory]::Move($Program, $previous)
                 $movedOld = $true
@@ -618,6 +620,8 @@ import(url.pathToFileURL(process.argv[1]).href).catch((error) => {
             catch {
                 throw [IO.IOException]::new("Program entry points and installation record removed, but cleanup of previous program files failed at ${previous}: $($_.Exception.Message)", $_.Exception)
             }
+            # Release each lock before deleting its file, and the management lock last, so no other
+            # maintenance can start before the purge has finished.
             if ($Purge) {
                 $useLease.Dispose()
                 $useLease = $null

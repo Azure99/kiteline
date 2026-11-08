@@ -112,6 +112,7 @@ export async function listeningPorts(signal: AbortSignal): Promise<ListeningPort
       if (error) throw error;
     } catch (reason) {
       signal.throwIfAborted();
+      // Linux omits /proc/net/tcp6 when IPv6 is disabled, which means no IPv6 listeners.
       if (!(family === "ipv6" && (reason as NodeJS.ErrnoException).code === "ENOENT")) throw reason;
     } finally {
       lines.close();

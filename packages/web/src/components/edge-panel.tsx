@@ -68,6 +68,7 @@ export function EdgePanel({
                       const target =
                         typeof returnFocus === "function" ? returnFocus() : returnFocus.current;
                       const active = document.activeElement;
+                      // Leave focus alone when another drawer is open or the user moved it out.
                       if (
                         document.querySelector('.edge-panel[data-mobile="true"][data-open]') ||
                         (active &&
@@ -150,6 +151,7 @@ function WidthHandle({
   const updateSize = useEffectEvent(() => {
     const next = measure();
     setSize(next);
+    // Adopt the constrained width so a narrowed window does not spring back when widened again.
     if (requestedWidth !== undefined && next.current + 0.5 < requestedWidth) onChange(next.current);
   });
   useLayoutEffect(() => {

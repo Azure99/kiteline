@@ -80,6 +80,7 @@ export class CursorTable<T> {
     clearTimeout(cursor.timer);
     cursor.controller.abort(new AppError("cancelled", this.messages.ended));
     cursor.closing ??= (async () => {
+      // Return the budget slot only after the handle closes, so the cursor limit bounds open handles.
       await cursor.reading;
       await this.closeValue(cursor.value);
       this.entries.delete(id);

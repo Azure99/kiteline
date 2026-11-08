@@ -39,7 +39,7 @@ On Linux and macOS, the public launcher is `/usr/local/bin/kiteline-agent`; use 
 & (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File (Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'kiteline-agent/kiteline-agent.ps1') doctor
 ```
 
-Both entries relax execution policy only for the child process without changing persistent settings; Group Policy still takes precedence. Direct `& (Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'kiteline-agent/kiteline-agent.ps1')` invocation is for console interaction, requires a policy that permits local scripts, and does not send output into the PowerShell pipeline. Use the full invocation above for capture, pipelines or redirection.
+Use the full invocation above for capture, pipelines or redirection.
 
 Running `kiteline-agent` with no arguments, or with `--help` or `-h` alone, prints a subcommand summary; `--version` alone prints its version. Unknown top-level commands or extra arguments to root help/version, `check`, `run`, or `doctor` report an error and exit with a nonzero status. Only `schedule` and its subcommands provide `--help`. Other subcommands have no `--help`; their arguments are listed below.
 
@@ -62,12 +62,12 @@ The project user is the account recorded at installation. Other accounts receive
 
 ### Installation and maintenance
 
-For procedures, prerequisites and data effects, see [Manual installation](devices.en.md#manual-installation), [Upgrade the agent](devices.en.md#upgrade-the-agent) and [Uninstall](devices.en.md#uninstall).
+For procedures, prerequisites and data effects, see [Manual installation](devices-advanced.en.md#manual-installation), [Upgrade the agent](devices.en.md#upgrade-the-agent) and [Uninstall](devices.en.md#uninstall).
 
 ### Binding and running
 
 - `check` checks bundled components, [system prerequisites](devices.en.md#supported-systems-and-prerequisites), data and runtime directory writability, and runtime path length. Success prints `Setup checks passed.` Otherwise it lists failures and exits nonzero.
-- `bind --server URL` registers this machine as a device with a single-use binding code. Enter it at `Binding code: ` or supply one line on stdin. `URL` must use `http://` or `https://`; the agent stores only the scheme, host and port. The device name comes from its hostname. `--if-unbound` exits with an error if already bound, preserving the existing identity.
+- `bind --server URL` registers this machine as a device with a single-use binding code. Enter it at `Binding code: ` or supply it on stdin. `URL` must use `http://` or `https://`; the agent stores only the scheme, host and port. The device name comes from its hostname. `--if-unbound` exits with an error if already bound, preserving the existing identity.
 - `run` starts the agent in the foreground, connects to the server and begins scheduled-task execution. Linux/macOS stop on `SIGINT`, `SIGTERM` or `SIGHUP`; Windows stops on Ctrl-C or Ctrl-Break. Normal shutdown ends all terminal sessions and active scheduled-task runs. For persistent background use, see [Run in the background](devices.en.md#run-in-the-background).
 - `doctor` reports `[ok]`, `[warn]` and `[error]` checks, exiting with status 1 if any is `[error]`. With an agent running, it reports that agent's actual environment: version, server connection, recorder, scheduled tasks, Git configuration sources and `SSH_AUTH_SOCK`. Without one, it checks only installation and configuration files and reports `Runtime environment has not been checked`.
 
@@ -113,7 +113,7 @@ The `compose.yaml` release attachment pins the default `KITELINE_VERSION` to tha
 | `KITELINE_AGENT_HOME`    | Linux/macOS: `<project user HOME>/.local/share/kiteline-agent`; Windows: `%LOCALAPPDATA%\kiteline-agent` | Agent data directory |
 | `KITELINE_AGENT_RUN_DIR` | `<agent data directory>/run`                                                                             | Runtime directory    |
 
-Directories are resolved in this order, with the first value found taking precedence:
+The installed command resolves directories in this order, with the first value found taking precedence; a command run from the unpacked directory uses only item 1, with defaults based on its own `HOME` on Linux/macOS or the current user's LocalAppData on Windows:
 
 1. Process environment variables `KITELINE_AGENT_HOME` and `KITELINE_AGENT_RUN_DIR`.
 2. `/etc/kiteline-agent.env` on Linux/macOS; directories written by `install` in `installation.json` on Windows.
@@ -137,13 +137,13 @@ Each key may appear at most once. The entire line must be `KEY="/absolute/path"`
 
 ### Other variables
 
-| Variable                                                                 | Purpose                                                                                                                                                                            |
-| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY` and lowercase forms | Outbound proxies for agent-to-server connections; see [Outbound proxies and certificates](devices.en.md#outbound-proxies-and-certificates)                                         |
-| `NODE_EXTRA_CA_CERTS`                                                    | CA certificate file for a server certificate issued by a private CA, on Linux/macOS only; see [Outbound proxies and certificates](devices.en.md#outbound-proxies-and-certificates) |
-| `LANG`, `LC_ALL`, `LC_CTYPE`                                             | `check` and `doctor` require UTF-8                                                                                                                                                 |
-| `PATH`                                                                   | Used to locate Git, SSH and Windows `pwsh.exe`                                                                                                                                     |
-| `SSH_AUTH_SOCK`                                                          | On Linux/macOS, `doctor` checks that it points to an accessible socket; Git uses it for SSH agent access                                                                           |
+| Variable                                                                 | Purpose                                                                                                                                                                                     |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY` and lowercase forms | Outbound proxies for agent-to-server connections; see [Outbound proxies and certificates](devices-advanced.en.md#outbound-proxies-and-certificates)                                         |
+| `NODE_EXTRA_CA_CERTS`                                                    | CA certificate file for a server certificate issued by a private CA, on Linux/macOS only; see [Outbound proxies and certificates](devices-advanced.en.md#outbound-proxies-and-certificates) |
+| `LANG`, `LC_ALL`, `LC_CTYPE`                                             | `check` and `doctor` require UTF-8                                                                                                                                                          |
+| `PATH`                                                                   | Used to locate Git, SSH and Windows `pwsh.exe`                                                                                                                                              |
+| `SSH_AUTH_SOCK`                                                          | On Linux/macOS, `doctor` checks that it points to an accessible socket; Git uses it for SSH agent access                                                                                    |
 
 Terminal sessions and scheduled tasks inherit the agent process's environment. Restart the agent after environment changes.
 
@@ -227,7 +227,7 @@ By default, a source is the TCP peer address, so requests through one reverse-pr
 | Disk search results                | 1,000 entries                                                       | Fixed                       |
 | Search duration                    | 10 seconds; returns matches found before timeout                    | `searchTimeout`             |
 
-Content search counts matching lines; file-name search counts files. Name lookups display deduplicated positions.
+Content search counts matching lines; file-name search counts files.
 
 Opening text, saving, image previews, uploads and downloads all consume concurrent file-transfer slots.
 
@@ -269,8 +269,6 @@ Writes include stage, unstage, discard, commit, branch operations, fetch, pull, 
 
 General device operations include file listing and renaming, Git reads, scheduled-task management and local CLI requests. Copy, move and delete have no overall deadline.
 
-RPC requests and results use a 1 MiB budget for the complete JSON envelope. Oversized results return `limit_exceeded` under the [result rules](../design/protocol.md#结果语义).
-
 ## File locations
 
 ### Agent on Linux and macOS
@@ -290,7 +288,7 @@ See [Uninstall](devices.en.md#uninstall) for files retained after removal. If up
 
 ### Agent on Windows
 
-`%ProgramFiles%` and `%ProgramData%` in this table refer to Windows system directories. Installation and command entries query them through system APIs; changing the environment variables does not change the installation location.
+`%ProgramFiles%` and `%ProgramData%` in this table refer to Windows system directories.
 
 | Path                                                       | Content                                                     |
 | ---------------------------------------------------------- | ----------------------------------------------------------- |
@@ -329,7 +327,7 @@ On Linux and macOS, new data directories have permissions `0700`; existing direc
 | `SESSION_ID/tmux.conf` | Session's tmux configuration                                     |
 | `SESSION_ID/pane.json` | Session startup arguments and environment variables (Windows)    |
 
-The agent deletes a session's `SESSION_ID/` directory when it ends. On Windows, `agent.lock` remains after the agent stops; local commands connect through a named pipe.
+The agent deletes a session's `SESSION_ID/` directory when it ends.
 
 ### Server
 
@@ -361,6 +359,7 @@ Original errors are in English; this table quotes their key parts.
 | `Setup credentials are invalid or expired`                                                          | Token mistyped or expired                                                                                                  | Generate another; see [Reset the setup token or password](server.en.md#reset-the-setup-token-or-password)                        |
 | `Already initialized`                                                                               | Owner password already set; `setup-token` is only available beforehand                                                     | Use `reset-password`                                                                                                             |
 | `Lock file is already being held`                                                                   | A server or agent already uses the same data directory                                                                     | Stop the running process first                                                                                                   |
+| `Agent … directory is already locked` (Windows)                                                     | An agent already uses the same data or runtime directory                                                                   | Stop the running process first                                                                                                   |
 | 429 `Too many attempts; try again later`                                                            | Attempts exceed the per-minute limit                                                                                       | Wait a minute before retrying                                                                                                    |
 | 400 `Expected one valid X-Real-IP from the trusted proxy`                                           | A trusted direct proxy did not supply one valid client IP                                                                  | Set the proxy’s `X-Real-IP`; see [proxy setup](server.en.md#https-and-reverse-proxies)                                           |
 | `Binding code is invalid, expired, or already used`                                                 | Binding code expired or used                                                                                               | Generate a new command in the web app; see [Connect using the web command](devices.en.md#connect-using-the-web-command)          |
@@ -374,6 +373,9 @@ Original errors are in English; this table quotes their key parts.
 | `git: spawn git ENOENT`                                                                             | Git absent from startup `PATH`                                                                                             | Install Git or fix `PATH`; see [Supported systems and prerequisites](devices.en.md#supported-systems-and-prerequisites)          |
 | `git: Native executable not found in the current PATH: git`                                         | Git absent from Windows startup `PATH`                                                                                     | Install Git or fix `PATH`                                                                                                        |
 | `Agent installation is busy`; Windows: `Installation is busy`                                       | A `kiteline-agent` process still uses the installation during upgrade/uninstall                                            | Stop `run` and services, wait for other commands to finish, then retry; see [Upgrade the agent](devices.en.md#upgrade-the-agent) |
+| `Agent installation is being changed`                                                               | This installation is being upgraded or uninstalled                                                                         | Wait for the maintenance command to finish, then retry                                                                           |
+| `Another installation operation is running`                                                         | Another install, upgrade or uninstall command is running                                                                   | Wait for it to finish, then retry                                                                                                |
+| `Installation lock changed; invoke the current launcher again`                                      | The installation was fully uninstalled or reinstalled while the command was starting                                       | Run the command again                                                                                                            |
 | `… uses the installation configuration`                                                             | Install-command shell has `KITELINE_AGENT_HOME` or `KITELINE_AGENT_RUN_DIR` set                                            | Unset both; see [Agent environment variables](#agent-environment-variables) for customization                                    |
 | Local command reports `connect ENOENT …/agent.sock` or `connect ECONNREFUSED …/agent.sock`          | Agent stopped (`ECONNREFUSED` indicates a stale socket after abnormal exit), or command resolves another runtime directory | Start the agent; match the user and directories used by `run`                                                                    |
 | `Device channel limit reached`                                                                      | Simultaneous terminal displays, file transfers and development requests reach the device limit                             | Close unused terminal displays and pages                                                                                         |
@@ -384,7 +386,7 @@ Original errors are in English; this table quotes their key parts.
 
 Forced termination or an agent crash, including directly closing a foreground agent's PowerShell window on Windows, does not clean up terminal sessions:
 
-- Linux/macOS: session programs keep running, and a new agent does not take them over. With the example systemd unit or a container whose main process is the agent, such as the example in [Run in a container](devices.en.md#run-in-a-container), they end with the agent. They remain with foreground execution or launchd.
+- Linux/macOS: session programs keep running, and a new agent does not take them over. With the example systemd unit or a container whose main process is the agent, such as the example in [Run in a container](devices-advanced.en.md#run-in-a-container), they end with the agent. They remain with foreground execution or launchd.
 - Windows: session programs end with the agent, but session directories remain in the runtime directory. Their `pane.json` contains the agent's complete environment, potentially including sensitive information such as tokens.
 
 Before cleanup, confirm no agent is using this runtime directory: `kiteline-agent terminal list` should report `connect ENOENT` or `connect ECONNREFUSED`.

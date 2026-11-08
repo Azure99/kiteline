@@ -16,7 +16,7 @@ server 用路径代理把浏览器请求转给设备上监听本机端口的开�
 
 工作台的端口入口和终端本地 HTTP 链接由 `packages/web/src/lib/device-service.ts` 转换为设备代理链接；接受的本地主机形式及前缀处理以 `deviceServiceLink()` 为准。
 
-agent 只连接自己网络命名空间里的回环地址：先连 `127.0.0.1:<port>`，这次连接在建立前失败时再试一次 `[::1]:<port>`，不查询 DNS（`packages/agent/src/http/channels.ts`）。连接建立后不更换地址，也不重发请求。同一端口上 IPv4 和 IPv6 是两个不同程序时，代理总是到达 IPv4 那一个。监听 `0.0.0.0` 或 `::` 的服务可以通过回环地址到达；只监听其他网卡地址的服务到达不了。容器内 agent 能到达的范围见[在容器中运行](../guide/devices.md#在容器中运行)。
+agent 只连接自己网络命名空间里的回环地址：先连 `127.0.0.1:<port>`，这次连接在建立前失败时再试一次 `[::1]:<port>`，不查询 DNS（`packages/agent/src/http/channels.ts`）。同一端口上 IPv4 和 IPv6 是两个不同程序时，代理总是到达 IPv4 那一个。监听 `0.0.0.0` 或 `::` 的服务可以通过回环地址到达；只监听其他网卡地址的服务到达不了。容器内 agent 能到达的范围见[在容器中运行](../guide/devices-advanced.md#在容器中运行)。
 
 ## 请求转发
 
@@ -61,9 +61,9 @@ agent 只连接自己网络命名空间里的回环地址：先连 `127.0.0.1:<p
 
 ## 连接寿命
 
-- server 的 `requestTimeout` 为 0，代理请求没有总时长限制。唯一的时限在准备阶段：从创建通道到 agent 发出 `ready`，超过 `interactionTimeout`（`packages/shared/src/protocol/index.ts`）返回 504。
+- server 的 `requestTimeout` 为 0，代理请求没有总时长限制。唯一的时限在准备阶段：从创建通道到 agent 发出 `ready`，超过 `interactionTimeout`（`packages/shared/src/protocol/limits.ts`）返回 504。
 - 进入字节流阶段后，代理不设空闲超时，文件通道的空闲时限和终端的确认规则都不适用于它。没有数据往来的 WebSocket 和 SSE 可以一直保持。
-- server 对经过 Upgrade 的浏览器 socket、agent 对数据 WebSocket 和本地 TCP 连接开启 TCP keepalive，间隔为 `tcpKeepAliveDelayMs`（`packages/shared/src/protocol/index.ts`）。keepalive 只用于发现已经断开的对端，不会关闭安静但存活的连接。
+- server 对经过 Upgrade 的浏览器 socket、agent 对数据 WebSocket 和本地 TCP 连接开启 TCP keepalive，间隔为 `tcpKeepAliveDelayMs`（`packages/shared/src/protocol/limits.ts`）。keepalive 只用于发现已经断开的对端，不会关闭安静但存活的连接。
 - 每个代理请求从创建通道到结束都占用设备的一个数据通道名额（`serverLimits.channelsPerDevice`，`packages/server/src/limits.ts`），终端显示和文件读写的数据通道共用这个上限，长时间打开的 WebSocket 和 SSE 一直占用。名额用满时新请求返回 429，已有连接不受影响。数值见[限额](../guide/reference.md#限额)。
 
 连接在以下情况结束：
@@ -77,7 +77,7 @@ agent 只连接自己网络命名空间里的回环地址：先连 `127.0.0.1:<p
 | 设备控制连接断开或被替换、设备被删除        | 该连接上的所有代理通道被关闭                                                 |
 | agent 停止                                  | agent 关闭所有代理通道                                                       |
 
-已经按 `Content-Length` 或分块编码完整结束的响应，不会因为随后的关闭被改判为失败。关闭代理连接不会停止开发服务进程，也不会撤销上游已经完成的操作；WebSocket 和 SSE 断开后由项目自己的客户端决定是否重连。代理不自动重发请求，原因见[结果语义](protocol.md#结果语义)。
+关闭代理连接不会停止开发服务进程，也不会撤销上游已经完成的操作；WebSocket 和 SSE 断开后由项目自己的客户端决定是否重连。代理不自动重发请求，原因见[结果语义](protocol.md#结果语义)。
 
 ## 端口建议
 
@@ -89,7 +89,7 @@ agent 只连接自己网络命名空间里的回环地址：先连 `127.0.0.1:<p
 | macOS   | 系统 `/usr/sbin/netstat` 的 TCP 监听信息                                    | `*`、`127.0.0.1`、`::1`             |
 | Windows | 原生模块调用 `GetTcpTable` 和 `GetTcp6Table`（`native/windows/network.cc`） | `0.0.0.0`、`127.0.0.1`、`::`、`::1` |
 
-实现位于 `packages/agent/src/http/ports.ts`。其他 `127.x` 地址和具体网卡地址上的监听不计入。结果按端口去重、升序排列，最多返回 `agentLimits.listPageEntries` 项（`packages/agent/src/limits.ts`），超出时 `truncated` 为 true，界面显示“仅显示部分端口”。Linux 上不存在 `/proc/net/tcp6`（IPv6 未启用）时按没有 IPv6 监听处理；其他读取或解析错误使整次读取失败。
+实现位于 `packages/agent/src/http/ports.ts`。其他 `127.x` 地址和具体网卡地址上的监听不计入。结果按端口去重、升序排列，最多返回 `agentLimits.listPageEntries` 项（`packages/agent/src/limits.ts`），超出时 `truncated` 为 true。
 
 候选只反映 agent 所在网络命名空间里的监听 socket。通过 NAT 发布、在本命名空间没有监听 socket 的端口不会出现；手工输入端口始终可用。
 
@@ -114,10 +114,9 @@ server 在向浏览器发出响应头之前遇到的错误按下表返回（映�
 - 502 包括本地端口拒绝连接、本地服务在请求前关闭连接、返回非 HTTP 数据或无效状态码。
 - 页面导航指带 `Sec-Fetch-Mode: navigate` 或 `Sec-Fetch-Dest: document` 的 GET 请求。登录成功后，工作台只在 `returnTo` 是同源的 `/proxy/…` 或 `/absproxy/…` 路径时跳回原地址（`packages/web/src/lib/login-return.ts`），其他情况见[导航与上下文](interaction.md#导航与上下文)。
 - 426 依据的版本记录只在 server 内存中（`Connections.releases`）。server 重启后，在 agent 再次尝试连接之前，未连接的设备返回 503。版本一致规则见[契约来源](protocol.md#契约来源)。
-- 页面导航得到英文 HTML 错误页，显示端口和实际错误；只有登录、设备权限及适用的 Origin 检查通过且找到设备后，才显示该设备的名称，名称与错误文本均作 HTML 转义。页面提供按原 deviceId 返回设备详情及重新加载的操作；其他请求得到 `text/plain` 消息。连接类错误会提示检查端口、监听地址和容器网络。所有错误响应带 `Cache-Control: no-store` 和 `Connection: close`；升级请求的错误响应直接写在原始 socket 上。
+- 页面导航得到英文 HTML 错误页，显示端口和实际错误；只有登录、设备权限及适用的 Origin 检查通过且找到设备后，才显示该设备的名称。其他请求得到 `text/plain` 消息。所有错误响应带 `Cache-Control: no-store` 和 `Connection: close`；升级请求的错误响应直接写在原始 socket 上。
 - 响应头已经发出或 WebSocket 已经升级后，任何失败都只能断开连接。
 - 上游自己返回的状态码和正文（包括应用自己的 401 和 5xx）原样转发，不属于上表。
-- 管理接口使用另一张映射表（`unsupported` 为 400，未列出的错误码为 500），见[结果语义](protocol.md#结果语义)的错误码表。
 
 ## 安全边界
 
@@ -125,6 +124,5 @@ server 在向浏览器发出响应头之前遇到的错误按下表返回（映�
 - **路径不是隔离边界。** 所有设备、所有端口的代理页面共用一个 origin。`Path=/` 的 Cookie、localStorage、IndexedDB 和 Service Worker 在项目之间、项目与工作台之间互相可见。`Service-Worker-Allowed` 和 `Clear-Site-Data` 原样转发，项目可以注册作用于整个 origin 的 Service Worker，也可以清除包括登录 Cookie 在内的全部 Cookie，使拥有者退出登录。
 - **访问需要登录。** 复制出的地址仍要求登录会话，不是公开分享链接。退出登录、登录会话到期和删除设备都会关闭相关的代理连接；设备上的开发服务进程继续运行。
 - **目标只在设备本机。** 代理只连接 agent 所在网络命名空间的回环地址，不接受其他主机。agent 只主动发起出站连接，不监听 TCP 端口。
-- **代理不保存数据。** 请求和响应正文只以数据块经过 server 和 agent 的内存，不写入磁盘。
 
 修改代理时必须保持：登录 Cookie 既不转给上游，也不接受上游设置同名 Cookie；由 CLI 凭据认证的请求不向上游转发 `Authorization`；写请求和升级请求检查 Origin；代理请求必须登录，只通过设备当前控制连接创建的通道到达设备回环地址。

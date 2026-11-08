@@ -60,6 +60,7 @@ export class HttpChannels {
           });
           local.on("error", (error) => {
             if (this.entries.get(id) !== item) return;
+            // Fall back only before connecting; later the request may have reached the service.
             if (!connected && host === "127.0.0.1") dial("::1");
             else this.fail(id, error);
           });

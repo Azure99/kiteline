@@ -49,6 +49,7 @@ class ComposeDraft {
     if (!text || this.state.sending) return false;
     this.publish({ ...this.state, sending: true, error: undefined });
     try {
+      // Not tied to the panel: closing it must not abandon input tmux may already have received.
       const { deviceId, workspaceId, sessionId } = this.target;
       await rpc(deviceId, "sessions.send", {
         workspaceId,

@@ -190,6 +190,8 @@ export class WatchRoots {
         if (active.tree) this.stop(active.tree);
         active.metadataRoots = metadataRoots;
         const ignored = (path: string) => ignoreTree(active.root, metadataRoots, path);
+        // macOS uses one native recursive watch instead of a descriptor per file. Linux watches
+        // directories only and receives file changes through their raw events.
         active.tree =
           process.platform === "darwin"
             ? this.startNative(active.root, ignored, new Set([id]))

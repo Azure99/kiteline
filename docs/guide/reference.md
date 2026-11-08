@@ -39,7 +39,7 @@ Linux 和 macOS 的命令入口是 `/usr/local/bin/kiteline-agent`；用 `sudo` 
 & (Join-Path $PSHOME $(if ($PSVersionTable.PSVersion.Major -eq 5) { 'powershell.exe' } else { 'pwsh.exe' })) -NoProfile -ExecutionPolicy Bypass -File (Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'kiteline-agent/kiteline-agent.ps1') doctor
 ```
 
-两种入口都只为子进程放宽执行策略，不修改持久设置，组策略仍优先。直接用 `& (Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'kiteline-agent/kiteline-agent.ps1')` 调用只适用于控制台交互，要求执行策略允许本地脚本，而且输出不进入 PowerShell 管道；需要捕获、管道或重定向时用上面的完整调用。
+需要捕获、管道或重定向时用上面的完整调用。
 
 不带参数执行 `kiteline-agent`，或单独使用 `--help`、`-h`，会打印子命令概要；单独使用 `--version` 打印版本号。未知根命令，以及根帮助/版本选项或 `check`、`run`、`doctor` 的多余参数，都会报错并以非零状态退出。只有 `schedule` 及其子命令提供 `--help`；其他子命令没有 `--help`，参数以下表为准。
 
@@ -62,12 +62,12 @@ Linux 和 macOS 的命令入口是 `/usr/local/bin/kiteline-agent`；用 `sudo` 
 
 ### 安装与维护
 
-安装、升级和卸载的步骤、前提及数据影响分别见[手工安装](devices.md#手工安装)、[升级 agent](devices.md#升级-agent)和[卸载](devices.md#卸载)。
+安装、升级和卸载的步骤、前提及数据影响分别见[手工安装](devices-advanced.md#手工安装)、[升级 agent](devices.md#升级-agent)和[卸载](devices.md#卸载)。
 
 ### 绑定与运行
 
 - `check` 检查随包组件、[系统前提](devices.md#支持的系统与准备)、数据及运行目录是否可写，以及运行目录的路径长度。全部通过时打印 `Setup checks passed.`，否则列出失败项并以非零状态退出。
-- `bind --server URL` 用一次性绑定码把这台机器登记为设备。绑定码在终端中由 `Binding code: ` 提示输入，或从标准输入读入一行。`URL` 必须是 `http://` 或 `https://` 地址，agent 只保存其中的协议、主机和端口；设备名取主机名。`--if-unbound` 在已经绑定时报错退出，不改动已有身份。
+- `bind --server URL` 用一次性绑定码把这台机器登记为设备。绑定码在终端中由 `Binding code: ` 提示输入，或从标准输入读入。`URL` 必须是 `http://` 或 `https://` 地址，agent 只保存其中的协议、主机和端口；设备名取主机名。`--if-unbound` 在已经绑定时报错退出，不改动已有身份。
 - `run` 在前台运行 agent，连接 server 并开始执行定时任务。Linux 和 macOS 收到 `SIGINT`、`SIGTERM` 或 `SIGHUP` 时停止，Windows 收到 Ctrl-C 或 Ctrl-Break 时停止。正常停止会结束全部终端会话和正在运行的定时任务。后台常驻见[后台运行](devices.md#后台运行)。
 - `doctor` 输出 `[ok]`、`[warn]`、`[error]` 三类检查结果，有 `[error]` 时以状态 1 退出。agent 正在运行时，它报告 agent 实际的环境：版本、server 连接、recorder、定时任务、Git 配置来源和 `SSH_AUTH_SOCK`；agent 未运行时只检查安装和配置文件，并提示 `Runtime environment has not been checked`。
 
@@ -113,7 +113,7 @@ Release 附件中的 `compose.yaml` 已把 `KITELINE_VERSION` 默认值固定为
 | `KITELINE_AGENT_HOME`    | Linux、macOS：`<项目用户 HOME>/.local/share/kiteline-agent`；Windows：`%LOCALAPPDATA%\kiteline-agent` | agent 数据目录 |
 | `KITELINE_AGENT_RUN_DIR` | `<agent 数据目录>/run`                                                                                | 运行目录       |
 
-目录按以下顺序确定，先找到的生效：
+安装后的命令入口按以下顺序确定目录，先找到的生效；从解包目录运行时只使用第 1 项，默认值在 Linux 和 macOS 上基于执行命令时的 `HOME`，在 Windows 上基于当前用户的 LocalAppData：
 
 1. 进程环境变量 `KITELINE_AGENT_HOME`、`KITELINE_AGENT_RUN_DIR`。
 2. Linux 和 macOS 读取 `/etc/kiteline-agent.env`；Windows 读取安装记录 `installation.json` 中由 `install` 写入的目录。
@@ -137,13 +137,13 @@ KITELINE_AGENT_RUN_DIR="/srv/kiteline/run"
 
 ### 其他变量
 
-| 变量                                                            | 作用                                                                                                                |
-| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY`、`NO_PROXY` 及小写形式 | agent 连接 server 时使用的出站代理，见[出站代理与证书](devices.md#出站代理与证书)                                   |
-| `NODE_EXTRA_CA_CERTS`                                           | server 使用私有 CA 签发的证书时，指定 CA 证书文件（仅 Linux、macOS），见[出站代理与证书](devices.md#出站代理与证书) |
-| `LANG`、`LC_ALL`、`LC_CTYPE`                                    | `check` 和 `doctor` 要求字符集为 UTF-8                                                                              |
-| `PATH`                                                          | agent 从中查找 Git、SSH 和 Windows 的 `pwsh.exe`                                                                    |
-| `SSH_AUTH_SOCK`                                                 | Linux、macOS 上的 `doctor` 检查它指向可访问的 socket；Git 通过它使用 SSH agent                                      |
+| 变量                                                            | 作用                                                                                                                         |
+| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY`、`NO_PROXY` 及小写形式 | agent 连接 server 时使用的出站代理，见[出站代理与证书](devices-advanced.md#出站代理与证书)                                   |
+| `NODE_EXTRA_CA_CERTS`                                           | server 使用私有 CA 签发的证书时，指定 CA 证书文件（仅 Linux、macOS），见[出站代理与证书](devices-advanced.md#出站代理与证书) |
+| `LANG`、`LC_ALL`、`LC_CTYPE`                                    | `check` 和 `doctor` 要求字符集为 UTF-8                                                                                       |
+| `PATH`                                                          | agent 从中查找 Git、SSH 和 Windows 的 `pwsh.exe`                                                                             |
+| `SSH_AUTH_SOCK`                                                 | Linux、macOS 上的 `doctor` 检查它指向可访问的 socket；Git 通过它使用 SSH agent                                               |
 
 终端会话和定时任务继承 agent 进程的环境。修改环境后需要重启 agent 才生效。
 
@@ -227,7 +227,7 @@ agent 数据目录中的 `agent.json`、`connection.json`、`temporary-files.jso
 | 磁盘搜索结果         | 1,000 条                          | 固定                        |
 | 搜索时长             | 10 秒，超时返回已找到的结果       | `searchTimeout`             |
 
-正文搜索按命中行计数，文件名搜索按文件计数；名称查阅显示去重后的位置数。
+正文搜索按命中行计数，文件名搜索按文件计数。
 
 文本打开、保存、图片预览、上传和下载都占用同时进行的文件传输名额。
 
@@ -269,8 +269,6 @@ agent 数据目录中的 `agent.json`、`connection.json`、`temporary-files.jso
 
 一般设备操作包括文件列表与重命名、Git 读取、定时任务管理和本机命令行请求。复制、移动和删除没有总时限。
 
-RPC 请求和结果按完整 JSON 信封计算 1 MiB 预算；结果超限按[结果语义](../design/protocol.md#结果语义)返回 `limit_exceeded`。
-
 ## 文件位置
 
 ### Linux 和 macOS 上的 agent
@@ -290,7 +288,7 @@ RPC 请求和结果按完整 JSON 信封计算 1 MiB 预算；结果超限按[�
 
 ### Windows 上的 agent
 
-下表中的 `%ProgramFiles%` 和 `%ProgramData%` 表示 Windows 系统目录。安装和命令入口通过系统 API 查询它们，修改同名环境变量不会改变安装位置。
+下表中的 `%ProgramFiles%` 和 `%ProgramData%` 表示 Windows 系统目录。
 
 | 路径                                                       | 内容                           |
 | ---------------------------------------------------------- | ------------------------------ |
@@ -329,7 +327,7 @@ Linux 和 macOS 上，新建的数据目录权限为 `0700`，已有目录保留
 | `SESSION_ID/tmux.conf` | 该终端会话的 tmux 配置                            |
 | `SESSION_ID/pane.json` | 该终端会话的启动参数和环境变量（Windows）         |
 
-会话结束时 agent 删除它的 `SESSION_ID/` 目录。Windows 的 `agent.lock` 在 agent 停止后保留，本机命令通过命名管道连接 agent。
+会话结束时 agent 删除它的 `SESSION_ID/` 目录。
 
 ### server
 
@@ -361,6 +359,7 @@ agent 正在运行时，`kiteline-agent doctor` 会显示 server 连接状态和
 | `Setup credentials are invalid or expired`                                           | token 输错或已过期                                                                            | 生成新 token，见[重置初始化 token 与密码](server.md#重置初始化-token-与密码)     |
 | `Already initialized`                                                                | 已设置拥有者密码，`setup-token` 只能在此之前使用                                              | 用 `reset-password`                                                              |
 | `Lock file is already being held`                                                    | 同一数据目录上已有 server 或 agent 在运行                                                     | 先停止正在运行的进程                                                             |
+| `Agent … directory is already locked`（Windows）                                     | 同一数据目录或运行目录上已有 agent 在运行                                                     | 先停止正在运行的进程                                                             |
 | 429 `Too many attempts; try again later`                                             | 一分钟内尝试次数超限                                                                          | 等待一分钟后重试                                                                 |
 | 400 `Expected one valid X-Real-IP from the trusted proxy`                            | 可信直接代理没有覆盖一个有效的客户端 IP                                                       | 按[反代配置](server.md#https-与反向代理)覆盖 `X-Real-IP`                         |
 | `Binding code is invalid, expired, or already used`                                  | 绑定码已过期或已被使用                                                                        | 在网页重新生成命令，见[用网页命令接入](devices.md#用网页命令接入)                |
@@ -374,6 +373,9 @@ agent 正在运行时，`kiteline-agent doctor` 会显示 server 连接状态和
 | `git: spawn git ENOENT`                                                              | 启动环境的 `PATH` 中没有 Git                                                                  | 安装 Git 或修正 `PATH`，见[支持的系统与准备](devices.md#支持的系统与准备)        |
 | `git: Native executable not found in the current PATH: git`                          | Windows 上启动环境的 `PATH` 中没有 Git                                                        | 安装 Git 或修正 `PATH`                                                           |
 | `Agent installation is busy`；Windows 上为 `Installation is busy`                    | 升级或卸载时仍有 `kiteline-agent` 进程在使用这份安装                                          | 停止 `run` 和服务，等待其他命令结束后重试，见[升级 agent](devices.md#升级-agent) |
+| `Agent installation is being changed`                                                | 这份安装正在升级或卸载                                                                        | 等维护命令结束后重试                                                             |
+| `Another installation operation is running`                                          | 另一条安装、升级或卸载命令正在运行                                                            | 等它结束后重试                                                                   |
+| `Installation lock changed; invoke the current launcher again`                       | 命令启动期间这份安装被完整卸载或重装                                                          | 重新执行命令                                                                     |
 | `… uses the installation configuration`                                              | 执行接入命令的 Shell 中设置了 `KITELINE_AGENT_HOME` 或 `KITELINE_AGENT_RUN_DIR`               | 取消这两个变量；自定义目录的设置方法见 [agent 环境变量](#agent-环境变量)         |
 | 本机命令报 `connect ENOENT …/agent.sock` 或 `connect ECONNREFUSED …/agent.sock`      | agent 未运行（ECONNREFUSED 表示 agent 异常退出后留下了旧 socket），或命令解析到不同的运行目录 | 启动 agent；确认用户和目录与 `run` 一致                                          |
 | `Device channel limit reached`                                                       | 该设备上同时打开的终端显示、文件传输和开发服务请求达到上限                                    | 关闭不用的终端显示和页面                                                         |
@@ -384,7 +386,7 @@ agent 正在运行时，`kiteline-agent doctor` 会显示 server 连接状态和
 
 agent 被强制结束或崩溃时（Windows 上包括直接关闭前台 agent 的 PowerShell 窗口），不会清理它的终端会话：
 
-- Linux 和 macOS：会话中的程序继续运行，新启动的 agent 不接管它们。使用示例 systemd 单元或以 agent 为主进程的容器（如[在容器中运行](devices.md#在容器中运行)中的示例）时，它们随 agent 一起结束；前台运行或使用 launchd 时会留下来。
+- Linux 和 macOS：会话中的程序继续运行，新启动的 agent 不接管它们。使用示例 systemd 单元或以 agent 为主进程的容器（如[在容器中运行](devices-advanced.md#在容器中运行)中的示例）时，它们随 agent 一起结束；前台运行或使用 launchd 时会留下来。
 - Windows：会话中的程序随 agent 一起结束，但会话目录留在运行目录中。其中的 `pane.json` 保存了 agent 的完整环境变量，可能含有令牌等敏感信息。
 
 清理前先确认没有 agent 在使用这个运行目录：`kiteline-agent terminal list` 报 `connect ENOENT` 或 `connect ECONNREFUSED`。

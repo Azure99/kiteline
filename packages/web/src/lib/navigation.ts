@@ -12,7 +12,9 @@ export interface WorkspaceTarget {
   workspaceId: string;
 }
 export interface NavigationOptions {
+  // Replace keeps the work page identity in history.state; push starts without it.
   replace?: boolean;
+  // "open" still notifies on an unchanged URL, so a repeated open reaches its owner.
   intent?: "open" | "view";
 }
 

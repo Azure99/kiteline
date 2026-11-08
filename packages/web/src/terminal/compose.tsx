@@ -117,6 +117,7 @@ export function ComposePanel({
       workspacePath,
       files,
       label,
+      // Paths arrive as absolute device paths; the program's cwd is unknown here.
       onWritten: (path) => {
         draft.insert((written ? "\n" : "") + path);
         written = true;

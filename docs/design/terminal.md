@@ -5,16 +5,16 @@
 ## 组件
 
 - **私有 tmux server**：每个会话一个，socket 为 `<运行目录>/<会话 ID>/tmux.sock`，其中只有一个名为 `kiteline` 的 tmux 会话、一个窗口和一个 pane。它持有真实 PTY 和程序，是会话是否存在的唯一依据。
-- **agent 会话表**（`packages/agent/src/terminal/sessions.ts`）：分配 ID、登记会话、创建和结束 tmux server、查证存活、发起恢复。
-- **recorder**（`packages/terminal-recorder/src/`）：每个 agent 一个 Node 进程；每个会话一个 tmux 控制模式客户端（`tmux -C`）、一个 `@xterm/headless` 模型和一个输入队列。
+- **agent 会话表**（`packages/agent/src/terminal/sessions.ts`）：分配 ID、登记会话、发起创建、结束 tmux server、查证存活、发起恢复。
+- **recorder**（`packages/terminal-recorder/src/`）：每个 agent 一个 Node 进程；每个会话一个 tmux 控制模式客户端（`tmux -C`）、一个 `@xterm/headless` 模型和一个输入队列。Linux 和 macOS 上 tmux server 由这个客户端的 `new-session` 启动。
 - **网页显示**（`packages/web/src/terminal/display.ts`）：每次附着新建一个 xterm.js 实例，恢复画面后接收实时输出，发送输入和尺寸。
 - **远程 CLI**（`packages/cli/src/`）：短 RPC 在 recorder 中观察和操作同一终端；`terminal attach` 经 agent 的 PTY 桥运行普通 tmux client，接续已有画面和原始输入。两者结束后终端继续运行。
 
 tmux 使用会话目录下的私有配置，不加载用户的 tmux 配置或插件，并收窄 prefix 键表。具体设置由 `packages/shared/src/terminal/node.ts` 的 `terminalPreset()` 定义。
 
-固定版本：tmux 版本见 [`release/inputs.json`](../../release/inputs.json)，各平台都禁用 Sixel，共用补丁由 [`native/tmux/series`](../../native/tmux/series) 定义。补丁让粘贴遵循 pane 模式，为 recorder 的 `flow-control` 客户端标志提供无损在线背压，并按私有 preset 回答程序状态查询；普通客户端不设置流控标志。xterm.js 及插件版本见 [`packages/web/package.json`](../../packages/web/package.json)、[`packages/terminal-recorder/package.json`](../../packages/terminal-recorder/package.json) 和 [`packages/shared/package.json`](../../packages/shared/package.json)。网页的 xterm.js 带有 [`packages/web/patches/`](../../packages/web/patches/) 中的补丁，让 DOM 渲染器按设备像素比测量字形宽度；维护方法见[构建与发布](../development/release.md#xtermjs)。
+固定版本：tmux 版本见 [`release/inputs.json`](../../release/inputs.json)，各平台都禁用 Sixel，共用补丁由 [`native/tmux/series`](../../native/tmux/series) 定义。补丁让粘贴遵循 pane 模式，为 recorder 的 `flow-control` 客户端标志提供无损在线背压，并按私有 preset 回答程序状态查询；普通客户端不设置流控标志。xterm.js 及插件版本见 [`packages/web/package.json`](../../packages/web/package.json)、[`packages/terminal-recorder/package.json`](../../packages/terminal-recorder/package.json) 和 [`packages/shared/package.json`](../../packages/shared/package.json)。网页的 xterm.js 带有 [`packages/web/patches/`](../../packages/web/patches/) 中的补丁；维护方法见[构建与发布](../development/release.md#xtermjs)。
 
-网页和 recorder 的共同适配在 `packages/shared/src/terminal/index.ts`，两端必须同步升级。该模块的私有状态访问经过 `core()`，升级时以 `TerminalCore` 核对使用的成员。网页还依赖 `packages/web/src/terminal/` 的触控选择和画面保留适配，其中 `auxiliary-input.ts` 直接导入 xterm.js 的私有键盘编码；这些入口也要随升级复核。
+网页和 recorder 的共同适配在 `packages/shared/src/terminal/index.ts`，两端必须同步升级。网页还依赖 `packages/web/src/terminal/` 的触控选择和画面保留适配，其中 `auxiliary-input.ts` 直接导入 xterm.js 的私有键盘编码；这些入口也要随升级复核。
 
 ## 会话生命周期
 
@@ -22,9 +22,8 @@ tmux 使用会话目录下的私有配置，不加载用户的 tmux 配置或插
 
 创建由 `packages/agent/src/terminal/sessions.ts` 协调，必须保持：
 
-- 以 `0700` 独占新建会话目录，已存在的目录从不复用。目录分配与会话登记在 metadata 的同一个同步队列回调内完成，与工作区变更串行。
+- 以 `0700` 独占新建会话目录，已存在的目录从不复用。
 - 启动 tmux 之前以 `starting` 状态登记会话及创建时的 `historyLines`；确认创建成功后才变为 `running`、记录可用。
-- 程序的工作目录是工作区目录，通过进程 cwd 传给 tmux，不用会展开格式字符串的 `-c`。
 
 Shell 的选择和执行参数见 [agent 配置文件](../guide/reference.md#agent-配置文件)；Windows 由 agent 先启动空的 tmux server，见[平台实现](platforms.md#windows)。
 
@@ -54,7 +53,7 @@ Shell 的选择和执行参数见 [agent 配置文件](../guide/reference.md#age
 
 agent 正常停止（包括停止或重启服务）时，`Agent.close()` 在每个会话的私有 socket 上执行 `kill-server`，会话中的程序随之结束。新启动的 agent 会话表为空，不导入旧会话。停止顺序见[启动与停止](agent-lifecycle.md#启动与停止)，异常退出见[资源与清理](#资源与清理)。
 
-程序退出后，`remain-on-exit on` 让 pane 保留到 agent 读取退出码。受管 pane 必须同时得到子进程退出状态、PTY 读取 EOF 并排空原始输出后才变为 dead，避免慢消费期间提前关闭 PTY 丢失尾部。recorder 订阅 `#{pane_dead}`，在控制流中排在之前的输出之后处理结束：先把结束帧（含退出码）排入每个显示的有序输出，再通知 agent；显示仍受消费信用限制，agent 删除登记可以早于尾部输出和结束帧的实际交付。agent 在私有 socket 上执行 `kill-server`（Windows 还要结束 tmux server 的进程集合并等它清空），删除登记，推送 `sessions.changed`，再删除会话目录。退出码在 Linux 和 macOS 上取同次订阅的 `#{pane_dead_status}`；Windows 的 pane 包装进程在 shell 退出后、自己结束前，将完整 DWORD 以四字节 UInt32LE 同步写入会话目录的 `pane.exit`，recorder 在 pane 变为 dead 时读取，读不到时为空。明确结束会话时，agent 先等进行中的创建或恢复，再让 recorder 关闭控制客户端并执行 `kill-server`，退出码为空。
+程序退出后，`remain-on-exit on` 让 pane 保留到 agent 读取退出码。受管 pane 必须同时得到子进程退出状态、PTY 读取 EOF 并排空原始输出后才变为 dead，避免慢消费期间提前关闭 PTY 丢失尾部。recorder 订阅 `#{pane_dead}`，在控制流中排在之前的输出之后处理结束：先把结束帧（含退出码）排入每个显示的有序输出，再通知 agent；显示仍受消费信用限制，agent 删除登记可以早于尾部输出和结束帧的实际交付。agent 在私有 socket 上执行 `kill-server`（Windows 还要结束 tmux server 的进程集合并等它清空），删除登记，推送 `sessions.changed`，再删除会话目录。明确结束会话时，agent 先等进行中的创建或恢复，再让 recorder 关闭控制客户端并执行 `kill-server`，退出码为空。
 
 不变量：
 
@@ -87,8 +86,6 @@ recorder 为每个会话保存一个检查点和其后的完整尾段：
 - “历史存在缺口”（`historyGap`）：本次 agent 运行期间该会话发生过记录故障，部分输出没有进入网页历史。agent 运行期间不清除。
 - “已减少较早历史”（`historyLimited`）：本次附着的恢复副本被缩短。
 
-模型积压、检查点间隔和恢复尾段的阈值见 `packages/terminal-recorder/src/model.ts` 的 `modelLimits`；每个显示已发送但未确认的窗口见 `packages/terminal-recorder/src/attachment.ts` 的 `terminalOutstandingBytes`；跨进程共用的恢复副本、待发队列、分块和交互期限见 `packages/shared/src/protocol/limits.ts` 的 `limits`。
-
 ## 附着与恢复
 
 ### 网页附着
@@ -106,11 +103,11 @@ agent 发往该显示的帧依次为：`restore.begin`（尺寸、`historyLines`
 
 记录器自身的背压只看模型待解析量：达到高水位时暂停读取 control 输出，低于低水位时恢复。`flow-control.patch` 让受管 control 客户端的堵塞阻止 tmux 继续读取真实 PTY，其他客户端不能绕过，也不触发 tmux 的五分钟积压淘汰。因此记录器处理不过来时，程序输出和同会话输入会等待，但输出不丢失、不乱序；已解析的滚屏历史按配置行数淘汰。
 
-显示在第一次打开时附着。切换或隐藏分组、手机切换会话、切换工作区正文模式只隐藏显示，隐藏的显示保持附着并继续消费输出。手机关闭仍属于桌面组的会话显示时，仅清除手机选择以保留桌面显示；其他关闭显示、离开工作区或页面销毁时释放附着。断开后网页不自动重连，显示“连接已断开”，由用户点击“重新连接”。之后成功读取的会话列表中已没有该会话时，出错的显示按已结束处理：保留画面并变为只读，不再提供“重新连接”。同一会话的多个显示各自维护视口、选区和搜索。
+显示在第一次打开时附着。隐藏的显示保持附着并继续消费输出。从页面移除显示、离开工作区或页面销毁时释放附着。断开后网页不自动重连，显示“连接已断开”，由用户点击“重新连接”。之后成功读取的会话列表中已没有该会话时，出错的显示按已结束处理：保留画面并变为只读，不再提供“重新连接”。同一会话的多个显示各自维护视口、选区和搜索。
 
-网页通过 xterm parser 接收 `ready` 后实时原始输出中的 OSC 52 文本，只在用户明确点击后复制；恢复的副本和尾段不产生请求，查询不读取剪贴板或回复。最新请求随当前 screen 发布，suspended 旧屏和隐藏候选不接收新请求；重附着成功更换 screen 时不继承旧请求，失败时保留旧屏的请求。关闭请求不依赖连接状态，异步复制结果只更新发起请求，失败保留正文。这是网页对原始输出的本地处理，不改变 tmux 对外层终端的剪贴板策略。
+网页通过 xterm parser 接收 `ready` 后实时原始输出中的 OSC 52 文本，只在用户明确点击后复制；恢复的副本和尾段不产生请求，查询不读取剪贴板或回复。这是网页对原始输出的本地处理，不改变 tmux 对外层终端的剪贴板策略。
 
-终端路径通过 xterm 的公开 cell API 识别完整逻辑行，将宽字符和软换行映射回链接范围。来源设备、工作区和根目录由发起显示的 pane 传入，不从当前 URL 或 Shell 输出推断；桌面和手机菜单共用路径解析，格式和操作见[使用工作台](../guide/usage.md#从终端输出打开文件)。本地 file URI 先按 URL 规则标准化，再匹配来源根目录；根目录定义 Files 命名空间，沿用已有软链接语义。
+来源设备、工作区和根目录由发起显示的 pane 传入，不从当前 URL 或 Shell 输出推断。本地 file URI 先按 URL 规则标准化，再匹配来源根目录；根目录定义 Files 命名空间，沿用已有软链接语义。
 
 ### 远程交互附着
 
@@ -132,15 +129,11 @@ CLI 在目标检查和连接成功后才进入 raw 模式，以本机终端实�
 
 ## 输入
 
-Ctrl+Shift+F6 从终端输入移焦到工具栏，搜索打开时移到搜索操作区；该组合不发送给远端。Tab、Shift+Tab、Escape 和 Ctrl+M 仍发送给终端程序。
-
 ### 本地多行撰写
 
-网页的按需编辑区独立于终端输入框，打开与关闭不改变终端网格。桌面 Ctrl/⌘+Shift+Enter 或正文右键、手机笔形快捷键打开它；Enter 在草稿内换行，Esc 关闭保留草稿。Insert 与 Send 都使用既有 `sessions.send` 粘贴操作，分别不附和附加 Enter；Ctrl/⌘+Enter 为 Send。该快捷键只在撰写区消费。
+Insert 与 Send 都使用既有 `sessions.send` 粘贴操作，分别不附和附加 Enter。
 
-`ComposeDrafts` 在外层 `Workbench` 持有，以设备和终端为键保存正文、caret、在途状态及错误，离开工作区不会卸载 owner。登录失效保留这些页面状态，明确退出成功时沿用工作台清空流程；刷新和页面关闭后丢失。面板关闭不取消已发出的 RPC，也不重置该草稿的在途标记。成功只清除仍与发送正文一致的草稿；失败或 unknown 保留原稿和原始错误，不自动重发。成功回执只在发起面板仍挂载且来源草稿已清空时关闭它，期间的新编辑及后来的面板实例保持打开。
-
-撰写附件复用 `SignedInWorkbench` 的上传宿主，随工作区卸载的面板不持有上传生命周期。成功回调捕获来源 Draft，用来源工作区根和上传最终相对路径组成设备绝对路径，替换该稿保存的选区并推进 caret；同批后续成功项在路径前加入 LF。文件详情与此处共用路径拼接，不推断程序 cwd。文件拖入沿用含目录整批拒绝的规则。上传窗口通过既有 `finalFocus` 恢复来源编辑框的 caret 和焦点。
+失败或 unknown 保留原稿和原始错误，不自动重发。
 
 ### 远程短命令
 
@@ -148,7 +141,7 @@ Ctrl+Shift+F6 从终端输入移焦到工具栏，搜索打开时移到搜索操
 
 可选 `ifInput: {epoch,inputSeq}` 在队列接纳处同步比较；条件不符返回 `failed/conflict`，不接纳输入。短 CLI 和网页每次接纳输入都会递增 `inputSeq`，包括后来因期限或 detach 丢弃的输入；计数不回退。远程 `terminal attach` 的原生输入不经过这个计数。计数不意味着回显、独占或干净提示符：已经接纳但尚未回显的输入仍可与下一次输入混合。
 
-成功回执只表示 tmux 输入操作已处理，包含操作前的输出位置 `before` 和回复时当前输入位置 `input`，不表示前台命令返回。排队到期是明确失败；开始注入后不能确定结果时为 `unknown`。调用方先观察，再决定后续输入；没有请求去重或自动重发。Unix 上要等这次 tmux 调用的进程关闭后队列才继续，避免中止的调用仍占用共享缓冲区。期限与可用按键见 [RPC 类型](../../packages/shared/src/protocol/terminal-observation.ts)。
+成功回执只表示 tmux 输入操作已处理，包含操作前的输出位置 `before` 和回复时当前输入位置 `input`，不表示前台命令返回。排队到期是明确失败；开始注入后不能确定结果时为 `unknown`。调用方先观察，再决定后续输入；没有请求去重或自动重发。期限与可用按键见 [RPC 类型](../../packages/shared/src/protocol/terminal-observation.ts)。
 
 ### 网页输入
 
@@ -163,11 +156,8 @@ Ctrl+Shift+F6 从终端输入移焦到工具栏，搜索打开时移到搜索操
 
 - 粘贴正文由 recorder 规范化（`normalizePaste`）：CRLF 和 LF 变为 CR，ESC 换成可见的 U+241B，正文因此不会被程序当作按键，也不会提前结束括号粘贴。普通输入不做替换。
 - 粘贴带 `-p`：程序开启括号粘贴时加起止标记。`paste.patch` 让 tmux 按程序自己的模式（`wp->base.mode`）判断，远程 TTY 客户端处于复制模式时网页粘贴仍带标记。
-- 注入失败时网页收到结果未确认的 `input.error`，recorder 只删除自己的 `kiteline-web-input` 缓冲。清理失败写到 agent stderr，不改变原输入结果。输入不自动重试；网页在断开和恢复期间不缓存输入。
+- 注入失败时网页收到结果未确认的 `input.error`，recorder 只删除自己的 `kiteline-web-input` 缓冲。输入不自动重试；网页在断开和恢复期间不缓存输入。
 - 网页输入不经过 tmux 键表，网页中的 Ctrl-b 直接交给程序。远程 TTY 客户端使用 tmux 键表：`Ctrl-b d` 断开，`Ctrl-b Ctrl-b` 发送 Ctrl-b。
-- 支持 `virtualKeyboardPolicy` 且文档有焦点时，终端触摸开始先关闭自动弹键盘，显式点按再激活输入，避免收起键盘后滑动历史又弹出。原生权限窗使文档失焦、但终端输入框仍 active 时恢复自动策略，以保留权限返回后的系统输入连接。
-- 手机辅助键短按通过原生 click 发送一次，方向键支持静止长按延迟连发；操作条件见[使用指南](../guide/usage.md#复制与粘贴)。辅助键和待用修饰键用 xterm.js 的键盘编码函数生成，读取程序当前的应用光标键模式；虚拟 Alt 按 Meta 处理。右下角笔形按钮打开本地撰写，终端点按仍沿用既有键盘激活规则。
-- 当前可见活动 pane 打开搜索时，终端区域隐藏工具栏，该 pane 隐藏辅助键；切换到其他 pane 时依据新活动 pane 的搜索状态呈现。辅助键固定为两排并保持挂载，搜索关闭后恢复显示。关闭搜索时，可写终端恢复手机键盘输入；只读终端仅恢复 xterm 焦点，保留历史导航。
 - 多个客户端同时输入时按到达顺序交错写入。
 - 输出背压期间，输入队列在取出下一项之前等待 control 恢复读取；既有容量内的输入保持 FIFO，不清空或重发。
 
@@ -181,13 +171,9 @@ Ctrl+Shift+F6 从终端输入移焦到工具栏，搜索打开时移到搜索操
 - 不使用 `resize-window`，它会把窗口切换为手动尺寸，客户端之后无法再调整。
 - 受管 control 输出堵塞时，远程 TTY 客户端的实际尺寸调整也延后，只保留最后尚未执行的目标；恢复后执行该尺寸。已经执行的尺寸及其输出、通知不被丢弃，避免暂停期间布局通知无限积压。
 
-分屏画布按保存的子树权重和各叶片最小尺寸推导所需空间；区域变窄时保留比例并允许局部滚动。标签、选择器或显式路由选择会话时，只在画布中就近显露目标；再次选择同一报告来源也会显露目标。输出、被动焦点变化和手动滚动不发起显露。终端标签条独立对齐活动项，超宽标签优先显示名称开头，同活动项重选不重置标签条滚动。
+隐藏或尺寸为 0 的显示不发送尺寸；滚动、选择和输出不重复提交尺寸。手机软键盘只缩短可见高度时，宽度和字号不变就保留打开键盘前的行列，终端只在本地裁切并跟随光标，不请求会话改变尺寸；宽度、旋转和字号变化会重新计算。
 
-桌面与手机交接当前会话选择及明确空选择，原有组树和比例保留；返回桌面时显露目标，明确排列分屏时显露当前活动项。正文与专注跨布局接续，协同布局以最近显式内容选择为准，终端输入不更新该选择。桌面标签或选择器的明确键盘激活会在菜单关闭且目标 ready 后交焦；后续按键、指针、目标或页面变化取消该请求。
-
-网页先按会话的实际尺寸恢复画面，收到 `ready` 后按可见区域发送尺寸，再开放输入。隐藏或尺寸为 0 的显示不发送尺寸；滚动、选择和输出不重复提交尺寸。手机软键盘只缩短可见高度时，宽度和字号不变就保留打开键盘前的行列，终端只在本地裁切并跟随光标，不请求会话改变尺寸；宽度、旋转和字号变化会重新计算。
-
-网页普通缓冲区在用户阅读历史时，尺寸变化以原视口首行的首个逻辑单元格为锚点，重排后显示包含该单元格的行，不按文字匹配位置。视口不能越过当前底部；锚点内容被历史淘汰时显示最早保留内容。锚点只在本次尺寸变化期间存在，由 xterm.js 补丁中的 Buffer 和 BufferReflow 传递；Viewport 同步读取重排后的视口位置。实际行列变化时，显示清除全部选区，搜索清空结果状态并保留查询文字。
+网页普通缓冲区在用户阅读历史时，尺寸变化以原视口首行的首个逻辑单元格为锚点，重排后显示包含该单元格的行，不按文字匹配位置。视口不能越过当前底部；锚点内容被历史淘汰时显示最早保留内容。锚点只在本次尺寸变化期间存在，由 xterm.js 补丁中的 Buffer 和 BufferReflow 传递；Viewport 同步读取重排后的视口位置。
 
 ## 远程观察
 
@@ -195,23 +181,23 @@ Ctrl+Shift+F6 从终端输入移焦到工具栏，搜索打开时移到搜索操
 
 每个 model 新建 `epoch`，每次已解析输出或尺寸变化递增 `seq`；相同文字重绘也可能推进 seq。快照的 `position` 还包含 `tail: null | number` 和 `attrs: boolean`。调用方仅能在同一目标携带该完整位置作 `ifChanged`；选项相同且位置未变才返回 `unchanged`，仍返回当前 `{epoch,inputSeq}`。更换观察选项返回完整数据，epoch 不同返回 `reset` 全屏。没有观察缓存；`send.before` 不是条件快照位置。
 
-终端值规则见 `packages/shared/src/protocol/terminal-observation.ts`。条件位置的 epoch 为 1..128 个 UTF-16 码元且不含 NUL；Agent 和远程 CLI 共用此规则，CLI 先解析 JSON 或 `EPOCH:SEQ` 文本。Agent 先检查完整会话目标、归属、recording 可用且未 ending，再解析 snapshot/send/wait/resize 的载荷。
+终端值规则见 `packages/shared/src/protocol/terminal-observation.ts`。
 
 send、resize、wait 在全部值解析成功后按 timeoutMs 建立一次绝对动作 deadline。编码、IPC 传递、排队和执行继续消费同一个期限；snapshot 没有动作 deadline。
 
-`sessions.wait` 使用相同输出事件和有序队列。quiet 从 recorder 完成已有解析后计时，输出与 resize 重置窗口；change 比较 `after` 的 epoch/seq，能看到请求到达前已发生的变化。quiet 默认 300ms、总等待默认 1000ms，总等待始终有限。quiet、changed、timeout、reset 都返回当时完整画面；quiet 只表示近期没有输出活动，不表示业务完成。
+`sessions.wait` 使用相同输出事件和有序队列。quiet 从 recorder 完成已有解析后计时，输出与 resize 重置窗口；change 比较 `after` 的 epoch/seq，能看到请求到达前已发生的变化。总等待始终有限。quiet、changed、timeout、reset 都返回当时完整画面；quiet 只表示近期没有输出活动，不表示业务完成。
 
 观察结果超过 `controlMessageBytes` 时返回 `failed/limit_exceeded`，保留终端运行；不截屏、不自动调整尺寸。等待中的 model 关闭以 `recording_unavailable` 结束。显式 `sessions.recover` 后的新 model 使用新 epoch，能观察时直接返回 reset，不要求先返回错误再抓屏。
 
 ## 程序报告状态
 
-recorder 持续解析程序主动发送的 OSC 7501，不依赖网页附着。shared 的 `program-status.ts` 实现 [Program Status Protocol rev 0.4](https://www.superlogical.com/rex/docs/build/program-status) 的原子报告解析与记录集合：根与 child 可并存，同 id 的新报告完整替换旧记录，clear 删除所指子树；非法 id 不回落根，未知 state 忽略，文本和尺寸超限拒绝整条报告。新记录、state 变化，或 blocked／done／error 状态下 kind／title／msg 变化视为一次新的状态出现，移到记录顺序的末尾；重复上报、working 的文本与进度和 idle 的文本更新保持原位。每终端最多 256 条，超过时淘汰当前顺序中最早的一条，因此持续更新进度但不改变状态的记录也可能先被淘汰。snapshot 保留原始记录；网页展示缺少 app 的记录时继承最近祖先的 app，不改写 child。
+recorder 持续解析程序主动发送的 OSC 7501，不依赖网页附着。shared 的 `program-status.ts` 实现 [Program Status Protocol rev 0.4](https://www.superlogical.com/rex/docs/build/program-status) 的原子报告解析与记录集合：根与 child 可并存，同 id 的新报告完整替换旧记录，clear 删除所指子树；非法 id 不回落根，未知 state 忽略，文本和尺寸超限拒绝整条报告。新记录、state 变化，或 blocked／done／error 状态下 kind／title／msg 变化视为一次新的状态出现，移到记录顺序的末尾；重复上报、working 的文本与进度和 idle 的文本更新保持原位。每终端最多 256 条，超过时淘汰当前顺序中最早的一条，因此持续更新进度但不改变状态的记录也可能先被淘汰。
 
 私有 tmux preset 开启默认 off 的 `program-status` 选项。tmux 解析 `OSC 7501;?` 后在同 pane 输入流中固定回复 `OSC 7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth ST`，同时支持 ST/BEL 终止符；随后 DA1 的应答仍按原顺序到达。应答不包含报告内容，不依赖网页或 recorder 附着；headless 和网页不代答，普通报告不产生应答。
 
 OSC133 A 和顶层 pane 退出删除 working/blocked，保留 idle/done/error；RIS 清空全部，DECSTR 和备用屏切换保留。普通 shell 内子进程退出依赖 producer clear 或新的 shell prompt，不轮询子进程。自然结束的状态清理排在此前输出之后、各显示的 ended 之前；随后 agent 删除会话，最终摘要不构成结束结果存档。
 
-每条合法 blocked 报告同时产生一次历史通知，历史清除不改变当前记录，后续其他状态也不撤销历史通知。记录故障时 agent 保留旧摘要；恢复新模型从空集合开始，capture 不生成通知，初始化完成先发空摘要再请求重画。重画可能没有新报告，不能从屏幕或旧通知推断状态恢复。list 小摘要、完整 snapshot/wait 和超限规则见[程序当前记录](protocol.md#程序当前记录)。
+list 小摘要、完整 snapshot/wait 和超限规则见[程序当前记录](protocol.md#程序当前记录)。
 
 ## 恢复动作
 
@@ -223,18 +209,18 @@ OSC133 A 和顶层 pane 退出删除 working/blocked，保留 idle/done/error；
 | “减少历史后重试” | 错误码为 `limit_exceeded`、`timeout` 或 `busy`                                      |
 | “重绘程序”       | 终端区域菜单，确认后执行                                                            |
 
-- 重新连接：确认登录仍有效后，以 `retained` 新建附着。有旧终端画面时将其保留为只读，在同尺寸的隐藏容器中恢复新画面；排完恢复输出并就绪后，才替换并释放旧显示。等待或失败时仍可滚动、选择和复制旧画面，失败只释放候选附着；旧屏的标题、阅读和辅助键状态更新不会覆盖候选失败反馈。不触及 recorder、共享历史和程序。
+- 重新连接：确认登录仍有效后，以 `retained` 新建附着。有旧终端画面时将其保留为只读，在同尺寸的隐藏容器中恢复新画面；排完恢复输出并就绪后，才替换并释放旧显示。等待或失败时仍可滚动、选择和复制旧画面，失败只释放候选附着。不触及 recorder、共享历史和程序。
 - 恢复终端：调用 `sessions.recover`，`recovering` 期间读取会话列表，变为可用后重新附着（见[记录故障后的恢复](#记录故障后的恢复)）。
 - 减少历史后重试：以 `screen` 重新附着，只省略本次的较早滚屏；检查点和 `historyLines` 不变，之后的附着仍取完整历史。
 - 重绘程序：调用 `sessions.redraw`，在输入队列中排队，通过临时改变尺寸让程序重画，随后恢复原尺寸。要求记录可用。程序会向所有客户端重画，其他客户端的画面和选区可能改变；请求完成只表示尺寸已恢复。
 
-关闭显示后再打开会新建附着，原显示的选区和本地历史随之释放。程序输出未结束的 OSC 或 DCS 序列时解析器一直不空闲，尾段超过 `terminalRecoveryTailBytes` 后新的附着只能返回 `busy`；以上动作都无法纠正，需要程序输出结束序列或结束会话。
+已释放的显示再次打开会新建附着，不保留原显示的选区和本地历史。程序输出未结束的 OSC 或 DCS 序列时解析器一直不空闲，尾段超过 `terminalRecoveryTailBytes` 后新的附着只能返回 `busy`；以上动作都无法纠正，需要程序输出结束序列或结束会话。
 
 ## 资源与清理
 
 - 每个显示的待发队列、未确认窗口和 IPC 积压各有上限。显示超限只关闭该附着，共享 IPC 故障可能影响多个附着。控制命令结果、IPC 单行和本机请求以 `controlMessageBytes` 为上限。超出记录能力时报告记录故障并保留程序。
 - `terminalSnapshotBytes` 只限制序列化结果，不限制内存；内存还包括各会话的 tmux 和 headless 网格、尾段和队列。
-- 关闭显示会取消它尚未注入的输入、帧路由和恢复引用。会话结束时删除 `<运行目录>/<会话 ID>/`。
+- 释放显示会取消它尚未注入的输入、帧路由和恢复引用。会话结束时删除 `<运行目录>/<会话 ID>/`。
 
 ### agent 异常退出后
 

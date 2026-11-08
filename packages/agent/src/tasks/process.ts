@@ -93,6 +93,8 @@ export class TaskProcess {
       const result = await exited;
       await groupDone;
       await this.stopping;
+      // A descendant that left the process group can hold the pipes open indefinitely; stop
+      // waiting shortly after the group ends and record the output as incomplete.
       const timer = setTimeout(() => {
         if (!this.child.stdout!.readableEnded || !this.child.stderr!.readableEnded) {
           this.output.error ??= "Output pipes did not close after the process group ended";

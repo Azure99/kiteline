@@ -25,7 +25,7 @@ export PATH="$PWD/$name/bin:$PATH"
 kiteline --version
 ```
 
-The PATH setting applies to this terminal. In a new terminal, set it again or use the full launcher path. Keep the whole package directory; the launcher uses its bundled runtime. For a macOS browser download blocked by quarantine, follow [manual installation](devices.en.md#manual-installation) to remove the quarantine attribute.
+The PATH setting applies to this terminal. In a new terminal, set it again or use the full launcher path. Keep the whole package directory; the launcher uses its bundled runtime. For a macOS browser download blocked by quarantine, follow [manual installation](devices-advanced.en.md#manual-installation) to remove the quarantine attribute.
 
 ### Windows
 
@@ -83,7 +83,7 @@ kiteline auth status
 - The first command prompts to paste a token only on a TTY; without one it fails immediately. It verifies the credential before saving it.
 - Credentials are saved to `~/.kiteline/credentials.json`; `KITELINE_CLI_HOME` selects another directory. New Linux/macOS directories use 0700 and files use 0600; Windows inherits access from the user's directory. Keep credentials outside shared directories and repositories.
 - You can also set both `KITELINE_URL` and `KITELINE_TOKEN`. They override saved credentials; setting only one fails instead of combining it with the file.
-- The CLI uses `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, and `NODE_EXTRA_CA_CERTS`. It does not follow redirects; supply the exact workbench address in `--server`.
+- The CLI uses `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY` (and their lowercase forms), and `NODE_EXTRA_CA_CERTS`. It does not follow redirects; supply the exact workbench address in `--server`.
 
 ### Log out and revoke
 
@@ -93,7 +93,7 @@ kiteline auth status
 
 ## Attach to an existing terminal
 
-In the workbench session menu, choose “Continue in CLI” and copy the command with full target IDs. Run it in a local terminal logged in to this server. “Install and log in” opens setup when needed; the selected platform also sets the shell for the attach command. “Return to attach”, X or Escape in setup returns to the original session command; close once more to leave the flow. “CLI setup” opened directly from the Settings menu exits when closed. You can also specify targets manually:
+In the workbench session menu, choose “Continue in CLI” and copy the command with full target IDs. Run it in a local terminal logged in to this server. “Install and log in” opens setup when needed. You can also specify targets manually:
 
 ```sh
 kiteline terminal attach --device DEVICE_ID --workspace WORKSPACE_ID --session SESSION_ID
@@ -145,11 +145,9 @@ Each call is a separate short command; terminal and shell state remain on the de
 - `terminal wait` returns the current screen after output becomes quiet or the wait times out. Quiet does not mean task completion.
 - `terminal resize` changes the shared terminal size for every client.
 - The CLI has no Git or scheduled-task commands; use native tools in the terminal.
-- `kiteline web url` returns the same terminal's workbench link. `web url --path PATH` returns a file link without checking existence. Click the terminal display in the workbench to type.
+- `kiteline web url` returns the same terminal's workbench link. `web url --path PATH` returns a file link without checking existence.
 
 For conditional input (`--if-input`), incremental observation (`--if-changed`), style intervals (`--attrs`) and deadlines, see `kiteline terminal <command> --help`. The mechanisms are described in [Remote observation (Chinese)](../design/terminal.md#远程观察).
-
-The epoch in `--if-changed`, `--if-input` and `--after` is limited to 128 UTF-16 code units. Longer values exit locally with code 2 without sending a request; `invalid_argument` returned by the device still exits with code 1.
 
 ### When recording is unavailable
 
@@ -175,8 +173,6 @@ kiteline web url --path 'notes/design copy.md'
 
 Default output is readable text. With `--json`, stdout contains a structured reply with `outcome`, `result`, or `error.code`. Prompts and diagnostics use stderr. The CLI does not retry automatically.
 
-When a downstream consumer closes output early in a POSIX pipeline, the CLI keeps the exit code listed below; the shell determines the pipeline's status. In PowerShell, when using `Select-Object -First` or another consumer that ends the pipeline early, save the full output to a variable or file first if you need `$LASTEXITCODE`.
-
 | Exit | Meaning                                                                                                                                        |
 | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | 0    | The operation or observation succeeded.                                                                                                        |
@@ -187,4 +183,3 @@ When a downstream consumer closes output early in a POSIX pipeline, the CLI keep
 An unknown result always exits 3, such as a local read failure during upload that leaves the write outcome uncertain. Missing or invalid local target configuration exits 2; a target not found on the device exits 1.
 
 JSON requests wait at most 30 seconds. File transfers end after 120 consecutive seconds without progress. `--help` and `--version` do not require a server connection.
-`--help` and `--version` queries do not validate option values; unknown options or missing option values still fail.

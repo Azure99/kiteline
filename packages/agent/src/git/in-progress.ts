@@ -118,6 +118,7 @@ async function readOperationState(
   if (mergeRebase) {
     if (!mergeRebase.isDirectory())
       throw new AppError("io_error", "rebase-merge state is unreadable");
+    // core.commentChar may change the prefix; without it the todo steps cannot be classified.
     let comment = "";
     try {
       comment = commandLine(

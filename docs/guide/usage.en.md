@@ -8,42 +8,33 @@ This guide is for owners who have connected devices and want to use the workbenc
 
 ### Supported browsers
 
-The workbench supports desktop Chrome and Android Chrome, with Chromium 97 as the minimum. When accessing it over HTTPS or `localhost`, current Chrome versions can install it as an app from the browser menu and open it in a separate window. It still needs a connection to the server and has no offline functionality.
-
-In iPhone Safari's Share menu, choose Add to Home Screen and enable Open as Web App if offered. Open the home screen icon, sign in if prompted, and select a device and workspace. This can reduce the space used by browser toolbars and still requires a server connection. The home screen window follows the same focus and fullscreen capability rules as a browser tab.
+The workbench requires at least Chromium 97. When accessing it over HTTPS or `localhost`, current Chrome versions can install it as an app from the browser menu.
 
 ### Sign-in and language
 
 Origins with different hostnames or schemes, such as `http://192.168.1.10:8080` and `https://kiteline.example.com`, require separate sign-ins. Different ports on the same host and scheme share a login. Preferences such as language are stored separately in the browser per origin, including the port. Signing out asks you to confirm discarding unsaved files. It ends only this browser's login; terminal sessions keep running. For a forgotten password, see [Reset the setup token or password](server.en.md#reset-the-setup-token-or-password).
 
-Language follows the browser by default: Simplified Chinese for Chinese locales, English otherwise. Switching language does not affect open files or terminals.
+Language follows the browser by default: Simplified Chinese for Chinese locales, English otherwise. Choose system, light or dark appearance from Settings at the bottom of the left sidebar.
 
-The address bar records the device, workspace, tool and open file, repository and session, so you can use Back, Forward and bookmarks. The browser tab title shows the current workspace, tool and device; Workbench, task, device and error pages show their context to help distinguish open pages.
+The address bar records the device, workspace, tool and open file, repository and session, so you can use Back, Forward and bookmarks.
 
 After a server upgrade, an already open page shows the Web and Server versions and pauses remote operations. Copy unsaved content before clicking "Reload page".
 
-Choose system, light or dark appearance from Settings at the bottom of the left sidebar or the login page. The default follows the system; a manual choice is saved in the current browser. Choose system again to resume automatic changes. Switching appearance preserves open file drafts, undo history and selections; terminal content keeps its dark colors.
+Wide layouts switch between Work pages, Together and Terminal, and Together shows work pages and a terminal at the same time; narrow layouts show only work pages or a terminal.
 
-At 960 CSS pixels or wider, the layout icon in the title row shows the current mode. Click to cycle through Work pages, Together and Terminal. In Together mode, the position icon on its left shows the terminal position and cycles through bottom, right, top and left. Drag the divider to adjust proportions; either sidebar can be collapsed independently. Narrow layouts show only work pages or a terminal, with a target icon in the title row to switch between them. On mobile, navigation and file/Git tools overlay the main area from their respective edges. Close them with the return button, backdrop or Escape; opening content returns to the main area. File search is in the tool’s More menu.
-
-On desktop, drag the inner edge of either sidebar to resize it, or Tab to its divider and use the left and right arrow keys. Home and End move to the currently allowed minimum and maximum width. Collapsing a sidebar or switching to a narrow layout and back preserves its width; the right sidebar remembers its width per workspace. Narrowing the window adopts the constrained width, and widening it does not restore the previous larger value. Reloading resets both sidebars to the defaults for the current window width.
-
-Switching between desktop and phone layouts keeps drafts, the active page and sessions, along with the existing position and proportions. When Together becomes narrow, it shows the most recently explicitly selected file or terminal. For example, selecting a file and then typing in the terminal still leaves the file visible after narrowing. Switching content on the phone and returning to desktop changes a layout that previously showed only one kind of content to Together.
-
-Device names, workspaces, files and folders, Git changes and work page tabs support context menus for the pointed object. On a phone, long-press an object or use its More button; device management is also available from More at the top right of device details. Editor and diff content keep their existing text selection and copy interactions; terminal content is described below.
+Device names, workspaces, files and folders, Git changes and work page tabs support context menus for the pointed object. On a phone, long-press an object or use its More button.
 
 ### Where settings are stored
 
-| Content                                                     | Storage                               |
-| ----------------------------------------------------------- | ------------------------------------- |
-| Language, appearance, recent workspaces, terminal font size | Current browser                       |
-| File font size                                              | Current browser                       |
-| Terminal groups and splits                                  | Current browser tab                   |
-| Work-page tabs, content mode and shared layout              | Current page, per workspace           |
-| Unsaved changes, commit messages                            | Current page; lost on reload or close |
-| New-session scrollback lines, terminal shortcuts            | Device; shared across origins         |
-| Device name                                                 | Server                                |
-| Workspace names and paths                                   | Device                                |
+| Content                                                                     | Storage                               |
+| --------------------------------------------------------------------------- | ------------------------------------- |
+| Language, appearance, recent workspaces, terminal font size, file font size | Current browser                       |
+| Terminal groups and splits                                                  | Current browser tab                   |
+| Work-page tabs, content mode and Together layout                            | Current page, per workspace           |
+| Unsaved changes, commit messages                                            | Current page; lost on reload or close |
+| New-session scrollback lines, terminal shortcuts                            | Device; shared across origins         |
+| Device name                                                                 | Server                                |
+| Workspace names and paths                                                   | Device                                |
 
 ## Devices and workspaces
 
@@ -57,39 +48,27 @@ Deleting a device removes its record, binding and scheduled-task summaries from 
 
 A workspace is a registered project directory on a device. Select the project directory in "Add workspace" on an online device. After editing the path, press Enter or "Go to directory"; select the currently listed directory after it loads successfully. The registered path is the real directory after resolving symbolic links. Adding the same directory again returns the existing workspace.
 
-Use Search beside Devices and workspaces to filter registered workspaces by name or path, including those without terminal sessions. Matching is case-insensitive. Filtering temporarily expands matching devices and shows the full path when it matches; clearing the filter restores the previous collapsed state. When a nonempty filter has exactly one result, press Enter to open that workspace. X clears the query and keeps search open; Search or Escape closes it and clears the filter. Full paths are also available in the object menu and device details.
-
-The button at the left edge of the main area opens or closes navigation. On mobile, choosing a destination returns to the main area. Returning to a workspace from the sidebar resumes its last target in the current page; selecting the current target again does not add a Back step. Activating Workbench, Tasks, a device or a workspace in the sidebar with the keyboard, or pressing Enter on a unique filter result, moves focus to the main content. The "Skip to main content" entry at the top of the page also moves focus there.
+Use Search beside Devices and workspaces to filter registered workspaces by name or path, including those without terminal sessions. Full paths are also available in the object menu and device details.
 
 Removing a workspace deletes only the registration, keeping directories and files. A workspace cannot be removed while the device is offline or it still has terminal sessions. If removal is rejected because of terminal sessions, select "Open workspace terminals", end the sessions, then retry removal.
 
 A workspace is not a sandbox. Terminal, file and Git operations use the project user's permissions and can access any path that user can access.
 
-Terminal sessions keep running when you switch tools, workspaces or devices. Leaving a workspace closes its terminal displays; returning attaches again. Unsaved changes and Git commit messages remain until the page closes. Terminal layouts restore after a reload or page discard in the same tab, with explicit session URLs taking precedence. Retention after closing the tab or restarting the browser depends on the browser. Signing out clears saved layouts. When browser storage is unavailable, no warning appears; layouts can still be changed and retained in the current page.
+Terminal sessions keep running when you switch tools, workspaces or devices; unsaved changes and Git commit messages remain until the page closes. Signing out clears saved terminal layouts.
 
 ## Terminal
 
-Press Ctrl+Shift+F6 in terminal input to move to the toolbar (or search actions when search is open), then use Tab to navigate the workbench. This combination is not sent to the remote program; normal Tab and Escape remain terminal input.
-
 Terminal sessions run on the device. Closing the page, losing the network, signing out, restarting the server or deleting the device does not end them. A session ends when its shell or shortcut command exits, you end it, the agent shuts down normally, or the device restarts. For abnormal exit, see [Clean up leftover terminal sessions](reference.en.md#clean-up-leftover-terminal-sessions). The same session can be open in multiple browsers and local terminals at once. All clients can type directly; simultaneous input is interleaved.
 
-If the terminal remains unresponsive, close displays of the same session that you are not using, then try again.
+Press Ctrl+Shift+F6 in terminal input to move to the toolbar, then use Tab to navigate the workbench; normal Tab and Escape remain terminal input. If the terminal remains unresponsive, close displays of the same session that you are not using, then try again.
 
 ### Online reports
 
-When a program sends OSC 7501 status records or OSC 9 or OSC 777 notifications, a badge appears beside its workspace in the sidebar. Hover on desktop or tap on mobile to see sources. Select a row's main area to open its terminal, or › to read details; Back returns to the list. Collapsing a device hides its workspaces and badges. Device rows and the mobile navigation button do not show a total. Navigation remains available during terminal search in the normal layout; leave focus mode first to open it.
+When a program sends OSC 7501 status records or OSC 9 or OSC 777 notifications, a badge appears beside its workspace in the sidebar. Hover over or tap the badge to see sources, and select a source to open its terminal. Sessions can report without an open display.
 
-Each terminal counts once, in the state its list row shows: error, waiting, done or running. A retained historical report counts as “done or notified” only when there is no such current state. Other current states and historical reports are shown in the details. Counts are terminals, rather than agents or completed tasks; missing current reports do not imply that a program is idle.
+Each terminal counts once, in the state its list row shows: error, waiting, done or running. A retained historical report counts as “done or notified” only when there is no such current state. Counts are terminals, rather than agents or completed tasks; missing current reports do not imply that a program is idle. A historical report does not mean the program is still waiting.
 
-The expanded list has one item per terminal: the session name and one state on the first line, and that state’s own original message on the second, truncated. An unresolved wait or error is shown first; otherwise the most recently appeared state is shown, so a completion or new progress never hides a question still waiting for an answer. Current records with the same state and message share one detail entry; matching text with different states keeps separate entries. A notification matching a current message shares its body and keeps its notification type and receipt time label. This display merge does not identify a shared source or task cycle. Only when a current done record has no text may the second line preview a notification that is not a waiting report, marked “Notification 14:40 · original text”; it is not attributed to that completion. Other current states do not borrow notification text. “+x” below › counts the merged detail entries apart from the shown one, rather than tasks; a single entry has only ›. When full records cannot be read, the details retain the known summary states without estimating entries from the summary's record total.
-
-Details keep the content already read at the time of the click, or read once if it is not ready. Summaries and new notifications do not replace the message being read. Back to the list or closing and reopening reads again. A continuously open list follows status summary or notification changes; without those changes, reopen to read updated text or progress. Separate notifications keep their title and body; merged entries use the representative current record's title. Notification type and server receipt time are always retained, in your local timezone: `HH:mm` for the same day, with the month and day added for another date. Offline devices, reconnects awaiting a fresh list, and unavailable terminal recording grey and fade retained summaries; current content is read again after recovery. A historical report does not mean the program is still waiting.
-
-Select and copy each detail message separately; scroll the detail popup to read long text. A selection started in a message stays within that message. Select and copy its title, status or other records separately.
-
-Inside a workspace, sessions with a pending historical report keep a dot on their terminal tab and in “Select terminal session”, whose rows also show a summary. The session selector button carries a dot while another session has a report. Sessions can report without an open display.
-
-Opening the list or reading details does not clear reports. Selecting a row's main area or “Open terminal” in details returns to its original session and reveals its pane on desktop. Returning from Files, switching or reselecting a terminal, reopening the page, and returning to a page showing that terminal activate it. When the server processes the activation request, it clears that terminal's existing report across clients; reports arriving afterward remain. Activation clears reports only, not the program's current status: while the program still reports done, the badge still counts it as done. When the session list confirms a source no longer exists, returning to its unavailable page while the device is online also handles its report. If the first list read fails, the report remains; read errors appear separately. Staying in the terminal does not automatically clear new reports. A terminal shown alongside work pages follows the same session selection and activation rules.
+Opening the list or reading details does not clear reports. Entering the terminal (selecting a source or “Open terminal” in details, or switching or reselecting to that terminal) activates it, clearing that terminal's existing report across clients; reports arriving afterward remain. Activation clears reports only, not the program's current status: while the program still reports done, the badge still counts it as done. Staying in the terminal does not automatically clear new reports.
 
 Pending reports live in server memory and synchronize when a page returns or reconnects. A server restart loses them. Ended sessions retain historical reports; deleting a device removes its reports. Failed or unconfirmed activation requests show an error; synchronized reports reflect the current state.
 
@@ -101,58 +80,44 @@ Ordinary Shell sessions without an explicit name use the first available name Sh
 
 Shortcuts run one command in the login shell; the session ends when that command exits. Install the AI CLI programs used by the default shortcuts yourself.
 
-"Close display" closes only the display; the session continues and can be reopened through "Select terminal session".
-
-Desktop groups share one row of tabs; click a tab to select a session within its group. Group checkboxes in the picker control which groups are shown. Hiding a group keeps its sessions, split structure and proportions; selecting a member reveals the group again. The phone shows one terminal at a time. The current session selection continues across layouts, including an explicit choice to close the display and leave no session selected. Existing desktop groups, split structure and proportions are retained. Returning to desktop makes the phone's selected session current and reveals its group and pane, including a hidden group.
-
-Explicitly selecting a session tab or picker item with the keyboard on desktop moves input focus to that session after the menu closes and its display is ready. A later key press, pointer action, target change, or leaving the page cancels the pending focus request.
-
-Terminal tabs identify the current session. Right-click a tab or use its row's More button in the session picker to rename, move, close the display or end that session. The terminal area menu provides splits, arrangement, maximization, search, font size and settings. The remaining space on the right shows the latest title the program sent, including after a page reload or when the session is opened on another device. In narrow areas, splits retain a minimum canvas based on their saved proportions and can be scrolled. Selecting a session from its tab or the picker, or explicitly arranging splits, reveals the current pane; output does not pull the canvas back from a manual scroll.
+"Close display" closes only the display; the session continues and can be reopened through "Select terminal session". On desktop, split and arrange sessions from the terminal area menu; the phone shows one terminal at a time.
 
 ### Copy and paste
 
-Scroll up to read retained history; new output does not pull you back to the bottom. Each client's scrolling and selection are independent.
-
-- Desktop: drag to select text. If a program such as htop handles the mouse, hold Shift while dragging, or Option on macOS; releasing the modifier keeps the selection. Copy through the context menu, or Cmd-C on macOS. Paste with Ctrl-V, Ctrl-Shift-V, Cmd-V or the context menu. Ctrl-C is sent to the program.
-- Phone: tap the terminal to operate program controls that support mouse clicks and open the keyboard. Long-press text or blank space to open the menu and paste; adjust the selection with the handles if needed before copying. Clear an existing selection before tapping the terminal to open the keyboard. Paste appears when the browser supports reading the clipboard.
+- Desktop: drag to select text. If a program such as htop handles the mouse, hold Shift while dragging, or Option on macOS. Copy through the context menu, or Cmd-C on macOS. Paste with Ctrl-V, Ctrl-Shift-V, Cmd-V or the context menu. Ctrl-C is sent to the program.
+- Phone: tap the terminal to operate program controls that support mouse clicks and open the keyboard. Long-press text or blank space to open the menu and paste; adjust the selection with the handles if needed before copying. Paste appears when the browser supports reading the clipboard.
 
 Oversized pastes are not sent and show "Pasted text exceeds the input limit". The web terminal does not display images from programs.
 
-When a program requests a copy through OSC 52, “Program copy” and the line count appear at the top right of the terminal. Click it to write to your local clipboard. The program supplies this text independently of the web selection; dismissing the prompt discards the request. A failed copy keeps the text and error so you can click again. Other web displays of the same session handle their requests independently, and restored history does not prompt for old requests.
+When a program requests a copy through OSC 52, “Program copy” and the line count appear at the top right of the terminal. Click it to write to your local clipboard; dismissing the prompt discards the request.
 
-On desktop, Ctrl-click a URL in terminal output to open it, or Cmd-click on macOS; plain clicks operate the terminal. On a phone, select a complete HTTP(S) URL and choose “Open link” from the selection menu. Clear an existing selection before using the desktop link gesture.
+On desktop, Ctrl-click a URL in terminal output to open it, or Cmd-click on macOS; plain clicks operate the terminal. On a phone, select a complete HTTP(S) URL and choose “Open link” from the selection menu.
 
-The phone shows two rows of terminal keys. A short tap sends a key once. Hold an arrow still for about 450ms to start sending, then repeat about every 90ms. Sliding across keys does not start input. After repetition starts, sliding, leaving the button or releasing stops it; keys already sent cannot be withdrawn. Switching terminals, opening search or composition, or leaving the page also stops repetition; hold again after returning.
-
-Tap SHIFT, CTRL or ALT once to apply it to the next key, and again to cancel. For a held arrow, the combination present before its first send lasts until release or cancellation, even though the indicators turn off after that first send. A modifier set during repetition stays pending for the next ordinary input. The pen button at the bottom right opens local composition. In the web app, Ctrl-b goes directly to the program; it is not a tmux prefix.
+The phone shows two rows of terminal keys: a short tap sends a key once, and holding an arrow repeats it. Tap SHIFT, CTRL or ALT once to apply it to the next key, and again to cancel. In the web app, Ctrl-b goes directly to the program; it is not a tmux prefix.
 
 ### Compose multiline input
 
-On desktop, press Ctrl/⌘+Shift+Enter inside the terminal or choose Compose from its context menu. On a phone, tap the pen button at the bottom right of the terminal keys. The editor covers the terminal, and Enter only adds a new line. Insert pastes the text into the program without Enter; Send or Ctrl/⌘+Enter pastes it and then presses Enter. The editor closes after success clears the delivered draft; the phone keyboard stays closed so you can read the reply. Edits made during the request stay open in the editor.
+On desktop, press Ctrl/⌘+Shift+Enter inside the terminal or choose Compose from its context menu. On a phone, tap the pen button at the bottom right of the terminal keys. In the editor, Enter only adds a new line. Insert pastes the text into the program without Enter; Send or Ctrl/⌘+Enter pastes it and then presses Enter.
 
-Close the editor or press Esc to keep its draft and caret position. Return to the original terminal after switching terminals, workspaces or devices to continue. Drafts live only in the current page; reloading, closing the page or signing out clears them, and they do not sync to another device. A pending send stays pending across closing, reopening and navigation, preventing another send while it is in flight; edits made during the request are kept. Failure or an unconfirmed result keeps the draft and error with the original terminal. Check the program's actual input before deciding to resend. Success means tmux handled the input, not that the program finished processing it.
+Closing the editor keeps its draft; return to the original terminal to continue. Drafts live only in the current page; reloading, closing the page or signing out clears them, and they do not sync to another device. Failure or an unconfirmed result keeps the draft and error with the original terminal. Check the program's actual input before deciding to resend. Success means tmux handled the input, not that the program finished processing it.
 
-Choose files with the paperclip button, or paste or drop files into the draft. Uploads start at the source workspace root; change the subdirectory and file name in the existing [upload dialog](#upload-and-download). After the device confirms a successful write, its final absolute path replaces the source draft's selection or is inserted at its caret. Successful paths from the same batch are separated by newlines. Switching workspaces or terminals during upload still inserts into the original draft. Close the upload dialog to continue typing. Paths are inserted as plain text; quote them according to your shell's rules when using them in a shell command.
+Choose files with the paperclip button, or paste or drop files into the draft. Uploads start at the source workspace root; change the subdirectory and file name in the [upload dialog](#upload-and-download). After the device confirms a successful write, its absolute path on the device replaces the draft's selection or is inserted at its caret. Paths are inserted as plain text; quote them according to your shell's rules when using them in a shell command.
 
 ### Open files from terminal output
 
 On desktop, Ctrl/Cmd-click a path to open it in Files in the source workspace. On a phone, select the full path with a long press, then choose Open file from the menu. Relative paths always start at the workspace root; they do not follow shell `cd`, SSH or container directories.
 
-Supported forms are `/`-separated relative paths, POSIX absolute paths inside the workspace, and local `file://` URIs. `:line` and `:line:column` position only the line in the existing unsaved draft; a line beyond the document goes to its last line. Ordinary paths containing `..` are not recognized. Desktop detection accepts complete ASCII paths without spaces; an exact phone selection may include spaces and Unicode. Use `./README` for an extensionless name. Windows workspaces accept `/`-separated relative paths, without drive letters or backslashes.
+Supported forms are `/`-separated relative paths, POSIX absolute paths inside the workspace, and local `file://` URIs. `:line` and `:line:column` position only the line. Ordinary paths containing `..` are not recognized. Desktop detection accepts complete ASCII paths without spaces; an exact phone selection may include spaces and Unicode. Use `./README` for an extensionless name. Windows workspaces accept `/`-separated relative paths, without drive letters or backslashes.
 
 ### Search and display
 
-On desktop and mobile, one button in the terminal control row cycles through normal, focus, fullscreen, and back to normal. Focus hides both sidebars and the device/workspace header; navigation returns in the normal layout. Changing the device, workspace, or tool exits terminal focus and fullscreen. Focus file on mobile follows the same rules. When the browser does not support fullscreen, the button cycles through normal, focus, and back to normal.
-
-Leaving fullscreen restores the normal layout. When the browser supports fullscreen, Settings on other pages and the phone file menu also provide fullscreen. Independent desktop fullscreen entered from Settings on other pages ends when changing devices, changing workspaces, or leaving a workspace; it stays active when switching tools within the same workspace.
-
-Terminal search covers currently loaded display content, including history, without case sensitivity. On desktop and phone, choose Search terminal from the terminal area menu to reveal the current pane and search it. The search bar shows the target session name, and its controls wrap in narrow areas. The current terminal's auxiliary keys are hidden during search and return when it closes, letting you continue typing; ended sessions still support history navigation. An actual grid size change keeps the query and clears the search result status; press Enter to search again.
+Terminal search covers currently loaded display content, including history, without case sensitivity; choose Search terminal from the terminal area menu. Ended sessions still support history navigation.
 
 "Scrollback lines for new sessions" in "Terminal settings" controls the history retained per session (range in [Limits](reference.en.md#limits)). It affects only sessions created afterward. Increasing it makes terminal loading, reconnection, and heavy output processing slower and can pause other web terminals on the same device. If you need less history, lower it and create a new session.
 
-A session has one row/column size, determined by the client that most recently typed or resized its window. Other clients reflow to it. Opening the phone keyboard does not resize the session. An actual grid size change clears each display's selection and keeps the content you were reading in view. Near the bottom, the viewport adjusts to the available scroll range; if that content has been trimmed from history, it shows the earliest retained content.
+A session has one row/column size, determined by the client that most recently typed or resized its window. Other clients reflow to it. Opening the phone keyboard does not resize the session.
 
-If the keyboard covers a program control, close the keyboard, or long-press text and drag a selection handle to bring that area into view; clear the selection before continuing. While the program hides its cursor, further input keeps the position you revealed. Tap Scroll to bottom to return to the input position.
+If the keyboard covers a program control, close the keyboard, or long-press text and drag a selection handle to bring that area into view.
 
 ### Connection and recovery
 
@@ -170,13 +135,11 @@ A history gap means some output during a recorder failure was not captured in we
 
 ### Continue in CLI
 
-The session menu’s “Continue in CLI” provides a complete command for the current device, workspace and session. Run it in a local terminal logged in to this server. If the CLI is not set up, choose “Install and log in” to open the guide; the selected platform also sets the shell for the attach command. “Return to attach”, X or Escape in the guide returns to the original session command; close once more to leave the flow. “CLI setup” in the Settings menu opens the guide directly, and closing it exits. CLI and Web operate the same shell, and the session keeps running after detaching. See [Remote CLI](cli.en.md#attach-to-an-existing-terminal) for keys, installation and credentials. Device-side workspace and session management commands are in the [command reference](reference.en.md#kiteline-agent-commands).
+The session menu’s “Continue in CLI” provides a complete command for the current device, workspace and session. Run it in a local terminal logged in to this server. If the CLI is not set up, choose “Install and log in” to open the guide; “CLI setup” in the Settings menu also opens the guide directly. CLI and Web operate the same shell, and the session keeps running after detaching. See [Remote CLI](cli.en.md#attach-to-an-existing-terminal) for keys, installation and credentials. Device-side workspace and session management commands are in the [command reference](reference.en.md#kiteline-agent-commands).
 
 ## Files
 
-The right Files sidebar browses the current workspace, with paths relative to its directory; opened files appear in the central work pages. Clicking a file or Git entry opens a page that remains until you close it. Selecting an already open page does not duplicate it. “Copy device absolute path” in Details copies the path text on the device; quote it according to your shell's rules when using it in a shell command.
-
-Work-page tabs show only filenames. To distinguish files with the same name or diffs of the same file from different sources, open a tab and check its content header's path and comparison source, or view the full path and source in its context menu. Below 960px wide, text, Markdown and image paths share one row with their action buttons. Long paths keep their ends and may not distinguish files with the same name; use file Details or the tab menu for the full path.
+The Files sidebar browses the current workspace, with paths relative to its directory. Work-page tabs show only filenames; view the full path and source in the tab's context menu. “Copy device absolute path” in Details copies the path text on the device; quote it according to your shell's rules when using it in a shell command.
 
 ### Browse
 
@@ -186,23 +149,15 @@ The list refreshes automatically when other programs change files, and periodica
 
 ### Open and edit
 
-Press Enter on a file tree, search result or Git file row to open it and move focus to the Work pages region.
+PNG, JPEG, GIF and WebP images are detected by content and previewed; images exceeding preview byte or pixel limits can only be downloaded. Other files open as UTF-8 text. Files containing NUL bytes, invalid UTF-8 or content exceeding editing limits (see [Limits](reference.en.md#limits)) can be downloaded but not edited.
 
 In the editor, Tab indents; press Escape, then immediately press Tab or Shift+Tab to leave. Ctrl+M (Shift+Alt+M on macOS) toggles Tab focus mode.
 
-PNG, JPEG, GIF and WebP images are detected by content and previewed; images exceeding preview byte or pixel limits can only be downloaded. Other files open as UTF-8 text. Files containing NUL bytes, invalid UTF-8 or content exceeding editing limits (see [Limits](reference.en.md#limits)) can be downloaded but not edited.
-
-The image preview's Fit to screen icon button stays selected in fit mode. Clicking it in fit mode switches to 100%; clicking it at any numeric zoom returns to fit mode.
-
 The file editor and Git diffs highlight syntax by filename. Diffs contain partial context, so multiline comments or strings can be colored incorrectly; use the source text to interpret them.
 
-The file toolbar keeps code line references, Save, and content preview. “More file actions” contains Find / replace, Copy text, Open containing directory, Download file, Check disk content, and Save as. “Open containing directory” navigates to the current file's directory and identifies the file; save an unnamed draft first. Phones also keep direct access to Focus file.
+Choose “Find / replace” from “More file actions” to search the current draft, including unsaved edits. Replacements change the draft; Save writes them to disk. File font size is also set in this menu (10–24px), independent of the terminal font size.
 
-While editing source, choose “Find / replace” from the menu to search the current draft, including unsaved edits. Replacements change the draft; Save writes them to disk.
-
-Font actions in “More file actions” set an absolute size from 10–24px, shared by the text editor, Markdown and read-only text previews across wide and narrow layouts. “Restore default font size” restores 13px in wide layouts and 16px in narrow layouts (less than 960px wide). File and terminal font sizes are independent.
-
-In the file source toolbar, “Copy code line reference” copies the whole lines touched by the selection, or the cursor line when nothing is selected, with the device, workspace, relative path and line numbers. It uses the current editor text, including unsaved edits, without changing the selection or saving the file. Paste it manually into the target terminal.
+In the file source toolbar, “Copy code line reference” copies the whole lines touched by the selection (or the cursor line when nothing is selected), with the device, workspace, relative path and line numbers. It includes unsaved edits; paste it manually into the target terminal.
 
 The editor preserves the original BOM, line endings and final newline. For mixed line endings, it indicates whether saves will use LF or CRLF. An edit that would exceed the editing limit is rejected in full.
 
@@ -212,11 +167,7 @@ Saving replaces the original with a new file, so its parent directory must allow
 
 ### Markdown preview
 
-Markdown source wraps to the editor width without changing line breaks in the file.
-
 Switch `.md` and `.markdown` files between source and preview. The preview includes unsaved edits and renders `mermaid` code blocks as diagrams. Relative file links open their targets in Files. Raw HTML appears as text; external images in ordinary Markdown appear as links, while external images within diagrams load automatically.
-
-Switching files or workspaces, or hiding the content, preserves preview mode when you return to the draft and restores the visible paragraph's position when the content becomes visible again. Terminal line links and search locations open source instead.
 
 ### HTML preview
 
@@ -224,14 +175,14 @@ Switching files or workspaces, or hiding the content, preserves preview mode whe
 
 The preview is isolated from the workbench, but document and CDN scripts can read and send the entire preview content. Modules, fetch and fonts remain subject to browser CORS rules; localStorage/sessionStorage are unavailable. Links, scripts and meta refresh can navigate within the frame, and browser Back may traverse frame history first. Form submission, new windows and top-level navigation are not enabled.
 
-Switching to source, another draft or workspace, or hiding the content ends the current preview. Switching sidebar tools or searching while the content remains visible does not restart it. Showing the preview again runs it anew, resetting form values and chart selections while preserving the source draft and undo history. Terminal line links return to source. Save writes the draft, while Download reads the file on disk; interactions inside the preview do not change the source.
+Switching to source, another draft or workspace, or hiding the content ends the current preview. Showing the preview again runs it anew, resetting form values and chart selections while preserving the source draft and undo history. Save writes the draft, while Download reads the file on disk; interactions inside the preview do not change the source.
 
 ### Drafts
 
 Drafts are kept only in the current page's memory:
 
-- They survive switching files, tools, workspaces and devices. "Open files" lets you find open drafts across all devices. A dot marks unsaved drafts in file tabs and "Open files".
-- Closing a file tab with unsaved content offers Cancel, Discard changes, or Save and close. Empty unnamed drafts close directly.
+- They survive switching files, tools, workspaces and devices. "Open files" lets you find open drafts across all devices.
+- Closing a file tab with unsaved content offers Cancel, Discard changes, or Save and close.
 - With unsaved changes, the browser prompts before reloading, navigating away, or closing the page. Confirming that you want to leave loses the drafts. On mobile, the prompt may be skipped when you close the app or the system discards the page.
 - While a device is offline, you can still edit, undo and copy. Save after it comes back online.
 - After a device or workspace is deleted, you can still edit, undo and copy, but cannot save, save as or download. Use “Copy text” to create a file in another workspace.
@@ -239,7 +190,7 @@ Drafts are kept only in the current page's memory:
 
 ### Save conflicts
 
-Save submits a named file directly. Only when that save encounters a disk version conflict does it read the current disk content and offer to overwrite that version, view the disk content, or cancel. Cancel keeps the draft. Viewing expands the full text in the same dialog, with Find, selection and copy; you can also load the disk version and discard the draft. Copy the text to an external tool for complex comparisons.
+Save submits a named file directly. Only when that save encounters a disk version conflict does it read the current disk content and offer to overwrite that version, view the disk content, or cancel. Cancel keeps the draft. When viewing the disk content, you can also load the disk version and discard the draft.
 
 Overwrite applies only to the version read in the dialog. If that version changes again, the overwrite is rejected; check again before deciding. Overwrite is unavailable if the read fails. If the conflict dialog shows that the original file no longer exists, choose “Save as” and enter a new path.
 
@@ -255,33 +206,21 @@ File search searches the workspace's files on disk by content or file name, with
 - `.gitignore` applies only inside Git repositories; `.ignore` and `.rgignore` always apply. Check "Include ignored files" to include files excluded by these rules.
 - Results and search duration are limited (see [Limits](reference.en.md#limits)). Reaching a limit shows "incomplete results". Results with non-UTF-8 paths are omitted and also mark the results incomplete.
 
-The current page keeps search conditions and successful results for each workspace, so you can return and continue opening them. Changing conditions or starting a new search clears the previous results; refreshing the page or signing out clears search state. Opening a content result maps an unchanged disk match to its position in the current draft. If that position cannot be confirmed, the editor opens Find; click “next” to continue searching. If focus has moved elsewhere, it does not open Find or overwrite the current query.
-
-Locating a match in an unsaved draft can take time, and the text remains usable while waiting. Reopening a file, selecting or editing text, or switching files cancels the old position request. A failed comparison shows an error.
+The current page keeps search conditions and successful results for each workspace; refreshing the page or signing out clears them. Opening a content result maps an unchanged disk match to its position in the current draft. If that position cannot be confirmed, the editor opens Find.
 
 ### Look up by name
 
-In a file's source, place the cursor on a word or select text on one line, then choose “Find ‘name’ by name” from “More file actions.” On desktop, F12 or Ctrl+click (Cmd+click on macOS) starts at “Possible definitions”; Shift+F12 starts at “Other occurrences.” These commands show the list without opening its first item. On phones, select a word and use the same menu.
+In a file's source, place the cursor on a word or select text on one line, then choose “Find ‘name’ by name” from “More file actions.” On desktop, you can also press F12 or Ctrl+click (Cmd+click on macOS); Shift+F12 starts at “Other occurrences.” The list has two groups, “Possible definitions” and “Other occurrences”; select an item to preview it, and “Open file” opens the editable document. Afterward, continue the existing list through “Name navigation” in the file search panel.
 
-Results match case-sensitive name text as complete words, without resolving which symbol each name belongs to. The two groups are mutually exclusive: “Possible definitions” prioritizes syntax marks in the current draft, then declaration line patterns; “Other occurrences” is ordered by the initiating file, nearby directories and path. Namesakes, imports, comments and documentation can appear, so check the path and context. Previewing another file does not change the lookup's sorting center. Name lookups leave the ordinary search query, Whole word and ignored-file settings unchanged.
-
-Use the two group buttons at the top to move to either group. Counts represent deduplicated positions. “Start” is counted and selectable; “Next” skips it and continues across groups. When results are incomplete, counts cover only the positions currently shown.
-
-Selecting a result opens a preview below the document on desktop or a temporary reading layer on phones. Open files use their current drafts, including unsaved edits. “Show results” returns to the list; “Open file” opens the editable document. The preview's return button or browser Back returns to the initiating position. Browsing successive candidates uses one browser history entry. From the document, continue the existing list through “Name navigation” in the file search panel; on phones, open that panel through Tools.
-
-Every F12, Shift+F12, Ctrl/Cmd+click or Find by name menu command starts a new lookup from the current selection, even for the same name. That selection becomes the new start and sorting center. An ordinary file open or search result open also ends the old lookup, including opening the same file. Switching search panels or entering a query alone does not end it. After a lookup ends or is replaced, its browser Back/Forward entries only open files, preserving each draft's current reading position.
-
-While a lookup is active, edits outside a matched range update its position. Deleting the original matched text invalidates that position. Undo restores the text without restoring the old match; start a new lookup from the current selection.
+Results match case-sensitive name text as complete words, without resolving which symbol each name belongs to. Namesakes, imports, comments and documentation can appear, so check the path and context.
 
 ### Create and rename
 
-"New file" opens an unnamed draft. Enter its path on first save, starting in the directory shown in the file toolbar when you created the draft. "New directory" in a folder's context menu creates inside that folder. The device and Git cannot see the file until it is saved. First saves, directory creation, and renaming fail if the name exists; nothing is overwritten. Open tabs follow renamed or moved paths. The workspace root and files currently being saved cannot be renamed, moved or deleted.
-
-Path inputs preserve line breaks in pasted text. Press Enter or the mobile keyboard's Done key to submit directory creation, renaming, first saves, or Save as. Upload, organize, and conflict paths still use their respective action buttons.
+"New file" opens an unnamed draft. Enter its path on first save, starting in the directory shown in the file toolbar when you created the draft. "New directory" in a folder's context menu creates inside that folder. The device and Git cannot see the file until it is saved. First saves, directory creation, and renaming fail if the name exists; nothing is overwritten. On file systems that do not support renaming without overwriting (some NFS and 9p mounts), first saves, renames, and uploads, copies and moves that do not replace an existing item can fail; do them in a terminal instead. Open tabs follow renamed or moved paths. The workspace root and files currently being saved cannot be renamed, moved or deleted. Path inputs preserve line breaks in pasted text.
 
 ### Upload and download
 
-Choose files from the toolbar or a folder's context menu, or drop them onto Files to upload. The toolbar and file drops use the current browsing directory; a folder's menu uses that folder. The confirmation dialog shows the device, workspace and starting directory captured when the upload was created, and lets you change destination paths. A drop containing any directory is rejected in full. Uploads send files sequentially. After data is sent, the device still needs to finish. Collapsing the dialog does not cancel the upload. If you switch workspaces while it is collapsed, reopening still shows the original upload destination. To upload to another workspace, start a new upload from that workspace. When leaving or refreshing during an upload, choose to stay in the browser's confirmation to continue; after leaving, select the files again.
+Choose files from the toolbar or a folder's context menu, or drop them onto Files to upload; the confirmation dialog shows the device, workspace and starting directory, and lets you change destination paths. A drop containing any directory is rejected in full. To upload to another workspace, start a new upload from that workspace. When leaving or refreshing during an upload, choose to stay in the browser's confirmation to continue; after leaving, select the files again.
 
 Downloads use the browser's download manager; directories cannot be downloaded. Batch downloads start one at a time: keep the page open until all have started, and allow multiple downloads in the browser. If blocked, enable them in the browser's site settings. Error notices include the device, workspace and path, so you can retry individual files from their menus. See [Limits](reference.en.md#limits) for size limits.
 
@@ -316,25 +255,17 @@ Git uses the device's Git installation and the project user's Git configuration,
 
 Git scans the workspace directory and all subdirectories, listing repositories including initialized submodules and linked worktrees within the workspace (marked `worktree`). Repositories outside the workspace are not used. If the workspace is only a subdirectory of a repository, it shows "No Git repositories found"; add the repository root as a workspace.
 
-With several repositories, the first available one is selected automatically. Switch by path in the repository menu; it marks the current repository and shows `.` as "Workspace root". If "Repository scan incomplete" appears, click "Continue scan". "Discover repositories again" rescans from the beginning. Resolve read errors or continue an incomplete scan before deciding that a repository is missing. Bare repositories are not supported.
+With several repositories, switch by path in the repository menu. If "Repository scan incomplete" appears, click "Continue scan"; resolve read errors or continue an incomplete scan before deciding that a repository is missing. Bare repositories are not supported.
 
 ### Status and diff
 
-Desktop starts with Changes above a shared History/Branches area. With both expanded, space starts at 60:40. Drag the divider to adjust their heights, or Tab to it and use the up and down arrow keys; Home and End move to the currently allowed limits. Collapse either area to give the other more space. Reopening an area or returning to the workspace keeps the adjusted ratio; reloading resets it to the default. Mobile uses one navigation row and shows one area at a time. The current branch in the top bar opens Branches. Switching or collapsing areas keeps drafts, the selected commit and open diffs. Each refresh button explicitly refreshes its own area; refreshing Changes does not reset a later history page to the first page.
+The Git sidebar manages changes, history, branches and repository operations; work pages show individual diffs, and you can keep multiple files or comparison sources open to compare them. Diffs start in Unified view; on wide screens you can switch to Split.
 
-The Git sidebar manages changes, history, branches and repository operations; work pages show individual diffs. Keep multiple files or comparison sources open to compare them. The content header shows the repository path, and tab tooltips retain the full path and parent revision. Checking list entries does not change the active page. Opening a source file from a diff keeps Git in the sidebar. Staging or unstaging preserves the current page and its comparison source.
-
-When a worktree or staged comparison says "This comparison no longer has changes", you can explicitly open the other side for the same repository and path while retaining the original page. The other side may also have no changes. "Open Git panel" reveals that repository's tools, keeping the selected Changes, History or Branches area.
-
-Diffs start in Unified view. On wide screens, the layout icon shows the current state; click it to switch between Unified and Split. Its tooltip names the current and next layout. Unified wraps to the actual content pane width, and Split wraps within each column, preserving source text and original line numbers. Long generated lines require more vertical scrolling. Narrow windows use Unified view and restore your previous choice when widened. Worktree, staged and history diffs share this choice.
-
-Inline changes use a stronger background color, and Split view aligns corresponding lines using unchanged text. Alignment uses only the context in the patch, so repeated content can produce imperfect matches. The original diff remains readable while computing or after a failure, with a status message.
-
-Diffs exceeding the limit show only part of the raw patch. Entries explain known statuses, previous rename paths, file modes and binary content. A change row known to be absent from disk cannot open the file; a historical deletion only describes the selected commit. Pagination controls appear only when there is a previous or next page. The Staged changes count covers the whole repository; other group counts cover the current page. An empty group on one page does not mean the whole repository is clean. Entries with non-UTF-8 paths cannot be operated on.
+Diffs exceeding the limit show only part of the raw patch. When the change list has previous or next pages, the Staged changes count covers the whole repository; other group counts cover the current page. An empty group on one page does not mean the whole repository is clean. Entries with non-UTF-8 paths cannot be operated on.
 
 A dot on a change row marks a related unsaved draft. Worktree comparisons read the device disk and index; staged comparisons read the index and HEAD. When a related unsaved draft exists, the diff explains this source and does not read the browser draft. A draft with an unconfirmed save may already be on disk; check it in Files.
 
-In a regular text file's worktree diff, click the new-side line number of an added or context line to open and locate it in the file; phones use the same direct action. Deleted lines, staged comparisons, historical versions and raw patches have no line-number navigation. If the target has an unsaved draft, the action only opens it and preserves its reading position because diff line numbers come from disk. Browser Back returns to the diff's reading position.
+In a regular text file's worktree diff, click the new-side line number of an added or context line to open and locate it in the file; deleted lines, staged comparisons, historical versions and raw patches have no line-number navigation. If the target has an unsaved draft, the action only opens it and preserves its reading position because diff line numbers come from disk.
 
 ### Stage and commit
 
@@ -342,11 +273,9 @@ In a regular text file's worktree diff, click the new-side line number of an add
 - An action that would also change unselected paths does not proceed. Those paths and the required preceding actions are listed.
 - Unstaging a rename affects both old and new paths. "Unstage the new path only" affects only the new path.
 
-Successful staging, unstaging or discarding unchecks the corresponding items in that operation. Background list updates that change other selected items uncheck them separately and show the count. After a failed, partial or unconfirmed result, refresh to check the actual state.
+When staging, unstaging or discarding fails, partially completes or has an unconfirmed result, refresh to check the actual state.
 
-The commit includes everything staged, regardless of the current page or selected rows. The dialog shows the repository, branch or detached HEAD, and the repository-wide staged file count. It explains why committing is unavailable, including an offline device, a Git write or status read in progress, unavailable status, conflicts, no staged changes or an empty message. Successful feedback shows the actual commit OID.
-
-On desktop, click "Commit message" to open the editor; you can write a message before staging. On mobile, open it from the available "Commit" button; when disabled, its reason appears beside it. Cancelling keeps the message draft. A successful commit clears the submitted message only if it has not been edited during the request; a new message written during the commit is retained.
+The commit includes everything staged, regardless of the current page or selected rows. The dialog shows the repository, branch or detached HEAD, and the repository-wide staged file count.
 
 ### Discard changes
 
@@ -354,21 +283,15 @@ On desktop, click "Commit message" to open the editor; you can write a message b
 
 ### Branches and history
 
-"Branches" lists local branches. Click a branch row to read its full name, commit OID and worktree path. "Create branch" in the branch navigation starts from the current HEAD; the action in history details starts from that commit. Branches checked out in other worktrees cannot be switched to or deleted. Switching does not force-overwrite local changes. Deletion runs `git branch -d`, which rejects unmerged branches; Git rejection shows [Result unconfirmed](#result-unconfirmed).
-
-The first history page updates when a new HEAD is read. Later pages keep the original snapshot, so new commits do not shift the current page. Returning to the first page with Previous, or refreshing history, reads the latest history; refreshing resets the history list to its first page. Open commit details, the selected parent and diffs retain their original comparison source.
+"Branches" lists local branches. "Create branch" in the branch navigation starts from the current HEAD; the action in history details starts from that commit. Branches checked out in other worktrees cannot be switched to or deleted. Switching does not force-overwrite local changes. Deletion runs `git branch -d`, which rejects unmerged branches; Git rejection shows [Result unconfirmed](#result-unconfirmed).
 
 History file line counts and diffs compare against the same parent commit. For merge commits, you can choose the parent. Binary files do not show line counts.
 
-After selecting a commit, click "Full commit message" on desktop to read its subject and body. On mobile, scroll through the message and files in the commit details. Line breaks are preserved and long lines wrap. If the message cannot be read, its error appears while files and diffs remain available.
-
 ### Synchronization and authentication
-
-On mobile, use the "Remote actions" menu for Pull and Push.
 
 Pull runs `git pull`, using the default commit message for merges. Pull configured for interactive rebase fails. Push runs `git push`; force push is not available.
 
-Authentication cannot be interactive: Git does not prompt for a username or password. SSH keys, ssh-agent or credential helpers must work without input in the agent's environment. "Terminal" in the feedback and "Continue in Terminal" in the operation bar first show the device, workspace, repository and full path. Copy the repository path, then select "Open workspace terminal" to enter the existing terminal. The Shell keeps its directory and any text already entered. Change to the target repository manually as needed and run the same Git command to finish configuration, such as saving credentials in a helper, then return and retry. For service agents, see [Run in the background](devices.en.md#run-in-the-background).
+Authentication cannot be interactive: Git does not prompt for a username or password. SSH keys, ssh-agent or credential helpers must work without input in the agent's environment. If a credential helper waits for input, the operation hangs until the Git write time limit (10 minutes by default; see [Limits](reference.en.md#limits)) and is then canceled. When configuration is needed, open the workspace terminal from "Terminal" in the feedback or "Continue in Terminal" in the operation bar. The Shell keeps its directory and any text already entered. Change to the target repository manually as needed and run the same Git command to finish configuration, such as saving credentials in a helper, then return and retry. For service agents, see [Run in the background](devices.en.md#run-in-the-background).
 
 ### Conflicts and continuation
 
@@ -382,14 +305,14 @@ After confirmation, "Abort" asks Git to restore the pre-operation state; uncommi
 
 ### Result unconfirmed
 
-Feedback names the operation and reports completion, failure, partial completion or an unconfirmed result. Successful staging and unstaging stay silent. Completed feedback can be dismissed; "Cancel operation" is available during execution. Each repository executes one Git write at a time, queuing the rest. The workbench cannot determine the repository state in these cases and shows "Result unconfirmed"; refresh and check before deciding to retry:
+Each repository executes one Git write at a time, queuing the rest. The workbench cannot determine the repository state in these cases and shows "Result unconfirmed"; refresh and check before deciding to retry:
 
 - A Git command exits unsuccessfully, such as a rejected push, a commit rejected by a hook, or an existing `index.lock`.
 - Contact is lost during execution.
 - The operation is cancelled.
 - The write deadline is exceeded (see [Limits](reference.en.md#limits)).
 
-Feedback directly shows the retained multiline Git output and error diagnostics, with a notice when truncated. Expand "Details" for additional error data. A successful Fetch can still be followed by a separate status read failure. Use "Refresh Git" to check branches, commits and changes. Retry manually only after confirming that the operation did not take effect. The workbench does not retry automatically.
+Feedback shows Git output and error diagnostics. A successful Fetch can still be followed by a separate status read failure. Use "Refresh Git" to check branches, commits and changes. Retry manually only after confirming that the operation did not take effect. The workbench does not retry automatically.
 
 A partially completed multi-step operation retains its known progress and diagnostics. Use a terminal for stash, line staging and similar operations.
 
@@ -399,13 +322,11 @@ The workbench opens HTTP services listening on local device ports, including Web
 
 ### Open a port
 
-Right-click the device name in the left navigation, or use its More menu on a touch interface, choose "Open port", then enter a port in that device's dialog. Open navigation first if it is collapsed. Candidates are a snapshot and may include non-HTTP services; unlisted ports can be entered manually.
+Right-click the device name in the left navigation, or use its More menu on a touch interface, choose "Open port", then enter a port. Candidates are a snapshot and may include non-HTTP services; unlisted ports can be entered manually.
 
-The dialog shows the actual URL used for opening and copying. "Keep prefix" also shows the base to configure in the project.
+The service must listen on `127.0.0.1`, `::1`, `0.0.0.0` or `::` on the agent's machine or container. See [Run in a container](devices-advanced.en.md#run-in-a-container).
 
-The service must listen on `127.0.0.1`, `::1`, `0.0.0.0` or `::` on the agent's machine or container. See [Run in a container](devices.en.md#run-in-a-container).
-
-In terminal output, `http:` links whose hosts are `localhost`, `127.0.0.1`, `[::1]`, `0.0.0.0` or `[::]` are converted to that device's port address. Ctrl-click on desktop, or Cmd-click on macOS; on phones, long-press to select the full link and tap "Open device port", which identifies the current device name and port. Other links open their original addresses.
+In terminal output, `http:` links whose hosts are `localhost`, `127.0.0.1`, `[::1]`, `0.0.0.0` or `[::]` are converted to that device's port address. Ctrl-click on desktop, or Cmd-click on macOS; on phones, long-press to select the full link and tap "Open device port". Other links open their original addresses.
 
 ### Two path modes
 
@@ -457,12 +378,13 @@ const socket = new WebSocket(socketUrl);
 ### Common errors
 
 - Redirected to sign-in: the browser is not signed in or its login expired. Signing in returns to the original URL automatically.
+- The page is still open, but API requests or hot reload return 401: the login has expired. In-page requests do not redirect to sign-in; reload the page to sign in.
 - 502: check the target port and actual error shown, whether an HTTP service listens on that port at a reachable address, and the agent container's network.
 - 503: device offline; check that device's agent connection. 426: agent/server version mismatch; see [Upgrade the agent](devices.en.md#upgrade-the-agent). 404: device ID does not exist.
 - 504 or 429: connection timeout or device connection capacity reached. Retry later.
 - Blank page or MIME-type error: use "Keep prefix" and configure the base.
 
-Workbench-generated error pages are in English and show the target device name, port and actual error. After addressing the problem, click "Reopen" to open the URL again manually. "Back to device" returns to that device's details. Errors returned by the development service appear unchanged.
+Workbench-generated error pages are in English and show the target device name, port and actual error. Errors returned by the development service appear unchanged.
 
 ### Security
 

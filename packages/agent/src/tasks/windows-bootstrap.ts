@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { windowsNative } from "@kiteline/shared/windows/native";
 
 // Initialize the task's private console before PowerShell creates its output writers.
+// The console belongs to this task's Job, so the agent's and other tasks' code pages stay as is.
 windowsNative().setConsoleOutputUtf8();
 const child = spawn(process.argv[3]!, process.argv.slice(4), {
   stdio: "inherit",

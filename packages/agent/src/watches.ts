@@ -16,6 +16,7 @@ export class WorkspaceWatches {
   private revision = 0;
 
   constructor(private send: (event: WorkspaceEvent) => void) {
+    // Linux runs watch setup, events and teardown in a worker so they cannot block requests.
     if (process.platform !== "linux") this.local = new WatchRoots(send);
   }
 

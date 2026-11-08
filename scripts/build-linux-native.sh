@@ -62,6 +62,8 @@ cc -static -Wall -Wextra -Werror -O2 $cpu_flags \
 cc -static -Wall -Wextra -Werror -O2 $cpu_flags \
   "$inputs/native/terminal/pty-bridge.c" -lutil -o /output/native/bin/pty-bridge
 "$prefix/bin/tic" -x -o /output/native/share/terminfo "$inputs/native/tmux/tmux.terminfo"
+# Older ncurses cannot read the extended number format that pairs#0x10000 needs; this legacy
+# copy caps pairs at 32767 and keeps every other capability.
 [ "$(grep -c 'pairs#0x10000,' "$inputs/native/tmux/tmux.terminfo")" -eq 1 ]
 sed 's/pairs#0x10000,/pairs#32767,/' "$inputs/native/tmux/tmux.terminfo" >tmux-legacy.terminfo
 "$prefix/bin/tic" -x -o /output/native/share/terminfo-legacy tmux-legacy.terminfo

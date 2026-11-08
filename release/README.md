@@ -17,8 +17,8 @@
 | [`Dockerfile.windows-native`](Dockerfile.windows-native) | 提供 Windows addon 的交叉编译环境。                                 |
 | [`ubuntu.sources`](ubuntu.sources)                       | 固定 Ubuntu apt 快照。                                              |
 
-`agent-linux-packages.txt` 由 `xargs apk add` 直接读取，每行一个包名，不能写注释。文件的 SHA-256 记录在 Linux 原生组件的构建记录中。包版本不固定，跟随所选 Alpine 版本的软件源；每个 Linux agent 包的 `dist/native/build-packages.txt` 记录构建时安装的包和版本。
+`agent-linux-packages.txt` 由 `xargs apk add` 直接读取，每行一个包名，不能写注释。包版本不固定，跟随所选 Alpine 版本的软件源。
 
 ## 更新方法
 
-修改下载地址时，同时填写新文件的 SHA-256；脚本下载后核对 SHA-256，不一致时停止构建。配套修改见[升级固定依赖](../docs/development/release.md#升级固定依赖)，组件复用与重建规则见[概览](../docs/development/release.md#概览)。
+配套修改见[升级固定依赖](../docs/development/release.md#升级固定依赖)，组件复用与重建规则见[概览](../docs/development/release.md#概览)。

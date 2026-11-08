@@ -291,6 +291,7 @@ export class DraftStore {
       baseText: draft.baseText,
       dirty: text !== draft.baseText,
     });
+    // No transactions means the text was replaced: no original-character identity carries over.
     for (const listener of this.transactionListeners) listener(draft, transactions);
     this.changed(
       draft,

@@ -59,6 +59,7 @@ export async function waitForGroup(pid: number, onError: (error: unknown) => voi
     try {
       if (!(await groupRunning(pid))) return;
     } catch (error) {
+      // An unreadable process table never counts as exited, so a persistent failure keeps waiting.
       onError(error);
     }
     await delay(interval);

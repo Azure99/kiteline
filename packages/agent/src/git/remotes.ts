@@ -79,6 +79,7 @@ export async function remotes(repo: Repo, signal: AbortSignal): Promise<GitRemot
   const upstream = upstreamResult.code === 0 ? commandLine(upstreamResult.bytes) : undefined;
   const pushMode = (await config(repo, "push.default", signal)).at(-1) ?? "simple";
   let pushTarget: string | undefined;
+  // Report a target only when push.default alone decides it; push refspecs or mirror may not.
   if (branch && defaultPushRemote && !explicitPush.has(defaultPushRemote)) {
     if (pushMode === "current") pushTarget = `${defaultPushRemote}/${branch}`;
     else if (

@@ -2,6 +2,8 @@ import postcss, { type AtRule, type Plugin, type Rule } from "postcss";
 import selectorParser from "postcss-selector-parser";
 import cascadeLayers from "@csstools/postcss-cascade-layers";
 
+// Chromium 97 lacks @layer; once flattened, the base and app resets outrank CodeMirror's
+// unlayered runtime styles, so inside the editor only a low-specificity copy is applied.
 const editorScope = ":where(.cm-editor, .cm-editor *)";
 const outsideEditor = ":not(:where(.cm-editor, .cm-editor *))";
 const appResetLayer = "kiteline-editor-reset";

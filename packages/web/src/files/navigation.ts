@@ -134,6 +134,7 @@ function enterFileNavigation(
       })
     : undefined;
   const state = { ...(destination ? {} : history.state), fileNavigation };
+  // One origin entry plus one candidate slot: the first candidate pushes, later ones replace.
   if (current?.sessionId === sessionId && current.kind !== "origin")
     history.replaceState(state, "", path);
   else history.pushState(state, "", path);
