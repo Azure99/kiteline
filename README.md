@@ -5,15 +5,15 @@
 Kiteline 是一个自托管的 coding agent 工作台。Claude Code、Codex 等命令行工具以原生 TUI 运行在你自己的设备上，通过浏览器即可管理多台设备和项目；同一个终端会话可在电脑、手机与远程 CLI 之间接续。
 
 <p align="center">
-  <a href="docs/assets/readme-desktop.png"><img src="docs/assets/readme-desktop.png" width="820" alt="桌面端：Codex 与项目检查上下分屏，中间显示 Git diff 和多个工作页标签，左侧展开 Codex 通知正文，右侧保留文件树"></a>
+  <a href="docs/assets/readme-desktop.png"><img src="docs/assets/readme-desktop.png" width="820" alt="桌面端：Codex 与 Checks 上下分屏，简短 Git diff 同时显示新增和删除，保留多个工作页与右侧文件树，程序状态悬浮窗中 Codex 的 Done 为绿色、OpenCode · Review 的 Running 为蓝色，OpenCode · Docs 为 Idle，Media kit 工作区显示通知角标"></a>
 </p>
 
 <table align="center">
   <tr>
     <td nowrap>
-      <a href="docs/assets/readme-mobile-terminal.png"><img src="docs/assets/readme-mobile-terminal.png" width="260" alt="手机端接续同一个 Codex 会话，显示移动终端工具栏和通知角标"></a>
-      <a href="docs/assets/readme-mobile-files.png"><img src="docs/assets/readme-mobile-files.png" width="260" alt="手机端原生预览同项目 README.md，保留通知角标"></a>
-      <a href="docs/assets/readme-mobile-git.png"><img src="docs/assets/readme-mobile-git.png" width="260" alt="手机端 Git Changes 面板同时显示工作区与暂存区修改，左侧暗化区域保留通知角标"></a>
+      <a href="docs/assets/readme-mobile-terminal.png"><img src="docs/assets/readme-mobile-terminal.png" width="260" alt="手机端接续同一个 Codex 会话，显示原生移动终端工具栏与主栏提醒会话数 2"></a>
+      <a href="docs/assets/readme-mobile-files.png"><img src="docs/assets/readme-mobile-files.png" width="260" alt="手机端原生预览同项目 README.md，主栏显示提醒会话数 2"></a>
+      <a href="docs/assets/readme-mobile-git.png"><img src="docs/assets/readme-mobile-git.png" width="260" alt="手机端 Git Changes 面板同时显示工作区与暂存区修改，左侧保留提醒会话数 2"></a>
     </td>
   </tr>
 </table>
