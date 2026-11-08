@@ -445,7 +445,7 @@ export class TerminalDisplay {
     );
   };
   scrollToBottom() {
-    this.keyboardViewport?.followInput();
+    this.keyboardViewport?.followInput(true);
     this.terminal?.scrollToBottom();
     if (this.options.host.classList.contains("terminal-readonly"))
       this.options.host.scrollTop = this.options.host.scrollHeight;

@@ -32,7 +32,20 @@ export class TouchSelection {
         this.container,
         this.screen,
         () => this.active || terminal.hasSelection(),
-        onTap,
+        (point) => {
+          if (terminal.modes.mouseTrackingMode !== "none") {
+            const mouse = {
+              bubbles: true,
+              cancelable: true,
+              clientX: point.x,
+              clientY: point.y,
+              button: 0,
+            };
+            this.screen.dispatchEvent(new MouseEvent("mousedown", { ...mouse, buttons: 1 }));
+            this.screen.dispatchEvent(new MouseEvent("mouseup", { ...mouse, buttons: 0 }));
+          }
+          onTap();
+        },
       ),
       terminal.onSelectionChange(() => {
         this.revision++;
@@ -295,12 +308,12 @@ export class TouchSelection {
 const touchHoldMs = 550;
 const touchSlopPx = 8;
 
-// The pinned xterm beta inertia omits coordinates; only an explicit tap requests focus.
+// The pinned xterm beta inertia omits coordinates; recognize taps independently of its gestures.
 export function adaptTouchGestures(
   container: HTMLElement,
   screen: HTMLElement,
   selecting: () => boolean,
-  onTap: () => void,
+  onTap: (point: Point) => void,
 ) {
   let last: { clientX: number; clientY: number } | undefined;
   let blocked = false;
@@ -340,7 +353,7 @@ export function adaptTouchGestures(
       Math.hypot(point.clientX - contact.x, point.clientY - contact.y) <= touchSlopPx;
     if (event.touches.length === 0) contact = undefined;
     else contact.eligible = false;
-    if (tap) onTap();
+    if (tap) onTap({ x: point.clientX, y: point.clientY });
   };
   const gesture = (raw: Event) => {
     const event = raw as Event & { clientX?: number; clientY?: number };

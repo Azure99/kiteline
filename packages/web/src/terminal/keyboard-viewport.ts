@@ -50,7 +50,9 @@ export class KeyboardViewport {
   isReading() {
     return this.active && this.reading;
   }
-  followInput() {
+  followInput(force = false) {
+    // A hidden cursor does not locate the controls the user has panned into view.
+    if (!force && this.isReading() && !this.terminal.modes.showCursor) return;
     this.reading = false;
     this.shortHistory = undefined;
     this.schedule();

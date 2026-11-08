@@ -112,7 +112,7 @@ Terminal tabs identify the current session. Right-click a tab or use its row's M
 Scroll up to read retained history; new output does not pull you back to the bottom. Each client's scrolling and selection are independent.
 
 - Desktop: drag to select text. If a program such as htop handles the mouse, hold Shift while dragging, or Option on macOS; releasing the modifier keeps the selection. Copy through the context menu, or Cmd-C on macOS. Paste with Ctrl-V, Ctrl-Shift-V, Cmd-V or the context menu. Ctrl-C is sent to the program.
-- Phone: tap the terminal to open the keyboard. Long-press text or blank space to open the menu and paste; adjust the selection with the handles if needed before copying. Clear an existing selection before tapping the terminal to open the keyboard. Paste appears when the browser supports reading the clipboard.
+- Phone: tap the terminal to operate program controls that support mouse clicks and open the keyboard. Long-press text or blank space to open the menu and paste; adjust the selection with the handles if needed before copying. Clear an existing selection before tapping the terminal to open the keyboard. Paste appears when the browser supports reading the clipboard.
 
 Oversized pastes are not sent and show "Pasted text exceeds the input limit". The web terminal does not display images from programs.
 
@@ -147,6 +147,8 @@ Terminal search covers currently loaded display content, including history, with
 "Scrollback lines for new sessions" in "Terminal settings" controls the history retained per session (range in [Limits](reference.en.md#limits)). It affects only sessions created afterward. Increasing it makes terminal loading, reconnection, and heavy output processing slower and can pause other web terminals on the same device. If you need less history, lower it and create a new session.
 
 A session has one row/column size, determined by the client that most recently typed or resized its window. Other clients reflow to it. Opening the phone keyboard does not resize the session. An actual grid size change clears each display's selection and keeps the content you were reading in view. Near the bottom, the viewport adjusts to the available scroll range; if that content has been trimmed from history, it shows the earliest retained content.
+
+If the keyboard covers a program control, close the keyboard, or long-press text and drag a selection handle to bring that area into view; clear the selection before continuing. While the program hides its cursor, further input keeps the position you revealed. Tap Scroll to bottom to return to the input position.
 
 ### Connection and recovery
 

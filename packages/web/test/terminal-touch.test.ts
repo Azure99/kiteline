@@ -36,13 +36,14 @@ function createGestures() {
   return { document, container, state, onTap, adapter };
 }
 
-test("a single stationary body tap requests input", () => {
+test("a single stationary body tap requests input at its release position", () => {
   const { document, onTap } = createGestures();
 
   touch(document, "touchstart", 0, [point()]);
-  touch(document, "touchend", 100, []);
+  touch(document, "touchend", 100, [], point(1, 12));
 
   expect(onTap).toHaveBeenCalledOnce();
+  expect(onTap).toHaveBeenCalledWith({ x: 12, y: 10 });
 });
 
 test("moving and returning to the start does not request input", () => {
