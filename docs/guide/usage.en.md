@@ -122,7 +122,9 @@ When a program requests a copy through OSC 52, “Program copy” and the line c
 
 On desktop, Ctrl-click a URL in terminal output to open it, or Cmd-click on macOS; plain clicks operate the terminal. On a phone, select a complete HTTP(S) URL and choose “Open link” from the selection menu. Clear an existing selection before using the desktop link gesture.
 
-The phone shows two rows of terminal keys. Tap a key to send it once; sliding across the keys does not send input. Tap SHIFT, CTRL or ALT once to apply it only to the next key, and again to cancel. The pen button at the bottom right opens local composition. In the web app, Ctrl-b goes directly to the program; it is not a tmux prefix.
+The phone shows two rows of terminal keys. A short tap sends a key once. Hold an arrow still for about 450ms to start sending, then repeat about every 90ms. Sliding across keys does not start input. After repetition starts, sliding, leaving the button or releasing stops it; keys already sent cannot be withdrawn. Switching terminals, opening search or composition, or leaving the page also stops repetition; hold again after returning.
+
+Tap SHIFT, CTRL or ALT once to apply it to the next key, and again to cancel. For a held arrow, the combination present before its first send lasts until release or cancellation, even though the indicators turn off after that first send. A modifier set during repetition stays pending for the next ordinary input. The pen button at the bottom right opens local composition. In the web app, Ctrl-b goes directly to the program; it is not a tmux prefix.
 
 ### Compose multiline input
 

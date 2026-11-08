@@ -385,8 +385,8 @@ export class TerminalDisplay {
     }
     socket.send(data);
   }
-  key(key: string) {
-    this.auxiliary?.key(key);
+  key(key: string, modifiers?: Modifiers) {
+    this.auxiliary?.key(key, modifiers);
   }
   toggleModifier(key: keyof Modifiers) {
     this.auxiliary?.toggle(key);

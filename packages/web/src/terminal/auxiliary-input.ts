@@ -91,18 +91,18 @@ export class AuxiliaryInput {
     this.modifiers = releasedModifiers;
     this.changed(this.modifiers);
   }
-  key(key: string) {
+  key(key: string, modifiers?: Modifiers) {
     if (this.terminal.options.disableStdin) return;
-    this.dispatch(describe(key));
+    this.dispatch(describe(key), modifiers);
   }
-  private encode(event: IKeyboardEvent) {
+  private encode(event: IKeyboardEvent, modifiers = this.modifiers) {
     const merged = {
       ...event,
-      shiftKey: event.shiftKey || this.modifiers.shiftKey,
-      ctrlKey: event.ctrlKey || this.modifiers.ctrlKey,
-      altKey: event.altKey || this.modifiers.altKey,
+      shiftKey: event.shiftKey || modifiers.shiftKey,
+      ctrlKey: event.ctrlKey || modifiers.ctrlKey,
+      altKey: event.altKey || modifiers.altKey,
     };
-    if (this.modifiers.shiftKey && !event.shiftKey) {
+    if (modifiers.shiftKey && !event.shiftKey) {
       const pair = punctuation.find((entry) => entry[1] === event.keyCode)?.[0];
       merged.key =
         pair?.[1] ??
@@ -129,9 +129,9 @@ export class AuxiliaryInput {
       result.key = merged.key;
     return result;
   }
-  private dispatch(event: IKeyboardEvent) {
-    const result = this.encode(event);
-    this.release();
+  private dispatch(event: IKeyboardEvent, modifiers?: Modifiers) {
+    const result = this.encode(event, modifiers);
+    if (!modifiers) this.release();
     if (result.type === KeyboardResultType.PAGE_UP || result.type === KeyboardResultType.PAGE_DOWN)
       this.terminal.scrollLines(
         (this.terminal.rows - 1) * (result.type === KeyboardResultType.PAGE_UP ? -1 : 1),

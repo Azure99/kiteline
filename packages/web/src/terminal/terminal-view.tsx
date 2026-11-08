@@ -25,7 +25,7 @@ import { showFile } from "../files/navigation";
 import { useMobile } from "../lib/use-mobile";
 import { cn } from "../lib/utils";
 import { terminalKeyboard } from "./keyboard-input";
-import { releasedModifiers } from "./auxiliary-input";
+import { releasedModifiers, type Modifiers } from "./auxiliary-input";
 import { TerminalSearch } from "./terminal-search";
 import { TerminalAuxKeys } from "./terminal-aux-keys";
 import { TerminalNotice } from "./terminal-notice";
@@ -289,11 +289,13 @@ export function TerminalView({
     }
   }
   const auxiliary = useCallback(
-    (value: string) => {
-      screens.current?.display?.key(value);
-      if (!mobile) screens.current?.display?.focus();
+    (value: string, modifiers?: Modifiers) => {
+      const display = screens.current?.display;
+      if (!display || display.terminal !== terminal) return;
+      display.key(value, modifiers);
+      if (!mobile) display.focus();
     },
-    [mobile],
+    [mobile, terminal],
   );
   return (
     <section
@@ -460,6 +462,7 @@ export function TerminalView({
       <TerminalAuxKeys
         hidden={searchOpen && paneActive}
         available={state.status === "ready"}
+        active={paneActive && !searchOpen && !(mobile && composeOpen)}
         mobile={mobile}
         modifiers={modifiers}
         onKey={auxiliary}
