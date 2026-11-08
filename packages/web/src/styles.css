@@ -803,12 +803,12 @@ body {
   background: var(--color-attention);
 }
 .status-count[data-bucket="done"] {
-  color: var(--color-primary);
-  background: var(--color-primary-soft);
-}
-.status-count[data-bucket="working"] {
   color: var(--color-success);
   background: var(--color-success-soft);
+}
+.status-count[data-bucket="working"] {
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
 }
 [data-level-text="blocked"] {
   color: var(--color-warning);
@@ -816,12 +816,14 @@ body {
 [data-level-text="error"] {
   color: var(--color-destructive);
 }
-[data-level-text="done"],
+[data-level-text="done"] {
+  color: var(--color-success);
+}
 [data-level-text="notice"] {
   color: var(--color-primary);
 }
 [data-level-text="working"] {
-  color: var(--color-success);
+  color: var(--color-primary);
 }
 [data-level-text="idle"] {
   color: var(--muted-foreground);
