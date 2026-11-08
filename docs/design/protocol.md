@@ -50,7 +50,7 @@ RPC 的 `id` 只用于关联回复和取消。server 拒绝与进行中的请求
 
 ### 错误码
 
-`error.code` 只使用下列值。`error.message` 是英文诊断，可以为空字符串；工作台按 `code` 显示本地化说明。“状态码”列是管理接口（`/api/`）返回错误时的 HTTP 状态码（`errorStatus`，`packages/server/src/http.ts`）。开发服务代理使用另一张表（例如 `unsupported` 为 501，表外的错误为 502），见[错误响应](http-access.md#错误响应)。
+本地产生的 `error.code` 只使用下列值，由 `packages/shared/src/protocol/validation.ts` 的 `errorCodes` 约束；对端报告的未知值原样透传，按表外错误映射状态码。`error.message` 是英文诊断，可以为空字符串；工作台按 `code` 显示本地化说明。“状态码”列是管理接口（`/api/`）返回错误时的 HTTP 状态码（`errorStatus`，`packages/server/src/http.ts`）。开发服务代理使用另一张表（例如 `unsupported` 为 501，表外的错误为 502），见[错误响应](http-access.md#错误响应)。
 
 | `code`                  | 含义                                                 | 状态码 |
 | ----------------------- | ---------------------------------------------------- | ------ |

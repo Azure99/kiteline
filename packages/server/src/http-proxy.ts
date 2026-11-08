@@ -6,7 +6,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import type { Duplex } from "node:stream";
-import { AppError, asError, integer } from "@kiteline/shared/protocol";
+import { AppError, asError, integer, type ErrorCode } from "@kiteline/shared/protocol";
 import type { ServerConfig } from "./config.js";
 import type { Store, Login } from "./store.js";
 import type { Channels } from "./channels.js";
@@ -79,7 +79,7 @@ function failure(
   if (downstream.kind === "http" && downstream.destination.headersSent)
     return destination.destroy();
   const detail = asError(error);
-  const statuses: Record<string, number> = {
+  const statuses: Partial<Record<ErrorCode, number>> = {
     unauthenticated: 401,
     forbidden: 403,
     not_found: 404,
@@ -90,7 +90,7 @@ function failure(
     busy: 429,
     timeout: 504,
   };
-  const status = Object.hasOwn(statuses, detail.code) ? statuses[detail.code]! : 502;
+  const status = Object.hasOwn(statuses, detail.code) ? statuses[detail.code as ErrorCode]! : 502;
   if (status === 401 && navigation(request) && downstream.kind === "http") {
     downstream.destination
       .writeHead(302, {

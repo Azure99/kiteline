@@ -1,4 +1,10 @@
-import type { FileListing, Outcome, RpcMethod, RpcResult } from "@kiteline/shared/protocol";
+import type {
+  FileListing,
+  KitelineError,
+  Outcome,
+  RpcMethod,
+  RpcResult,
+} from "@kiteline/shared/protocol";
 import { ApiError, apiError, fileChannel, openChannel, rpc, rpcReply } from "../src/lib/api";
 import { GitActions, type GitTarget } from "../src/git/actions";
 
@@ -58,7 +64,7 @@ export async function checkChannelContracts(deviceId: string) {
   // @ts-expect-error fileChannel also reserves through the public POST endpoint
   await fileChannel(target, "file.read", { purpose: "download" });
 
-  const error = { code: "io_error", message: "The response was lost" };
+  const error: KitelineError = { code: "io_error", message: "The response was lost" };
   const outcome: Outcome | undefined = apiError(error).outcome;
   void outcome;
   // @ts-expect-error API errors use the protocol outcome vocabulary

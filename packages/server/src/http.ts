@@ -2,7 +2,7 @@ import type { IncomingMessage, OutgoingHttpHeaders, ServerResponse } from "node:
 import { isIP, SocketAddress, type BlockList } from "node:net";
 import type { Duplex } from "node:stream";
 import type { Store, Login } from "./store.js";
-import { AppError, appVersion, asError, limits } from "@kiteline/shared/protocol";
+import { AppError, appVersion, asError, limits, type ErrorCode } from "@kiteline/shared/protocol";
 
 function bearer(request: IncomingMessage) {
   const value = request.headers.authorization;
@@ -157,7 +157,7 @@ export function requireOrigin(request: IncomingMessage, expected: string) {
   if (request.headers.origin !== expected) throw new AppError("forbidden", "Origin mismatch");
 }
 export function errorStatus(error: unknown) {
-  const statuses: Record<string, number> = {
+  const statuses: Partial<Record<ErrorCode, number>> = {
     unauthenticated: 401,
     forbidden: 403,
     not_found: 404,
@@ -172,7 +172,7 @@ export function errorStatus(error: unknown) {
     version_mismatch: 426,
   };
   const code = asError(error).code;
-  return Object.hasOwn(statuses, code) ? statuses[code]! : 500;
+  return Object.hasOwn(statuses, code) ? statuses[code as ErrorCode]! : 500;
 }
 export function serverError(error: unknown) {
   if (error instanceof AppError) return error;

@@ -1,9 +1,19 @@
 import release from "../version.json" with { type: "json" };
 import type { TaskSnapshot } from "./tasks.js";
-import { AppError, record, string, optionalString, integer } from "./validation.js";
+import {
+  AppError,
+  errorCodes,
+  peerErrorCode,
+  record,
+  string,
+  optionalString,
+  integer,
+  type ErrorCode,
+} from "./validation.js";
 import { limits } from "./limits.js";
 
-export { AppError, record, string, optionalString, integer, limits };
+export { AppError, errorCodes, peerErrorCode, record, string, optionalString, integer, limits };
+export type { ErrorCode };
 
 export const appVersion = release.version;
 export const terminalProfile = "xterm-c2-unicode11";
@@ -30,7 +40,7 @@ export const controlCloseCodes = {
 
 export type Outcome = "succeeded" | "failed" | "partial" | "unknown";
 export interface KitelineError {
-  code: string;
+  code: AppError["code"];
   message: string;
   details?: unknown;
 }
@@ -429,7 +439,7 @@ export class OperationError extends AppError {
   }
 
   constructor(
-    code: string,
+    code: AppError["code"],
     message: string,
     public outcome: "failed" | "partial" | "unknown",
     public result?: unknown,
@@ -452,7 +462,7 @@ export function asError(error: unknown): KitelineError {
   if (error instanceof AppError)
     return { code: error.code, message: error.message, details: error.details };
   const code = (error as { code?: string })?.code;
-  const mapped: Record<string, string> = {
+  const mapped: Record<string, ErrorCode> = {
     ENOENT: "not_found",
     EEXIST: "conflict",
     EACCES: "permission_denied",

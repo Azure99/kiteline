@@ -3,7 +3,7 @@ import { hostname } from "node:os";
 import { resolve } from "node:path";
 import { lstat } from "node:fs/promises";
 import { parseArgs } from "node:util";
-import { AppError, limits, record, string } from "@kiteline/shared/protocol";
+import { AppError, limits, peerErrorCode, record, string } from "@kiteline/shared/protocol";
 import { atomicJson } from "@kiteline/shared/node/files";
 import { fetchServerJson } from "@kiteline/shared/node/network";
 import { agentConfig, privateDirectory, stateFiles } from "../config.js";
@@ -69,7 +69,10 @@ export async function bindCli(args: string[]) {
       });
       value = record(response.body);
       if (!response.ok)
-        throw new AppError(String(record(value.error).code), String(record(value.error).message));
+        throw new AppError(
+          peerErrorCode(String(record(value.error).code)),
+          String(record(value.error).message),
+        );
     } catch (error) {
       if (error instanceof AppError) throw error;
       throw new Error(

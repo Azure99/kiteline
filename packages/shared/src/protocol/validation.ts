@@ -1,6 +1,31 @@
+export const errorCodes = [
+  "invalid_argument",
+  "unsupported",
+  "unauthenticated",
+  "forbidden",
+  "permission_denied",
+  "not_found",
+  "conflict",
+  "limit_exceeded",
+  "version_mismatch",
+  "busy",
+  "offline",
+  "timeout",
+  "cancelled",
+  "io_error",
+  "command_failed",
+  "recording_unavailable",
+] as const;
+export type ErrorCode = (typeof errorCodes)[number];
+// A peer may run a build with a different list, so a code it reports passes through unchecked.
+export type PeerErrorCode = string & { readonly peer: unique symbol };
+export function peerErrorCode(code: string) {
+  return code as PeerErrorCode;
+}
+
 export class AppError extends Error {
   constructor(
-    public code: string,
+    public code: ErrorCode | PeerErrorCode,
     message: string,
     public details?: unknown,
   ) {

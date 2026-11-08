@@ -4,6 +4,7 @@ import {
   checkMetadata,
   integer,
   limits,
+  peerErrorCode,
   record,
   string,
   type FileProgress,
@@ -64,7 +65,7 @@ export function parseTerminalNotice(message: Record<string, unknown>) {
 
 export function parseReplyError(value: unknown) {
   const error = record(value);
-  const code = string(error.code);
+  const code = peerErrorCode(string(error.code));
   if (typeof error.message !== "string")
     throw new AppError("invalid_argument", "Expected a diagnostic string");
   return new AppError(code, error.message, error.details);

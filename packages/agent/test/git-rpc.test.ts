@@ -12,6 +12,7 @@ import {
   appVersion,
   OperationError,
   errorReply,
+  type KitelineError,
   type RepoDiscovery,
   type GitReview,
   type GitStatus,
@@ -139,7 +140,7 @@ test("Git path RPCs reject unpaired surrogates without changing a legal replacem
 });
 
 test("operation replies preserve diagnostics, uncertainty and observed Git progress", () => {
-  const reason = {
+  const reason: KitelineError = {
     code: "permission_denied",
     message: "Cannot save run",
     details: { path: "state" },
