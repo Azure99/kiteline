@@ -323,7 +323,10 @@ function TerminalDetail({
                 <p className="font-medium">{entry.report.notice.title}</p>
               )}
               {entry.report.notice.body && (
-                <p className="whitespace-pre-wrap">{entry.report.notice.body}</p>
+                <StatusMessage
+                  name={entry.report.notice.title || terminal.name}
+                  text={entry.report.notice.body}
+                />
               )}
             </section>
           );
@@ -337,7 +340,7 @@ function TerminalDetail({
             </p>
             {record.title && <p className="font-medium">{record.title}</p>}
             {entry.report && <ReportLine report={entry.report} />}
-            {record.msg && <p className="whitespace-pre-wrap">{record.msg}</p>}
+            {record.msg && <StatusMessage name={record.title || terminal.name} text={record.msg} />}
           </section>
         );
       })}
@@ -353,6 +356,39 @@ function ReportLine({ report }: { report: ReceivedReport }) {
       {t(($) => (report.notice.blocked ? $.status.noticeBlocked : $.status.notice))}{" "}
       <time dateTime={new Date(report.receivedAt).toISOString()}>{clock(report.receivedAt)}</time>
     </p>
+  );
+}
+
+function StatusMessage({ name, text }: { name: string; text: string }) {
+  const { t } = useTranslation();
+  const message = useRef<HTMLTextAreaElement>(null);
+
+  useLayoutEffect(() => {
+    const element = message.current!;
+    let previousWidth = -1;
+    function fitHeight() {
+      const width = element.clientWidth;
+      if (width === previousWidth) return;
+      previousWidth = width;
+      element.style.height = "0px";
+      element.style.height = `${element.scrollHeight}px`;
+    }
+    fitHeight();
+    const observer = new ResizeObserver(fitHeight);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [text]);
+
+  return (
+    <textarea
+      ref={message}
+      className="status-message"
+      aria-label={t(($) => $.status.details, { name })}
+      readOnly
+      rows={1}
+      wrap="soft"
+      value={text}
+    />
   );
 }
 
