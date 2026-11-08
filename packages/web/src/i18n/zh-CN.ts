@@ -300,6 +300,8 @@ export const zhCN = {
     partial: "操作部分完成。",
   },
   status: {
+    reminders_one: "{{count, number}} 个会话有提醒",
+    reminders_other: "{{count, number}} 个会话有提醒",
     count_error_one: "{{count, number}} 个错误",
     count_error_other: "{{count, number}} 个错误",
     count_blocked_one: "{{count, number}} 个等待",

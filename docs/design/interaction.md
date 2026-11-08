@@ -80,7 +80,7 @@
 
 ### 工作区程序状态
 
-跨工作区的程序状态与历史报告只在侧栏工作区行显示角标，不汇总到设备或手机导航入口。角标、列表和详情使用同一投影，口径写在 `packages/web/src/devices/workspace-status.ts` 和 `workspace-status-entries.ts` 的注释中。进入终端只清除历史报告，不记录“已看”。
+工作区行的状态角标、列表、详情和手机导航入口的提醒会话数使用同一投影，口径见 `packages/web/src/devices/workspace-status.ts` 和 `workspace-status-entries.ts`。进入终端只清除历史报告，不记录“已看”。
 
 - **读取。** 列表打开时按终端读取 snapshot，摘要变化时重读。详情固定进入时的内容，阅读期间摘要和通知更新不替换正文，避免打断选区。
 - **失效。** 离线、事件连接尚未读回新列表或 recorder 不可用时，保留旧摘要并逐终端标为旧状态，健康来源不受同工作区另一终端故障影响。current 失效即丢弃本次正文，恢复后等待新的 snapshot，不重显失联前正文。

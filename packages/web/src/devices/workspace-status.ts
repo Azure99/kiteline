@@ -159,6 +159,20 @@ export function badgeCounts(status: WorkspaceStatus) {
   return counts;
 }
 
+export function reminderCount(statuses: ReadonlyMap<string, WorkspaceStatus>) {
+  let count = 0;
+  for (const status of statuses.values()) {
+    for (const terminal of status.terminals) {
+      if (
+        terminal.report ||
+        terminal.summary?.states.some((state) => isOpen(state) || state === "done")
+      )
+        count++;
+    }
+  }
+  return count;
+}
+
 export function workspaceStatuses(
   devices: Device[],
   lists: Record<string, DeviceSessions>,

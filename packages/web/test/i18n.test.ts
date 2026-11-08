@@ -62,11 +62,14 @@ test("interpolation preserves user text and plural selection uses the active lan
   await setLanguagePreference("en");
   expect(i18n.t(($) => $.shell.uploadStatus, { count: 1 })).toBe("1 upload");
   expect(i18n.t(($) => $.shell.uploadStatus, { count: 2 })).toBe("2 uploads");
+  expect(i18n.t(($) => $.status.reminders, { count: 1 })).toBe("1 session with reminders");
+  expect(i18n.t(($) => $.status.reminders, { count: 2 })).toBe("2 sessions with reminders");
   expect(i18n.t(($) => $.devices.terminals, { count: 1234 })).toBe("1,234 terminals");
   const path = "项目/{{count}}/<config>.txt";
   expect(i18n.t(($) => $.shell.downloadFailed, { path, error: "original" })).toContain(path);
   await setLanguagePreference("zh-CN");
   expect(i18n.t(($) => $.shell.uploadStatus, { count: 2 })).toBe("上传状态 2");
+  expect(i18n.t(($) => $.status.reminders, { count: 2 })).toBe("2 个会话有提醒");
 });
 
 test("existing errors are translated at display time without changing diagnostics or metadata", async () => {

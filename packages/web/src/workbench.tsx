@@ -54,7 +54,7 @@ import { useRecentWorkspaces, type RecentWorkspace } from "./devices/recent-work
 import { Workspace } from "./workspace/workspace";
 import { WorkspaceMemories, workspaceKey } from "./workspace/memory";
 import { reportKey, type ReceivedReport } from "./terminal/reports";
-import { useDeviceSessions, workspaceStatuses } from "./devices/workspace-status";
+import { reminderCount, useDeviceSessions, workspaceStatuses } from "./devices/workspace-status";
 import { GitActions } from "./git/actions";
 import { DraftStore, isDirty } from "./files/drafts";
 import { DraftView } from "./files/draft-view";
@@ -450,11 +450,17 @@ function SignedInWorkbench({
     tool: route.tool,
     onBind: openBinding,
   };
+  const navigationReminders = mobile && !navigationVisible ? reminderCount(statuses) : 0;
+  const navigationLabel = navigationVisible
+    ? t(($) => $.shell.collapseSidebar)
+    : t(($) => $.shell.expandSidebar);
   const navigationButton = (
     <IconButton
       ref={navigationToggle}
       label={
-        navigationVisible ? t(($) => $.shell.collapseSidebar) : t(($) => $.shell.expandSidebar)
+        navigationReminders > 0
+          ? `${navigationLabel} · ${t(($) => $.status.reminders, { count: navigationReminders })}`
+          : navigationLabel
       }
       aria-expanded={navigationVisible}
       aria-controls="device-sidebar"
@@ -466,6 +472,11 @@ function SignedInWorkbench({
       }}
     >
       {navigationVisible ? <PanelLeftClose /> : <PanelLeftOpen />}
+      {navigationReminders > 0 && (
+        <span className="absolute top-0 right-0 rounded-full bg-primary px-1 text-[10px] text-primary-foreground">
+          {navigationReminders}
+        </span>
+      )}
     </IconButton>
   );
   function renderMain() {

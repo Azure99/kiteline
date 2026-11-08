@@ -9,6 +9,7 @@ import {
 import type { ReceivedReport } from "../src/terminal/reports";
 import {
   badgeCounts,
+  reminderCount,
   terminalBucket,
   workspaceStatuses,
   type TerminalStatus,
@@ -52,6 +53,76 @@ function session(programStatus: ProgramStatusSummary, overrides: Partial<Session
     ...overrides,
   };
 }
+
+test("there are no reminders without projected terminal statuses", () => {
+  expect(reminderCount(workspaceStatuses([device], {}, []))).toBe(0);
+});
+
+test.each<{
+  states: ProgramStatusRecord["state"][];
+  notified: boolean;
+  expected: number;
+}>([
+  { states: [], notified: false, expected: 0 },
+  { states: ["idle"], notified: false, expected: 0 },
+  { states: ["working"], notified: false, expected: 0 },
+  { states: ["working", "idle"], notified: false, expected: 0 },
+  { states: ["blocked"], notified: false, expected: 1 },
+  { states: ["error"], notified: false, expected: 1 },
+  { states: ["done"], notified: false, expected: 1 },
+  { states: ["working", "done"], notified: false, expected: 1 },
+  { states: ["working"], notified: true, expected: 1 },
+  { states: ["idle"], notified: true, expected: 1 },
+  { states: ["done"], notified: true, expected: 1 },
+  { states: ["working", "blocked", "error", "done"], notified: true, expected: 1 },
+  { states: [], notified: true, expected: 1 },
+])(
+  "reminders count $states with notified=$notified as $expected session",
+  ({ states, notified, expected }) => {
+    const statuses = workspaceStatuses(
+      [device],
+      { device: { sessions: [session({ states, records: states.length })], current: true } },
+      notified ? [report] : [],
+    );
+    expect(reminderCount(statuses)).toBe(expected);
+  },
+);
+
+test("reminders include every workspace and device, even when session IDs match", () => {
+  const statuses = workspaceStatuses(
+    [
+      {
+        ...device,
+        snapshot: {
+          ...device.snapshot!,
+          workspaces: [
+            ...device.snapshot!.workspaces,
+            { id: "other-workspace", name: "Other workspace", path: "/other" },
+          ],
+        },
+      },
+      { ...device, id: "other-device", status: "offline" },
+    ],
+    {
+      device: {
+        sessions: [
+          session({ states: ["done"], records: 1 }),
+          session(
+            { states: ["error"], records: 1 },
+            { id: "other-terminal", workspaceId: "other-workspace" },
+          ),
+        ],
+        current: true,
+      },
+      "other-device": {
+        sessions: [session({ states: ["blocked"], records: 1 })],
+        current: false,
+      },
+    },
+    [{ ...report, deviceId: "other-device", sessionId: "ended" }],
+  );
+  expect(reminderCount(statuses)).toBe(4);
+});
 
 test("each terminal counts once, in the state its row leads with", () => {
   // Summary states are listed newest first.

@@ -305,6 +305,8 @@ export const en = {
     partial: "The operation was only partially completed.",
   },
   status: {
+    reminders_one: "{{count, number}} session with reminders",
+    reminders_other: "{{count, number}} sessions with reminders",
     count_error_one: "{{count, number}} error",
     count_error_other: "{{count, number}} errors",
     count_blocked_one: "{{count, number}} waiting",
