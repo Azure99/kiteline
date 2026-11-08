@@ -458,7 +458,16 @@ test("CLI event snapshots, task changes and watch subscriptions expose only sele
     .toHaveLength(1);
   await expect
     .poll(() => first.received.filter((event) => event.type === "sessions.changed"))
-    .toEqual([{ type: "sessions.changed", deviceId: peers[0]!.deviceId, workspaceId: "work" }]);
+    .toEqual(
+      expect.arrayContaining(
+        peers.slice(0, 2).map((peer) => ({
+          type: "sessions.changed",
+          deviceId: peer.deviceId,
+          workspaceId: "work",
+        })),
+      ),
+    );
+  expect(first.received.filter((event) => event.type === "sessions.changed")).toHaveLength(2);
   await expect
     .poll(() => other.received.filter((event) => event.type === "sessions.changed"))
     .toEqual([{ type: "sessions.changed", deviceId: peers[2]!.deviceId, workspaceId: "work" }]);

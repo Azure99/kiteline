@@ -271,8 +271,14 @@ export class Connections {
             }
             break;
           }
+          case "sessions.changed": {
+            const event = parseWorkspaceEvent(type, message);
+            for (const browser of this.browsers)
+              if (permitsDevice(browser.login, id))
+                this.send(browser.socket, { ...event, deviceId: id });
+            break;
+          }
           case "workspace.changed":
-          case "sessions.changed":
           case "watch.status": {
             const event = parseWorkspaceEvent(type, message);
             for (const browser of this.browsers)

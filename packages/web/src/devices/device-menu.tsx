@@ -29,10 +29,12 @@ export function DeviceMenu({
   device,
   children,
   actions,
+  triggerClassName,
 }: {
   device: Device;
   children?: ReactElement<ComponentPropsWithRef<"button">>;
   actions: DeviceActions;
+  triggerClassName?: string;
 }) {
   const { t } = useTranslation();
   const [settings, setSettings] = useState(false);
@@ -61,6 +63,7 @@ export function DeviceMenu({
                 ref={trigger}
                 variant="ghost"
                 size="icon"
+                className={triggerClassName}
                 aria-label={t(($) => $.common.actionsNamed, { name: device.name })}
               />
             }

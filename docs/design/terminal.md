@@ -205,7 +205,7 @@ send、resize、wait 在全部值解析成功后按 timeoutMs 建立一次绝对
 
 ## 程序报告状态
 
-recorder 持续解析程序主动发送的 OSC 7501，不依赖网页附着。shared 的 `program-status.ts` 实现 [Program Status Protocol rev 0.4](https://www.superlogical.com/rex/docs/build/program-status) 的原子报告解析与记录集合：根与 child 可并存，同 id 的新报告完整替换旧记录，clear 删除所指子树；非法 id 不回落根，未知 state 忽略，文本和尺寸超限拒绝整条报告。新记录、state 变化，或 blocked／done／error 状态下 kind／title／msg 变化视为一次新的状态出现，移到记录顺序的末尾；重复上报、working 的文本与进度和 idle 的文本更新保持原位。每终端最多 256 条，超过时淘汰当前顺序中最早的一条，因此持续更新进度但不改变状态的记录也可能先被淘汰。缺少 app 的记录在读取时继承最近祖先的 app，不改写 child。
+recorder 持续解析程序主动发送的 OSC 7501，不依赖网页附着。shared 的 `program-status.ts` 实现 [Program Status Protocol rev 0.4](https://www.superlogical.com/rex/docs/build/program-status) 的原子报告解析与记录集合：根与 child 可并存，同 id 的新报告完整替换旧记录，clear 删除所指子树；非法 id 不回落根，未知 state 忽略，文本和尺寸超限拒绝整条报告。新记录、state 变化，或 blocked／done／error 状态下 kind／title／msg 变化视为一次新的状态出现，移到记录顺序的末尾；重复上报、working 的文本与进度和 idle 的文本更新保持原位。每终端最多 256 条，超过时淘汰当前顺序中最早的一条，因此持续更新进度但不改变状态的记录也可能先被淘汰。snapshot 保留原始记录；网页展示缺少 app 的记录时继承最近祖先的 app，不改写 child。
 
 私有 tmux preset 开启默认 off 的 `program-status` 选项。tmux 解析 `OSC 7501;?` 后在同 pane 输入流中固定回复 `OSC 7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth ST`，同时支持 ST/BEL 终止符；随后 DA1 的应答仍按原顺序到达。应答不包含报告内容，不依赖网页或 recorder 附着；headless 和网页不代答，普通报告不产生应答。
 

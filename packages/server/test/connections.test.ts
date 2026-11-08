@@ -618,7 +618,7 @@ test("replacement broadcasts offline then online and isolates ready channels and
   await newChannel.ready;
 });
 
-test("terminal reports reach permitted devices without workspace subscriptions and use connection identity", async () => {
+test("session changes and reports reach permitted devices without subscribing to file watches", async () => {
   const f = await fixture();
   const peers = [await f.device("First"), await f.device("Second")];
   const received: Record<string, unknown>[][] = [[], [], []];
@@ -637,7 +637,13 @@ test("terminal reports reach permitted devices without workspace subscriptions a
     await once(socket, "open");
     await expect.poll(() => received[i]!.length).toBe(2);
   }
-  for (const peer of peers)
+  for (const peer of peers) {
+    for (const event of [
+      { type: "sessions.changed", workspaceId: "work" },
+      { type: "workspace.changed", workspaceId: "work" },
+      { type: "watch.status", workspaceId: "work", status: "normal" },
+    ])
+      peer.socket.send(JSON.stringify({ ...event, deviceId: "spoofed", diagnostic: "local" }));
     peer.socket.send(
       JSON.stringify({
         type: "terminal.notice",
@@ -649,6 +655,7 @@ test("terminal reports reach permitted devices without workspace subscriptions a
         diagnostic: "not forwarded",
       }),
     );
+  }
   const reports = (index: number) =>
     received[index]!.filter((event) => event.type === "terminal.notice");
   await expect.poll(() => reports(2)).toHaveLength(2);
@@ -667,12 +674,31 @@ test("terminal reports reach permitted devices without workspace subscriptions a
           notice: { title: "", body: "A report; with text", blocked: false },
         },
       ]);
+    expect(received[i]!.filter((event) => event.type === "sessions.changed")).toEqual([
+      { type: "sessions.changed", deviceId: peers[i]!.deviceId, workspaceId: "work" },
+    ]);
+    expect(
+      received[i]!.filter((event) =>
+        ["workspace.changed", "watch.status"].includes(String(event.type)),
+      ),
+    ).toEqual([]);
     expect(
       peers[i]!.messages.filter((message) => message.type === "watch.set").every(
         (message) => (message.workspaceIds as string[]).length === 0,
       ),
     ).toBe(true);
   }
+  const ownerChanges = received[2]!.filter((event) => event.type === "sessions.changed");
+  expect(ownerChanges).toHaveLength(2);
+  expect(ownerChanges).toEqual(
+    expect.arrayContaining(
+      peers.map((peer) => ({
+        type: "sessions.changed",
+        deviceId: peer.deviceId,
+        workspaceId: "work",
+      })),
+    ),
+  );
 });
 
 test("oversized browser report is dropped without disconnecting the device; malformed fields close it", async () => {

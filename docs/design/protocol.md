@@ -189,22 +189,22 @@ Web owner 在 `POST /api/credentials` 提交 `{name, deviceIds, expiresAt}`，�
 
 - `metadata.snapshot` 是完整快照，server 只接受同一连接中 `revision` 更大的快照。`tasks.snapshot` 同样按连接内递增的 `revision` 接受，每条连接的第一份直接替换；server 只保留白名单字段，见 [server 摘要](scheduled-tasks.md#server-摘要)。
 - `watch.set` 是所有浏览器正在查看的、该设备上的工作区的并集。
-- server 校验已知事件的字段，只转发白名单中的字段：`request.progress` 只发给发起请求的登录；`workspace.changed`、`sessions.changed`、`watch.status` 只发给正在查看该工作区的浏览器。`workspace.changed` 只指定工作区，统一触发该工作区的文件、Git 和仓库发现刷新。`rpc.result` 和 `request.progress` 先校验请求 ID，仅当请求属于当前控制连接时才校验并消费其余字段。需要校验的字段不合法时，server 以 1008 `invalid_control_message` 关闭连接；hello 完成后不认识的类型被忽略，hello 之前的其他消息则关闭连接。
+- server 校验已知事件的字段，只转发白名单中的字段：`request.progress` 只发给发起请求的登录；`sessions.changed` 发给有该设备权限的浏览器；`workspace.changed`、`watch.status` 只发给正在查看该工作区的浏览器。`workspace.changed` 只指定工作区，统一触发该工作区的文件、Git 和仓库发现刷新。`rpc.result` 和 `request.progress` 先校验请求 ID，仅当请求属于当前控制连接时才校验并消费其余字段。需要校验的字段不合法时，server 以 1008 `invalid_control_message` 关闭连接；hello 完成后不认识的类型被忽略，hello 之前的其他消息则关闭连接。
 - agent 收到不合法的消息时同样以 1008 `invalid_control_message` 关闭连接。
 
 ### 浏览器事件
 
 连接建立后，server 立即发送一次 `devices.changed`，再同步待处理终端报告。浏览器发送 `watch.set` 声明正在查看的设备和工作区，每次替换上一次的列表；发送 `notices.sync` 请求重新同步报告。消息定义见 `BrowserControlMessage`。watch 目标数超过 server 的上限或发送其他消息时，server 以 1008 `invalid_event_message` 关闭连接。
 
-| 事件                                                    | 接收者                   |
-| ------------------------------------------------------- | ------------------------ |
-| `devices.changed`（当前登录可见的完整设备列表）         | 所有浏览器               |
-| `tasks.changed`                                         | 有该设备权限的浏览器     |
-| `terminal.notice`、`notice.cleared`                     | 有该设备权限的浏览器     |
-| `notices.reset`                                         | 正在同步报告的浏览器     |
-| `workspace.changed`、`sessions.changed`、`watch.status` | 正在查看该工作区的浏览器 |
-| `request.progress`                                      | 发起请求的登录           |
-| `channel.failed`                                        | 发起文件读取的登录       |
+| 事件                                            | 接收者                   |
+| ----------------------------------------------- | ------------------------ |
+| `devices.changed`（当前登录可见的完整设备列表） | 所有浏览器               |
+| `tasks.changed`、`sessions.changed`             | 有该设备权限的浏览器     |
+| `terminal.notice`、`notice.cleared`             | 有该设备权限的浏览器     |
+| `notices.reset`                                 | 正在同步报告的浏览器     |
+| `workspace.changed`、`watch.status`             | 正在查看该工作区的浏览器 |
+| `request.progress`                              | 发起请求的登录           |
+| `channel.failed`                                | 发起文件读取的登录       |
 
 连接关闭后，工作台等待 1.5 秒，读取 `/api/session` 和设备列表后重新连接；这两次读取失败时，3 秒后再试（`packages/web/src/devices/use-browser-control-connection.ts`）。重连和页面恢复时同步尚待处理的终端报告，其他断线期间的事件不补发。
 
@@ -223,6 +223,8 @@ server 在内存中保留每个设备/工作区/session 的最新待处理报告
 ### 程序当前记录
 
 `sessions.list` 的 `Session.programStatus` 只含按各类别最近一次出现从新到旧排列的去重 `states` 和记录总数 `records`，保留同终端同时存在的状态，不解释为 agent 数量。类别顺序或记录数变化会触发 `sessions.changed`；同类别记录之间的次序、正文或进度变化可能不改变摘要，不保证广播。缺少摘要或空记录表示没有可用报告，不能推断 idle、unsupported 或任务完成。`sessions.snapshot` 的完整结果及 `sessions.wait` 的完整 screen 带按状态出现顺序从早到晚排列的 `programStatus` 记录数组，`unchanged` 沿用原位置与输入回执，不附完整记录。出现的判定、记录字段和生命周期见[程序报告状态](terminal.md#程序报告状态)。
+
+`sessions.changed` 只携带工作区身份，不广播记录正文。工作台通过既有 list 和 snapshot 按需读取，跨工作区观察不扩大文件与 Git 的 watch 并集；呈现和读取生命周期见[工作区程序状态](interaction.md#工作区程序状态)。
 
 recorder 通过可靠 IPC `program.status` 发送小摘要；agent 只在摘要变化时失效列表，正文变化仍由完整读取取得。recorder 故障保留已观察摘要并将 recording 标为 unavailable；恢复新 Model 后先发空摘要，再请求重画，没有新报告就保持未知。当前记录不持久化，也不通过网页恢复字节或结束帧生成 PSP 镜像。完整 JSON 仍受 `controlMessageBytes` 限制；超限读取明确返回 `failed/limit_exceeded`，不裁剪 records，之后缩小记录仍可读取。
 

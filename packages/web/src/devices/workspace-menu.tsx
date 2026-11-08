@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { FolderOpen, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import type { Device, Workspace } from "@kiteline/shared/protocol";
@@ -12,6 +12,7 @@ export function WorkspaceMenu({
   workspace,
   children,
   navigation = false,
+  accessory,
   onOpen,
   onAction,
 }: {
@@ -19,6 +20,8 @@ export function WorkspaceMenu({
   workspace: Workspace;
   children: ReactElement;
   navigation?: boolean;
+  /** Rendered between the row and its touch-only more button. */
+  accessory?: ReactNode;
   onOpen: () => void;
   onAction: (action: DeviceAction) => void;
 }) {
@@ -32,6 +35,7 @@ export function WorkspaceMenu({
         <ContextMenuTrigger render={children} />
         <ContextMenuContent>{items}</ContextMenuContent>
       </ContextMenu>
+      {accessory}
       <Menu>
         <MenuTrigger
           render={

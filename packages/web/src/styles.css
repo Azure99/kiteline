@@ -18,7 +18,10 @@
   --color-danger-soft: #fceced;
   --color-warning-soft: #fff4db;
   --color-warning: #805800;
+  --color-attention: #b45f06;
+  --color-attention-foreground: #fff;
   --color-success: #276749;
+  --color-success-soft: #eaf3ed;
   --color-search-match: #f7e8b7;
   --color-ring: var(--color-primary);
 }
@@ -94,7 +97,10 @@
   --color-danger-soft: #41252b;
   --color-warning-soft: #3b3021;
   --color-warning: #f0cc8a;
+  --color-attention: #f2b84b;
+  --color-attention-foreground: #2b1d05;
   --color-success: #9be6b1;
+  --color-success-soft: #23392d;
   --color-search-match: #443719;
   --code-selection: #2b405a;
   --code-active: #202c3a40;
@@ -749,4 +755,261 @@ body {
 .git-panes[data-mobile="true"] > [data-panel],
 .git-panes[data-mobile="true"] > [data-panel] > div {
   display: contents !important;
+}
+
+/* Workspace program status: one quiet mark at the end of the existing row. */
+.workspace-badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  min-height: 20px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+  cursor: default;
+}
+.workspace-badge:hover,
+.workspace-badge[data-popup-open] {
+  background: var(--muted);
+}
+.workspace-badge:focus-visible {
+  box-shadow: 0 0 0 2px var(--color-ring);
+}
+.workspace-badge[data-stale] {
+  filter: grayscale(1);
+  opacity: 0.55;
+}
+/* Each terminal counts once, in the category of its list item's lead. */
+.status-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  font-weight: 600;
+}
+.status-count[data-bucket="error"] {
+  color: var(--color-destructive-foreground);
+  background: var(--color-destructive);
+}
+.status-count[data-bucket="blocked"] {
+  color: var(--color-attention-foreground);
+  background: var(--color-attention);
+}
+.status-count[data-bucket="done"] {
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+.status-count[data-bucket="working"] {
+  color: var(--color-success);
+  background: var(--color-success-soft);
+}
+[data-level-text="blocked"] {
+  color: var(--color-warning);
+}
+[data-level-text="error"] {
+  color: var(--color-destructive);
+}
+[data-level-text="done"],
+[data-level-text="notice"] {
+  color: var(--color-primary);
+}
+[data-level-text="working"] {
+  color: var(--color-success);
+}
+[data-level-text="idle"] {
+  color: var(--muted-foreground);
+}
+.status-row[data-stale] > .status-row-main,
+.status-record[data-stale] {
+  filter: grayscale(1);
+  opacity: 0.55;
+}
+.status-popup {
+  width: 300px;
+  max-width: calc(100vw - 16px);
+  max-height: var(--available-height);
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  color: var(--foreground);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.14);
+  outline: none;
+}
+.status-row {
+  display: flex;
+  align-items: stretch;
+  border-radius: 4px;
+  font-size: 13px;
+}
+/* Reserve the preview line during a read; populated rows then keep the same height. */
+.status-row[data-lines="2"] {
+  min-height: 46px;
+}
+/* Line 1: name and one state; line 2: that state's own text. The detail column has a fixed
+   width so › sits at the same place on single- and two-line items. */
+.status-row-main {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-content: start;
+  column-gap: 8px;
+  min-width: 0;
+  padding: 5px 4px 5px 8px;
+  border-radius: 4px 0 0 4px;
+  text-align: left;
+  line-height: 18px;
+  outline: none;
+}
+.status-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.status-row-state {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.status-row-preview {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* › and the "+x" count below it share one narrow column, so the state sits close to ›. */
+.status-row-detail {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+  width: 36px;
+  padding: 5px 8px 5px 0;
+  border-left: 1px solid transparent;
+  border-radius: 0 4px 4px 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+  white-space: nowrap;
+  outline: none;
+}
+.status-row-detail svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 1px 0;
+}
+.status-row:hover {
+  background: var(--muted);
+}
+.status-row:hover .status-row-detail {
+  border-left-color: var(--border);
+}
+.status-row-main:hover,
+.status-row-main:focus-visible,
+.status-row-detail:hover,
+.status-row-detail:focus-visible {
+  background: var(--border);
+  color: inherit;
+}
+.status-detail {
+  display: grid;
+  /* The column follows the panel, so a long terminal name truncates instead of widening it. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  padding-bottom: 6px;
+  user-select: text;
+}
+.status-detail-head {
+  position: sticky;
+  top: -4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  padding-right: 4px;
+  background: var(--background);
+  font-size: 13px;
+}
+.status-back {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  width: 28px;
+  border-radius: 4px;
+  color: var(--muted-foreground);
+  outline: none;
+}
+.status-back svg {
+  width: 16px;
+  height: 16px;
+}
+.status-back:hover,
+.status-back:focus-visible {
+  background: var(--border);
+  color: inherit;
+}
+.status-open {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  outline: none;
+}
+.status-open:hover,
+.status-open:focus-visible {
+  background: var(--muted);
+}
+.status-record {
+  display: grid;
+  gap: 2px;
+  padding: 0 8px;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+@variant max-desk {
+  .status-popup {
+    width: min(340px, calc(100vw - 16px));
+  }
+  /* Both buttons share the top padding so › stays on the first text line. */
+  .status-row[data-lines="1"] > .status-row-main,
+  .status-row[data-lines="1"] > .status-row-detail {
+    padding-top: 13px;
+    padding-bottom: 13px;
+  }
+  .status-row[data-lines="2"] > .status-row-main,
+  .status-row[data-lines="2"] > .status-row-detail {
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+  .status-row[data-lines="2"] {
+    min-height: 52px;
+  }
+  .status-detail-head {
+    min-height: 44px;
+  }
+  .status-back {
+    width: 44px;
+  }
+  .status-open {
+    min-height: 36px;
+  }
+  .workspace-badge {
+    min-height: 32px;
+    padding: 0 8px;
+  }
 }

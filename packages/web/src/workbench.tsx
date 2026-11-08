@@ -54,6 +54,7 @@ import { useRecentWorkspaces, type RecentWorkspace } from "./devices/recent-work
 import { Workspace } from "./workspace/workspace";
 import { WorkspaceMemories, workspaceKey } from "./workspace/memory";
 import { reportKey, type ReceivedReport } from "./terminal/reports";
+import { useDeviceSessions, workspaceStatuses } from "./devices/workspace-status";
 import { GitActions } from "./git/actions";
 import { DraftStore, isDirty } from "./files/drafts";
 import { DraftView } from "./files/draft-view";
@@ -366,8 +367,10 @@ function SignedInWorkbench({
     },
     [setError],
   );
-  function openReport(report: ReceivedReport) {
-    choose(workspaceDestination(report, "terminal", { session: report.sessionId }));
+  const deviceSessions = useDeviceSessions(devices, connected);
+  const statuses = workspaceStatuses(devices, deviceSessions, navigationReports);
+  function openTerminal(terminal: { deviceId: string; workspaceId: string; sessionId: string }) {
+    choose(workspaceDestination(terminal, "terminal", { session: terminal.sessionId }));
     // Repeated activation must still reveal a terminal when the URL is unchanged.
     setActivationRequest((value) => value + 1);
   }
@@ -437,8 +440,8 @@ function SignedInWorkbench({
     openPort: setPortDevice,
   };
   const navigationProps = {
-    reports: navigationReports,
-    onReport: openReport,
+    statuses,
+    onOpenTerminal: openTerminal,
     devices,
     drafts,
     actions: deviceActions,
@@ -451,10 +454,7 @@ function SignedInWorkbench({
     <IconButton
       ref={navigationToggle}
       label={
-        (navigationVisible ? t(($) => $.shell.collapseSidebar) : t(($) => $.shell.expandSidebar)) +
-        (mobile && navigationReports.length
-          ? " · " + t(($) => $.reports.count, { count: navigationReports.length })
-          : "")
+        navigationVisible ? t(($) => $.shell.collapseSidebar) : t(($) => $.shell.expandSidebar)
       }
       aria-expanded={navigationVisible}
       aria-controls="device-sidebar"
@@ -466,11 +466,6 @@ function SignedInWorkbench({
       }}
     >
       {navigationVisible ? <PanelLeftClose /> : <PanelLeftOpen />}
-      {mobile && navigationReports.length > 0 && (
-        <span className="absolute top-0 right-0 rounded-full bg-primary px-1 text-[10px] text-primary-foreground">
-          {navigationReports.length}
-        </span>
-      )}
     </IconButton>
   );
   function renderMain() {
